@@ -339,15 +339,16 @@ impl Game<'_> {
             return;
         };
         let allowed = g.creative() && g.permission >= 2;
-        let Some(mut host) = self.lan.take() else { return; };
         let reply = self
-            .as_guest_messaged(&mut host, conn, |game| {
+            .as_guest_messaged(conn, |game| {
                 allowed
                     .then(|| game.apply_test_instance_action(&p))
                     .flatten()
             })
             .flatten();
-        if let Some((status, size)) = reply {
+        if let Some((status, size)) = reply
+            && let Some(host) = self.lan.as_mut()
+        {
             host.hub.send_to(
                 conn,
                 &C::TestInstanceBlockStatus(play::TestInstanceBlockStatus {
@@ -356,7 +357,6 @@ impl Game<'_> {
                 }),
             );
         }
-        self.lan = Some(host);
     }
 
     fn apply_test_instance_action(

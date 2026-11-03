@@ -128,13 +128,11 @@ impl Game<'_> {
             return;
         };
         let allowed = g.creative() && g.permission >= 2;
-        let Some(mut host) = self.lan.take() else { return; };
-        self.as_guest(&mut host, conn, |game| {
+        self.as_guest(conn, |game| {
             if allowed {
                 game.apply_set_test_block(&p);
             }
         });
-        self.lan = Some(host);
     }
 
     fn apply_set_test_block(&mut self, p: &play::SetTestBlock) {

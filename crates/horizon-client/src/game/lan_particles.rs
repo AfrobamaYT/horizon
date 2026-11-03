@@ -240,11 +240,9 @@ impl Game<'_> {
 
     /// `LivingEntity.checkFallDamage`'s `ServerLevel.sendParticles` of the
     /// landing block's crumbs: drawn in this window, when it has one, and
-    /// sent to each player within 32 blocks. `host` is the hub of a guest's
-    /// turn, which is out of `self.lan` meanwhile.
+    /// sent to each player within 32 blocks.
     pub(super) fn landing_dust(
         &mut self,
-        host: Option<&LanHost>,
         state: BlockStateId,
         at: Vec3,
         count: i32,
@@ -267,7 +265,7 @@ impl Game<'_> {
                 );
             }
         }
-        let Some(hub) = host.or(self.lan.as_ref()).map(|h| &h.hub) else {
+        let Some(hub) = self.lan.as_ref().map(|h| &h.hub) else {
             return;
         };
         let Some(particle) = Self::hub_particle(

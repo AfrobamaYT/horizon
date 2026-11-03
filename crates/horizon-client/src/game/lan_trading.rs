@@ -318,12 +318,9 @@ impl Game<'_> {
             {
                 self.native_player_trade(uuid, &name, entity_id);
             }
-            if let Some(mut host) = self.lan.take() {
-                self.as_guest(&mut host, conn, |g| {
-                    g.merchant_traded(gm.merchant.mob, &traded)
-                });
-                self.lan = Some(host);
-            }
+            self.as_guest(conn, |g| {
+                g.merchant_traded(gm.merchant.mob, &traded)
+            });
         }
         self.drop_guest_items(gi, dropped);
         self.lan_send_offers(conn, &mut gm, false);

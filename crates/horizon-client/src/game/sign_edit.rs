@@ -452,10 +452,7 @@ impl Game<'_> {
         {
             let mut lines = p.lines.to_vec();
             let mut cancel = false;
-            let Some(mut host) = self.lan.take() else {
-                return;
-            };
-            self.as_guest_messaged(&mut host, conn, |game| {
+            self.as_guest_messaged(conn, |game| {
                 game.native_sign_changed(
                     uuid,
                     &name,
@@ -466,7 +463,6 @@ impl Game<'_> {
                     &mut cancel,
                 );
             });
-            self.lan = Some(host);
             if cancel {
                 // The sign keeps its text: the editor closes, and the player's
                 // client, which shows what it sent, gets the sign as it is.

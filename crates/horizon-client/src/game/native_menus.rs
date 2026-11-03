@@ -254,13 +254,12 @@ impl Game<'_> {
     /// the guest has no body to swap in.
     fn player_hook(&mut self, conn: u32, f: impl FnOnce(&mut Self)) {
         let mut f = Some(f);
-        if self.lan_acting != Some(conn) && let Some(mut host) = self.lan.take() {
-            self.as_guest(&mut host, conn, |g| {
+        if self.lan_acting != Some(conn) {
+            self.as_guest(conn, |g| {
                 if let Some(f) = f.take() {
                     f(g);
                 }
             });
-            self.lan = Some(host);
         }
         if let Some(f) = f {
             f(self);

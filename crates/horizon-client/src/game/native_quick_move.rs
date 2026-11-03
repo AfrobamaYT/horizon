@@ -143,13 +143,11 @@ impl Game<'_> {
         ) {
             return false;
         }
-        let Some(mut host) = self.lan.take() else { return false; };
         let handled = self
-            .as_guest(&mut host, conn, |game| {
+            .as_guest(conn, |game| {
                 game.mod_menu_quick_move(pos, size, p.slot as usize, at)
             })
             .unwrap_or(false);
-        self.lan = Some(host);
         if !handled {
             return false;
         }

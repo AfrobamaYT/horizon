@@ -429,11 +429,8 @@ impl Game<'_> {
     /// the mods (`AnvilCraftEvent.Post`).
     fn lan_station_combined(&mut self, conn: u32, gs: &mut GuestStation, craft: Option<&AnvilCraft>) {
         let change = std::mem::take(&mut gs.menu.level_change);
-        if change != 0
-            && let Some(mut host) = self.lan.take()
-        {
-            self.as_guest(&mut host, conn, |g| g.give_levels(change));
-            self.lan = Some(host);
+        if change != 0 {
+            self.as_guest(conn, |g| g.give_levels(change));
         }
         if !std::mem::take(&mut gs.menu.combined) {
             return;
@@ -595,18 +592,15 @@ impl Game<'_> {
             )
         });
         // Player.onEnchantmentPerformed, and EnchantmentMenu's awardStat(ENCHANT_ITEM).
-        if let Some(mut host) = self.lan.take() {
-            self.as_guest(&mut host, conn, |game| {
-                game.enchantment_performed(need);
-                game.award_custom_stat("enchant_item", 1);
-                if let Some(given) = &given {
-                    game.native_player_enchant_item(uuid, entity_id, &enchanted, given);
-                }
-                // CriteriaTriggers.ENCHANTED_ITEM, with the levels it cost.
-                game.trigger_enchanted_item(&enchanted, need);
-            });
-            self.lan = Some(host);
-        }
+        self.as_guest(conn, |game| {
+            game.enchantment_performed(need);
+            game.award_custom_stat("enchant_item", 1);
+            if let Some(given) = &given {
+                game.native_player_enchant_item(uuid, entity_id, &enchanted, given);
+            }
+            // CriteriaTriggers.ENCHANTED_ITEM, with the levels it cost.
+            game.trigger_enchanted_item(&enchanted, need);
+        });
         let new_seed = self.world.random.next_int();
         if let Some(host) = self.lan.as_mut() {
             host.hub.guests[gi].xp_seed = new_seed;
@@ -710,12 +704,9 @@ impl Game<'_> {
                 };
                 // As that player: `native_acting_player` and `native_acting_id`
                 // answer for the one who pressed.
-                if let Some(mut host) = self.lan.take() {
-                    self.as_guest(&mut host, conn, |game| {
-                        game.mod_menu_button(context, &mut carried)
-                    });
-                    self.lan = Some(host);
-                }
+                self.as_guest(conn, |game| {
+                    game.mod_menu_button(context, &mut carried)
+                });
                 if let Some(host) = self.lan.as_mut() {
                     if host.hub.guest(conn).is_some_and(|g| g.carried != carried) {
                         let net = host.hub.stack(&carried);
