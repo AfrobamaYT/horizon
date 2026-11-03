@@ -141,8 +141,12 @@ pub(super) fn emit(
         } else {
             String::new()
         };
-        let host = host_for(is_level, receiver_mut, ticks)
-            .map(|(name, ty)| (fresh_name(name, &mut used), ty));
+        let host = host_param::host_param(hook, receiver_mut, ticks).map(|param| {
+            (
+                fresh_name(if is_level { "level" } else { "host" }, &mut used),
+                param,
+            )
+        });
         // A scoped hook's parts: the trait its method goes on, and the lookup
         // of the parts attached to the thing its `key` argument names.
         let scoped = match (api.get("scope"), api.get("key")) {
@@ -194,9 +198,9 @@ pub(super) fn emit(
         let mut trait_params = vec!["&self".to_owned()];
         let mut dispatch_params = Vec::new();
         let mut call_args = Vec::new();
-        if let Some((name, ty)) = &host {
-            trait_params.push(format!("{name}: {ty}"));
-            dispatch_params.push(format!("{name}: {ty}"));
+        if let Some((name, param)) = &host {
+            trait_params.push(format!("{name}: {}", param.ty));
+            dispatch_params.push(format!("{name}: {}", param.ty));
             call_args.push(name.clone());
         }
         if is_render {
@@ -248,13 +252,7 @@ pub(super) fn emit(
         if fill {
             // The dispatch's parameters in order: the host, the arguments,
             // and the output last.
-            let host = host.as_ref().map(|_| {
-                if ticks {
-                    "&mut super::mod_api_host::LevelTicks { level: self, ticks }"
-                } else {
-                    "self"
-                }
-            });
+            let host = host.as_ref().map(|(_, param)| param.call);
             let passed = host
                 .into_iter()
                 .chain(args.iter().chain(output.as_ref()).map(|(n, _)| n.as_str()))

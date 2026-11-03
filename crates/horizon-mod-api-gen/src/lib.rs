@@ -576,30 +576,6 @@ impl VisitMut for EventLifetimes {
     }
 }
 
-fn host_for(is_level: bool, mutable: Option<bool>, ticks: bool) -> Option<(&'static str, String)> {
-    mutable.map(|mutable| {
-        let (name, kind) = if is_level {
-            (
-                "level",
-                match (mutable, ticks) {
-                    (true, true) => "LevelWriteHost",
-                    (false, true) => "LevelTicksHost",
-                    (true, false) => "LevelRandomHost",
-                    (false, false) => "LevelHost",
-                },
-            )
-        } else {
-            ("host", "Host")
-        };
-        let mutable = if mutable || (is_level && ticks) {
-            "mut "
-        } else {
-            ""
-        };
-        (name, format!("&{mutable}dyn {kind}"))
-    })
-}
-
 #[derive(Debug)]
 struct CatalogHook {
     entry: serde_json::Value,
@@ -1002,6 +978,7 @@ enum FillMode {
 
 mod build;
 mod dispatch;
+mod host_param;
 pub use build::{generate, inject};
 mod injection;
 pub use injection::{TraitContract, TraitInjection};
@@ -1369,26 +1346,42 @@ mod tests {
 
     #[test]
     fn level_hosts_match_receiver_mutability() {
+        let level = super::CatalogHook {
+            entry: serde_json::json!({"target": "horizon_client::game::GameLevel<'_>::native_test"}),
+            side: super::HelperSide::Both,
+        };
+        let game = super::CatalogHook {
+            entry: serde_json::json!({"target": "horizon_client::game::Game<'_>::native_test"}),
+            side: super::HelperSide::Both,
+        };
+        use super::host_param::{HostParam, host_param};
+        let param = |ty: &str, call| {
+            Some(HostParam {
+                ty: ty.into(),
+                call,
+            })
+        };
         assert_eq!(
-            super::host_for(true, Some(false), false),
-            Some(("level", "&dyn LevelHost".into()))
+            host_param(&level, Some(false), false),
+            param("&dyn LevelHost", "self")
         );
         assert_eq!(
-            super::host_for(true, Some(true), false),
-            Some(("level", "&mut dyn LevelRandomHost".into()))
+            host_param(&level, Some(true), false),
+            param("&mut dyn LevelRandomHost", "self")
+        );
+        let ticks = "&mut super::mod_api_host::LevelTicks { level: self, ticks }";
+        assert_eq!(
+            host_param(&level, Some(false), true),
+            param("&mut dyn LevelTicksHost", ticks)
         );
         assert_eq!(
-            super::host_for(true, Some(false), true),
-            Some(("level", "&mut dyn LevelTicksHost".into()))
+            host_param(&level, Some(true), true),
+            param("&mut dyn LevelWriteHost", ticks)
         );
+        assert_eq!(host_param(&level, None, false), None);
         assert_eq!(
-            super::host_for(true, Some(true), true),
-            Some(("level", "&mut dyn LevelWriteHost".into()))
-        );
-        assert_eq!(super::host_for(true, None, false), None);
-        assert_eq!(
-            super::host_for(false, Some(true), false),
-            Some(("host", "&mut dyn Host".into()))
+            host_param(&game, Some(true), false),
+            param("&mut dyn Host", "self")
         );
     }
 
