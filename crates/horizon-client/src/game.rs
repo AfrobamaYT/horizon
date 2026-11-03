@@ -14118,6 +14118,9 @@ impl Game<'_> {
             return out;
         }
         let a = alpha as f32;
+        let interpolated_pitch = self.player_model.as_ref().map_or(self.pitch, |model| {
+            model.previous_head_pitch + a * (self.pitch - model.previous_head_pitch)
+        });
         // FirstPersonHandsAndItemsRenderer: the swing goes to the hand that
         // swings; each hand has its inverse arm height (the swap scale is 1
         // for every item but spears).
@@ -14160,36 +14163,31 @@ impl Game<'_> {
             let attack = attacks[i];
             let inverse_height =
                 horizon_client::first_person::equip_displacement(heights[i], scale);
-            let mut canceled = false;
-            self.native_render_hand(
+            let mut render = horizon_client::mod_api::NativeHandRender {
+                player: self.own_uuid(),
+                player_entity_id: self.own_entity_id(),
                 hand,
-                item.as_ref(),
-                a,
-                attack,
-                inverse_height,
-                &mut canceled,
-            );
+                stack: item.as_ref(),
+                partial: a,
+                interpolated_pitch,
+                swing: attack,
+                equip: inverse_height,
+                packed_light: packed,
+                translation: [0.0; 3],
+                rotation: [0.0; 3],
+                scale: 1.0,
+            };
+            let mut canceled = false;
+            if !horizon_client::mod_api::mods().is_empty() {
+                self.native_render_hand(&mut render, &mut canceled);
+            }
             if canceled {
                 continue;
             }
-            let (mut x, mut y, mut z, mut pitch, mut yaw, mut roll, mut pose_scale) =
-                (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
-            self.native_render_hand_pose(
-                hand,
-                item.as_ref(),
-                a,
-                attack,
-                inverse_height,
-                &mut x,
-                &mut y,
-                &mut z,
-                &mut pitch,
-                &mut yaw,
-                &mut roll,
-                &mut pose_scale,
-            );
             // No mod moved the hand (always so without one): no matrices to build.
-            let pose = [x, y, z, pitch, yaw, roll, pose_scale];
+            let [x, y, z] = render.translation;
+            let [pitch, yaw, roll] = render.rotation;
+            let pose = [x, y, z, pitch, yaw, roll, render.scale];
             let to_world = if pose == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0] {
                 to_world
             } else {
