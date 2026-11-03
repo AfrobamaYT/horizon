@@ -4780,6 +4780,24 @@ mod magic_absorb_tests {
         assert_eq!(m.extra.effects, vec![("minecraft:speed", 110, 0)]);
     }
 
+    #[test]
+    fn weaker_longer_effect_returns_with_its_flags_and_removal_clears_the_chain() {
+        let mut m = witch();
+        assert!(m.add_effect_with("speed", 2, 1, false, false));
+        assert!(!m.add_effect_with("speed", 5, 0, true, false));
+        for _ in 0..2 {
+            ai::tick_effects(&mut m, None);
+        }
+        assert_eq!(m.extra.effects, vec![("minecraft:speed", 3, 0)]);
+        assert!(m.extra.ambient_effects.contains(&"minecraft:speed"));
+        assert!(m.extra.hidden_effects.contains(&"minecraft:speed"));
+        m.add_effect("speed", 1, 2);
+        assert!(m.retain_effects(|_| false));
+        assert!(m.extra.effect_chains.is_empty());
+        assert!(m.extra.ambient_effects.is_empty());
+        assert!(m.extra.hidden_effects.is_empty());
+    }
+
     /// `Witch.getDamageAfterMagicAbsorb`: `#witch_resistant_to` (`magic`,
     /// `indirect_magic`, `sonic_boom`, `thorns`) takes 15% of the hit, which
     /// leaves a 10 health witch on 7 of a 20 hit it would not survive whole.

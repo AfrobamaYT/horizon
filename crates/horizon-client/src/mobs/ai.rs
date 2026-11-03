@@ -2735,6 +2735,10 @@ pub(crate) fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>
                 && let Some(chain) = m.extra.effect_chains.iter().position(|e| e.id == effect)
             {
                 let mut hidden = m.extra.effect_chains.remove(chain);
+                if effect == "minecraft:absorption" {
+                    m.absorption = (m.absorption - 4.0 * (amp + 1) as f32).max(0.0);
+                    m.absorption = m.absorption.max(4.0 * (hidden.amplifier + 1) as f32);
+                }
                 m.extra.effects[i] = (effect, hidden.duration, hidden.amplifier);
                 m.extra.ambient_effects.retain(|e| *e != effect);
                 if hidden.ambient {
