@@ -600,10 +600,24 @@ fn host_for(is_level: bool, mutable: Option<bool>, ticks: bool) -> Option<(&'sta
     })
 }
 
+#[derive(Debug)]
+struct CatalogHook {
+    entry: serde_json::Value,
+    side: HelperSide,
+}
+
+impl std::ops::Deref for CatalogHook {
+    type Target = serde_json::Value;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entry
+    }
+}
+
 fn catalog_hooks(
     root: &Path,
     catalog: &serde_json::Value,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<CatalogHook>, String> {
     let mut hooks = catalog["hooks"]
         .as_array()
         .ok_or("catalog hooks must be an array")?
@@ -629,12 +643,13 @@ fn catalog_hooks(
         );
     }
     let mut seen = HashSet::new();
-    for hook in &hooks {
+    let mut validated = Vec::with_capacity(hooks.len());
+    for hook in hooks {
         let name = hook["name"].as_str().ok_or("hook name missing")?;
         if !seen.insert(name.to_owned()) {
             return Err(format!("duplicate hook {name}"));
         }
-        HelperSide::parse(hook)
+        let side = HelperSide::parse(&hook)
             .map_err(|e| format!("hook {name}: {e}"))?
             .ok_or_else(|| format!("hook {name}: side missing"))?;
         for key in ["neoforge", "fabric", "paper"] {
@@ -650,8 +665,9 @@ fn catalog_hooks(
                 }
             }
         }
+        validated.push(CatalogHook { entry: hook, side });
     }
-    Ok(hooks)
+    Ok(validated)
 }
 
 /// The crate folder and module path of a hook target that is a free function
@@ -1088,10 +1104,12 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
             &mut dispatch
         };
         let mut method_source = doc_comments(&method.attrs, name, false)?;
-        method_source.push_str(&format!(
-            "/// Side: {}.\n",
-            hook["side"].as_str().expect("validated hook side")
-        ));
+        let side = match hook.side {
+            HelperSide::Server => "server",
+            HelperSide::Client => "client",
+            HelperSide::Both => "both",
+        };
+        method_source.push_str(&format!("/// Side: {side}.\n"));
         match (contract, out) {
             ("cancel", Some(out)) => method_source.push_str(&format!(
                 "///\n/// Return `Flow::Cancel` to take it: this sets `{out}`, and later mods are skipped.\n"
