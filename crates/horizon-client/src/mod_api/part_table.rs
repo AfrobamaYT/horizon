@@ -1073,9 +1073,6 @@ pub(crate) mod tests {
                 Some(Box::new(ChemTank(at)))
             });
         }
-        fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
-            event.output *= 2;
-        }
     }
 
     /// A test host's whole state, kept on each transaction it opens and put back on an abort, as
@@ -2131,14 +2128,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_block_part_answers_for_its_block_only_after_the_mods() {
+    fn a_block_part_answers_for_its_block_only() {
         game_thread();
-        // No world is open, so no state has its parts yet: only the mod's own hook answers.
-        assert_eq!(read(1), 2);
+        // No world is open, so no state has its parts yet: nothing answers.
+        assert_eq!(read(1), 1);
         resolve(&[]).unwrap();
-        // Doubled by the mod, then 5 more from the part: (1 * 2) + 5.
-        assert_eq!(read(1), 7);
-        assert_eq!(read(2), 2);
+        // 5 more from the part: 1 + 5.
+        assert_eq!(read(1), 6);
+        assert_eq!(read(2), 1);
     }
 
     #[test]
@@ -2160,7 +2157,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_state_without_parts_answers_none_and_keeps_the_global_hook() {
+    fn a_state_without_parts_is_answered_by_nothing() {
         game_thread();
         resolve(&[]).unwrap();
         // Out of range, and in range but a block no part is attached to.
@@ -2174,9 +2171,9 @@ pub(crate) mod tests {
                 .block_state(BlockStateId(0))
                 .is_empty()
         );
-        // The mod's hook still hears both: no parts is not no subscribers.
-        assert_eq!(read(0), 2);
-        assert_eq!(read(99), 2);
+        // A scoped hook has no global method, so both keep vanilla's answer.
+        assert_eq!(read(0), 1);
+        assert_eq!(read(99), 1);
     }
 
     #[test]
@@ -2204,9 +2201,9 @@ pub(crate) mod tests {
                 resolve(&[]).unwrap();
                 (before, read(1))
             });
-            // The tag part comes after the key part of the same mod: (1 * 2) + 5 + 100.
-            assert_eq!(client.join().unwrap(), (7, 102));
-            assert_eq!(server.join().unwrap(), ((107, 2), 7));
+            // The tag part comes after the key part of the same mod: 1 + 5 + 100.
+            assert_eq!(client.join().unwrap(), (6, 101));
+            assert_eq!(server.join().unwrap(), ((106, 1), 6));
         });
     }
 
