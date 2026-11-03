@@ -2068,7 +2068,7 @@ mod tests {
         )
     }
 
-    fn write_bundle(project: &Path, id: &str, helper: &str) {
+    pub(super) fn write_bundle(project: &Path, id: &str, helper: &str) {
         fs::create_dir_all(project.join("src")).unwrap();
         fs::write(
             project.join(NATIVE_MANIFEST),
@@ -2721,11 +2721,11 @@ mod tests {
     fn unknown_manifest_fields_are_refused_by_the_typed_reader() {
         let d = dir("unknown-field");
         write_native(&d, "zoom", A, B);
-        let json = fs::read_to_string(d.join(NATIVE_MANIFEST)).unwrap();
+        let text = fs::read_to_string(d.join(NATIVE_MANIFEST)).unwrap();
         for (name, value) in [("hooks", "1"), ("banana", "\"x\"")] {
             fs::write(
                 d.join(NATIVE_MANIFEST),
-                json.replacen('}', &format!(",\"{name}\":{value}}}"), 1),
+                format!("{text}\n{name} = {value}\n"),
             )
             .unwrap();
             let error = bundles(&d).unwrap_err();
@@ -2766,33 +2766,19 @@ mod tests {
             )
             .unwrap()
         );
-        fs::write(
-            d.join("native/rust/src/hook.rs"),
-            "fn hook() { let _ = 1; }",
-        )
-        .unwrap();
+        fs::write(d.join("src/lib.rs"), "fn hook() { let _ = 1; }").unwrap();
         assert_ne!(first, key(A));
     }
 
     #[test]
-    fn api_target_is_neither_copied_nor_hashed() {
+    fn build_output_is_neither_copied_nor_hashed() {
         let d = dir("api-target");
-        fs::create_dir_all(d.join("rust/target/debug")).unwrap();
-        fs::create_dir_all(d.join("other/target")).unwrap();
-        fs::create_dir_all(d.join("rust/empty")).unwrap();
-        fs::write(
-            d.join(MANIFEST),
-            "[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'rust'\n",
-        )
-        .unwrap();
-        fs::write(
-            d.join("rust/Cargo.toml"),
-            "[package]\nname = 'example'\nversion = '0.1.0'\n",
-        )
-        .unwrap();
-        fs::write(d.join("rust/target/debug/output"), "one").unwrap();
-        fs::write(d.join("other/target/keep"), "keep").unwrap();
-        let bundle = bundle(&d, None).unwrap();
+        write_bundle(&d, "example", "");
+        fs::create_dir_all(d.join("target/debug")).unwrap();
+        fs::create_dir_all(d.join(".git/hooks")).unwrap();
+        fs::write(d.join("target/debug/output"), "one").unwrap();
+        fs::write(d.join(".git/hooks/pre-commit"), "not packaged").unwrap();
+        let bundle = bundle_in(&d).unwrap().unwrap();
         let key = || {
             version_for(
                 A,
@@ -2806,16 +2792,16 @@ mod tests {
         let first = key();
         let hash = mod_hash(&bundle).unwrap();
         let digest = source_digest(&bundle);
-        fs::write(d.join("rust/target/debug/output"), "two").unwrap();
+        fs::write(d.join("target/debug/output"), "two").unwrap();
         assert_eq!(first, key());
         assert_eq!(hash, mod_hash(&bundle).unwrap());
         assert_eq!(digest, source_digest(&bundle));
         let dest = dir("api-target-copy");
         copy_bundle(&bundle, &dest).unwrap();
-        assert!(!dest.join("rust/target").exists());
-        assert!(dest.join("rust/empty").is_dir());
-        assert!(dest.join("other/target/keep").is_file());
-        fs::write(d.join("rust/Cargo.toml"), "changed").unwrap();
+        assert!(!dest.join("target").exists());
+        assert!(!dest.join(".git").exists());
+        assert!(dest.join("src/lib.rs").is_file());
+        fs::write(d.join("Cargo.toml"), "changed").unwrap();
         assert_ne!(first, key());
     }
 
@@ -2841,14 +2827,14 @@ mod tests {
         };
         let mut seen = vec![key()];
         for file in [
-            "rust/src/lib.rs",
-            "rust/data/salt.txt",
-            "rust/Cargo.toml",
+            "src/lib.rs",
+            "data/salt.txt",
+            "Cargo.toml",
             "data/greeting.txt",
         ] {
-            let mut bytes = fs::read(d.join("native").join(file)).unwrap();
+            let mut bytes = fs::read(d.join(file)).unwrap();
             bytes.extend_from_slice(b"\n");
-            fs::write(d.join("native").join(file), bytes).unwrap();
+            fs::write(d.join(file), bytes).unwrap();
             let now = key();
             assert!(!seen.contains(&now), "{file} is in the key");
             seen.push(now);

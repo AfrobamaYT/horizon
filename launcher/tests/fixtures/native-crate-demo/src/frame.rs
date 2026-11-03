@@ -1,4 +1,4 @@
-// The first frame: shows that the crate, both data folders and the post-build step reached the
+// The first frame: shows that bundled data and the crate's post-build step reached the
 // game, in the log and in the mod's folder (`horizon-mods/.horizon-mod-data/crate_demo/proof.txt`).
 fn crate_demo_frame(game: &mut crate::game::Game<'_>) {
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,9 +15,9 @@ fn crate_demo_frame(game: &mut crate::game::Game<'_>) {
         None => "missing (the game's folder is unknown)".to_owned(),
     };
     let line = format!(
-        "crate_demo: {} checksum {:08x}, baked {}",
+        "crate_demo: {} ({} bytes), baked {}",
         String::from_utf8_lossy(greeting).trim(),
-        crate_demo_engine::checksum(greeting),
+        greeting.len(),
         baked.trim()
     );
     eprintln!("{line}");
