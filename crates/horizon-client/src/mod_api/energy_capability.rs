@@ -27,7 +27,8 @@ pub trait EnergyHandler: Send + Sync {
 pub const ENERGY: CapabilityKey<dyn EnergyHandler> = CapabilityKey {
     name: "horizon:energy",
     default: Some(|host, at| {
-        host.energy_amount(at)
+        crate::mod_api::backend_of(host)
+            .and_then(|backend| backend.energy_amount(at))
             .map(|_| Box::new(GameEnergy(at)) as Box<dyn EnergyHandler>)
     }),
     handler: PhantomData,
@@ -45,16 +46,22 @@ pub const ITEM_ENERGY: ItemCapabilityKey<dyn EnergyHandler> =
 struct GameEnergy(BlockSide);
 impl EnergyHandler for GameEnergy {
     fn amount(&self, host: &mut dyn Host) -> u32 {
-        host.energy_amount(self.0).unwrap_or(0)
+        crate::mod_api::backend_of(host)
+            .and_then(|backend| backend.energy_amount(self.0))
+            .unwrap_or(0)
     }
     fn capacity(&self, host: &mut dyn Host) -> u32 {
-        host.energy_capacity(self.0)
+        crate::mod_api::backend_of(host).map_or(0, |backend| backend.energy_capacity(self.0))
     }
     fn insert(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
-        host.energy_insert(self.0, amount, tx).min(amount)
+        crate::mod_api::backend_mut_of(host)
+            .map_or(0, |backend| backend.energy_insert(self.0, amount, tx))
+            .min(amount)
     }
     fn extract(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
-        host.energy_extract(self.0, amount, tx).min(amount)
+        crate::mod_api::backend_mut_of(host)
+            .map_or(0, |backend| backend.energy_extract(self.0, amount, tx))
+            .min(amount)
     }
 }
 
