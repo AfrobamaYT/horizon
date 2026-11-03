@@ -676,7 +676,7 @@ pub(super) mod tests {
                 levels: game.level_shapes,
             };
             game.lan_host(settings, net, config).unwrap();
-            let mut host = game.lan.take().unwrap();
+            let host = game.lan.as_mut().unwrap();
             for id in [12, 13] {
                 let (tx, _rx) = std::sync::mpsc::channel();
                 let mut guest = Guest::new(
@@ -699,7 +699,6 @@ pub(super) mod tests {
                 guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));
                 host.hub.guests.push(guest);
             }
-            game.lan = Some(host);
             let player = game.native_player_ref(12).unwrap();
             assert!(!game.native_player_set_game_mode(player, GameMode::Survival));
             assert!(game.native_player_set_game_mode(player, GameMode::Creative));
@@ -765,7 +764,9 @@ pub(super) mod tests {
             let player = game.native_player_ref(13).unwrap();
             assert_eq!(player.entity, other);
             assert_eq!(player.game_mode(game), Some(GameMode::Survival));
-            assert!(!game.native_player_set_game_mode(player, GameMode::Creative));
+            assert!(game.native_player_set_game_mode(player, GameMode::Creative));
+            assert_eq!(player.game_mode(game), Some(GameMode::Creative));
+            assert_eq!(game.lan_acting, Some(12));
             let acting = game.native_player_ref(12).unwrap();
             assert!(game.native_player_set_game_mode(acting, GameMode::Adventure));
             assert_eq!(
@@ -928,10 +929,10 @@ pub(super) mod tests {
                 config,
             )
             .unwrap();
-            let mut host = game.lan.take().unwrap();
+            let host = game.lan.as_mut().unwrap();
             host.hub.guests = std::mem::take(&mut hub.guests);
             host.hub.guests[1].position = [1600.0, 64.0, 0.0];
-            game.lan_update_streaming(&host);
+            game.lan_update_streaming();
             assert!(
                 game.streaming
                     .extra
@@ -945,7 +946,6 @@ pub(super) mod tests {
                     .iter()
                     .any(|(chunk, _)| *chunk == (100, 0))
             );
-            game.lan = Some(host);
             let players = game.native_server_players();
             assert_eq!(players.len(), 1);
             assert_eq!(players[0].uuid, 1);

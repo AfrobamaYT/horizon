@@ -418,8 +418,8 @@ impl Game<'_> {
 
     /// Changes a player's game mode as `ServerPlayer.setGameMode` and
     /// `/gamemode` do, including the cancellable change hook and ability
-    /// updates. Returns false for a stale or unavailable player, another
-    /// player during a swap, no change, or a canceled change. API
+    /// updates. Returns false for a stale or unavailable player, an active
+    /// outer guest, no change, or a canceled change. API
     /// @API:player_game_mode_write@.
     pub(super) fn native_player_set_game_mode(
         &mut self,
