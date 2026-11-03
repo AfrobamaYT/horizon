@@ -1167,7 +1167,7 @@ fn put_attributes(map: &mut Compound, m: &Mob, a: &crate::mobs::finalize::Attrib
                     Op::AddMultipliedTotal => "add_multiplied_total",
                 };
                 Tag::compound([
-                    ("id", string(x.id)),
+                    ("id", string(&x.id)),
                     ("amount", Tag::Double(x.amount.to_bits())),
                     ("operation", string(op)),
                 ])
@@ -1468,8 +1468,7 @@ pub fn mob_from_nbt(
             let effect = crate::brewing::namespaced(def.id);
             let duration = number(e.get("duration")).unwrap_or(0) as i32;
             let amplifier = number(e.get("amplifier")).unwrap_or(0) as i32;
-            m.extra.effects.retain(|x| x.0 != effect);
-            m.extra.effects.push((effect, duration, amplifier));
+            m.load_effect(effect, duration, amplifier);
             // Details.CODEC: `show_particles` defaults to true.
             m.extra.hidden_effects.retain(|h| *h != effect);
             if number(e.get("show_particles")) == Some(0) {

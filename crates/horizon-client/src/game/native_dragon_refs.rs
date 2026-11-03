@@ -316,6 +316,7 @@ mod tests {
                 age: 0,
                 duration: 200,
                 from_dragon,
+                victims: Vec::new(),
                 potion: None,
             };
             assert!(dragon.set_phase(game, NativeDragonPhase::SittingFlaming));
