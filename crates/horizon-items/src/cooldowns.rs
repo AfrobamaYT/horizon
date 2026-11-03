@@ -118,6 +118,12 @@ impl Cooldowns {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+    /// Each group still cooling down and its ticks left, in no set order.
+    pub fn remaining(&self) -> impl Iterator<Item = (&Arc<str>, i32)> {
+        self.entries
+            .iter()
+            .map(|(group, (_, end))| (group, end.wrapping_sub(self.tick_count)))
+    }
 }
 
 #[cfg(test)]
