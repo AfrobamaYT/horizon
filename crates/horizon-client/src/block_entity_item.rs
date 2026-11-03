@@ -531,20 +531,21 @@ mod tests {
 
     #[test]
     fn a_mod_block_entity_rides_its_item() {
-        let tank = saved("{id:\"gtbasic:drum\",x:3,y:4,z:5,Fluid:\"gtceu:water\",Amount:2000}");
+        let tank =
+            saved("{id:\"example:crate\",x:3,y:4,z:5,Fluid:\"minecraft:water\",Amount:2000}");
         let patch = pick(&tank);
         let data = patch
             .get(&JavaString::from(BLOCK_ENTITY_DATA))
             .expect("data");
         assert_eq!(data.get("Amount"), Some(&Tag::Int(2000)));
-        assert_eq!(data.get("id"), Some(&Tag::String("gtbasic:drum".into())));
+        assert_eq!(data.get("id"), Some(&Tag::String("example:crate".into())));
         assert_eq!(data.get("x"), None);
-        let fresh = saved("{id:\"gtbasic:drum\",x:9,y:9,z:9}");
+        let fresh = saved("{id:\"example:crate\",x:9,y:9,z:9}");
         let placed = place(&fresh, &patch, false);
         assert_eq!(placed.get("Amount"), Some(&Tag::Int(2000)));
         assert_eq!(placed.get("x"), Some(&Tag::Int(9)));
         // Another type's data is ignored.
-        let other = saved("{id:\"gtbasic:tank\",x:9,y:9,z:9}");
+        let other = saved("{id:\"example:tank\",x:9,y:9,z:9}");
         assert_eq!(place(&other, &patch, false).get("Amount"), None);
     }
 

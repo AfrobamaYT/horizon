@@ -652,7 +652,7 @@ mod tests {
             check("{Command:\"say\"}"),
             Err("Expected 'id' field in {Command:\"say\"}".into())
         );
-        assert_eq!(check("{id:\"gtbasic:drum\",Tank:1}"), Ok(()));
+        assert_eq!(check("{id:\"example:crate\",Tank:1}"), Ok(()));
         assert_eq!(
             check("{id:\"minecraft:stone\"}"),
             Err("Unknown registry key in ResourceKey[minecraft:root / minecraft:block_entity_type]: minecraft:stone".into())
