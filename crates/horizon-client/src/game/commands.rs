@@ -2215,7 +2215,10 @@ impl Game<'_> {
                 self.release_vehicle_container(id);
                 self.carts.retain(|c| c.id != id);
             }
-            Target::Other(id) => self.others.retain(|o| o.id != id),
+            Target::Other(id) => {
+                self.others.retain(|o| o.id != id);
+                self.forget_entity(id);
+            }
             Target::Fangs(id) => self.fangs.list.retain(|f| f.id != id),
             Target::Crystal(id) => self.kill_crystal(id),
             Target::Dragon(id) => self.kill_dragon(id),
@@ -2682,7 +2685,7 @@ impl Game<'_> {
         let table = save::text(tag.get("LootTable"));
         let rolled = match (table, entity) {
             (Some(table), BlockEntity::Chest(slots)) if slots.iter().all(Option::is_none) => {
-                let loot = structure_blocks::loot_data(&self.options.resources, &self.pack_files());
+                let loot = self.server_loot.get();
                 let at = Vec3::new(f64::from(key.0), f64::from(key.1), f64::from(key.2));
                 let biome = self.biome_name_at(at).unwrap_or_default();
                 Some(structure_blocks::roll_container(

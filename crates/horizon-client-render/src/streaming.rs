@@ -152,8 +152,7 @@ pub trait ChunkGenerator: Send + Sync + 'static {
     /// contents.
     fn final_block_entities(
         &self,
-        _proto: &Proto,
-        _writes: &[([i32; 3], u32)],
+        _entries: &[(&Proto, &[([i32; 3], u32)])],
     ) -> Vec<((i32, i32, i32), crate::chunk::block_entity::BlockEntity)> {
         Vec::new()
     }
@@ -1003,12 +1002,19 @@ impl<G: ChunkGenerator> Jobs<G> {
                 }
                 generator.decorate(&mut *worker, &mut region);
                 let mut writes = FinalWrites::default();
-                for (i, snapshot) in &finals {
-                    let blocks = generator.final_writes(snapshot, &region[*i]);
-                    writes
-                        .block_entities
-                        .extend(generator.final_block_entities(&region[*i], &blocks));
-                    writes.blocks.extend(blocks);
+                let blocks: [Vec<_>; 9] = std::array::from_fn(|n| {
+                    finals.get(n).map_or_else(Vec::new, |(i, snapshot)| {
+                        generator.final_writes(snapshot, &region[*i])
+                    })
+                });
+                let entries: Vec<_> = finals
+                    .iter()
+                    .zip(&blocks)
+                    .map(|((i, _), blocks)| (&region[*i], blocks.as_slice()))
+                    .collect();
+                writes.block_entities = generator.final_block_entities(&entries);
+                writes.blocks.extend(blocks.into_iter().flatten());
+                for (i, _) in &finals {
                     region[*i] = Box::new(());
                 }
                 let finals = finals.into_iter().map(|(i, _)| i).collect();
@@ -2470,7 +2476,10 @@ impl Streaming {
             let written: Vec<(i32, i32)> = self.written.drain().collect();
             return SaveStep::Protos(self.checkout_protos(written));
         }
-        let aborted = self.shared.aborted.load(std::sync::atomic::Ordering::Relaxed);
+        let aborted = self
+            .shared
+            .aborted
+            .load(std::sync::atomic::Ordering::Relaxed);
         while (self.saving > 0)
             || (!aborted
                 && (self.decorating > 0 || !self.finishing.is_empty() || !self.viewing.is_empty()))
