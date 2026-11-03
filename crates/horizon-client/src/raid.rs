@@ -346,7 +346,11 @@ impl Raid {
     /// True when this omen triggers the raid (no wave spawned yet: the
     /// `raid_trigger` stat and the `voluntary_exile` advancement).
     pub fn absorb_omen(&mut self, amplifier: i32) -> bool {
-        self.omen_level = (self.omen_level + amplifier + 1).clamp(0, MAX_OMEN_LEVEL);
+        self.omen_level = self
+            .omen_level
+            .wrapping_add(amplifier)
+            .wrapping_add(1)
+            .clamp(0, MAX_OMEN_LEVEL);
         !self.has_first_wave_spawned()
     }
     /// `Raid.getEnchantOdds`.
@@ -651,7 +655,7 @@ impl Raid {
                     self.status = Status::Victory;
                     actions.push(Action::Victory {
                         heroes: self.heroes(),
-                        amplifier: self.omen_level - 1,
+                        amplifier: self.omen_level.wrapping_sub(1),
                     });
                 }
             }
@@ -1526,6 +1530,15 @@ impl IntOpenHashOrder {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn omen_arithmetic_wraps_as_java_ints() {
+        let mut raid = Raid::new([0, 64, 0], 2, 1);
+        raid.omen_level = i32::MAX;
+        raid.absorb_omen(0);
+        // Java: MAX + 0 + 1 wraps to MIN, then clamps to 0.
+        assert_eq!(raid.omen_level, 0);
+    }
+
     #[test]
     fn raids_read_then_seeded_match_raids_loaded_seeded() {
         let mut raids = Raids::default();

@@ -5,7 +5,7 @@ use super::{Game, commands::Target};
 use horizon_client::{
     lan::playerdata::ints_uuid,
     mod_api::{EntityRef, LevelRef, MobRef, NativeRaidStatus, RaidRef},
-    raid::{MAX_OMEN_LEVEL, Raid, Status},
+    raid::{Raid, Status},
 };
 
 impl Game<'_> {
@@ -66,15 +66,15 @@ impl Game<'_> {
         Some(self.native_raid_data(raid)?.center)
     }
 
-    /// `Raid.getRaidOmenLevel`, 0 to 5.
+    /// `Raid.getRaidOmenLevel`: 0 to 5 in play, any value a mod set.
     pub(super) fn native_raid_omen_level(&self, raid: RaidRef) -> Option<i32> {
         Some(self.native_raid_data(raid)?.omen_level)
     }
 
-    /// `Raid.setRaidOmenLevel`. Only 0 to `getMaxRaidOmenLevel` (5) is
-    /// accepted, the range `/raid omen` allows. The raid is saved with it.
+    /// `Raid.setRaidOmenLevel`: any value, as vanilla assigns it (only
+    /// `absorbRaidOmen` clamps, to 0 to 5). The raid is saved with it.
     pub(super) fn native_raid_set_omen_level(&mut self, raid: RaidRef, level: i32) -> bool {
-        if !(0..=MAX_OMEN_LEVEL).contains(&level) || self.native_raid_data(raid).is_none() {
+        if self.native_raid_data(raid).is_none() {
             return false;
         }
         self.raid_set_omen(raid.id(), level);
@@ -286,8 +286,11 @@ mod tests {
 
             assert!(game.native_raid_set_omen_level(raid, 5));
             assert_eq!(game.native_raid_omen_level(raid), Some(5));
-            assert!(!game.native_raid_set_omen_level(raid, 6));
-            assert!(!game.native_raid_set_omen_level(raid, -1));
+            assert!(game.native_raid_set_omen_level(raid, -1));
+            assert_eq!(game.native_raid_omen_level(raid), Some(-1));
+            assert!(game.native_raid_set_omen_level(raid, i32::MAX));
+            assert_eq!(game.native_raid_omen_level(raid), Some(i32::MAX));
+            assert!(game.native_raid_set_omen_level(raid, 5));
             assert_eq!(game.native_raid_omen_level(raid), Some(5));
 
             assert!(game.native_raid_stop(raid));
