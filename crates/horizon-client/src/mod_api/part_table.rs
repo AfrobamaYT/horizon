@@ -4,8 +4,7 @@
 //! own tags, at world open and on `/reload`, into a table kept by that game's thread.
 use super::{
     BlockEntityPart, BlockPart, BlockSide, Capability, CapabilityKey, EntityCapabilityKey,
-    EntityRef, Hooks, Host, ItemCapabilityKey, ItemPart, ItemPlace, MenuPart, ModEntry,
-    PlaceProvider,
+    EntityRef, Host, ItemCapabilityKey, ItemPart, ItemPlace, MenuPart, ModEntry, PlaceProvider,
 };
 use std::{
     any::{Any, TypeId, type_name},
@@ -108,7 +107,7 @@ struct TagParts {
     items: Vec<(Box<str>, Attached<dyn ItemPart>)>,
 }
 
-/// What every mod's [`Hooks::register`] attached.
+/// What every mod's [`Hooks::register`](super::Hooks::register) attached.
 #[derive(Default)]
 struct Installed {
     keys: Parts,
@@ -443,7 +442,7 @@ fn attached<'a, 'k, P: ?Sized>(
     id().and_then(|id| table.get(id)).map_or(&[], Vec::as_slice)
 }
 
-/// What a mod's [`Hooks::register`] attaches its parts with. A thing takes one part of each
+/// What a mod's [`Hooks::register`](super::Hooks::register) attaches its parts with. A thing takes one part of each
 /// kind: the same kind twice on one thing refuses the mods at startup, naming both.
 pub struct Registrar {
     mod_id: &'static str,
@@ -722,7 +721,7 @@ fn namespaced(id: &str) -> bool {
         .is_some_and(|(namespace, path)| !namespace.is_empty() && !path.is_empty())
 }
 
-/// Builds the parts from every mod's [`Hooks::register`], in dispatch order. Once, at startup;
+/// Builds the parts from every mod's [`Hooks::register`](super::Hooks::register), in dispatch order. Once, at startup;
 /// the error lists every part refused, naming its mods.
 pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
     let installed = if let Some(first) = mods.first() {
