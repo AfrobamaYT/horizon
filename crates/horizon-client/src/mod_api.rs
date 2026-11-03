@@ -781,6 +781,34 @@ pub enum NativeExplosionInteraction {
     Tnt,
 }
 
+/// Which volume slider a sound is played under (`SoundSource`). A sound source
+/// is the group a client's sound options control: an entity's is
+/// `Entity.getSoundSource`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeSoundSource {
+    Master,
+    Music,
+    /// Jukeboxes and note blocks (`RECORDS`).
+    Records,
+    Weather,
+    /// Blocks (`BLOCKS`).
+    Blocks,
+    Hostile,
+    Neutral,
+    /// Players (`PLAYERS`).
+    Players,
+    Ambient,
+    Voice,
+    Ui,
+}
+
+impl NativeSoundSource {
+    /// Its position in vanilla's `SoundSource` order, as the network sends it.
+    pub fn index(self) -> usize {
+        self as usize
+    }
+}
+
 /// The empty-context block shape requested from a level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeBlockShapeKind {
@@ -1627,6 +1655,8 @@ pub use entity_capability::{ENTITY_ITEMS, EntityCapabilityKey};
 mod fluid_capability;
 pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod item_place;
+mod menu_slot;
+pub use menu_slot::MenuSlotBacking;
 mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider};
 mod resource;
