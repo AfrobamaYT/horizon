@@ -445,7 +445,11 @@ mod tests {
                     .build();
                 registrar.block_entity_part(&kind, Crate);
             }
-            fn blocks(&self, event: &mut BlocksEvent<'_>) {
+            fn blocks(
+                &self,
+                _context: &horizon_client::mod_api::RegistrationContext<'_>,
+                event: &mut BlocksEvent<'_>,
+            ) {
                 event.blocks.push(horizon_mods::content::Block {
                     id: CRATE.into(),
                     template: "minecraft:white_banner".into(),
