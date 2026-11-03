@@ -57,10 +57,10 @@ pub fn read_identity(path: &Path) -> Result<JarIdentity, String> {
     let valid_id = (2..=64).contains(&bytes.len())
         && match loader {
             JarLoader::Fabric => {
-                bytes[0].is_ascii_alphabetic()
+                bytes[0].is_ascii_lowercase()
                     && bytes
                         .iter()
-                        .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(b))
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-".contains(b))
             }
             JarLoader::NeoForge => bytes
                 .iter()
@@ -434,6 +434,10 @@ mod tests {
             (
                 "bad-id",
                 vec![("fabric.mod.json", r#"{"id":"-bad","version":"1"}"#)],
+            ),
+            (
+                "uppercase",
+                vec![("fabric.mod.json", r#"{"id":"Fabric","version":"1"}"#)],
             ),
             ("no-version", vec![("fabric.mod.json", r#"{"id":"good"}"#)]),
             (
