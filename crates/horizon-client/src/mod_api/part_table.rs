@@ -858,6 +858,23 @@ pub(crate) mod tests {
     struct Hoard;
     impl BlockPart for Hoard {}
     impl BlockEntityPart for Hoard {
+        /// With data `[1]`, it replaces its own block with granite.
+        fn block_entity_tick(
+            &self,
+            host: &mut dyn ServerHost,
+            event: &mut BlockEntityTickEvent<'_>,
+        ) {
+            if event.entity.data == [1] {
+                let level = host.level("minecraft:overworld").unwrap();
+                let state = host.block_state_default("minecraft:granite").unwrap();
+                assert!(level.set_block(
+                    host,
+                    event.pos,
+                    state,
+                    NativeBlockUpdateFlags::KNOWN_SHAPE
+                ));
+            }
+        }
         fn pre_remove_side_effects(
             &self,
             level: &mut dyn LevelRandomHost,

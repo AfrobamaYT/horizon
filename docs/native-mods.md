@@ -293,6 +293,8 @@ the catalog, not a global API number, source comments or documentation histories
   scatter as `Containers.dropItemStack` scatters them, after the block entity's own container slots. It runs inside
   the level's write with the level host, like `neighbor_changed`; the block entity is still in place, so the part
   reads its attachments through `attachments(Holder::BlockEntity(pos))`. A part that returns nothing draws nothing.
+  A block entity that removes its own block during its `block_entity_tick` or `menu_button` is out of the level for
+  that call, so its part isn't asked: its attachments go with it, and only its container slots come back out.
 
 - `native_visuals`: a world-frame hook that appends block-rim and
   colored-light requests. Rims trace the client's existing block outline edges,
