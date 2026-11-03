@@ -97,10 +97,6 @@ pub struct Manifest {
     /// Exact source revisions tested together, never mutable tags.
     pub horizon: String,
     pub mixins: String,
-    /// The version of Horizon's native hook points (`game/native_hooks.rs`,
-    /// `NATIVE_HOOKS_API`) a mod that hooks nothing else needs: the launcher
-    /// builds it on any Horizon with that version or a later one, and
-    /// `horizon` is only the revision it was tested on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hooks: Option<u32>,
 }
