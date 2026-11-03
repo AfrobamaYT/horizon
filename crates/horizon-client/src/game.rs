@@ -3261,10 +3261,10 @@ struct Game<'a> {
     /// Guests whose records are displaced by nested player swaps, outer first.
     lan_guest_swaps: Vec<u32>,
     player_attachments: horizon_world::attachments::Attachments,
-    /// The joined guests' attachments, by UUID: here rather than in their
+    /// The joined guests' attachments, by connection: here rather than in their
     /// records, so a hook in one guest's turn still reaches the others'.
     /// The acting guest's are in `player_attachments` for the turn.
-    guest_attachments: HashMap<u128, horizon_world::attachments::Attachments>,
+    guest_attachments: HashMap<u32, horizon_world::attachments::Attachments>,
     /// The block the acting player is breaking (`break_block`): its destroy
     /// event, and the ones before it, are the player's own (`Level.levelEvent`
     /// with the player excluded); the events after it are not.
@@ -13919,7 +13919,7 @@ impl Game<'_> {
         let player = self
             .player
             .as_ref()
-            .filter(|p| !p.health.dead_or_dying() && !spectator);
+            .filter(|p| !p.health.dead_or_dying() && !spectator && !self.lan_acting_fake);
         // ExperienceOrb.followNearbyPlayer: each orb goes for the nearest
         // living player within 8 blocks, the host's own or a guest.
         let mut followed: Vec<([f64; 3], [f64; 3])> = player
@@ -13935,7 +13935,13 @@ impl Game<'_> {
                 host.hub
                     .guests
                     .iter()
-                    .filter(|g| g.placed && g.loaded && !g.dead && g.health > 0.0)
+                    .filter(|g| {
+                        g.placed
+                            && g.participates_in_player_simulation()
+                            && g.loaded
+                            && !g.dead
+                            && g.health > 0.0
+                    })
                     .filter(|g| !g.spectator())
                     .map(|g| {
                         let p = g.position;

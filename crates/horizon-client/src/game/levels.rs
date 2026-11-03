@@ -715,6 +715,7 @@ impl Game<'_> {
     /// The mods hear `dim`'s level close (`LevelEvent.Unload`), once for
     /// each open they heard.
     fn native_level_closed(&mut self, dim: Dim) {
+        self.remove_level_fake_players(dim.id());
         let Some(i) = self.levels.heard_open.iter().position(|d| *d == dim) else {
             return;
         };
