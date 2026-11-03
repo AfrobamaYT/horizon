@@ -2954,7 +2954,7 @@ impl Game<'_> {
     /// `Entity.setPose` for the server's players: the mods hear each placed
     /// guest's change of pose. Nothing is kept while no mod is loaded.
     fn lan_guest_poses(&mut self, host: &mut LanHost) {
-        if horizon_client::mod_api::mods().is_empty() {
+        if !crate::mod_api::listened(crate::mod_api::HookId::EntityPoseChange) {
             host.poses.clear();
             return;
         }
