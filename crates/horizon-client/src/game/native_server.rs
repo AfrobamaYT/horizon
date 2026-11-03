@@ -1023,7 +1023,7 @@ impl Game<'_> {
         self.native_as_player(uuid, |game| {
             let rest = if points > 0 { game.mending(points) } else { 0 };
             if rest > 0 {
-                game.give_orb_points(rest);
+                game.give_experience_points(rest as i32);
             }
         })
     }
@@ -1040,7 +1040,7 @@ impl Game<'_> {
     /// they are the acting player (the host, or a guest swapped in), else a
     /// guest's through `as_guest`, only where no other player is swapped in.
     /// False when it didn't run: no such player here, or dead.
-    fn native_as_player(&mut self, uuid: u128, f: impl FnOnce(&mut Self)) -> bool {
+    pub(super) fn native_as_player(&mut self, uuid: u128, f: impl FnOnce(&mut Self)) -> bool {
         if uuid == self.native_acting_id() {
             if self
                 .player

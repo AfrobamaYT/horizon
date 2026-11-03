@@ -19,11 +19,13 @@ pub use crate::game::{
     ItemEnergyBuffer, NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks,
     NativeDataMapType, NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem,
     NativeHit, NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent,
-    NativePlayerRender, NativeShake,
+    NativePlayerRender, NativeShake, PhantomSpawnResult, SleepProblem,
 };
+pub use crate::gamerules::Value as GameRuleValue;
 pub use crate::gfx::native_render::{
     RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent, wgpu,
 };
+pub use crate::health::{HurtSource, ShieldBlock};
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
@@ -33,7 +35,7 @@ pub use crate::music::{Music, MusicLayer};
 pub use crate::particles::{ParticleOptions, ParticleType};
 pub use crate::recipe_book::RecipeBookCategory;
 pub use crate::text::Text;
-pub use horizon_assets::item_model::DisplayContext;
+pub use horizon_assets::item_model::{DisplayContext, StackView};
 pub use horizon_core::{
     geometry::Direction,
     position::BlockPos,
@@ -346,6 +348,41 @@ pub enum NativeAuthority {
     RemoteClient,
 }
 
+/// Supported vanilla `Block.UPDATE_*` flags for a level block write.
+/// Horizon currently sends all writes to clients regardless of client flags.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NativeBlockUpdateFlags(i32);
+
+impl NativeBlockUpdateFlags {
+    /// No update flags.
+    pub const NONE: Self = Self(0);
+    /// Notify neighboring blocks.
+    pub const NEIGHBORS: Self = Self(1);
+    /// Skip neighbor shape updates.
+    pub const KNOWN_SHAPE: Self = Self(16);
+    /// Suppress drops caused by neighbor shape updates.
+    pub const SUPPRESS_DROPS: Self = Self(32);
+    /// The replacement is caused by a piston.
+    pub const MOVE_BY_PISTON: Self = Self(64);
+    /// Skip wire shape updates.
+    pub const SKIP_SHAPE_UPDATE_ON_WIRE: Self = Self(128);
+    /// Skip the removed block entity's side effects, including container spills.
+    pub const SKIP_BLOCK_ENTITY_SIDE_EFFECTS: Self = Self(256);
+    /// Skip the new block's on-place behavior.
+    pub const SKIP_ON_PLACE: Self = Self(512);
+    #[doc(hidden)]
+    pub fn bits(self) -> i32 {
+        self.0
+    }
+}
+
+impl std::ops::BitOr for NativeBlockUpdateFlags {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
 /// One open attempt of one world; it rejects a previous open's commands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NativeWorldEpoch(u64);
@@ -442,6 +479,15 @@ impl LevelRef {
     pub fn epoch(self) -> NativeWorldEpoch {
         self.epoch
     }
+}
+
+/// The empty-context block shape requested from a level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeBlockShapeKind {
+    /// Selection outline (`BlockState.getShape`).
+    Outline,
+    /// Collision shape (`BlockState.getCollisionShape`).
+    Collision,
 }
 
 /// An online player in one open server world, keyed by UUID.
@@ -550,6 +596,37 @@ pub struct NativeLifecycleContext {
     pub authority: NativeAuthority,
     pub epoch: NativeWorldEpoch,
     pub tick: NativeTickId,
+}
+
+/// Tool action requested by a block interaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ToolAbility {
+    AxeStrip,
+    AxeScrape,
+    AxeWaxOff,
+    ShovelFlatten,
+    ShovelDouse,
+    HoeTill,
+}
+
+/// Read-only context for a tool modification.
+#[non_exhaustive]
+pub struct ToolUse {
+    /// The acting entity ID, if present.
+    pub player: Option<u32>,
+    /// The hand holding the tool.
+    pub hand: crate::first_person::Hand,
+    /// The clicked block position.
+    pub pos: [i32; 3],
+    /// The clicked face's direction.
+    pub face: [i32; 3],
+    /// The click position in world coordinates.
+    pub click: [f64; 3],
+    /// The action being considered.
+    pub ability: ToolAbility,
+    /// Whether this is a simulation. Current vanilla calls pass false.
+    pub simulated: bool,
 }
 
 /// The ordered list of mods shared by the client and server.
@@ -673,7 +750,9 @@ impl BlockHit {
     }
 }
 
-mod generated_host;
+mod generated_host {
+    include!(concat!(env!("OUT_DIR"), "/mod_api_generated_host.rs"));
+}
 pub use generated_host::Host;
 
 /// Result of accessing or decoding an attachment.
@@ -755,11 +834,22 @@ macro_rules! level_attachment_host {
 }
 level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
+mod capability;
+pub use capability::{CapabilityKey, ITEMS, ItemHandler};
+mod fluid_capability;
+pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
+mod item_place;
+pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, StackItemHandler};
 mod part_table;
-pub use part_table::{Attached, Parts, Registrar};
-pub(crate) use part_table::{KnownIds, install_parts, mark_game_thread, parts, resolve_parts};
+pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
+pub(crate) use part_table::{
+    KnownIds, capability_mod, install_parts, item_capability, mark_game_thread, parts,
+    place_provider, resolve_parts,
+};
 
-mod generated;
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
+}
 pub use generated::Hooks;
 #[doc(hidden)]
 pub use generated::*;
@@ -824,6 +914,41 @@ mod tests {
         }
     }
 
+    struct MorePhantoms;
+
+    impl Hooks for MorePhantoms {
+        fn player_spawn_phantoms(
+            &self,
+            _host: &mut dyn Host,
+            event: &mut PlayerSpawnPhantomsEvent<'_>,
+        ) -> Option<PhantomSpawnResult> {
+            *event.phantoms = event.phantoms.map(|count| count + 2);
+            None
+        }
+    }
+
+    #[test]
+    fn phantom_listener_can_increase_the_default_count() {
+        let mods = [Box::new(MorePhantoms) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let mut count = Some(3);
+        let mut result = None;
+        dispatch_player_spawn_phantoms(
+            &mut host,
+            &mods,
+            7,
+            "Probe",
+            [0; 3],
+            &mut count,
+            &mut result,
+        );
+        assert_eq!(count, Some(5));
+        assert!(result.is_none());
+    }
+
     /// Asks the host to tell a player without anyone having implemented it.
     struct Chatty;
 
@@ -875,6 +1000,32 @@ mod tests {
     }
 
     #[test]
+    fn player_turn_mods_receive_identity_and_chain_changes() {
+        struct Turn;
+        impl Hooks for Turn {
+            fn calculate_player_turn(
+                &self,
+                _host: &dyn Host,
+                event: &mut CalculatePlayerTurnEvent,
+            ) {
+                assert_eq!((event.player_entity_id, event.player_uuid), (42, 123));
+                event.mouse_sensitivity *= 2.0;
+                event.cinematic_camera_enabled = !event.cinematic_camera_enabled;
+            }
+        }
+        let host = Reader {
+            block: "",
+            lines: Vec::new(),
+        };
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Turn), Box::new(Turn)];
+        let mut sensitivity = 0.25;
+        let mut cinematic = false;
+        dispatch_calculate_player_turn(&host, &mods, 42, 123, &mut sensitivity, &mut cinematic);
+        assert_eq!(sensitivity, 1.0);
+        assert!(!cinematic);
+    }
+
+    #[test]
     fn a_test_host_implements_only_what_its_hook_calls() {
         // Another test installs parts with tags: a dispatch must run on a game thread.
         mark_game_thread();
@@ -903,6 +1054,54 @@ mod tests {
             let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
             assert_eq!(told, [block], "{block}");
         }
+    }
+
+    #[test]
+    fn mining_events_identify_the_player_and_keep_mod_decisions() {
+        struct MiningProbe(Arc<Mutex<Vec<u32>>>);
+        impl Hooks for MiningProbe {
+            fn player_harvest_check(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut PlayerHarvestCheckEvent,
+            ) {
+                self.0.lock().unwrap().push(event.player);
+                event.can_harvest = false;
+            }
+            fn player_break_speed(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut PlayerBreakSpeedEvent,
+            ) -> Flow {
+                self.0.lock().unwrap().push(event.player);
+                event.new_speed = 2.0;
+                Flow::Continue
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods = [Box::new(MiningProbe(seen.clone())) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:stone",
+            lines: Vec::new(),
+        };
+        let mut harvest = true;
+        let mut speed = 1.0;
+        let mut canceled = false;
+        dispatch_player_harvest_check(&mut host, &mods, 42, [1, 2, 3], 7, &mut harvest);
+        dispatch_player_break_speed(
+            &mut host,
+            &mods,
+            42,
+            [1, 2, 3],
+            7,
+            1.0,
+            &mut speed,
+            &mut canceled,
+        );
+        assert_eq!(*seen.lock().unwrap(), [42, 42]);
+        assert!(!harvest);
+        assert_eq!(speed, 2.0);
+        assert!(!canceled);
     }
 
     #[test]
@@ -975,5 +1174,80 @@ mod tests {
             );
             assert_eq!(canceled, expected, "{hand:?} {hit:?}");
         }
+    }
+
+    /// Records what `player_brewed_potion` told it.
+    struct BrewWatcher(Arc<Mutex<Vec<(u128, i32, ItemStack)>>>);
+
+    impl Hooks for BrewWatcher {
+        fn player_brewed_potion(
+            &self,
+            _host: &mut dyn Host,
+            event: &mut PlayerBrewedPotionEvent<'_>,
+        ) {
+            let seen = (event.player, event.player_entity_id, event.stack.clone());
+            self.0.lock().unwrap().push(seen);
+        }
+    }
+
+    /// `BrewingStandMenu.PotionSlot.onTake`: a pickup and a shift-click on a
+    /// bottle slot each tell a listening mod once, with the taken stack and
+    /// the player's UUID and entity id; with no listener nothing is kept.
+    #[test]
+    fn a_bottle_slot_take_tells_the_listener_once_with_the_player() {
+        use crate::menu::{Env, Input, Kind, LogicalSide, Menu};
+        let root = std::env::temp_dir().join(format!("horizon-brewed-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
+        let items = crate::items::Items::for_tests(Default::default());
+        let overlay = &horizon_world::loot::PackOverlay::NONE;
+        let recipes = crate::crafting::Recipes::load(&root, &items, overlay).unwrap();
+        let brewing = crate::brewing::Brewing::load(&root, &items, overlay);
+        let _ = std::fs::remove_dir_all(&root);
+        let (banners, station_recipes) = (Default::default(), Default::default());
+        let (enchantments, names) = (Default::default(), Default::default());
+        let env = &Env {
+            player: Some(7),
+            player_entity_id: Some(41),
+            side: LogicalSide::Server,
+            items: &items,
+            recipes: &recipes,
+            brewing: &brewing,
+            banners: &banners,
+            station_recipes: &station_recipes,
+            enchantments: &enchantments,
+            names: &names,
+            trade: None,
+            maps: None,
+        };
+        let potion = ItemStack::new("minecraft:potion", 1);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(BrewWatcher(seen.clone()))];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        for input in [Input::Pickup, Input::QuickMove] {
+            let mut menu = Menu::new(Kind::Brewing);
+            menu.set_slot(env, 0, Some(potion.clone()));
+            menu.click(env, 0, 0, input).unwrap();
+            // Without a listener the take is only the advancement's.
+            assert!(menu.brewed_potion_takes.is_empty(), "{input:?}");
+            assert_eq!(menu.brewed, std::slice::from_ref(&potion), "{input:?}");
+
+            let mut menu = Menu::new(Kind::Brewing);
+            menu.brewed_potion_hook = true;
+            menu.set_slot(env, 0, Some(potion.clone()));
+            menu.click(env, 0, 0, input).unwrap();
+            assert_eq!(
+                menu.brewed_potion_takes,
+                std::slice::from_ref(&potion),
+                "{input:?}"
+            );
+            for stack in &menu.brewed_potion_takes {
+                dispatch_player_brewed_potion(&mut host, &mods, 7, 41, stack);
+            }
+        }
+        let told = (7, 41, potion);
+        assert_eq!(*seen.lock().unwrap(), [told.clone(), told]);
     }
 }
