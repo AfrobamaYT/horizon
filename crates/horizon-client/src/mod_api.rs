@@ -57,6 +57,7 @@ pub use horizon_world::{
     registry::BlockStateId,
 };
 pub use serde_json;
+
 use serde_json::{Map, Value};
 use std::time::Duration;
 /// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
@@ -624,6 +625,22 @@ impl MobRef {
     }
 }
 
+/// A dropped item entity of the open world, narrowed with `host.item_entity`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ItemEntityRef(EntityRef);
+
+impl ItemEntityRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+}
+
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -675,6 +692,19 @@ pub enum ChunkStatus {
     Full,
 }
 
+/// What an explosion a mod sets off does to blocks
+/// (`Level.ExplosionInteraction`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NativeExplosionInteraction {
+    /// Blocks stay; entities are hurt and pushed (`NONE`).
+    None,
+    /// Blocks break and drop by the `block_explosion_drop_decay` rule (`BLOCK`).
+    #[default]
+    Block,
+    /// Blocks break and drop by the `tnt_explosion_drop_decay` rule (`TNT`).
+    Tnt,
+}
+
 /// The empty-context block shape requested from a level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeBlockShapeKind {
@@ -682,6 +712,75 @@ pub enum NativeBlockShapeKind {
     Outline,
     /// Collision shape (`BlockState.getCollisionShape`).
     Collision,
+}
+
+/// `ChatVisiblity`: which chat a client shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeChatVisibility {
+    Full,
+    System,
+    Hidden,
+}
+
+/// `HumanoidArm`: a player's main hand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeMainHand {
+    Left,
+    Right,
+}
+
+/// `ParticleStatus`: how many particles a client shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeParticleStatus {
+    All,
+    Decreased,
+    Minimal,
+}
+
+/// A player's client options, as `ServerboundClientInformationPacket` carries them
+/// (vanilla's `ClientInformation`). Raw ids map as vanilla's `ByIdMap` does: chat
+/// visibility and particle status wrap (`floorMod(id, 3)`), the main hand reads an
+/// unknown id as left.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeClientInfo {
+    pub language: String,
+    pub view_distance: i8,
+    pub chat_visibility: NativeChatVisibility,
+    pub chat_colors: bool,
+    /// Skin layer bits (`PlayerModelPart`).
+    pub model_customisation: u8,
+    pub main_hand: NativeMainHand,
+    pub text_filtering: bool,
+    pub allows_listing: bool,
+    pub particle_status: NativeParticleStatus,
+}
+
+impl From<&horizon_protocol::packets::configuration::ClientInformation> for NativeClientInfo {
+    fn from(i: &horizon_protocol::packets::configuration::ClientInformation) -> Self {
+        Self {
+            language: i.language.clone(),
+            view_distance: i.view_distance,
+            chat_visibility: match i.chat_visibility.rem_euclid(3) {
+                0 => NativeChatVisibility::Full,
+                1 => NativeChatVisibility::System,
+                _ => NativeChatVisibility::Hidden,
+            },
+            chat_colors: i.chat_colors,
+            model_customisation: i.model_customisation,
+            main_hand: if i.main_hand == 1 {
+                NativeMainHand::Right
+            } else {
+                NativeMainHand::Left
+            },
+            text_filtering: i.text_filtering,
+            allows_listing: i.allows_listing,
+            particle_status: match i.particle_status.rem_euclid(3) {
+                0 => NativeParticleStatus::All,
+                1 => NativeParticleStatus::Decreased,
+                _ => NativeParticleStatus::Minimal,
+            },
+        }
+    }
 }
 
 /// A block face for a level support query.
@@ -703,6 +802,32 @@ pub enum NativeSupportType {
     Full,
     Center,
     Rigid,
+}
+
+/// Block shape used by an empty-context level ray.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeClipBlock {
+    Collider,
+    Outline,
+}
+
+/// Fluid mode for a level ray. More modes are a follow-up.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeClipFluid {
+    None,
+}
+
+/// Result of a block ray, including the vanilla miss result.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeClipHit {
+    pub miss: bool,
+    pub block: [i32; 3],
+    pub face: NativeBlockFace,
+    pub location: [f64; 3],
+    pub inside: bool,
+    pub world_border: bool,
 }
 
 /// An online player in one open server world, keyed by UUID.
@@ -727,6 +852,14 @@ impl From<PlayerRef> for EntityRef {
     fn from(player: PlayerRef) -> Self {
         player.entity
     }
+}
+
+/// One player's open menu, invalidated on close, replacement or reconnect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MenuRef {
+    pub(crate) player: PlayerRef,
+    pub(crate) window: i32,
+    pub(crate) generation: u64,
 }
 
 /// A player's food data.
