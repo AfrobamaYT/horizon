@@ -631,7 +631,7 @@ impl Game<'_> {
             && let Some(eye) = self.eye_position()
         {
             // `player.drop(stack, false)`.
-            self.throw_from_eyes(rest, eye, false);
+            self.throw_from_eyes(rest, eye, false, false);
         }
     }
     /// Drinking a potion while right-click is held; true when handled.

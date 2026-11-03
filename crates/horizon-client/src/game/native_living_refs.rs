@@ -280,13 +280,12 @@ impl Game<'_> {
     ) -> Option<EntityRef> {
         let target = self.native_living_target(living)?;
         let stack = equipment_stack(Some(stack))?;
-        // LivingEntity.drop swings first, and the swinger's own client hears it.
-        if !throw_randomly {
-            self.native_living_swing(living, Hand::Main, true);
-        }
         let mut item = None;
         match target {
             Target::Mob(id) => {
+                if !throw_randomly {
+                    self.native_living_swing(living, Hand::Main, true);
+                }
                 item = self.native_mob_drop(id, stack, throw_randomly, include_thrower_name);
             }
             Target::Player | Target::Guest(_) => {
@@ -336,18 +335,14 @@ impl Game<'_> {
         randomly: bool,
         thrown_from_hand: bool,
     ) -> Option<u32> {
-        let eye = self.eye_position()?;
         if randomly {
-            return self.drop_from_eyes(stack, eye, true, thrown_from_hand);
+            let eye = self.eye_position()?;
+            self.throw_from_eyes(stack, eye, true, thrown_from_hand)
+        } else if thrown_from_hand {
+            self.player_drop(stack)
+        } else {
+            self.drop_plain(stack)
         }
-        if thrown_from_hand {
-            // ServerPlayer.drop: the statistics; mods hear it as `player_drop`'s.
-            self.award_stat("dropped", &stack.item, stack.count as i32);
-            self.award_custom_stat("drop", 1);
-            let player = self.native_acting_id();
-            self.native_item_dropped(player, &stack.item, stack.count);
-        }
-        self.drop_from_eyes(stack, eye, false, thrown_from_hand)
     }
     /// A mob's half of `native_living_drop`: the id of the item entity.
     fn native_mob_drop(
@@ -738,6 +733,61 @@ mod tests {
             game.native_living_drop(stand, apple, false, false)
                 .is_none()
         );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn player_mod_drop_matches_drop_key_motion() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::ZERO,
+                )
+                .unwrap(),
+            );
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            game.yaw = 37.0;
+            game.pitch = -21.0;
+            game.world.random = horizon_core::random::LegacyRandom::new(12345);
+            let item = ItemStack::new("minecraft:apple", 1);
+            game.inventory[game.selected] = Some(item.clone());
+            game.drop_held(true);
+            let key_velocity = game.dropped.last().unwrap().velocity;
+            game.world.random = horizon_core::random::LegacyRandom::new(12345);
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(42);
+            let player = game.native_living(game.native_entity(42).unwrap()).unwrap();
+            let id = game
+                .native_living_drop(player, item, false, true)
+                .unwrap()
+                .id();
+            let mod_velocity = game.dropped.iter().find(|entity| entity.id == id).unwrap().velocity;
+            assert_eq!(key_velocity, mod_velocity);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn armor_stand_drop_does_not_swing() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.armor_stands.push(horizon_client::entities::ArmorStand::new(
+                90,
+                horizon_core::geometry::Vec3::ZERO,
+                0.0,
+            ));
+            let stand = game.native_living(game.native_entity(90).unwrap()).unwrap();
+            let before = game.swings_started;
+            assert!(
+                game.native_living_drop(stand, ItemStack::new("minecraft:apple", 1), false, false)
+                    .is_none()
+            );
+            assert_eq!(game.swings_started, before);
+            assert!(game.dropped.is_empty());
+        });
     }
 
     #[test]
