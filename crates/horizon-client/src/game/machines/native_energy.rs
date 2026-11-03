@@ -187,14 +187,11 @@ mod tests {
                 block,
                 NativeBlockUpdateFlags::NEIGHBORS
             ));
-            let mut fields = ModBlockEntityFields {
-                id: "test:battery".into(),
-                ..Default::default()
-            };
+            let mut fields = ModBlockEntityFields::default();
             fields.nbt.insert("energy".into(), Tag::Int(800));
             game.world.block_entities.insert(
                 (0, 64, 0),
-                BlockEntity::Mod(Box::new(ModBlockEntity::new(fields))),
+                BlockEntity::Mod(Box::new(ModBlockEntity::new("test:battery".into(), fields))),
             );
             for id in [13, 14] {
                 game.armor_stands.push(ArmorStand::new(id, Vec3::ZERO, 0.0));

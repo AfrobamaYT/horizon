@@ -1959,16 +1959,16 @@ pub(crate) mod tests {
 
     struct EntityBattery(EntityRef);
     impl EnergyHandler for EntityBattery {
-        fn amount(&self, host: &mut dyn Host) -> u32 {
+        fn amount(&self, host: &mut dyn ServerHost) -> u32 {
             ROBOT_ENERGY
                 .get_existing(host, Holder::Entity(self.0.id()))
                 .unwrap()
                 .unwrap_or(0)
         }
-        fn capacity(&self, _: &mut dyn Host) -> u32 {
+        fn capacity(&self, _: &mut dyn ServerHost) -> u32 {
             1000
         }
-        fn insert(&self, host: &mut dyn Host, _: &Transaction, amount: u32) -> u32 {
+        fn insert(&self, host: &mut dyn ServerHost, _: &Transaction, amount: u32) -> u32 {
             let held = self.amount(host);
             let moved = amount.min(1000 - held);
             ROBOT_ENERGY
@@ -1976,7 +1976,7 @@ pub(crate) mod tests {
                 .unwrap();
             moved
         }
-        fn extract(&self, host: &mut dyn Host, _: &Transaction, amount: u32) -> u32 {
+        fn extract(&self, host: &mut dyn ServerHost, _: &Transaction, amount: u32) -> u32 {
             let held = self.amount(host);
             let moved = amount.min(held);
             ROBOT_ENERGY
@@ -1988,20 +1988,20 @@ pub(crate) mod tests {
 
     struct EntityTank(EntityRef);
     impl ResourceHandler<FluidResource> for EntityTank {
-        fn size(&self, _: &mut dyn Host) -> usize {
+        fn size(&self, _: &mut dyn ServerHost) -> usize {
             1
         }
-        fn resource(&self, host: &mut dyn Host, _: usize) -> Option<FluidResource> {
+        fn resource(&self, host: &mut dyn ServerHost, _: usize) -> Option<FluidResource> {
             (self.amount(host, 0) > 0)
                 .then(|| FluidResource::of(&FluidStack::new("minecraft:water", 1)))
         }
-        fn amount(&self, host: &mut dyn Host, _: usize) -> u32 {
+        fn amount(&self, host: &mut dyn ServerHost, _: usize) -> u32 {
             ROBOT_FLUID
                 .get_existing(host, Holder::Entity(self.0.id()))
                 .unwrap()
                 .unwrap_or(0)
         }
-        fn capacity(&self, _: &mut dyn Host, index: usize, resource: &FluidResource) -> u32 {
+        fn capacity(&self, _: &mut dyn ServerHost, index: usize, resource: &FluidResource) -> u32 {
             if index == 0 && resource == &FluidResource::of(&FluidStack::new("minecraft:water", 1))
             {
                 1000
@@ -2011,7 +2011,7 @@ pub(crate) mod tests {
         }
         fn insert(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             _: &Transaction,
             index: usize,
             resource: &FluidResource,
@@ -2026,7 +2026,7 @@ pub(crate) mod tests {
         }
         fn extract(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             _: &Transaction,
             index: usize,
             resource: &FluidResource,
