@@ -247,6 +247,20 @@ impl BlockEntities {
     pub fn attachments(&self, pos: Pos) -> Option<&horizon_world::attachments::Attachments> {
         self.attachments.get(&pos)
     }
+    /// Puts the attachment map of the live block entity at `pos` back as `data`, or removes it
+    /// where it had none: a transaction's abort.
+    pub fn set_attachments(
+        &mut self,
+        pos: Pos,
+        data: Option<horizon_world::attachments::Attachments>,
+    ) {
+        match data {
+            Some(data) => self.restore_attachments(pos, data),
+            None => {
+                self.attachments.remove(&pos);
+            }
+        }
+    }
     /// Attachment maps in a loaded chunk, for a save snapshot.
     pub fn chunk_attachments(
         &self,

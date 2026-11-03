@@ -10,7 +10,10 @@
 //! waiting work, which nothing outside had seen.
 //!
 //! Covered here: block entities (slots, saved compound, attachments), a hopper's cooldown and
-//! cauldron block states. Player and entity inventories come with item places.
+//! cauldron block states. A block's tentative state is stored only (`World::set_stored`): the
+//! one real write, with its remesh, relight and logs, is at the root commit. A jukebox is
+//! told at the root commit from its record before and after, so a disc swapped in one
+//! transaction changes the song. Player and entity inventories come with item places.
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
 use horizon_client::items::ItemStack;
 use horizon_world::attachments::Attachments;
@@ -31,6 +34,7 @@ pub(super) struct Level {
 
 struct Kept {
     entity: Option<BlockEntity>,
+    /// None where it had no map: an abort removes one a write made.
     attachments: Option<Attachments>,
     hopper: Option<HopperState>,
 }
@@ -39,10 +43,6 @@ struct Kept {
 pub(super) enum After {
     /// `BlockEntity.setChanged`.
     Changed(Pos),
-    /// `JukeboxBlockEntity.setTheItem` through a transfer: the disc starts.
-    JukeboxInserted([i32; 3]),
-    /// `JukeboxBlockEntity.removeItem`: the song stops.
-    JukeboxTaken([i32; 3]),
     /// The block's new state, set with its updates (`Level.setBlock`, `UPDATE_ALL`).
     Block(Pos),
     /// `Block.popResource`.
@@ -75,8 +75,8 @@ impl Game<'_> {
             (false, _) => self.roll_back(level),
         }
     }
-    /// Closes every transaction left open, as aborted: a panic inside one unwound past its
-    /// close. Run before each tick.
+    /// Closes every transaction left open, as aborted: one a mod opened through the helpers
+    /// and never closed. Run before each tick.
     pub(super) fn abort_open_transactions(&mut self) {
         while !self.transactions.is_empty() {
             self.native_transaction_close(false);
@@ -94,8 +94,9 @@ impl Game<'_> {
             hopper: self.hoppers.get(&pos).copied(),
         });
     }
-    /// Sets the block at `pos` to `state`. In a transaction, quietly, keeping the old state,
-    /// with its updates at the root commit; otherwise at once (`Level.setBlock`).
+    /// Sets the block at `pos` to `state`. In a transaction, stored only, keeping the old
+    /// state, and set with its updates at the root commit; otherwise at once
+    /// (`Level.setBlock`).
     pub(super) fn journal_set_block(&mut self, pos: [i32; 3], state: BlockStateId) -> bool {
         let Some(level) = self.transactions.last_mut() else {
             return self.level_set(pos, state).is_ok();
@@ -104,7 +105,11 @@ impl Game<'_> {
         let old = self.world.block(pos[0], pos[1], pos[2]);
         level.blocks.entry(key).or_insert(old);
         level.after.push(After::Block(key));
-        self.world.set(pos[0], pos[1], pos[2], state).is_ok()
+        self.world.set_stored(pos[0], pos[1], pos[2], state)
+    }
+    /// Whether a transaction is open: a jukebox's song then waits for the root commit.
+    pub(super) fn in_transaction(&self) -> bool {
+        !self.transactions.is_empty()
     }
     /// Runs `after` at once, or at the root commit inside a transaction.
     pub(super) fn after_commit(&mut self, after: After) {
@@ -116,8 +121,6 @@ impl Game<'_> {
     fn run_after(&mut self, after: After) {
         match after {
             After::Changed(pos) => self.container_changed(pos),
-            After::JukeboxInserted(pos) => self.jukebox_inserted(pos),
-            After::JukeboxTaken(pos) => self.jukebox_taken(pos),
             // Only reached through a root commit, which sets the block itself.
             After::Block(_) => {}
             After::Drop(pos, stack) => {
@@ -138,12 +141,31 @@ impl Game<'_> {
                     let now = self.world.block(pos.0, pos.1, pos.2);
                     let was = level.blocks[&pos];
                     if now != was {
-                        // Back to the old state quietly, so the set sees the change.
-                        let _ = self.world.set(pos.0, pos.1, pos.2, was);
+                        // The stored state back, so the one real write sees the change.
+                        self.world.set_stored(pos.0, pos.1, pos.2, was);
                         let _ = self.level_set([pos.0, pos.1, pos.2], now);
                     }
                 }
                 after => self.run_after(after),
+            }
+        }
+        for (pos, kept) in level.block_entities {
+            let record = |entity: Option<&BlockEntity>| match entity {
+                Some(BlockEntity::Jukebox(j)) => j.record().cloned(),
+                _ => None,
+            };
+            let was = record(kept.entity.as_ref());
+            let now = record(self.world.block_entities.get(&pos));
+            if was == now {
+                continue;
+            }
+            // The song of the record it had stops; the one it has now starts.
+            let pos = [pos.0, pos.1, pos.2];
+            if was.is_some() {
+                self.jukebox_stopped(pos);
+            }
+            if now.is_some() {
+                self.jukebox_inserted(pos);
             }
         }
     }
@@ -154,19 +176,16 @@ impl Game<'_> {
             {
                 *now = entity;
             }
-            if let (Some(attachments), Some(now)) = (
-                kept.attachments,
-                self.world.block_entities.attachments_mut(pos),
-            ) {
-                *now = attachments;
-            }
+            self.world
+                .block_entities
+                .set_attachments(pos, kept.attachments);
             match kept.hopper {
                 Some(hopper) => self.hoppers.insert(pos, hopper),
                 None => self.hoppers.remove(&pos),
             };
         }
         for (pos, state) in level.blocks {
-            let _ = self.world.set(pos.0, pos.1, pos.2, state);
+            self.world.set_stored(pos.0, pos.1, pos.2, state);
         }
     }
 }
@@ -235,9 +254,11 @@ mod tests {
         };
         let full = registry.resolve(&full).unwrap();
         let empty = registry.default_state("minecraft:cauldron").unwrap();
+        let jukebox = registry.default_state("minecraft:jukebox").unwrap();
         let flags = NativeBlockUpdateFlags::NEIGHBORS;
         assert!(game.native_level_set_block(level, [0, 64, 0], chest, flags));
         assert!(game.native_level_set_block(level, [2, 64, 0], full, flags));
+        assert!(game.native_level_set_block(level, [4, 64, 0], jukebox, flags));
         let sticks = |count| ItemStack::new("minecraft:stick", count);
         let host: &mut dyn Host = &mut game;
 
@@ -284,11 +305,89 @@ mod tests {
         assert_eq!(chest_items(&game), [(0, 3)]);
         assert_eq!(game.world.block(2, 64, 0), empty);
 
-        // A transaction a panic left open is aborted before the next tick.
+        // A transaction a mod opened through the helpers and never closed is aborted before
+        // the next tick.
         game.native_transaction_open();
         let host: &mut dyn Host = &mut game;
         host.container_insert([0, 64, 0], None, 0, sticks(1), false);
         game.abort_open_transactions();
         assert_eq!(chest_items(&game), [(0, 3)]);
+
+        // A panic caught outside the root: what it changed is gone before the catch returns,
+        // and the transaction is closed.
+        let host: &mut dyn Host = &mut game;
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            host.transaction(|host| -> Result<(), ()> {
+                host.container_insert([0, 64, 0], None, 0, sticks(1), false);
+                panic!("a broken handler")
+            })
+        }));
+        assert!(caught.is_err());
+        assert_eq!(chest_items(&game), [(0, 3)]);
+        assert!(game.transactions.is_empty());
+
+        // An attachment map a write made inside an aborted transaction is gone with it.
+        let chest_holder = horizon_client::mod_api::Holder::BlockEntity([0, 64, 0]);
+        assert!(game.world.block_entities.attachments((0, 64, 0)).is_none());
+        game.native_transaction_open();
+        assert!(game.attachment_map_quiet(chest_holder).is_ok());
+        assert!(game.world.block_entities.attachments((0, 64, 0)).is_some());
+        game.native_transaction_close(false);
+        assert!(game.world.block_entities.attachments((0, 64, 0)).is_none());
+
+        // An aborted cauldron change leaves no write behind in the world's queues.
+        assert!(game.native_level_set_block(level, [2, 64, 0], full, flags));
+        game.world.block_log = Some(Vec::new());
+        game.world.path_writes = Some(Vec::new());
+        let queues = |game: &Game<'_>| {
+            let world = &game.world;
+            (
+                world.block_log.as_ref().map(Vec::len),
+                world.path_writes.as_ref().map(Vec::len),
+                world.light_edits.len(),
+                world.dirty_light.len(),
+                world.watched_writes.len(),
+            )
+        };
+        let before = queues(&game);
+        let host: &mut dyn Host = &mut game;
+        let _ = host.transaction(|host| {
+            host.fluid_tank_extract([2, 64, 0], None, 0, 1000, false);
+            Err::<(), ()>(())
+        });
+        assert_eq!(game.world.block(2, 64, 0), full);
+        assert_eq!(queues(&game), before);
+
+        // A disc swapped for another in one transaction changes the song: the old one's
+        // stops and the new one's starts.
+        let disc = |item: &str| ItemStack::new(item, 1);
+        let host: &mut dyn Host = &mut game;
+        host.container_insert([4, 64, 0], None, 0, disc("minecraft:music_disc_cat"), false);
+        let Some(BlockEntity::Jukebox(j)) = game.world.block_entities.get_mut(&(4, 64, 0)) else {
+            panic!("jukebox block entity missing")
+        };
+        assert!(j.playing, "a disc put in through a transfer plays");
+        j.ticks = 500;
+        let host: &mut dyn Host = &mut game;
+        let swapped = host.transaction(|host| {
+            host.container_extract([4, 64, 0], None, 0, 1, false);
+            Ok::<_, ()>(host.container_insert(
+                [4, 64, 0],
+                None,
+                0,
+                disc("minecraft:music_disc_13"),
+                false,
+            ))
+        });
+        assert_eq!(swapped, Ok(None));
+        let Some(BlockEntity::Jukebox(j)) = game.world.block_entities.get(&(4, 64, 0)) else {
+            panic!("jukebox block entity missing")
+        };
+        assert_eq!(
+            j.record().map(|r| &*r.item),
+            Some("minecraft:music_disc_13")
+        );
+        assert!(j.playing);
+        assert_eq!(j.ticks, 0, "the new disc's song starts from its beginning");
     }
 }

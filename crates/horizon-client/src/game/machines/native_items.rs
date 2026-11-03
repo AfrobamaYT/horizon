@@ -332,9 +332,10 @@ impl Game<'_> {
             }
             if self.move_in_item(None, &view, some, slot).1 {
                 self.view_told(&view);
-                // JukeboxBlockEntity.setTheItem through a transfer: the disc starts.
-                if view.kind == Kind::Jukebox {
-                    self.after_commit(After::JukeboxInserted(pos));
+                // JukeboxBlockEntity.setTheItem through a transfer: the disc starts (in a
+                // transaction, at the root commit).
+                if view.kind == Kind::Jukebox && !self.in_transaction() {
+                    self.jukebox_inserted(pos);
                 }
             }
         }
@@ -389,9 +390,10 @@ impl Game<'_> {
         }
         let out = self.take_up_to(&view, slot, max)?;
         self.view_told(&view);
-        // JukeboxBlockEntity.removeItem: a disc taken out stops the song.
-        if view.kind == Kind::Jukebox {
-            self.after_commit(After::JukeboxTaken(pos));
+        // JukeboxBlockEntity.removeItem: a disc taken out stops the song (in a transaction, at
+        // the root commit).
+        if view.kind == Kind::Jukebox && !self.in_transaction() {
+            self.jukebox_taken(pos);
         }
         Some(out)
     }
