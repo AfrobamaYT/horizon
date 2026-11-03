@@ -2360,12 +2360,15 @@ impl Game<'_> {
         let Tag::Compound(fields) = tag else {
             return;
         };
-        // A mod block entity's type is named after its block (`mod_content`):
-        // its update tag merges into what the client keeps of it (`handleUpdateTag`).
+        // Only the declared type on one of its valid blocks accepts an update tag.
         // Nothing is drawn from it yet, so its section stays as it is.
         let block = self.world.block(pos[0], pos[1], pos[2]);
         if let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&key) {
-            if *self.res.facts().get(block).name == *name {
+            if m.id() == name
+                && horizon_client::containers::block_entity_types::type_for(
+                    &self.res.facts().get(block).name,
+                ) == Some(name)
+            {
                 m.merge_update_tag(fields);
             }
             return;
@@ -3146,6 +3149,7 @@ impl Game<'_> {
                     r.view_distance = p.chunk_radius;
                     r.simulation_distance = p.simulation_distance;
                     r.show_death_screen = p.show_death_screen;
+                    r.do_limited_crafting = p.limited_crafting;
                 }
                 self.streaming.radius =
                     self.render_distance_in_use().min(p.chunk_radius + 1).max(2);
@@ -7617,10 +7621,8 @@ impl Game<'_> {
                 self.with_hand(hand, Game::start_using_item);
                 return true;
             } else if item_used
-                && held
-                    .as_ref()
-                    .is_some_and(|s| &*s.item == "minecraft:bone_meal")
-                && self.remote_bone_meal_succeeds(&hit)
+                && let Some(stack) = held.as_ref().filter(|s| &*s.item == "minecraft:bone_meal")
+                && self.with_hand(hand, |g| g.remote_bone_meal_succeeds(&hit, stack))
             {
                 // BoneMealItem.useOn succeeded on this client's level (SUCCESS;
                 // the server grows the plant): this hand swings and the click
@@ -7800,13 +7802,14 @@ impl Game<'_> {
             && self.block_in_tag("minecraft:banners", &self.block_name(hit.pos))
     }
 
-    /// `BoneMealItem.useOn` on this client's level (a copy: nothing grows
-    /// here): whether it succeeds.
-    fn remote_bone_meal_succeeds(&mut self, hit: &super::Hit) -> bool {
+    /// `BoneMealItem.useOn` with the acting hand's `stack` on this client's
+    /// level (a copy: nothing grows here): whether it succeeds.
+    fn remote_bone_meal_succeeds(&mut self, hit: &super::Hit, stack: &ItemStack) -> bool {
         let pos = horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
         let face = horizon_core::geometry::Direction::ALL[face_direction(hit.face) as usize];
+        let (crop, _) = self.held_bonemeal(pos, stack);
         self.with_level(|b, level, _| {
-            b.bone_meal_succeeds_on_client(&mut DryLevel::new(level), pos, face)
+            b.bone_meal_succeeds_on_client(&mut DryLevel::new(level), pos, face, crop)
         })
     }
 
@@ -7902,9 +7905,18 @@ impl Game<'_> {
             let result = b.use_item_on(
                 &mut level,
                 &mut horizon_world::level::Ticks::default(),
-                horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
-                face,
-                horizon_core::geometry::Vec3::new(hit.point[0], hit.point[1], hit.point[2]),
+                horizon_core::geometry::BlockHit {
+                    block: horizon_core::position::BlockPos::new(
+                        hit.pos[0], hit.pos[1], hit.pos[2],
+                    ),
+                    direction: face,
+                    location: horizon_core::geometry::Vec3::new(
+                        hit.point[0],
+                        hit.point[1],
+                        hit.point[2],
+                    ),
+                    inside: hit.inside,
+                },
                 player,
                 held.map(|s| &*s.item),
             );
@@ -9410,6 +9422,14 @@ impl Game<'_> {
         self.send(S::ContainerClose(play::ContainerClose { container: id }));
         self.remote_close_local();
     }
+    fn remote_reject_container(&mut self, container: i32) {
+        self.remote_close_local();
+        if self.screen == Screen::Inventory {
+            self.screen = Screen::Playing;
+            self.capture(true);
+        }
+        self.send(S::ContainerClose(play::ContainerClose { container }));
+    }
     fn remote_close_local(&mut self) {
         // `Gui.setScreen` clears the focus of the screen it takes down: the
         // container's keyboard focus must not outlive it (a Tab bound to the
@@ -9593,9 +9613,7 @@ impl Game<'_> {
             ))),
             _ => {
                 // Unsupported menu: tell the server we closed it.
-                self.send(S::ContainerClose(play::ContainerClose {
-                    container: p.container,
-                }));
+                self.remote_reject_container(p.container);
                 self.chat_line(
                     horizon_client::text::Text::literal(format!(
                         "(Horizon cannot show {menu} screens yet)"
@@ -9649,9 +9667,7 @@ impl Game<'_> {
     fn remote_open_mount(&mut self, p: play::MountScreenOpen) {
         let columns = usize::try_from(p.columns).unwrap_or(0).min(5);
         if !self.open_remote_mount_menu(p.entity as u32, columns) {
-            self.send(S::ContainerClose(play::ContainerClose {
-                container: p.container,
-            }));
+            self.remote_reject_container(p.container);
             return;
         }
         if let Some(r) = self.remote.as_mut() {
@@ -10678,6 +10694,50 @@ fn hold_server_fire(fire_ticks: i32, server_on_fire: bool) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn rejected_menu_packets_retire_the_previous_client_menu() {
+        use super::super::{
+            Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
+        };
+        use horizon_client::items::ItemStack;
+        use horizon_protocol::{
+            connection::Pipe,
+            packets::play::{Clientbound as C, MountScreenOpen, OpenScreen},
+        };
+        use horizon_world::nbt::Tag;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "MenuTest").unwrap();
+            for packet in [
+                C::OpenScreen(OpenScreen {
+                    container: 7,
+                    menu: -1,
+                    title: Tag::String("unsupported".into()),
+                }),
+                C::MountScreenOpen(MountScreenOpen {
+                    container: 7,
+                    columns: 0,
+                    entity: i32::MAX,
+                }),
+            ] {
+                let remote = game.remote.as_mut().unwrap();
+                remote.menu.set(Some((7, "minecraft:generic_9x3".into())));
+                let generation = remote.menu.generation;
+                game.screen = Screen::Inventory;
+                game.carried = Some(ItemStack::new("minecraft:stone", 1));
+                game.handle_packet(packet).unwrap();
+                let remote = game.remote.as_ref().unwrap();
+                assert!(remote.menu.as_ref().is_none());
+                assert_ne!(remote.menu.generation, generation);
+                assert!(game.carried.is_none());
+                assert!(game.screen == Screen::Playing);
+            }
+        });
+    }
+
     /// `LivingEntity.handleEntityEvent(55)` is `swapHandItems`: the whole
     /// stacks trade hands, not just their ids.
     #[test]
@@ -10754,7 +10814,10 @@ mod tests {
             motion::PlayerMotion,
         };
         use horizon_core::geometry::Vec3;
-        use horizon_protocol::{connection::Pipe, packets::play::SpawnInfo};
+        use horizon_protocol::{
+            connection::Pipe,
+            packets::play::{Clientbound, Respawn, SpawnInfo},
+        };
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -10778,8 +10841,31 @@ mod tests {
             game.enter_remote_dimension(&spawn, false, Reason::Other);
             let joined = game.native_lifecycle.epoch().unwrap();
             let old = EntityRef::new(joined, 12);
-            game.enter_remote_dimension(&spawn, true, Reason::Other);
+            let remote = game.remote.as_mut().unwrap();
+            remote.menu.set(Some((7, "minecraft:generic_9x3".into())));
+            let open_generation = remote.menu.generation;
+            game.handle_packet(Clientbound::Respawn(Respawn {
+                spawn: spawn.clone(),
+                keep: 0,
+            }))
+            .unwrap();
             assert_eq!(game.native_lifecycle.epoch(), Some(joined));
+            let remote = game.remote.as_mut().unwrap();
+            assert!(remote.menu.as_ref().is_none());
+            assert_ne!(remote.menu.generation, open_generation);
+            let inventory_generation = remote.menu.generation;
+            game.handle_packet(Clientbound::Respawn(Respawn {
+                spawn: spawn.clone(),
+                keep: 0,
+            }))
+            .unwrap();
+            assert_eq!(game.native_lifecycle.epoch(), Some(joined));
+            let remote = game.remote.as_mut().unwrap();
+            assert!(remote.menu.as_ref().is_none());
+            assert_ne!(remote.menu.generation, inventory_generation);
+            remote.menu.set(Some((7, "minecraft:generic_9x3".into())));
+            assert_ne!(remote.menu.generation, open_generation);
+            assert_ne!(remote.menu.generation, inventory_generation);
 
             // A different level key replaces the world even with the same
             // dimension type; IDs can be reused but old handles cannot.
@@ -11476,6 +11562,8 @@ mod tests {
             names: &names,
             trade: None,
             maps: None,
+            limited_crafting: false,
+            known_recipes: None,
         };
         let mut menu = Menu::new(Kind::Inventory);
         let cobblestone = ItemStack {

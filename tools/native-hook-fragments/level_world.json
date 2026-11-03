@@ -27,8 +27,23 @@
       "receiver": "level"
     },
     {
+      "name": "level_is_raining_at", "side": "server",
+      "target": "horizon_client::game::native_level_world::Game<'_>::native_level_is_raining_at",
+      "receiver": "level"
+    },
+    {
+      "name": "level_enabled_features", "side": "server",
+      "target": "horizon_client::game::native_level_world::Game<'_>::native_level_enabled_features",
+      "receiver": "level"
+    },
+    {
       "name": "level_is_thundering", "side": "server",
       "target": "horizon_client::game::native_level_world::Game<'_>::native_level_is_thundering",
+      "receiver": "level"
+    },
+    {
+      "name": "level_random", "side": "server",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_level_random",
       "receiver": "level"
     }
   ]

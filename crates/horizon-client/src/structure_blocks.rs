@@ -293,6 +293,7 @@ fn text(nbt: &Compound, key: &str) -> Option<String> {
 /// hands the template's block entity NBT to `loadWithComponents`, which is
 /// what a chunk load does with a saved one.
 fn generated_block_entity(block: &str, nbt: &Compound) -> Option<BlockEntity> {
+    let declared = crate::containers::block_entity_types::type_for(block);
     // A mod sign has no vanilla block name; its saved entity id is still vanilla's.
     let fallback = BlockEntity::for_block(block).or_else(|| {
         let id = text(nbt, "id")?;
@@ -303,24 +304,24 @@ fn generated_block_entity(block: &str, nbt: &Compound) -> Option<BlockEntity> {
         } else {
             None
         }
-    })?;
+    });
+    let id = declared.or_else(|| fallback.as_ref().map(BlockEntity::id))?;
     let mut tag = nbt.clone();
     // RandomizableContainer.tryLoadLootTable: with a table the items are not read.
-    if text(&tag, "LootTable").is_some() {
+    if declared.is_none() && text(&tag, "LootTable").is_some() {
         tag.remove(&JavaString::from("Items"));
     }
-    // Programmatic block entities (and a template that saved none) carry no id.
-    if !tag.contains_key(&JavaString::from("id")) {
-        tag.insert("id".into(), Tag::String(fallback.id().into()));
+    // The declaration owns identity; structures supply its payload, not a factory call.
+    if declared.is_some() || !tag.contains_key(&JavaString::from("id")) {
+        tag.insert("id".into(), Tag::String(id.into()));
     }
     for axis in ["x", "y", "z"] {
         tag.insert(axis.into(), Tag::Int(0));
     }
     // A saved kind the client cannot decode keeps the block's own entity.
-    Some(
-        crate::save::decode_block_entity(&Tag::Compound(tag))
-            .map_or(fallback, |(_, entity)| entity),
-    )
+    crate::save::decode_block_entity(&Tag::Compound(tag))
+        .map(|(_, entity)| entity)
+        .or(fallback)
 }
 
 /// Client block entities for the generated block entities of a chunk, and the
@@ -360,6 +361,52 @@ pub fn block_entities(
 mod tests {
     use super::*;
     use horizon_world::loot::{ExplorationMap, LootStack};
+
+    #[test]
+    fn declared_structure_entities_keep_template_payload_not_template_type() {
+        const CHILD: &str = "HORIZON_TEST_DECLARED_STRUCTURE_ENTITY";
+        if std::env::var_os(CHILD).is_none() {
+            assert!(
+                std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "structure_blocks::tests::declared_structure_entities_keep_template_payload_not_template_type",
+                    ])
+                    .env(CHILD, "1")
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            return;
+        }
+        use crate::containers::block_entity_types::{self, BlockEntityTypes};
+        block_entity_types::install(BlockEntityTypes::new(
+            [
+                ("test:ornate_banner".into(), "test:machine".into()),
+                ("test:press".into(), "test:machine".into()),
+            ]
+            .into(),
+            vec!["test:machine".into()],
+        ))
+        .unwrap();
+        let Tag::Compound(nbt) = horizon_world::nbt::parse_snbt(
+            r#"{id:"minecraft:banner",energy:900L,LootTable:"test:loot",Items:[{Slot:0b,id:"minecraft:stone",count:3}]}"#,
+        ).unwrap().0 else {
+            panic!("not a compound");
+        };
+        for block in ["test:ornate_banner", "test:press"] {
+            let Some(BlockEntity::Mod(entity)) = generated_block_entity(block, &nbt) else {
+                panic!("declared type did not override {block}");
+            };
+            assert_eq!(entity.id(), "test:machine");
+            assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(900)));
+            assert_eq!(
+                entity.nbt.get(&"LootTable".into()),
+                Some(&Tag::String("test:loot".into()))
+            );
+            assert_eq!(entity.items[0].as_ref().unwrap().count, 3);
+        }
+    }
 
     #[test]
     fn a_saved_mod_sign_uses_its_vanilla_entity_type() {

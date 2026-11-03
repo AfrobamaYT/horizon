@@ -782,9 +782,7 @@ impl Game<'_> {
     /// `AbstractMinecart`: `minecart_improvements` picks the smoother
     /// physics.
     pub(super) fn minecart_improvements(&self) -> bool {
-        self.remote
-            .as_ref()
-            .map_or(&self.level.enabled_features, |remote| &remote.features)
+        self.enabled_feature_ids()
             .iter()
             .any(|f| f == "minecraft:minecart_improvements")
     }
@@ -2038,10 +2036,11 @@ impl Game<'_> {
                 if sneaking || self.riding.is_some() || self.ridden_by_guest(id) || has_mob {
                     return false;
                 }
-                if !self.native_may_board(id) {
-                    return true;
-                }
-                self.riding = Some(id);
+                self.start_riding_target(
+                    super::commands::Target::Player,
+                    super::commands::Target::Cart(id),
+                    false,
+                );
             }
             // AbstractMinecartContainer.interact: no sneak check.
             CartKind::Chest | CartKind::Hopper => self.open_cart_container(i),

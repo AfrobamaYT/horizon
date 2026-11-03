@@ -86,7 +86,8 @@ A content mod has capability `registries` and carries `assets/` and `data/` in t
 by declaring them in `data/<id>/horizon/block/*.json` and `data/<id>/horizon/item/*.json`, each copying a vanilla
 template ([modpacks.md](modpacks.md#registries-02-data-driven-blocks-items-and-mob-effects)), and creative tabs, mob
 effects, entity types and menu types (each below) in `creative_tab/`, `mob_effect/`, `entity_type/` and `menu/` beside
-them. LAN and dedicated server players play with them when they run the same mods: a client whose mods add different
+them. `fluid/` gives a fluid a client look (`sprite`, an atlas sprite id, and `tint`, `0xAARRGGBB`, both optional), as
+NeoForge's `IClientFluidTypeExtensions`; the fluid needs no block, and a recipe page draws its well from it. LAN and dedicated server players play with them when they run the same mods: a client whose mods add different
 content is refused when it joins, with the reason.
 
 Every Horizon server checks loaded mods in the configuration phase (`horizon_protocol::mod_list`, channel
@@ -123,7 +124,13 @@ for a vanilla block that ticks, and its sections count it.
 `"MODEL"` puts its block model in the chunk mesh, `"ENTITYBLOCK_ANIMATED"` leaves the model out for a block whose
 moving parts its block entity draws every frame (a turning shaft, a machine's arm), and `"INVISIBLE"` draws nothing.
 Its outline, collision, light and occlusion stay as declared: on a template that occludes (stone), the faces it
-covers stay hidden, so a block drawn by its block entity usually takes a template that doesn't (glass).
+covers stay hidden unless it also sets `occludes`.
+
+`occludes: false` makes a block occlude nothing whatever its template does, as vanilla's `noOcclusion()`: the faces
+of the blocks beside it are drawn, so a thin panel or a block drawn by its block entity on a full-cube template
+doesn't leave a hole in the floor under it. It is no longer a solid render either, so light passes it as it passes
+leaves: dampened by 1, or not at all if its template lets skylight down. Unset or `true`, it occludes as its template
+does.
 
 A block copies its template's states. It can also declare state properties of
 its own, which its template does not have — how a pipe says which sides it

@@ -16,16 +16,15 @@ pub(super) fn validate(
     mutable: Option<bool>,
     ticks: bool,
 ) -> Result<(), String> {
-    if hook.context.is_some()
-        && (mutable.is_some()
-            || is_level
-            || ticks
-            || hook.get("host").is_some()
-            || hook["mod_api"].get("scope").is_some())
-    {
-        return Err(format!(
-            "{name}: a phase context cannot be combined with a game/level host or Parts scope"
-        ));
+    if hook.context.is_some() {
+        let owns_host = mutable.is_some() || is_level || ticks;
+        let host_marker = hook.get("host").is_some();
+        let scoped = hook["mod_api"].get("scope").is_some();
+        if owns_host || host_marker || scoped {
+            return Err(format!(
+                "{name}: a phase context cannot be combined with a game/level host or Parts scope"
+            ));
+        }
     }
     if let Some(marker) = hook.get("host") {
         if is_level || hook.side == HelperSide::Client {

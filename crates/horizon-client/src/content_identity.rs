@@ -82,6 +82,20 @@ pub fn identity(
             }
         }
     }
+    let membership = match std::fs::read(root.join(crate::mod_content::BLOCK_ENTITY_TYPES)) {
+        Ok(bytes) => serde_json::from_slice::<BTreeMap<String, String>>(&bytes)
+            .map_err(IdentityError::Json)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => BTreeMap::new(),
+        Err(error) => return Err(IdentityError::Read(error)),
+    };
+    if !membership.is_empty() {
+        let entries: Vec<_> = membership
+            .into_iter()
+            .enumerate()
+            .map(|(index, (block, kind))| (index as u64, format!("{block}\0{kind}")))
+            .collect();
+        hash = hash_entries(hash, "horizon:block_entity_membership/v1", &entries);
+    }
     let components: Vec<_> = horizon_protocol::item::custom::entries()
         .map(|(id, name)| (id as u64, name.to_owned()))
         .collect();
@@ -124,11 +138,12 @@ fn hash_facts(bytes: &[u8]) -> Result<[u8; 32], IdentityError> {
 }
 
 /// The built-in registries whose network ids content mods extend besides blocks.
-const REGISTRIES: [&str; 4] = [
+const REGISTRIES: [&str; 5] = [
     "minecraft:item",
     "minecraft:mob_effect",
     "minecraft:entity_type",
     "minecraft:menu",
+    "minecraft:block_entity_type",
 ];
 
 fn parse_registries(bytes: &[u8]) -> Result<Builtin, IdentityError> {
@@ -221,6 +236,60 @@ mod tests {
         let press = root("press", r#","ruby:press":{"protocol_id":25}"#);
         assert_ne!(press, vanilla);
         assert_ne!(press, root("mill", r#","ruby:mill":{"protocol_id":25}"#));
+    }
+
+    #[test]
+    fn block_entity_ids_and_membership_affect_identity() {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-content-identity-block-entities-{}",
+            std::process::id()
+        ));
+        let build = |label: &str, kind: &str, id: u32, membership: &str| {
+            let root = root.join(label);
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(
+                root.join("facts.json"),
+                br#"{"states":[["test:press",false,false,"Block{test:press}",{"id":"test:press"}]]}"#,
+            )
+            .unwrap();
+            std::fs::write(
+                root.join("registries.json"),
+                format!(
+                    r#"{{"minecraft:block_entity_type":{{"entries":{{"minecraft:chest":{{"protocol_id":1}},"{kind}":{{"protocol_id":{id}}}}}}}}}"#
+                ),
+            )
+            .unwrap();
+            std::fs::write(
+                root.join(crate::mod_content::BLOCK_ENTITY_TYPES),
+                membership,
+            )
+            .unwrap();
+            identity(&root).unwrap()
+        };
+        let mapping = r#"{"test:press":"test:machine","test:mill":"test:machine"}"#;
+        let machine = build("first", "test:machine", 44, mapping);
+        assert_eq!(identity(&root.join("first")).unwrap(), machine);
+        assert_ne!(machine, build("wire", "test:machine", 45, mapping));
+        assert_ne!(machine, build("name", "test:other", 44, mapping));
+        assert_ne!(
+            machine,
+            build(
+                "membership",
+                "test:machine",
+                44,
+                r#"{"test:press":"test:machine"}"#
+            )
+        );
+        assert_eq!(
+            machine,
+            build(
+                "order",
+                "test:machine",
+                44,
+                r#"{"test:mill":"test:machine","test:press":"test:machine"}"#
+            )
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

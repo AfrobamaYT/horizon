@@ -2535,10 +2535,18 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
             .push(MobEvent::Sound("entity.panda.bite", at, 1.0, 1.0));
     }
     // Axolotl.playAttackSound: playSound(AXOLOTL_ATTACK, 1.0, 1.0).
-    if m.species() == Species::Axolotl {
+    if m.species() == Species::Axolotl && !m.silent {
         let at = [m.position.x, m.position.y, m.position.z];
         cx.events
             .push(MobEvent::Sound("entity.axolotl.attack", at, 1.0, 1.0));
+    }
+    // Dolphin.playAttackSound: playSound(DOLPHIN_ATTACK, 1.0, 1.0), once
+    // the blow landed. A dolphin that is hurt takes its attacker as a target
+    // and strikes with the melee goal, so its bite is heard as it lands.
+    if m.species() == Species::Dolphin && !m.silent {
+        let at = [m.position.x, m.position.y, m.position.z];
+        cx.events
+            .push(MobEvent::Sound("entity.dolphin.attack", at, 1.0, 1.0));
     }
     let _ = Fluid::None;
 }
@@ -2719,9 +2727,39 @@ pub(crate) fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>
             }
             _ => {}
         }
-        if !infinite && m.extra.effects.get(i).is_some_and(|e| e.0 == effect) {
-            let ticks = &mut m.extra.effects[i].1;
-            *ticks = if expired { 0 } else { *ticks - 1 };
+        if m.extra.effects.get(i).is_some_and(|e| e.0 == effect) {
+            if !expired {
+                if let Some(hidden) = m.extra.effect_chains.iter_mut().find(|e| e.id == effect) {
+                    hidden.tick_down();
+                }
+                if !infinite {
+                    m.extra.effects[i].1 -= 1;
+                }
+            } else {
+                m.extra.effects[i].1 = 0;
+            }
+            if !expired
+                && m.extra.effects[i].1 == 0
+                && let Some(chain) = m.extra.effect_chains.iter().position(|e| e.id == effect)
+            {
+                let mut hidden = m.extra.effect_chains.remove(chain);
+                if effect == "minecraft:absorption" {
+                    m.absorption = m.absorption.min(4.0 * (hidden.amplifier + 1) as f32);
+                }
+                m.extra.effects[i] = (effect, hidden.duration, hidden.amplifier);
+                m.extra.ambient_effects.retain(|e| *e != effect);
+                if hidden.ambient {
+                    m.extra.ambient_effects.push(effect);
+                }
+                m.extra.hidden_effects.retain(|e| *e != effect);
+                if !hidden.visible {
+                    m.extra.hidden_effects.push(effect);
+                }
+                if let Some(next) = hidden.hidden.take() {
+                    m.extra.effect_chains.push(*next);
+                }
+                m.effects_dirty = true;
+            }
         }
         // LivingEntity.tickEffects refreshes a surviving effect every 600 ticks.
         if m.extra
@@ -2733,20 +2771,7 @@ pub(crate) fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>
         }
         i += 1;
     }
-    // AbsorptionMobEffect.removeAttributeModifiers: the hearts it gave go with it.
-    for i in 0..m.extra.effects.len() {
-        let e = m.extra.effects[i];
-        if e.0 == "minecraft:absorption" && e.1 <= 0 && e.1 != -1 {
-            m.absorption = (m.absorption - 4.0 * (e.2 + 1) as f32).max(0.0);
-        }
-    }
     m.retain_effects(|e| e.1 > 0 || e.1 == -1);
-    m.extra
-        .hidden_effects
-        .retain(|h| m.extra.effects.iter().any(|e| e.0 == *h));
-    m.extra
-        .ambient_effects
-        .retain(|h| m.extra.effects.iter().any(|e| e.0 == *h));
     if m.effects_dirty {
         let invisible = m.has_effect("minecraft:invisibility");
         m.needs_sync |= m.invisible != invisible;
@@ -3335,6 +3360,72 @@ mod hit_effect_tests {
             return;
         }
         assert_eq!(out, Some(vec!["plain 2".to_owned()]));
+    }
+}
+
+#[cfg(test)]
+mod attack_sound_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+    use std::sync::Arc;
+
+    /// The sounds `do_hurt_target` raises for `kind` on a blow that landed,
+    /// with `silent` set on the attacker; `None` without the extracted data.
+    fn attack_sounds(kind: &str, silent: bool) -> Option<Vec<(&'static str, f32, f32)>> {
+        let mut heard = Vec::new();
+        let ran = with_test_world(&[], |w, types| {
+            let mut m = Mob::new(
+                1,
+                Arc::new(types.types[kind].clone()),
+                Vec3::new(0.5, 64.0, 0.5),
+                0.0,
+            );
+            m.silent = silent;
+            let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+            let mut cx = Cx {
+                w,
+                lr: &mut lr,
+                events: &mut events,
+            };
+            do_hurt_target(&mut m, Who::Mob(2), &mut cx);
+            heard = events
+                .iter()
+                .filter_map(|e| match e {
+                    MobEvent::Sound(s, _, volume, pitch) => Some((*s, *volume, *pitch)),
+                    _ => None,
+                })
+                .collect();
+        });
+        if !ran {
+            return None;
+        }
+        Some(heard)
+    }
+
+    /// `Mob.doHurtTarget` ends with `playAttackSound`, which `Dolphin`,
+    /// `Axolotl` and `Panda` override with their own bite at volume 1 and
+    /// pitch 1. Without the dolphin arm its bite is silent (no sound event at
+    /// all); the axolotl and the panda sit next to it as the control.
+    #[test]
+    fn a_dolphins_blow_plays_its_attack_sound() {
+        let Some(dolphin) = attack_sounds("minecraft:dolphin", false) else {
+            return;
+        };
+        assert_eq!(dolphin, vec![("entity.dolphin.attack", 1.0, 1.0)]);
+        for (kind, sound) in [
+            ("minecraft:axolotl", "entity.axolotl.attack"),
+            ("minecraft:panda", "entity.panda.bite"),
+        ] {
+            assert_eq!(
+                attack_sounds(kind, false),
+                Some(vec![(sound, 1.0, 1.0)]),
+                "{kind}"
+            );
+        }
+        // Entity.playSound skips a silent entity, so neither attack sound plays.
+        for kind in ["minecraft:dolphin", "minecraft:axolotl", "minecraft:panda"] {
+            assert_eq!(attack_sounds(kind, true), Some(vec![]), "{kind}");
+        }
     }
 }
 

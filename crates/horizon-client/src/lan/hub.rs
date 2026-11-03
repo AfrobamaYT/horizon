@@ -52,6 +52,7 @@ pub mod game_event {
     pub const THUNDER_LEVEL: u8 = 8;
     pub const GUARDIAN_ELDER_EFFECT: u8 = 10;
     pub const IMMEDIATE_RESPAWN: u8 = 11;
+    pub const LIMITED_CRAFTING: u8 = 12;
     pub const LEVEL_CHUNKS_LOAD_START: u8 = 13;
 }
 
@@ -324,6 +325,8 @@ pub struct Hub {
     pub far: Option<super::far::Far>,
     /// The `immediate_respawn` game rule, as the players were last told.
     immediate_respawn: bool,
+    /// The `limited_crafting` game rule, as the players were last told.
+    pub limited_crafting: bool,
     /// An integrated server's owner (`MinecraftServer.isSingleplayerOwner`),
     /// whose moves are never checked.
     pub singleplayer_owner: Option<u128>,
@@ -473,6 +476,13 @@ fn stuck_meta(state: &mut EntityState, (arrows, stingers): (i32, i32)) {
         }
         state.defaults.push((index, serializer::INT, Value::Int(0)));
     }
+}
+
+fn frozen_meta(state: &mut EntityState, ticks: i32) {
+    if ticks != 0 {
+        state.meta.push((7, serializer::INT, Value::Int(ticks)));
+    }
+    state.defaults.push((7, serializer::INT, Value::Int(0)));
 }
 
 /// `Player.DATA_SHOULDER_PARROT_LEFT` (19) and `_RIGHT` (20), an
@@ -673,6 +683,7 @@ impl Hub {
             seat_order: 0,
             sound_seeds: Mutex::new(LegacyRandom::new(crate::sound_engine::unique_seed())),
             immediate_respawn: false,
+            limited_crafting: false,
             movement_checks: (true, true),
             anticheat: None,
             chat_filter: None,
@@ -785,6 +796,17 @@ impl Hub {
             self.immediate_respawn = on;
             self.broadcast(&C::GameEvent(play::GameEvent {
                 event: game_event::IMMEDIATE_RESPAWN,
+                param: if on { 1.0 } else { 0.0 },
+            }));
+        }
+    }
+    /// `MinecraftServer.onGameRuleChanged`: every player is told when
+    /// `limited_crafting` changes; a joining player's Login carries it.
+    pub fn set_limited_crafting(&mut self, on: bool) {
+        if self.limited_crafting != on {
+            self.limited_crafting = on;
+            self.broadcast(&C::GameEvent(play::GameEvent {
+                event: game_event::LIMITED_CRAFTING,
                 param: if on { 1.0 } else { 0.0 },
             }));
         }
@@ -1229,7 +1251,7 @@ impl Hub {
             simulation_distance: self.config.simulation_distance,
             reduced_debug_info: false,
             show_death_screen: !self.immediate_respawn,
-            limited_crafting: false,
+            limited_crafting: self.limited_crafting,
             spawn: self.spawn_info(i, 0),
             // MinecraftServer.usesAuthentication, enforceSecureProfile.
             online_mode: self.lan.shared.config.online.is_some(),
@@ -1847,10 +1869,9 @@ impl Hub {
                 }
             }
         }
-        // keepConnectionAlive's timeout, checked once a second here, not on
-        // the writer thread: a client that stops reading blocks that thread
-        // and would hold its slot forever. Kicked, it gets the reason; still
-        // here a second later, its connection is closed under the writer.
+        // keepConnectionAlive's timeout, checked once a second here. Kicked,
+        // the client gets the reason; still here a second later (it reads
+        // nothing, so its disconnect waits unwritten), its connection is closed.
         if self.ticks.is_multiple_of(20) {
             for g in &self.guests {
                 if g.participates_online() && !g.left_reason.is_empty() && g.sender.timed_out() {
@@ -2545,6 +2566,13 @@ impl Hub {
             }
             // Block entities with data the client shows.
             for &(x, y, z) in &positions {
+                let state = world.block(x, y, z).0;
+                if !self
+                    .encoder
+                    .entity_matches(state, world.block_entities.get(&(x, y, z)))
+                {
+                    continue;
+                }
                 // A decorated pot is no block entity: its tag is the chunk's saved one.
                 let tag = match world.block_entities.get(&(x, y, z)) {
                     Some(entity) => self.encoder.update_tag((x, y, z), entity),
@@ -2556,7 +2584,6 @@ impl Hub {
                 let Some(tag) = tag else {
                     continue;
                 };
-                let state = world.block(x, y, z).0;
                 let Some(kind) = self.encoder.entity_type(state) else {
                     continue;
                 };
@@ -2818,6 +2845,7 @@ impl Hub {
                 state.watching = g.watching;
                 state.hidden = self.hidden.get(&g.uuid).copied();
                 stuck_meta(&mut state, g.stuck);
+                frozen_meta(&mut state, g.motion.as_ref().map_or(0, |m| m.ticks_frozen));
                 shoulder_meta(&mut state, g.shoulders);
                 state
             })
@@ -3016,15 +3044,20 @@ impl Hub {
         let g = &mut self.guests[i];
         if let Some(m) = g.motion.as_ref() {
             let now = (m.air, m.health.absorption());
+            let frozen = m.ticks_frozen;
             let mut values = Vec::new();
             if now.0 != g.sent_air.0 {
                 values.push((1, serializer::INT, Value::Int(now.0)));
+            }
+            if frozen != g.sent_frozen {
+                values.push((7, serializer::INT, Value::Int(frozen)));
             }
             if now.1.to_bits() != g.sent_air.1.to_bits() {
                 values.push((17, serializer::FLOAT, Value::Float(now.1)));
             }
             if !values.is_empty() {
                 g.sent_air = now;
+                g.sent_frozen = frozen;
                 g.send(&C::SetEntityData(play::SetEntityData {
                     id: g.entity_id,
                     values,
@@ -4312,6 +4345,7 @@ impl Hub {
         g.sent_health = None;
         g.sent_xp = None;
         g.sent_air = (300, 0.0);
+        g.sent_frozen = 0;
         g.sent_shared = 0;
         g.sent_shoulders = [None; 2];
         g.sent_stuck = (0, 0);
@@ -4940,6 +4974,54 @@ mod tests {
         durations
     }
 
+    fn sent_frozen(rx: &std::sync::mpsc::Receiver<crate::lan::Out>) -> Vec<i32> {
+        let mut sent = Vec::new();
+        while let Ok(out) = rx.try_recv() {
+            let crate::lan::Out::Packet(body) = out else {
+                continue;
+            };
+            let mut r = horizon_protocol::buf::Reader::new(&body);
+            let id = r.varint().unwrap();
+            if let Ok(C::SetEntityData(p)) = C::decode(id, r.rest()) {
+                for (index, _, value) in p.values {
+                    if let (7, Value::Int(ticks)) = (index, value) {
+                        sent.push(ticks);
+                    }
+                }
+            }
+        }
+        sent
+    }
+
+    #[test]
+    fn a_guests_frozen_ticks_go_to_its_client() {
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client")
+                    .join(horizon_core::VANILLA_VERSION)
+            });
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let resources = crate::motion::MotionResources::load(&root, &assets).unwrap();
+        let mut body =
+            crate::motion::PlayerMotion::new(&resources, horizon_core::geometry::Vec3::ZERO)
+                .unwrap();
+        body.ticks_frozen = 140;
+        let (mut hub, rx) = hub_with_a_guest();
+        hub.guests[0].motion = Some(Box::new(body));
+        hub.sync_player_state(0);
+        assert_eq!(sent_frozen(&rx), vec![140]);
+        hub.sync_player_state(0);
+        assert_eq!(sent_frozen(&rx), Vec::<i32>::new());
+        hub.guests[0].motion.as_mut().unwrap().ticks_frozen = 0;
+        hub.sync_player_state(0);
+        assert_eq!(sent_frozen(&rx), vec![0]);
+    }
+
     /// The host and port of the transfer packets the guest was sent.
     fn sent_transfers(rx: &std::sync::mpsc::Receiver<crate::lan::Out>) -> Vec<(String, i32)> {
         let mut sent = Vec::new();
@@ -5271,6 +5353,58 @@ mod tests {
         // Without a ring, nothing.
         requeue_ring(&mut far, &sent, (0, 0), 10, 10);
         assert!(far.is_empty());
+    }
+
+    /// `MinecraftServer.onGameRuleChanged`: setting `limited_crafting` updates the hub's state
+    /// and broadcasts `ClientboundGameEventPacket` (event 12) with 1.0 (on) or 0.0 (off) to guests.
+    #[test]
+    fn set_limited_crafting_broadcasts_game_event() {
+        let (mut hub, rx) = hub_with_a_guest();
+        assert!(!hub.limited_crafting);
+
+        // Setting to true broadcasts game event 12 with param 1.0
+        hub.set_limited_crafting(true);
+        assert!(hub.limited_crafting);
+
+        let out = rx.try_recv().expect("packet should be sent to guest");
+        let body = match out {
+            crate::lan::Out::Packet(b) => b,
+            _ => panic!("expected Out::Packet"),
+        };
+        let mut reader = horizon_protocol::buf::Reader::new(&body);
+        let id = reader.varint().unwrap();
+        let packet = play::Clientbound::decode(id, &body[reader.position()..]).unwrap();
+        match packet {
+            play::Clientbound::GameEvent(p) => {
+                assert_eq!(p.event, game_event::LIMITED_CRAFTING);
+                assert_eq!(p.param, 1.0);
+            }
+            other => panic!("expected GameEvent, got {other:?}"),
+        }
+
+        // Setting to the same state should not broadcast another packet
+        hub.set_limited_crafting(true);
+        assert!(rx.try_recv().is_err());
+
+        // Setting to false broadcasts game event 12 with param 0.0
+        hub.set_limited_crafting(false);
+        assert!(!hub.limited_crafting);
+
+        let out = rx.try_recv().expect("packet should be sent to guest");
+        let body = match out {
+            crate::lan::Out::Packet(b) => b,
+            _ => panic!("expected Out::Packet"),
+        };
+        let mut reader = horizon_protocol::buf::Reader::new(&body);
+        let id = reader.varint().unwrap();
+        let packet = play::Clientbound::decode(id, &body[reader.position()..]).unwrap();
+        match packet {
+            play::Clientbound::GameEvent(p) => {
+                assert_eq!(p.event, game_event::LIMITED_CRAFTING);
+                assert_eq!(p.param, 0.0);
+            }
+            other => panic!("expected GameEvent, got {other:?}"),
+        }
     }
 
     /// cargo test --release -p horizon-client --lib lan::hub::tests::requeue_cost -- --ignored --nocapture

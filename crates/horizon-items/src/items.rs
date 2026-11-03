@@ -45,6 +45,9 @@ pub struct ConsumeEffectSpec {
     pub id: String,
     pub duration: i32,
     pub amplifier: i32,
+    /// `MobEffectInstance`'s `ambient` (default false) and `show_particles` (default true).
+    pub ambient: bool,
+    pub show_particles: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -87,19 +90,7 @@ fn parse_consume_effect(effect: &serde_json::Value) -> Option<ConsumeEffect> {
                 .map_or(1.0, |p| p as f32);
             let mut specs = Vec::new();
             if let Some(list) = effect.get("effects").and_then(|l| l.as_array()) {
-                for e in list {
-                    if let Some(id) = e.get("id").and_then(|i| i.as_str()) {
-                        let duration =
-                            e.get("duration").and_then(|d| d.as_i64()).unwrap_or(0) as i32;
-                        let amplifier =
-                            e.get("amplifier").and_then(|a| a.as_i64()).unwrap_or(0) as i32;
-                        specs.push(ConsumeEffectSpec {
-                            id: id.to_string(),
-                            duration,
-                            amplifier,
-                        });
-                    }
-                }
+                specs.extend(list.iter().filter_map(consume_effect_spec));
             }
             Some(ConsumeEffect::ApplyEffects {
                 effects: specs,
@@ -383,6 +374,9 @@ pub struct Items {
     /// Block tag name (without '#') -> member block names.
     pub block_tags: HashMap<String, HashSet<String>>,
     pub item_tags: HashMap<String, HashSet<String>>,
+    /// Fluid tag name -> member fluid names (`minecraft:water` holds `minecraft:water` and
+    /// `minecraft:flowing_water`).
+    pub fluid_tags: HashMap<String, HashSet<String>>,
     /// Item tags in vanilla's order (`TagLoader`: file order, nested tags in
     /// place, first occurrence kept), the order `TagSlotDisplay` resolves.
     pub item_tag_order: HashMap<String, Vec<String>>,
@@ -958,6 +952,7 @@ impl Items {
             registry_order,
             block_tags: load_tags(root, "block", overlay)?,
             item_tags: load_tags(root, "item", overlay)?,
+            fluid_tags: load_tags(root, "fluid", overlay)?,
             item_tag_order: load_tag_lists(root, "item", overlay)?,
             loot,
             songs: load_songs(root),
@@ -995,6 +990,7 @@ impl Items {
             registry_order: Vec::new(),
             block_tags: load_tags(root, "block", overlay)?,
             item_tags: load_tags(root, "item", overlay)?,
+            fluid_tags: load_tags(root, "fluid", overlay)?,
             item_tag_order: load_tag_lists(root, "item", overlay)?,
             loot: Default::default(),
             songs: HashMap::new(),
@@ -1012,6 +1008,7 @@ impl Items {
             order: Vec::new(),
             registry_order: Vec::new(),
             block_tags: HashMap::new(),
+            fluid_tags: HashMap::new(),
             item_tag_order: item_tags
                 .iter()
                 .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
@@ -1026,6 +1023,10 @@ impl Items {
     /// Whether `block` is in the block tag `tag` (`minecraft:fire`, no `#`).
     pub fn block_in_tag(&self, tag: &str, block: &str) -> bool {
         self.block_tags.get(tag).is_some_and(|s| s.contains(block))
+    }
+    /// Whether `fluid` is in the fluid tag `tag` (`minecraft:water`, no `#`): `FluidState.is(TagKey)`.
+    pub fn fluid_in_tag(&self, tag: &str, fluid: &str) -> bool {
+        self.fluid_tags.get(tag).is_some_and(|s| s.contains(fluid))
     }
     /// Whether an item belongs to a loaded item tag.
     pub fn item_in_tag(&self, tag: &str, item: &str) -> bool {
@@ -2224,6 +2225,18 @@ pub fn bucket_contents(
     })
 }
 
+/// One `MobEffectInstance` of an `apply_effects` consume effect (its codec's defaults).
+fn consume_effect_spec(e: &Value) -> Option<ConsumeEffectSpec> {
+    let flag = |key: &str, default: bool| e.get(key).and_then(|v| v.as_bool()).unwrap_or(default);
+    Some(ConsumeEffectSpec {
+        id: e.get("id")?.as_str()?.to_string(),
+        duration: e.get("duration").and_then(|d| d.as_i64()).unwrap_or(0) as i32,
+        amplifier: e.get("amplifier").and_then(|a| a.as_i64()).unwrap_or(0) as i32,
+        ambient: flag("ambient", false),
+        show_particles: flag("show_particles", true),
+    })
+}
+
 #[cfg(test)]
 mod bucket_use_tests {
     use super::*;
@@ -2277,6 +2290,21 @@ pub(crate) fn prepared_items() -> Option<Items> {
 #[cfg(test)]
 mod consume_effect_tests {
     use super::*;
+
+    #[test]
+    fn effects_keep_their_ambient_and_particle_flags() {
+        let quiet =
+            serde_json::json!({"id": "minecraft:haste", "duration": 3600, "show_particles": false});
+        let s = consume_effect_spec(&quiet).unwrap();
+        assert_eq!(
+            (s.id.as_str(), s.duration, s.amplifier),
+            ("minecraft:haste", 3600, 0)
+        );
+        assert!(!s.ambient && !s.show_particles);
+        let plain =
+            consume_effect_spec(&serde_json::json!({"id": "minecraft:regeneration"})).unwrap();
+        assert!(!plain.ambient && plain.show_particles);
+    }
 
     #[test]
     fn a_mods_own_consume_effect_kind_is_kept() {
