@@ -1402,6 +1402,8 @@ level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
 mod capability;
 pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS};
+mod entity_capability;
+pub use entity_capability::{ENTITY_ITEMS, EntityCapabilityKey};
 mod fluid_capability;
 pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod item_place;
@@ -1412,12 +1414,12 @@ pub use resource::{ComponentId, ItemResource, ResourceHandler, move_resources};
 pub use transaction::{Transaction, TransactionSeal, run_transaction};
 mod part_table;
 pub use part_table::{
-    Attached, BlockEntityProviders, BlockProvider, ItemProvider, Parts, Registrar,
+    Attached, BlockEntityProviders, BlockProvider, EntityProvider, ItemProvider, Parts, Registrar,
     block_entity_providers,
 };
 pub(crate) use part_table::{
-    KnownIds, answered, ask_providers, install_parts, mark_game_thread, parts, place_provider,
-    providers, resolve_parts,
+    KnownIds, ProvidedBy, answered, ask_providers, install_parts, mark_game_thread, parts,
+    place_provider, providers, resolve_parts,
 };
 
 mod generated {
