@@ -809,6 +809,7 @@ impl Game<'_> {
             } else {
                 None
             },
+            ask_taming: self.remote.is_none() && !horizon_client::mod_api::mods().is_empty(),
             border: Some(self.border.geometry()),
             // The first player in the level: a server has no player of its own.
             difficulty: self.local_difficulty(
@@ -7654,6 +7655,7 @@ mod pearl_tests {
             items: Some(&items),
             lid_openers: &lid_openers,
             mod_effects: None,
+            ask_taming: false,
             border: None,
         };
         let pw = ProjWorld {

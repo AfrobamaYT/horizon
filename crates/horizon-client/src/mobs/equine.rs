@@ -14,7 +14,6 @@ use horizon_core::geometry::Vec3;
 use horizon_core::geometry::trig::Mth;
 use horizon_core::random::RandomSource;
 use std::f32::consts::PI;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const COLORS: [&str; 7] = [
     "white",
@@ -367,10 +366,9 @@ impl Goal for RunAroundLikeCrazy {
             .unwrap_or(0)
             < temper
         {
-            // tameWithName. With mods loaded the game asks AnimalTameEvent
-            // first and sets `tame` itself, so nothing sees a horse tame
-            // that a mod refuses.
-            if !TAMING_ASKED.load(Ordering::Relaxed) {
+            // tameWithName. When the game asks AnimalTameEvent it sets
+            // `tame` itself, so nothing sees a horse tame that a mod refuses.
+            if !cx.w.ask_taming {
                 m.extra.tame = true;
             }
             cx.events.push(MobEvent::Tamed { mob: m.id });
@@ -378,13 +376,6 @@ impl Goal for RunAroundLikeCrazy {
         }
         refuse_rider(m, cx.events);
     }
-}
-/// Whether the game asks `AnimalTameEvent` before a horse is tamed (mods are
-/// loaded): then `RunAroundLikeCrazyGoal` leaves `tame` to the game.
-static TAMING_ASKED: AtomicBool = AtomicBool::new(false);
-/// Set once at startup, as the mods load.
-pub fn ask_taming(on: bool) {
-    TAMING_ASKED.store(on, Ordering::Relaxed);
 }
 /// `RunAroundLikeCrazyGoal.tick`'s failed taming: `modifyTemper(5)`, the
 /// rider thrown off (with entity event 6) and `makeMad`.
