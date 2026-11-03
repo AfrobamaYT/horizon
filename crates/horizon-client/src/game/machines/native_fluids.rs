@@ -613,30 +613,8 @@ impl Game<'_> {
                 return None;
             }
             let host: &mut dyn Host = self;
-            let side = Some(face);
-            let mut out: Option<FluidStack> = None;
-            for tank in 0..part.tanks(host, pos, side) {
-                let taken = out.as_ref().map_or(0, |out| out.amount);
-                let want = amount.unsigned_abs() - taken;
-                if want == 0 {
-                    break;
-                }
-                // One fluid, the first there, and none with components: these helpers name a
-                // fluid by its id alone.
-                let Some(there) = part.fluid(host, pos, side, tank) else {
-                    continue;
-                };
-                let first = out.as_ref().unwrap_or(&there);
-                if there.has_components() || !there.same_fluid_same_components(first) {
-                    continue;
-                }
-                if let Some(got) = part.extract(host, pos, side, tank, want, false) {
-                    out = Some(there.with_amount(taken + got.amount.min(want)));
-                }
-            }
-            return out
-                .filter(|out| out.amount > 0)
-                .map(|out| (out.fluid.to_string(), mb(out.amount)));
+            let out = host.drain_one_named_fluid(&part, pos, Some(face), amount.unsigned_abs());
+            return out.map(|out| (out.fluid.to_string(), mb(out.amount)));
         }
         self.fluid_take(dimension, pos, face, amount)
             .map(|(fluid, taken, _)| (fluid, taken))

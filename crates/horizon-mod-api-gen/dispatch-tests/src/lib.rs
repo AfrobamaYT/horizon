@@ -124,6 +124,9 @@ mod tests {
             pub mod menu {
                 pub struct AnvilCraft;
             }
+            pub mod stations {
+                pub struct EnchantmentRow<'a>(std::marker::PhantomData<&'a ()>);
+            }
             pub mod fog {
                 #[derive(Clone, Copy)]
                 pub struct FogType;

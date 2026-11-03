@@ -203,6 +203,20 @@ impl Drop for Unstage {
 /// The owners of item handlers whose real calls disagreed with their simulation, warned once.
 static BROKEN: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
+/// `owner`'s item handler at `at` moved other than it was asked or its simulation said: a mod
+/// bug, warned once per mod.
+pub(crate) fn warn_broken(owner: Option<usize>, at: &dyn std::fmt::Debug) {
+    let owner = owner.map_or_else(|| "the game".to_owned(), super::mod_name);
+    let mut warned = BROKEN.lock().unwrap_or_else(|e| e.into_inner());
+    if warned.get_or_insert_default().insert(owner.clone()) {
+        log::warn!(
+            "Horizon: {owner}'s item handler at {at:?} moved other than it was asked or its \
+             simulation said; what it left out is put back or dropped there. Its simulate must \
+             answer as its real call does."
+        );
+    }
+}
+
 #[cfg(test)]
 pub(super) fn warned_about(owner: &str) -> bool {
     let broken = BROKEN.lock().unwrap_or_else(|e| e.into_inner());
@@ -222,6 +236,13 @@ fn is_exactly(out: Option<&ItemStack>, old: &ItemStack, count: u32) -> bool {
 }
 
 impl Container<'_> {
+    /// The mod that registered the handler; none for the game's own.
+    fn owner(&self) -> Option<usize> {
+        match self {
+            Self::Block(h, ..) => super::capability_mod(h),
+            Self::Item(h, _) => super::capability_mod(h),
+        }
+    }
     fn slots(&self, host: &mut dyn Host) -> usize {
         match self {
             Self::Block(h, pos, side) => h.slots(host, *pos, *side),
@@ -260,14 +281,24 @@ impl Container<'_> {
     }
     /// Inserts `stack` into `slot` for real, in passes until one takes nothing, as
     /// `Inventory.add` and NeoForge's insert loops do: a handler may take less per call than
-    /// it holds. What is left.
+    /// it holds. What is left: of the offered item, and never more than was offered. A leftover
+    /// of another item, or of other components, is a mod bug, warned once naming its mod: the
+    /// passes end, and the leftover is taken as the offered item.
     fn insert_all(&self, host: &mut dyn Host, slot: usize, stack: ItemStack) -> Option<ItemStack> {
         let mut left = stack;
         loop {
             let count = left.count;
-            match self.insert(host, slot, left, false) {
-                Some(rest) if rest.count >= count => return Some(rest),
-                Some(rest) if rest.count > 0 => left = rest,
+            match self.insert(host, slot, left.clone(), false) {
+                Some(rest) if !rest.same_item_same_components(&left) => {
+                    match self {
+                        Self::Block(_, pos, _) => warn_broken(self.owner(), pos),
+                        Self::Item(_, place) => warn_broken(self.owner(), place),
+                    }
+                    left.count = rest.count.min(count);
+                    return Some(left).filter(|left| left.count > 0);
+                }
+                Some(rest) if rest.count >= count => return Some(left),
+                Some(rest) if rest.count > 0 => left.count = rest.count,
                 _ => return None,
             }
         }
@@ -421,19 +452,7 @@ impl Container<'_> {
         slot: usize,
         loose: Option<ItemStack>,
     ) -> bool {
-        let owner = match self {
-            Self::Block(h, ..) => super::capability_mod(h),
-            Self::Item(h, _) => super::capability_mod(h),
-        };
-        let owner = owner.map_or_else(|| "the game".to_owned(), super::mod_name);
-        let mut warned = BROKEN.lock().unwrap_or_else(|e| e.into_inner());
-        if warned.get_or_insert_default().insert(owner.clone()) {
-            log::warn!(
-                "Horizon: {owner}'s item handler at {place:?} moved other than its simulation said; \
-                 what it left out is put back or dropped there. Its simulate must answer as its real call does."
-            );
-        }
-        drop(warned);
+        warn_broken(self.owner(), place);
         let Self::Block(_, pos, _) = self else {
             return false;
         };

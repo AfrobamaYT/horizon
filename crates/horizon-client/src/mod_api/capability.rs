@@ -157,4 +157,67 @@ impl dyn Host + '_ {
         })
         .or_else(|| key.default.and_then(|default| default(self, pos)))
     }
+
+    /// `handler`'s real insert of `stack` into `slot` of the block entity at `at`, through
+    /// `side`: what is left, of the offered item and never more than was offered. A handler
+    /// answering more, or another item, is a mod bug, warned once naming its mod.
+    pub(crate) fn insert_checked(
+        &mut self,
+        handler: &Arc<dyn ItemHandler>,
+        at: [i32; 3],
+        side: Option<Direction>,
+        slot: usize,
+        stack: ItemStack,
+    ) -> Option<ItemStack> {
+        let rest = handler
+            .insert(self, at, side, slot, stack.clone(), false)
+            .filter(|rest| rest.count > 0)?;
+        if rest.count > stack.count || !rest.same_item_same_components(&stack) {
+            super::item_place::warn_broken(super::capability_mod(handler), &at);
+        }
+        Some(ItemStack {
+            count: rest.count.min(stack.count),
+            ..stack
+        })
+    }
+
+    /// `handler`'s real extract from `slot` of the block entity at `at`, through `side`, of what
+    /// its simulation gave, `simulated`: what came out, of that item and never more. Another item,
+    /// or the same with other components, is a mod bug, warned once naming its mod: it goes back
+    /// into the slot, else is dropped at the block, and nothing comes out. So is what it gives
+    /// beyond `simulated`'s count, which goes back the same way.
+    pub(crate) fn extract_checked(
+        &mut self,
+        handler: &Arc<dyn ItemHandler>,
+        at: [i32; 3],
+        side: Option<Direction>,
+        slot: usize,
+        simulated: &ItemStack,
+    ) -> Option<ItemStack> {
+        let max = simulated.count;
+        let out = handler
+            .extract(self, at, side, slot, max, false)
+            .filter(|out| out.count > 0)?;
+        if !out.same_item_same_components(simulated) {
+            super::item_place::warn_broken(super::capability_mod(handler), &at);
+            if let Some(rest) = self.insert_checked(handler, at, side, slot, out) {
+                self.drop_at(at, rest);
+            }
+            return None;
+        }
+        if out.count > max {
+            super::item_place::warn_broken(super::capability_mod(handler), &at);
+            let excess = ItemStack {
+                count: out.count - max,
+                ..out.clone()
+            };
+            if let Some(rest) = self.insert_checked(handler, at, side, slot, excess) {
+                self.drop_at(at, rest);
+            }
+        }
+        (max > 0).then(|| ItemStack {
+            count: out.count.min(max),
+            ..out
+        })
+    }
 }

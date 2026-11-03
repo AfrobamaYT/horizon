@@ -135,6 +135,7 @@ impl Game<'_> {
         };
         load_player(menu, &host.hub.guests[gi]);
         menu.brewed_potion_hook = !horizon_client::mod_api::mods().is_empty();
+        menu.item_smelted_hook = menu.brewed_potion_hook;
         let result = op(menu, &env);
         if let Some(maps) = maps {
             self.register_made_maps(maps);
@@ -371,19 +372,25 @@ impl Game<'_> {
             }
             _ => {}
         }
-        // FurnaceResultSlot.checkTakeAchievements: the guest took from the output.
+        // FurnaceResultSlot.checkTakeAchievements, each as the click made it.
+        let guest = &host.hub.guests[gi];
+        for (stack, removed) in std::mem::take(&mut menu.item_smelted) {
+            self.native_item_smelted(guest.uuid, guest.entity_id, stack.as_ref(), removed);
+        }
+        // The guest took from the output.
         let count = |s: Option<&ItemStack>| s.map_or(0, |s| s.count);
         if furnace && count(menu.slot(2)) < count(items[2].as_ref()) {
             let at = host.hub.guests[gi].position;
             let guest = &host.hub.guests[gi];
             let output = items[2].as_ref();
             if let Some(output) = output {
+                let taken = output.count - count(menu.slot(2));
                 self.native_furnace_extract(
                     guest.uuid,
                     &guest.name,
                     [pos.0, pos.1, pos.2],
                     &output.item,
-                    output.count - count(menu.slot(2)),
+                    taken,
                 );
             }
             self.award_furnace_recipes(pos, at);
