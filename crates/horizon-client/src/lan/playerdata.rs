@@ -210,10 +210,8 @@ pub fn apply(guest: &mut Guest, level: &Level) {
             103 => guest.armor[0] = Some(stack),
             150 => guest.offhand = Some(stack),
             _ => {
-                if let Some(cell) =
-                    crate::save::body_saddle_index(*slot).and_then(|i| guest.body_saddle.get_mut(i))
-                {
-                    *cell = Some(stack);
+                if let Some(slot) = crate::save::equipment_slot(*slot) {
+                    guest.equipment.set(slot, Some(stack));
                 }
             }
         }
@@ -506,8 +504,11 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
     put(101, &guest.armor[2]);
     put(100, &guest.armor[3]);
     put(150, &guest.offhand);
-    put(crate::save::BODY_SLOT, &guest.body_saddle[0]);
-    put(crate::save::SADDLE_SLOT, &guest.body_saddle[1]);
+    for slot in [crate::equipment::BODY, crate::equipment::SADDLE] {
+        if let Some(saved) = crate::save::saved_slot(slot) {
+            put(saved, &guest.equipment[slot]);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -562,10 +563,11 @@ mod tests {
         let mut g = holding(7, "minecraft:diamond", 1);
         let mut saddle = ItemStack::new("minecraft:saddle", 1);
         saddle.damage = 3;
-        g.body_saddle = [
+        g.equipment.set(
+            crate::equipment::BODY,
             Some(ItemStack::new("minecraft:leather_horse_armor", 1)),
-            Some(saddle),
-        ];
+        );
+        g.equipment.set(crate::equipment::SADDLE, Some(saddle));
         g.armor[0] = Some(ItemStack::new("minecraft:iron_helmet", 1));
         save(&g, &dir);
         let tag = read_dat(&path(&dir, 7)).unwrap();
@@ -577,7 +579,7 @@ mod tests {
         let mut loaded = guest();
         loaded.uuid = 7;
         assert!(load(&mut loaded, &dir));
-        assert_eq!(loaded.body_saddle, g.body_saddle);
+        assert_eq!(loaded.equipment, g.equipment);
         assert_eq!(loaded.armor, g.armor);
         // A vanilla file with only a saddle keeps it and has no body.
         let mut level = Level::default();
@@ -590,9 +592,11 @@ mod tests {
         )]));
         let mut vanilla = guest();
         apply(&mut vanilla, &level);
-        assert_eq!(vanilla.body_saddle[0], None);
+        assert_eq!(vanilla.equipment[crate::equipment::BODY], None);
         assert_eq!(
-            vanilla.body_saddle[1].as_ref().map(|s| &*s.item),
+            vanilla.equipment[crate::equipment::SADDLE]
+                .as_ref()
+                .map(|s| &*s.item),
             Some("minecraft:saddle")
         );
         std::fs::remove_dir_all(dir).unwrap();

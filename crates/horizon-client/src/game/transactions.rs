@@ -66,7 +66,7 @@ struct KeptPlayer {
     inventory: Vec<Option<ItemStack>>,
     armor: [Option<ItemStack>; 4],
     offhand: Option<ItemStack>,
-    body_saddle: [Option<ItemStack>; 2],
+    equipment: crate::equipment::Equipment,
     carried: Option<ItemStack>,
 }
 
@@ -190,7 +190,7 @@ impl Game<'_> {
             inventory: self.inventory.clone(),
             armor: self.armor.clone(),
             offhand: self.offhand.clone(),
-            body_saddle: self.body_saddle.clone(),
+            equipment: self.equipment.clone(),
             carried: self.carried.clone(),
         });
     }
@@ -403,7 +403,7 @@ impl Game<'_> {
                 g.inventory = kept.inventory;
                 g.armor = kept.armor;
                 g.offhand = kept.offhand;
-                g.body_saddle = kept.body_saddle;
+                g.equipment = kept.equipment;
                 g.carried = kept.carried;
             });
         }

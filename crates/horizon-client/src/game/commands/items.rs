@@ -20,8 +20,8 @@ pub(in crate::game) enum Slot {
     /// `armor[0..4]` (head, chest, legs, feet).
     Armor(usize),
     Offhand,
-    /// The player's body (0) or saddle (1) equipment slot.
-    BodySaddle(usize),
+    /// The player's body or saddle (`EquipmentSlot` ordinal, `Game::equipment`).
+    Equipment(usize),
     Ender(usize),
     /// A mob's equipment by name (`mainhand`, `offhand`, `head`, ...).
     Mob(u32, &'static str),
@@ -140,9 +140,12 @@ impl Game<'_> {
                 if matches_name(name, "weapon.offhand") {
                     add(Slot::Offhand);
                 }
-                for (i, n) in ["armor.body", "saddle"].into_iter().enumerate() {
+                for (i, n) in [
+                    (crate::equipment::BODY, "armor.body"),
+                    (crate::equipment::SADDLE, "saddle"),
+                ] {
                     if matches_name(name, n) {
-                        add(Slot::BodySaddle(i));
+                        add(Slot::Equipment(i));
                     }
                 }
                 for i in 0..27 {
@@ -217,7 +220,7 @@ impl Game<'_> {
             Slot::MainHand => self.inventory.get(self.selected).cloned().flatten(),
             Slot::Armor(i) => self.armor.get(*i).cloned().flatten(),
             Slot::Offhand => self.offhand.clone(),
-            Slot::BodySaddle(i) => self.body_saddle.get(*i).cloned().flatten(),
+            Slot::Equipment(i) => self.equipment.get(*i).cloned(),
             Slot::Ender(i) => self.ender_items.get(*i).cloned().flatten(),
             Slot::Mob(id, key) => {
                 let m = self.mobs.iter().find(|m| m.id == *id)?;
@@ -278,13 +281,21 @@ impl Game<'_> {
                 self.player_on_equip("offhand", old.as_ref(), stack.as_ref());
                 true
             }
-            Slot::BodySaddle(i) => match self.body_saddle.get_mut(*i) {
-                Some(slot) => {
-                    *slot = stack;
-                    true
+            // setItemSlot, so onEquipItem: the equip sound, but no game event
+            // for body and saddle.
+            Slot::Equipment(i) => {
+                if *i >= crate::equipment::SADDLE + 1 {
+                    return false;
                 }
-                None => false,
-            },
+                let old = self.equipment[*i].clone();
+                self.equipment.set(*i, stack.clone());
+                self.player_on_equip(
+                    crate::equipment::SLOT_NAMES[*i],
+                    old.as_ref(),
+                    stack.as_ref(),
+                );
+                true
+            }
             Slot::Ender(i) => match self.ender_items.get_mut(*i) {
                 Some(slot) => {
                     *slot = stack;

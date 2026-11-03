@@ -1275,25 +1275,19 @@ pub fn mob_to_nbt(
                 }
             }
         }
-        if let Some(id) = &m.extra.body {
+        let body = m.extra.body.as_ref().map(|id| {
             let mut stack = crate::items::ItemStack::new(id, m.extra.body_count.max(1));
             stack.damage = m.extra.body_damage.max(0) as u32;
             stack.extra = m.extra.body_extra.clone();
-            equipment.insert("body".into(), crate::save::item_to_nbt(&stack));
-        } else {
-            equipment.remove(&"body".into());
-        }
-        if let Some(saddle) = m.saddle_item() {
-            equipment.insert("saddle".into(), crate::save::item_to_nbt(&saddle));
-        } else {
-            equipment.remove(&"saddle".into());
-        }
-        // Vanilla saves `equipment` only when something is equipped.
-        if equipment.is_empty() {
-            map.remove(&"equipment".into());
-        } else {
-            map.insert("equipment".into(), Tag::Compound(equipment));
-        }
+            stack
+        });
+        crate::equipment::put(&mut equipment, crate::equipment::BODY, body.as_ref());
+        crate::equipment::put(
+            &mut equipment,
+            crate::equipment::SADDLE,
+            m.saddle_item().as_ref(),
+        );
+        crate::equipment::store(map, equipment);
     }
     tag
 }

@@ -25,14 +25,13 @@ fn player_slot(
     selected: usize,
     armor: &[Option<ItemStack>; 4],
     offhand: &Option<ItemStack>,
-    body_saddle: &[Option<ItemStack>; 2],
+    equipment: &horizon_client::equipment::Equipment,
     slot: EquipmentSlot,
 ) -> Option<ItemStack> {
     match slot {
         EquipmentSlot::MainHand => inventory.get(selected).cloned().flatten(),
         EquipmentSlot::OffHand => offhand.clone(),
-        EquipmentSlot::Body => body_saddle[0].clone(),
-        EquipmentSlot::Saddle => body_saddle[1].clone(),
+        EquipmentSlot::Body | EquipmentSlot::Saddle => equipment.get(slot as usize).cloned(),
         _ => armor[armor_index(slot)?].clone(),
     }
 }
@@ -139,7 +138,7 @@ impl Game<'_> {
                 self.selected,
                 &self.armor,
                 &self.offhand,
-                &self.body_saddle,
+                &self.equipment,
                 slot,
             ),
             Target::Guest(conn) => {
@@ -149,7 +148,7 @@ impl Game<'_> {
                     g.selected,
                     &g.armor,
                     &g.offhand,
-                    &g.body_saddle,
+                    &g.equipment,
                     slot,
                 )
             }
@@ -464,32 +463,40 @@ mod tests {
             let owner = Owner::Entity(Target::Player);
             let mut body = ItemStack::new("minecraft:diamond_horse_armor", 1);
             body.damage = 4;
+            body.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("armor".into()));
             let saddle = ItemStack::new("minecraft:saddle", 1);
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::ZERO,
+                )
+                .unwrap(),
+            );
+            game.audio.capture = Some(Vec::new());
             for (name, stack) in [("armor.body", &body), ("saddle", &saddle)] {
                 let slots = game.slots_named(&owner, name);
                 assert_eq!(slots.len(), 1, "{name} is one slot");
                 assert!(game.slot_set(&slots[0], Some(stack.clone())));
             }
-            assert_eq!(game.body_saddle, [Some(body.clone()), Some(saddle.clone())]);
+            assert_eq!(
+                (game.equipment.get(6), game.equipment.get(7)),
+                (Some(&body), Some(&saddle))
+            );
+            // onEquipItem: each item in its own slot plays its equip sound.
+            assert_eq!(game.audio.capture.as_ref().unwrap().len(), 2);
             game.sync_level();
             let tag = game.level.player_tag();
             let equipment = tag.get("equipment").unwrap();
             assert!(equipment.get("body").is_some() && equipment.get("saddle").is_some());
             let mut read = horizon_client::save::Level::default();
             read.read_player(&tag);
-            let saved = |slot| {
-                read.inventory
-                    .iter()
-                    .find(|i| i.0 == slot)
-                    .map(|i| i.1.clone())
-            };
+            // Loading the file back into a Game restores both, components too.
+            game.equipment = Default::default();
+            let level = read;
+            game.load_saved_inventory(&level);
             assert_eq!(
-                saved(horizon_client::save::BODY_SLOT).as_deref(),
-                Some("minecraft:diamond_horse_armor")
-            );
-            assert_eq!(
-                saved(horizon_client::save::SADDLE_SLOT).as_deref(),
-                Some("minecraft:saddle")
+                (game.equipment.get(6), game.equipment.get(7)),
+                (Some(&body), Some(&saddle))
             );
         });
     }
@@ -512,9 +519,10 @@ mod tests {
             stack("minecraft:iron_boots"),
         ];
         let offhand = stack("minecraft:shield");
-        let body_saddle = [None, stack("minecraft:saddle")];
+        let mut equipment = horizon_client::equipment::Equipment::default();
+        equipment.set(horizon_client::equipment::SADDLE, stack("minecraft:saddle"));
         let at =
-            |slot| player_slot(&inventory, 1, &armor, &offhand, &body_saddle, slot).map(|s| s.item);
+            |slot| player_slot(&inventory, 1, &armor, &offhand, &equipment, slot).map(|s| s.item);
         assert_eq!(
             at(EquipmentSlot::MainHand).as_deref(),
             Some("minecraft:dirt")

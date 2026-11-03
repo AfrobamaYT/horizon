@@ -731,8 +731,9 @@ pub(super) mod tests {
                 Some(saddle.clone())
             );
             assert_eq!(
-                game.lan.as_ref().unwrap().hub.guests[0].body_saddle[0]
-                    .as_ref()
+                game.lan.as_ref().unwrap().hub.guests[0]
+                    .equipment
+                    .get(horizon_client::equipment::BODY)
                     .map(|s| &*s.item),
                 Some("minecraft:iron_horse_armor")
             );

@@ -2399,8 +2399,7 @@ a dimension.
 - `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
   `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
-  slot as `LivingEntity.setItemSlot` does (None or air empties it). Mob equipment writes return false until Horizon can
-  preserve complete stacks for all mob slots. Players (the host and guests) and mobs store all eight slots; a player's
+  slot as `LivingEntity.setItemSlot` does (None or air empties it). Mobs store all eight slots in one `Equipment` (`horizon_client::equipment`, `EntityEquipment`); players (the host and guests) keep body and saddle in it beside their own hand and armor fields. A player's
   `body` and `saddle` are kept and saved in the `equipment` compound as vanilla does, and dropped on death, but nothing
   renders or sends them. Armor stands store the six armor and hand slots, and the dragon none yet.
 - `living.swing(host, hand, send_to_self)` (`LivingEntity.swing`) starts an arm swing, shortened by haste and lengthened

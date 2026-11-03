@@ -276,11 +276,20 @@ pub const LOW_DISK_SPACE: u64 = 67_108_864;
 pub const BODY_SLOT: u8 = 151;
 pub const SADDLE_SLOT: u8 = 152;
 
-/// 0 for the body slot, 1 for the saddle slot, None for any other slot.
-pub fn body_saddle_index(slot: u8) -> Option<usize> {
+/// The `EquipmentSlot` ordinal a saved slot number stands for, for the
+/// slots a player holder keeps in its `Equipment`.
+pub fn equipment_slot(slot: u8) -> Option<usize> {
     match slot {
-        BODY_SLOT => Some(0),
-        SADDLE_SLOT => Some(1),
+        BODY_SLOT => Some(crate::equipment::BODY),
+        SADDLE_SLOT => Some(crate::equipment::SADDLE),
+        _ => None,
+    }
+}
+/// The saved slot number of a held `EquipmentSlot` ordinal (the inverse).
+pub fn saved_slot(equipment_slot: usize) -> Option<u8> {
+    match equipment_slot {
+        crate::equipment::BODY => Some(BODY_SLOT),
+        crate::equipment::SADDLE => Some(SADDLE_SLOT),
         _ => None,
     }
 }
