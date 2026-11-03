@@ -27,8 +27,9 @@ pub enum Drop {
     /// `Enderman.dropCustomDeathLoot`: the carried block's own drops, rolled
     /// with `enderman::carried_block_tool` (`enderman::carried_block_drops`).
     CarriedBlock(BlockStateId),
-    /// An experience orb of this value.
-    Orb(i32),
+    /// The experience the mob is worth (`getExperienceReward`), before
+    /// `ExperienceOrb.award` splits it into orbs.
+    Experience(i32),
 }
 
 /// How the mob died.
@@ -422,16 +423,6 @@ pub fn loot_entity(m: &Mob, vehicle: Option<LootEntity>) -> LootEntity {
         .collect();
     e
 }
-/// `ExperienceOrb.getExperienceValue`.
-pub fn orb_value(amount: i32) -> i32 {
-    for v in [2477, 1237, 617, 307, 149, 73, 37, 17, 7, 3] {
-        if amount >= v {
-            return v;
-        }
-    }
-    1
-}
-
 /// `LivingEntity.die`'s drops for `m` (equipment it loses is removed from
 /// it). Returns the drops in spawn order and whether a charged creeper
 /// killer dropped a head (`Creeper.droppedSkulls`).
@@ -588,12 +579,7 @@ pub fn die(
     }
     // dropExperience.
     if killed_by_player && drops_experience(m) && d.mob_drops {
-        let mut amount = base_experience(m);
-        while amount > 0 {
-            let value = orb_value(amount);
-            amount -= value;
-            out.push(Drop::Orb(value));
-        }
+        out.push(Drop::Experience(base_experience(m)));
     }
     (out, skulls)
 }

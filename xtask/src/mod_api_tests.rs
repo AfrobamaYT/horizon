@@ -6,6 +6,9 @@ mod tests {
     struct ItemStack {
         item: Arc<str>,
     }
+    struct StackView {
+        count: i32,
+    }
     struct BlockEntityDraw(Vec<u32>);
     #[allow(dead_code)]
     mod stubs {
@@ -49,6 +52,12 @@ mod tests {
         pub(super) struct Hand;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
         pub(super) struct NativeShake;
+        pub(super) struct ShieldBlock;
+        pub(super) struct HurtSource<'a>(pub &'a ());
+        #[derive(Clone, Copy)]
+        pub(super) struct PhantomSpawnResult;
+        #[derive(Clone, Copy)]
+        pub(super) struct SleepProblem;
         pub(super) struct Music;
         pub(super) struct MusicLayer;
         pub(super) struct NativeBlockRim;
@@ -408,6 +417,53 @@ mod tests {
             &mut answer,
         );
         assert_eq!(*calls.lock().unwrap(), vec![1]);
+    }
+
+    #[test]
+    fn item_model_property_dispatches_borrowed_stack_and_preserves_unhandled_answers() {
+        struct Property;
+        impl Hooks for Property {
+            fn item_model_property(&self, _: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) {
+                if event.property == "example:charged" {
+                    event.value = event.stack.count > 1;
+                }
+            }
+        }
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Property)];
+        let host = TestHost;
+        let mut value = false;
+        dispatch_item_model_property(
+            &host,
+            &mods,
+            "example:charged",
+            &StackView { count: 2 },
+            &mut value,
+        );
+        assert!(value);
+        dispatch_item_model_property(
+            &host,
+            &mods,
+            "other:property",
+            &StackView { count: 1 },
+            &mut value,
+        );
+        assert!(value);
+        dispatch_item_model_property(
+            &host,
+            &mods,
+            "example:charged",
+            &StackView { count: 1 },
+            &mut value,
+        );
+        assert!(!value);
+        dispatch_item_model_property(
+            &host,
+            &[],
+            "example:charged",
+            &StackView { count: 2 },
+            &mut value,
+        );
+        assert!(!value);
     }
 
     #[test]
