@@ -49,9 +49,7 @@ impl Game<'_> {
             return false;
         };
         d.set_native_phase(phase);
-        if std::mem::take(&mut d.flame_ended) {
-            self.breath_clouds.retain(|c| !c.from_dragon);
-        }
+        self.end_dragon_flame();
         true
     }
 

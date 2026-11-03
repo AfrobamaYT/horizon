@@ -2592,6 +2592,17 @@ impl Game<'_> {
     }
     /// The dragon's breath clouds (`AreaEffectCloud` with instant damage at
     /// a quarter duration scale): shrinking, puffing particles, harming the player.
+    /// `DragonSittingFlamingPhase.end`: the flame cloud goes once the
+    /// phase is left.
+    pub(super) fn end_dragon_flame(&mut self) {
+        if self
+            .dragon
+            .as_mut()
+            .is_some_and(|d| std::mem::take(&mut d.flame_ended))
+        {
+            self.breath_clouds.retain(|c| !c.from_dragon);
+        }
+    }
     pub(super) fn tick_breath(&mut self) {
         // What instant damage reaches: neither creative nor spectator players.
         let players: Vec<FightPlayer> = self
@@ -2600,10 +2611,11 @@ impl Game<'_> {
             .filter(|p| p.alive && !p.creative && !p.spectator)
             .collect();
         let mut harmed: Vec<(FightWho, f32)> = Vec::new();
-        // DragonSittingFlamingPhase.end discards the flame cloud.
-        let flame_over = self.dragon.as_mut().is_some_and(|d| {
-            std::mem::take(&mut d.flame_ended) || !matches!(d.phase, Phase::Flaming { .. })
-        });
+        self.end_dragon_flame();
+        let flame_over = self
+            .dragon
+            .as_ref()
+            .is_some_and(|d| !matches!(d.phase, Phase::Flaming { .. }));
         let mut clouds = std::mem::take(&mut self.breath_clouds);
         clouds.retain_mut(|c| {
             // Lingering potions' clouds tick with the potions.
