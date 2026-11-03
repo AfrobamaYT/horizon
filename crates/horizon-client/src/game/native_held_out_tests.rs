@@ -35,6 +35,7 @@ impl Observer {
         state.results.push(results);
     }
 }
+#[mod_api::__subscriptions]
 impl Hooks for Observer {
     fn item_spawn(&self, host: &mut dyn ServerHost, _: &mut ItemSpawnEvent<'_>) {
         self.observe(host);

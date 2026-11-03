@@ -415,7 +415,55 @@ pub(super) mod tests {
         // A game that opened its world resolves its parts; the harness stops
         // short of the open, so do it here for the by-state part table.
         game.resolve_parts().unwrap();
+        // The title's save folder is under the working directory: give each test its own, so a
+        // test that saves leaves the checkout clean and parallel tests don't share files.
+        let saves = std::env::temp_dir().join(format!(
+            "horizon-with-game-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+            saves.clone(),
+            horizon_client::save::LevelShape::OVERWORLD,
+        ));
         test(&mut game);
+        let _ = std::fs::remove_dir_all(saves);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn block_part_connects_wire_in_a_real_game_level() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::{geometry::Direction, position::BlockPos};
+        use std::sync::Arc;
+
+        horizon_client::mod_api::part_tests::redstone_game_thread();
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let wire = registry.default_state("minecraft:redstone_wire").unwrap();
+            let glass = registry.default_state("minecraft:glass").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let pos = BlockPos::new(5, 64, 5);
+            let neighbour = BlockPos::new(6, 64, 5);
+            game.world.set(5, 63, 5, stone).unwrap();
+            game.world.set(6, 64, 5, glass).unwrap();
+            let connected = game.with_level(|b, level, ticks| {
+                b.update_shape(level, ticks, wire, pos, Direction::East, neighbour, glass)
+            });
+            assert_eq!(
+                registry.state(connected).unwrap().properties["east"],
+                "side"
+            );
+            game.world.set(6, 64, 5, stone).unwrap();
+            let vanilla = game.with_level(|b, level, ticks| {
+                b.update_shape(level, ticks, wire, pos, Direction::East, neighbour, stone)
+            });
+            assert_eq!(registry.state(vanilla).unwrap().properties["east"], "none");
+        });
     }
 
     #[test]
@@ -1524,7 +1572,9 @@ pub(super) mod tests {
                     address: ([127, 0, 0, 1], 1).into(),
                 })))
                 .unwrap();
+            use crate::mod_api;
             struct Logout(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+            #[mod_api::__subscriptions]
             impl crate::mod_api::Hooks for Logout {
                 fn player_logged_out(
                     &self,

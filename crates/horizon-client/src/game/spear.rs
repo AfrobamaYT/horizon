@@ -389,9 +389,12 @@ impl Game<'_> {
                 .find(|m| m.id == id as u32 && m.extra.using_item > 0);
             let item = mob.and_then(|m| {
                 if m.extra.using_off_hand {
-                    m.extra.off_hand.clone()
+                    horizon_client::mobs::finalize::item(m, horizon_client::mobs::finalize::OFFHAND)
                 } else {
-                    m.extra.main_hand.clone()
+                    horizon_client::mobs::finalize::item(
+                        m,
+                        horizon_client::mobs::finalize::MAINHAND,
+                    )
                 }
             });
             (item, mob.map(|m| m.position))
