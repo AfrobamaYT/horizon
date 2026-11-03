@@ -168,16 +168,9 @@ impl Bundle {
                 return Err("duplicate native bundle path".into());
             }
         }
-        let manifest_json: serde_json::Value =
+        let manifest: Manifest =
             serde_json::from_slice(files.get(MANIFEST).ok_or("missing horizon-native.json")?)
                 .map_err(|e| e.to_string())?;
-        if manifest_json.get("hooks").is_some() {
-            return Err(
-                "native hook version is no longer supported; rebuild against this game".into(),
-            );
-        }
-        let manifest: Manifest =
-            serde_json::from_value(manifest_json).map_err(|e| e.to_string())?;
         manifest.check()?;
         if let Some(id) = content_id.filter(|id| *id != manifest.id) {
             return Err(format!(
@@ -265,26 +258,19 @@ mod tests {
         )
     }
     #[test]
-    fn archive_with_hook_number_requires_rebuilding() {
-        let path = std::env::temp_dir().join(format!("native-hooks-{}.hmod", std::process::id()));
-        for value in [
-            serde_json::json!(1),
-            serde_json::Value::Null,
-            serde_json::json!("bad"),
-        ] {
+    fn archive_with_an_unknown_manifest_field_is_refused() {
+        let path = std::env::temp_dir().join(format!("native-unknown-{}.hmod", std::process::id()));
+        for name in ["hooks", "banana"] {
             let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
             zip.start_file(MANIFEST, zip::write::SimpleFileOptions::default())
                 .unwrap();
             let mut json = serde_json::to_value(manifest()).unwrap();
-            json["hooks"] = value;
+            json[name] = serde_json::json!(1);
             zip.write_all(&serde_json::to_vec(&json).unwrap()).unwrap();
             zip.finish().unwrap();
-            assert!(
-                Bundle::read(&path)
-                    .err()
-                    .unwrap()
-                    .contains("rebuild against this game")
-            );
+            let error = Bundle::read(&path).err().unwrap();
+            assert!(error.contains("unknown field"), "{error}");
+            assert!(error.contains(name), "{error}");
         }
         std::fs::remove_file(path).unwrap();
     }

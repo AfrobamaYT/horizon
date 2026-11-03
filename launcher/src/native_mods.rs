@@ -567,29 +567,24 @@ pub(crate) fn bundle_in(dir: &Path) -> Result<Option<Bundle>, String> {
         return Ok(None);
     }
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let native_json: serde_json::Value =
+    let native: horizon_mods::index::native::Manifest =
         serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-    if native_json.get("hooks").is_some() {
+    native
+        .check()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let found = bundle(&dir.join("mixins").join(&native.id), Some(native.mixins))?;
+    if found.horizon.as_ref().is_some_and(|pinned| *pinned != native.horizon) {
         return Err(format!(
-            "{}: native hook version is no longer supported; rebuild against this game.",
-            path.display()
+            "{}: {NATIVE_MANIFEST} pins Horizon {}, its {MANIFEST} {}.",
+            native.id,
+            native.horizon,
+            found.horizon.expect("checked above")
         ));
     }
-    let field = |name: &str| native_json[name].as_str().map(str::to_owned);
-    let id = field("id").ok_or_else(|| format!("{} has no id.", path.display()))?;
-    if !api::valid_id(&id) {
-        return Err(format!("{}: invalid mod id {id:?}", path.display()));
-    }
-    let found = bundle(&dir.join("mixins").join(&id), field("mixins"))?;
-    match (&found.horizon, field("horizon")) {
-        (Some(pinned), Some(native)) if *pinned != native => Err(format!(
-            "{id}: {NATIVE_MANIFEST} pins Horizon {native}, its {MANIFEST} {pinned}."
-        )),
-        (_, native) => Ok(Some(Bundle {
-            horizon: found.horizon.clone().or(native),
-            ..found
-        })),
-    }
+    Ok(Some(Bundle {
+        horizon: Some(native.horizon),
+        ..found
+    }))
 }
 
 fn bundle(dir: &Path, mixins: Option<String>) -> Result<Bundle, String> {
@@ -2794,19 +2789,19 @@ mod tests {
     }
 
     #[test]
-    fn hook_number_bundles_require_rebuilding() {
-        let d = dir("hooks");
+    fn unknown_manifest_fields_are_refused_by_the_typed_reader() {
+        let d = dir("unknown-field");
         write_native(&d, "zoom", A, B);
         let json = fs::read_to_string(d.join(NATIVE_MANIFEST)).unwrap();
-        for value in ["1", "null", "\"invalid\""] {
+        for (name, value) in [("hooks", "1"), ("banana", "\"x\"")] {
             fs::write(
                 d.join(NATIVE_MANIFEST),
-                json.replacen('}', &format!(",\"hooks\":{value}}}"), 1),
+                json.replacen('}', &format!(",\"{name}\":{value}}}"), 1),
             )
             .unwrap();
-            assert!(bundles(&d)
-                .unwrap_err()
-                .contains("rebuild against this game"));
+            let error = bundles(&d).unwrap_err();
+            assert!(error.contains("unknown field"), "{error}");
+            assert!(error.contains(name), "{error}");
         }
     }
 
