@@ -4,7 +4,6 @@
 //! and `DecoratedPotBlock.useItemOn` / `useWithoutItem`.
 use super::{Game, spill};
 use horizon_client::{
-    first_person::Hand,
     items::ItemStack,
     mobs::Who,
     particles::{ParticleOptions, ParticleType},
@@ -84,11 +83,35 @@ impl Game<'_> {
         );
         Some(tag)
     }
-    /// `DecoratedPotBlock.useItemOn` with `held`, then `useWithoutItem` on the
-    /// main hand's turn: true when the pot took the click.
-    pub(super) fn use_decorated_pot(&mut self, pos: [i32; 3], held: Option<&ItemStack>) -> bool {
+    /// The pot's item or empty-hand method, on the captured block state.
+    pub(super) fn use_decorated_pot(
+        &mut self,
+        pos: [i32; 3],
+        state: horizon_world::registry::BlockStateId,
+        held: Option<&ItemStack>,
+        branch: horizon_world::level::UseBranch,
+    ) -> Option<horizon_client::mod_api::NativeInteractionResult> {
+        use horizon_client::mod_api::NativeInteractionResult as Answer;
+        if &*self.res.facts().get(state).name != "minecraft:decorated_pot" {
+            return None;
+        }
+        if matches!(branch, horizon_world::level::UseBranch::WithoutItem) {
+            let current = self.world.block(pos[0], pos[1], pos[2]);
+            if &*self.res.facts().get(current).name != "minecraft:decorated_pot" {
+                return Some(Answer::Pass);
+            }
+            self.audio.play(
+                "minecraft:block.decorated_pot.insert_fail",
+                Some(pos.map(|v| f64::from(v) + 0.5)),
+                1.0,
+                1.0,
+            );
+            self.block_entity_event(pos, 1, WOBBLE_NEGATIVE);
+            self.post_block_game_event("minecraft:block_change", pos, Some(Who::Player), None);
+            return Some(Answer::Success);
+        }
         let Some(mut tag) = self.pot_tag(pos) else {
-            return false;
+            return Some(Answer::Pass);
         };
         let mut pot_item = tag.get("item").and_then(save::item_from_nbt);
         let insertable = held.filter(|stack| match &pot_item {
@@ -98,21 +121,7 @@ impl Game<'_> {
         let center = pos.map(|v| f64::from(v) + 0.5);
         let Some(stack) = insertable else {
             spill::put_saved_entity(&mut self.world, pos, tag);
-            // TRY_WITH_EMPTY_HAND: only the main hand goes on to useWithoutItem.
-            if self.hand != Hand::Main {
-                return false;
-            }
-            self.audio.play(
-                "minecraft:block.decorated_pot.insert_fail",
-                Some(center),
-                1.0,
-                1.0,
-            );
-            self.block_entity_event(pos, 1, WOBBLE_NEGATIVE);
-            self.post_block_game_event("minecraft:block_change", pos, Some(Who::Player), None);
-            // ServerPlayerGameMode.useItemOn: useWithoutItem consumed the click.
-            self.trigger_default_block_use(pos);
-            return true;
+            return Some(Answer::TryWithEmptyHand);
         };
         let stack = stack.clone();
         self.block_entity_event(pos, 1, WOBBLE_POSITIVE);
@@ -150,7 +159,6 @@ impl Game<'_> {
             7,
         );
         self.post_block_game_event("minecraft:block_change", pos, Some(Who::Player), None);
-        self.trigger_block("minecraft:item_used_on_block", pos, &stack);
-        true
+        Some(Answer::Success)
     }
 }

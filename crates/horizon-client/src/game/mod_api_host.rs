@@ -189,6 +189,19 @@ impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
     ) -> Option<BlockStateId> {
         self.native_state_with_property(state, key, value)
     }
+    fn brightness(&self, layer: horizon_client::mod_api::LightLayer, pos: [i32; 3]) -> i32 {
+        super::native_level_refs::world_brightness(self.world, layer, pos)
+    }
+    fn raw_brightness(&self, pos: [i32; 3], sky_darken: i32) -> i32 {
+        horizon_world::level::raw_brightness(
+            self,
+            BlockPos::new(pos[0], pos[1], pos[2]),
+            sky_darken,
+        )
+    }
+    fn is_loaded(&self, pos: [i32; 3]) -> bool {
+        self.world.is_loaded_at(pos[0], pos[1], pos[2])
+    }
 }
 
 impl horizon_client::mod_api::LevelRandomHost for super::GameLevel<'_> {
@@ -229,6 +242,15 @@ impl<'a, L: std::ops::Deref<Target = super::GameLevel<'a>>> horizon_client::mod_
         value: &str,
     ) -> Option<BlockStateId> {
         horizon_client::mod_api::LevelHost::state_with_property(&*self.level, state, key, value)
+    }
+    fn brightness(&self, layer: horizon_client::mod_api::LightLayer, pos: [i32; 3]) -> i32 {
+        horizon_client::mod_api::LevelHost::brightness(&*self.level, layer, pos)
+    }
+    fn raw_brightness(&self, pos: [i32; 3], sky_darken: i32) -> i32 {
+        horizon_client::mod_api::LevelHost::raw_brightness(&*self.level, pos, sky_darken)
+    }
+    fn is_loaded(&self, pos: [i32; 3]) -> bool {
+        horizon_client::mod_api::LevelHost::is_loaded(&*self.level, pos)
     }
 }
 
@@ -287,5 +309,9 @@ impl horizon_client::mod_api::LevelWriteHost for LevelTicks<'_, &mut super::Game
     ) -> bool {
         self.level
             .native_send_particles(options, state, at, spread, speed, count)
+    }
+
+    fn level_event(&mut self, id: i32, pos: [i32; 3], data: i32) -> bool {
+        self.level.native_level_event(id, pos, data)
     }
 }

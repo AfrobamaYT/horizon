@@ -2038,10 +2038,11 @@ impl Game<'_> {
                 if sneaking || self.riding.is_some() || self.ridden_by_guest(id) || has_mob {
                     return false;
                 }
-                if !self.native_may_board(id) {
-                    return true;
-                }
-                self.riding = Some(id);
+                self.start_riding_target(
+                    super::commands::Target::Player,
+                    super::commands::Target::Cart(id),
+                    false,
+                );
             }
             // AbstractMinecartContainer.interact: no sneak check.
             CartKind::Chest | CartKind::Hopper => self.open_cart_container(i),
