@@ -911,8 +911,8 @@ pub(super) struct NativeCommands {
 impl Game<'_> {
     /// Asks the mods for their commands once per hub, and puts them in every
     /// player's command tree.
-    pub(super) fn register_native_commands(&mut self, host: &mut LanHost) {
-        if host.native_commands.is_some() {
+    pub(super) fn register_native_commands(&mut self) {
+        if self.lan.as_ref().is_none_or(|host| host.native_commands.is_some()) {
             return;
         }
         let mut commands = Vec::new();
@@ -920,6 +920,7 @@ impl Game<'_> {
         let vanilla = horizon_client::command::vanilla::game_dispatcher_with_features(
             &self.level.enabled_features,
         );
+        let Some(host) = self.lan.as_ref() else { return; };
         let (tree, levels, problems) = command_tree(&commands, |name| {
             host.hub.vanilla_command(name) || vanilla.find(name).is_some()
         });
@@ -929,6 +930,7 @@ impl Game<'_> {
         let mut dispatcher = Dispatcher::new();
         register_dispatcher(&mut dispatcher, &tree);
         let dispatcher = Arc::new(dispatcher);
+        let Some(host) = self.lan.as_mut() else { return; };
         host.hub.set_mod_commands(0, tree);
         host.native_commands = Some(NativeCommands { levels, dispatcher });
     }
