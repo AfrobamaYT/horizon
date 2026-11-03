@@ -211,6 +211,7 @@ mod native_claimed_items;
 mod native_components;
 mod native_criteria;
 mod native_data_maps;
+mod native_display_refs;
 mod native_dragon_refs;
 mod native_entities;
 mod native_entity_data;
@@ -258,9 +259,11 @@ mod native_player_stats;
 mod native_projectile_refs;
 mod native_projectiles;
 mod native_quick_move;
+mod native_raid_refs;
 mod native_recipes;
 mod native_server;
 mod native_shaders;
+mod native_sound_refs;
 mod native_ticks;
 mod native_visuals;
 mod native_world_columns;
@@ -12415,12 +12418,17 @@ impl Game<'_> {
         // Warm the loot data with this world's packs before chunks decode
         // (`save::roll_loaded_loot` reads the cached copy).
         self.load_server_loot();
-        // TagsUpdatedEvent (SERVER_DATA_LOAD): the world's data is in, before
-        // its chunks and players are.
         // MinecraftServer's constructor reads CustomBossEvents before any
         // server event.
         self.bosses = Default::default();
         self.load_bossbars();
+        // ServerLevel's constructor reads its Raids saved data before any
+        // server event; their randoms are seeded on the first raid tick.
+        if self.remote.is_none() {
+            self.read_raids();
+        }
+        // TagsUpdatedEvent (SERVER_DATA_LOAD): the world's data is in, before
+        // its chunks and players are.
         self.native_server_data_loaded(false);
         self.sync_recipe_content();
         reset_world_progress(&mut self.adv, &mut self.stats);

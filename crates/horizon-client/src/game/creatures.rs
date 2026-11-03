@@ -99,6 +99,9 @@ pub(super) struct NativeSound {
     /// The connection of a player who doesn't hear it, as
     /// `Level.playSound(except, ...)`.
     pub except: Option<u32>,
+    /// The entity the sound follows (`ClientboundSoundEntityPacket`), sent
+    /// from `at`, where it was when the mod queued the sound.
+    pub entity: Option<i32>,
 }
 
 /// Mob-system state owned by the game.
@@ -4079,13 +4082,6 @@ impl Game<'_> {
                 .filter(|m| m.alive() && m.species() == Species::Breeze)
                 .map(|m| m.id)
                 .collect();
-            // Drawn only when a breeze could deflect a projectile: an empty
-            // level must not move the level random every tick.
-            let jitter = if breezes.is_empty() || projectiles.is_empty() {
-                0.0
-            } else {
-                self.world.random.next_float()
-            };
             let w = self.mob_world_base(&[]);
             let rain = self.arrow_rain();
             let scene = self.arrow_scene(&rain);
@@ -4257,7 +4253,7 @@ impl Game<'_> {
                     && !wind
                     && breezes.contains(&id)
                 {
-                    super::wind::reverse(p, jitter);
+                    super::wind::reverse(p);
                     if p.arrow.is_some() {
                         horizon_client::arrows::finish_entity_hit(p, &scene, EntityHit::Deflected);
                         let a = p.arrow.as_mut().expect("an arrow");
@@ -7895,6 +7891,34 @@ mod breeding_tests {
         assert_eq!(breeding_credit(&mut love, 1, 2), Some(None));
         // Neither was fed by a player (a bred pair loaded from a save).
         assert_eq!(breeding_credit(&mut love, 1, 2), None);
+    }
+}
+
+#[cfg(test)]
+mod breeze_random_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn breeze_deflection_does_not_draw_from_level_random() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let breeze = game
+                .res
+                .mob_types()
+                .get("minecraft:breeze")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(1, breeze, Vec3::new(0.0, 64.0, 0.0), 0.0));
+            let mut projectile =
+                Projectile::new(ProjectileKind::Snowball, Vec3::new(-2.0, 64.5, 0.0), None);
+            projectile.velocity = Vec3::new(3.0, 0.0, 0.0);
+            game.creatures.projectiles.push(projectile);
+            let before = game.world.random.state();
+            game.tick_projectiles().unwrap();
+            assert!(game.creatures.projectiles[0].velocity.x < 0.0);
+            assert_eq!(game.world.random.state(), before);
+        });
     }
 }
 
