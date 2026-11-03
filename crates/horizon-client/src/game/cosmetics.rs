@@ -134,7 +134,7 @@ impl Game<'_> {
         let uuid = if own {
             self.remote.as_ref().map(|r| r.profile())?
         } else if &*m.kind.id == "minecraft:player" {
-            self.remote_player_uuid(m.id)?
+            self.remote_other_player_uuid(m.id)?
         } else if self.cosmetics.local && &*m.kind.id == "minecraft:mannequin" {
             u128::from(m.id)
         } else {

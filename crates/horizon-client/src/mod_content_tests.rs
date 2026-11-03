@@ -404,11 +404,11 @@ fn ruby_mod(dir: &Path) -> ContentMod {
         ),
         (
             "data/ruby/horizon/item/ruby.json",
-            r#"{"template": "minecraft:diamond", "max_stack_size": 16, "rarity": "rare"}"#,
+            r#"{"template": "minecraft:diamond", "max_stack_size": 16, "rarity": "rare", "block": "ruby:ruby_glass"}"#,
         ),
         (
             "data/ruby/horizon/item/ruby_sword.json",
-            r#"{"template": "minecraft:iron_sword", "components": {"minecraft:max_damage": 900,
+            r#"{"template": "minecraft:iron_sword", "block": "minecraft:wheat", "components": {"minecraft:max_damage": 900,
                 "minecraft:attribute_modifiers": [{"type": "minecraft:attack_damage",
                     "id": "minecraft:base_attack_damage", "amount": 7.0,
                     "operation": "add_value", "slot": "mainhand"}],
@@ -601,7 +601,78 @@ fn content_root_loads_with_every_table() {
     assert!(ruby_block.fire_resistant && !iron_block.fire_resistant);
     let gem = &items.items["ruby:ruby"];
     assert_eq!(gem.max_stack, 16);
+    assert_eq!(gem.block, Some(BlockStateId(n + 65)));
+    let binding = independent_behaviours.item_binding("ruby:ruby").unwrap();
+    assert_eq!(
+        binding.block,
+        independent_behaviours.block(BlockStateId(n + 65))
+    );
+    // Exercise the same binding as server placement, including its emitted sound.
+    {
+        use horizon_core::{
+            geometry::{Direction, Vec3},
+            position::BlockPos,
+            random::LegacyRandom,
+        };
+        use horizon_world::level::{LevelAccess, LevelEvent, PlaceContext, PlaceOutcome, Ticks};
+        struct TestLevel {
+            blocks: std::collections::HashMap<BlockPos, BlockStateId>,
+            air: BlockStateId,
+            random: LegacyRandom,
+            events: Vec<LevelEvent>,
+        }
+        impl LevelAccess for TestLevel {
+            fn block_state(&self, pos: BlockPos) -> BlockStateId {
+                *self.blocks.get(&pos).unwrap_or(&self.air)
+            }
+            fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
+                Some(self.blocks.insert(pos, state).unwrap_or(self.air))
+            }
+            fn is_loaded(&self, _: BlockPos) -> bool {
+                true
+            }
+            fn random(&mut self) -> &mut LegacyRandom {
+                &mut self.random
+            }
+            fn game_time(&self) -> i64 {
+                0
+            }
+            fn emit(&mut self, event: LevelEvent) {
+                self.events.push(event);
+            }
+        }
+        let floor = BlockPos::new(0, 0, 0);
+        let wheat = new.default_state("minecraft:wheat").unwrap();
+        let mut level = TestLevel {
+            blocks: [(floor, iron)].into_iter().collect(),
+            air: new.default_state("minecraft:air").unwrap(),
+            random: LegacyRandom::new(1),
+            events: Vec::new(),
+        };
+        let ctx = PlaceContext {
+            clicked_pos: floor,
+            face: Direction::Up,
+            hit: Vec3::new(0.5, 1.0, 0.5),
+            inside: false,
+            yaw: 0.0,
+            pitch: 0.0,
+            sneaking: false,
+            item: "ruby:ruby_sword".into(),
+            can_use_game_master_blocks: false,
+        };
+        let denied = independent_behaviours.place_block(&mut level, &mut Ticks::new(1), &ctx);
+        assert!(matches!(denied, PlaceOutcome::Failed));
+        assert!(level.events.is_empty());
+        level
+            .blocks
+            .insert(floor, new.default_state("minecraft:farmland").unwrap());
+        let placed = independent_behaviours.place_block(&mut level, &mut Ticks::new(1), &ctx);
+        assert!(matches!(placed, PlaceOutcome::Placed { state, .. } if state == wheat));
+        assert!(level.events.iter().any(|e| matches!(e, LevelEvent::Sound { sound, .. } if &**sound == "minecraft:item.crop.plant")));
+    }
     let sword = &items.items["ruby:ruby_sword"];
+    assert_eq!(sword.block, new.default_state("minecraft:wheat"));
+    assert_eq!(items.items["minecraft:iron_block"].block, Some(iron));
     let iron_sword = &items.items["minecraft:iron_sword"];
     assert_eq!((sword.max_damage, iron_sword.max_damage), (900, 250));
     assert_eq!(sword.modifiers.len(), 1);
@@ -666,6 +737,25 @@ fn refuses_unknown_templates_and_vanilla_ids() {
     let e = build(&base, std::slice::from_ref(&m), &scratch.join("out")).unwrap_err();
     assert!(e.to_string().contains("is not a block"), "{e}");
     m.content.blocks[0].template = "minecraft:iron_block".into();
+    let gem = m
+        .content
+        .items
+        .iter_mut()
+        .find(|i| i.id == "ruby:ruby")
+        .unwrap();
+    gem.block = Some("minecraft:not_a_block".into());
+    let e = build(&base, std::slice::from_ref(&m), &scratch.join("out")).unwrap_err();
+    assert!(
+        e.to_string()
+            .contains("block \"minecraft:not_a_block\" is not a block"),
+        "{e}"
+    );
+    m.content
+        .items
+        .iter_mut()
+        .find(|i| i.id == "ruby:ruby")
+        .unwrap()
+        .block = Some("ruby:ruby_glass".into());
     let stew = m
         .content
         .items
@@ -3180,12 +3270,15 @@ fn biome_base(tag: &str) -> PathBuf {
             bundle(&[
                 (
                     "minecraft:plains",
-                    r#"{"temperature":0.8,"features":[[],["minecraft:lake"],[],[],[],[],["minecraft:ore_coal"]]}"#,
+                    r#"{"temperature":0.8,"downfall":0.4,"features":[[],["minecraft:lake"],[],[],[],[],["minecraft:ore_coal"]]}"#,
                 ),
-                ("minecraft:desert", r#"{"features":[["minecraft:fossil"]]}"#),
+                (
+                    "minecraft:desert",
+                    r#"{"temperature":2.0,"downfall":0.0,"features":[["minecraft:fossil"]]}"#,
+                ),
                 (
                     "minecraft:nether_wastes",
-                    r#"{"temperature":2.0,"features":[[],[],[],[],[],[],["minecraft:ore_coal"]]}"#,
+                    r#"{"temperature":2.0,"downfall":0.0,"features":[[],[],[],[],[],[],["minecraft:ore_coal"]]}"#,
                 ),
             ]),
         ),
@@ -3223,7 +3316,7 @@ fn zinc_mod(dir: &Path, modifiers: &[(&str, &str)]) -> ContentMod {
     let mut files = vec![
         ("horizon-mod.toml".to_owned(), manifest("zinc", "")),
         (
-            "data/zinc/worldgen/configured_feature/ore_zinc.json".to_owned(),
+            "data/zinc/worldgen/feature/ore_zinc.json".to_owned(),
             r#"{"type":"minecraft:ore","config":{}}"#.to_owned(),
         ),
         (
@@ -3254,6 +3347,129 @@ fn biome_features(root: &Path) -> BTreeMap<String, serde_json::Value> {
             (id, v["features"].clone())
         })
         .collect()
+}
+
+#[test]
+fn biome_modifier_climate_rejects_malformed_ranges() {
+    for climate in [
+        r#"{"type":"horizon:climate","temperature":{"min":"warm"}}"#,
+        r#"{"type":"horizon:climate","temperature":{"min":null,"max":1}}"#,
+        r#"{"type":"horizon:climate","temperature":null}"#,
+        r#"{"type":"horizon:climate","temperature":{"min":2,"max":1}}"#,
+        r#"{"type":"horizon:climate","temperature":{"minimum":1}}"#,
+        r#"{"type":"horizon:climate","temperature":{}}"#,
+        r#"{"type":"horizon:climate"}"#,
+    ] {
+        let base = biome_base("biome-invalid-climate");
+        let scratch = base.parent().unwrap().to_owned();
+        let modifier = format!(
+            r#"{{"type":"neoforge:add_features","biomes":{climate},"features":"zinc:ore_zinc","step":"underground_ores"}}"#
+        );
+        let m = zinc_mod(&scratch.join("zinc"), &[("bad", &modifier)]);
+        assert!(
+            build(&base, &[m], &scratch.join("out")).is_err(),
+            "{climate}"
+        );
+        fs::remove_dir_all(&scratch).unwrap();
+    }
+}
+
+#[test]
+fn biome_modifier_climate_standalone_includes_bounds() {
+    let base = biome_base("biome-climate-alone");
+    let scratch = base.parent().unwrap().to_owned();
+    let m = zinc_mod(
+        &scratch.join("zinc"),
+        &[(
+            "warm",
+            r#"{
+        "type":"neoforge:add_features",
+        "biomes":{"type":"horizon:climate","temperature":{"min":2,"max":2},"downfall":{"max":0}},
+        "features":"zinc:ore_zinc","step":"underground_ores"}"#,
+        )],
+    );
+    let out = scratch.join("out");
+    build(&base, &[m], &out).unwrap();
+    let features = biome_features(&out);
+    assert_eq!(
+        features["minecraft:desert"][6],
+        serde_json::json!(["zinc:ore_zinc"])
+    );
+    assert_eq!(
+        features["minecraft:nether_wastes"][6],
+        serde_json::json!(["minecraft:ore_coal", "zinc:ore_zinc"])
+    );
+    assert_eq!(
+        features["minecraft:plains"][6],
+        serde_json::json!(["minecraft:ore_coal"])
+    );
+    fs::remove_dir_all(&scratch).unwrap();
+}
+
+#[test]
+fn biome_modifier_climate_combines_with_holder_sets() {
+    let base = biome_base("biome-climate");
+    let scratch = base.parent().unwrap().to_owned();
+    let m = zinc_mod(
+        &scratch.join("zinc"),
+        &[(
+            "warm",
+            r##"{
+        "type":"neoforge:add_features",
+        "biomes":{"type":"neoforge:and","values":["#minecraft:is_overworld",
+            {"type":"horizon:climate","temperature":{"min":0.8,"max":0.8},
+             "downfall":{"min":0.4}}]},
+        "features":"zinc:ore_zinc","step":"underground_ores"}"##,
+        )],
+    );
+    let out = scratch.join("out");
+    build(&base, &[m], &out).unwrap();
+    let features = biome_features(&out);
+    assert_eq!(
+        features["minecraft:plains"][6],
+        serde_json::json!(["minecraft:ore_coal", "zinc:ore_zinc"])
+    );
+    assert_eq!(
+        features["minecraft:desert"][0],
+        serde_json::json!(["minecraft:fossil"])
+    );
+    assert_eq!(
+        features["minecraft:nether_wastes"][6],
+        serde_json::json!(["minecraft:ore_coal"])
+    );
+    fs::remove_dir_all(&scratch).unwrap();
+}
+
+#[test]
+fn biome_modifier_climate_nested_or_not() {
+    let base = biome_base("biome-climate-or-not");
+    let scratch = base.parent().unwrap().to_owned();
+    let m = zinc_mod(
+        &scratch.join("zinc"),
+        &[(
+            "select",
+            r##"{
+        "type":"neoforge:add_features", "features":"zinc:ore_zinc", "step":"underground_ores",
+        "biomes":{"type":"neoforge:or","values":["minecraft:plains",
+            {"type":"neoforge:not","value":{"type":"horizon:climate","temperature":{"min":1}}}]}}"##,
+        )],
+    );
+    let out = scratch.join("out");
+    build(&base, &[m], &out).unwrap();
+    let features = biome_features(&out);
+    assert_eq!(
+        features["minecraft:plains"][6],
+        serde_json::json!(["minecraft:ore_coal", "zinc:ore_zinc"])
+    );
+    assert_eq!(
+        features["minecraft:nether_wastes"][6],
+        serde_json::json!(["minecraft:ore_coal"])
+    );
+    assert_eq!(
+        features["minecraft:desert"][0],
+        serde_json::json!(["minecraft:fossil"])
+    );
+    fs::remove_dir_all(&scratch).unwrap();
 }
 
 /// `neoforge:add_features` puts a mod's ore at the end of its step in every
@@ -3355,6 +3571,46 @@ fn biome_modifiers_place_mod_features_in_vanilla_biomes() {
     let _ = fs::remove_dir_all(&scratch);
 }
 
+/// 26.3's feature directory feeds the configured-feature bundle and command
+/// registry, including nested paths; the old documented path warns instead.
+#[test]
+fn configured_features_load_from_the_26_3_path() {
+    let base = biome_base("feature-paths");
+    let scratch = base.parent().unwrap();
+    fs::write(
+        base.join("command-registries.json"),
+        r#"{"blocks":{},"items":[],"by_registry":{"minecraft:worldgen/feature":{"ids":[]}}}"#,
+    )
+    .unwrap();
+    let feature = r#"{"type":"minecraft:simple_block","config":{}}"#;
+    let m = folder_mod(
+        &scratch.join("zinc"),
+        &[
+            ("horizon-mod.toml", &manifest("zinc", "")),
+            ("data/zinc/worldgen/feature/nested/new.json", feature),
+            ("data/zinc/worldgen/configured_feature/old.json", feature),
+        ],
+    );
+    let root = scratch.join("out");
+    build(&base, &[m], &root).unwrap();
+    let bundle: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(root.join("worldgen/features.json")).unwrap()).unwrap();
+    assert_eq!(
+        bundle,
+        BTreeMap::from([("zinc:nested/new".into(), feature.into())])
+    );
+    let commands: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("command-registries.json")).unwrap()).unwrap();
+    let ids = commands["by_registry"]["minecraft:worldgen/feature"]["ids"]
+        .as_array()
+        .unwrap();
+    assert_eq!(ids, &[serde_json::json!("zinc:nested/new")]);
+    let warnings = fs::read_to_string(root.join(WARNINGS)).unwrap();
+    assert!(warnings.contains("data/zinc/worldgen/configured_feature/old.json"));
+    assert!(warnings.contains("use worldgen/feature/ in 26.3"));
+    fs::remove_dir_all(scratch).unwrap();
+}
+
 /// A mod with features but no modifier leaves vanilla's biome bundle alone.
 #[test]
 fn biome_modifiers_none_keep_the_vanilla_biomes() {
@@ -3397,6 +3653,11 @@ fn biome_modifiers_refuse_unknown_names() {
         (
             r#"{"type":"neoforge:add_spawns","biomes":"minecraft:plains","spawners":[]}"#,
             "biome modifier type \"add_spawns\" skipped",
+        ),
+        (
+            r#"{"type":"neoforge:add_features","biomes":"minecraft:plains",
+                "features":{"type":"horizon:climate","temperature":{"min":1}},"step":"underground_ores"}"#,
+            "placed feature set type \"horizon:climate\" is not read",
         ),
     ]
     .into_iter()
@@ -3451,7 +3712,7 @@ fn content_root_generates_a_biome_modifier_ore() {
                 r#"{"template": "minecraft:iron_ore"}"#.to_owned(),
             ),
             (
-                "data/zinc/worldgen/configured_feature/ore_zinc.json",
+                "data/zinc/worldgen/feature/ore_zinc.json",
                 r##"{"type": "minecraft:ore", "size": 9, "discard_chance_on_air_exposure": 0.0,
                     "targets": [{"target": {"predicate_type": "minecraft:tag_match",
                         "tag": "minecraft:stone_ore_replaceables"},
@@ -3819,7 +4080,7 @@ fn a_feature_gives_a_mods_sign_its_block_entity() {
                 r#"{"template": "minecraft:oak_sign"}"#,
             ),
             (
-                "data/post/worldgen/configured_feature/notice.json",
+                "data/post/worldgen/feature/notice.json",
                 r#"{"type": "minecraft:ore", "size": 9, "discard_chance_on_air_exposure": 0.0,
                     "targets": [{"target": {"predicate_type": "minecraft:tag_match",
                         "tag": "minecraft:stone_ore_replaceables"},

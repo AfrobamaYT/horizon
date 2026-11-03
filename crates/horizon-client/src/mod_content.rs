@@ -660,6 +660,7 @@ struct NewItem {
     rarity: Option<Rarity>,
     components: Vec<(String, J)>,
     crafting_remainder: Option<String>,
+    block: Option<String>,
     /// `StandingAndWallBlockItem.wallBlock`, when its block declares it.
     wall_block: Option<String>,
 }
@@ -1146,18 +1147,26 @@ impl<'a> Plan<'a> {
                     rarity: None,
                     components: component_patch(&b.decl.id, &b.decl.components)?,
                     crafting_remainder: None,
+                    block: None,
                     wall_block: b.decl.wall_block.clone(),
                 });
             }
         }
         for m in &sorted {
             for i in &m.content.items {
+                if let Some(block) = &i.block
+                    && !defaults.contains_key(block)
+                    && !blocks.iter().any(|b| b.decl.id == *block)
+                {
+                    return Err(format!("{}: block {block:?} is not a block", i.id).into());
+                }
                 items.push(NewItem {
                     rename: Rename::new(&i.template, &i.id),
                     max_stack_size: i.max_stack_size,
                     rarity: i.rarity,
                     components: component_patch(&i.id, &i.components)?,
                     crafting_remainder: i.crafting_remainder.clone(),
+                    block: i.block.clone(),
                     wall_block: None,
                 });
             }
@@ -1323,6 +1332,19 @@ impl<'a> Plan<'a> {
             BTreeSet::new()
         };
         for i in &self.items {
+            if !components && let Some(block) = &i.block {
+                map.set(
+                    &i.rename.to,
+                    J::Obj(vec![
+                        ("class".into(), J::Arr(vec![J::Str("BlockItem".into())])),
+                        (
+                            "fields".into(),
+                            J::Obj(vec![("block".into(), J::Str(block.clone()))]),
+                        ),
+                    ]),
+                );
+                continue;
+            }
             let Some(v) = map.get(&i.rename.from) else {
                 continue;
             };
@@ -1809,7 +1831,7 @@ const WORLDGEN_BUNDLES: [(&str, &str); 6] = [
     ("structure_set", "worldgen/structure_sets.json"),
     ("template_pool", "worldgen/template_pools.json"),
     ("processor_list", "worldgen/processor_lists.json"),
-    ("configured_feature", "worldgen/features.json"),
+    ("feature", "worldgen/features.json"),
     ("placed_feature", "worldgen/placed_features.json"),
 ];
 
@@ -2339,6 +2361,15 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
         let declarations = format!("data/{}/horizon/", m.id);
         let mut reader = m.content.reader()?;
         for file in &m.content.files {
+            if let Some((_, path)) = file.strip_prefix("data/").and_then(|p| p.split_once('/'))
+                && path.starts_with("worldgen/configured_feature/")
+            {
+                warnings.push(format!(
+                    "mod {}: {file}: use worldgen/feature/ in 26.3; file ignored",
+                    m.id
+                ));
+                continue;
+            }
             let bytes = reader.read(file)?;
             let is_tag = file.starts_with("data/") && file.contains("/tags/");
             if is_tag && file.ends_with(".json") {
@@ -2536,6 +2567,17 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
         overlay.write(
             horizon_items::items::MOD_CRAFT_REMAINDERS,
             &serde_json::to_vec(&remainders)?,
+        )?;
+    }
+    let placed_blocks: BTreeMap<&str, &str> = plan
+        .items
+        .iter()
+        .filter_map(|i| Some((i.rename.to.as_str(), i.block.as_deref()?)))
+        .collect();
+    if !placed_blocks.is_empty() {
+        overlay.write(
+            horizon_items::items::MOD_ITEM_BLOCKS,
+            &serde_json::to_vec(&placed_blocks)?,
         )?;
     }
     // clients must agree on the block states and the items', mob effects',

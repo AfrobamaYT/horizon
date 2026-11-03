@@ -917,14 +917,16 @@ impl Game<'_> {
         self.combat.exploded.clear();
         // EntityTickEvent.Pre for the mobs about to tick, before the loop holds them.
         let mut round = self.native_tick_round();
-        if round.listening() {
+        if round.listening() || !horizon_client::mod_api::mods().is_empty() {
             let ticking = self.entity_ticking_area();
             let mut i = 0;
             while let Some(m) = self.mobs.get(i) {
                 let (x, z) = (m.position.x.floor() as i32, m.position.z.floor() as i32);
                 if self.world.loaded(x, z) && ticking(x, z) {
                     let (id, kind) = (m.id, super::native_ticks::TickKind::Mob(m.kind.clone()));
-                    self.native_tick_pre_batch(&mut round, id, kind);
+                    if self.native_tick_pre_batch(&mut round, id, kind) {
+                        self.sync_sleeping_mob(i);
+                    }
                 }
                 i += 1;
             }
@@ -1207,7 +1209,8 @@ impl Game<'_> {
         let mut dying = m.clone();
         // LivingEntity.die: the death is heard, and a sculk catalyst nearby
         // takes the experience (before the loot is dropped). It takes what
-        // would drop, whoever killed the mob.
+        // would drop, whoever killed the mob. Experience the catalyst takes is
+        // never dropped, so living_experience_drop does not hear of it.
         self.sculk_mob_died(m);
         let mut catalyst_xp = 0;
         let consumed =
@@ -1409,6 +1412,26 @@ impl Game<'_> {
             None => None,
         }
     }
+    /// `LivingEntity.dropExperience`: the experience a dying mob or player is worth once
+    /// the mods have had their say; 0 when they cancel it.
+    pub(super) fn living_experience_drop(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        attacker: Option<u128>,
+        original: i32,
+    ) -> i32 {
+        let (mut amount, mut cancel) = (original, false);
+        self.native_living_experience_drop(
+            entity,
+            kind,
+            attacker,
+            original,
+            &mut amount,
+            &mut cancel,
+        );
+        if cancel { 0 } else { amount.max(0) }
+    }
     fn drop_death_loot(
         &mut self,
         m: &mut Mob,
@@ -1556,8 +1579,11 @@ impl Game<'_> {
                         self.spawn_item(item, pos, dispenser::new_item_motion(), 10);
                     }
                 }
-                drops::Drop::Orb(value) if !consumed => self.spawn_orbs(pos, value as u32),
-                drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Orb(_) => {}
+                drops::Drop::Experience(reward) if !consumed => {
+                    let amount = self.living_experience_drop(m.id, &kind, player_uuid, reward);
+                    self.spawn_orbs(pos, amount as u32);
+                }
+                drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Experience(_) => {}
             }
         }
     }
@@ -1567,6 +1593,8 @@ impl Game<'_> {
         let mut hurt = false;
         let mut infested = false;
         let aim = self.attacker_aim(source.attacker);
+        // So `living_knockback` sees who hit and what they hold.
+        let _attacker = self.knockback_scope_for(source.attacker);
         if let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
             let hit = t.damage_aimed(amount, source, aim);
             hurt = hit;
@@ -1978,6 +2006,10 @@ impl Game<'_> {
                 } => match target {
                     // A player's source names no melee attacker, as its damage's doesn't.
                     Who::Player => {
+                        let _attacker = self.knockback_scope(match source.attacker {
+                            Some(Who::Mob(id)) => id as i32,
+                            _ => 0,
+                        });
                         let source = HurtSource {
                             damage_type: source_damage_type(source),
                             causing: 0,
@@ -3422,6 +3454,11 @@ impl Game<'_> {
         };
         // The causing entity for the death message.
         let owner = self.combat.projectile_owner.take();
+        let _attacker = self.knockback_scope(
+            attacker
+                .or(owner)
+                .map_or_else(horizon_client::health::knockback_attacker, |id| id as i32),
+        );
         if let Some(a) = attacker.or(owner) {
             self.note_attacker(damage_type, a);
         }
@@ -3540,7 +3577,7 @@ impl Game<'_> {
     /// `LivingEntity.knockback` on the player: pushed `power` away from the
     /// direction (`xd`, `zd`), less its knockback resistance, and up only from
     /// the ground.
-    /// The native knockback hook runs once the resistance is applied, with
+    /// The native knockback hook runs before resistance is applied, with
     /// `source`, the hit's.
     pub(super) fn knock_back_player(
         &mut self,
@@ -3549,6 +3586,14 @@ impl Game<'_> {
         zd: f64,
         source: HurtSource<'_>,
     ) {
+        let credit = match self.player_hurt_by() {
+            Some((Who::Mob(id), _)) => id as i32,
+            _ => 0,
+        };
+        let _attacker = self.knockback_scope(match horizon_client::health::knockback_attacker() {
+            0 => credit,
+            attacker => attacker,
+        });
         if let Some(p) = self.player.as_mut() {
             knock_back(p, &mut self.world.random, power, (xd, zd), source);
         }
@@ -4233,6 +4278,7 @@ impl Game<'_> {
         }
     }
     pub(super) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
+        let _attacker = self.knockback_scope_for(p.owner);
         // Projectile.onHitBlock: BlockState.onProjectileHit, for every
         // projectile (a wind charge out of the world's top has no face).
         if let Hit::Block { pos, at, face } = hit
@@ -7541,8 +7587,8 @@ mod knockback_tests {
         false
     }
 
-    /// `LivingEntity.knockback` on a player: the hook runs after the
-    /// knockback resistance and before the motion changes; a mod's strength or
+    /// `LivingEntity.knockback` on a player: the hook runs before the
+    /// knockback resistance and the motion changes; a mod's strength or
     /// direction pushes, a cancel pushes nothing, and without a mod in the way
     /// the push is vanilla's. Needs the prepared data in
     /// `.local/horizon-client/26.3`; skipped without it.

@@ -7,7 +7,7 @@ pub(super) use data::place_summoned;
 mod effects;
 pub(super) mod execute;
 pub(super) mod extra;
-mod items;
+pub(in crate::game) mod items;
 mod misc;
 mod place;
 mod players;
@@ -373,22 +373,13 @@ impl Game<'_> {
     /// Player.getDisplayName: the name (team-formatted), suggesting a
     /// `/tell`, showing the player on hover, inserting the name.
     pub(super) fn player_display_name(&self) -> Text {
-        let name = self.acting_player_name().to_owned();
-        let Some(uuid) = self.lan_acting_uuid else {
-            return self.target_name(Target::Player);
-        };
-        self.target_name(Target::Player).with_component_fields(vec![
-            (
-                "click_event".into(),
-                serde_json::json!({"action": "suggest_command", "command": format!("/tell {name} ")}),
-            ),
-            (
-                "hover_event".into(),
-                serde_json::json!({"action": "show_entity", "id": "minecraft:player",
-                    "uuid": horizon_protocol::crypto::uuid_string(uuid), "name": name}),
-            ),
-            ("insertion".into(), name.into()),
-        ])
+        let name = self.acting_player_name();
+        if let Some(uuid) = self.lan_acting_uuid {
+            return self.player_text(name, uuid);
+        }
+        let mut displayname = self.target_name(Target::Player);
+        horizon_client::lan::hub::native_player_name_format(&Text::literal(name), &mut displayname);
+        displayname
     }
     fn source_position(&self) -> [f64; 3] {
         if let Some(s) = &self.command_source {
@@ -2799,29 +2790,6 @@ impl Game<'_> {
         self.feedback(Text::tr("commands.clone.success", &[&count]));
         Ok(count)
     }
-    /// Player.giveExperiencePoints including negative amounts.
-    /// The caller reports the level change to the mods.
-    fn give_points(&mut self, amount: i32) {
-        let e = &mut self.experience;
-        e.progress += amount as f32 / horizon_client::entities::Experience::needed(e.level) as f32;
-        e.total = e.total.saturating_add(amount).clamp(0, i32::MAX);
-        while e.progress < 0.0 {
-            let f = e.progress * horizon_client::entities::Experience::needed(e.level) as f32;
-            if e.level > 0 {
-                e.level -= 1;
-                e.progress = 1.0 + f / horizon_client::entities::Experience::needed(e.level) as f32;
-            } else {
-                e.level = 0;
-                e.progress = 0.0;
-            }
-        }
-        while e.progress >= 1.0 {
-            e.progress =
-                (e.progress - 1.0) * horizon_client::entities::Experience::needed(e.level) as f32;
-            e.level += 1;
-            e.progress /= horizon_client::entities::Experience::needed(e.level) as f32;
-        }
-    }
     /// AdvancementCommands.perform / performCriterion.
     fn cmd_advancement(&mut self, ctx: &Context) -> R<i32> {
         let targets = self.entities(ctx, "targets", true)?;
@@ -2986,7 +2954,6 @@ impl Game<'_> {
     /// ExperienceCommand's add and set on the player in place: false when
     /// the points to set do not fit the level.
     fn change_experience(&mut self, add: bool, levels: bool, amount: i32) -> bool {
-        let old_level = self.experience.level;
         if add {
             if levels {
                 // Player.giveExperienceLevels handles the strict negative
@@ -2994,9 +2961,12 @@ impl Game<'_> {
                 self.give_levels(amount);
                 return true;
             } else {
-                self.give_points(amount);
+                self.give_experience_points(amount);
             }
-        } else if levels {
+            return true;
+        }
+        let old_level = self.experience.level;
+        if levels {
             self.experience.level = amount;
         } else {
             let needed = horizon_client::entities::Experience::needed(self.experience.level);

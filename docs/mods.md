@@ -203,6 +203,16 @@ gets its own damage and durability, or a tool its mining speed:
     "!minecraft:repairable": {} } }
 ```
 
+An item can place a block by naming it with `block`, whether it is a vanilla block or a declared mod block:
+
+```json
+{ "template": "minecraft:wheat_seeds", "block": "ruby:crop" }
+```
+
+This uses the block's placement state and survival rules and consumes the item outside creative mode. Add seeds to
+`minecraft:villager_plantable_seeds` for farmers to plant them. The mapping does not change what the block drops or
+what Pick Block gives.
+
 Native mods can register component types before content loads. A content item
 can set a registered type with a JSON value, such as `"sample:charge": {"charge": 42}`.
 JSON values become NBT values. Values must fit the network NBT limits and
@@ -376,13 +386,27 @@ A pool addition holds `"elements"` as a pool does, a processor list addition `"p
 Lithostitched's `add_structure_set_entries`, `add_template_pool_elements` and `add_processor_list_processors` modifiers
 do on NeoForge and Fabric, and `horizon-port-pack carry` writes the last two from those.
 
-A mod's own configured and placed features (`data/<ns>/worldgen/configured_feature/`, `placed_feature/`) generate in
+A mod's own configured and placed features (`data/<ns>/worldgen/feature/`, `placed_feature/`) generate in
 biomes it does not own (vanilla's) through NeoForge's biome modifiers, files in `data/<ns>/neoforge/biome_modifier/`
 (older Forge mods: `data/<ns>/forge/biome_modifier/`, `forge:` types). `add_features` appends its `features` to one
 generation `step` of every biome in `biomes`; `remove_features` takes them out of its `steps` (every step when it lists
 none); `none` does nothing. `biomes` and `features` are an id, a `#tag` or a list of ids; `biomes` may also be
 NeoForge's `any`, `or`, `and` or `not`. Every addition comes before every removal, each in mod and file order, and a
-feature already in the step is not added twice.
+feature already in the step is not added twice. Configured features use 26.3's `worldgen/feature/` directory
+(registry `minecraft:worldgen/feature`), not the previously documented `worldgen/configured_feature/`.
+Files in the old directory are ignored with a warning naming the new one; move them before loading the mod.
+
+A biome holder set can also use Horizon's own `horizon:climate` type, alone or nested in those boolean sets; it is not
+a NeoForge format. It filters each biome's base `temperature` and `downfall` (the names in
+[Fabric's public biome weather API](https://maven.fabricmc.net/docs/yarn-1.21-rc1+build.1/net/minecraft/world/biome/Biome.Weather.html)),
+not its positional temperature. Each range takes `min`, `max`, or both, inclusive; an omitted bound is unbounded. At
+least one field and one bound per range are required. Unknown keys, non-numbers and inverted bounds stop the content
+load. Climate sets apply only to `biomes`, not `features`.
+
+```json
+{ "type": "neoforge:and", "values": ["#minecraft:is_overworld",
+  { "type": "horizon:climate", "temperature": { "min": 0.8 }, "downfall": { "max": 0.5 } }] }
+```
 
 ```json
 { "type": "neoforge:add_features", "biomes": "#minecraft:is_overworld",
@@ -423,6 +447,10 @@ Behaviour that needs code (a new key, a HUD, a tool that changes how mining work
 a `horizon-mixin.toml` and a few `.rs` helpers that hook into named functions of the game. Start from
 [horizon-native-mod-template](https://github.com/horizon-rust/horizon-native-mod-template). How the launcher builds
 one, what it pins and why it is not sandboxed: [native-mods.md](native-mods.md).
+The typed hook API is generated automatically at build time, in debug and release builds alike; its generated
+Rust files are build output, not files to regenerate or commit. Engine contributors adding a hook only run
+`cargo run -p xtask -- mod-api` to fill its hand-written placeholder body
+([Adding a hook](native-mods.md#adding-a-hook)).
 
 A native mod's config files go in the game's shared `config/` folder, beside `options.txt` (on a dedicated server,
 beside `server.properties`), as Fabric and NeoForge mods' do: the mod picks its own file names, such as

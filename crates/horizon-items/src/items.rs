@@ -241,6 +241,8 @@ pub const CRAFT_REMAINDERS: [(&str, &str); 5] = [
 /// In a root built by `mod_content::build`: the content mods' items' crafting
 /// remainders, by item. Other roots have none.
 pub const MOD_CRAFT_REMAINDERS: &str = "horizon-mod-craft-remainders.json";
+/// Explicit item-to-block mappings from content mods (not block drops).
+pub const MOD_ITEM_BLOCKS: &str = "horizon-mod-item-blocks.json";
 /// A reduction of `blocks_attacks.damage_reductions`.
 #[derive(Clone, Debug)]
 pub struct BlockReduction {
@@ -664,7 +666,27 @@ impl Items {
                     .or_insert(BlockStateId(i as u32));
             }
         }
-        Self::load_with(root, &block_for_item, overlay)
+        let mut items = Self::load_with(root, &block_for_item, overlay)?;
+        let path = root.join(MOD_ITEM_BLOCKS);
+        match fs::read(&path) {
+            Ok(bytes) => {
+                let mappings: HashMap<String, String> = serde_json::from_slice(&bytes)
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
+                for (item, block) in mappings {
+                    let state = registry
+                        .default_state(&block)
+                        .ok_or_else(|| format!("{item}: block {block:?} is not a block"))?;
+                    let info = items
+                        .items
+                        .get_mut(item.as_str())
+                        .ok_or_else(|| format!("{item}: not an item"))?;
+                    info.block = Some(state);
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("{}: {e}", path.display()).into()),
+        }
+        Ok(items)
     }
     /// Every item's default components and the tags, without the block <->
     /// item mapping (for headless tools that never place blocks).
