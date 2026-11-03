@@ -424,6 +424,14 @@ impl Game<'_> {
         })
     }
 
+    /// Whether a live player handle names a connectionless actor.
+    pub(super) fn native_player_is_fake(&self, player: PlayerRef) -> Option<bool> {
+        match self.player_handle_read(player)? {
+            PlayerRead::Acting { .. } => Some(self.lan_acting_fake),
+            PlayerRead::Guest(guest) => Some(!guest.participates_online()),
+        }
+    }
+
     /// Resolve an online UUID on this server. During a nested player swap,
     /// outer players whose records are displaced return None. API @API:player_read@.
     pub(super) fn native_player_ref(&self, uuid: u128) -> Option<PlayerRef> {
