@@ -146,7 +146,7 @@ pub struct Version {
     pub published: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub changelog: String,
-    /// A mod's API line (`0.1`), from its manifest; a modpack's format (`1`).
+    /// A content mod's API line (`0.2`), from its manifest; a modpack's format (`1`).
     pub api: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub side: Option<Side>,
@@ -574,17 +574,9 @@ pub fn inspect(kind: &Kind, path: &Path) -> Result<Facts, String> {
                     native::MANIFEST
                 ));
             }
-            let Package { manifest: m, wasm } = Package::read(path)?;
+            let m = Package::read(path)?.manifest;
             crate::Content::read(path, &m)?;
-            let api_level = match wasm {
-                Some(wasm) => {
-                    let functions = crate::api_level::imports(&wasm)?;
-                    Some(crate::api_level::needed(functions.iter().map(String::as_str)).0)
-                }
-                None => None,
-            };
             Ok(Facts {
-                api_level,
                 capabilities: m.capabilities,
                 id: Some(m.id),
                 version: Some(m.version),

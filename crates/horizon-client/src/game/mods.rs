@@ -73,7 +73,7 @@ pub(super) fn content_root(
     dev: &[std::path::PathBuf],
 ) -> std::path::PathBuf {
     use horizon_client::mod_content::{self, ContentMod};
-    use horizon_mods::{Capability, Content, Package};
+    use horizon_mods::{Content, Package};
     let here = std::env::current_dir().unwrap_or_default();
     let mut paths = horizon_mods::find(&here.join(mod_list::DIR));
     paths.retain(|p| !dev.contains(p));
@@ -89,10 +89,7 @@ pub(super) fn content_root(
         };
         let m = &package.manifest;
         let on = enabled.contains(&m.id) || dev.contains(path);
-        if !on
-            || !m.capabilities.contains(&Capability::Registries)
-            || mods.iter().any(|c| c.id == m.id)
-        {
+        if !on || mods.iter().any(|c| c.id == m.id) {
             continue;
         }
         // The items this mod's native code declares may be a file item's crafting remainder.
@@ -198,7 +195,6 @@ fn announced_entry(
         sha256,
         side: match m.side {
             Side::Both => mod_list::Side::Both,
-            Side::Server => mod_list::Side::Server,
             Side::Client => mod_list::Side::Client,
         },
     }
@@ -343,8 +339,6 @@ fn not_built(dir: &std::path::Path, built: &str, rows: &[Installed]) -> Vec<Inst
     out
 }
 
-/// A WebAssembly code mod's row on the Mods page.
-const STOPPED: &str = "Doesn't run any more: needs a native port";
 /// The player was told once about the WebAssembly mods that stopped (`horizon-mods/<this>`).
 const NOTICE_SEEN: &str = ".native-notice";
 
@@ -376,12 +370,11 @@ impl Game<'_> {
                     }
                 };
                 let m = &package.manifest;
-                let problem = package.wasm.is_some().then(|| STOPPED.to_owned());
                 Installed {
                     id: m.id.clone(),
                     title: format!("{} {}", m.name, m.version),
                     description: m.description.clone(),
-                    problem,
+                    problem: None,
                     dev: self.mods.dev.contains(path),
                     native: None,
                 }
@@ -410,12 +403,6 @@ impl Game<'_> {
         let native_dir = Self::game_dir().join(mod_list::NATIVE_DIR);
         let unbuilt = not_built(&native_dir, &built, &self.settings.mods.installed);
         self.settings.mods.installed.extend(unbuilt);
-        let installed = &self.settings.mods.installed;
-        self.mods.stopped = installed
-            .iter()
-            .filter(|row| row.problem.as_deref() == Some(STOPPED))
-            .map(|row| row.title.clone())
-            .collect();
     }
     /// Once, in the first world after the update: which WebAssembly mods stopped.
     pub(super) fn tell_native_now(&mut self) {

@@ -69,7 +69,10 @@ capabilities = ["registries"]
 namespaces = []              # optional: more namespaces the mod's files use (below)
 ```
 
-Unknown keys are refused, so a typo is an error, not a silently ignored permission.
+Unknown keys are refused, so a typo is an error, not a silently ignored permission. Content manifests
+use only `api = "0.2"` and `capabilities = ["registries"]`, with `side = "client"` (the default) or `"both"`.
+Executable `mod.wasm` files are unsupported: a folder or archive containing one is refused, including when
+installed through a modpack. Code is never silently skipped.
 
 ### Content mods (API 0.2)
 
@@ -84,8 +87,8 @@ A server that has content mods on also checks them one by one (`horizon_protocol
 `horizon:mod_list`): in the configuration phase it sends the id, version and SHA-256 of each `.hmod` with
 `side = "both"`, the client answers with its own, and a client that differs is refused with the mods named: missing,
 not on this server, or another version or file. Only `side = "both"` mods are compared and sent: a `client` mod (a
-HUD, a minimap) never blocks a join and is never told to a server, and a `server` mod stays private to it. A manifest
-with no `side` line is `client`, so a content mod meant for both halves must say `side = "both"`, or this check
+local resource pack) never blocks a join and is never told to a server. A manifest with no `side` line is `client`,
+so a content mod meant for both halves must say `side = "both"`, or this check
 ignores it. A mod run from a folder (`--dev-mod`) has no file hash and matches by version. Native mods are not in the
 list yet: their manifest has no side.
 

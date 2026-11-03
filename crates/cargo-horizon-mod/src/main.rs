@@ -10,7 +10,7 @@
 //! - `check <file> [--json]`: what the registry checks of a submission
 //!   (`.hmod`, `.hnmod`, `.hpack`, resource pack `.zip`, `.hshader`).
 //! - `registry build|review|check|list`: the registry repository's CI.
-use horizon_mods::{Capability, Content, Manifest, Package, manifest::MANIFEST};
+use horizon_mods::{Content, Manifest, Package, manifest::MANIFEST};
 mod check;
 mod registry;
 
@@ -208,14 +208,9 @@ fn build() -> Result<PathBuf, String> {
 fn build_in(root: &Path) -> Result<PathBuf, String> {
     let manifest_text = std::fs::read_to_string(root.join(MANIFEST))
         .map_err(|e| format!("{MANIFEST}: {e} (run this in a mod's folder)"))?;
-    let manifest = Manifest::parse(&manifest_text)?;
+    let manifest = Package::read(root)?.manifest;
     if root.join("Cargo.toml").exists() {
         return Err("a Cargo.toml: code mods are native now (docs/native-mods.md)".into());
-    }
-    if !manifest.capabilities.contains(&Capability::Registries) {
-        return Err(format!(
-            "a content mod has capability registries in {MANIFEST}"
-        ));
     }
     // The same checks as the game's, and the files in the order it lists them.
     let content = Content::read(root, &manifest)?;
@@ -230,7 +225,7 @@ fn build_in(root: &Path) -> Result<PathBuf, String> {
     let path = dir.join(format!("{}.hmod", manifest.id));
     // Write then rename, so a running game never reads half a file.
     let partial = path.with_extension("hmod.partial");
-    let bytes = Package::write_files(&manifest_text, None, &files)?;
+    let bytes = Package::write_files(&manifest_text, &files)?;
     std::fs::write(&partial, bytes).map_err(|e| e.to_string())?;
     std::fs::rename(&partial, &path).map_err(|e| e.to_string())?;
     Ok(path)
@@ -307,7 +302,6 @@ mod tests {
         let hmod = build_in(&path).unwrap();
         assert_eq!(hmod, path.join("target/horizon-mod/gems.hmod"));
         let package = Package::read(&hmod).unwrap();
-        assert!(package.wasm.is_none());
         let content = Content::read(&hmod, &package.manifest).unwrap();
         assert!(
             content
@@ -321,6 +315,13 @@ mod tests {
             "{}",
             report.text()
         );
+        std::fs::write(path.join("mod.wasm"), b"\0asm").unwrap();
+        assert!(
+            build_in(&path)
+                .unwrap_err()
+                .contains("unsupported executable file")
+        );
+        std::fs::remove_file(path.join("mod.wasm")).unwrap();
         // Code is native now.
         std::fs::write(path.join("Cargo.toml"), "").unwrap();
         assert!(build_in(&path).unwrap_err().contains("native"));
