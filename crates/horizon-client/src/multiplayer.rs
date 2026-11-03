@@ -1395,14 +1395,17 @@ impl Screen {
                 );
             }
             Self::Disconnected { reason, retry } => {
+                let lines = wrap(reason, 300.0, atlas);
+                // Keep the complete reason above the retry notice and buttons.
+                let top = half(h) + 8.0 - lines.len() as f32 * 9.0;
                 centered(
                     batch,
                     &crate::lang::get_or("disconnect.lost", "Connection Lost"),
-                    half(h) - 40.0,
+                    top - 24.0,
                     rgba(170, 170, 170, 255),
                 );
-                for (i, line) in wrap(reason, 300.0, atlas).iter().enumerate() {
-                    centered(batch, line, half(h) - 16.0 + i as f32 * 9.0, u32::MAX);
+                for (i, line) in lines.iter().enumerate() {
+                    centered(batch, line, top + i as f32 * 9.0, u32::MAX);
                 }
                 if let Some(r) = retry {
                     let text = r.text(std::time::Instant::now());

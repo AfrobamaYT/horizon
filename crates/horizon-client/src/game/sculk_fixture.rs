@@ -472,15 +472,8 @@ impl Game<'_> {
             }
             m.random = LegacyRandom::new(spec.seed);
             // EntityType.create equips nothing (that is finalizeSpawn's job).
-            for slot in [
-                &mut m.extra.main_hand,
-                &mut m.extra.off_hand,
-                &mut m.extra.head,
-                &mut m.extra.chest,
-                &mut m.extra.legs,
-                &mut m.extra.feet,
-            ] {
-                *slot = None;
+            for slot in horizon_items::equipment::MAINHAND..=horizon_items::equipment::HEAD {
+                m.extra.set_slot_stack(slot, None);
             }
             if s.trace_events {
                 horizon_client::mobs::warden::finalize(&mut m, false, &mut Vec::new());

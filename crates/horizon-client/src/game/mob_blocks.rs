@@ -389,8 +389,13 @@ impl Game<'_> {
         out: &mut Vec<Vertex>,
     ) {
         // ItemInHandLayer submits with OverlayTexture.NO_OVERLAY: no hurt tint.
-        for (item, off_hand) in [(&mob.extra.main_hand, false), (&mob.extra.off_hand, true)] {
-            let Some(item) = item else { continue };
+        for (slot, off_hand) in [
+            (horizon_items::equipment::MAINHAND, false),
+            (horizon_items::equipment::OFFHAND, true),
+        ] {
+            let Some(item) = mob.extra.slot_stack(slot).map(|s| &s.item) else {
+                continue;
+            };
             let left = off_hand != mob.main_arm_left();
             // PlayerItemInHandLayer.submitArmWithItem (avatars only): a spyglass
             // in use, with no swing in progress, is held to the eye (`heldOnHead`).
@@ -527,10 +532,8 @@ impl Game<'_> {
         let mut stack = if local_player {
             let Some(stack) = &self.armor[0] else { return };
             stack.clone()
-        } else if let Some(stack) = &mob.extra.armor[0] {
+        } else if let Some(stack) = mob.extra.slot_stack(horizon_items::equipment::HEAD) {
             stack.clone()
-        } else if let Some(head) = &mob.extra.head {
-            ItemStack::new(head, 1)
         } else {
             return;
         };

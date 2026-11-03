@@ -721,7 +721,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mod_api::ServerHost;
+    use crate::mod_api::{self, ServerHost};
     use horizon_client::mobs::{Anim, Brain, Mob, MobType, Part, Species};
     use horizon_core::geometry::Vec3;
     use std::sync::Arc;
@@ -760,6 +760,7 @@ mod tests {
             pre: Arc<AtomicUsize>,
             cancel_cow: Arc<AtomicBool>,
         }
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn living_conversion_pre(
                 &self,

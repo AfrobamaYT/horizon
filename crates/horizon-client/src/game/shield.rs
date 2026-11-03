@@ -195,8 +195,7 @@ impl Game<'_> {
             5.0
         } else {
             m.extra
-                .main_hand
-                .as_deref()
+                .main_hand_id()
                 .and_then(|item| self.items().get(item))
                 .map_or(0.0, |i| i.disable_blocking_seconds)
         };
