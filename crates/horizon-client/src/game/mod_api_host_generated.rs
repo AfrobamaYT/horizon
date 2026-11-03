@@ -606,6 +606,18 @@ impl Host for super::Game<'_> {
     fn drop_at(&mut self, pos: [i32; 3], stack: ItemStack) {
         self.native_drop_at(pos, stack)
     }
+    fn level_set_block(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: NativeBlockUpdateFlags,
+    ) -> bool {
+        self.native_level_set_block(level, pos, state, flags)
+    }
+    fn level_destroy_block(&mut self, level: LevelRef, pos: [i32; 3], drop: bool) -> bool {
+        self.native_level_destroy_block(level, pos, drop)
+    }
     fn level_entities_in(
         &self,
         level: LevelRef,
