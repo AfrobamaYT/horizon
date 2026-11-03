@@ -651,4 +651,66 @@ mod tests {
             );
         });
     }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn momentum_follows_a_boats_displacement_and_a_refused_blow_still_attacks() {
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            // A boat that moved along +Z while its velocity points along +X.
+            let id = game.take_entity_id();
+            let mut boat = super::super::boats::Boat::new(id, "oak".into(), Vec3::ZERO, 0.0);
+            boat.previous = Vec3::new(0.0, 0.0, -2.0);
+            boat.position = Vec3::ZERO;
+            boat.velocity = Vec3::new(5.0, 0.0, 0.0);
+            game.boats.push(boat);
+            let boat = game.native_entity(id).unwrap();
+            assert_eq!(
+                game.native_entity_known_speed(boat),
+                Some(Vec3::new(0.0, 0.0, 2.0))
+            );
+            let mut shot = arrow(Who::Mob(99));
+            shot.velocity = Vec3::new(1.0, 0.0, 0.0);
+            game.add_projectile(shot);
+            let arrow_ref = game
+                .native_projectile_ref(
+                    game.native_entity(game.creatures.projectiles[0].id)
+                        .unwrap(),
+                )
+                .unwrap();
+            assert!(arrow_ref.deflect(
+                game,
+                NativeDeflection::MomentumDeflect,
+                Some(boat),
+                None,
+                true,
+                [3.0; 3]
+            ));
+            assert_eq!(
+                game.creatures.projectiles[0].velocity,
+                Vec3::new(0.0, 0.0, 3.0)
+            );
+
+            // A player's blow at a new wind charge: refused, yet the attack
+            // charge resets and nothing about the charge changes.
+            let mut charge =
+                Projectile::new(ProjectileKind::WindCharge, Vec3::ZERO, Some(Who::Mob(99)));
+            charge.velocity = Vec3::new(0.0, 1.0, 0.0);
+            game.add_projectile(charge);
+            let i = game.creatures.projectiles.len() - 1;
+            game.attack_ticks = 50;
+            assert!(!game.deflect(i));
+            assert_eq!(game.attack_ticks, 0);
+            assert_eq!(
+                game.creatures.projectiles[i].velocity,
+                Vec3::new(0.0, 1.0, 0.0)
+            );
+            assert_eq!(game.creatures.projectiles[i].owner, Some(Who::Mob(99)));
+            game.creatures.projectiles[i].no_deflect_ticks = 0;
+            game.attack_ticks = 50;
+            assert!(game.deflect(i));
+            assert_eq!(game.attack_ticks, 0);
+            assert_eq!(game.creatures.projectiles[i].owner, Some(Who::Player));
+        });
+    }
 }

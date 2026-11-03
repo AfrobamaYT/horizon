@@ -81,7 +81,7 @@ impl Rocket {
             attached_to: None,
             angled: false,
             item,
-            random: horizon_client::projectiles::position_random(position),
+            random: horizon_client::projectiles::unique_random(position),
         }
     }
     /// `FireworkRocketEntity.addAdditionalSaveData`; the owner only when it is `player`.
@@ -132,7 +132,7 @@ impl Rocket {
             attached_to: None,
             angled: r.angled,
             item,
-            random: horizon_client::projectiles::position_random(r.position),
+            random: horizon_client::projectiles::unique_random(r.position),
         }
     }
     /// One tick of a server's client: the rocket flies on by itself between

@@ -22,8 +22,9 @@ pub fn own_random(shooter: &crate::mobs::Mob) -> horizon_core::random::LegacyRan
     )
 }
 
-/// A random seeded from a position: what an entity built without a shooter
-/// gets for `Entity.random`, which vanilla seeds unpredictably.
+/// A random seeded from a position alone: an arrow's existing seed, so two
+/// arrows at one spot share a stream (tracked on #29). New randoms use
+/// [`unique_random`].
 pub fn position_random(position: Vec3) -> horizon_core::random::LegacyRandom {
     horizon_core::random::LegacyRandom::new(
         position.x.to_bits() as i64 ^ position.z.to_bits().rotate_left(17) as i64,
@@ -39,6 +40,31 @@ impl PartialEq for OwnRandom {
     fn eq(&self, _: &Self) -> bool {
         true
     }
+}
+
+/// `RandomSource.create()` for a new entity's random: `seedUniquifier ^
+/// nanoTime`. Every call steps a process-wide uniquifier (as `Random`'s) and
+/// mixes the position in through a splitmix64 finalizer, so two entities made
+/// at one spot get independent streams. Draws nothing from any level random.
+pub fn unique_random(position: Vec3) -> horizon_core::random::LegacyRandom {
+    use std::sync::atomic::{AtomicI64, Ordering};
+    static UNIQUIFIER: AtomicI64 = AtomicI64::new(0x1F3D_5B79_A2C4_E681);
+    const STEP: i64 = 1_181_783_497_276_652_981;
+    let step = UNIQUIFIER
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |s| {
+            Some(
+                s.wrapping_mul(STEP)
+                    .wrapping_add(0x9E37_79B9_7F4A_7C15_u64 as i64),
+            )
+        })
+        .unwrap_or_default();
+    let mut z = (step as u64)
+        ^ position.x.to_bits()
+        ^ position.y.to_bits().rotate_left(21)
+        ^ position.z.to_bits().rotate_left(42);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    horizon_core::random::LegacyRandom::new((z ^ (z >> 31)) as i64)
 }
 
 /// `ProjectileDeflection`: how a projectile's movement turns.
@@ -480,7 +506,7 @@ impl Projectile {
             no_gravity: false,
             fire_ticks: 0,
             // Entity.random: seeded unpredictably, the position stands in.
-            random: OwnRandom(position_random(position)),
+            random: OwnRandom(unique_random(position)),
             no_deflect_ticks,
             arrow: kind_is_arrow
                 .then(|| Box::new(crate::arrows::ArrowState::new(position_random(position)))),
@@ -1954,6 +1980,22 @@ mod deflect_tests {
         // A breeze's wind charge, and any other kind, has no such window.
         let breeze = Projectile::new(ProjectileKind::BreezeWindCharge, Vec3::ZERO, None);
         assert_eq!(breeze.no_deflect_ticks, 0);
+    }
+
+    /// Two projectiles made at one spot do not share a random stream.
+    #[test]
+    fn projectiles_at_one_spot_get_independent_randoms() {
+        let at = Vec3::new(1.0, 64.0, 2.0);
+        let mut a = Projectile::new(ProjectileKind::Snowball, at, None);
+        let mut b = Projectile::new(ProjectileKind::Snowball, at, None);
+        let (fa, fb): (Vec<f32>, Vec<f32>) = (0..6)
+            .map(|_| (a.random.0.next_float(), b.random.0.next_float()))
+            .unzip();
+        assert_ne!(fa, fb);
+        assert_ne!(
+            unique_random(at).next_float(),
+            unique_random(at).next_float()
+        );
     }
 
     /// `REVERSE` takes exactly one float from the projectile's own random:

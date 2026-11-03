@@ -129,11 +129,7 @@ impl Game<'_> {
         ) {
             self.hit_shulker_bullet(None, i);
         } else {
-            if !self.deflect(i) {
-                // `Player.deflectProjectile` refused (a wind charge made
-                // under five ticks ago): the blow goes on as an attack.
-                return false;
-            }
+            self.deflect(i);
         }
         true
     }
@@ -200,9 +196,28 @@ impl Game<'_> {
         Some(horizon_world::view_direction::view_vector(pitch, yaw))
     }
 
-    /// `Projectile.deflect(AIM_DEFLECT, player, player, true)`. False, and
-    /// nothing changes, when the projectile refuses.
+    /// `Player.attack` on a redirectable projectile: `onAttack` resets the
+    /// attack strength, then `Projectile.deflect(AIM_DEFLECT, player, player,
+    /// true)`. When the projectile refuses (a wind charge in its first five
+    /// ticks) the blow goes on as an ordinary attack, which a projectile does
+    /// not take: `hurtOrSimulate` fails and `PLAYER_ATTACK_NODAMAGE` plays,
+    /// the same sound. Either way the swing follows. True when it turned.
     pub(super) fn deflect(&mut self, i: usize) -> bool {
+        self.reset_attack_strength();
+        let turned = self.turn_projectile(i);
+        self.swing_arm();
+        let from = self
+            .player
+            .as_ref()
+            .map(|p| [p.position.x, p.position.y, p.position.z]);
+        self.audio
+            .play("minecraft:entity.player.attack.nodamage", from, 1.0, 1.0);
+        turned
+    }
+
+    /// The deflection itself: the view as the new movement, the player as
+    /// owner. False, and nothing changes, when the projectile refuses.
+    fn turn_projectile(&mut self, i: usize) -> bool {
         let dir = view_vector(self.yaw, self.pitch);
         let (guest, owner_uuid) = (self.lan_acting, Some(self.acting_player_uuid()));
         let p = &mut self.creatures.projectiles[i];
@@ -215,17 +230,6 @@ impl Game<'_> {
         p.pitch = dir[1].atan2(dir[0].hypot(dir[2])).to_degrees() as f32;
         // Not into the one who turned it on its way out.
         p.left_owner = false;
-        // The deflection set `needsSync`, `onDeflection`'s power and the
-        // owner (on a server the guest who struck it): a server's players
-        // see it turn at once, not at the fireball's next update.
-        self.reset_attack_strength();
-        self.swing_arm();
-        let from = self
-            .player
-            .as_ref()
-            .map(|p| [p.position.x, p.position.y, p.position.z]);
-        self.audio
-            .play("minecraft:entity.player.attack.nodamage", from, 1.0, 1.0);
         true
     }
 }

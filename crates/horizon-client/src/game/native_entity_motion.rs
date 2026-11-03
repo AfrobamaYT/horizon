@@ -47,39 +47,68 @@ impl Game<'_> {
         };
         Some([v.x, v.y, v.z])
     }
-    /// `Entity.getKnownSpeed`, in blocks a tick: what the entity moved in its
-    /// last tick (`computeSpeed`), or for a player what the client reported.
-    /// A mob, projectile, rocket or trident gives its displacement; any other
-    /// simulated entity its velocity.
+    /// `Entity.getKnownSpeed`, in blocks a tick: a player's reported move; a
+    /// vehicle with a live controlling player, that player's; else what the
+    /// entity moved in its last tick (`computeSpeed`: position minus the
+    /// previous tick's). Every list the walk keeps has a previous position.
+    /// A frame, painting, crystal, spawner, cloud, fangs or marker never
+    /// moves, so zero; the dragon uses its own previous position.
     pub(super) fn native_entity_known_speed(&self, entity: EntityRef) -> Option<Vec3> {
         let t = self.native_entity_target(entity)?;
         if let Some(g) = self.native_target_guest(t) {
             let [x, y, z] = g.known_movement;
             return Some(Vec3::new(x, y, z));
         }
-        Some(match t {
-            Target::Player => self.known_player_movement(),
-            Target::Mob(id) => {
-                let m = self.mobs.iter().find(|m| m.id == id)?;
-                m.position.subtract(m.previous)
-            }
-            Target::Projectile(id) => {
-                let p = self.creatures.projectiles.iter().find(|p| p.id == id)?;
-                p.position.subtract(p.previous)
-            }
-            Target::Rocket(id) => {
-                let r = self.rockets.iter().find(|r| r.id == id)?;
-                r.position.subtract(r.previous)
-            }
-            Target::Trident(id) => {
-                let r = self.tridents.iter().find(|r| r.id == id)?;
-                r.position.subtract(r.previous)
-            }
-            _ => {
-                let [x, y, z] = self.native_entity_velocity(entity)?;
-                Vec3::new(x, y, z)
-            }
+        if matches!(t, Target::Player) {
+            return Some(self.known_player_movement());
+        }
+        if let Some(rider) = self.native_controlling_player(t, entity) {
+            return self.native_entity_known_speed(rider);
+        }
+        if let Target::Dragon(_) = t {
+            let d = self.dragon.as_ref()?;
+            return Some(d.position.subtract(d.previous));
+        }
+        Some(match self.native_walk_entity(entity.id()) {
+            Some(h) => with_entity!(self, h, e => e.position().subtract(e.previous_position())),
+            None => Vec3::ZERO,
         })
+    }
+    /// `Entity.getControllingPassenger` when it is a player: a boat's first
+    /// passenger, or the first passenger of a mount a player steers (horses,
+    /// camels, pigs, striders, happy ghasts, nautiluses).
+    fn native_controlling_player(&self, t: Target, entity: EntityRef) -> Option<EntityRef> {
+        let steered = match t {
+            Target::Boat(_) => true,
+            Target::Mob(id) => self.mobs.iter().any(|m| {
+                m.id == id
+                    && matches!(
+                        m.kind.id.trim_start_matches("minecraft:"),
+                        "horse"
+                            | "donkey"
+                            | "mule"
+                            | "skeleton_horse"
+                            | "zombie_horse"
+                            | "camel"
+                            | "pig"
+                            | "strider"
+                            | "happy_ghast"
+                            | "nautilus"
+                            | "zombie_nautilus"
+                    )
+            }),
+            _ => false,
+        };
+        let first = *self
+            .native_entity_passengers(entity)
+            .ok_or(())
+            .ok()?
+            .first()?;
+        let player = matches!(
+            self.native_entity_target(first)?,
+            Target::Player | Target::Guest(_)
+        );
+        (steered && player).then_some(first)
     }
     /// Sets the entity's velocity (`Entity.setDeltaMovement`); clients see it
     /// as they see the entity move. False for a player (its client moves

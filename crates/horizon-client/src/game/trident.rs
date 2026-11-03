@@ -124,7 +124,7 @@ impl ThrownTrident {
             age: 0,
             owner: 0,
             guest: None,
-            random: horizon_client::projectiles::position_random(position),
+            random: horizon_client::projectiles::unique_random(position),
         }
     }
     /// `ThrownTrident.tick`'s Loyalty return: pulled up and towards the
@@ -445,7 +445,7 @@ impl Game<'_> {
             age: 0,
             owner: 0,
             guest: self.lan_acting,
-            random: horizon_client::projectiles::position_random(start),
+            random: horizon_client::projectiles::unique_random(start),
         });
         self.player_projectile_shot();
         self.audio
