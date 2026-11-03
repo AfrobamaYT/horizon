@@ -6,7 +6,9 @@
 //! follows. Players resolve through the shared player-handle path
 //! (`native_server.rs`), so reads return None for a stale handle, for a player
 //! who isn't online here or whose record is swapped out, and when the player
-//! never died. A death in a level that is not loaded reads as None too.
+//! never died. A death in a level that is not loaded reads as None too. A
+//! write needs a living player (`native_as_player`), so it is refused inside
+//! `player_died`, where the read still works.
 use super::Game;
 use horizon_client::mod_api::{LevelRef, PlayerRef};
 
@@ -184,17 +186,14 @@ mod tests {
             let overworld = game.native_level("minecraft:overworld").unwrap();
             game.lan.as_mut().unwrap().hub.guests[0].last_death =
                 Some(("minecraft:overworld".into(), [4, 70, -9]));
-            // During the guest's turn the list is out, yet the acting player
-            // resolves, and the record is the one swapped into the level.
-            let mut host = game.lan.take().unwrap();
+            // During the guest's turn the acting player resolves, and the record is the one swapped into the level.
             let seen = game
-                .as_guest(&mut host, 1, |game| {
+                .as_guest(1, |game| {
                     let before = player.last_death_location(&*game);
                     let set = player.set_last_death_location(game, Some((overworld, [1, 2, 3])));
                     (before, set, player.last_death_location(&*game))
                 })
                 .unwrap();
-            game.lan = Some(host);
             assert_eq!(
                 seen,
                 (
@@ -259,9 +258,7 @@ mod tests {
                 guest.position = [-1.2, 64.9, 7.1];
                 guest.health = 0.0;
             }
-            let mut host = game.lan.take().unwrap();
-            game.guest_die(&mut host, 0, 1);
-            game.lan = Some(host);
+            game.guest_die(0, 1);
 
             let guest = &game.lan.as_ref().unwrap().hub.guests[0];
             assert!(guest.dead);
