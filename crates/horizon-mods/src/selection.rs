@@ -1,4 +1,7 @@
 //! The package candidates the game loads, before content validation and conflicts.
+mod context;
+pub use context::{Argument, LaunchArguments, MissingValue, ModSelectionContext};
+
 use crate::{Package, find, index::native};
 use std::{
     collections::BTreeSet,

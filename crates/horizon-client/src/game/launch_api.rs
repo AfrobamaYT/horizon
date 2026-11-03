@@ -222,7 +222,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(o.fullscreen && o.session_stdin);
-        assert_eq!(o.game_dir.as_deref(), Some(std::path::Path::new("g")));
+        assert_eq!(o.game_dir, Some(std::env::current_dir().unwrap().join("g")));
         assert!(parse(&["--launch-api"]).unwrap().is_none());
         assert!(parse(&["--no-such-option"]).is_err());
     }
