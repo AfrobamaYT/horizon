@@ -708,7 +708,7 @@ fn namespaced(id: &str) -> bool {
 /// the error lists every part refused, naming its mods.
 pub(crate) fn install_parts(mods: &[Box<dyn Hooks>]) -> Result<(), Vec<String>> {
     let mut registrar = Registrar::default();
-    for (index, hooks) in super::entered(mods, "register").enumerate() {
+    for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
         registrar.mod_index = index;
         hooks.register(&mut registrar);
     }
