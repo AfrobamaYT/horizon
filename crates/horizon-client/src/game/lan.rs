@@ -2228,6 +2228,11 @@ impl Game<'_> {
         self.lan = Some(host);
     }
 
+    /// Spend the current level's forced marks after its tracker snapshot.
+    pub(super) fn spend_forced_meta(&mut self) {
+        self.persist.forced_meta.clear();
+    }
+
     /// Run the hub for this tick and apply what the guests did. While the
     /// single player game is `paused` only the connections run
     /// (`IntegratedServer.tickPaused`): `ServerGamePacketListenerImpl.tick`
@@ -2302,7 +2307,7 @@ impl Game<'_> {
                 }
             }
             // Persist is swapped per level, so parked dimensions retain their marks.
-            self.persist.forced_meta.clear();
+            self.spend_forced_meta();
             // ServerEntity.sendChanges clears needsSync once it has looked.
             for m in &mut self.mobs {
                 m.needs_sync = false;

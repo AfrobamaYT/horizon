@@ -1030,7 +1030,7 @@ mod tests {
                 });
                 game.lan_entity_uuids(&mut snapshot);
                 assert_eq!(snapshot.as_slice()[0].forced_meta, [1 << 8, 0, 0, 0]);
-                game.persist.forced_meta.clear();
+                game.spend_forced_meta();
                 assert!(game.persist.forced_meta.is_empty());
             }
         });
