@@ -4118,6 +4118,7 @@ mod teleport_mob_tests {
     }
 }
 
+#[cfg(test)]
 mod teleport_player_tests {
     use crate::game::native_entity_refs::tests::with_game;
     use horizon_client::motion::PlayerMotion;
