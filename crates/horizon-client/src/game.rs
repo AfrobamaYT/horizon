@@ -20099,7 +20099,11 @@ fn load_resources(
         world_loading::preload_launch_world(folder, &root, assets.registry, biomes.clone());
     }
     let tables = Arc::new(startup::time("pack.mesh_tables", || {
-        MeshTables::new(&assets, &render, &facts, visibility)
+        if headless {
+            Ok(MeshTables::server())
+        } else {
+            MeshTables::new(&assets, &render, &facts, visibility)
+        }
     })?);
     let pack_step = startup::step("pack.assemble");
     let pack = PackResources::assemble(

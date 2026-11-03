@@ -621,6 +621,23 @@ fn redstone_color(power: u8) -> u32 {
     ((r * 255.0) as u32) << 16 | ((g * 255.0) as u32) << 8 | (b * 255.0) as u32
 }
 impl MeshTables {
+    /// A server's worker context never dispatches mesh jobs. Keep no per-state
+    /// rendering facts or sprite layers; generation and lighting use their own
+    /// gameplay and light tables.
+    pub fn server() -> Self {
+        Self {
+            info: Vec::new(),
+            solid: Vec::new(),
+            full_faces: Vec::new(),
+            visibility: FaceVisibility::empty(),
+            water_still: 0,
+            water_flow: 0,
+            water_overlay: 0,
+            lava_still: 0,
+            lava_flow: 0,
+            animated_layers: Vec::new(),
+        }
+    }
     pub fn new(
         assets: &Assets,
         render: &RenderAssets,
