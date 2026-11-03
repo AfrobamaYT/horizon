@@ -1,7 +1,6 @@
 //! Native item data component helpers.
 use super::Game;
 use horizon_client::items::ItemStack;
-use horizon_client::mod_api::BackendSeal;
 use horizon_world::nbt::Tag;
 
 /// Failure to access a native item component.
@@ -34,15 +33,13 @@ impl Game<'_> {
     }
     /// Whether an enchantment on `stack` has effect component `effect`, by the world's
     /// enchantment definitions (`EnchantmentHelper.has`), behind
-    /// `ItemResource::has_enchantment_effect`, which alone makes the seal. API
+    /// `ItemResource::has_enchantment_effect`, through the opaque backend. API
     /// @API:item_components@.
     pub(super) fn native_item_has_enchantment_effect(
         &self,
-        seal: BackendSeal,
         stack: &ItemStack,
         effect: &str,
     ) -> bool {
-        let _ = seal;
         world_stations!(self)
             .enchantments
             .has_component(stack, effect)

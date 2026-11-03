@@ -8,10 +8,6 @@ use super::Host;
 /// one a mod opens.
 pub struct TransactionSeal(());
 
-/// What the game's glue behind a `mod_api` method takes, and only `mod_api` makes, so a mod
-/// calls the method, never the glue. The opaque backend (#231) takes its place there.
-pub struct BackendSeal(pub(super) ());
-
 /// An open transaction, as NeoForge's `TransactionContext`: what every write of a handler or a
 /// place takes, so none happens outside one. Only `host.transaction` makes one, and lends it to
 /// its closure alone.

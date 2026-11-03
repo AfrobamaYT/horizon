@@ -2030,7 +2030,7 @@ pub use resource::{
     ComponentId, EnchantmentEffect, ItemResource, Overanswered, PREVENT_ARMOR_CHANGE,
     ResourceHandler, move_resources,
 };
-pub use transaction::{BackendSeal, Transaction, TransactionSeal, run_transaction};
+pub use transaction::{Transaction, TransactionSeal, run_transaction};
 mod part_table;
 pub use part_table::{
     Attached, BlockEntityProviders, BlockProvider, EntityProvider, ItemProvider, Parts, Registrar,
