@@ -754,6 +754,8 @@ one, where vanilla gives the `by` one.
 
 - Context-free block and item tag lookups from server hooks (`native_server_block_in_tag`, `native_server_item_in_tag`). They return `NotServer` on a client and `TagsUnavailable` before the world loads its tags. An unknown tag returns false; an empty stack tests `minecraft:air`.
 
+- A block part's `should_check_weak_power` adjusts whether a signal query reads indirect power through that block, for its position and input direction.
+
 - A block part's `should_redstone_wire_connect_to` adjusts whether redstone wire connects to that block for the given position and optional direction.
 
 - A mod block's comparator output, as vanilla's `BlockBehaviour.hasAnalogOutputSignal` and `getAnalogOutputSignal`: `native_has_analog_output` says a block of yours has one,
