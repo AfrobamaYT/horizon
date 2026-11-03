@@ -519,6 +519,40 @@ impl Host for super::Game<'_> {
     fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
         self.native_entity_level(entity)
     }
+    fn block_entity_type(&self, pos: [i32; 3]) -> Option<String> {
+        self.native_block_entity_type(pos)
+    }
+    fn container_size(&self, pos: [i32; 3], side: Option<Direction>) -> Option<usize> {
+        self.native_container_size(pos, side)
+    }
+    fn container_stack(
+        &self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        slot: usize,
+    ) -> Option<ItemStack> {
+        self.native_container_stack(pos, side, slot)
+    }
+    fn container_insert(
+        &mut self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        slot: usize,
+        stack: ItemStack,
+        simulate: bool,
+    ) -> Option<ItemStack> {
+        self.native_container_insert(pos, side, slot, stack, simulate)
+    }
+    fn container_extract(
+        &mut self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        slot: usize,
+        max: u32,
+        simulate: bool,
+    ) -> Option<ItemStack> {
+        self.native_container_extract(pos, side, slot, max, simulate)
+    }
     fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
         self.native_item_container_slots(stack)
     }

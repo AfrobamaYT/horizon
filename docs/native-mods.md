@@ -3016,6 +3016,14 @@ doesn't exist warns. Opening a world fails, naming the mod, when a part is attac
 doesn't have. Scoped hooks run on a game's thread; one dispatched from any other thread (which no game hook
 does) can't see tag parts, and warns once.
 
+A capability is answered by block entity type: `r.block_entity_capability(&ITEMS, "mymod:pipe",
+Arc::new(PipeItems))` gives the type an `ItemHandler` in place of the game's answer, and
+`host.capability(&ITEMS, pos)` finds the handler at `pos`, the mod's or the game's own (a block entity's slots
+by side, by the rules hoppers follow). A handler holds no borrow: each call is given the host, so it may call a
+neighbour's capability, and it keeps its state in the block entity's slots, compound or attachments. Hoppers and
+`insert_item` use a mod's handler where one is registered; `simulate` answers without changing anything. A
+mod's own capability is a `CapabilityKey::new("mymod:chemicals")`, answered only by parts.
+
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements

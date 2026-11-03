@@ -741,8 +741,10 @@ macro_rules! level_attachment_host {
 }
 level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
+mod capability;
+pub use capability::{CapabilityKey, ITEMS, ItemHandler};
 mod part_table;
-pub use part_table::{Attached, Parts, Registrar};
+pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
 pub(crate) use part_table::{KnownIds, install_parts, mark_game_thread, parts, resolve_parts};
 
 mod generated;
