@@ -901,3 +901,49 @@ mod death_loot_table_tests {
         assert_eq!(after_never, after_default);
     }
 }
+#[cfg(test)]
+mod slot_tests {
+    use super::*;
+    use crate::mobs::sensor_scan_tests::kind;
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    fn mob(id: &str, species: Species) -> Mob {
+        let mut kind = kind();
+        let k = Arc::make_mut(&mut kind);
+        k.id = id.into();
+        k.species = species;
+        Mob::new(1, kind, Vec3::ZERO, 0.0)
+    }
+
+    /// A wolf's armor is the body slot, with the durability it lost; a
+    /// helmet beside it reads from the head slot.
+    #[test]
+    fn a_wolfs_slots_read_apart() {
+        let mut wolf = mob("minecraft:wolf", Species::Wolf);
+        wolf.extra.body = Some("minecraft:wolf_armor".into());
+        wolf.extra.body_damage = 9;
+        wolf.extra.head = Some("minecraft:iron_helmet".into());
+        let body = slot_item(&wolf, "body").unwrap();
+        let head = slot_item(&wolf, "head").unwrap();
+        assert_eq!(
+            (body.item.as_str(), body.damage),
+            ("minecraft:wolf_armor", 9)
+        );
+        assert_eq!(head.item, "minecraft:iron_helmet");
+        // The armor was put on by `Equippable`, so it always drops.
+        assert_eq!(drop_chance(&wolf, "body"), 2.0);
+    }
+
+    /// A body item nothing equipped (a `/item replace ... armor.body` on a
+    /// zombie) drops by the default chance, as vanilla's unequipped slot.
+    #[test]
+    fn a_zombies_body_item_drops_by_the_default_chance() {
+        let mut zombie = mob("minecraft:zombie", Species::Zombie);
+        zombie.extra.body = Some("minecraft:iron_helmet".into());
+        assert_eq!(drop_chance(&zombie, "body"), DEFAULT_DROP_CHANCE);
+        let body = slot_item(&zombie, "body").unwrap();
+        assert_eq!(body.item, "minecraft:iron_helmet");
+        assert!(slot_item(&zombie, "head").is_none());
+    }
+}

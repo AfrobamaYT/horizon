@@ -8328,11 +8328,11 @@ mod living_drops_tests {
                     Vec3::new(4.5, 64.0, 4.5),
                     0.0,
                 ));
-            game.break_armor_stand_by_anything(0, "minecraft:explosion", 0);
+            game.break_armor_stand_by_anything(0, "minecraft:player_explosion", 12);
             let seen = seen.lock().unwrap();
             assert_eq!(
                 seen.last().unwrap(),
-                "minecraft:armor_stand [] minecraft:explosion false"
+                "minecraft:armor_stand [] minecraft:player_explosion false"
             );
         });
     }

@@ -868,12 +868,14 @@ impl Game<'_> {
             }
             self.armor_stand_turtle_eggs(i, landed)?;
             let a = &mut self.armor_stands[i];
-            if !a.environment_tick(&self.world, self.res.facts(), self.pack.assets.registry) {
-                dead.push(i);
+            if let Some(damage_type) =
+                a.environment_tick(&self.world, self.res.facts(), self.pack.assets.registry)
+            {
+                dead.push((i, damage_type));
             }
         }
-        for i in dead.into_iter().rev() {
-            self.break_armor_stand_by_anything(i, "minecraft:generic", 0);
+        for (i, damage_type) in dead.into_iter().rev() {
+            self.break_armor_stand_by_anything(i, damage_type, 0);
         }
         Ok(())
     }

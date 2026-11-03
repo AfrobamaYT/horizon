@@ -1602,8 +1602,10 @@ impl ArmorStand {
         world: &World,
         facts: &BlockFacts,
         registry: &horizon_world::registry::BlockRegistry,
-    ) -> bool {
+    ) -> Option<&'static str> {
         let (lo, hi) = (self.bounds().min_position(), self.bounds().max_position());
+        // The damage type of the last hit that lowered its health.
+        let mut hit_by = None;
         let mut water = false;
         let mut lava = false;
         for x in lo.x.floor() as i32..=hi.x.floor() as i32 {
@@ -1628,6 +1630,7 @@ impl ArmorStand {
                 && self.health > 0.5
             {
                 self.health -= 4.0;
+                hit_by = Some("minecraft:on_fire");
             }
             self.fire_ticks -= 1;
         }
@@ -1640,11 +1643,14 @@ impl ArmorStand {
         if fire && !self.invisible && !self.marker && !self.no_gravity {
             if self.fire_ticks > 0 {
                 self.health -= 0.15;
+                hit_by = Some("minecraft:in_fire");
             } else {
                 self.fire_ticks = 100;
             }
         }
-        self.health > 0.5
+        // Dead: the damage type that ran its health out, which vanilla's
+        // `brokenByAnything` receives as the `DamageSource`.
+        (self.health <= 0.5).then(|| hit_by.unwrap_or("minecraft:generic"))
     }
     /// EntityType.ARMOR_STAND dimensions (0.5 x 1.975, half for small).
     pub fn bounds(&self) -> Aabb {
@@ -1997,9 +2003,23 @@ mod fire_environment_tests {
             )
             .unwrap();
         for _ in 0..150 {
-            assert!(stand.environment_tick(&world, &facts, assets.registry));
+            assert!(
+                stand
+                    .environment_tick(&world, &facts, assets.registry)
+                    .is_none()
+            );
         }
         assert_eq!(stand.health, 20.0, "lava does not hurt armor stands");
+        // A stand the flames run out of health names the damage that did it.
+        world
+            .set(20, 4, 20, assets.registry.default_state("minecraft:air").unwrap())
+            .unwrap();
+        stand.health = 4.0;
+        stand.fire_ticks = 20;
+        assert_eq!(
+            stand.environment_tick(&world, &facts, assets.registry),
+            Some("minecraft:on_fire")
+        );
     }
 }
 #[cfg(test)]
