@@ -390,7 +390,7 @@ mod tests {
             game.dropped
                 .iter()
                 .filter(|item| item.stack.item.as_ref() == "minecraft:diamond")
-                .map(|item| u32::from(item.stack.count))
+                .map(|item| item.stack.count)
                 .sum::<u32>(),
             3
         );
