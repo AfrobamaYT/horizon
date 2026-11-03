@@ -979,7 +979,10 @@ impl Game<'_> {
             } else {
                 None
             },
-            ask_mods: self.asks_mods(),
+            asks_animal_tame: self.remote.is_none()
+                && crate::mod_api::listened(crate::mod_api::HookId::AnimalTame),
+            asks_living_destroy_block: self.remote.is_none()
+                && crate::mod_api::listened(crate::mod_api::HookId::LivingDestroyBlock),
             asks_baby_spawn: self.remote.is_none()
                 && crate::mod_api::listened(crate::mod_api::HookId::BabyEntitySpawn),
             border: Some(self.border.geometry()),
@@ -1622,10 +1625,6 @@ impl Game<'_> {
             }
             None => None,
         }
-    }
-    /// A server with native mods: it asks their cancellable mob events.
-    pub(super) fn asks_mods(&self) -> bool {
-        self.remote.is_none() && !horizon_client::mod_api::mods().is_empty()
     }
     fn killer_uuid(&mut self, conn: Option<u32>) -> Option<u128> {
         match conn {
@@ -7964,6 +7963,36 @@ fn breeding_credit(
 }
 
 #[cfg(test)]
+mod mob_subscription_tests {
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn empty_mod_stops_deferring_after_each_default_handler() {
+        use crate::mod_api::{self, Hooks};
+        struct Empty;
+        impl Hooks for Empty {}
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("empty", Box::new(Empty))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let world = game.mob_world_base(&[]);
+                assert!(world.asks_animal_tame && world.asks_living_destroy_block);
+                let mut cancel = false;
+                game.native_animal_tame(1, 1, 2, "minecraft:horse", &mut cancel);
+                game.native_living_destroy_block(
+                    2,
+                    "minecraft:ravager",
+                    [0; 3],
+                    game.world.air,
+                    &mut cancel,
+                );
+                let world = game.mob_world_base(&[]);
+                assert!(!world.asks_animal_tame && !world.asks_living_destroy_block);
+                assert!(!cancel);
+            });
+        });
+    }
+}
+
+#[cfg(test)]
 mod breeding_tests {
     use super::*;
 
@@ -8299,7 +8328,8 @@ mod pearl_tests {
             items: Some(&items),
             lid_openers: &lid_openers,
             mod_effects: None,
-            ask_mods: false,
+            asks_animal_tame: false,
+            asks_living_destroy_block: false,
             asks_baby_spawn: false,
             border: None,
         };
