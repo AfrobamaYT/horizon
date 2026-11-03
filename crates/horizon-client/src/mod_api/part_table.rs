@@ -166,8 +166,8 @@ impl std::ops::Deref for PartsRef {
     }
 }
 
-/// The parts hook `hook` asks: with no tag parts, the key parts every game shares; otherwise this
-/// thread's game's, or the key parts until its world opens.
+/// The parts hook `hook` asks: this game thread's resolved table, then the shared key parts
+/// when there are no tag parts, then the off-thread path.
 pub(crate) fn parts(hook: &'static str) -> PartsRef {
     let Some(installed) = installed() else {
         return PartsRef::Shared(&NO_PARTS);
@@ -846,6 +846,18 @@ pub(crate) mod tests {
         }
     }
 
+    /// Connects redstone wire to its block from any side.
+    struct Connector;
+    impl BlockPart for Connector {
+        fn should_redstone_wire_connect_to(
+            &self,
+            _: &dyn LevelHost,
+            event: &mut ShouldRedstoneWireConnectToEvent,
+        ) {
+            event.connected = true;
+        }
+    }
+
     /// The block entity of type `test:press_entity`, held by block `test:press`: it ticks, and
     /// each tick adds a data slot.
     struct Press;
@@ -938,6 +950,7 @@ pub(crate) mod tests {
     impl Hooks for Doubler {
         fn register(&self, r: &mut Registrar) {
             r.block_part("test:gauge", Gauge);
+            r.block_part("test:connector", Connector);
             r.block_part_tag("test:gauged", TagGauge);
             r.block_entity_part("test:press_entity", &["test:press"], Press);
             r.block_entity_part("test:hoard", &["test:press"], Hoard);
@@ -2018,6 +2031,21 @@ pub(crate) mod tests {
         mods
     }
 
+    /// Install a redstone connector on glass for real-game tests.
+    pub(crate) fn redstone_game_thread() {
+        struct RedstoneMod;
+        impl Hooks for RedstoneMod {
+            fn register(&self, r: &mut Registrar) {
+                r.block_part("minecraft:glass", Connector);
+            }
+        }
+        let mods: super::super::Mods =
+            vec![ModEntry::new("redstone_test", Box::new(RedstoneMod))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        mark_game_thread();
+    }
+
     /// The comparator reading of state `state`, from 1.
     fn read(state: u32) -> i32 {
         let mut output = 1;
@@ -2044,10 +2072,11 @@ pub(crate) mod tests {
             KnownIds {
                 block: &|_| true,
                 item: &|_| true,
-                state_count: 3,
+                state_count: 4,
                 state_block: &|state| match state {
                     1 => "test:gauge",
                     2 => "test:other",
+                    3 => "test:connector",
                     _ => "minecraft:air",
                 },
             },
@@ -2063,6 +2092,24 @@ pub(crate) mod tests {
         // Doubled by the mod, then 5 more from the part: (1 * 2) + 5.
         assert_eq!(read(1), 7);
         assert_eq!(read(2), 2);
+    }
+
+    #[test]
+    fn redstone_connection_is_scoped_to_the_attached_block() {
+        game_thread();
+        resolve(&[]).unwrap();
+        for (state, expected) in [(3, true), (2, false)] {
+            let mut connected = false;
+            dispatch_should_redstone_wire_connect_to(
+                &Level,
+                LevelDimension::Overworld,
+                BlockPos::new(0, 64, 0),
+                BlockStateId(state),
+                Some(Direction::East),
+                &mut connected,
+            );
+            assert_eq!(connected, expected);
+        }
     }
 
     #[test]
