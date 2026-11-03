@@ -261,8 +261,6 @@
 //!
 //! API 224 adds An experience bottle broke and awarded experience (`native_exp_bottle`).
 //!
-//! API 223 adds A mob conversion completed (`native_entity_transform`).
-//!
 //! API 222 adds A guest player's fall flying state changed (`native_entity_toggle_glide`).
 //!
 //! API 221 adds A server entity completed a same-level teleport command (`native_entity_teleport`).
@@ -654,7 +652,7 @@
 //! hands it vanilla's choice (the damage bar, or a bundle's fullness already applied), to replace or hide.
 //!
 //! API 59 adds entities for server mods (`native_summon`,
-//! `native_set_display`, `native_remove_entity`, in `native_entities.rs`).
+//! `native_set_display`, in `native_entities.rs`).
 //!
 //! API 58 adds the renderer's hook points, in `horizon-client-render`'s
 //! `gfx/native_render.rs`: `native_world_drawn` (draw with the world's colour,
@@ -732,8 +730,7 @@
 //! `native_is_signal_source`, and the helper `native_update_signal_neighbors`).
 //!
 //! API 37 adds mobs for server mods (`native_spawn_mob`, `native_mob`,
-//! `native_mobs`,
-//! `native_set_mob_health`, `native_kill_mob`, `native_remove_mob`... in
+//! `native_mobs`, `native_set_mob_health`, `native_kill_mob`... in
 //! `native_mobs.rs`).
 //!
 //! API 36 adds recipes of a mod's own types (`native_recipes_of_type`,
@@ -6319,25 +6316,6 @@ impl Game<'_> {
         mod_api::dispatch_entity_enter_love_mode(self, mod_api::mods(), entity, kind, player);
     }
 
-    /// A mob conversion completed; both ids and entity types are reported.
-    /// 223.
-    pub(super) fn native_entity_transform(
-        &mut self,
-        entity: u32,
-        kind: &str,
-        transformed: u32,
-        transformed_kind: &str,
-    ) {
-        mod_api::dispatch_entity_transform(
-            self,
-            mod_api::mods(),
-            entity,
-            kind,
-            transformed,
-            transformed_kind,
-        );
-    }
-
     /// A mob or server player is about to die (NeoForge's `LivingDeathEvent`,
     /// vanilla's `LivingEntity.die`): its health has run out, and the loot,
     /// experience and death message have not run. `entity` is its id and
@@ -6392,9 +6370,9 @@ impl Game<'_> {
     }
 
     /// A mob converted into another type (NeoForge's
-    /// `LivingConversionEvent.Post`): `entity` is gone, `converted` took its
-    /// place. Fires with `native_entity_transform`, after the new mob joined
-    /// the level, for the conversions `native_living_conversion_pre` tells.
+    /// `LivingConversionEvent.Post`): `converted` replaces `entity`. Fires
+    /// after the finalized new mob joined the level and before the old mob
+    /// is removed, for the conversions `native_living_conversion_pre` tells.
     /// API @API:living_conversion_post@.
     pub(super) fn native_living_conversion_post(
         &mut self,
@@ -10078,18 +10056,19 @@ impl Game<'_> {
         self.native_loot_drops(&context, drops);
         drops.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
     }
-    /// The mods' say on what the acting player's use drops
-    /// (`NativeLootDrops::used`): `table` is the loot table rolled, if any.
+    /// The mods' say on what a use drops (`NativeLootDrops::used`): `table`
+    /// is the loot table rolled, if any, and `player` the user, none for a
+    /// dispenser.
     pub(super) fn native_use_drops(
         &mut self,
         table: &str,
         origin: [f64; 3],
         block: Option<([i32; 3], BlockStateId)>,
         entity: Option<(u32, &str)>,
+        player: Option<u128>,
         tool: Option<&ItemStack>,
         drops: &mut Vec<ItemStack>,
     ) {
-        let player = Some(self.native_acting_id());
         let context = NativeLootDrops {
             table,
             dimension: self.dim.id(),

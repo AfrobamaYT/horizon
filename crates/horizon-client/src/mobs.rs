@@ -1343,6 +1343,13 @@ impl MannequinDescription {
         }
     }
 }
+/// Whether breeding experience was drawn in the parent's tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BreedExperience {
+    Deferred,
+    Drawn(Option<u32>),
+}
+
 /// Events a mob tick asks the game to act on.
 #[derive(Clone, Debug)]
 pub enum MobEvent {
@@ -1885,6 +1892,8 @@ pub enum MobEvent {
         /// A llama's baby, drawn from the parent's random as
         /// `Llama.getBreedOffspring` does.
         llama: Option<Box<super::mobs::llama::Offspring>>,
+        /// The parent-RNG experience decision, if already made.
+        experience: BreedExperience,
     },
     /// Replace a block by name (sheep turning grass to dirt), optionally with
     /// the destroy effect.
@@ -2666,6 +2675,11 @@ impl PlayerView {
         self.effects.contains(&effect)
     }
 }
+/// `Animal.finalizeSpawnChildFromBreeding`: draw only when mob drops are enabled.
+pub fn breeding_experience(parent: &mut Mob, mob_drops: bool) -> Option<u32> {
+    mob_drops.then(|| 1 + parent.random.next_int_bound(7).unwrap_or(0) as u32)
+}
+
 #[derive(Clone)]
 pub struct MobWorld<'a> {
     pub world: &'a World,

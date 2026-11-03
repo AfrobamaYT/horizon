@@ -747,8 +747,7 @@ API 58 adds [the renderer's hook points](#render-hook-points): `native_world_dra
 `native_render_needs`, where a mod asks for the entity runs and the world's depth without a shader pack. Bundles that use them need `"hooks": 58`.
 
 API 59 adds [entities](#entities) for server mods: `native_summon(dimension, kind, pos, nbt)` spawns any entity from its compound
-as `/summon` does, and `native_set_display` (a display's transformation, eased over ticks) and
-`native_remove_entity` pose and remove displays, markers and interactions: models that move, from a mod's own
+as `/summon` does. `native_set_display` sets a display's transformation, eased over ticks, to pose a mod's own
 item models. Bundles that use them need `"hooks": 59`.
 
 API 60 adds `native_item_bar(stack, bar)`: the small bar `GuiGraphicsExtractor.itemDecorations` draws under an item,
@@ -822,7 +821,7 @@ item is consumed, on the server thread, for the acting player. The kind and the 
 the game's own effects, sounds, teleports and drops are open to the hook. An unclaimed kind does nothing.
 The hook sees the item's own consumable component, not a patch on the stack; a bare vanilla name and an unknown `minecraft:` kind are the loader's, not the hook's. Bundles that use it need "hooks": 74.
 
-API 75 adds [loot table hooks](#loot-tables), for changing loot a mod didn't make. `native_loot_table_load(id, table)`, in `horizon-world`'s `loot.rs`, gets each loot table's JSON as it loads, after the data packs' (NeoForge's `LootTableLoadEvent`, Fabric's `LootTableEvents.MODIFY`): add pools or entries, change or replace it, and chests, block and mob drops, fishing and the rest then roll the changed table. It runs wherever tables load, a client too. `native_loot_drops(context, drops)` gets the items a broken block or a dead mob is about to drop, to add, change or take out (global loot modifiers, `MODIFY_DROPS`), with `NativeLootDrops`: the table rolled, the dimension, the origin, the block or the mob, the player who broke or killed it, the tool and an explosion's radius. It hears blocks a player, an explosion or a mob breaks, not other breaks such as leaves decaying. Bundles need `"hooks": 75`.
+API 75 adds [loot table hooks](#loot-tables), for changing loot a mod didn't make. `native_loot_table_load(id, table)`, in `horizon-world`'s `loot.rs`, gets each loot table's JSON as it loads, after the data packs' (NeoForge's `LootTableLoadEvent`, Fabric's `LootTableEvents.MODIFY`): add pools or entries, change or replace it, and chests, block and mob drops, fishing and the rest then roll the changed table. It runs on the server for each data load and reload, not client preloads. `native_loot_drops(context, drops)` gets the items a broken block or a dead mob is about to drop, to add, change or take out (global loot modifiers, `MODIFY_DROPS`), with `NativeLootDrops`: the table rolled, the dimension, the origin, the block or the mob, the player who broke or killed it, the tool and an explosion's radius. It hears blocks a player, an explosion or a mob breaks, not other breaks such as leaves decaying. Bundles need `"hooks": 75`.
 
 API 76 adds `native_state_for_placement(state, context, fluid, answer)`: the state a block is about to be placed in
 (`Block.getStateForPlacement(BlockPlaceContext)`), `state` the block's own default state. Answer only for your own
@@ -2166,7 +2165,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_exp_bottle(pos, experience)`**: an experience bottle broke and its orbs were created.
 - **`native_firework_explode(entity, pos, bursts)`**: a firework rocket completed its damage and explosion effects.
 - **`native_potion_splash(item, pos)`**: a thrown splash or lingering potion finished applying its hit effects at `pos`. Experience bottles are excluded.
-- **`native_entity_transform(entity, kind, transformed, transformed_kind)`**: a mob conversion completed through the shared `Mob.convertTo` path.
 - **`native_entity_enter_love_mode(entity, kind, player)`**: a mob entered love mode after a player interaction; `player` is the feeder UUID when known.
 - **`native_entity_teleport(dimension, entity, from, to)`**: a server entity completed a same-level teleport command. `entity` is its network id; `from` and `to` are coordinates in `dimension`. This reports the move after it happens.
 - **`native_entity_breed(parent, partner, child)`**: two mobs completed a breeding action. `child` is absent when the vanilla action lays an egg instead of creating a baby.
@@ -2385,8 +2383,7 @@ place; `native_server_tick` does not define one, so name the dimension and expec
   is, and kept when its chunk unloads. Nothing is spawned outside `/summon`'s bounds, in a chunk that isn't loaded, or a monster on peaceful.
 - `native_mob(dimension, id)` and `native_mobs(dimension)` read the living mobs: id, dimension, kind, position, yaw, health and maximum health.
 - `native_set_mob_health(dimension, id, health)` changes a mob's health, and answers false for no such mob or a value that isn't finite or above 0.
-- `native_kill_mob(dimension, id)` kills as `/kill` does, with its loot; `native_remove_mob(dimension, id)` takes the mob away with no death
-  and no loot (it is not saved either).
+- `native_kill_mob(dimension, id)` kills as `/kill` does, with its loot. `EntityRef::discard` removes an entity without death or loot.
 - While the game ticks its mobs they are out of the level: from a hook inside that tick, a spawned mob joins after the tick, and the others
   read as gone.
 
@@ -2397,8 +2394,8 @@ Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global l
 
 - **`horizon_world::loot::native_loot_table_load(id, table)`**: each table's JSON as it loads, after the data packs'. Push a pool
   onto `table["pools"]` or an entry onto a pool's `entries`; chests, block and mob drops, fishing and the rest then roll the
-  changed table. Keep a replaced table's `random_sequence`: a mob's table without one drops nothing. It runs wherever tables load,
-  a client too, so make the same change each time; a `/reload` may keep the tables already loaded. It is a free function in
+  changed table. Keep a replaced table's `random_sequence`: a mob's table without one drops nothing. It runs once per table on
+  each server data load and `/reload`, not on client preloads. It is a free function in
   `crates/horizon-world/src/loot.rs`, so a helper injected there compiles inside `horizon-world`, without `crate::game`.
 - **`native_loot_drops(context, drops)`**: the items a broken block or a dead mob is about to drop, after its tables rolled (a
   mob's worn, held and carried items and inventory too, not an enderman's carried block or a copper golem's preserved equipment).
@@ -2440,7 +2437,6 @@ names the level it means by its `dimension` (`minecraft:overworld`), as `native_
 - `native_set_display(dimension, id, &NativeDisplay)` sets a `block_display`, `item_display` or `text_display`'s
   transformation (translation, left rotation, scale, right rotation; quaternions `[x, y, z, w]`), the ticks players see it
   ease over (`interpolation`) and its teleport duration (`teleport`, 0 to 59). Each call restarts the ease on clients.
-- `native_remove_entity(dimension, id)` removes such an entity as `/kill` does. Mobs go with `native_remove_mob`.
 
 A model that moves (a turning gun barrel, a thrown projectile) is an `item_display` showing an item whose model comes from
 the mod's `.hmod` assets: summon it once, then move and pose it from a tick hook. Easing between ticks happens on each

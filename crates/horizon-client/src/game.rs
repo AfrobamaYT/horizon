@@ -8,9 +8,10 @@
 /// which borrows stay disjoint from.
 macro_rules! world_items {
     ($s:ident) => {
-        match &$s.world_tables {
-            Some(t) => &t.items,
-            None => $s.res.items(),
+        match (&$s.server_items, &$s.world_tables) {
+            (Some(items), _) => items,
+            (None, Some(t)) => &t.items,
+            (None, None) => $s.res.items(),
         }
     };
 }
@@ -2854,6 +2855,9 @@ struct Game<'a> {
     /// The world's data packs' content tables, when it has packs (`None`
     /// keeps `Resources.rest`'s own in use).
     world_tables: Option<WorldTables>,
+    /// Server-owned loot and item snapshots, independent of client preloads.
+    server_loot: horizon_client::structure_blocks::LootSnapshot,
+    server_items: Option<Items>,
     /// The world is superflat (`ServerLevel.isFlat`, for every dimension).
     world_flat: bool,
     /// The world is the Debug preset (`Level.isDebug`, for every dimension): its blocks
@@ -4683,10 +4687,7 @@ impl Game<'_> {
             loot: if self.remote.is_some() {
                 None
             } else {
-                horizon_client::structure_blocks::loot_data(
-                    &self.options.resources,
-                    &pack_files(&self.world_tables),
-                )
+                self.server_loot.get()
             },
             registry: self.pack.assets.registry,
             rules,
@@ -6492,7 +6493,7 @@ impl Game<'_> {
         }
         // A fence click reaches the hook before attaching a lead.
         if on_block
-            && (use_block.or(!(sneaking && hands_full))
+            && (self.hand == Hand::Main && use_block.or(!(sneaking && hands_full))
                 || use_item.or(true)
                     && self
                         .held()
@@ -12341,7 +12342,9 @@ impl Game<'_> {
             session_lock,
             rand_sequences,
             locator,
+            loot,
         } = prepared;
+        self.server_loot = loot;
         let dim = Dim::from_id(&level.dimension);
         self.level_shapes = shapes;
         self.world_root = save_root.clone();
@@ -12370,10 +12373,7 @@ impl Game<'_> {
         }
         // Warm the loot data with this world's packs before chunks decode
         // (`save::roll_loaded_loot` reads the cached copy).
-        let _ = horizon_client::structure_blocks::world_loot_data(
-            &self.options.resources,
-            &pack_files(&self.world_tables),
-        );
+        self.load_server_loot();
         // TagsUpdatedEvent (SERVER_DATA_LOAD): the world's data is in, before
         // its chunks and players are.
         self.native_server_data_loaded(false);
@@ -12717,6 +12717,8 @@ impl Game<'_> {
             return self.leave_server(None);
         }
         // The save screen has finished every write before releasing storage.
+        self.server_loot.set(None);
+        self.server_items = None;
         self.session_lock = None;
         self.world_icon = None;
         horizon_client::crash::clear_detail("World");
@@ -19453,6 +19455,8 @@ impl<'a> Game<'a> {
             rcon_source: false,
             server_lists: None,
             world_tables: None,
+            server_loot: Default::default(),
+            server_items: None,
             cmds: Default::default(),
             ui: chat::UiState::new(),
             combat: Default::default(),
@@ -19774,10 +19778,7 @@ impl Game<'_> {
     /// The content tables the world plays with: its data packs' over the
     /// game's own when it has packs, `Resources.rest`'s own otherwise.
     fn items(&self) -> &Items {
-        match &self.world_tables {
-            Some(t) => &t.items,
-            None => self.res.items(),
-        }
+        world_items!(self)
     }
     fn recipes(&self) -> &Recipes {
         match &self.world_tables {
@@ -19867,6 +19868,34 @@ impl Game<'_> {
             data_maps,
         })
     }
+    /// Build and publish one server snapshot for this world load or reload.
+    fn load_server_loot(&mut self) {
+        self.server_items = None;
+        let overlay = pack_files(&self.world_tables);
+        let loot = if horizon_client::mod_api::mods().is_empty() {
+            horizon_client::structure_blocks::world_loot_data(&self.options.resources, &overlay)
+        } else {
+            match horizon_world::loot::LootData::load(&self.options.resources, &overlay) {
+                Ok(mut loot) => {
+                    loot.apply_native_table_loads();
+                    Some(Arc::new(loot))
+                }
+                Err(e) => {
+                    log::warn!("Horizon: server loot tables unavailable: {e}");
+                    None
+                }
+            }
+        };
+        if !horizon_client::mod_api::mods().is_empty()
+            && let Some(loot) = &loot
+        {
+            let mut items = self.items().clone();
+            items.set_loot_tables(loot.tables().clone());
+            self.server_items = Some(items);
+        }
+        self.server_loot.set(loot);
+    }
+
     /// Resolve the mods' parts against the tags this game plays with (`/reload` again): mods
     /// that attach parts to a block or item it doesn't have are an error.
     pub(super) fn resolve_parts(&self) -> Result<()> {
@@ -19889,11 +19918,12 @@ impl Game<'_> {
             return;
         }
         self.world_tables = self.build_world_tables();
+        self.recipe_tables.categories = None;
+        horizon_client::structure_blocks::forget_loot_data();
+        self.load_server_loot();
         if let Err(e) = self.resolve_parts() {
             log::warn!("Horizon: {e}");
         }
-        self.recipe_tables.categories = None;
-        horizon_client::structure_blocks::forget_loot_data();
         // Before the players are sent the reloaded data below.
         self.sync_recipe_content();
         // PlayerList.reloadResources: the tags and recipes go to the players
@@ -22082,6 +22112,37 @@ fn debug_crosshair_drawn(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn reload_resolves_parts_against_reloaded_tags() {
+        use crate::mod_api::{self, BlockPart, DataPackFilesEvent, Hooks, Host, Registrar};
+        struct TagPart;
+        impl BlockPart for TagPart {}
+        struct ReloadMod;
+        impl Hooks for ReloadMod {
+            fn register(&self, registrar: &mut Registrar) {
+                registrar.block_part_tag("test:reload", TagPart);
+            }
+            fn data_pack_files(&self, _: &dyn Host, event: &mut DataPackFilesEvent<'_>) {
+                event.files.push((
+                    "tags/test:block/reload".into(),
+                    br#"{"values":["minecraft:stone"]}"#.to_vec(),
+                ));
+            }
+        }
+        let mods: mod_api::Mods = vec![Box::new(ReloadMod) as Box<dyn Hooks>].into();
+        mod_api::install_parts(&mods).unwrap();
+        assert!(mod_api::MODS.set(mods).is_ok());
+        super::native_entity_refs::tests::with_game(|game| {
+            game.load_server_loot();
+            game.reload_world_tables();
+            assert!(
+                !mod_api::parts("test")
+                    .block(|| Some("minecraft:stone"))
+                    .is_empty()
+            );
+        });
+    }
     use super::*;
     use horizon_client::container_screen::{Button, Clicks, Release, Target};
 
@@ -22230,6 +22291,61 @@ mod tests {
             let before = calls.load(Ordering::SeqCst);
             game.use_item_as_player().unwrap();
             assert_eq!(calls.load(Ordering::SeqCst), before + 1);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn fence_ties_without_a_lead_only_on_main_hand() {
+        use horizon_client::{mobs::leash::Holder, mod_api::NativeBlockUpdateFlags};
+        super::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let fence = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:oak_fence")
+                .unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [0, 64, 0],
+                fence,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            let hit = Hit {
+                pos: [0, 64, 0],
+                face: [0, 1, 0],
+                point: [0.5, 65.0, 0.5],
+                inside: false,
+            };
+            let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+            let mut mob = horizon_client::mobs::Mob::new(
+                12,
+                kind,
+                horizon_core::geometry::Vec3::new(1.0, 64.0, 1.0),
+                0.0,
+            );
+            mob.extra.leash = Some(Holder::Player);
+            game.mobs.push(mob);
+            game.forced_hit = Some(hit);
+            game.guest_use = Some(GuestUse::OnBlock(Hand::Off));
+            game.with_hand(Hand::Off, |game| game.use_hand(Some(&hit)))
+                .unwrap();
+            assert_eq!(game.mobs[0].extra.leash, Some(Holder::Player));
+            game.offhand = Some(ItemStack::new("minecraft:lead", 1));
+            game.with_hand(Hand::Off, |game| game.use_hand(Some(&hit)))
+                .unwrap();
+            assert_eq!(game.mobs[0].extra.leash, Some(Holder::Knot(hit.pos)));
+            game.mobs[0].extra.leash = Some(Holder::Player);
+            game.offhand = None;
+            game.guest_use = Some(GuestUse::OnBlock(Hand::Main));
+            game.with_hand(Hand::Main, |game| game.use_hand(Some(&hit)))
+                .unwrap();
+            assert_eq!(game.mobs[0].extra.leash, Some(Holder::Knot(hit.pos)));
         });
     }
 
