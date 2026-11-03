@@ -884,6 +884,16 @@ pub struct NativeClipHit {
     pub world_border: bool,
 }
 
+/// One item cooldown a player waits on (`ItemCooldowns.cooldowns`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeItemCooldown {
+    /// The cooldown group: an item id, or the group an item's
+    /// `use_cooldown` component names.
+    pub group: String,
+    /// Ticks until the cooldown ends.
+    pub ticks_left: i32,
+}
+
 /// An online player in one open server world, keyed by UUID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PlayerRef {
