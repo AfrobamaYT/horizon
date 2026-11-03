@@ -6783,7 +6783,7 @@ impl Game<'_> {
         if let Some(hit) = block_hit {
             let (player, player_entity_id) = self.native_clicker();
             let (hand, at) = (self.hand, hit.native());
-            self.native_use_item_on(
+            self.native_use_on(
                 &stack,
                 hit.pos,
                 hit.face,

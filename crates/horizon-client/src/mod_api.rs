@@ -2384,7 +2384,7 @@ mod tests {
     struct Probe;
 
     impl Hooks for Probe {
-        fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+        fn use_on(&self, host: &mut dyn Host, event: &mut UseOnEvent<'_>) -> Flow {
             let player = host.acting_player().expect("a player acts");
             let level = host.level(&player.dimension).expect("a loaded level");
             let block = level.block(host, event.pos).expect("a loaded block");
@@ -2504,7 +2504,7 @@ mod tests {
     struct Chatty;
 
     impl Hooks for Chatty {
-        fn use_item_on(&self, host: &mut dyn Host, _event: &mut UseItemOnEvent<'_>) -> Flow {
+        fn use_on(&self, host: &mut dyn Host, _event: &mut UseOnEvent<'_>) -> Flow {
             host.tell(7, Text::literal("hello"));
             Flow::Continue
         }
@@ -2612,7 +2612,7 @@ mod tests {
             let mut claimed = false;
             let (pos, face) = ([1, 2, 3], [0, 1, 0]);
             let hit = top_hit();
-            dispatch_use_item_on(
+            dispatch_use_on(
                 &mut host,
                 &stack,
                 pos,
@@ -2763,7 +2763,7 @@ mod tests {
         };
         let mut claimed = false;
         let (pos, face) = ([0; 3], [0, 1, 0]);
-        dispatch_use_item_on(
+        dispatch_use_on(
             &mut host,
             &stick(),
             pos,
@@ -2785,7 +2785,7 @@ mod tests {
     struct OffHandTop;
 
     impl Hooks for OffHandTop {
-        fn use_item_on(&self, _: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+        fn use_on(&self, _: &mut dyn Host, event: &mut UseOnEvent<'_>) -> Flow {
             assert_eq!((event.player, event.player_entity_id), (7, 41));
             assert_eq!((event.hand, event.hit), (Hand::Off, top_hit()));
             Flow::Continue
@@ -2824,7 +2824,7 @@ mod tests {
             lines: Vec::new(),
         };
         let mut claimed = false;
-        dispatch_use_item_on(
+        dispatch_use_on(
             &mut host,
             &stick(),
             [0; 3],
