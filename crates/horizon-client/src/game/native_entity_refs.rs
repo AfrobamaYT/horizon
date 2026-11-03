@@ -561,7 +561,7 @@ pub(super) mod tests {
         use horizon_client::{
             items::ItemStack,
             lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
-            mod_api::EquipmentSlot,
+            mod_api::{EquipmentSlot, GameMode},
         };
         use horizon_protocol::packets::configuration::ClientInformation;
         use std::sync::{
@@ -621,15 +621,19 @@ pub(super) mod tests {
             }
             game.lan = Some(host);
             let player = game.native_player_ref(12).unwrap();
-            assert!(!game.native_player_set_game_mode(player, -1));
-            assert!(!game.native_player_set_game_mode(player, 4));
-            assert!(!game.native_player_set_game_mode(player, 0));
-            assert!(game.native_player_set_game_mode(player, 1));
-            assert_eq!(game.native_player_game_mode(player), Some(1));
+            assert!(!game.native_player_set_game_mode(player, GameMode::Survival));
+            assert!(game.native_player_set_game_mode(player, GameMode::Creative));
+            assert_eq!(
+                game.native_player_game_mode(player),
+                Some(GameMode::Creative)
+            );
             let abilities = game.native_player_abilities(player).unwrap();
             assert!(abilities.invulnerable && abilities.may_fly && abilities.instabuild);
-            assert!(game.native_player_set_game_mode(player, 0));
-            assert_eq!(game.native_player_game_mode(player), Some(0));
+            assert!(game.native_player_set_game_mode(player, GameMode::Survival));
+            assert_eq!(
+                game.native_player_game_mode(player),
+                Some(GameMode::Survival)
+            );
             let abilities = game.native_player_abilities(player).unwrap();
             assert!(!abilities.invulnerable && !abilities.may_fly && !abilities.instabuild);
             let mut stale = player;
@@ -637,7 +641,7 @@ pub(super) mod tests {
                 horizon_client::mod_api::NativeWorldEpoch::new(0),
                 player.entity.id(),
             );
-            assert!(!game.native_player_set_game_mode(stale, 1));
+            assert!(!game.native_player_set_game_mode(stale, GameMode::Creative));
             host = game.lan.take().unwrap();
             let other = game
                 .native_lifecycle
@@ -682,11 +686,14 @@ pub(super) mod tests {
             );
             let player = game.native_player_ref(13).unwrap();
             assert_eq!(player.entity, other);
-            assert_eq!(player.game_mode(game), Some(0));
-            assert!(!game.native_player_set_game_mode(player, 1));
+            assert_eq!(player.game_mode(game), Some(GameMode::Survival));
+            assert!(!game.native_player_set_game_mode(player, GameMode::Creative));
             let acting = game.native_player_ref(12).unwrap();
-            assert!(game.native_player_set_game_mode(acting, 2));
-            assert_eq!(game.native_player_game_mode(acting), Some(2));
+            assert!(game.native_player_set_game_mode(acting, GameMode::Adventure));
+            assert_eq!(
+                game.native_player_game_mode(acting),
+                Some(GameMode::Adventure)
+            );
             host = game.lan.take().unwrap();
             let nested = game.enter_guest(&mut host, 13).unwrap();
             game.lan = Some(host);

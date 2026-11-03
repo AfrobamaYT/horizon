@@ -918,6 +918,49 @@ impl From<PlayerRef> for EntityRef {
     }
 }
 
+/// A player's game mode (vanilla's `GameType`).
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GameMode {
+    Survival,
+    Creative,
+    Adventure,
+    Spectator,
+}
+
+impl GameMode {
+    /// Every mode, in id order.
+    pub const ALL: [Self; 4] = [
+        Self::Survival,
+        Self::Creative,
+        Self::Adventure,
+        Self::Spectator,
+    ];
+    /// `GameType.getId`: 0 survival, 1 creative, 2 adventure, 3 spectator.
+    pub fn id(self) -> i32 {
+        match self {
+            Self::Survival => 0,
+            Self::Creative => 1,
+            Self::Adventure => 2,
+            Self::Spectator => 3,
+        }
+    }
+    /// The mode with `GameType` id `id`, or None for an id vanilla doesn't
+    /// have.
+    pub fn from_id(id: i32) -> Option<Self> {
+        Self::ALL.into_iter().find(|mode| mode.id() == id)
+    }
+    /// `GameType.getName`: `survival`, `creative`, `adventure`, `spectator`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Survival => "survival",
+            Self::Creative => "creative",
+            Self::Adventure => "adventure",
+            Self::Spectator => "spectator",
+        }
+    }
+}
+
 /// One player's open menu, invalidated on close, replacement or reconnect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MenuRef {
@@ -1359,6 +1402,16 @@ pub(crate) use part_table::tests as part_tests;
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn game_modes_round_trip_through_their_ids() {
+        for mode in GameMode::ALL {
+            assert_eq!(GameMode::from_id(mode.id()), Some(mode));
+        }
+        assert_eq!(GameMode::from_id(-1), None);
+        assert_eq!(GameMode::from_id(4), None);
+        assert_eq!(GameMode::Adventure.name(), "adventure");
+    }
 
     struct Quiet;
     impl Hooks for Quiet {}
