@@ -14189,7 +14189,9 @@ impl Game<'_> {
                 interpolated_pitch,
                 swing: attack,
                 equip: inverse_height,
-                packed_light: packed,
+                // LightCoordsUtil.pack(block, sky), as RenderHandEvent
+                // gives it, not the vertex's encoding.
+                packed_light: u32::from(light & 15) << 4 | u32::from(light >> 4) << 20,
                 translation: [0.0; 3],
                 rotation: [0.0; 3],
                 scale: 1.0,

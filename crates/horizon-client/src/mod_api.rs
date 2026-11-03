@@ -94,6 +94,7 @@ pub struct NativeHandRender<'a> {
     pub interpolated_pitch: f32,
     pub swing: f32,
     pub equip: f32,
+    /// Vanilla packed light at the eyes (`LightCoordsUtil.pack`: block << 4 | sky << 20).
     pub packed_light: u32,
     pub translation: [f32; 3],
     pub rotation: [f32; 3],

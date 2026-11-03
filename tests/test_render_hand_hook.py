@@ -39,7 +39,7 @@ impl Game {
     fn own_uuid(&self) -> u128 { 7 }
     fn own_entity_id(&self) -> i32 { 9 }
     fn native_render_hand(&mut self, render: &mut horizon_client::mod_api::NativeHandRender<'_>, canceled: &mut bool) {
-        assert_eq!((render.player, render.player_entity_id, render.interpolated_pitch, render.packed_light), (7, 9, 2.0, 11));
+        assert_eq!((render.player, render.player_entity_id, render.interpolated_pitch, render.packed_light), (7, 9, 2.0, 3 << 4 | 10 << 20));
         self.calls.push((render.hand, render.stack.copied(), render.partial, render.swing, render.equip));
         render.translation[0] += 2.0;
         render.rotation[1] += 15.0;
@@ -49,7 +49,7 @@ impl Game {
     fn draw(&mut self) -> Vec<(usize, [f32; 3], [f32; 3], f32)> {
         let mut rendered = Vec::new();
         for (hand, item) in [Some(42), None].into_iter().enumerate() {
-            let (a, attack, inverse_height, packed) = (0.5, 0.25, 0.75, 11);
+            let (a, attack, inverse_height, light) = (0.5, 0.25, 0.75, 0xA3u8);
             PITCH
             DISPATCH
             rendered.push((hand, render.translation, render.rotation, render.scale));
