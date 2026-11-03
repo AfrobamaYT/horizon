@@ -1270,7 +1270,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             .map_or(0, |i| i as u8)
     }
     /// `NoteBlock.playNote`: queues the block event and emits the game event.
-    pub(crate) fn note_play(&mut self, pos: BlockPos, state: BlockStateId) {
+    /// `by_player` for a tune or a punch, not for redstone.
+    pub(crate) fn note_play(&mut self, pos: BlockPos, state: BlockStateId, by_player: bool) {
         let b = self.b;
         let index = self.note_instrument(state);
         if super::data::instrument_works_above(index) || b.is_air(self.above_state(pos)) {
@@ -1278,7 +1279,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             let (mut played, mut played_note) = (index, note);
             if !self
                 .level
-                .note_block_play(pos, &mut played, &mut played_note)
+                .note_block_play(pos, by_player, &mut played, &mut played_note)
             {
                 return;
             }
@@ -1367,7 +1368,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let signal = self.has_neighbor_signal(pos);
         if signal != b.table.bool(state, b.props.powered) {
             if signal {
-                self.note_play(pos, state);
+                self.note_play(pos, state, false);
             }
             self.set_block_and_update(pos, b.table.set_bool(state, b.props.powered, signal));
         }

@@ -388,8 +388,15 @@ pub trait LevelAccess {
     }
     /// `NoteBlock.playNote`: the note block at `pos` is about to play
     /// `instrument` (an index into `data::INSTRUMENTS`) at `note` (0 to 24).
+    /// `by_player` is false for redstone, whose `playNote` has no player.
     /// The level may change either; false stops the note.
-    fn note_block_play(&self, _pos: BlockPos, _instrument: &mut u8, _note: &mut i32) -> bool {
+    fn note_block_play(
+        &self,
+        _pos: BlockPos,
+        _by_player: bool,
+        _instrument: &mut u8,
+        _note: &mut i32,
+    ) -> bool {
         true
     }
     /// `BaseFireBlock.onPlace` found the empty frame `shape` around the fire

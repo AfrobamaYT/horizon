@@ -254,7 +254,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         },
                     );
                     self.set_block_and_update(pos, next);
-                    self.note_play(pos, next);
+                    self.note_play(pos, next, true);
                     Success
                 }
                 Class::RedstoneWire => self.wire_use(pos, state, player),
@@ -686,7 +686,7 @@ impl Behaviours {
             sim.dragon_egg_teleport(pos, state);
         }
         if chain.contains(&Class::Note) {
-            sim.note_play(pos, state);
+            sim.note_play(pos, state, true);
             return true;
         }
         if chain.contains(&Class::RedStoneOre) && !self.table.bool(state, self.props.lit) {

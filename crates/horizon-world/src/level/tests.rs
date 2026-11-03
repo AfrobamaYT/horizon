@@ -71,6 +71,8 @@ pub(crate) struct TestLevel {
     /// What `note_block_play` answers: the instrument index and note it
     /// plays instead, or None to stop the note.
     pub note_answer: Option<Option<(u8, i32)>>,
+    /// `by_player` of every note the level was asked about, in order.
+    pub note_players: std::cell::RefCell<Vec<bool>>,
     /// `allow_portal_spawn` refuses every portal.
     pub refuse_portals: bool,
 }
@@ -94,6 +96,7 @@ impl TestLevel {
             openers: HashMap::new(),
             opener_rechecks: Vec::new(),
             note_answer: None,
+            note_players: std::cell::RefCell::new(Vec::new()),
             refuse_portals: false,
         }
     }
@@ -188,7 +191,14 @@ impl LevelAccess for TestLevel {
             *smoke = Some(answer);
         }
     }
-    fn note_block_play(&self, _pos: BlockPos, instrument: &mut u8, note: &mut i32) -> bool {
+    fn note_block_play(
+        &self,
+        _pos: BlockPos,
+        by_player: bool,
+        instrument: &mut u8,
+        note: &mut i32,
+    ) -> bool {
+        self.note_players.borrow_mut().push(by_player);
         match self.note_answer {
             None => true,
             Some(None) => false,
@@ -3784,6 +3794,8 @@ fn a_stopped_note_still_tunes_the_block() {
     w.level.note_answer = Some(None);
     assert_eq!(w.use_block(pos), InteractionResult::Success);
     assert_eq!(w.prop(pos, "note"), "1");
+    // NoteBlock.useWithoutItem plays with its player.
+    assert_eq!(*w.level.note_players.borrow(), [true]);
     w.full_tick();
     assert!(!w.level.events.iter().any(|event| matches!(
         event,
@@ -3810,6 +3822,8 @@ fn a_stopped_note_makes_no_sound_or_game_event() {
     w.level.note_answer = Some(None);
     let (sounds, particles, game_event) = play_note(&mut w);
     assert!(sounds.is_empty() && particles.is_empty() && !game_event);
+    // NoteBlock.neighborChanged plays with no player.
+    assert_eq!(*w.level.note_players.borrow(), [false]);
 }
 
 #[test]
