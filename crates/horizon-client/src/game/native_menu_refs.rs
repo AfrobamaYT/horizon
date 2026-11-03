@@ -16,9 +16,6 @@ use horizon_client::{
 
 impl Game<'_> {
     fn native_menu_guest(&self, menu: MenuRef) -> Option<&Guest> {
-        if self.lan_acting.is_some() {
-            return None;
-        }
         let super::native_server::PlayerRead::Guest(guest) =
             self.player_handle_read(menu.player)?
         else {
