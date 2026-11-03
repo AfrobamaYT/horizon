@@ -2237,7 +2237,13 @@ impl Goal for Breed {
         if self.love_time >= reduced(60) && m.distance_sqr(p.position) < 9.0 {
             let llama = super::llama::is_llama(m.species())
                 .then(|| Box::new(super::llama::breed_offspring(m, &p)));
-            let experience = if llama.is_some() && !cx.w.ask_mods {
+            let parent_variant = (!cx.w.ask_mods
+                && matches!(
+                    m.species(),
+                    Species::Pig | Species::Cow | Species::Chicken | Species::Fox | Species::Cat
+                ))
+            .then(|| m.random.next_boolean());
+            let experience = if (llama.is_some() || parent_variant.is_some()) && !cx.w.ask_mods {
                 super::BreedExperience::Drawn(super::breeding_experience(m, cx.w.mob_drops))
             } else {
                 super::BreedExperience::Deferred
@@ -2256,6 +2262,7 @@ impl Goal for Breed {
                 parent: m.id,
                 partner: p.id,
                 llama,
+                parent_variant,
                 experience,
             });
         }
@@ -2832,6 +2839,98 @@ impl MoveToBlock {
             self.reached = true;
             self.try_ticks -= 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod breeding_variant_tests {
+    use super::*;
+    use crate::mobs::{BreedExperience, world::with_test_world};
+    use horizon_core::{
+        geometry::Vec3,
+        random::{LegacyRandom, RandomSource},
+    };
+    use std::sync::Arc;
+
+    #[test]
+    fn variant_and_experience_are_drawn_in_order_before_later_goal_work() {
+        assert!(with_test_world(&[], |world, types| {
+            for id in [
+                "minecraft:pig",
+                "minecraft:cow",
+                "minecraft:chicken",
+                "minecraft:fox",
+                "minecraft:cat",
+            ] {
+                let kind = Arc::new(types.types[id].clone());
+                let partner =
+                    [Mob::new(2, kind.clone(), Vec3::new(1.0, 64.0, 0.0), 0.0).seen(None)];
+                for (ask_mods, mob_drops) in
+                    [(false, true), (false, false), (true, true), (true, false)]
+                {
+                    let world = MobWorld {
+                        ask_mods,
+                        mob_drops,
+                        others: &partner,
+                        ..world.clone()
+                    };
+                    let mut parent = Mob::new(1, kind.clone(), Vec3::new(0.0, 64.0, 0.0), 0.0);
+                    parent.random = LegacyRandom::new(0);
+                    let mut goal = Breed {
+                        speed: 1.0,
+                        partner: Some(2),
+                        love_time: reduced(60) - 1,
+                    };
+                    let mut events = Vec::new();
+                    let mut level_random = LegacyRandom::new(1);
+                    let mut cx = Cx {
+                        w: &world,
+                        lr: &mut level_random,
+                        events: &mut events,
+                    };
+                    goal.tick(&mut parent, &mut cx);
+                    let (choice, experience) = events
+                        .iter()
+                        .find_map(|event| match event {
+                            MobEvent::Breed {
+                                parent_variant,
+                                experience,
+                                ..
+                            } => Some((*parent_variant, *experience)),
+                            _ => None,
+                        })
+                        .expect("the animals breed");
+                    assert_eq!(choice, (!ask_mods).then_some(true), "{id}");
+                    assert_eq!(
+                        experience,
+                        if ask_mods {
+                            BreedExperience::Deferred
+                        } else {
+                            BreedExperience::Drawn(mob_drops.then_some(3))
+                        },
+                        "{id}"
+                    );
+                    assert_eq!(
+                        parent.random.state(),
+                        if ask_mods {
+                            25_214_903_917
+                        } else if mob_drops {
+                            234_029_835_660_143
+                        } else {
+                            205_749_139_540_596
+                        },
+                        "{id}"
+                    );
+                    if !ask_mods && mob_drops {
+                        assert_eq!(
+                            parent.random.next_int(),
+                            1_033_096_058,
+                            "{id}: same-tick later draw"
+                        );
+                    }
+                }
+            }
+        }));
     }
 }
 

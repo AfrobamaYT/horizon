@@ -436,6 +436,17 @@ impl Game<'_> {
         scripted: bool,
         natural: bool,
     ) -> Option<u32> {
+        let mob = self.create_mob_reason(kind, at, persistent, scripted)?;
+        self.insert_spawned_mob(mob, persistent, scripted, natural)
+    }
+
+    fn create_mob_reason(
+        &mut self,
+        kind: &str,
+        at: [f64; 3],
+        persistent: bool,
+        scripted: bool,
+    ) -> Option<Mob> {
         let kind = if kind.contains(':') {
             kind.to_owned()
         } else {
@@ -461,6 +472,16 @@ impl Game<'_> {
             };
             horizon_client::mobs::raider::finalize(&mut mob, reason);
         }
+        Some(mob)
+    }
+
+    fn insert_spawned_mob(
+        &mut self,
+        mob: Mob,
+        persistent: bool,
+        scripted: bool,
+        natural: bool,
+    ) -> Option<u32> {
         let id = mob.id;
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
@@ -2966,11 +2987,10 @@ impl Game<'_> {
                     parent,
                     partner,
                     llama,
+                    parent_variant,
                     experience,
                 } => {
-                    let mob_count = self.mobs.len();
-                    self.breed(parent, partner, llama, experience);
-                    let child = self.mobs.get(mob_count).map(|m| m.id);
+                    let child = self.breed(parent, partner, llama, parent_variant, experience);
                     self.native_entity_breed(parent, partner, child);
                 }
                 MobEvent::LockGaze { mob, partner } => {
@@ -3192,6 +3212,32 @@ impl Game<'_> {
             self.add_orb(at, amount);
         }
     }
+    /// `Animal.finalizeSpawnChildFromBreeding` before the experience orb.
+    fn finalize_breeding(&mut self, parent: &Mob, partner: u32, child: Option<&Mob>) {
+        if let Some(cause) = breeding_credit(&mut self.love_cause, parent.id, partner) {
+            let parent_view = self.mob_entity(parent);
+            let partner_view = self
+                .mobs
+                .iter()
+                .find(|m| m.id == partner)
+                .map(|m| self.mob_entity(m))
+                .unwrap_or_else(|| parent_view.clone());
+            let child_view = child.map(|child| self.mob_entity(child));
+            let who = cause.map_or(
+                super::commands::Target::Player,
+                super::commands::Target::Guest,
+            );
+            self.for_player(who, |g| {
+                g.award_custom_stat("animals_bred", 1);
+                g.trigger_bred(&parent_view, &partner_view, child_view.as_ref());
+            });
+        }
+        if let Some(q) = self.mobs.iter_mut().find(|m| m.id == partner) {
+            q.extra.age = 6000;
+            q.extra.in_love = 0;
+        }
+        self.mob_event_particles(parent.id, 18);
+    }
     /// `ServerPlayer.tellNeutralMobsThatIDied`: the mobs within 32 blocks
     /// across and 10 up and down get `NeutralMob.playerDied`, when the
     /// `forgive_dead_players` rule is on. A mob's `Who::Player` is the guest
@@ -3226,11 +3272,10 @@ impl Game<'_> {
         parent: u32,
         partner: u32,
         llama: Option<Box<horizon_client::mobs::llama::Offspring>>,
+        parent_variant: Option<bool>,
         experience: horizon_client::mobs::BreedExperience,
-    ) {
-        let Some(p) = self.mobs.iter().find(|m| m.id == parent).cloned() else {
-            return;
-        };
+    ) -> Option<u32> {
+        let p = self.mobs.iter().find(|m| m.id == parent).cloned()?;
         // BabyEntitySpawnEvent: not for an egg (turtle, frog, sniffer).
         if !matches!(
             p.species(),
@@ -3274,66 +3319,40 @@ impl Game<'_> {
                     q.extra.age = 6000;
                     q.extra.in_love = 0;
                 }
-                return;
+                return None;
             }
-        }
-        // Animal.finalizeSpawnChildFromBreeding: the player who fed the parent,
-        // or else the one who fed the partner.
-        if let Some(cause) = breeding_credit(&mut self.love_cause, parent, partner) {
-            let parent = self.mob_entity(&p);
-            let partner_view = self
-                .mobs
-                .iter()
-                .find(|m| m.id == partner)
-                .map(|m| self.mob_entity(m))
-                .unwrap_or_else(|| parent.clone());
-            let mut child = parent.clone();
-            child.baby = true;
-            // TurtleBreedGoal.breed triggers it without a child.
-            let turtle = matches!(p.species(), Species::Turtle | Species::Frog);
-            if matches!(
-                (
-                    p.species(),
-                    self.mobs
-                        .iter()
-                        .find(|m| m.id == partner)
-                        .map(|m| m.species())
-                ),
-                (Species::Horse, Some(Species::Donkey)) | (Species::Donkey, Some(Species::Horse))
-            ) {
-                child.kind = "minecraft:mule".into();
-            }
-            let who = cause.map_or(
-                super::commands::Target::Player,
-                super::commands::Target::Guest,
-            );
-            self.for_player(who, |g| {
-                g.award_custom_stat("animals_bred", 1);
-                g.trigger_bred(&parent, &partner_view, (!turtle).then_some(&child));
-            });
-        }
-        if let Some(q) = self.mobs.iter_mut().find(|m| m.id == partner) {
-            q.extra.age = 6000;
-            q.extra.in_love = 0;
         }
         let q = self.mobs.iter().find(|m| m.id == partner).cloned();
-        // Animal.finalizeSpawnChildFromBreeding: entity event 18 for the parent.
-        self.mob_event_particles(parent, 18);
         // Sniffer.spawnChildFromBreeding: an egg instead of a baby.
         if p.species() == Species::Sniffer {
+            self.finalize_breeding(&p, partner, None);
             self.lay_sniffer_egg(&p);
-            return;
+            return None;
         }
         // TurtleBreedGoal.breed: the goal gave the mother her egg; only the
         // experience is left, and only with mob loot on.
         if matches!(p.species(), Species::Turtle | Species::Frog) {
+            self.finalize_breeding(&p, partner, None);
             // One `new ExperienceOrb`, not split as `ExperienceOrb.award` does.
             self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
-            return;
+            return None;
         }
-        // (Mooshroom draws its own coin in getOffspringVariant.)
-        let coin = p.species() != Species::Mooshroom
-            && self.world.random.next_int_bound(2).unwrap_or(0) == 0;
+        let coin = if matches!(
+            p.species(),
+            Species::Pig | Species::Cow | Species::Chicken | Species::Fox | Species::Cat
+        ) {
+            match parent_variant {
+                Some(choice) => choice,
+                None => {
+                    let parent = self.mobs.iter_mut().find(|m| m.id == parent)?;
+                    parent.random.next_boolean()
+                }
+            }
+        } else {
+            // Mooshroom draws its own coin in getOffspringVariant.
+            p.species() != Species::Mooshroom
+                && self.world.random.next_int_bound(2).unwrap_or(0) == 0
+        };
         // Axolotl.getBreedOffspring: useRareVariant (one in 1200) makes it blue,
         // else either parent's variant. The draws come from the mother's random.
         let axolotl = if p.species() == Species::Axolotl {
@@ -3377,9 +3396,14 @@ impl Game<'_> {
             }
             _ => p.kind.id.clone(),
         };
-        if let Some(id) = self.spawn_mob(&kind, [p.position.x, p.position.y, p.position.z], true)
-            && let Some(child) = self.mobs.iter_mut().find(|m| m.id == id)
-        {
+        let mut child = self.create_mob_reason(
+            &kind,
+            [p.position.x, p.position.y, p.position.z],
+            true,
+            false,
+        )?;
+        'offspring: {
+            let child = &mut child;
             child.extra.age = -24000;
             // No Mob.finalizeSpawn either: no follow range bonus, right-handed.
             spawning::bred_offspring(child);
@@ -3416,17 +3440,7 @@ impl Game<'_> {
             // A llama's baby was drawn in the parent's tick.
             if let Some(o) = llama {
                 horizon_client::mobs::llama::apply_offspring(child, &o);
-                let at = [p.position.x, p.position.y, p.position.z];
-                match experience {
-                    horizon_client::mobs::BreedExperience::Deferred => {
-                        self.award_breeding_experience(parent, at);
-                    }
-                    horizon_client::mobs::BreedExperience::Drawn(Some(amount)) => {
-                        self.add_orb(at, amount);
-                    }
-                    horizon_client::mobs::BreedExperience::Drawn(None) => {}
-                }
-                return;
+                break 'offspring;
             }
             if horizon_client::mobs::equine::is_equine(p.species()) {
                 let other = q.clone().unwrap_or_else(|| p.clone());
@@ -3455,8 +3469,7 @@ impl Game<'_> {
                     };
                 }
                 self.world.random = r;
-                self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
-                return;
+                break 'offspring;
             }
             if p.species() == Species::Cat {
                 // Cat.getBreedOffspring.
@@ -3469,20 +3482,15 @@ impl Game<'_> {
                 if p.extra.tame {
                     child.extra.tame = true;
                     child.extra.owner = p.extra.owner;
-                    // The mix needs all of `self`, so it waits until `child`'s
-                    // borrow of the mob list is over.
                     let mixed = dye_mix(
                         self.res.recipes(),
                         &mut self.world.random,
                         p.extra.color,
                         other.extra.color,
                     );
-                    if let Some(c) = self.mobs.iter_mut().find(|m| m.id == id) {
-                        c.extra.color = mixed;
-                    }
+                    child.extra.color = mixed;
                 }
-                self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
-                return;
+                break 'offspring;
             }
             if p.species() == Species::Wolf {
                 // Wolf.getBreedOffspring: a parent's variant; tame parents
@@ -3496,33 +3504,26 @@ impl Game<'_> {
                 if p.extra.tame {
                     horizon_client::mobs::tame::set_tame(child, true);
                     child.extra.owner = p.extra.owner;
-                    // The mix needs all of `self`, so it waits until `child`'s
-                    // borrow of the mob list is over.
                     let mixed = dye_mix(
                         self.res.recipes(),
                         &mut self.world.random,
                         p.extra.color,
                         other.extra.color,
                     );
-                    if let Some(c) = self.mobs.iter_mut().find(|m| m.id == id) {
-                        c.extra.color = mixed;
-                    }
+                    child.extra.color = mixed;
                 }
-                self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
-                return;
+                break 'offspring;
             }
             // Panda.getBreedOffspring: genes from both parents.
             if p.species() == Species::Panda {
                 horizon_client::mobs::panda::inherit(child, &p, q.as_ref().unwrap_or(&p));
-                self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
-                return;
+                break 'offspring;
             }
             // Axolotl.getBreedOffspring: the drawn variant, and the baby is persistent.
             if let Some(variant) = axolotl {
                 child.extra.variant = variant;
                 child.persistent = true;
-                self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
-                return;
+                break 'offspring;
             }
             // Nautilus.getBreedOffspring: a tame parent's baby is tame too.
             if p.species() == Species::Nautilus && p.extra.tame {
@@ -3552,14 +3553,19 @@ impl Game<'_> {
                     p.extra.color,
                     other.extra.color,
                 );
-                if let Some(c) = self.mobs.iter_mut().find(|m| m.id == id) {
-                    c.extra.color = mixed;
-                }
+                child.extra.color = mixed;
             }
-        } else {
-            return;
         }
-        self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
+        self.finalize_breeding(&p, partner, Some(&child));
+        let at = [p.position.x, p.position.y, p.position.z];
+        match experience {
+            horizon_client::mobs::BreedExperience::Deferred => {
+                self.award_breeding_experience(parent, at);
+            }
+            horizon_client::mobs::BreedExperience::Drawn(Some(amount)) => self.add_orb(at, amount),
+            horizon_client::mobs::BreedExperience::Drawn(None) => {}
+        }
+        self.insert_spawned_mob(child, true, false, false)
     }
     /// `MobEffectUtil.addEffectToPlayersAround` for an elder guardian:
     /// mining fatigue III for five minutes unless a stronger or longer one
@@ -7764,6 +7770,132 @@ fn breeding_credit(
 #[cfg(test)]
 mod breeding_tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    fn breeding_announces_the_orb_before_the_lower_id_child() {
+        use crate::mod_api::{self, BabyEntitySpawnEvent, EntityJoinLevelEvent, Flow, Hooks, Host};
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        struct Observer {
+            joins: Arc<Mutex<Vec<(u32, String)>>>,
+            cancel: Arc<AtomicBool>,
+        }
+        impl Hooks for Observer {
+            fn baby_entity_spawn(
+                &self,
+                _: &mut dyn Host,
+                _: &mut BabyEntitySpawnEvent<'_>,
+            ) -> Flow {
+                if self.cancel.load(Ordering::SeqCst) {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+            fn entity_join_level(
+                &self,
+                _: &mut dyn Host,
+                event: &mut EntityJoinLevelEvent<'_>,
+            ) -> Flow {
+                self.joins
+                    .lock()
+                    .unwrap()
+                    .push((event.entity, event.kind.into()));
+                Flow::Continue
+            }
+        }
+        let joins = Arc::new(Mutex::new(Vec::new()));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mods: mod_api::Mods = vec![Box::new(Observer {
+            joins: joins.clone(),
+            cancel: cancel.clone(),
+        }) as Box<dyn Hooks>]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let cow = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+                let base = game.next_entity;
+                game.next_entity += 2;
+                game.mobs.push(Mob::new(
+                    base + 1,
+                    cow.clone(),
+                    Vec3::new(0.0, 64.0, 0.0),
+                    0.0,
+                ));
+                game.mobs
+                    .push(Mob::new(base + 2, cow, Vec3::new(1.0, 64.0, 0.0), 0.0));
+                game.native_joins_skip();
+                let parent = game.mobs.iter_mut().find(|mob| mob.id == base + 1).unwrap();
+                parent.random = horizon_core::random::LegacyRandom::new(0);
+                parent.extra.variant = 1;
+                let child = game.breed(
+                    base + 1,
+                    base + 2,
+                    None,
+                    None,
+                    horizon_client::mobs::BreedExperience::Deferred,
+                );
+                assert_eq!(child, Some(base + 3));
+                assert_eq!(
+                    *joins.lock().unwrap(),
+                    vec![
+                        (base + 4, "minecraft:experience_orb".into()),
+                        (base + 3, "minecraft:cow".into())
+                    ]
+                );
+                assert_eq!(
+                    game.mobs
+                        .iter()
+                        .find(|mob| mob.id == base + 3)
+                        .unwrap()
+                        .extra
+                        .variant,
+                    1
+                );
+                assert_eq!(
+                    game.mobs
+                        .iter()
+                        .find(|mob| mob.id == base + 1)
+                        .unwrap()
+                        .random
+                        .state(),
+                    234_029_835_660_143
+                );
+                let next = game.next_entity;
+                let random = game
+                    .mobs
+                    .iter()
+                    .find(|mob| mob.id == base + 1)
+                    .unwrap()
+                    .random
+                    .state();
+                cancel.store(true, Ordering::SeqCst);
+                let child = game.breed(
+                    base + 1,
+                    base + 2,
+                    None,
+                    None,
+                    horizon_client::mobs::BreedExperience::Deferred,
+                );
+                assert_eq!(child, None);
+                assert_eq!(game.next_entity, next);
+                assert_eq!(
+                    game.mobs
+                        .iter()
+                        .find(|mob| mob.id == base + 1)
+                        .unwrap()
+                        .random
+                        .state(),
+                    random
+                );
+                assert_eq!(joins.lock().unwrap().len(), 2);
+            });
+        });
+    }
 
     #[test]
     fn the_player_who_fed_either_animal_is_credited() {

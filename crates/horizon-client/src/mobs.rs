@@ -1930,6 +1930,8 @@ pub enum MobEvent {
         /// A llama's baby, drawn from the parent's random as
         /// `Llama.getBreedOffspring` does.
         llama: Option<Box<super::mobs::llama::Offspring>>,
+        /// Whether the parent supplies the variant, if already drawn.
+        parent_variant: Option<bool>,
         /// The parent-RNG experience decision, if already made.
         experience: BreedExperience,
     },
