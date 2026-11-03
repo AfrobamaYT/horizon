@@ -692,6 +692,20 @@ pub trait LevelAccess {
     fn adjust_signal_source(&self, _state: BlockStateId, vanilla: bool) -> bool {
         vanilla
     }
+    /// Whether a signal query needs the weak-power block hook.
+    fn has_weak_power_hook(&self) -> bool {
+        false
+    }
+    /// Override `SignalGetter.getSignal`'s conductor check for a block.
+    fn adjust_should_check_weak_power(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _direction: Direction,
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
     /// `BlockState.hasAnalogOutputSignal` once the library answered `vanilla`:
     /// whether comparators read the block. The default keeps it.
     fn adjust_has_analog_output(&self, _state: BlockStateId, vanilla: bool) -> bool {

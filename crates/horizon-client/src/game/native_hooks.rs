@@ -554,6 +554,22 @@ impl GameLevel<'_> {
         mod_api::dispatch_is_signal_source(self, state, source);
     }
 
+    /// `IBlockExtension.shouldCheckWeakPower`: set `check` to decide whether
+    /// indirect power is read through this block. `check` starts with vanilla's
+    /// conductor answer. `direction` is the input side of the block being powered,
+    /// opposite the queried block's output side. Authoritative servers only.
+    #[inline(always)]
+    pub(super) fn native_should_check_weak_power(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Direction,
+        check: &mut bool,
+    ) {
+        mod_api::dispatch_should_check_weak_power(self, dimension, pos, state, direction, check);
+    }
+
     /// `BlockState.hasAnalogOutputSignal`: set `output` for a block of yours
     /// that comparators read (how full or far along it is, as a composter's
     /// level), so they ask `native_analog_output`. Asked from inside the
