@@ -158,6 +158,54 @@ fn api_types(source: &str, generated: &str) -> Result<ApiTypes, String> {
     })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HelperSide {
+    Server,
+    Client,
+    Both,
+}
+
+impl HelperSide {
+    fn parse(value: &serde_json::Value) -> Result<Option<Self>, String> {
+        match value.get("side") {
+            None => Ok(None),
+            Some(serde_json::Value::String(side)) => match side.as_str() {
+                "server" => Ok(Some(Self::Server)),
+                "client" => Ok(Some(Self::Client)),
+                "both" => Ok(Some(Self::Both)),
+                _ => Err(format!("unknown helper side {side}")),
+            },
+            Some(_) => Err("helper side must be a string".into()),
+        }
+    }
+}
+
+fn helper_target<'a>(
+    game: &'a [(String, syn::ItemFn)],
+    name: &str,
+    target: &str,
+) -> Result<&'a syn::ItemFn, String> {
+    let native = target
+        .rsplit("::")
+        .next()
+        .ok_or("helper target missing method")?;
+    if !native.starts_with("native_") {
+        return Err(format!("invalid helper target {target}"));
+    }
+    let method = one_function(game.iter().map(|(_, method)| method), native)?;
+    let (module, _) = game
+        .iter()
+        .find(|(_, other)| std::ptr::eq(other, method))
+        .expect("method found");
+    let expected = format!("{module}::Game<'_>::{native}");
+    if target != expected {
+        return Err(format!(
+            "wrong target for helper {name}: {target}, it is {expected}"
+        ));
+    }
+    Ok(method)
+}
+
 fn host_method(
     method: &syn::ItemFn,
     name: &str,
@@ -1153,29 +1201,71 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
     }
     for helper in &helpers {
         let name = helper["name"].as_str().ok_or("helper name missing")?;
+        let side = HelperSide::parse(helper)?;
+        if helper.get("client_target").is_some() && side != Some(HelperSide::Both) {
+            return Err(format!("{name}: client_target requires side both"));
+        }
         if !names.insert(name) {
             return Err(format!("duplicate helper {name}"));
         }
         let target = helper["target"].as_str().ok_or("helper target missing")?;
-        let native = target
-            .rsplit("::")
-            .next()
-            .ok_or("helper target missing method")?;
-        if !native.starts_with("native_") {
-            return Err(format!("invalid helper target {target}"));
+        let method = helper_target(&game, name, target)?;
+        let (declaration, mut implementation) = host_method(method, name, &types.exports)?;
+        if let Some(client_target) = helper.get("client_target") {
+            let client_target = client_target
+                .as_str()
+                .ok_or("client_target must be a string")?;
+            let client_native = client_target
+                .rsplit("::")
+                .next()
+                .ok_or("client target missing method")?;
+            let client = helper_target(&game, name, client_target)?;
+            let (_, client_implementation) = host_method(client, name, &types.exports)?;
+            let server_fn: syn::ImplItemFn =
+                syn::parse_str(&implementation).map_err(|e| format!("{name}: {e}"))?;
+            let client_fn: syn::ImplItemFn =
+                syn::parse_str(&client_implementation).map_err(|e| format!("{name}: {e}"))?;
+            let normalize = |mut sig: syn::Signature| {
+                for arg in &mut sig.inputs {
+                    if let syn::FnArg::Typed(arg) = arg {
+                        arg.pat = Box::new(syn::parse_quote!(_));
+                    }
+                }
+                sig.to_token_stream().to_string()
+            };
+            if normalize(server_fn.sig.clone()) != normalize(client_fn.sig.clone()) {
+                return Err(format!("{name}: client and server signatures differ"));
+            }
+            let sig = server_fn.sig;
+            let server_body = server_fn.block;
+            let args = sig
+                .inputs
+                .iter()
+                .skip(1)
+                .map(|arg| match arg {
+                    syn::FnArg::Typed(arg) => arg.pat.to_token_stream().to_string(),
+                    _ => unreachable!("host_method validated arguments"),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let callee = if matches!(client.sig.inputs.first(), Some(syn::FnArg::Receiver(_))) {
+                "self."
+            } else {
+                "Self::"
+            };
+            implementation = format!(
+                "{} {{ if self.options.execution_role.is_client() {{ {callee}{client_native}({args}) }} else {} }}\n",
+                sig.to_token_stream(),
+                server_body.to_token_stream()
+            );
         }
-        let method = one_function(game.iter().map(|(_, method)| method), native)?;
-        let (module, _) = game
-            .iter()
-            .find(|(_, other)| std::ptr::eq(other, method))
-            .expect("the method was found in the list");
-        let expected = format!("{module}::Game<'_>::{native}");
-        if target != expected {
-            return Err(format!(
-                "wrong target for helper {name}: {target}, it is {expected}"
-            ));
-        }
-        let (declaration, implementation) = host_method(method, name, &types.exports)?;
+        let side_doc = match side {
+            Some(HelperSide::Server) => "/// Side: server.\n",
+            Some(HelperSide::Client) => "/// Side: client.\n",
+            Some(HelperSide::Both) => "/// Side: both.\n",
+            None => "",
+        };
+        host_traits.push_str(side_doc);
         host_traits.push_str(&declaration);
         host_impl.push_str(&implementation);
         if let Some(receiver) = helper.get("receiver") {
@@ -1183,7 +1273,9 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
                 .as_str()
                 .ok_or("helper receiver must be a string")?;
             let (handle, code) = handle_method(method, name, receiver, &types.handles)?;
-            handles.entry(handle).or_default().push_str(&code);
+            let methods = handles.entry(handle).or_default();
+            methods.push_str(side_doc);
+            methods.push_str(&code);
         }
     }
     let handles = handles
@@ -1286,6 +1378,26 @@ pub fn generate_test_hooks(root: &Path, out_dir: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn helper_side_is_optional_and_typed() {
+        use super::HelperSide;
+        use serde_json::json;
+        assert_eq!(HelperSide::parse(&json!({})), Ok(None));
+        assert_eq!(
+            HelperSide::parse(&json!({"side":"server"})),
+            Ok(Some(HelperSide::Server))
+        );
+        assert_eq!(
+            HelperSide::parse(&json!({"side":"client"})),
+            Ok(Some(HelperSide::Client))
+        );
+        assert_eq!(
+            HelperSide::parse(&json!({"side":"both"})),
+            Ok(Some(HelperSide::Both))
+        );
+        assert!(HelperSide::parse(&json!({"side":null})).is_err());
+        assert!(HelperSide::parse(&json!({"side":"unknown"})).is_err());
+    }
     use quote::ToTokens;
     use serde_json::Value;
     #[test]
