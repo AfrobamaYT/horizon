@@ -3741,6 +3741,7 @@ mod tests {
 
     #[test]
     fn builds_use_the_selected_profile() {
+        let d = dir("profile");
         let rust = Toolchain {
             dir: PathBuf::from("/rust/1.99.1-x"),
         };
