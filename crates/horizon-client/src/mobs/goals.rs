@@ -2906,7 +2906,7 @@ mod breeding_variant_tests {
                     assert_eq!(choice, (!ask_mods).then_some(true), "{id}");
                     assert_eq!(
                         experience,
-                        if ask_mods {
+                        if ask_mods || id == "minecraft:fox" {
                             BreedExperience::Deferred
                         } else {
                             BreedExperience::Drawn(mob_drops.then_some(3))
@@ -2917,14 +2917,14 @@ mod breeding_variant_tests {
                         parent.random.state(),
                         if ask_mods {
                             25_214_903_917
-                        } else if mob_drops {
+                        } else if mob_drops && id != "minecraft:fox" {
                             234_029_835_660_143
                         } else {
                             205_749_139_540_596
                         },
                         "{id}"
                     );
-                    if !ask_mods && mob_drops {
+                    if !ask_mods && mob_drops && id != "minecraft:fox" {
                         assert_eq!(
                             parent.random.next_int(),
                             1_033_096_058,

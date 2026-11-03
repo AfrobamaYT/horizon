@@ -287,6 +287,12 @@ pub(super) fn named_mob_pickable(
 /// camera-relative bounds (`cull_skinned`).
 pub(super) type Skinned = Option<((usize, usize, u32), Option<(glam::Vec3, glam::Vec3)>)>;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OrbOrder {
+    BeforeChild,
+    AfterChild,
+}
+
 impl Game<'_> {
     pub(super) fn player_view(&self) -> Option<PlayerView> {
         let p = self.player.as_ref()?;
@@ -3213,7 +3219,13 @@ impl Game<'_> {
         }
     }
     /// `Animal.finalizeSpawnChildFromBreeding` before the experience orb.
-    fn finalize_breeding(&mut self, parent: &Mob, partner: u32, child: Option<&Mob>) {
+    fn finalize_breeding(
+        &mut self,
+        parent: &Mob,
+        partner: u32,
+        child: Option<&Mob>,
+        order: OrbOrder,
+    ) {
         if let Some(cause) = breeding_credit(&mut self.love_cause, parent.id, partner) {
             let parent_view = self.mob_entity(parent);
             let partner_view = self
@@ -3236,7 +3248,9 @@ impl Game<'_> {
             q.extra.age = 6000;
             q.extra.in_love = 0;
         }
-        self.mob_event_particles(parent.id, 18);
+        if order == OrbOrder::BeforeChild {
+            self.mob_event_particles(parent.id, 18);
+        }
     }
     /// `ServerPlayer.tellNeutralMobsThatIDied`: the mobs within 32 blocks
     /// across and 10 up and down get `NeutralMob.playerDied`, when the
@@ -3325,14 +3339,14 @@ impl Game<'_> {
         let q = self.mobs.iter().find(|m| m.id == partner).cloned();
         // Sniffer.spawnChildFromBreeding: an egg instead of a baby.
         if p.species() == Species::Sniffer {
-            self.finalize_breeding(&p, partner, None);
+            self.finalize_breeding(&p, partner, None, OrbOrder::BeforeChild);
             self.lay_sniffer_egg(&p);
             return None;
         }
         // TurtleBreedGoal.breed: the goal gave the mother her egg; only the
         // experience is left, and only with mob loot on.
         if matches!(p.species(), Species::Turtle | Species::Frog) {
-            self.finalize_breeding(&p, partner, None);
+            self.finalize_breeding(&p, partner, None, OrbOrder::BeforeChild);
             // One `new ExperienceOrb`, not split as `ExperienceOrb.award` does.
             self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
             return None;
@@ -3556,15 +3570,23 @@ impl Game<'_> {
                 child.extra.color = mixed;
             }
         }
-        self.finalize_breeding(&p, partner, Some(&child));
+        let order = if p.species() == Species::Fox {
+            OrbOrder::AfterChild
+        } else {
+            OrbOrder::BeforeChild
+        };
+        self.finalize_breeding(&p, partner, Some(&child), order);
         let at = [p.position.x, p.position.y, p.position.z];
-        let fox = p.species() == Species::Fox;
+        let fox = order == OrbOrder::AfterChild;
         let mut child = Some(child);
         let joined = if fox {
             self.insert_spawned_mob(child.take().unwrap(), true, false, false)
         } else {
             None
         };
+        if fox {
+            self.mob_event_particles(parent, 18);
+        }
         match experience {
             horizon_client::mobs::BreedExperience::Deferred => {
                 self.award_breeding_experience(parent, at);
@@ -7877,6 +7899,35 @@ mod breeding_tests {
                         .state(),
                     234_029_835_660_143
                 );
+                joins.lock().unwrap().clear();
+                let fox = game.res.mob_types().get("minecraft:fox").unwrap().clone();
+                let fox_base = game.next_entity;
+                game.next_entity += 2;
+                game.mobs.push(Mob::new(
+                    fox_base + 1,
+                    fox.clone(),
+                    Vec3::new(0.0, 64.0, 0.0),
+                    0.0,
+                ));
+                game.mobs
+                    .push(Mob::new(fox_base + 2, fox, Vec3::new(1.0, 64.0, 0.0), 0.0));
+                game.native_joins_skip();
+                let fox_child = game.breed(
+                    fox_base + 1,
+                    fox_base + 2,
+                    None,
+                    None,
+                    horizon_client::mobs::BreedExperience::Deferred,
+                );
+                assert_eq!(fox_child, Some(fox_base + 3));
+                assert_eq!(
+                    *joins.lock().unwrap(),
+                    vec![
+                        (fox_base + 3, "minecraft:fox".into()),
+                        (fox_base + 4, "minecraft:experience_orb".into())
+                    ]
+                );
+                joins.lock().unwrap().clear();
                 let next = game.next_entity;
                 let random = game
                     .mobs
@@ -7904,7 +7955,7 @@ mod breeding_tests {
                         .state(),
                     random
                 );
-                assert_eq!(joins.lock().unwrap().len(), 2);
+                assert!(joins.lock().unwrap().is_empty());
             });
         });
     }
