@@ -6,7 +6,12 @@
 use std::sync::{Arc, OnceLock};
 
 mod phase;
-pub use phase::{LoadedMods, RegistrationContext, RegistrationPhase};
+pub(crate) use phase::install_packages;
+#[cfg(test)]
+pub(crate) use phase::with_test_packages;
+pub use phase::{
+    LoadedMods, PackageInfo, PackageKind, PackageSide, RegistrationContext, RegistrationPhase,
+};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod reload_order;

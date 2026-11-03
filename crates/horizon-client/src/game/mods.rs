@@ -4,7 +4,31 @@
 use super::{Game, execution_role::ExecutionRole};
 use crate::mod_api::{RegistrationContext, RegistrationPhase};
 use horizon_client::mod_list::{self, Installed};
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{Mutex, OnceLock},
+};
+
+static STARTUP_PACKAGES: OnceLock<Mutex<Option<Vec<horizon_mods::selection::SelectedPackage>>>> =
+    OnceLock::new();
+
+pub(crate) fn initialize_packages(game_dir: &std::path::Path, dev: &[PathBuf]) {
+    let settings = horizon_client::settings::Settings::load(
+        &horizon_client::logging::player_dir().join("options.txt"),
+    );
+    let built = std::env::current_exe()
+        .ok()
+        .and_then(|exe| std::fs::read_to_string(exe.with_file_name(BUILD_INFO)).ok())
+        .map(|info| built_ids(&info))
+        .unwrap_or_default();
+    let selected: Vec<_> =
+        horizon_mods::selection::packages(game_dir, &settings.mods.enabled, &built, dev).collect();
+    crate::mod_api::install_packages(crate::mod_api::mods(), &selected);
+    assert!(
+        STARTUP_PACKAGES.set(Mutex::new(Some(selected))).is_ok(),
+        "startup packages already installed"
+    );
+}
 
 #[derive(Default)]
 pub(super) struct ModsState {
@@ -104,7 +128,13 @@ pub(super) fn content_root(
     let mut mods: Vec<ContentMod> = Vec::new();
     let announce = !horizon_protocol::mod_list::is_set();
     let mut announced = Vec::new();
-    for selected in horizon_mods::selection::packages(&here, enabled, &built, dev) {
+    let selected = STARTUP_PACKAGES
+        .get()
+        .and_then(|packages| packages.lock().unwrap().take())
+        .unwrap_or_else(|| {
+            horizon_mods::selection::packages(&here, enabled, &built, dev).collect()
+        });
+    for selected in selected {
         let path = &selected.path;
         let m = &selected.package.manifest;
         if mods.iter().any(|c| c.id == m.id) {
@@ -465,16 +495,18 @@ mod tests {
             )]
             .into(),
             || {
-                register_standalone_models(ExecutionRole::IntegratedServer);
-                register_standalone_models(ExecutionRole::DedicatedServer);
-                assert_eq!(calls.load(Ordering::Relaxed), 0);
-                register_standalone_models(ExecutionRole::Client);
-                assert_eq!(calls.load(Ordering::Relaxed), 1);
-                assert!(
-                    horizon_client::models::standalone()
-                        .iter()
-                        .any(|id| id == "registration_test:block/shaft")
-                );
+                crate::mod_api::with_test_packages(&["registration_test"], || {
+                    register_standalone_models(ExecutionRole::IntegratedServer);
+                    register_standalone_models(ExecutionRole::DedicatedServer);
+                    assert_eq!(calls.load(Ordering::Relaxed), 0);
+                    register_standalone_models(ExecutionRole::Client);
+                    assert_eq!(calls.load(Ordering::Relaxed), 1);
+                    assert!(
+                        horizon_client::models::standalone()
+                            .iter()
+                            .any(|id| id == "registration_test:block/shaft")
+                    );
+                })
             },
         );
     }

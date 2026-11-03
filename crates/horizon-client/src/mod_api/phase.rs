@@ -12,7 +12,10 @@ pub enum PackageKind {
 /// The package's declared side.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum PackageSide { Client, Both }
+pub enum PackageSide {
+    Client,
+    Both,
+}
 
 /// Read-only package metadata available during registration.
 #[non_exhaustive]
@@ -24,30 +27,86 @@ pub struct PackageInfo {
 
 impl PackageInfo {
     /// Package identifier.
-    pub fn id(&self) -> &str { &self.id }
+    pub fn id(&self) -> &str {
+        &self.id
+    }
     /// The package's version, when its manifest is available.
-    pub fn version(&self) -> Option<&str> { self.manifest.as_ref().map(|m| m.version.as_str()) }
+    pub fn version(&self) -> Option<&str> {
+        self.manifest.as_ref().map(|m| m.version.as_str())
+    }
     /// Whether this package contains code.
-    pub fn kind(&self) -> PackageKind { self.kind }
+    pub fn kind(&self) -> PackageKind {
+        self.kind
+    }
     /// Manifest side, if the manifest is available.
-    pub fn side(&self) -> Option<PackageSide> { self.manifest.as_ref().map(|m| match m.side { horizon_mods::Side::Client => PackageSide::Client, horizon_mods::Side::Both => PackageSide::Both }) }
+    pub fn side(&self) -> Option<PackageSide> {
+        self.manifest.as_ref().map(|m| match m.side {
+            horizon_mods::Side::Client => PackageSide::Client,
+            horizon_mods::Side::Both => PackageSide::Both,
+        })
+    }
     /// Additional namespaces declared by this package.
-    pub fn namespaces(&self) -> &[String] { self.manifest.as_ref().map_or(&[], |m| &m.namespaces) }
+    pub fn namespaces(&self) -> &[String] {
+        self.manifest.as_ref().map_or(&[], |m| &m.namespaces)
+    }
     /// Whether this package declares a dependency on `id`.
-    pub fn depends_on(&self, id: &str) -> bool { self.manifest.as_ref().is_some_and(|m| m.dependencies.contains_key(id)) }
+    pub fn depends_on(&self, id: &str) -> bool {
+        self.manifest
+            .as_ref()
+            .is_some_and(|m| m.dependencies.contains_key(id))
+    }
 }
 
 static PACKAGES: OnceLock<Vec<PackageInfo>> = OnceLock::new();
 
-pub(crate) fn install_packages(mods: &[super::ModEntry], content: &[horizon_mods::selection::SelectedPackage]) {
-    let mut packages: Vec<_> = mods.iter().map(|m| PackageInfo { id: m.id.into(), kind: PackageKind::Code, manifest: None }).collect();
+#[cfg(test)]
+thread_local! {
+    static TEST_PACKAGES: std::cell::Cell<Option<&'static [PackageInfo]>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
+    let packages: Vec<_> = ids
+        .iter()
+        .map(|id| PackageInfo {
+            id: (*id).into(),
+            kind: PackageKind::Code,
+            manifest: None,
+        })
+        .collect();
+    let packages = Box::leak(packages.into_boxed_slice());
+    TEST_PACKAGES.set(Some(packages));
+    let result = f();
+    TEST_PACKAGES.set(None);
+    result
+}
+
+pub(crate) fn install_packages(
+    mods: &[super::ModEntry],
+    content: &[horizon_mods::selection::SelectedPackage],
+) {
+    let mut packages: Vec<_> = mods
+        .iter()
+        .map(|m| PackageInfo {
+            id: m.id.into(),
+            kind: PackageKind::Code,
+            manifest: None,
+        })
+        .collect();
     for selected in content {
         let manifest = &selected.package.manifest;
         if manifest.native.is_none() && !packages.iter().any(|p| p.id == manifest.id) {
-            packages.push(PackageInfo { id: manifest.id.clone(), kind: PackageKind::Content, manifest: Some(manifest.clone()) });
+            packages.push(PackageInfo {
+                id: manifest.id.clone(),
+                kind: PackageKind::Content,
+                manifest: Some(manifest.clone()),
+            });
         }
     }
-    assert!(PACKAGES.set(packages).is_ok(), "package inventory already installed");
+    assert!(
+        PACKAGES.set(packages).is_ok(),
+        "package inventory already installed"
+    );
 }
 
 /// The bootstrap declarations being collected.
@@ -68,6 +127,10 @@ pub struct LoadedMods<'a> {
 
 impl LoadedMods<'_> {
     pub(crate) fn new() -> Self {
+        #[cfg(test)]
+        if let Some(entries) = TEST_PACKAGES.get() {
+            return Self { entries };
+        }
         Self {
             entries: PACKAGES.get().map_or(&[], Vec::as_slice),
         }
@@ -79,10 +142,14 @@ impl LoadedMods<'_> {
     }
 
     /// Packages in dispatch order.
-    pub fn iter(&self) -> impl Iterator<Item = &PackageInfo> { self.entries.iter() }
+    pub fn iter(&self) -> impl Iterator<Item = &PackageInfo> {
+        self.entries.iter()
+    }
 
     /// Find an installed package by ID.
-    pub fn get(&self, id: &str) -> Option<&PackageInfo> { self.entries.iter().find(|entry| entry.id == id) }
+    pub fn get(&self, id: &str) -> Option<&PackageInfo> {
+        self.entries.iter().find(|entry| entry.id == id)
+    }
 }
 
 /// A registration phase's view. Declarations go on the hook's event; there is
