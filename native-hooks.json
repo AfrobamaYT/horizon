@@ -788,7 +788,7 @@
     {
       "name": "menu_button",
       "side": "server",
-      "neoforge": [],
+      "neoforge": "none (NeoForge has no such event; vanilla AbstractContainerMenu.clickMenuButton)",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_menu_button",
       "mod_api": {
