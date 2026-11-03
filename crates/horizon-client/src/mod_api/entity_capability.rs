@@ -29,16 +29,21 @@ impl<T: ?Sized + 'static> EntityCapabilityKey<T> {
 /// An entity's items, as NeoForge 26.3's `Capabilities.Item.ENTITY`. The game answers it for a
 /// player with their inventory (`PlayerInventoryWrapper`): indices as vanilla's `Inventory`
 /// numbers them, 0..36 the main inventory (0..9 the hotbar), 36..40 the armour from feet to
-/// head, 40 the off hand.
+/// head, 40 the off hand. For a chest or hopper minecart, a chest boat, or a chested donkey,
+/// mule or llama, it answers with their container's slots ([`ItemPlace::EntitySlot`]).
 pub const ENTITY_ITEMS: EntityCapabilityKey<dyn ResourceHandler<ItemResource>> =
     EntityCapabilityKey {
         name: "horizon:entity_items",
         default: Some(|host, entity| {
             if entity.kind(host)? != "minecraft:player" {
-                return None;
+                let size = host.entity_container_size(entity.id())?;
+                return Some(Box::new(ContainerItems {
+                    entity: entity.id(),
+                    size,
+                }));
             }
             let player = entity.uuid(host)?;
-            Some(Box::new(PlayerItems(player)) as Box<dyn ResourceHandler<ItemResource>>)
+            Some(Box::new(PlayerItems(player)))
         }),
         handler: PhantomData,
     };
@@ -73,6 +78,65 @@ impl EntityRef {
     }
 }
 
+/// The game's own [`ENTITY_ITEMS`] for a container entity: its `size` slots, each an
+/// [`ItemPlace::EntitySlot`], taking a stack of anything.
+struct ContainerItems {
+    entity: u32,
+    size: usize,
+}
+
+impl ContainerItems {
+    fn place(&self, index: usize) -> Option<ItemPlace> {
+        (index < self.size).then_some(ItemPlace::EntitySlot {
+            entity: self.entity,
+            slot: index,
+        })
+    }
+}
+
+impl ResourceHandler<ItemResource> for ContainerItems {
+    fn size(&self, _: &mut dyn Host) -> usize {
+        self.size
+    }
+    fn resource(&self, host: &mut dyn Host, index: usize) -> Option<ItemResource> {
+        self.place(index)?.resource(host)
+    }
+    fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
+        self.place(index).map_or(0, |place| place.amount(host))
+    }
+    fn capacity(&self, host: &mut dyn Host, index: usize, resource: &ItemResource) -> u32 {
+        match self.place(index) {
+            Some(_) => max_stack(host, resource),
+            None => 0,
+        }
+    }
+    fn insert(
+        &self,
+        host: &mut dyn Host,
+        tx: &Transaction,
+        index: usize,
+        resource: &ItemResource,
+        amount: u32,
+    ) -> u32 {
+        let Some(place) = self.place(index) else {
+            return 0;
+        };
+        let limit = max_stack(host, resource);
+        fill(host, tx, &place, resource, amount, limit)
+    }
+    fn extract(
+        &self,
+        host: &mut dyn Host,
+        tx: &Transaction,
+        index: usize,
+        resource: &ItemResource,
+        amount: u32,
+    ) -> u32 {
+        self.place(index)
+            .map_or(0, |place| place.extract(host, tx, resource, amount))
+    }
+}
+
 /// The player inventory's slots, by `Inventory`'s numbers (`PlayerInventoryWrapper`).
 const MAIN: usize = 36;
 const ARMOUR: [&str; 4] = ["feet", "legs", "chest", "head"];
@@ -83,35 +147,38 @@ const OFF_HAND: usize = MAIN + ARMOUR.len();
 struct PlayerItems(u128);
 
 impl PlayerItems {
-    fn place(&self, index: usize) -> ItemPlace {
+    /// Index `index` as the player's slot, numbered as `native_inventory_tick` numbers them.
+    fn place(&self, index: usize) -> Option<ItemPlace> {
         let slot = match index {
             OFF_HAND => -106,
+            index if index > OFF_HAND => return None,
             index if index >= MAIN => 100 + (index - MAIN) as i32,
             index => index as i32,
         };
-        ItemPlace::PlayerSlot {
+        Some(ItemPlace::PlayerSlot {
             player: self.0,
             slot,
-        }
+        })
     }
-    /// Puts up to `amount` of `resource` at `place`, into what fits there and no further: an
-    /// empty place or one with the same item, up to `limit`.
-    fn fill(
-        host: &mut dyn Host,
-        tx: &Transaction,
-        place: &ItemPlace,
-        resource: &ItemResource,
-        amount: u32,
-        limit: u32,
-    ) -> u32 {
-        let held = match place.stack(host) {
-            Some(held) if !resource.matches(&held) => return 0,
-            held => held.map_or(0, |held| held.count),
-        };
-        match amount.min(limit.saturating_sub(held)) {
-            0 => 0,
-            room => place.insert(host, tx, resource, room),
-        }
+}
+
+/// Puts up to `amount` of `resource` at `place`, into what fits there and no further: an
+/// empty place or one with the same item, up to `limit`.
+fn fill(
+    host: &mut dyn Host,
+    tx: &Transaction,
+    place: &ItemPlace,
+    resource: &ItemResource,
+    amount: u32,
+    limit: u32,
+) -> u32 {
+    let held = match place.stack(host) {
+        Some(held) if !resource.matches(&held) => return 0,
+        held => held.map_or(0, |held| held.count),
+    };
+    match amount.min(limit.saturating_sub(held)) {
+        0 => 0,
+        room => place.insert(host, tx, resource, room),
     }
 }
 
@@ -149,10 +216,10 @@ impl ResourceHandler<ItemResource> for PlayerItems {
         OFF_HAND + 1
     }
     fn resource(&self, host: &mut dyn Host, index: usize) -> Option<ItemResource> {
-        self.place(index).resource(host)
+        self.place(index)?.resource(host)
     }
     fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
-        self.place(index).amount(host)
+        self.place(index).map_or(0, |place| place.amount(host))
     }
     fn capacity(&self, host: &mut dyn Host, index: usize, resource: &ItemResource) -> u32 {
         match index
@@ -172,8 +239,11 @@ impl ResourceHandler<ItemResource> for PlayerItems {
         resource: &ItemResource,
         amount: u32,
     ) -> u32 {
+        let Some(place) = self.place(index) else {
+            return 0;
+        };
         let limit = self.capacity(host, index, resource);
-        Self::fill(host, tx, &self.place(index), resource, amount, limit)
+        fill(host, tx, &place, resource, amount, limit)
     }
     fn extract(
         &self,
@@ -183,10 +253,8 @@ impl ResourceHandler<ItemResource> for PlayerItems {
         resource: &ItemResource,
         amount: u32,
     ) -> u32 {
-        if index > OFF_HAND {
-            return 0;
-        }
-        self.place(index).extract(host, tx, resource, amount)
+        self.place(index)
+            .map_or(0, |place| place.extract(host, tx, resource, amount))
     }
     /// Where `Inventory.add` puts it: onto the same item in the selected slot, then in the off
     /// hand, then in the main inventory in order, then into its empty slots in order; never
@@ -203,9 +271,10 @@ impl ResourceHandler<ItemResource> for PlayerItems {
             player: self.0,
             hand: Hand::Main,
         };
-        let same = [selected, self.place(OFF_HAND)]
+        let same = [Some(selected), self.place(OFF_HAND)]
             .into_iter()
-            .chain((0..MAIN).map(|index| self.place(index)));
+            .chain((0..MAIN).map(|index| self.place(index)))
+            .flatten();
         let mut went = 0;
         for place in same {
             if went < amount
@@ -213,13 +282,12 @@ impl ResourceHandler<ItemResource> for PlayerItems {
                     .stack(host)
                     .is_some_and(|held| resource.matches(&held))
             {
-                went += Self::fill(host, tx, &place, resource, amount - went, limit);
+                went += fill(host, tx, &place, resource, amount - went, limit);
             }
         }
-        for index in 0..MAIN {
-            let place = self.place(index);
+        for place in (0..MAIN).filter_map(|index| self.place(index)) {
             if went < amount && place.stack(host).is_none() {
-                went += Self::fill(host, tx, &place, resource, amount - went, limit);
+                went += fill(host, tx, &place, resource, amount - went, limit);
             }
         }
         went

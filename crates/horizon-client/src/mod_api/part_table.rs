@@ -385,7 +385,9 @@ pub fn block_entity_providers<T: ?Sized + 'static>(
     host: &dyn Host,
     at: BlockSide,
 ) -> Option<BlockEntityProviders<T>> {
-    let parts = providers(ProvidedBy::BlockEntity, key.name, host, |host| at.kind(host));
+    let parts = providers(ProvidedBy::BlockEntity, key.name, host, |host| {
+        at.kind(host)
+    });
     (!parts.is_empty()).then_some(BlockEntityProviders {
         parts,
         at,
@@ -1283,6 +1285,9 @@ pub(crate) mod tests {
         }
         fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
             Some(u128::from(entity.id()))
+        }
+        fn entity_container_size(&self, _: u32) -> Option<usize> {
+            None
         }
         fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
             Some(match entity.id() {
