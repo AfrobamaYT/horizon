@@ -390,7 +390,7 @@ pub(super) fn emit(
                 );
                 (
                     format!(
-                        "let {part_table} = super::parts(\"{name}\"); let {part_list} = {part_table}.{lookup}; if {part_list}.is_empty() && !super::listened(HookId::{hook_id}) {{ return; }}"
+                        "let {part_table} = if super::has_part_hook(HookId::{hook_id}) {{ Some(super::parts(\"{name}\")) }} else {{ None }}; let {part_list} = {part_table}.as_ref().and_then(|table| table.for_hook(HookId::{hook_id})).map_or(&[][..], |table| table.{lookup}); if {part_list}.is_empty() && !super::listened(HookId::{hook_id}) {{ return; }}"
                     ),
                     if matches!(contract, "cancel" | "replace") {
                         format!("'hook: {{ {calls} }}")

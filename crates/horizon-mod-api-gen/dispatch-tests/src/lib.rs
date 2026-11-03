@@ -332,10 +332,16 @@ mod tests {
     struct Registrar;
     /// No parts: the scoped dispatch calls the mods only.
     struct Parts;
+    fn has_part_hook(_: HookId) -> bool {
+        false
+    }
     fn parts(_: &'static str) -> Parts {
         Parts
     }
     impl Parts {
+        fn for_hook(&self, _: HookId) -> Option<&Self> {
+            Some(self)
+        }
         fn block_state(&self, _: BlockStateId) -> &'static [&'static dyn BlockPart] {
             &[]
         }
