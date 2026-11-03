@@ -1310,6 +1310,12 @@ mod tests {
             host_param(&level_both, Some(false), false),
             param("LevelSide", "super::mod_api_host::level_side(self)")
         );
+        for (mutable, ticks) in [(Some(true), false), (Some(false), true)] {
+            assert_eq!(
+                super::host_param::validate(&level_both, "test", true, mutable, ticks).unwrap_err(),
+                "test: a both-side level hook takes the read kind until a client level seam exists"
+            );
+        }
         assert_eq!(
             host_param(&game, Some(true), false),
             param("HostSide", "HostSide::of(self)")
@@ -1321,6 +1327,19 @@ mod tests {
         assert_eq!(
             host_param(&read, Some(false), false),
             param("&dyn Host", "&*self")
+        );
+        let client_read = super::CatalogHook {
+            entry: read.entry.clone(),
+            side: super::HelperSide::Client,
+        };
+        assert_eq!(
+            super::host_param::validate(&client_read, "test", false, Some(false), false)
+                .unwrap_err(),
+            "test: this entry takes no host marker"
+        );
+        assert_eq!(
+            super::host_param::validate(&read, "test", true, Some(false), false).unwrap_err(),
+            "test: this entry takes no host marker"
         );
     }
 

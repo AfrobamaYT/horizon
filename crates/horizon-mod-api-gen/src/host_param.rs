@@ -7,6 +7,30 @@ pub(super) struct HostParam {
     pub call: &'static str,
 }
 
+/// Validate catalog access restrictions against the hook's receiver.
+pub(super) fn validate(
+    hook: &CatalogHook,
+    name: &str,
+    is_level: bool,
+    mutable: Option<bool>,
+    ticks: bool,
+) -> Result<(), String> {
+    if let Some(marker) = hook.get("host") {
+        if is_level || hook.side == HelperSide::Client {
+            return Err(format!("{name}: this entry takes no host marker"));
+        }
+        if marker.as_str() != Some("read") {
+            return Err(format!("{name}: invalid host marker"));
+        }
+    }
+    if is_level && hook.side == HelperSide::Both && (mutable == Some(true) || ticks) {
+        return Err(format!(
+            "{name}: a both-side level hook takes the read kind until a client level seam exists"
+        ));
+    }
+    Ok(())
+}
+
 /// Select the host once for both generated signatures and the native call.
 pub(super) fn host_param(
     hook: &CatalogHook,
