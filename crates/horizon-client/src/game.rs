@@ -229,6 +229,7 @@ mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
 mod native_living_refs;
+mod native_menu_refs;
 mod native_menus;
 mod native_mob_draw;
 mod native_mob_refs;
