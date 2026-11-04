@@ -59,6 +59,7 @@ mod tests {
         pub(super) struct Compound;
         pub(super) struct NativeSpawnReason;
         pub(super) struct NativeSpawnCheck;
+        pub(super) struct NativeDespawn;
         pub(super) struct NativeDifficulty;
         pub(super) struct NativeSpawner;
         pub(super) enum Placement {
@@ -232,6 +233,7 @@ mod tests {
         pub(super) struct NativePlayerFood;
         #[derive(Clone, Copy)]
         pub(super) struct LivingRef;
+        pub(super) struct MobRef;
         #[derive(Clone, Copy)]
         pub(super) struct EntityRef;
         #[derive(Clone, Copy)]

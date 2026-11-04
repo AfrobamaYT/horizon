@@ -1985,6 +1985,13 @@ fn check_despawn(m: &mut Mob, w: &MobWorld) -> bool {
     if m.species() == Species::Mannequin {
         return true;
     }
+    // `MobDespawnEvent` comes first in NeoForge's `Mob.checkDespawn`, so an answer
+    // other than `Default` skips vanilla's checks and their `nextInt(800)` draw.
+    match std::mem::take(&mut m.despawn) {
+        mod_api::NativeDespawn::Allow => return false,
+        mod_api::NativeDespawn::Deny => return true,
+        _ => {}
+    }
     // Mob.checkDespawn discards disallowed types even when persistent or NoAI.
     if w.difficulty.effective == 0.0 && !super::spawn_rules::allowed_in_peaceful(m.species()) {
         return false;
