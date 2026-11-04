@@ -1438,9 +1438,10 @@ impl Game<'_> {
     ) -> Result<Dispensed> {
         let target = offset(pos, facing);
         let target_pos = Self::pos_of(target);
-        let crop = self.bonemeal(target_pos, false, &mut stack);
+        let ask = self.bonemeal(target_pos, false, &mut stack);
         let grown = self.with_level(|b, level, ticks| {
-            crop.unwrap_or_else(|| b.grow_crop(level, ticks, target_pos))
+            ask.crop
+                .unwrap_or_else(|| b.grow_crop(level, ticks, target_pos, ask.check))
                 || b.grow_water_plant(level, ticks, target_pos, None)
         });
         if grown {
@@ -1454,7 +1455,7 @@ impl Game<'_> {
         }
         self.process_level_events()?;
         // A canceled `BonemealEvent` that succeeded uses none of the meal.
-        let left = if grown && crop != Some(true) {
+        let left = if grown && ask.crop != Some(true) {
             shrink(stack)
         } else {
             (stack.count > 0).then_some(stack)

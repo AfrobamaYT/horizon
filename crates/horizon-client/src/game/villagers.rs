@@ -36,11 +36,12 @@ impl Game<'_> {
             return;
         };
         let mut stack = inventory[slot].clone();
-        let crop = self.bonemeal(pos, false, &mut stack);
-        let grown = crop
-            .unwrap_or_else(|| self.with_level(|b, level, ticks| b.grow_crop(level, ticks, pos)));
+        let ask = self.bonemeal(pos, false, &mut stack);
+        let grown = ask.crop.unwrap_or_else(|| {
+            self.with_level(|b, level, ticks| b.grow_crop(level, ticks, pos, ask.check))
+        });
         // A canceled `BonemealEvent` that succeeded uses none of the meal.
-        if grown && crop != Some(true) {
+        if grown && ask.crop != Some(true) {
             stack.count = stack.count.saturating_sub(1);
         }
         // The event's host may have moved the villager in `mobs`.

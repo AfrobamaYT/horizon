@@ -8002,9 +8002,15 @@ impl Game<'_> {
     fn remote_bone_meal_succeeds(&mut self, hit: &super::Hit, stack: &ItemStack) -> bool {
         let pos = horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
         let face = horizon_core::geometry::Direction::ALL[face_direction(hit.face) as usize];
-        let (crop, _) = self.held_bonemeal(pos, stack);
+        let (ask, _) = self.held_bonemeal(pos, stack);
         self.with_level(|b, level, _| {
-            b.bone_meal_succeeds_on_client(&mut DryLevel::new(level), pos, face, crop)
+            b.bone_meal_succeeds_on_client(
+                &mut DryLevel::new(level),
+                pos,
+                face,
+                ask.crop,
+                ask.check,
+            )
         })
     }
 
