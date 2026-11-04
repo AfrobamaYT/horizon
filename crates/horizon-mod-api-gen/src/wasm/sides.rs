@@ -219,9 +219,9 @@ pub(super) fn guest(
         )
         .unwrap();
         if let Some((_, list)) = super::SUBSCRIBED.iter().find(|(o, _)| o == owner) {
-            let (param, receiver) = match *owner {
-                "Hooks" => ("", "super::hooks()".to_string()),
-                _ => (
+            let (param, receiver) = match super::mod_receiver(owner) {
+                Some(receiver) => ("", receiver.to_string()),
+                None => (
                     "handler: u32",
                     format!("super::handler::<dyn {}>(handler)", trait_path(owner)),
                 ),
@@ -258,10 +258,9 @@ pub(super) fn guest(
                     ty => call_args.push(place.value(ty, &source)?),
                 }
             }
-            let receiver = if *owner == "Hooks" {
-                "super::hooks()".to_string()
-            } else {
-                format!("super::handler::<dyn {}>(handler)", trait_path(owner))
+            let receiver = match super::mod_receiver(owner) {
+                Some(receiver) => receiver.to_string(),
+                None => format!("super::handler::<dyn {}>(handler)", trait_path(owner)),
             };
             let result = results(types, method, &sig, "r", &mut_locals);
             writeln!(
@@ -514,12 +513,15 @@ pub(super) fn host(
     // Proxies: the mod's traits, each method calling its export.
     for owner in owners.iter().filter(|o| EXPORTS.contains(o)) {
         let iface = bound_ident(&interface(owner));
-        let proxy = if *owner == "Hooks" {
+        let proxy = if super::mod_receiver(owner).is_some() {
             "super::WasmMod"
         } else {
             "super::WasmHandler"
         };
         writeln!(code, "impl {} for {proxy} {{", trait_path(owner)).unwrap();
+        for (_, _, method) in super::HAND_WRITTEN.iter().filter(|(o, ..)| o == owner) {
+            writeln!(code, "{method}").unwrap();
+        }
         if let Some((_, list)) = super::SUBSCRIBED.iter().find(|(o, _)| o == owner) {
             writeln!(
                 code,
@@ -611,7 +613,7 @@ pub(super) fn host(
             ));
         }
         if super::SUBSCRIBED.iter().any(|(o, _)| o == owner) {
-            let params = if *owner == "Hooks" {
+            let params = if super::mod_receiver(owner).is_some() {
                 vec![]
             } else {
                 vec!["u32".to_string()]

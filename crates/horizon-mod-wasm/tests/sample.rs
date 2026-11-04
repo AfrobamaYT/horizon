@@ -4,7 +4,7 @@
 
 #[test]
 #[ignore = "needs the sample built to mod.wasm (CI's wasm-mods job)"]
-fn the_sample_mod_loads_and_subscribes_to_its_hook() {
+fn the_sample_mod_loads_subscribes_and_registers_its_part() {
     let path = |var: &str| std::path::PathBuf::from(std::env::var(var).expect(var));
     let package = path("HORIZON_WASM_SAMPLE");
     let std_member = std::fs::read(path("HORIZON_WASM_STD")).unwrap();
@@ -27,4 +27,7 @@ fn the_sample_mod_loads_and_subscribes_to_its_hook() {
             .any(|hook| matches!(hook, Some(mod_api::HookId::ServerChat))),
         "the sample listens to server_chat"
     );
+    // Its `register` runs in the mod and attaches a part to sticks, which listens to use_item.
+    mod_api::__private::install_parts(&loaded.mods).unwrap();
+    assert!(mod_api::__private::has_part_hook(mod_api::HookId::UseItem));
 }

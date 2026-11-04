@@ -34,9 +34,20 @@ pub struct Attached<P: ?Sized> {
     /// tag (#41 §3).
     order: usize,
     /// The part's kind: one per thing.
-    kind: TypeId,
+    kind: PartKind,
     pub(super) type_name: &'static str,
     pub(super) part: Arc<P>,
+}
+
+/// A part's kind: its Rust type, or a wasm mod's part's type name in the mod.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PartKind {
+    Native(TypeId),
+    #[cfg_attr(
+        not(all(feature = "wasm-host", not(target_arch = "wasm32"))),
+        allow(dead_code)
+    )]
+    Foreign(&'static str),
 }
 
 impl<P: ?Sized> Attached<P> {
@@ -1027,7 +1038,21 @@ impl Registrar {
         tag: &str,
         part: Arc<P>,
     ) -> Option<(Box<str>, Attached<P>)> {
-        let name = type_name::<K>();
+        self.tagged_kind(
+            PartKind::Native(TypeId::of::<K>()),
+            type_name::<K>(),
+            tag,
+            part,
+        )
+    }
+
+    fn tagged_kind<P: ?Sized>(
+        &mut self,
+        kind: PartKind,
+        name: &'static str,
+        tag: &str,
+        part: Arc<P>,
+    ) -> Option<(Box<str>, Attached<P>)> {
         if tag.starts_with('#') || !namespaced(tag) {
             self.refused.push(format!(
                 "{} attached {name} to tag {tag:?}, which is not a namespaced tag name (write it without #)",
@@ -1042,7 +1067,7 @@ impl Registrar {
                 mod_id: self.mod_id,
                 mod_index: self.mod_index,
                 order: self.registered,
-                kind: TypeId::of::<K>(),
+                kind,
                 type_name: name,
                 part,
             },
@@ -1073,12 +1098,24 @@ impl Registrar {
         id: &str,
         part: Arc<P>,
     ) -> bool {
+        let kind = PartKind::Native(TypeId::of::<K>());
+        self.attach_kind(kind, type_name::<K>(), table, id, part)
+    }
+
+    fn attach_kind<P: ?Sized>(
+        &mut self,
+        kind: PartKind,
+        type_name: &'static str,
+        table: fn(&mut Parts) -> &mut HashMap<Box<str>, Vec<Attached<P>>>,
+        id: &str,
+        part: Arc<P>,
+    ) -> bool {
         let part = Attached {
             mod_id: self.mod_id,
             mod_index: self.mod_index,
             order: self.registered + 1,
-            kind: TypeId::of::<K>(),
-            type_name: type_name::<K>(),
+            kind,
+            type_name,
             part,
         };
         let inserted = insert_part(table(&mut self.parts), id, part, &mut self.refused);
@@ -1087,6 +1124,165 @@ impl Registrar {
         }
         inserted
     }
+}
+
+/// A wasm mod's registrations: its own registrar drained, and the game's replay of it.
+#[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+impl Registrar {
+    /// A registrar of mod `mod_id`'s own, for its `register` in the mod.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn of_mod(mod_id: &'static str) -> Self {
+        Self::new(mod_id)
+    }
+
+    /// What `register` attached, each part given an index by `keep` (`mod_api::wasm`).
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn drain(
+        self,
+        mut keep: impl FnMut(&crate::registration::PartAt, ForeignPart) -> u32,
+    ) -> crate::registration::Registered {
+        use crate::registration::{PartAt, RegisteredController, RegisteredType};
+        let mut parts = Vec::new();
+        fn each<P: ?Sized>(
+            parts: &mut Vec<(usize, PartAt, Box<str>, &'static str, ForeignPart)>,
+            table: HashMap<Box<str>, Vec<Attached<P>>>,
+            at: fn() -> PartAt,
+            wrap: fn(Arc<P>) -> ForeignPart,
+        ) {
+            for (key, list) in table {
+                for part in list {
+                    parts.push((
+                        part.order,
+                        at(),
+                        key.clone(),
+                        part.type_name,
+                        wrap(part.part),
+                    ));
+                }
+            }
+        }
+        let p = self.parts;
+        each(&mut parts, p.blocks, || PartAt::Block, ForeignPart::Block);
+        each(
+            &mut parts,
+            p.block_entity_kinds,
+            || PartAt::BlockEntity,
+            ForeignPart::BlockEntity,
+        );
+        each(&mut parts, p.items, || PartAt::Item, ForeignPart::Item);
+        each(&mut parts, p.menus, || PartAt::Menu, ForeignPart::Menu);
+        for (tag, part) in self.tags.blocks {
+            parts.push((
+                part.order,
+                PartAt::BlockTag,
+                tag,
+                part.type_name,
+                ForeignPart::Block(part.part),
+            ));
+        }
+        for (tag, part) in self.tags.items {
+            parts.push((
+                part.order,
+                PartAt::ItemTag,
+                tag,
+                part.type_name,
+                ForeignPart::Item(part.part),
+            ));
+        }
+        parts.sort_by_key(|(order, ..)| *order);
+        crate::registration::Registered {
+            parts: parts
+                .into_iter()
+                .map(
+                    |(_, at, key, type_name, part)| crate::registration::RegisteredPart {
+                        handler: keep(&at, part),
+                        at,
+                        key: key.into(),
+                        type_name: type_name.into(),
+                    },
+                )
+                .collect(),
+            types: self
+                .block_entity_types
+                .into_iter()
+                .map(|t| RegisteredType {
+                    id: t.id,
+                    blocks: t.blocks,
+                })
+                .collect(),
+            requested: self
+                .requested_types
+                .into_iter()
+                .map(|r| r.kind.id().to_owned())
+                .collect(),
+            controllers: self
+                .controllers
+                .into_iter()
+                .map(|c| RegisteredController {
+                    id: c.id.into(),
+                    validates: c.validates,
+                })
+                .collect(),
+            refused: self.refused,
+        }
+    }
+
+    /// Replays a wasm mod's registrations on the game's registrar, each part made by `proxy`
+    /// from its index. Its parts' kinds are their type names in the mod.
+    #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
+    pub(crate) fn replay(
+        &mut self,
+        registered: crate::registration::Registered,
+        mut proxy: impl FnMut(&crate::registration::PartAt, u32) -> ForeignPart,
+    ) {
+        use crate::registration::PartAt;
+        for t in registered.types {
+            self.register_block_entity_type(t.id, t.blocks);
+        }
+        for id in registered.requested {
+            self.block_entity_type_key(&id);
+        }
+        for c in registered.controllers {
+            self.register_ticket_controller(&c.id, c.validates);
+        }
+        self.refused.extend(registered.refused);
+        for part in registered.parts {
+            let name: &'static str = Box::leak(part.type_name.into_boxed_str());
+            let kind = PartKind::Foreign(name);
+            match (&part.at, proxy(&part.at, part.handler)) {
+                (PartAt::Block, ForeignPart::Block(p)) => {
+                    self.attach_kind(kind, name, |t| &mut t.blocks, &part.key, p);
+                }
+                (PartAt::BlockEntity, ForeignPart::BlockEntity(p)) => {
+                    self.attach_kind(kind, name, |t| &mut t.block_entity_kinds, &part.key, p);
+                }
+                (PartAt::Item, ForeignPart::Item(p)) => {
+                    self.attach_kind(kind, name, |t| &mut t.items, &part.key, p);
+                }
+                (PartAt::Menu, ForeignPart::Menu(p)) => {
+                    self.attach_kind(kind, name, |t| &mut t.menus, &part.key, p);
+                }
+                (PartAt::BlockTag, ForeignPart::Block(p)) => {
+                    let tagged = self.tagged_kind(kind, name, &part.key, p);
+                    self.tags.blocks.extend(tagged);
+                }
+                (PartAt::ItemTag, ForeignPart::Item(p)) => {
+                    let tagged = self.tagged_kind(kind, name, &part.key, p);
+                    self.tags.items.extend(tagged);
+                }
+                _ => unreachable!("a proxy is made for the place it was asked for"),
+            }
+        }
+    }
+}
+
+/// A part of a wasm mod, as the mod keeps it or the game's proxy of it.
+#[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+pub(crate) enum ForeignPart {
+    Block(Arc<dyn BlockPart>),
+    BlockEntity(Arc<dyn BlockEntityPart>),
+    Item(Arc<dyn ItemPart>),
+    Menu(Arc<dyn MenuPart>),
 }
 
 fn namespaced(id: &str) -> bool {
@@ -2923,7 +3119,7 @@ pub mod tests {
             mod_id: ["earlier", "later"][mod_index],
             mod_index,
             order: 0,
-            kind: TypeId::of::<Gauge>(),
+            kind: PartKind::Native(TypeId::of::<Gauge>()),
             type_name: "Gauge",
             part: Arc::new(Gauge),
         };

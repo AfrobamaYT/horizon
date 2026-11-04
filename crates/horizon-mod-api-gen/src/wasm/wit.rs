@@ -283,7 +283,7 @@ pub(super) struct Signature {
 /// each value argument, and back the result plus each `&mut` argument's written-back form.
 pub(super) fn signature(types: &Types<'_>, method: &Method) -> Result<Signature, String> {
     let mut params = Vec::new();
-    if EXPORTS.contains(&method.owner) && method.owner != "Hooks" {
+    if EXPORTS.contains(&method.owner) && super::mod_receiver(method.owner).is_none() {
         params.push(("handler".to_string(), "u32".to_string()));
     }
     let mut results = Vec::new();
@@ -462,7 +462,7 @@ pub(super) fn package(
             .unwrap();
         }
         if let Some((_, _)) = super::SUBSCRIBED.iter().find(|(o, _)| o == owner) {
-            let handler = if *owner == "Hooks" {
+            let handler = if super::mod_receiver(owner).is_some() {
                 ""
             } else {
                 "handler: u32"

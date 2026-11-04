@@ -448,17 +448,22 @@ impl Group {
     }
 }
 
-/// One wasm mod of a group: the [`Hooks`](crate::Hooks) the game dispatches to.
-pub struct WasmMod {
+/// One wasm mod of a group, as its calls run: its group, its exports and its id.
+struct Running {
     group: Arc<Group>,
     exports: glue::ModExports,
     id: &'static str,
+}
+
+/// One wasm mod of a group: the [`Hooks`](crate::Hooks) the game dispatches to.
+pub struct WasmMod {
+    module: Arc<Running>,
     subscribed: &'static [Option<HookId>],
 }
 
 /// One of a wasm mod's registered parts or handlers, by the index the mod keeps it under.
 pub struct WasmHandler {
-    module: Arc<WasmMod>,
+    module: Arc<Running>,
     index: u32,
     subscribed: &'static [Option<HookId>],
 }
@@ -481,7 +486,7 @@ impl NoAnswer for crate::Flow {
     }
 }
 
-impl WasmMod {
+impl Running {
     /// Runs one call with `frame`'s hosts, charging its fuel to this mod. A refused call or a
     /// trap answers `T::default()`, as no mod answering; a trap stops the whole group.
     fn call<T: NoAnswer>(
@@ -514,6 +519,16 @@ impl WasmMod {
     }
 }
 
+impl WasmMod {
+    fn call<T: NoAnswer>(
+        &self,
+        frame: Frame,
+        f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
+    ) -> T {
+        self.module.call(frame, f)
+    }
+}
+
 impl WasmHandler {
     fn call<T: NoAnswer>(
         &self,
@@ -522,6 +537,51 @@ impl WasmHandler {
     ) -> T {
         self.module.call(frame, f)
     }
+}
+
+/// The hooks a subscribed-hooks export named.
+fn hook_ids(names: Vec<String>) -> &'static [Option<HookId>] {
+    Box::leak(
+        names
+            .iter()
+            .map(|n| glue::hook_id(n))
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+    )
+}
+
+/// [`Hooks::register`](crate::Hooks::register) of a wasm mod: the mod runs its own and hands
+/// over what it attached (`registration`), and this replays it on the game's registrar, each
+/// part a proxy calling back into the mod.
+fn register(module: &WasmMod, r: &mut crate::Registrar, _: &crate::RegistrationContext<'_>) {
+    use crate::part_table::ForeignPart;
+    use crate::registration::{PartAt, Registration};
+    let registered = module.registered(module.module.id.to_owned());
+    r.replay(registered, |at, index| {
+        let names = module.call(Frame::default(), |m, s| match at {
+            PartAt::Block | PartAt::BlockTag => {
+                m.horizon_mod_api_block_part().call_subscribed(s, index)
+            }
+            PartAt::BlockEntity => m
+                .horizon_mod_api_block_entity_part()
+                .call_subscribed(s, index),
+            PartAt::Item | PartAt::ItemTag => {
+                m.horizon_mod_api_item_part().call_subscribed(s, index)
+            }
+            PartAt::Menu => m.horizon_mod_api_menu_part().call_subscribed(s, index),
+        });
+        let part = Arc::new(WasmHandler {
+            module: module.module.clone(),
+            index,
+            subscribed: hook_ids(names),
+        });
+        match at {
+            PartAt::Block | PartAt::BlockTag => ForeignPart::Block(part),
+            PartAt::BlockEntity => ForeignPart::BlockEntity(part),
+            PartAt::Item | PartAt::ItemTag => ForeignPart::Item(part),
+            PartAt::Menu => ForeignPart::Menu(part),
+        }
+    });
 }
 
 /// A member of a group: its mod id, and the prefix of its exports, `<prefix>-<interface>`.
@@ -559,29 +619,19 @@ pub fn instantiate(
     let group = Arc::new(Group::new(store, budgets, GROUP_WAIT));
     let mut entries = Vec::new();
     for (id, exports) in found {
-        let module = WasmMod {
+        let module = Arc::new(Running {
             group: group.clone(),
             exports,
             id,
-            subscribed: &[],
-        };
+        });
         let names = module.call(Frame::default(), |m, store| {
             m.horizon_mod_api_hooks().call_subscribed(store)
         });
-        let subscribed: &'static [Option<HookId>] = Box::leak(
-            names
-                .iter()
-                .map(|n| glue::hook_id(n))
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
-        );
-        entries.push(crate::ModEntry::new(
-            id,
-            Box::new(WasmMod {
-                subscribed,
-                ..module
-            }),
-        ));
+        let hooks = WasmMod {
+            module,
+            subscribed: hook_ids(names),
+        };
+        entries.push(crate::ModEntry::new(id, Box::new(hooks)));
     }
     Ok(entries)
 }

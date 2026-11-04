@@ -316,7 +316,7 @@ fn executable_content_is_refused_without_installing_or_skipping_code() {
     v.file.sha256 = index::sha256_file(&path).unwrap();
     v.file.signature = None;
     let e = put(&index, true, &home).unwrap_err();
-    assert_eq!(e, "mod.wasm: unsupported executable file in a content mod");
+    assert_eq!(e, "mod.wasm needs a [wasm] section");
     assert!(!home.join("horizon-mods/coords_hud.hmod").exists());
     assert!(installed::Installed::load(&home).entries.is_empty());
     fs::remove_dir_all(home).unwrap();
@@ -390,7 +390,7 @@ fn refuses_a_changed_file_a_taken_id_and_local_files_from_the_real_registry() {
 
 #[test]
 fn registry_versions_run_when_made_for_this_game() {
-    use super::super::{pick, support, Support};
+    use super::super::{Support, pick, support};
     let v = |game: &str| vec![game.to_owned()];
     let horizon = vec![LOADER.to_owned()];
     assert_eq!(support(Kind::Mod, &v(GAME), &horizon), Support::Works);

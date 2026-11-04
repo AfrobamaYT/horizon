@@ -3247,6 +3247,7 @@ pub(crate) use part_table::{
 
 #[macro_use]
 mod wasm_codec;
+mod registration;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]

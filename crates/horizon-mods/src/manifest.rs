@@ -606,7 +606,7 @@ impl Package {
         let manifest = Manifest::parse(text)?;
         let package = Package { manifest, icon };
         if has_cargo != package.has_source() || has_source != has_cargo {
-            return Err("inconsistent code package declaration and source".into());
+            return Err("inconsistent code declaration ([native] or [wasm]) and source".into());
         }
         match (has_wasm, package.manifest.wasm.is_some()) {
             (true, false) => return Err(WasmError::Undeclared.to_string()),

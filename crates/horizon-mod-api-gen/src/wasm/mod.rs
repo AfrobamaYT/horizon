@@ -38,7 +38,32 @@ const EXPORTS: &[&str] = &[
     "MenuPart",
     "ServerReloadListener",
     "ClientReloadListener",
+    "registration::Registration",
 ];
+
+/// The exported traits the mod itself answers, with no handler index, and the guest's
+/// expression for its implementation of each; every other export is a registered handler's.
+pub(super) const MOD_EXPORTS: &[(&str, &str)] = &[
+    ("Hooks", "super::hooks()"),
+    ("registration::Registration", "super::Registrations"),
+];
+
+/// The guest's receiver of `owner`'s exports, if the mod itself answers them.
+pub(super) fn mod_receiver(owner: &str) -> Option<&'static str> {
+    MOD_EXPORTS
+        .iter()
+        .find(|(o, _)| *o == owner)
+        .map(|(_, r)| *r)
+}
+
+/// Methods of the mod's traits that cross by hand rather than through their types, each with
+/// the game's proxy method, which calls `super::<name>` (`mod_api::wasm_host`). `register`
+/// crosses as the `Registration` export.
+pub(super) const HAND_WRITTEN: &[(&str, &str, &str)] = &[(
+    "Hooks",
+    "register",
+    "fn register(&self, r: &mut crate::Registrar, cx: &crate::RegistrationContext<'_>) { super::register(self, r, cx) }",
+)];
 
 /// The exported traits that list the hooks they subscribe to, and the method listing them.
 const SUBSCRIBED: &[(&str, &str)] = &[
@@ -97,7 +122,12 @@ pub(super) fn surface<'a>(
                 continue;
             };
             let name = function.sig.ident.to_string();
-            if hidden(&function.attrs) || name.ends_with("subscribed") {
+            if hidden(&function.attrs)
+                || name.ends_with("subscribed")
+                || HAND_WRITTEN
+                    .iter()
+                    .any(|(o, n, _)| o == owner && *n == name)
+            {
                 continue;
             }
             match method(&mut types, id.module, owner, function) {
