@@ -190,13 +190,12 @@ impl Game<'_> {
                 // resolvePlayerResponsibleForDamage: the causing player, by entity id,
                 // for a native mod's experience drop.
                 let by_player = match cause.or(by) {
-                    _ if horizon_client::mod_api::mods().is_empty() => None,
                     Some(Target::Player) => self.lan_acting,
                     Some(Target::Guest(conn)) => Some(conn),
                     _ => None,
                 }
                 .and_then(|conn| self.command_guest(conn))
-                .map(|g| crate::game::combat::PlayerCredit::Entity(g.entity_id as u32));
+                .map(|g| crate::game::combat::PlayerCredit(g.uuid));
                 let now = self.world.game_time;
                 self.for_player(target, |g| {
                     if g.spectator() {
@@ -268,7 +267,7 @@ impl Game<'_> {
         if hurt {
             self.resolve_player_responsible(id, damage);
             if damage.attacker == Some(Who::Player) {
-                self.last_hurt_by_player.insert(id, self.lan_acting);
+                self.remember_mob_player_credit(id);
                 if let Some(host) = self.lan.as_mut() {
                     match self.lan_acting {
                         Some(conn) => {

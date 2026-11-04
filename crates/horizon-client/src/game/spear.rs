@@ -289,7 +289,7 @@ impl Game<'_> {
             });
         }
         if hurt {
-            self.last_hurt_by_player.insert(id, self.lan_acting);
+            self.remember_mob_player_credit(id);
         }
         if let Some(p) = self.player.as_mut()
             && !self.creative

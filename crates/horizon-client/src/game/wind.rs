@@ -184,7 +184,7 @@ impl Game<'_> {
                     m.damage(1.0, source);
                 }
                 if p.owner == Some(Who::Player) {
-                    self.last_hurt_by_player.insert(id, self.lan_acting);
+                    self.remember_mob_player_credit(id);
                 }
             }
         }

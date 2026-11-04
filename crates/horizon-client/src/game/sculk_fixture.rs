@@ -735,7 +735,7 @@ impl Game<'_> {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                         m.damage(amount, horizon_client::mobs::Damage::player(at));
                     }
-                    self.last_hurt_by_player.insert(id, self.lan_acting);
+                    self.remember_mob_player_credit(id);
                 }
                 "set" => {
                     let n = |i: usize| words[i].parse::<i32>().unwrap_or(0);

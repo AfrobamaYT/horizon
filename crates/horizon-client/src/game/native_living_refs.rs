@@ -265,7 +265,7 @@ impl Game<'_> {
                     // is out of reach (the same None the other players'
                     // handles read while the hub is out).
                     Who::Player => {
-                        let conn = *self.last_hurt_by_player.get(&id)?;
+                        let conn = self.resolve_player_credit(*self.last_hurt_by_player.get(&id)?)?;
                         match conn {
                             None if self.lan_acting.is_some() => None,
                             None => Some(self.player.as_ref()?.entity_id as u32),
@@ -741,7 +741,7 @@ mod tests {
             assert_eq!(pig_living.last_attacker(game).map(|a| a.id()), Some(15));
             // The host's hit, read in the host's own turn: the host's handle.
             game.mobs[0].ai.last_hurt_by = Some(Who::Player);
-            game.last_hurt_by_player.insert(12, None);
+            game.last_hurt_by_player.insert(12, super::super::combat::PlayerCredit(123));
             assert_eq!(pig_living.last_attacker(game).map(|a| a.id()), Some(20));
             // The same record inside a guest's turn: the host's displaced
             // body is out of reach, so the attacker reads None.

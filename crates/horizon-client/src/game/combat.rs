@@ -38,42 +38,25 @@ pub(super) struct Stuck {
     pub(super) remove_arrow_time: i32,
     pub(super) remove_stinger_time: i32,
 }
-/// Who `LivingEntity.resolvePlayerResponsibleForDamage` credits: a player by
-/// entity id, or the owner of a tamed animal by UUID.
+/// `LivingEntity.lastHurtByPlayer`: a reference that survives a disconnect.
 #[derive(Clone, Copy)]
-pub(super) enum PlayerCredit {
-    Entity(u32),
-    Owner(u128),
-}
-impl PlayerCredit {
-    /// `EntityReference.getPlayer` (`getPlayerInAnyDimension`): the UUID of the
-    /// credited player while they are online, none for a player who left.
-    pub(super) fn uuid(self, host: &super::lan::LanHost) -> Option<u128> {
-        host.hub
-            .guests
-            .iter()
-            .find(|g| {
-                g.placed
-                    && match self {
-                        Self::Entity(id) => g.entity_id as u32 == id,
-                        Self::Owner(uuid) => g.uuid == uuid,
-                    }
-            })
-            .map(|g| g.uuid)
-    }
-}
+pub(super) struct PlayerCredit(pub(super) u128);
 impl CombatTracker {
     /// `LivingEntity.lastHurtByPlayer`, remembered for 100 ticks (taken, as a
     /// dead player's memory goes with them).
     pub(super) fn take_hurt_by_player(&mut self, now: i64) -> Option<PlayerCredit> {
         let (credit, at) = self.last_hurt_by_player.take()?;
-        (now - at <= 100).then_some(credit)
+        (now - at < 100).then_some(credit)
     }
     /// Whether a player hurt this body within the last 100 ticks
     /// (`lastHurtByPlayerMemoryTime > 0`), without forgetting them.
     pub(super) fn recently_hit_by_player(&self, now: i64) -> bool {
+        self.player_credit(now).is_some()
+    }
+    /// The player reference while its 100-tick memory is active.
+    pub(super) fn player_credit(&self, now: i64) -> Option<PlayerCredit> {
         self.last_hurt_by_player
-            .is_some_and(|(_, at)| now - at <= 100)
+            .and_then(|(credit, at)| (now - at < 100).then_some(credit))
     }
     /// `LivingEntity.setLastHurtByPlayer(player, 100)`.
     pub(super) fn note_hurt_by_player(&mut self, credit: PlayerCredit, now: i64) {
@@ -327,13 +310,22 @@ impl Game<'_> {
     fn resolve_player_responsible_for_player(&mut self, id: u32) {
         let now = self.world.game_time;
         match self.mobs.iter().find(|m| m.id == id) {
-            None => self
-                .combat
-                .note_hurt_by_player(PlayerCredit::Entity(id), now),
+            None => {
+                let uuid = self.lan.as_ref().and_then(|host| {
+                    host.hub
+                        .guests
+                        .iter()
+                        .find(|g| g.entity_id as u32 == id)
+                        .map(|g| g.uuid)
+                });
+                if let Some(uuid) = uuid {
+                    self.combat.note_hurt_by_player(PlayerCredit(uuid), now);
+                }
+            }
             Some(m) if m.extra.tame && &*m.kind.id == "minecraft:wolf" => {
                 self.combat.last_hurt_by_player = m.extra.owner.map(|o| {
                     let owner = horizon_client::lan::playerdata::ints_uuid(o);
-                    (PlayerCredit::Owner(owner), now)
+                    (PlayerCredit(owner), now)
                 });
             }
             Some(_) => {}
@@ -364,9 +356,7 @@ impl Game<'_> {
                                 }
                             }
                         };
-                        if let Some(id) = attacker
-                            && !horizon_client::mod_api::mods().is_empty()
-                        {
+                        if let Some(id) = attacker {
                             self.resolve_player_responsible_for_player(id);
                         }
                     }
@@ -852,8 +842,19 @@ mod noted_tests {
 }
 #[cfg(test)]
 mod kill_credit_tests {
-    use super::CombatTracker;
+    use super::{CombatTracker, PlayerCredit};
     use horizon_client::text::Text;
+
+    #[test]
+    fn player_reference_expires_after_one_hundred_ticks() {
+        let mut tracker = CombatTracker::default();
+        tracker.note_hurt_by_player(PlayerCredit(123), 1_000);
+        assert_eq!(
+            tracker.player_credit(1_099).map(|credit| credit.0),
+            Some(123)
+        );
+        assert!(tracker.player_credit(1_100).is_none());
+    }
 
     /// `CombatTracker.getKiller`'s window: a hundred ticks after the hurt
     /// still counts (`getLastHurtByMob` answers), the next tick no longer

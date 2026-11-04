@@ -548,7 +548,7 @@ impl Game<'_> {
                 // last player to hurt it (`setLastHurtByPlayer`), so its death
                 // message names them and their item.
                 if hurt && attacker == Some(Who::Player) {
-                    self.last_hurt_by_player.insert(id, self.lan_acting);
+                    self.remember_mob_player_credit(id);
                 }
             }
         }

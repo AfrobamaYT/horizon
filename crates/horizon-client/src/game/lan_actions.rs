@@ -4514,7 +4514,7 @@ impl Game<'_> {
                     self.guest_combat
                         .get_mut(&conn)
                         .and_then(|c| c.take_hurt_by_player(now))
-                        .and_then(|c| self.lan.as_ref().and_then(|host| c.uuid(host)))
+                        .and_then(|c| self.resolve_player_credit(c).map(|_| c.0))
                 };
                 let reward = self.living_experience_drop(
                     id as u32,
@@ -4538,22 +4538,27 @@ impl Game<'_> {
         };
         let now = self.world.game_time;
         let combat = self.guest_combat.get(&conn);
-        let who = combat.and_then(|c| c.kill_credit(now)).and_then(|id| {
-            if self.lan_acting.is_none()
-                && self
-                    .player
-                    .as_ref()
-                    .is_some_and(|p| p.entity_id as u32 == id)
-            {
-                Some(None)
-            } else {
-                host.hub
-                    .guests
-                    .iter()
-                    .find(|g| g.entity_id as u32 == id)
-                    .map(|g| Some(g.conn))
-            }
-        });
+        let player_credit = combat.and_then(|c| c.player_credit(now));
+        let who = if let Some(credit) = player_credit {
+            self.resolve_player_credit(credit)
+        } else {
+            combat.and_then(|c| c.kill_credit(now)).and_then(|id| {
+                if self.lan_acting.is_none()
+                    && self
+                        .player
+                        .as_ref()
+                        .is_some_and(|p| p.entity_id as u32 == id)
+                {
+                    Some(None)
+                } else {
+                    host.hub
+                        .guests
+                        .iter()
+                        .find(|g| g.entity_id as u32 == id)
+                        .map(|g| Some(g.conn))
+                }
+            })
+        };
         let Some(who) = who else { return };
         let (damage, attacker) = combat
             .and_then(|c| c.killing_blow())
