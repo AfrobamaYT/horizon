@@ -6162,6 +6162,7 @@ impl Game<'_> {
                 resources: self.motion,
                 loop_context: &self.loop_context,
                 tag_items: None,
+                block_registries: None,
             }
             .controlled_simulation_tick_with_sprint_window(keys, sprint_window)?;
         } else {
@@ -6179,6 +6180,7 @@ impl Game<'_> {
                     resources: self.motion,
                     loop_context: &self.loop_context,
                     tag_items: None,
+                    block_registries: None,
                 }
                 .passenger_pose_tick()?;
             }

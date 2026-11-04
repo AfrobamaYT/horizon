@@ -84,6 +84,7 @@ impl Game<'_> {
                 resources: self.motion,
                 loop_context: &self.loop_context,
                 tag_items: Some(world_items!(self)),
+                block_registries: Some(&self.pack.block_registries),
             }
             .replayed_tick(keys, sprinting)
         };

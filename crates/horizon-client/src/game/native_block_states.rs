@@ -16,8 +16,7 @@ impl Game<'_> {
     /// (`{...}`); and, as `/setblock`'s argument, for anything after the
     /// block.
     pub(super) fn native_block_state_id(&self, name: &str) -> Option<BlockStateId> {
-        let registry = self.pack.assets.registry;
-        parse(&block_registries(registry), registry, name)
+        parse(&self.pack.block_registries, self.pack.assets.registry, name)
     }
     /// The state `state` as `/setblock` takes it back
     /// (`BlockStateParser.serialize`): its block, then each property in
@@ -66,7 +65,7 @@ impl Game<'_> {
 
 /// The command registries' block table of `registry` alone, built once: what
 /// the parser checks properties against, whether a world is open or not.
-fn block_registries(registry: &'static BlockRegistry) -> Arc<Registries> {
+pub(super) fn block_registries(registry: &'static BlockRegistry) -> Arc<Registries> {
     static CACHE: Mutex<Vec<(usize, Arc<Registries>)>> = Mutex::new(Vec::new());
     let key = std::ptr::from_ref(registry) as usize;
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
@@ -83,7 +82,11 @@ fn block_registries(registry: &'static BlockRegistry) -> Arc<Registries> {
 
 /// `BlockStateParser.parseForBlock` of the whole of `name`, NBT included, as
 /// `/setblock` reads it; a state with NBT has no id.
-fn parse(reg: &Registries, registry: &BlockRegistry, name: &str) -> Option<BlockStateId> {
+pub(super) fn parse(
+    reg: &Registries,
+    registry: &BlockRegistry,
+    name: &str,
+) -> Option<BlockStateId> {
     let mut reader = Reader::new(name);
     let input = block::parse(&mut reader, reg, false).ok()?;
     if reader.can_read() || input.nbt.is_some() {
@@ -97,7 +100,7 @@ fn parse(reg: &Registries, registry: &BlockRegistry, name: &str) -> Option<Block
 }
 
 /// `Block.defaultBlockState` of the block `block` names (`Identifier.parse`).
-fn default_state(registry: &BlockRegistry, block: &str) -> Option<BlockStateId> {
+pub(super) fn default_state(registry: &BlockRegistry, block: &str) -> Option<BlockStateId> {
     registry.default_state(&horizon_client::command::args::normalize(block))
 }
 

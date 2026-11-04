@@ -287,6 +287,7 @@ impl MotionWorld<'_, '_, '_> {
                 &mut *self.scene,
                 self.assets.registry,
                 self.tag_items,
+                self.block_registries,
             ),
             crate::block_contact::Contact {
                 entity: self.player.entity_id,
@@ -703,6 +704,7 @@ impl LivingFallWorld for FallCall<'_, '_, '_, '_> {
                 self.world.scene,
                 self.world.assets.registry,
                 self.world.tag_items,
+                self.world.block_registries,
             ),
             resources,
             rules,
