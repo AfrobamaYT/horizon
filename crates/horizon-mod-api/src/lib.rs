@@ -91,7 +91,8 @@ pub mod __private;
 mod phase;
 pub use horizon_mods::Side;
 pub use phase::{
-    DataLoadContext, DataLoadOrigin, LoadedMods, PackageInfo, PackageKind, RegistrationContext,
+    DataLoadContext, DataLoadOrigin, LoadedMods, LoopContext, LoopSide, PackageInfo, PackageKind,
+    RegistrationContext,
 };
 mod config_files;
 pub use config_files::{

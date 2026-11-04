@@ -2617,6 +2617,19 @@ is out of the world during the call, as in `native_menu_button`. Only a server's
 thread, LAN guests, a dedicated server) shift-click this way; a native mod's own menus (`native_open_menu`) get their
 clicks already.
 
+### The loop context
+
+`LoopContext<'_>` is the read-only view for a hook fired inside a menu, recipe or
+player-list loop, where no game is at hand (a catalog entry names it with
+`"context": "loop"`; no hook uses it yet). `side()` is `LoopSide::Server` or
+`LoopSide::Client`, `registry(name)` borrows names in registry ID order,
+`setting(mod_id, key)` returns a loaded mod's setting captured when the context was
+built, and `mods()` is the `LoadedMods` view of registration. It has no game Host,
+handle construction or transaction, and its answers never change while it is held.
+The side that owns the loop builds it, never a hook: the client builds one at window
+start and again after each resource reload, so a reload captures fresh settings; a
+server side comes with the first server hook that takes it.
+
 ### Items' default components
 
 `Hooks::modify_default_components` receives `&DataLoadContext<'_>` before its

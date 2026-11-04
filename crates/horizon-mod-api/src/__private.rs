@@ -331,6 +331,24 @@ pub mod game {
         }
     }
 
+    pub use self::loopcontextnew::LoopContextNew;
+    mod loopcontextnew {
+        #[allow(unused_imports)]
+        use crate::phase::*;
+        #[allow(unused_imports)]
+        use crate::*;
+        #[allow(unused_imports)]
+        use std::sync::OnceLock;
+        pub trait LoopContextNew<'a>: Sized {
+            fn new(source: &'a horizon_world::native_load_context::LoopContext) -> Self;
+        }
+        impl<'a> LoopContextNew<'a> for LoopContext<'a> {
+            fn new(source: &'a horizon_world::native_load_context::LoopContext) -> Self {
+                LoopContext::new(source)
+            }
+        }
+    }
+
     pub use self::modblockentityviewnew::ModBlockEntityViewNew;
     mod modblockentityviewnew {
         #[allow(unused_imports)]

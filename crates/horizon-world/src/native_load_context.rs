@@ -30,23 +30,15 @@ impl LoadInputs {
     }
 }
 
-/// Origin and borrowed engine inputs for one owning load. This contains no
-/// game, world handles or mutable registry access.
-pub struct LoadContext {
-    origin: DataLoadOrigin,
+/// A load's registry snapshot with the settings captured for its mods.
+struct Snapshot {
     inputs: Arc<LoadInputs>,
     settings: BTreeMap<String, BTreeMap<String, String>>,
 }
 
-impl LoadContext {
-    /// Called at a load boundary, never by a reader of already-loaded data.
-    /// Captures settings for the owning phase's loaded package IDs; reusing the
-    /// registry inputs for another load still captures fresh settings.
-    pub fn new<'a>(
-        origin: DataLoadOrigin,
-        inputs: Arc<LoadInputs>,
-        mod_ids: impl IntoIterator<Item = &'a str>,
-    ) -> Self {
+impl Snapshot {
+    /// Captures settings for `mod_ids`; the registry inputs are shared, not scanned again.
+    fn capture<'a>(inputs: Arc<LoadInputs>, mod_ids: impl IntoIterator<Item = &'a str>) -> Self {
         let mut settings = BTreeMap::new();
         for mod_id in mod_ids {
             let directory = inputs.settings_root.join(mod_id);
@@ -64,10 +56,37 @@ impl LoadContext {
             }
             settings.insert(mod_id.to_owned(), values);
         }
+        Self { inputs, settings }
+    }
+
+    fn registry(&self, name: &str) -> Option<&[String]> {
+        self.inputs.registries.get(name).map(Vec::as_slice)
+    }
+
+    fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
+        self.settings.get(mod_id)?.get(key).cloned()
+    }
+}
+
+/// Origin and borrowed engine inputs for one owning load. This contains no
+/// game, world handles or mutable registry access.
+pub struct LoadContext {
+    origin: DataLoadOrigin,
+    snapshot: Snapshot,
+}
+
+impl LoadContext {
+    /// Called at a load boundary, never by a reader of already-loaded data.
+    /// Captures settings for the owning phase's loaded package IDs; reusing the
+    /// registry inputs for another load still captures fresh settings.
+    pub fn new<'a>(
+        origin: DataLoadOrigin,
+        inputs: Arc<LoadInputs>,
+        mod_ids: impl IntoIterator<Item = &'a str>,
+    ) -> Self {
         Self {
             origin,
-            inputs,
-            settings,
+            snapshot: Snapshot::capture(inputs, mod_ids),
         }
     }
 
@@ -77,7 +96,21 @@ impl LoadContext {
         origin: DataLoadOrigin,
         mod_ids: impl IntoIterator<Item = &'a str>,
     ) -> Self {
-        Self::new(origin, self.inputs.clone(), mod_ids)
+        Self::new(origin, self.snapshot.inputs.clone(), mod_ids)
+    }
+
+    /// The context of a menu, recipe or player-list loop of `side`, over this
+    /// load's registry inputs, with fresh settings. Built where the side's loop
+    /// owner starts or reloads its resources, never by a reader.
+    pub fn loop_context<'a>(
+        &self,
+        side: LoopSide,
+        mod_ids: impl IntoIterator<Item = &'a str>,
+    ) -> LoopContext {
+        LoopContext {
+            side,
+            snapshot: Snapshot::capture(self.snapshot.inputs.clone(), mod_ids),
+        }
     }
 
     pub fn origin(&self) -> DataLoadOrigin {
@@ -86,12 +119,44 @@ impl LoadContext {
 
     /// Names in registry ID order, from the load's registry snapshot.
     pub fn registry(&self, name: &str) -> Option<&[String]> {
-        self.inputs.registries.get(name).map(Vec::as_slice)
+        self.snapshot.registry(name)
     }
 
     /// A loaded mod's setting captured at this load boundary, with no file I/O.
     pub fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
-        self.settings.get(mod_id)?.get(key).cloned()
+        self.snapshot.setting(mod_id, key)
+    }
+}
+
+/// The side a loop context serves, chosen where the context is built.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LoopSide {
+    Server,
+    Client,
+}
+
+/// Registries, settings and the side for hooks fired inside a menu, recipe or
+/// player-list loop, where no game is at hand. It holds no game, world handle
+/// or mutable registry access, and is built once per resource generation.
+pub struct LoopContext {
+    side: LoopSide,
+    snapshot: Snapshot,
+}
+
+impl LoopContext {
+    pub fn side(&self) -> LoopSide {
+        self.side
+    }
+
+    /// Names in registry ID order, from the registry snapshot it was built over.
+    pub fn registry(&self, name: &str) -> Option<&[String]> {
+        self.snapshot.registry(name)
+    }
+
+    /// A loaded mod's setting captured when this context was built, with no file I/O.
+    pub fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
+        self.snapshot.setting(mod_id, key)
     }
 }
 
@@ -143,5 +208,33 @@ mod tests {
         let missing = LoadContext::new(DataLoadOrigin::ServerDataLoad, inputs, ["active"]);
         assert_eq!(missing.setting("active", "mode"), None);
         assert!(!root.exists());
+    }
+
+    #[test]
+    fn a_loop_context_shares_the_registries_and_captures_its_own_settings() {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-loop-settings-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let mod_dir = root.join("active");
+        fs::create_dir_all(&mod_dir).unwrap();
+        fs::write(mod_dir.join("mode"), "one").unwrap();
+        let registries = BTreeMap::from([("item".to_owned(), vec!["a:b".to_owned()])]);
+        let inputs = Arc::new(LoadInputs::new(registries, root.clone()));
+        let load = LoadContext::new(DataLoadOrigin::ClientPreload, inputs, ["active"]);
+
+        let client = load.loop_context(LoopSide::Client, ["active"]);
+        fs::write(mod_dir.join("mode"), "two").unwrap();
+        let server = load.loop_context(LoopSide::Server, ["active"]);
+
+        assert_eq!(client.side(), LoopSide::Client);
+        assert_eq!(server.side(), LoopSide::Server);
+        assert_eq!(client.registry("item"), Some(&["a:b".to_owned()][..]));
+        assert_eq!(server.registry("item"), client.registry("item"));
+        assert_eq!(client.setting("active", "mode").as_deref(), Some("one"));
+        assert_eq!(server.setting("active", "mode").as_deref(), Some("two"));
+        assert_eq!(load.setting("active", "mode").as_deref(), Some("one"));
+        fs::remove_dir_all(&root).unwrap();
     }
 }
