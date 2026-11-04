@@ -56,6 +56,7 @@ mod tests {
         pub(super) struct Corners;
         pub(super) struct Suggestion;
         pub(super) struct HudBatch;
+        pub(super) struct TooltipElement;
         pub(super) struct BiomeColors;
         pub(super) struct SpawnEntry;
         pub(super) struct UseAnimation;

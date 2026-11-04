@@ -589,8 +589,7 @@ impl Game<'_> {
                     self.native_kill_event(i);
                 }
                 self.mobs[i].knockback(0.4, xd, zd, &source);
-                self.last_hurt_by_player
-                    .insert(self.mobs[i].id, self.lan_acting);
+                self.remember_mob_player_credit(self.mobs[i].id);
                 self.post_attack(i);
             }
         }
