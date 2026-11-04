@@ -1053,7 +1053,6 @@
     "Running {name}'s post-build step": "Uruchamianie kroku po kompilacji moda {name}",
     "The source of {source}. Its release ships {file}, a content mod: installing those from GitHub is not supported yet.": "Kod źródłowy {source}. Wydanie zawiera {file}, mod zawartości: instalowanie takich modów z GitHub nie jest jeszcze obsługiwane.",
     "Build anyway": "Mimo to zbuduj",
-    "{error} They often still build: pass --allow-version-mismatch to try.": "{error} Często nadal się kompilują: przekaż --allow-version-mismatch, aby spróbować.",
     "Accent colour, glass, blur, language and the options above go back to how Horizon ships.": "Kolor akcentu, szkło, rozmycie, język i opcje powyżej wracają do ustawień, z jakimi Horizon jest dostarczany.",
     "Reset the launcher's look": "Przywróć wygląd launchera",
     "Reset to defaults": "Przywróć domyślne",
