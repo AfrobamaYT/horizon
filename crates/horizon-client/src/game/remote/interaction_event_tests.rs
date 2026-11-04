@@ -773,3 +773,53 @@ fn on_item_use_first_runs_before_the_block_and_ends_the_click() {
         });
     });
 }
+
+#[test]
+#[ignore = "requires prepared game resources"]
+fn an_item_used_from_the_off_hand_reaches_the_use_hooks_on_the_server() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "off_hand_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    mod_api::__private::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(false, |game| {
+            let side = LogicalSide::Server;
+            game.offhand = Some(ItemStack::new("minecraft:stick", 1));
+
+            // An empty main hand passes, and the off hand uses its item.
+            game.inventory[game.selected] = None;
+            *observer.0.lock().unwrap() = Controls::default();
+            assert_eq!(game.use_item_as_player().unwrap(), Some(Hand::Off));
+            assert_eq!(
+                observer.0.lock().unwrap().steps,
+                [Step::Air(side, Hand::Off), Step::ItemPart]
+            );
+
+            // A main hand item nothing answers for passes too: both hands' hooks, in order.
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:stone", 1));
+            *observer.0.lock().unwrap() = Controls::default();
+            assert_eq!(game.use_item_as_player().unwrap(), Some(Hand::Off));
+            assert_eq!(
+                observer.0.lock().unwrap().steps,
+                [
+                    Step::Air(side, Hand::Main),
+                    Step::Air(side, Hand::Off),
+                    Step::ItemPart
+                ]
+            );
+
+            // A guest's use packet names the off hand alone.
+            game.inventory[game.selected] = None;
+            *observer.0.lock().unwrap() = Controls::default();
+            game.guest_use = Some(super::super::GuestUse::Item(Hand::Off));
+            assert_eq!(game.use_item_as_player().unwrap(), Some(Hand::Off));
+            assert_eq!(
+                observer.0.lock().unwrap().steps,
+                [Step::Air(side, Hand::Off), Step::ItemPart]
+            );
+        });
+    });
+}
