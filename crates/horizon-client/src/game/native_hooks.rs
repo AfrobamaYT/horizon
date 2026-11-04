@@ -1037,7 +1037,8 @@ impl GameLevel<'_> {
     /// from inside the level's update, so answer from your own state: check the
     /// block first, and don't read or change the world here. When the answer
     /// changes, and once the block is placed, call
-    /// `native_update_signal_neighbors`. Authoritative servers only.
+    /// `level.update_neighbors(host, pos, state, NeighbourUpdate::Neighbours)`. Authoritative
+    /// servers only.
     #[inline(always)]
     pub(super) fn native_block_signal(
         &self,
@@ -1082,7 +1083,7 @@ impl GameLevel<'_> {
     /// it when the block is yours. Asked whenever wire settles its shape:
     /// answer from `state` and `pos` without touching the world. When the
     /// answer changes, and once the wire is placed, update its neighbours
-    /// (`native_update_signal_neighbors`). Authoritative servers only.
+    /// (`level.update_neighbors`). Authoritative servers only.
     #[inline(always)]
     pub(super) fn native_should_redstone_wire_connect_to(
         &self,
@@ -1138,7 +1139,8 @@ impl GameLevel<'_> {
     /// Asked only for blocks `native_has_analog_output` answered for, from
     /// inside the level's update: don't change the world here. When the
     /// answer changes without the block's state changing, call
-    /// `native_update_output_neighbors`; a change of state through
+    /// `level.update_neighbors(host, pos, state, NeighbourUpdate::OutputSignal)`; a change of
+    /// state through
     /// `native_set_block` or `native_set_block_property` (neighbour updates
     /// on) tells the comparators itself, as vanilla's `Level.setBlock` does.
     /// Authoritative servers only.
@@ -9418,60 +9420,6 @@ impl Game<'_> {
         };
         let at = BlockPos::new(pos[0], pos[1], pos[2]);
         self.with_level(|b, level, ticks| b.set_block(level, ticks, at, id, flags))
-    }
-    /// The block at `pos` changed its comparator output
-    /// (`native_analog_output`) without changing its state: the comparators
-    /// beside it, or behind a conductor there, read it again
-    /// (`Level.updateNeighbourForOutputSignal`). Acts on the level in place:
-    /// false (and nothing happens) when `dimension` is another, or this
-    /// window isn't a server.
-    pub(super) fn native_update_output_neighbors(
-        &mut self,
-        dimension: &str,
-        pos: [i32; 3],
-    ) -> bool {
-        if (self.serving.is_none() && self.options.dedicated.is_none())
-            || dimension != self.dim.id()
-        {
-            return false;
-        }
-        let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        self.with_level(|b, level, ticks| b.update_neighbour_for_output_signal(level, ticks, at));
-        true
-    }
-    /// The block at `pos` changed the signal it gives: its neighbours, and
-    /// theirs (a block it powers passes the signal on), read it again, as
-    /// around a lever (`Level.updateNeighborsAt`). Call it when the answer
-    /// changes and once the block is placed. Acts on the level in place:
-    /// false (and nothing happens) when `dimension` is another, or this
-    /// window isn't a server.
-    pub(super) fn native_update_signal_neighbors(
-        &mut self,
-        dimension: &str,
-        pos: [i32; 3],
-    ) -> bool {
-        if (self.serving.is_none() && self.options.dedicated.is_none())
-            || dimension != self.dim.id()
-        {
-            return false;
-        }
-        let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        let state = self.world.block(pos[0], pos[1], pos[2]);
-        self.with_level(|b, level, ticks| {
-            let block = b.block(state);
-            b.update_neighbors_at(level, ticks, at, block);
-            for [x, y, z] in [
-                [0, -1, 0],
-                [0, 1, 0],
-                [0, 0, -1],
-                [0, 0, 1],
-                [-1, 0, 0],
-                [1, 0, 0],
-            ] {
-                b.update_neighbors_at(level, ticks, at.offset(x, y, z), block);
-            }
-        });
-        true
     }
     /// Runs `change` on the mod block entity at `pos` (a generator charging
     /// the machine beside it) and returns what it returns; none for any

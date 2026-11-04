@@ -147,6 +147,7 @@ mod level_effects;
 mod level_entities_in;
 mod level_events;
 mod level_item_entities;
+mod level_neighbor_updates;
 mod level_reads;
 mod level_save;
 mod level_shapes;

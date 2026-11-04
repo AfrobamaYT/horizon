@@ -1278,6 +1278,29 @@ impl Behaviours {
         let block = self.block(sim.state(pos));
         sim.update_neighbour_for_output_signal(pos, block);
     }
+    /// `update` from `pos` (`Level.updateNeighborsAt`, `updateNeighborsAtExceptFromFacing` or
+    /// `updateNeighbourForOutputSignal`), `block` the block that changed there.
+    pub fn neighbour_update<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        block: BlockId,
+        update: NeighbourUpdate,
+    ) {
+        self.sim(level, ticks).neighbour_update(pos, block, update);
+    }
+    /// `Level.neighborChanged(pos, block)`: the block at `pos` hears that `block` beside it
+    /// changed, as a diode tells the block in front of it.
+    pub fn neighbor_changed_at<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        block: BlockId,
+    ) {
+        self.sim(level, ticks).neighbor_changed_at(pos, block);
+    }
     /// `Level.scheduleTick(pos, block, delay)` for the block at `pos`.
     pub fn schedule_tick<L: LevelAccess + ?Sized>(
         &self,

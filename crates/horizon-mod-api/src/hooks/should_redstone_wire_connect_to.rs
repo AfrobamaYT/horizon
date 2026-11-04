@@ -8,7 +8,7 @@ pub trait Hooks {
     /// it when the block is yours. Asked whenever wire settles its shape:
     /// answer from `state` and `pos` without touching the world. When the
     /// answer changes, and once the wire is placed, update its neighbours
-    /// (`native_update_signal_neighbors`). Authoritative servers only.
+    /// (`level.update_neighbors`). Authoritative servers only.
     #[hook(
         side = "server",
         contract = "collect",

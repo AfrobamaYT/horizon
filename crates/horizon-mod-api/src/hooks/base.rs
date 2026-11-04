@@ -571,7 +571,8 @@ pub trait Hooks {
     /// from inside the level's update, so answer from your own state: check the
     /// block first, and don't read or change the world here. When the answer
     /// changes, and once the block is placed, call
-    /// `native_update_signal_neighbors`. Authoritative servers only.
+    /// `level.update_neighbors(host, pos, state, NeighbourUpdate::Neighbours)`. Authoritative
+    /// servers only.
     #[hook(
         side = "server",
         contract = "listen",
@@ -805,7 +806,8 @@ pub trait Hooks {
     /// Asked only for blocks `native_has_analog_output` answered for, from
     /// inside the level's update: don't change the world here. When the
     /// answer changes without the block's state changing, call
-    /// `native_update_output_neighbors`; a change of state through
+    /// `level.update_neighbors(host, pos, state, NeighbourUpdate::OutputSignal)`; a change of
+    /// state through
     /// `native_set_block` or `native_set_block_property` (neighbour updates
     /// on) tells the comparators itself, as vanilla's `Level.setBlock` does.
     /// Authoritative servers only.
@@ -4506,10 +4508,6 @@ pub trait Helpers {
         target = "horizon_client::game::native_claimed_items::Game<'_>::native_poll"
     )]
     fn poll();
-    #[helper(side = "server")]
-    fn update_output_neighbors();
-    #[helper(side = "server")]
-    fn update_signal_neighbors();
     #[helper(side = "server")]
     fn block_entity_sync();
     #[helper(side = "client")]
