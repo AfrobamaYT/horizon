@@ -7788,13 +7788,15 @@ pub(super) fn damage_type(kind: horizon_client::mobs::DamageKind, caused: bool) 
     }
 }
 /// A Horizon item stack as a loot stack (id, count, damage, enchantments).
+/// The killer's gear: its enchantments are the ones gameplay sees, as
+/// `EnchantmentHelper.getEnchantmentLevel` reads them for Looting.
 fn to_loot(stack: &ItemStack) -> horizon_world::loot::LootStack {
     horizon_world::loot::LootStack {
         item: stack.item.to_string(),
         count: stack.count as i32,
         damage: stack.damage as i32,
         enchantments: stack
-            .enchantments()
+            .all_enchantments()
             .iter()
             .map(|(e, l)| (e.to_string(), *l as i32))
             .collect(),

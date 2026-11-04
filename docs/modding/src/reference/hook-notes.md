@@ -2218,6 +2218,21 @@ handle, an entity the client doesn't track and a level it doesn't show:
   A worn stack is asked again only when it changes (`ItemStack.matches`), so the answer must be the same for the
   same stack. With no mod listening, or none changing a stack's list, nothing is copied. A player's attack speed
   still reads its held item type's `attack_speed`, not the stack's (see #549).
+- `get_enchantment_level` (`GetEnchantmentLevelEvent`) edits the enchantments gameplay sees on a stack:
+  `ItemEnchantments` is NeoForge's `ItemEnchantments.Mutable` (`level`, `set`, `upgrade`, `retain` for `removeIf`,
+  levels at most 255), and `target` is the one enchantment a read asks for, `None` when every one is read. The
+  game's reads follow NeoForge's split:
+  - through the hook: `ItemStack::enchantment_level` (`getEnchantmentLevel`, every gameplay level read: Looting,
+    Fortune and the other loot functions, Respiration, Silk Touch, Mending, Thorns, the trident's and crossbow's
+    enchantments, fishing), and `ItemStack::all_enchantments` (`getAllEnchantments`: every enchantment effect
+    component, the enchantments' attribute modifiers, the decorated pot's `hasTag` check, the killer's gear for
+    entity loot);
+  - the stack's own component: `ItemStack::enchantments` and `tag_enchantment_level` (`getTagEnchantmentLevel`)
+    for tooltips, the anvil, grindstone and enchanting table, item predicates, saves, the network, and
+    `EnchantmentHelper.has` (Curse of Binding), which NeoForge doesn't hook either.
+
+  It is asked on every such read, many times a tick, so keep a listener cheap. With no mod listening nothing runs;
+  with one, ids are parsed once and a read the mods leave alone allocates nothing.
 - `living.set_health(host, health)` is `LivingEntity.setHealth` (Paper's `Damageable#setHealth`), cut to the
   range from zero to the maximum, with no hook; a non-finite value is refused. This raw write can set zero
   or change a dead entity's health without running the death pipeline.

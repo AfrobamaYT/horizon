@@ -206,7 +206,7 @@ impl Game<'_> {
         let mut ignite = 0.0f32;
         let mut mob_effects = Vec::new();
         let mut hook_calls: Vec<(String, String, Value, u32)> = Vec::new();
-        for (id, level) in held.enchantments() {
+        for (id, level) in held.all_enchantments().iter() {
             let Some(def) = world_stations!(self).enchantments.get(id) else {
                 continue;
             };
@@ -274,7 +274,7 @@ impl Game<'_> {
             return;
         };
         let mut effects = Vec::new();
-        for (id, level) in held.enchantments() {
+        for (id, level) in held.all_enchantments().iter() {
             let Some(def) = self.stations().enchantments.get(id) else {
                 continue;
             };
@@ -418,7 +418,7 @@ impl Game<'_> {
             ..Default::default()
         };
         let mut bursts = Vec::new();
-        for (id, level) in held.enchantments() {
+        for (id, level) in held.all_enchantments().iter() {
             let Some(def) = world_stations!(self).enchantments.get(id) else {
                 continue;
             };
@@ -681,7 +681,7 @@ impl Game<'_> {
             ..Default::default()
         };
         let mut ignite: Option<f32> = None;
-        for (id, level) in bow.enchantments() {
+        for (id, level) in bow.all_enchantments().iter() {
             let Some(def) = world_stations!(self).enchantments.get(id) else {
                 continue;
             };
@@ -1075,7 +1075,7 @@ fn location_disks<'a>(
     let mut disks = Vec::new();
     for (stack, slot) in equipment {
         let Some(stack) = stack else { continue };
-        for (id, level) in stack.enchantments() {
+        for (id, level) in stack.all_enchantments().iter() {
             let Some(def) = enchantments.get(id) else {
                 continue;
             };
