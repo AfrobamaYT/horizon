@@ -102,6 +102,8 @@ mod cosmetics;
 mod creaking;
 mod creative_hotbar;
 mod creatures;
+#[cfg(test)]
+mod crop_grow_tests;
 mod crossbow;
 pub(crate) mod cushions;
 mod debug_keys;
@@ -1335,6 +1337,22 @@ impl LevelAccess for GameLevel<'_> {
         let mut cancel = false;
         self.native_block_grow_feature(self.dimension, pos, &mut feature, &mut cancel);
         feature.filter(|_| !cancel).map(std::borrow::Cow::Owned)
+    }
+    fn crop_grow_pre(&mut self, pos: BlockPos, state: BlockStateId, vanilla: bool) -> bool {
+        if !self.native_authoritative || !mod_api::__private::listened(mod_api::HookId::CropGrowPre)
+        {
+            return vanilla;
+        }
+        let mut result = mod_api::NativeTriState::Default;
+        self.native_crop_grow_pre(self.dimension, pos, state, &mut result);
+        result.or(vanilla)
+    }
+    fn crop_grow_post(&mut self, pos: BlockPos, original: BlockStateId) {
+        if self.native_authoritative && mod_api::__private::listened(mod_api::HookId::CropGrowPost)
+        {
+            let state = self.block_state(pos);
+            self.native_crop_grow_post(self.dimension, pos, original, state);
+        }
     }
     fn allow_block_burn(&self, pos: BlockPos) -> bool {
         let mut cancel = false;
