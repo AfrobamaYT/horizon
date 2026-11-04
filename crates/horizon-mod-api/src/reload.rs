@@ -88,8 +88,11 @@ impl Drop for ReloadMark {
 
 /// One registered listener of either side, between registration and ordering.
 pub struct RegisteredListener<L: ?Sized> {
+    /// The listener's name.
     pub id: Identifier,
+    /// Maps the listener's files to ids, if it reads a folder.
     pub converter: Option<FileToIdConverter>,
+    /// The listener.
     pub listener: Arc<L>,
     /// The registering mod's id, for crash attribution on its later calls; the
     /// vanilla anchors have none.
@@ -234,9 +237,13 @@ impl<L: ?Sized + 'static> ReloadCore<L> {
 /// reload paths report listeners alike.
 #[derive(Debug)]
 pub enum ReloadStageError {
+    /// The listeners could not be ordered.
     Order(ReloadOrderError),
+    /// A listener's `prepare` failed.
     Listener {
+        /// The failing listener's name.
         listener: Identifier,
+        /// Why it failed.
         source: ReloadResourceError,
     },
 }
@@ -263,11 +270,16 @@ impl std::error::Error for ReloadStageError {
 /// The server's vanilla function library rides along as the `Vanilla` step of
 /// its own reload; the client's has none.
 pub enum PreparedStep<V = ()> {
+    /// A mod listener's prepared step.
     Mod {
+        /// Applies the prepared result.
         apply: ReloadApply,
+        /// The owning mod's id, or `None` for the game's own.
         owner: Option<&'static str>,
+        /// The listener's name.
         id: Identifier,
     },
+    /// The server's vanilla function library step.
     Vanilla(V),
 }
 

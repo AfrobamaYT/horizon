@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "item_tooltip",
+      "doc": "`ItemTooltipEvent`: the whole tooltip of `stack` (`ItemStack.getTooltipLines`),\nonce its name, the item's own lines, the components' lines, the\nadvanced lines and the operator warning are in `lines`, each with a\ncolour as `rgba` packs it (`u32::MAX` keeps the text's own). Add,\nchange, reorder or remove lines. `player` and `player_entity_id` are\nthe local player's, `display` the stack's `minecraft:tooltip_display`,\n`advanced` (F3+H) and `creative` (a creative tab's own slot) its\n`TooltipFlag`. Asked each frame the tooltip shows, never for one the\nstack hides or a crossbow's loaded projectile. Client-side.",
       "side": "client",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_item_tooltip",

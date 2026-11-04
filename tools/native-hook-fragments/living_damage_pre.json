@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "living_damage_pre",
+      "doc": "NeoForge's `LivingDamageEvent.Pre`: `LivingEntity.actuallyHurt` of entity `entity` of\ntype `kind` (`minecraft:player`, `minecraft:zombie`) by `source` (named as\n`native_living_incoming_damage` names it) has taken armor and magic, and the absorption\nhearts are next: `container` holds the damage it started with, what it is now\n(`new_damage`, which may be 0) and each reduction so far (armor, enchantments, mob\neffects). Change its\n`new_damage` and the health takes that; set its post-attack invulnerability ticks and the\nentity keeps them instead of vanilla's. A value that is not a number is put back as it\nwas. It fires for players, mobs and the ender dragon; a wolf whose armor takes the hit and\narmor stands do not fire it. The level is the hit's: its blocks, random and own\nattachments; the hurt entity is in the middle of its hit.",
       "target": "horizon_client::game::native_hooks::HitLevel<'_>::native_living_damage_pre",
       "neoforge": "LivingDamageEvent.Pre",
       "side": "server",

@@ -10,16 +10,27 @@ use std::{
 #[non_exhaustive]
 pub enum ReloadOrderError {
     /// A listener name has already been registered.
-    DuplicateListener { id: Identifier },
+    DuplicateListener {
+        /// The listener's name.
+        id: Identifier,
+    },
     /// The same listener object has already been registered under another name.
     DuplicateObject {
+        /// The listener's name.
         id: Identifier,
+        /// The name the object was first registered under.
         registered_as: Identifier,
     },
     /// A dependency named a listener that has not been registered.
-    UnknownListener { id: Identifier },
+    UnknownListener {
+        /// The listener's name.
+        id: Identifier,
+    },
     /// The listed listeners belong to a dependency cycle.
-    Cycle { listeners: Vec<Identifier> },
+    Cycle {
+        /// The names of the listeners in the cycle.
+        listeners: Vec<Identifier>,
+    },
 }
 impl std::fmt::Display for ReloadOrderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

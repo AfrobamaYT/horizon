@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "fluid_place_block",
+      "doc": "Liquid at `liquid_pos` is about to place `state` at `pos`. Set\n`cancel` to prevent placement or change `new_state` to replace it.\nServer-side.",
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_fluid_place_block",
       "neoforge": "BlockEvent.FluidPlaceBlockEvent",
       "side": "server",
