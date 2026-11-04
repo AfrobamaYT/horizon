@@ -65,12 +65,12 @@ use horizon_world::{
 use mod_api::NativePermissionLevel;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EntityRef,
-    EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand,
-    NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
+    self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EnchantmentInfo,
+    EntityRef, EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera,
+    NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
     NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
-    PathComputationType, Placement, RecipeBookCategory, ScreenOpening, ServerReloadListeners,
-    ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    PathComputationType, Placement, PlayerRef, RecipeBookCategory, ScreenOpening,
+    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
@@ -539,9 +539,7 @@ impl Game<'_> {
 
 /// `Level.setBlock`'s flags, for the `native_set_block_property` helpers:
 /// `flags::UPDATE_CLIENTS` as a vanilla crop grows, `flags::UPDATE_ALL` as a
-/// furnace sets its `lit`. Horizon sends every write to players, so
-/// `UPDATE_CLIENTS`, `UPDATE_INVISIBLE` and `UPDATE_IMMEDIATE` change nothing
-/// yet.
+/// furnace sets its `lit`.
 pub(super) use horizon_world::level::flags;
 
 impl GameLevel<'_> {
@@ -8520,9 +8518,9 @@ impl GameLevel<'_> {
     /// `ticks` (`native_random_tick`, `native_tick_block`). A crop's random
     /// tick grows it with `flags::UPDATE_CLIENTS`: neighbours' shapes update,
     /// but no neighbour gets `neighborChanged` and comparators aren't told;
-    /// `flags::UPDATE_ALL` does both. Horizon sends every write to players
-    /// whatever the flags: `UPDATE_CLIENTS`, `UPDATE_INVISIBLE` and
-    /// `UPDATE_IMMEDIATE` change nothing yet. Any loaded position, not only
+    /// `flags::UPDATE_ALL` does both. `UPDATE_CLIENTS` sends a block update;
+    /// `UPDATE_INVISIBLE` suppresses its notification only on clients, as in
+    /// `Level.setBlock`. Any loaded position, not only
     /// the hook's; true when the block changed, false off an authoritative
     /// server, when the block has no such property or value, `pos` is not
     /// loaded, or the property already has `value` (no write, as
@@ -8590,6 +8588,19 @@ impl GameLevel<'_> {
             put_block_entity(self.world, pos, entity);
         }
         changed
+    }
+    /// `Level.removeBlock`: replace a block with its fluid's legacy block.
+    pub(super) fn native_remove_block(
+        &mut self,
+        ticks: &mut Ticks,
+        pos: [i32; 3],
+        moved: bool,
+    ) -> bool {
+        if !self.native_authoritative || !self.world.is_loaded_at(pos[0], pos[1], pos[2]) {
+            return false;
+        }
+        self.behaviours
+            .remove_block(self, ticks, BlockPos::new(pos[0], pos[1], pos[2]), moved)
     }
     /// Schedules a tick of `block` (a block name) at `pos` in `delay` game
     /// ticks, as a falling block's shape update schedules its fall
@@ -8739,6 +8750,16 @@ fn put_block_entity(world: &mut horizon_client::world::World, pos: [i32; 3], ent
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
 impl Game<'_> {
+    /// `Inventory.items`: the non-empty main inventory stacks in slot order, including
+    /// their components. None for a stale or unavailable player; on clients only the
+    /// local player's inventory is available.
+    pub(super) fn native_player_inventory(&self, player: PlayerRef) -> Option<Vec<ItemStack>> {
+        let inventory = match self.player_read_both(player)? {
+            super::native_server::PlayerRead::Acting { .. } => &self.inventory,
+            super::native_server::PlayerRead::Guest(guest) => &guest.inventory,
+        };
+        Some(inventory.iter().flatten().cloned().collect())
+    }
     /// The id of the item in the slot under the pointer on the open container screen
     /// (`AbstractContainerScreen.getHoveredSlot().getItem()`), None over no slot or an empty one.
     pub(super) fn native_screen_hovered_item(&self) -> Option<String> {
@@ -8799,9 +8820,8 @@ impl Game<'_> {
     }
     /// Sets a block in the current authoritative level through `Level.setBlock`.
     /// Returns false for another dimension, an invalid state, or no change.
-    /// `flags` selects vanilla's neighbour and shape updates; Horizon sends
-    /// every write to players whatever the flags. A block entity block gets
-    /// its block entity.
+    /// `flags` selects vanilla's neighbour, shape and client updates. A block
+    /// entity block gets its block entity.
     pub(super) fn native_set_block(
         &mut self,
         dimension: &str,
@@ -8951,7 +8971,7 @@ impl Game<'_> {
     }
     /// `native_set_block_property` with `Level.setBlock`'s `flags`, as a
     /// brewing stand's tick sets its bottles with `flags::UPDATE_CLIENTS`.
-    /// Players get the write whatever the flags (`flags`); false when this
+    /// Players get the write when `UPDATE_CLIENTS` is set; false when this
     /// window isn't a server, and in each case `native_set_block_property`
     /// returns false.
     pub(super) fn native_set_block_property_with(
@@ -9425,6 +9445,34 @@ impl Game<'_> {
     /// Where the mouse is, in GUI pixels.
     pub(super) fn native_cursor(&self) -> [f32; 2] {
         [self.cursor.0, self.cursor.1]
+    }
+    /// Registered enchantments, in registry order.
+    pub(super) fn native_enchantments(&self) -> Vec<EnchantmentInfo> {
+        let enchantments = &self.stations().enchantments;
+        enchantments
+            .list
+            .iter()
+            .map(|e| {
+                mod_api::EnchantmentInfo::new(
+                    e.id.to_string(),
+                    e.max_level,
+                    enchantments.is_curse(&e.id),
+                )
+            })
+            .collect()
+    }
+    /// `Enchantment.getMinCost(level)`: the enchanting power needed, or None for an unknown id.
+    pub(super) fn native_enchantment_min_cost(&self, id: &str, level: u32) -> Option<i32> {
+        self.stations()
+            .enchantments
+            .get(id)
+            .map(|e| e.min_cost.calculate(level))
+    }
+    /// Whether enchantment `id` can go on `item` (`Enchantment.isSupportedItem`).
+    pub(super) fn native_enchantment_supports(&self, id: &str, item: &str) -> bool {
+        self.stations()
+            .enchantments
+            .can_enchant(self.items(), id, item)
     }
     /// The size of sprite `name` in its own pixels, as `native_sprite` draws it on `draw`, if
     /// there is one.
@@ -11019,6 +11067,26 @@ fn mod_screen_opens(
 #[cfg(test)]
 mod tests {
     use mod_api::__private::game::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn enchantment_registry_returns_records_and_unknown_cost() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let all = game.native_enchantments();
+            let sharpness = all.iter().find(|e| e.id == "minecraft:sharpness").unwrap();
+            assert_eq!((sharpness.max_level, sharpness.curse), (5, false));
+            let binding = all
+                .iter()
+                .find(|e| e.id == "minecraft:binding_curse")
+                .unwrap();
+            assert!(binding.curse);
+            assert!(
+                game.native_enchantment_min_cost("minecraft:sharpness", 1)
+                    .is_some()
+            );
+            assert_eq!(game.native_enchantment_min_cost("missing:unknown", 1), None);
+        });
+    }
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_trait_mod_measures_text_and_sprites_through_its_draw_context() {

@@ -190,8 +190,7 @@ impl Game<'_> {
     }
     /// Set a block in the level in place (`Level.setBlock`). Parked levels,
     /// stale handles, clients and unloaded or out-of-height positions return
-    /// false. Client-update and client-render flags are not supported; Horizon
-    /// sends every change to clients.
+    /// false. Client notification follows the supplied update flags.
     pub(super) fn native_level_set_block(
         &mut self,
         level: LevelRef,
@@ -203,6 +202,21 @@ impl Game<'_> {
             return false;
         }
         self.native_set_block(level.dimension(), pos, state, flags.bits())
+    }
+    /// Remove a block in place (`Level.removeBlock`), preserving its fluid.
+    pub(super) fn native_level_remove_block(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        moved: bool,
+    ) -> bool {
+        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+            return false;
+        }
+        let changed =
+            self.with_level(|_, level, ticks| level.native_remove_block(ticks, pos, moved));
+        let _ = self.process_level_events();
+        changed
     }
     /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
     /// dropping its resources. Parked levels and invalid positions return false.
@@ -1054,6 +1068,10 @@ pub(super) mod tests {
             .unwrap();
             game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = Some(Box::new(motion));
             let player = game.native_player_ref(12).unwrap();
+            assert_eq!(
+                player.inventory(game),
+                Some(vec![ItemStack::new("minecraft:stone", 1)])
+            );
             let guest_living = game.native_living(player.fields().entity).unwrap();
             let host: &dyn mod_api::Host = game;
             assert_eq!(
@@ -2458,6 +2476,65 @@ pub(super) mod tests {
             .registry
             .default_state("minecraft:air")
             .unwrap();
+        // Flag-aware writes log only client updates; ordinary World::set still logs by default.
+        game.world.block_log = Some(Vec::new());
+        assert!(game.native_level_set_block(
+            level,
+            [2, 64, 0],
+            stone,
+            NativeBlockUpdateFlags::NONE
+        ));
+        assert!(game.world.block_log.as_ref().unwrap().is_empty());
+        assert!(game.native_level_set_block(
+            level,
+            [3, 64, 0],
+            stone,
+            NativeBlockUpdateFlags::CLIENTS
+        ));
+        assert_eq!(game.world.block_log.as_ref().unwrap(), &vec![(3, 64, 0)]);
+        assert!(game.native_level_set_block(
+            level,
+            [4, 64, 0],
+            stone,
+            NativeBlockUpdateFlags::CLIENTS | NativeBlockUpdateFlags::INVISIBLE
+        ));
+        assert_eq!(
+            game.world.block_log.as_ref().unwrap(),
+            &vec![(3, 64, 0), (4, 64, 0)]
+        );
+        game.world.block_log = None;
+        let waterlogged = game
+            .pack
+            .assets
+            .registry
+            .resolve(&horizon_world::chunk::BlockState {
+                name: "minecraft:oak_slab".into(),
+                properties: [
+                    ("type".into(), "bottom".into()),
+                    ("waterlogged".into(), "true".into()),
+                ]
+                .into_iter()
+                .collect(),
+            })
+            .unwrap();
+        let water = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:water")
+            .unwrap();
+        for moved in [false, true] {
+            game.world.set(5, 64, 0, waterlogged).unwrap();
+            assert!(game.native_level_remove_block(level, [5, 64, 0], moved));
+            assert_eq!(game.world.block(5, 64, 0), water);
+            game.world.set(5, 64, 0, waterlogged).unwrap();
+            let removed = game.with_level(|_, level, ticks| {
+                let mut host = super::super::mod_api_host::LevelTicks { level, ticks };
+                mod_api::LevelWriteHost::remove_block(&mut host, [5, 64, 0], moved)
+            });
+            assert!(removed);
+            assert_eq!(game.world.block(5, 64, 0), water);
+        }
         let flags = NativeBlockUpdateFlags::NEIGHBORS;
         assert!(game.native_level_set_block(level, [0, 64, 0], stone, flags));
         assert_eq!(game.world.block(0, 64, 0), stone);

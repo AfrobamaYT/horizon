@@ -1,0 +1,23 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "enchantments",
+      "doc": "Registered enchantments in registry order, with id, maximum level and curse-tag membership.",
+      "side": "client",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_enchantments"
+    },
+    {
+      "name": "enchantment_min_cost",
+      "doc": "Enchanting power needed at the given level, or None for an unknown enchantment.",
+      "side": "client",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_enchantment_min_cost"
+    },
+    {
+      "name": "enchantment_supports",
+      "doc": "Whether the enchantment supports the given item in the active registry.",
+      "side": "client",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_enchantment_supports"
+    }
+  ]
+}

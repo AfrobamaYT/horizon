@@ -836,7 +836,11 @@ impl Hub {
         let distance = self.chunk_radius();
         self.broadcast(&C::SetChunkCacheRadius(play::Distance { distance }));
         for g in &mut self.guests {
-            g.view_distance = i32::from(g.info.view_distance).clamp(2, self.config.view_distance);
+            // Mth.clamp(requested, 2, serverViewDistance): Java's max then min order also
+            // handles a management value below two without panicking when the bounds cross.
+            g.view_distance = i32::from(g.info.view_distance)
+                .max(2)
+                .min(self.config.view_distance);
             g.center = None;
         }
     }
@@ -3562,8 +3566,11 @@ impl Hub {
                     let g = &mut self.guests[i];
                     // PlayerModelPart.HAT (bit 6): the tab list shows the hat layer.
                     let was_hat = g.info.model_customisation & 0x40 != 0;
-                    g.view_distance =
-                        i32::from(info.view_distance).clamp(2, self.config.view_distance);
+                    // max(2).min(view), not clamp: a live management value
+                    // below 2 would cross the bounds and panic (horizon-rust/horizon#8118).
+                    g.view_distance = i32::from(info.view_distance)
+                        .max(2)
+                        .min(self.config.view_distance);
                     let old_info = self.mods_loaded.then(|| Box::new(g.info.clone()));
                     g.info = info;
                     if let Some(old) = old_info {
