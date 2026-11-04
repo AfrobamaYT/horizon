@@ -8670,21 +8670,41 @@ impl Game<'_> {
     /// (`level.getRandom()`), the one its explosions, block drops and other
     /// level draws use, so a mod's draws move vanilla's later ones as a Java
     /// mod's do. A parked level (the Nether while the server ticks the
-    /// Overworld) answers with its own stream. Draw with
-    /// `horizon_core::random::RandomSource` (`next_int_bound`, `next_float`...),
-    /// at the call site: the stream is the level's, not a copy. `None` on a
-    /// client of a server, for a stale handle and for a level not open: the
-    /// Nether and the End open when someone first goes there and close after
-    /// 300 ticks with nobody in them (`close_idle_levels`).
-    pub(super) fn native_level_random(&mut self, level: LevelRef) -> Option<&mut LegacyRandom> {
+    /// Overworld) answers with its own stream. This is a copy of it as it
+    /// stands: draw with `LevelRef::with_random`, which stores the stream
+    /// back, so the draws move the level's own. `None` on a client of a
+    /// server, for a stale handle and for a level not open: the Nether and
+    /// the End open when someone first goes there and close after 300 ticks
+    /// with nobody in them (`close_idle_levels`).
+    pub(super) fn native_level_random(&self, level: LevelRef) -> Option<LegacyRandom> {
         self.native_level_world(level)?;
         if level.dimension() == self.dim.id() {
+            Some(self.world.random.clone())
+        } else {
+            self.levels
+                .parked_world_of(level.dimension())
+                .map(|world| world.random.clone())
+        }
+    }
+    /// Replace the random of the server level `level` names with `random`,
+    /// a stream `native_level_random` gave and the mod drew from. False where
+    /// that gives `None`.
+    pub(super) fn native_level_set_random(
+        &mut self,
+        level: LevelRef,
+        random: LegacyRandom,
+    ) -> bool {
+        if self.native_level_world(level).is_none() {
+            return false;
+        }
+        let target = if level.dimension() == self.dim.id() {
             Some(&mut self.world.random)
         } else {
             self.levels
                 .parked_world_mut_of(level.dimension())
                 .map(|world| &mut world.random)
-        }
+        };
+        target.map(|target| *target = random).is_some()
     }
     /// The item entities of the server level `dimension` whose box meets
     /// the box `min`..`max`, in the level's order: vanilla's

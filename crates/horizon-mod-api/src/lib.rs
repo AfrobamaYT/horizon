@@ -160,11 +160,9 @@ pub use horizon_client_core::particle_type::ParticleType;
 pub use horizon_client_core::suggestion::Suggestion;
 #[horizon_mod_api_macros::wasm(via = serde_json::Value)]
 pub use horizon_client_core::text::Text;
-pub use horizon_core::{
-    geometry::Direction,
-    position::BlockPos,
-    random::{LegacyRandom, RandomSource},
-};
+#[horizon_mod_api_macros::wasm(via = (u64, Option<f64>))]
+pub use horizon_core::random::LegacyRandom;
+pub use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
 #[horizon_mod_api_macros::wasm(via = horizon_world::nbt::Tag)]
 pub use horizon_items::item_data::StackData;
 #[horizon_mod_api_macros::wasm(via = horizon_world::nbt::Tag)]
@@ -1810,6 +1808,18 @@ impl LevelRef {
     pub fn dimension(self) -> &'static str {
         self.dimension
     }
+    /// Draw from the level's own random stream (vanilla's `Level.random`), in vanilla's order:
+    /// `draw` gets the stream and the level keeps it after. None where `random` is None.
+    pub fn with_random<T>(
+        self,
+        host: &mut dyn ServerHost,
+        draw: impl FnOnce(&mut LegacyRandom) -> T,
+    ) -> Option<T> {
+        let mut random = self.random(host)?;
+        let drawn = draw(&mut random);
+        self.set_random(host, random);
+        Some(drawn)
+    }
     /// The open of the world the handle belongs to.
     pub fn epoch(self) -> NativeWorldEpoch {
         self.epoch
@@ -3309,11 +3319,33 @@ pub trait LevelRandomHost: LevelHost {
     fn attachments(&mut self, _holder: Holder) -> Result<&mut Attachments, AttachmentError> {
         unimplemented!("LevelRandomHost::attachments")
     }
-    /// The level's random stream through `native_level_random`, or None on a non-authoritative level.
-    fn random(&mut self) -> Option<&mut LegacyRandom> {
+    /// A copy of the level's random stream through `native_level_random`, or None on a
+    /// non-authoritative level. Draw with `with_random`, which stores it back.
+    fn random(&mut self) -> Option<LegacyRandom> {
         unimplemented!("LevelRandomHost::random")
     }
+    /// Replace the level's random stream with `random`, one `random` gave and the mod drew from.
+    /// False on a non-authoritative level.
+    fn set_random(&mut self, _random: LegacyRandom) -> bool {
+        unimplemented!("LevelRandomHost::set_random")
+    }
 }
+
+macro_rules! level_random_draws {
+    ($($host:ident),+) => { $(
+        impl dyn $host + '_ {
+            /// Draw from the level's own random stream, in vanilla's order: `draw` gets the
+            /// stream and the level keeps it after. None on a non-authoritative level.
+            pub fn with_random<T>(&mut self, draw: impl FnOnce(&mut LegacyRandom) -> T) -> Option<T> {
+                let mut random = self.random()?;
+                let drawn = draw(&mut random);
+                self.set_random(random);
+                Some(drawn)
+            }
+        }
+    )+ };
+}
+level_random_draws!(LevelRandomHost, LevelWriteHost);
 
 /// A `LevelReader` with vanilla's `ScheduledTickAccess`. Shape updates cannot write blocks.
 pub trait LevelTicksHost: LevelHost {

@@ -463,7 +463,7 @@ mod tests {
             let mut expected = game.world.random.clone();
             let host: &mut dyn ServerHost = game;
             let drawn: Vec<i32> = (0..3)
-                .map(|_| level.random(&mut *host).unwrap().next_int())
+                .map(|_| level.with_random(&mut *host, |r| r.next_int()).unwrap())
                 .collect();
             let want: Vec<i32> = (0..3).map(|_| expected.next_int()).collect();
             assert_eq!(drawn, want);
@@ -477,7 +477,7 @@ mod tests {
             };
             let parked = LevelRef::new(level.epoch(), other.id());
             let host: &mut dyn ServerHost = game;
-            assert!(parked.random(&mut *host).is_none(), "not open yet");
+            assert!(parked.random(&*host).is_none(), "not open yet");
             let back = game.dim;
             game.enter_level(other).unwrap();
             game.enter_level(back).unwrap();
@@ -489,7 +489,7 @@ mod tests {
                 .clone();
             let in_place = game.world.random.clone();
             let host: &mut dyn ServerHost = game;
-            let drawn = parked.random(&mut *host).unwrap().next_long();
+            let drawn = parked.with_random(&mut *host, |r| r.next_long()).unwrap();
             assert_eq!(drawn, expected.next_long());
             let mut after = game
                 .levels
@@ -507,7 +507,7 @@ mod tests {
                 game.dim.id(),
             );
             let host: &mut dyn ServerHost = game;
-            assert!(stale.random(&mut *host).is_none());
+            assert!(stale.with_random(&mut *host, |r| r.next_int()).is_none());
         });
     }
 

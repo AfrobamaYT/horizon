@@ -252,8 +252,11 @@ impl mod_api::LevelRandomHost for super::GameLevel<'_> {
         self.world.attachment_syncs.insert(holder);
         world_attachments(self.world, holder)
     }
-    fn random(&mut self) -> Option<&mut mod_api::LegacyRandom> {
-        self.native_level_random()
+    fn random(&mut self) -> Option<mod_api::LegacyRandom> {
+        self.native_level_random().cloned()
+    }
+    fn set_random(&mut self, random: mod_api::LegacyRandom) -> bool {
+        self.native_level_random().map(|r| *r = random).is_some()
     }
 }
 
@@ -293,8 +296,12 @@ impl mod_api::LevelRandomHost for super::native_hooks::HitLevel<'_> {
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         self.0.attachments(holder)
     }
-    fn random(&mut self) -> Option<&mut mod_api::LegacyRandom> {
-        Some(self.0.random())
+    fn random(&mut self) -> Option<mod_api::LegacyRandom> {
+        Some(self.0.random().clone())
+    }
+    fn set_random(&mut self, random: mod_api::LegacyRandom) -> bool {
+        *self.0.random() = random;
+        true
     }
 }
 
@@ -368,8 +375,11 @@ impl<'a: 'b, 'b> mod_api::LevelRandomHost for LevelTicks<'b, &mut super::GameLev
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         mod_api::LevelRandomHost::attachments(&mut *self.level, holder)
     }
-    fn random(&mut self) -> Option<&mut mod_api::LegacyRandom> {
+    fn random(&mut self) -> Option<mod_api::LegacyRandom> {
         mod_api::LevelRandomHost::random(&mut *self.level)
+    }
+    fn set_random(&mut self, random: mod_api::LegacyRandom) -> bool {
+        mod_api::LevelRandomHost::set_random(&mut *self.level, random)
     }
 }
 
