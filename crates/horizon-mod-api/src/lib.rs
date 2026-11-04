@@ -958,7 +958,6 @@ pub enum NativeAuthority {
 }
 
 /// Supported vanilla `Block.UPDATE_*` flags for a level block write.
-/// Horizon currently sends all writes to clients regardless of client flags.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct NativeBlockUpdateFlags(i32);
@@ -968,6 +967,10 @@ impl NativeBlockUpdateFlags {
     pub const NONE: Self = Self(0);
     /// Notify neighboring blocks.
     pub const NEIGHBORS: Self = Self(1);
+    /// Send the block update to clients.
+    pub const CLIENTS: Self = Self(2);
+    /// Suppress the client-side block update notification.
+    pub const INVISIBLE: Self = Self(4);
     /// Skip neighbor shape updates.
     pub const KNOWN_SHAPE: Self = Self(16);
     /// Suppress drops caused by neighbor shape updates.
@@ -3592,6 +3595,10 @@ pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
         _flags: NativeBlockUpdateFlags,
     ) -> bool {
         unimplemented!("LevelWriteHost::set_block")
+    }
+    /// Remove a block through `Level.removeBlock`, preserving its fluid. `moved` marks a piston move.
+    fn remove_block(&mut self, _pos: [i32; 3], _moved: bool) -> bool {
+        unimplemented!("LevelWriteHost::remove_block")
     }
     /// Change a block property through `native_set_block_property`.
     fn set_block_property(
