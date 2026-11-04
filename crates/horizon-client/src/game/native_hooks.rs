@@ -9280,8 +9280,8 @@ impl Game<'_> {
     pub(super) fn native_size(&self, draw: &HudBatch) -> [f32; 2] {
         [draw.width, draw.height]
     }
-    /// The width of `text` in GUI pixels.
-    pub(super) fn native_text_width(&self, text: &str) -> f32 {
+    /// The width of `text` in GUI pixels, as `native_text` draws it on `draw` (`Font.width`).
+    pub(super) fn native_text_width(&self, _draw: &HudBatch, text: &str) -> f32 {
         HudBatch::text_width(&self.gui.atlas, text)
     }
     /// A rectangle in GUI pixels, `argb` (0x78000000 is the extras' box).
@@ -9602,8 +9602,9 @@ impl Game<'_> {
             .enchantments
             .can_enchant(self.items(), id, item)
     }
-    /// The size of sprite `name` in its own pixels, if there is one.
-    pub(super) fn native_sprite_size(&self, name: &str) -> Option<[f32; 2]> {
+    /// The size of sprite `name` in its own pixels, as `native_sprite` draws it on `draw`, if
+    /// there is one.
+    pub(super) fn native_sprite_size(&self, _draw: &HudBatch, name: &str) -> Option<[f32; 2]> {
         let r = self.gui.atlas.sprites.get(name)?;
         Some([r.w as f32, r.h as f32])
     }
@@ -9618,7 +9619,7 @@ impl Game<'_> {
         let dst = [at[0], at[1], size, size];
         let sprite = look
             .and_then(|l| l.sprite)
-            .and_then(|s| self.native_sprite_size(&s).map(|size| (s, size)));
+            .and_then(|s| self.native_sprite_size(batch, &s).map(|size| (s, size)));
         if let Some((name, px)) = sprite {
             self.native_sprite(batch, &name, [0.0, 0.0, px[0], px[1]], dst, Some(tint));
         } else {
@@ -11214,6 +11215,28 @@ mod tests {
             assert_eq!(game.native_enchantment_min_cost("missing:unknown", 1), None);
         });
     }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_trait_mod_measures_text_and_sprites_through_its_draw_context() {
+        use super::super::mod_api_host::generated::GameDrawContext;
+        use super::super::native_entity_refs::tests::with_game;
+        use mod_api::DrawContext;
+
+        with_game(|game| {
+            let mut batch = horizon_client::hud::HudBatch::new([320, 240]);
+            let draw = GameDrawContext {
+                game,
+                surface: &mut batch,
+            };
+            // A server's HUD atlas holds the fonts: vanilla's ascii sheet is 128 by 128, and an
+            // upper-case A advances 6 GUI pixels.
+            assert_eq!(draw.sprite_size("font/ascii"), Some([128.0, 128.0]));
+            assert_eq!(draw.sprite_size("mymod:no_such_sprite"), None);
+            assert_eq!(draw.text_width("AA"), 12.0);
+            assert_eq!(draw.text_width(""), 0.0);
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn declared_types_create_tick_and_reload_through_game() {
