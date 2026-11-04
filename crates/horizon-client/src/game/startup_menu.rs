@@ -354,6 +354,7 @@ pub(super) fn spawn_loader(
     let vanilla_root = vanilla_root.to_path_buf();
     let mod_sources = options.mods.clone();
     let world = launch_world(options).map(str::to_owned);
+    let role = options.execution_role;
     let progress = progress.clone();
     let handle = std::thread::Builder::new()
         .name("resource-loader".into())
@@ -374,7 +375,7 @@ pub(super) fn spawn_loader(
                         &settings,
                         started,
                         true,
-                        false,
+                        role,
                         &progress,
                         &mut |gui, root| {
                             let _ = sender.send(LoaderMsg::Ui(gui, root.to_path_buf()));

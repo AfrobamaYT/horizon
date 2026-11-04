@@ -1,6 +1,6 @@
 //! Navigation helpers for native mod mob handles.
 use super::{Game, commands::Target};
-use horizon_client::mod_api::MobRef;
+use mod_api::MobRef;
 
 impl Game<'_> {
     /// `PathNavigation.moveTo(x, y, z, speed)`: true if a path was started.
@@ -57,12 +57,9 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
-    use horizon_client::{
-        chunk::Chunk,
-        mobs::Mob,
-        mod_api::{EntityRef, MobRef, NativeWorldEpoch},
-    };
+    use horizon_client::{chunk::Chunk, mobs::Mob};
     use horizon_core::geometry::Vec3;
+    use mod_api::{EntityRef, MobRef, NativeWorldEpoch};
     use std::sync::Arc;
 
     #[test]

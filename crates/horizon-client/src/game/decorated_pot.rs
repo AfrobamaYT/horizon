@@ -90,8 +90,8 @@ impl Game<'_> {
         state: horizon_world::registry::BlockStateId,
         held: Option<&ItemStack>,
         branch: horizon_world::level::UseBranch,
-    ) -> Option<horizon_client::mod_api::NativeInteractionResult> {
-        use horizon_client::mod_api::NativeInteractionResult as Answer;
+    ) -> Option<mod_api::NativeInteractionResult> {
+        use mod_api::NativeInteractionResult as Answer;
         if &*self.res.facts().get(state).name != "minecraft:decorated_pot" {
             return None;
         }

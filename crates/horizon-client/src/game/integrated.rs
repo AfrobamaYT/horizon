@@ -1183,7 +1183,7 @@ fn serve(
     });
     let opening = Opening {
         world,
-        sync: preload_sync_data(&options.resources),
+        sync: preload_sync_data(&res.core.item_data),
     };
     let mut server = match startup::time("server.game_new", || {
         server_game(res, pack, options, settings)

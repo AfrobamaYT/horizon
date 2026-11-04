@@ -650,6 +650,7 @@ impl VanillaLodSampler {
 
 #[cfg(test)]
 mod tests {
+    use horizon_world::native_load_context::DataLoadOrigin;
     /// The all-cached path must return exactly the per-cell reductions the
     /// old override produced, including negative chunk coordinates.
     #[test]
@@ -692,12 +693,14 @@ mod tests {
         );
         let assets = crate::assets::Assets::load(&root)?;
         let biomes = crate::biome::Biomes::load(&root)?;
-        let terrain = Arc::new(VanillaTerrain::new(
-            &root.join("worldgen"),
-            assets.registry,
-            &biomes,
-            1234,
-        )?);
+        let item_data = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
+        let terrain_resources = crate::vanillagen::TerrainResources {
+            dir: &root.join("worldgen"),
+            registry: assets.registry,
+            biomes: &biomes,
+            item_data: &item_data,
+        };
+        let terrain = Arc::new(VanillaTerrain::new(terrain_resources, 1234)?);
         let mut sampler = VanillaLodSampler::new(terrain.clone());
         let mut fork = sampler.fork().expect("independent far sampler");
         let direct = sampler.grid(-1024, 0, 32, 16);
@@ -1005,10 +1008,15 @@ mod tests {
         );
         let assets = crate::assets::Assets::load(&root)?;
         let biomes = crate::biome::Biomes::load(&root)?;
+        let item_data = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
+        let terrain_resources = crate::vanillagen::TerrainResources {
+            dir: &root.join("worldgen"),
+            registry: assets.registry,
+            biomes: &biomes,
+            item_data: &item_data,
+        };
         let terrain = Arc::new(VanillaTerrain::for_dimension(
-            &root.join("worldgen"),
-            assets.registry,
-            &biomes,
+            terrain_resources,
             1234,
             "minecraft:the_end",
         )?);
@@ -1080,10 +1088,15 @@ mod tests {
         );
         let assets = crate::assets::Assets::load(&root)?;
         let biomes = crate::biome::Biomes::load(&root)?;
+        let item_data = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
+        let terrain_resources = crate::vanillagen::TerrainResources {
+            dir: &root.join("worldgen"),
+            registry: assets.registry,
+            biomes: &biomes,
+            item_data: &item_data,
+        };
         let terrain = Arc::new(VanillaTerrain::for_dimension(
-            &root.join("worldgen"),
-            assets.registry,
-            &biomes,
+            terrain_resources,
             1234,
             "minecraft:the_end",
         )?);
@@ -1165,10 +1178,15 @@ mod tests {
         );
         let assets = crate::assets::Assets::load(&root)?;
         let biomes = crate::biome::Biomes::load(&root)?;
+        let item_data = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
+        let terrain_resources = crate::vanillagen::TerrainResources {
+            dir: &root.join("worldgen"),
+            registry: assets.registry,
+            biomes: &biomes,
+            item_data: &item_data,
+        };
         let terrain = Arc::new(VanillaTerrain::for_dimension(
-            &root.join("worldgen"),
-            assets.registry,
-            &biomes,
+            terrain_resources,
             1234,
             "minecraft:the_end",
         )?);

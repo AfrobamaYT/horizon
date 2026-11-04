@@ -165,14 +165,14 @@ impl ServerReloadListeners {
 }
 
 /// The ordered listeners and retained entries of one completed registration.
-pub(crate) struct OrderedServerReload {
-    pub(crate) listeners: Vec<super::reload::RegisteredListener<dyn ServerReloadListener>>,
-    pub(crate) retained: Vec<RetainedEntry>,
+pub struct OrderedServerReload {
+    pub listeners: Vec<super::reload::RegisteredListener<dyn ServerReloadListener>>,
+    pub retained: Vec<RetainedEntry>,
 }
 
 /// One listener retained in the reload resources, as NeoForge's
 /// `ReloadableServerResources` keeps a manager.
-pub(crate) struct RetainedEntry {
+pub struct RetainedEntry {
     pub(crate) id: Identifier,
     pub(crate) any: Arc<dyn Any + Send + Sync>,
 }

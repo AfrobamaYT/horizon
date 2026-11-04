@@ -1,7 +1,7 @@
 //! The trait mod: the launcher links this crate into the game and calls `hooks()`. Each
 //! method of `Hooks` is one of Horizon's hook points; implement the ones the mod needs
 //! (docs/native-mods.md, "Trait mods").
-use horizon_client::mod_api::{self, Hooks, PlayerLoggedInEvent, ServerHost, Text};
+use mod_api::{self, Hooks, PlayerLoggedInEvent, ServerHost, Text};
 
 #[derive(Default)]
 struct Mod;

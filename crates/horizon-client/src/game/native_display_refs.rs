@@ -8,10 +8,6 @@
 use super::{Game, commands::Target};
 use horizon_client::{
     items::ItemStack,
-    mod_api::{
-        DisplayRef, EntityRef, NativeBillboard, NativeDisplayKind, NativeItemDisplayContext,
-        NativeTextAlignment, NativeTransformation, Text,
-    },
     save::item_from_nbt,
     scoreboard::{comp_text, json_to_tag, tag_to_json},
     text_display::{display_data, text_display_data},
@@ -20,6 +16,10 @@ use horizon_protocol::entity_data::Value;
 use horizon_world::{
     nbt::{Compound, Tag},
     registry::BlockStateId,
+};
+use mod_api::{
+    DisplayRef, EntityRef, NativeBillboard, NativeDisplayKind, NativeItemDisplayContext,
+    NativeTextAlignment, NativeTransformation, Text,
 };
 
 /// The entity data entry `id` of a display's compound: what it sets, else the default.
@@ -585,8 +585,8 @@ impl Game<'_> {
 mod tests {
     use super::super::{commands::OtherEntity, native_entity_refs::tests::with_game};
     use super::*;
-    use horizon_client::mod_api::NativeWorldEpoch;
     use horizon_core::geometry::Vec3;
+    use mod_api::NativeWorldEpoch;
 
     fn push(game: &mut Game<'_>, id: u32, kind: &str) -> DisplayRef {
         game.options.dedicated = Some(Vec::new());

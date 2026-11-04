@@ -10,7 +10,7 @@
 use super::Game;
 use horizon_client::cooldowns::Cooldowns;
 use horizon_client::items::ItemStack;
-use horizon_client::mod_api::{NativeItemCooldown, PlayerRef};
+use mod_api::{NativeItemCooldown, PlayerRef};
 use std::sync::Arc;
 
 impl Game<'_> {

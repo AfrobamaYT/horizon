@@ -1500,7 +1500,7 @@ fn pipeline(
     let ordered: Vec<Bundle> = resolution.order.iter().map(|&i| mods[i].clone()).collect();
     let projects: Vec<_> = mods
         .iter()
-        .map(|bundle| api::Project::read(bundle, target))
+        .map(api::Project::read)
         .collect::<Result<_, _>>()
         .map_err(|error| error.to_string())?;
     let revision = match &built_on {

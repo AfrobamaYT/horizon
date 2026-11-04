@@ -1,36 +1,7 @@
 //! Bulk block edits for server mods: a helper on the level being ticked, as `native_set_block` is, that makes many
 //! runs of blocks up columns at once, straight into the chunks.
 use super::Game;
-
-/// Which of a column's heights (`Heightmap.Types`) a run's `y` counts from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum NativeHeightmap {
-    WorldSurface,
-    MotionBlocking,
-    MotionBlockingNoLeaves,
-    OceanFloor,
-}
-/// A run: `height` blocks up a column from `y` (from the column's `surface` height when one is
-/// given), set to palette entry `block`, only where filter `only` matches when one is given.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct NativeBlockRun {
-    pub x: i32,
-    pub z: i32,
-    pub y: i32,
-    pub height: u32,
-    pub surface: Option<NativeHeightmap>,
-    pub block: u32,
-    pub only: Option<u32>,
-}
-/// A bulk edit: block states and block predicates as commands write them (without NBT), and the runs naming them
-/// by index.
-#[derive(Clone, Debug, PartialEq, Default)]
-pub struct NativeBlockEdit {
-    pub palette: Vec<String>,
-    pub filters: Vec<String>,
-    pub runs: Vec<NativeBlockRun>,
-}
+pub use mod_api::game::{NativeBlockEdit, NativeBlockRun, NativeHeightmap};
 
 #[allow(dead_code)]
 impl Game<'_> {

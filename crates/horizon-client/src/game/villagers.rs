@@ -272,7 +272,7 @@ impl Game<'_> {
         let Some(ty) = horizon_client::particles::ParticleType::from_name(kind) else {
             return;
         };
-        let options = horizon_client::particles::ParticleOptions::simple(ty);
+        let options = mod_api::particles::ParticleOptions::simple(ty);
         let mut spawned = Vec::new();
         horizon_client::particles::around_self(
             self.particles.random(),
@@ -552,7 +552,7 @@ impl Game<'_> {
     /// Ask after this mob's tick Pre; its living tick applies the answer.
     pub(super) fn sync_sleeping_mob(&mut self, index: usize) {
         if self.remote.is_some()
-            || !crate::mod_api::listened(crate::mod_api::HookId::CanContinueSleeping)
+            || !mod_api::__private::listened(mod_api::HookId::CanContinueSleeping)
         {
             return;
         }
