@@ -9500,6 +9500,11 @@ impl Game<'_> {
     pub(super) fn native_fluid_name(&self, fluid: &str) -> String {
         super::native_panel_recipes::fluid_name(fluid)
     }
+    /// The selected language's text for a translation key (`Component.translatable`'s lookup), `None`
+    /// when no language layer defines it.
+    pub(super) fn native_translate(&self, key: &str) -> Option<String> {
+        horizon_client::lang::has(key).then(|| horizon_client::lang::get(key))
+    }
     /// A line of text at `(x, y)` in GUI pixels, opaque `rgb`.
     pub(super) fn native_text(
         &self,
