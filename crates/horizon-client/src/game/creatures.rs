@@ -1233,15 +1233,11 @@ impl Game<'_> {
                 horizon_client::mobs::apply_mob_pushes(m, &mut pushes);
                 horizon_client::mobs::blocks_changed(m, &path_changes);
                 let from = events.len();
-<<<<<<< HEAD
                 let credit_expiring = m.ai.last_hurt_by_player == 1;
-                let kept = m.tick(&w, &mut scratch, &mut events);
+                let kept = m.tick(&w, &mut level, &mut events);
                 if credit_expiring && m.ai.last_hurt_by_player == 0 {
                     player_credit.remove(&m.id);
                 }
-=======
-                let kept = m.tick(&w, &mut level, &mut events);
->>>>>>> origin/main
                 // A killed mob's body is removed: its effects that act on
                 // death run (`LivingEntity.remove` with KILLED).
                 if !kept && !m.alive() && !m.removed && !m.extra.effects.is_empty() {
