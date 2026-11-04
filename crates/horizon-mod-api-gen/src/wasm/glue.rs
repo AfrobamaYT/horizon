@@ -165,11 +165,14 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         Ty::Str(_) => format!("{e}.to_string()"),
         Ty::List(item, _) | Ty::Array(item, _) => {
             format!(
-                "{e}.iter().map(|x| {}).collect::<Vec<_>>()",
+                "{e}.iter().map(|x| Ok({})).collect::<Result<Vec<_>, Refused>>()?",
                 lower(types, item, "x")
             )
         }
-        Ty::Option(item) => format!("{e}.as_ref().map(|x| {})", lower(types, item, "x")),
+        Ty::Option(item) => format!(
+            "{e}.as_ref().map(|x| Ok::<_, Refused>({})).transpose()?",
+            lower(types, item, "x")
+        ),
         Ty::Result(ok, err) => format!(
             "match {e} {{ Ok(x) => Ok({}), Err(x) => Err({}) }}",
             lower_or_unit(types, ok, "x"),
@@ -191,7 +194,7 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         }
         Ty::Ref(inner, _) => lower(types, inner, &format!("(&**{e})")),
         Ty::Boxed(inner) | Ty::Shared(inner) => lower(types, inner, &format!("(&**{e})")),
-        Ty::Named(def) => format!("lower_{def}({e})"),
+        Ty::Named(def) => format!("lower_{def}({e})?"),
     }
 }
 
@@ -590,7 +593,7 @@ pub(super) fn conversions(
                 format!("match v {{ {}, {EVERY_CASE} }}", arms.join(", "))
             }
             Kind::Via(form) => format!(
-                "{{ let f: {} = ::core::convert::From::from(v); {} }}",
+                "{{ let f: {} = ::core::convert::TryFrom::try_from(v).map_err(Refused::because)?; {} }}",
                 super::sides::rust_ty(types, form, false),
                 lower(types, form, "(&f)")
             ),
@@ -603,10 +606,10 @@ pub(super) fn conversions(
                 lower(types, frame, "v"),
                 rust.split('<').next().unwrap()
             ),
-            Kind::Json => "serde_json::to_string(v).unwrap_or_default()".into(),
+            Kind::Json => "serde_json::to_string(v).map_err(Refused::because)?".into(),
             Kind::Opaque(_) => unreachable!(),
         };
-        writeln!(code, "#[allow(unused_variables, unreachable_patterns, clippy::all)] fn lower_{id}(v: &{rust}) -> {wire} {{ {body} }}").unwrap();
+        writeln!(code, "#[allow(unused_variables, unreachable_patterns, clippy::all)] fn lower_{id}(v: &{rust}) -> Result<{wire}, Refused> {{ Ok({body}) }}").unwrap();
         // Lifting, for types that own their contents.
         if def.lifetimes == 0 {
             let path = rust.as_str();
@@ -695,7 +698,7 @@ pub(super) fn conversions(
                                     }
                                     // A chain's link: only the chain, holding the next, builds it.
                                     Payload::Record(..) if link.is_some() => {
-                                        format!("{source}(_) => return Err(Refused)")
+                                        format!("{source}(_) => return Err(Refused::SHAPE)")
                                     }
                                     Payload::Record(_, fields) => {
                                         let parts: Vec<String> = fields
@@ -724,13 +727,14 @@ pub(super) fn conversions(
                     format!("match w {{ {} }}", arms.join(", "))
                 }
                 Kind::Via(form) => format!(
-                    "{{ let f: {} = {}; ::core::convert::TryFrom::try_from(f).map_err(|_| Refused)? }}",
+                    "{{ let f: {} = {}; ::core::convert::TryFrom::try_from(f).map_err(|_| Refused::because(\"a {} that doesn't convert\"))? }}",
                     super::sides::rust_ty(types, form, false),
-                    lift(types, form, "w")
+                    lift(types, form, "w"),
+                    path.trim_start_matches("crate::")
                 ),
                 Kind::Chain { frame, case, link } if case.is_empty() => format!(
                     "{{ let mut frames = w.into_iter().rev(); let mut v = {}; for frame in frames {{ let mut outer = {}; outer.{link} = Some(Box::new(v)); v = outer; }} v }}",
-                    lift(types, frame, "frames.next().ok_or(Refused)?"),
+                    lift(types, frame, "frames.next().ok_or(Refused::SHAPE)?"),
                     lift(types, frame, "frame"),
                 ),
                 Kind::Chain { frame, case, link } => {
@@ -756,14 +760,14 @@ pub(super) fn conversions(
                         })
                         .collect();
                     format!(
-                        "{{ let mut frames = w.into_iter().rev(); let mut v = {}; for frame in frames {{ v = match frame {{ {}::{}(p) => {path}::{case} {{ {link}: Box::new(v), {} }}, _ => return Err(Refused) }}; }} v }}",
-                        lift(types, frame, "frames.next().ok_or(Refused)?"),
+                        "{{ let mut frames = w.into_iter().rev(); let mut v = {}; for frame in frames {{ v = match frame {{ {}::{}(p) => {path}::{case} {{ {link}: Box::new(v), {} }}, _ => return Err(Refused::SHAPE) }}; }} v }}",
+                        lift(types, frame, "frames.next().ok_or(Refused::SHAPE)?"),
                         wire_path(frame_def),
                         bound_type(&linked.wit),
                         parts.join(", ")
                     )
                 }
-                Kind::Json => "serde_json::from_str(&w).map_err(|_| Refused)?".into(),
+                Kind::Json => "serde_json::from_str(&w).map_err(Refused::because)?".into(),
                 Kind::Opaque(_) => unreachable!(),
             };
             writeln!(code, "#[allow(unused_variables, clippy::all)] fn lift_{id}(w: {wire}) -> Result<{path}, Refused> {{ Ok({body}) }}").unwrap();
@@ -780,65 +784,105 @@ pub(super) fn conversions(
                 continue;
             }
             let out = format!("{W}::{}", bound_type(&wit::out_name(def)));
+            // What the call started with, to send back only what it changed: an owned copy of
+            // each field that holds no borrow, and of each `&mut` record's own.
+            let mut kept = Vec::new();
+            let mut copies = Vec::new();
             let parts: Vec<String> = writable
                 .iter()
                 .map(|f| {
+                    let name = &f.rust;
                     let value = match &f.ty {
                         Ty::Ref(inner, true)
                             if let Ty::Named(inner) = &**inner
                                 && wit::has_out(types, &types.defs[*inner]) =>
                         {
-                            format!("lower_out_{inner}(&*v.{})", f.rust)
+                            kept.push(format!("{name}: Before{inner}"));
+                            copies.push(format!("{name}: before_{inner}(&*v.{name})"));
+                            format!("lower_out_{inner}(&*v.{name}, &b.{name})?")
                         }
-                        ty => lower(types, ty, &format!("(&v.{})", f.rust)),
+                        Ty::Ref(inner, true) if !borrows(types, inner) => {
+                            kept.push(format!(
+                                "{name}: {}",
+                                super::sides::rust_ty(types, inner, true)
+                            ));
+                            copies.push(format!("{name}: (*v.{name}).clone()"));
+                            format!(
+                                "if *v.{name} != b.{name} {{ Some({}) }} else {{ None }}",
+                                lower(types, inner, &format!("(&*v.{name})"))
+                            )
+                        }
+                        ty if !borrows(types, ty) => {
+                            kept.push(format!(
+                                "{name}: {}",
+                                super::sides::rust_ty(types, ty, true)
+                            ));
+                            copies.push(format!("{name}: v.{name}.clone()"));
+                            format!(
+                                "if v.{name} != b.{name} {{ Some({}) }} else {{ None }}",
+                                lower(types, ty, &format!("(&v.{name})"))
+                            )
+                        }
+                        ty => format!("Some({})", lower(types, ty, &format!("(&v.{name})"))),
                     };
                     format!("{}: {value}", bound_ident(&f.wit))
                 })
                 .collect();
-            writeln!(code, "#[allow(unused_variables, clippy::all)] fn lower_out_{id}(v: &{rust}) -> {out} {{ {out} {{ {} }} }}", parts.join(", ")).unwrap();
+            writeln!(
+                code,
+                "#[allow(dead_code, non_camel_case_types)] pub(super) struct Before{id} {{ {} }}",
+                kept.join(", ")
+            )
+            .unwrap();
+            writeln!(code, "#[allow(unused_variables, clippy::all)] fn before_{id}(v: &{rust}) -> Before{id} {{ Before{id} {{ {} }} }}", copies.join(", ")).unwrap();
+            writeln!(code, "#[allow(unused_variables, clippy::all)] fn lower_out_{id}(v: &{rust}, b: &Before{id}) -> Result<{out}, Refused> {{ Ok({out} {{ {} }}) }}", parts.join(", ")).unwrap();
             let mut writes = String::new();
             for f in &writable {
-                let source = format!("o.{}", bound_ident(&f.wit));
+                let field = format!("o.{}", bound_ident(&f.wit));
+                // A field the other side left as it was comes back as `None`.
+                let source = "x".to_string();
+                let unchanged = |write: String| format!("if let Some(x) = {field} {{ {write} }}\n");
                 match &f.ty {
                     Ty::Ref(inner, true)
                         if let Ty::Named(inner) = &**inner
                             && wit::has_out(types, &types.defs[*inner]) =>
                     {
-                        writeln!(writes, "write_back_{inner}(&mut *v.{}, {source})?;", f.rust)
+                        writeln!(writes, "write_back_{inner}(&mut *v.{}, {field})?;", f.rust)
                             .unwrap();
                     }
-                    Ty::Ref(inner, true) if !borrows(types, inner) => {
-                        writeln!(writes, "*v.{} = {};", f.rust, lift(types, inner, &source))
-                            .unwrap()
-                    }
+                    Ty::Ref(inner, true) if !borrows(types, inner) => writes.push_str(&unchanged(
+                        format!("*v.{} = {};", f.rust, lift(types, inner, &source)),
+                    )),
                     Ty::Ref(inner, true) => {
                         if let Ty::Named(inner) = &**inner
                             && outs.contains(inner)
                         {
-                            writeln!(writes, "write_back_{inner}(v.{}, {source})?;", f.rust)
-                                .unwrap();
+                            writes.push_str(&unchanged(format!(
+                                "write_back_{inner}(v.{}, {source})?;",
+                                f.rust
+                            )));
                         } else {
-                            writeln!(writes, "let _ = {source};").unwrap();
+                            writeln!(writes, "let _ = {field};").unwrap();
                         }
                     }
-                    ty if !borrows(types, ty) => {
-                        writeln!(writes, "v.{} = {};", f.rust, lift(types, ty, &source)).unwrap()
-                    }
+                    ty if !borrows(types, ty) => writes.push_str(&unchanged(format!(
+                        "v.{} = {};",
+                        f.rust,
+                        lift(types, ty, &source)
+                    ))),
                     // A wrapper around one mutable borrow (`CarriedAccess`): write through it.
                     Ty::Named(inner)
                         if let Kind::TupleRecord(items) = &types.defs[*inner].kind
                             && let [Ty::Ref(target, true)] = items.as_slice()
                             && !borrows(types, target) =>
                     {
-                        writeln!(
-                            writes,
+                        writes.push_str(&unchanged(format!(
                             "*v.{}.0 = {};",
                             f.rust,
                             lift(types, target, &source)
-                        )
-                        .unwrap()
+                        )))
                     }
-                    _ => writeln!(writes, "let _ = {source};").unwrap(),
+                    _ => writeln!(writes, "let _ = {field};").unwrap(),
                 }
             }
             writeln!(code, "#[allow(unused_variables, clippy::all)] fn write_back_{id}(v: &mut {rust}, o: {out}) -> Result<(), Refused> {{ {writes} Ok(()) }}").unwrap();

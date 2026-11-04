@@ -9771,6 +9771,11 @@ impl Game<'_> {
     pub(super) fn native_fluid_name(&self, fluid: &str) -> String {
         super::native_panel_recipes::fluid_name(fluid)
     }
+    /// The selected language's text for a translation key (`Component.translatable`'s lookup), `None`
+    /// when no language layer defines it.
+    pub(super) fn native_translate(&self, key: &str) -> Option<String> {
+        horizon_client::lang::has(key).then(|| horizon_client::lang::get(key))
+    }
     /// A line of text at `(x, y)` in GUI pixels, opaque `rgb`.
     pub(super) fn native_text(
         &self,
@@ -11405,6 +11410,26 @@ mod tests {
                     .is_some()
             );
             assert_eq!(game.native_enchantment_min_cost("missing:unknown", 1), None);
+        });
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn translate_gives_the_text_of_a_defined_key_and_none_otherwise() {
+        use horizon_client::lang::{Language, ResourceSource, scoped};
+        struct Empty;
+        impl ResourceSource for Empty {
+            fn read(&self, _: &str) -> Option<Vec<u8>> {
+                None
+            }
+        }
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (got, _) = scoped(Language::load(&[&Empty], "en_us"), || {
+                (
+                    game.native_translate("horizon.options.controller"),
+                    game.native_translate("missing.key"),
+                )
+            });
+            assert_eq!(got, (Some("Controller".to_owned()), None));
         });
     }
     #[test]
