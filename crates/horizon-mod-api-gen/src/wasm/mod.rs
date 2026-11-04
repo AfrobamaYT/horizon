@@ -750,6 +750,14 @@ mod tests {
                     .next()
                     .unwrap();
                 assert!(client.contains("menu-click:"));
+                for definition in [
+                    "variant menu-click {",
+                    "variant swap-with {",
+                    "enum mouse-button {",
+                    "enum drag-kind {",
+                ] {
+                    assert!(wasm.wit.contains(definition), "missing {definition}");
+                }
                 let server = wasm
                     .wit
                     .split("interface backend-mut {")

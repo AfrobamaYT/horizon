@@ -11191,7 +11191,6 @@ mod tests {
             },
         };
         use horizon_world::nbt::Tag;
-        use mod_api::Input;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -11267,33 +11266,41 @@ mod tests {
             }))
             .unwrap();
             assert_eq!(game.native_menu_slot(menu, 36).unwrap().unwrap().count, 3);
-            let click = |slot, button, input| mod_api::MenuClick {
-                slot,
-                button,
-                input,
+            use mod_api::{DragKind, MenuClick, MouseButton, SwapWith};
+            let pickup = |slot| MenuClick::Pickup {
+                slot: Some(slot),
+                button: MouseButton::Left,
             };
-            for (slot, button, input) in [
-                (Some(46), 0, Input::Pickup),
-                (Some(usize::MAX), 0, Input::Pickup),
-                (Some(36), 2, Input::Pickup),
-                (None, 0, Input::QuickMove),
-                (Some(36), 9, Input::Swap),
-                (Some(36), 2, Input::Clone),
-                (None, 3, Input::QuickCraft),
+            for invalid in [
+                pickup(46),
+                pickup(usize::MAX),
+                MenuClick::Swap {
+                    slot: 36,
+                    with: SwapWith::Hotbar(9),
+                },
+                MenuClick::Clone { slot: 36 },
+                MenuClick::Drag {
+                    kind: DragKind::Clone,
+                    slots: vec![36],
+                },
+                MenuClick::Drag {
+                    kind: DragKind::Split,
+                    slots: vec![36, usize::MAX],
+                },
             ] {
-                assert!(!menu.click(game, &[click(slot, button, input)]));
+                assert!(!menu.click(game, &[invalid]));
                 assert_eq!(menu.slot(game, 36).unwrap().unwrap().count, 3);
                 assert_eq!(menu.carried(game), Some(None));
             }
             game.options.execution_role = ExecutionRole::IntegratedServer;
-            assert!(!menu.click(game, &[click(Some(36), 0, Input::Pickup)]));
+            assert!(!menu.click(game, &[pickup(36)]));
             game.options.execution_role = ExecutionRole::Client;
             let screen = game.screen;
             game.screen = Screen::Creative;
-            assert!(!menu.click(game, &[click(Some(36), 0, Input::Pickup)]));
+            assert!(!menu.click(game, &[pickup(36)]));
             game.screen = screen;
             game.remote.as_mut().unwrap().state_id = 17;
-            assert!(menu.click(game, &[click(Some(36), 0, Input::Pickup)]));
+            assert!(menu.click(game, &[pickup(36)]));
             let (id, body) = reader.recv().unwrap();
             let play::Serverbound::ContainerClick(sent) =
                 play::Serverbound::decode(id, &body).unwrap()
@@ -11316,27 +11323,20 @@ mod tests {
             assert_eq!(sent.carried.unwrap().count, 3);
             assert_eq!(menu.slot(game, 36), Some(None));
             assert_eq!(menu.carried(game).unwrap().unwrap().count, 3);
-            assert!(!menu.click(
-                game,
-                &[
-                    click(Some(36), 0, Input::Pickup),
-                    click(Some(usize::MAX), 0, Input::Pickup),
-                ]
-            ));
+            assert!(!menu.click(game, &[pickup(36), pickup(usize::MAX),]));
             assert_eq!(menu.slot(game, 36), Some(None));
             assert_eq!(menu.carried(game).unwrap().unwrap().count, 3);
             assert!(menu.click(
                 game,
-                &[
-                    click(None, 0, Input::QuickCraft),
-                    click(Some(37), 1, Input::QuickCraft),
-                    click(None, 2, Input::QuickCraft),
-                ]
+                &[MenuClick::Drag {
+                    kind: DragKind::Split,
+                    slots: vec![37]
+                },]
             ));
             assert_eq!(menu.slot(game, 37).unwrap().unwrap().count, 3);
             assert_eq!(menu.carried(game), Some(None));
-            assert!(menu.click(game, &[click(Some(37), 0, Input::Pickup)]));
-            assert!(menu.click(game, &[click(Some(36), 0, Input::Pickup)]));
+            assert!(menu.click(game, &[pickup(37)]));
+            assert!(menu.click(game, &[pickup(36)]));
             assert_eq!(menu.carried(game), Some(None));
             assert_eq!(menu.slot(game, 36).unwrap().unwrap().count, 3);
             game.handle_packet(C::SetPlayerInventory(play::SetPlayerInventory {
@@ -11345,13 +11345,25 @@ mod tests {
             }))
             .unwrap();
             assert_eq!(menu.slot(game, 36).unwrap().unwrap().count, 2);
-            assert!(menu.click(game, &[click(Some(36), 0, Input::QuickMove)]));
+            assert!(menu.click(game, &[MenuClick::QuickMove { slot: 36 }]));
             assert_eq!(menu.slot(game, 36), Some(None));
             assert_eq!(menu.slot(game, 9).unwrap().unwrap().count, 2);
-            assert!(menu.click(game, &[click(Some(9), 1, Input::Swap)]));
+            assert!(menu.click(
+                game,
+                &[MenuClick::Swap {
+                    slot: 9,
+                    with: SwapWith::Hotbar(1)
+                }]
+            ));
             assert_eq!(menu.slot(game, 9), Some(None));
             assert_eq!(menu.slot(game, 37).unwrap().unwrap().count, 2);
-            assert!(menu.click(game, &[click(Some(37), 1, Input::Throw)]));
+            assert!(menu.click(
+                game,
+                &[MenuClick::Throw {
+                    slot: 37,
+                    whole_stack: true
+                }]
+            ));
             assert_eq!(menu.slot(game, 37), Some(None));
             game.handle_packet(C::SetCursorItem(play::SetCursorItem {
                 item: stone.clone(),
@@ -11376,7 +11388,7 @@ mod tests {
             };
             game.handle_packet(open()).unwrap();
             assert_eq!(game.native_menu_slot_count(menu), None);
-            assert!(!menu.click(game, &[click(Some(36), 0, Input::Pickup)]));
+            assert!(!menu.click(game, &[pickup(36)]));
             let crafting = game
                 .native_local_player()
                 .and_then(|player| game.native_menu_ref(player))
@@ -11406,7 +11418,7 @@ mod tests {
             );
             game.handle_packet(open()).unwrap();
             assert_eq!(game.native_menu_slot_count(crafting), None);
-            assert!(!crafting.click(game, &[click(Some(1), 0, Input::Pickup)]));
+            assert!(!crafting.click(game, &[pickup(1)]));
             let crafting = game
                 .native_local_player()
                 .and_then(|player| game.native_menu_ref(player))
@@ -11417,7 +11429,7 @@ mod tests {
             }))
             .unwrap();
             assert_eq!(game.native_menu_slot_count(crafting), None);
-            assert!(!crafting.click(game, &[click(Some(1), 0, Input::Pickup)]));
+            assert!(!crafting.click(game, &[pickup(1)]));
             let inventory = game
                 .native_local_player()
                 .and_then(|player| game.native_menu_ref(player))
@@ -11455,10 +11467,10 @@ mod tests {
             assert_eq!(game.native_menu_slot(chest, 3), Some(None));
             game.handle_packet(C::SetCursorItem(play::SetCursorItem { item: None }))
                 .unwrap();
-            assert!(chest.click(game, &[click(Some(2), 0, Input::Pickup)]));
+            assert!(chest.click(game, &[pickup(2)]));
             assert_eq!(chest.slot(game, 2), Some(None));
             assert_eq!(chest.carried(game).unwrap().unwrap().count, 4);
-            assert!(chest.click(game, &[click(Some(2), 0, Input::Pickup)]));
+            assert!(chest.click(game, &[pickup(2)]));
             assert_eq!(chest.slot(game, 2).unwrap().unwrap().count, 4);
             assert_eq!(chest.carried(game), Some(None));
             for expected in [
@@ -11524,14 +11536,14 @@ mod tests {
             other.dimension = "test:other_overworld".into();
             game.enter_remote_dimension(&other, true, Reason::Other);
             assert_eq!(game.native_menu_slot_count(before_replacement), None);
-            assert!(!before_replacement.click(game, &[click(Some(36), 0, Input::Pickup)]));
+            assert!(!before_replacement.click(game, &[pickup(36)]));
             let before_logout = game
                 .native_local_player()
                 .and_then(|player| game.native_menu_ref(player))
                 .unwrap();
             game.client_logging_out();
             assert_eq!(game.native_menu_slot_count(before_logout), None);
-            assert!(!before_logout.click(game, &[click(Some(36), 0, Input::Pickup)]));
+            assert!(!before_logout.click(game, &[pickup(36)]));
             assert!(
                 game.native_local_player()
                     .and_then(|player| game.native_menu_ref(player))

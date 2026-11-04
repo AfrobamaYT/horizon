@@ -121,7 +121,31 @@ pub trait Maps {
     fn derive(&self, id: i32, scale: bool) -> Option<i32>;
 }
 
-pub use mod_api::menu::Input;
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Input {
+    Pickup,
+    QuickMove,
+    Swap,
+    Clone,
+    Throw,
+    QuickCraft,
+    PickupAll,
+}
+
+impl Input {
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "PICKUP" => Self::Pickup,
+            "QUICK_MOVE" => Self::QuickMove,
+            "SWAP" => Self::Swap,
+            "CLONE" => Self::Clone,
+            "THROW" => Self::Throw,
+            "QUICK_CRAFT" => Self::QuickCraft,
+            "PICKUP_ALL" => Self::PickupAll,
+            _ => return None,
+        })
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {

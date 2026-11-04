@@ -2127,14 +2127,6 @@ handle, an entity the client doesn't track and a level it doesn't show:
   window id included), on a respawn, a dimension change or a logout, and after a reconnect. Nothing here sends a packet
   or changes the menu.
 
-Client input uses `menu.click(host, &[mod_api::MenuClick { slot, button, input }]) on a mutable `ClientHost`.
-It uses that same menu-order slot (`None` for outside), validates the current handle and button/mode,
-and submits through the normal predicted `ContainerClick` path. Complete quick-craft gestures belong
-in one batch; all clicks are validated before the first is predicted or sent. A stale handle, invalid request,
-spectator, non-client host or creative inventory screen returns `false` without side effects.
-`true` is submission, not server acceptance; authoritative slot/cursor corrections still win.
-See [A menu's slots](../concepts/trait-mods.md#a-menus-slots) for modes and a compiling example.
-
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
 - `level.block_state(host, pos)` returns a typed `BlockStateId` without allocating a state string. For text such as
@@ -2377,6 +2369,18 @@ See [A menu's slots](../concepts/trait-mods.md#a-menus-slots) for modes and a co
 `level.set_block(host, pos, state, flags)`, `level.remove_block(host, pos, moved)` and `level.destroy_block(host, pos, drop)` change the level in place. They return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. Removal preserves the fluid's legacy block; `moved` marks a piston move. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. `CLIENTS` sends the update, while `INVISIBLE` suppresses notification only on the client, as in `Level.setBlock`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill.
 
 A helper whose catalog entry names a `receiver` (`entity`, `level`, `block_entity`) is called on that handle (for example `entity.position(host)`), rather than as an ID-based `Host` method.
+
+### Client menu input
+
+Client input uses `menu.click(host, &[mod_api::MenuClick::QuickMove { slot }])` on a mutable `ClientHost`.
+Actions use menu-order slots; only `Pickup` accepts `None` for outside. Typed `MouseButton`,
+`SwapWith` and `DragKind` values replace vanilla's wire codes, and `Drag { kind, slots }` expands
+to a complete gesture. All actions are validated before the first is predicted or sent through the
+normal `ContainerClick` path. A stale handle, invalid slot/hotbar index, creative-only action in survival,
+spectator, non-client host or creative inventory screen returns `false` without side effects.
+`true` is submission, not server acceptance; authoritative slot/cursor corrections still win.
+See [A menu's slots](../concepts/trait-mods.md#a-menus-slots) for actions and an example.
+Diverges from upstream: new helper.
 
 ### Mob AI goals
 

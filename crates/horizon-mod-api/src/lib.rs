@@ -149,7 +149,7 @@ pub use crate::health::DamageContainer;
 pub use crate::health::{HurtSource, Reduction, ShieldBlock, Victim};
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::item_tooltip::TooltipDisplay;
-pub use crate::menu::{Input, LogicalSide, MenuClick, StackedOnOther};
+pub use crate::menu::{DragKind, LogicalSide, MenuClick, MouseButton, StackedOnOther, SwapWith};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
 pub use crate::mobs::PathComputationType;
@@ -3610,7 +3610,9 @@ pub struct BackendMutRef<'a> {
 /// The opaque client-write backend, with no access to server writes.
 ///
 /// Only the API can construct or open this value.
+// hidden: a game-side type, not part of the mod surface
 #[doc(hidden)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ClientBackendMutRef<'a> {
     inner: &'a mut dyn ClientBackendMut,
 }
@@ -4319,10 +4321,9 @@ mod tests {
         let menu = __private::game::menu_ref(player, 0, 1);
         assert!(!menu.click(
             &mut Empty,
-            &[MenuClick {
+            &[MenuClick::Pickup {
                 slot: Some(0),
-                button: 0,
-                input: Input::Pickup
+                button: MouseButton::Left,
             }]
         ));
     }

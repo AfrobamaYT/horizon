@@ -10,43 +10,29 @@ use horizon_client::{
         guest::Guest,
         menu::{SlotBacking, Slots, VEHICLE_KEY_Y},
     },
-    menu::{Kind, Menu},
+    menu::{Input, Kind, Menu},
 };
 use mod_api::__private::game::*;
-use mod_api::{EntityRef, Input, MenuClick, MenuRef, MenuSlotBacking, PlayerRef};
+use mod_api::{
+    DragKind, EntityRef, MenuClick, MenuRef, MenuSlotBacking, MouseButton, PlayerRef, SwapWith,
+};
 
 impl Game<'_> {
     /// Submit clicks on the local player's live menu through normal prediction
     /// and `ContainerClick`. Slots use the same menu order as `slot`; `None`
     /// is outside (-999). All clicks are validated before any prediction or send.
-    /// A quick-craft gesture must start and end in this batch, with matching mode.
-    /// Refuses stale menus, invalid slots/buttons, spectators, non-client hosts,
+    /// A drag expands to one complete quick-craft gesture.
+    /// Refuses stale menus, invalid slots/hotbar indices, spectators, non-client hosts,
     /// the creative inventory screen and empty batches without changing items.
     /// True means submitted, not accepted by the server: its corrections win.
     pub(super) fn native_menu_click(&mut self, menu: MenuRef, clicks: &[MenuClick]) -> bool {
-        if self.is_logical_server()
-            || self.screen == super::Screen::Creative
-            || self.spectator()
-            || !valid_client_clicks(clicks, self.instabuild())
-        {
+        if self.is_logical_server() || self.screen == super::Screen::Creative || self.spectator() {
             return false;
         }
         let Some(name) = self.native_client_menu_name(menu) else {
             return false;
         };
-        let ops: Option<Vec<_>> = clicks
-            .iter()
-            .map(|click| {
-                let slot = match click.slot {
-                    Some(slot) => {
-                        Some(Self::menu_slot(name, i32::from(i16::try_from(slot).ok()?))?)
-                    }
-                    None => None,
-                };
-                Some((slot, click.button, click.input))
-            })
-            .collect();
-        let Some(ops) = ops else {
+        let Some(ops) = client_click_ops(name, clicks, self.instabuild()) else {
             return false;
         };
         self.remote_menu_ops(&ops)
@@ -346,46 +332,65 @@ impl Game<'_> {
         Some(self.native_menu_guest(menu)?.carried.clone())
     }
 }
-fn valid_client_clicks(clicks: &[MenuClick], creative: bool) -> bool {
-    let mut dragging = None;
+fn client_click_ops(
+    menu: &str,
+    clicks: &[MenuClick],
+    creative: bool,
+) -> Option<Vec<(Option<usize>, i32, Input)>> {
     if clicks.is_empty() {
-        return false;
+        return None;
     }
+    let mapped_slot = |slot| Game::menu_slot(menu, i32::from(i16::try_from(slot).ok()?));
+    let mut ops = Vec::new();
     for click in clicks {
-        if !valid_client_click(click.slot, click.button, click.input, creative) {
-            return false;
-        }
-        if click.input == Input::QuickCraft {
-            let mode = click.button / 4;
-            match (click.button % 4, dragging) {
-                (0, None) => dragging = Some(mode),
-                (1, Some(active)) if mode == active => {}
-                (2, Some(active)) if mode == active => dragging = None,
-                _ => return false,
+        let op = match click {
+            MenuClick::Pickup { slot, button } => (
+                match slot {
+                    Some(slot) => Some(mapped_slot(*slot)?),
+                    None => None,
+                },
+                match button {
+                    MouseButton::Left => 0,
+                    MouseButton::Right => 1,
+                },
+                Input::Pickup,
+            ),
+            MenuClick::QuickMove { slot } => (Some(mapped_slot(*slot)?), 0, Input::QuickMove),
+            MenuClick::Swap { slot, with } => (
+                Some(mapped_slot(*slot)?),
+                match with {
+                    SwapWith::Hotbar(index) if *index <= 8 => i32::from(*index),
+                    SwapWith::Offhand => 40,
+                    _ => return None,
+                },
+                Input::Swap,
+            ),
+            MenuClick::Clone { slot } if creative => (Some(mapped_slot(*slot)?), 2, Input::Clone),
+            MenuClick::Throw { slot, whole_stack } => (
+                Some(mapped_slot(*slot)?),
+                i32::from(*whole_stack),
+                Input::Throw,
+            ),
+            MenuClick::Drag { kind, slots } => {
+                let mode = match kind {
+                    DragKind::Split => 0,
+                    DragKind::One => 4,
+                    DragKind::Clone if creative => 8,
+                    _ => return None,
+                };
+                ops.push((None, mode, Input::QuickCraft));
+                for slot in slots {
+                    ops.push((Some(mapped_slot(*slot)?), mode + 1, Input::QuickCraft));
+                }
+                ops.push((None, mode + 2, Input::QuickCraft));
+                continue;
             }
-        } else if dragging.is_some() {
-            return false;
-        }
+            MenuClick::PickupAll { slot } => (Some(mapped_slot(*slot)?), 0, Input::PickupAll),
+            _ => return None,
+        };
+        ops.push(op);
     }
-    dragging.is_none()
-}
-
-fn valid_client_click(slot: Option<usize>, button: i32, input: Input, creative: bool) -> bool {
-    match input {
-        Input::Pickup => matches!(button, 0 | 1),
-        Input::QuickMove | Input::Throw | Input::PickupAll => {
-            slot.is_some() && matches!(button, 0 | 1)
-        }
-        Input::Swap => slot.is_some() && matches!(button, 0..=8 | 40),
-        Input::Clone => slot.is_some() && button == 2 && creative,
-        Input::QuickCraft => match button {
-            0 | 2 | 4 | 6 => slot.is_none(),
-            1 | 5 => slot.is_some(),
-            8 | 10 => creative && slot.is_none(),
-            9 => creative && slot.is_some(),
-            _ => false,
-        },
-    }
+    Some(ops)
 }
 
 #[cfg(test)]
@@ -400,79 +405,114 @@ mod tests {
     };
 
     #[test]
-    fn client_click_modes_validate_buttons_and_outside_before_prediction() {
-        for input in [
-            Input::Pickup,
-            Input::QuickMove,
-            Input::Swap,
-            Input::Clone,
-            Input::Throw,
-            Input::QuickCraft,
-            Input::PickupAll,
+    fn client_click_actions_encode_vanilla_ops() {
+        let actions = [
+            MenuClick::Pickup {
+                slot: Some(36),
+                button: MouseButton::Left,
+            },
+            MenuClick::Pickup {
+                slot: None,
+                button: MouseButton::Right,
+            },
+            MenuClick::QuickMove { slot: 9 },
+            MenuClick::Swap {
+                slot: 9,
+                with: SwapWith::Hotbar(8),
+            },
+            MenuClick::Swap {
+                slot: 9,
+                with: SwapWith::Offhand,
+            },
+            MenuClick::Clone { slot: 9 },
+            MenuClick::Throw {
+                slot: 9,
+                whole_stack: false,
+            },
+            MenuClick::Throw {
+                slot: 9,
+                whole_stack: true,
+            },
+            MenuClick::PickupAll { slot: 9 },
+        ];
+        assert_eq!(
+            client_click_ops("inventory", &actions, true),
+            Some(vec![
+                (Some(0), 0, Input::Pickup),
+                (None, 1, Input::Pickup),
+                (Some(9), 0, Input::QuickMove),
+                (Some(9), 8, Input::Swap),
+                (Some(9), 40, Input::Swap),
+                (Some(9), 2, Input::Clone),
+                (Some(9), 0, Input::Throw),
+                (Some(9), 1, Input::Throw),
+                (Some(9), 0, Input::PickupAll),
+            ])
+        );
+        for (kind, mode, creative) in [
+            (DragKind::Split, 0, false),
+            (DragKind::One, 4, false),
+            (DragKind::Clone, 8, true),
         ] {
-            for slot in [None, Some(0)] {
-                for creative in [false, true] {
-                    for button in -2..=42 {
-                        let expected = match input {
-                            Input::Pickup => (0..=1).contains(&button),
-                            Input::QuickMove | Input::Throw | Input::PickupAll => {
-                                slot.is_some() && (0..=1).contains(&button)
-                            }
-                            Input::Swap => {
-                                slot.is_some() && ((0..=8).contains(&button) || button == 40)
-                            }
-                            Input::Clone => slot.is_some() && button == 2 && creative,
-                            Input::QuickCraft => {
-                                (0..=10).contains(&button)
-                                    && button % 4 != 3
-                                    && (button < 8 || creative)
-                                    && slot.is_some() == (button % 4 == 1)
-                            }
-                        };
-                        assert_eq!(
-                            valid_client_click(slot, button, input, creative),
-                            expected,
-                            "{input:?}, {slot:?}, {button}, creative={creative}"
-                        );
-                    }
-                }
-            }
+            assert_eq!(
+                client_click_ops(
+                    "inventory",
+                    &[
+                        MenuClick::Drag {
+                            kind,
+                            slots: vec![36, 9]
+                        },
+                        MenuClick::QuickMove { slot: 9 },
+                    ],
+                    creative
+                ),
+                Some(vec![
+                    (None, mode, Input::QuickCraft),
+                    (Some(0), mode + 1, Input::QuickCraft),
+                    (Some(9), mode + 1, Input::QuickCraft),
+                    (None, mode + 2, Input::QuickCraft),
+                    (Some(9), 0, Input::QuickMove),
+                ])
+            );
         }
-        assert!(!valid_client_click(Some(0), i32::MAX, Input::Swap, true));
-        assert!(!valid_client_click(None, i32::MIN, Input::QuickCraft, true));
     }
 
     #[test]
-    fn client_click_batches_require_complete_matching_drag_gestures() {
-        let click = |slot, button, input| MenuClick {
-            slot,
-            button,
-            input,
-        };
-        let drag = |slot, button| click(slot, button, Input::QuickCraft);
-        assert!(!valid_client_clicks(&[], false));
-        for (mode, creative) in [(0, false), (4, false), (8, true)] {
-            let start = drag(None, mode);
-            let add = drag(Some(0), mode + 1);
-            let end = drag(None, mode + 2);
-            assert!(valid_client_clicks(&[start, add, end], creative));
-            assert!(valid_client_clicks(&[start, add, add, end], creative));
-            assert!(!valid_client_clicks(&[start, add], creative));
-            assert!(!valid_client_clicks(&[add, end], creative));
-            assert!(!valid_client_clicks(&[start, start, end], creative));
-            assert!(!valid_client_clicks(
-                &[start, drag(Some(0), (mode + 4) % 12 + 1), end],
-                creative
-            ));
-            assert!(!valid_client_clicks(
-                &[start, click(Some(0), 0, Input::Pickup), end],
-                creative
-            ));
+    fn client_click_actions_refuse_invalid_batches_before_prediction() {
+        assert!(client_click_ops("inventory", &[], false).is_none());
+        for invalid in [
+            MenuClick::QuickMove { slot: 46 },
+            MenuClick::QuickMove { slot: usize::MAX },
+            MenuClick::Swap {
+                slot: 9,
+                with: SwapWith::Hotbar(9),
+            },
+            MenuClick::Swap {
+                slot: 9,
+                with: SwapWith::Hotbar(u8::MAX),
+            },
+            MenuClick::Clone { slot: 9 },
+            MenuClick::Drag {
+                kind: DragKind::Clone,
+                slots: vec![9],
+            },
+            MenuClick::Drag {
+                kind: DragKind::Split,
+                slots: vec![9, usize::MAX],
+            },
+        ] {
+            assert!(
+                client_click_ops(
+                    "inventory",
+                    &[MenuClick::QuickMove { slot: 9 }, invalid,],
+                    false
+                )
+                .is_none()
+            );
         }
-        assert!(valid_client_clicks(
-            &[click(Some(0), 0, Input::QuickMove)],
-            false
-        ));
+        assert!(
+            client_click_ops("unsupported", &[MenuClick::QuickMove { slot: 0 }], true).is_none()
+        );
     }
 
     fn guest() -> Guest {

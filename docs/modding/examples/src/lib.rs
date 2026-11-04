@@ -44,13 +44,6 @@ pub fn quick_move(host: &mut dyn mod_api::ClientHost, slot: usize) -> bool {
     else {
         return false;
     };
-    menu.click(
-        host,
-        &[mod_api::MenuClick {
-            slot: Some(slot),
-            button: 0,
-            input: mod_api::Input::QuickMove,
-        }],
-    )
+    menu.click(host, &[mod_api::MenuClick::QuickMove { slot }])
 }
 // ANCHOR_END: menu_quick_move
