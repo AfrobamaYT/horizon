@@ -123,7 +123,10 @@ impl Game<'_> {
             .iter()
             .position(|&s| s == source_now)
             .unwrap_or(0);
-        (!cancel && mod_sound_ok(&sound, at, source, volume_now, pitch_now)).then(|| HeardSound {
+        if cancel || !mod_sound_ok(&sound, at, source, volume_now, pitch_now) {
+            return None;
+        }
+        Some(HeardSound {
             name: Cow::Owned(sound),
             source,
             volume: volume_now,
