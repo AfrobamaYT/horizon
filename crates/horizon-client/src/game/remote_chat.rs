@@ -340,13 +340,15 @@ impl Game<'_> {
                 },
             ),
         };
-        self.command_prompt = Some(CommandPrompt {
-            command: command.to_owned(),
-            message,
-            accept,
-            over_screen,
-            behind: None,
-            focus: None,
+        self.open_screen_overlay("command_prompt", |game| {
+            game.command_prompt = Some(CommandPrompt {
+                command: command.to_owned(),
+                message,
+                accept,
+                over_screen,
+                behind: None,
+                focus: None,
+            });
         });
         self.capture(false);
     }
@@ -435,7 +437,7 @@ impl Game<'_> {
                 use horizon_client::clipboard::Clipboard;
                 self.clipboard.set(&format!("/{}", prompt.command));
             }
-            (false, _, Some(Behind::Book(book))) => self.book = Some(*book),
+            (false, _, Some(Behind::Book(book))) => self.open_book(*book),
             (false, _, Some(Behind::Dialog(dialog))) => self.reopen_dialog(dialog),
             (false, _, None) => {}
         }
