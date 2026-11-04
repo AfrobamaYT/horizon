@@ -19408,10 +19408,10 @@ impl Game<'_> {
                     let steps = self.clock.advance(elapsed);
                     for _ in 0..steps {
                         let started = Instant::now();
+                        // Minecraft.tick: every client tick, paused or not, in menus too.
+                        self.native_client_tick_pre();
                         if self.title.is_none() && !self.pause {
-                            self.native_client_tick_pre();
                             horizon_client::spans::time("tick", || self.tick())?;
-                            self.native_client_tick_post();
                             self.tick_ambience();
                             self.tick_fov();
                         }
@@ -19421,6 +19421,7 @@ impl Game<'_> {
                         self.tick_chat_queue();
                         self.tick_music();
                         self.tick_sound_engine();
+                        self.native_client_tick_post();
                         self.clock.record(started.elapsed());
                         if let Some(report) = self.clock.take_sprint_report() {
                             self.sprint_report(&report);

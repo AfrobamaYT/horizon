@@ -2,7 +2,7 @@
   "hooks": [
     {
       "name": "client_tick_pre",
-      "doc": "Once a client tick, before the window's tick runs (NeoForge's\n`ClientTickEvent.Pre`): the window's `Game` only, so not on a server's\nown tick (`server_tick` is that moment). Client-side.",
+      "doc": "Once every client tick, paused or not and on the title screen too, before the window's tick runs (NeoForge's\n`ClientTickEvent.Pre`): the window's `Game` only, so not on a server's\nown tick (`server_tick` is that moment). Client-side.",
       "side": "client",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_client_tick_pre",
