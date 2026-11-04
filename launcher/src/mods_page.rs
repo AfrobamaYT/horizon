@@ -1533,16 +1533,6 @@ impl Launcher {
             Some(b) if !b.pinned_by.is_empty() => b.pinned_by.clone(),
             _ => pinned,
         };
-        // Rebuilding on a newer Horizon, or on the build's own one when mods pinned another
-        // commit, builds every mod on that Horizon's commit (`on_base`).
-        let update = build
-            .as_ref()
-            .filter(|_| state != State::NoMods)
-            .and_then(|b| {
-                native_mods::newer_than(&b.base, &self.installed).or_else(|| {
-                    (!pinned.is_empty() && self.installed.contains(&b.base)).then(|| b.base.clone())
-                })
-            });
         let mine = self.native_for.as_deref() == Some(instance.id.as_str());
         let step = self.native_step.as_ref().filter(|_| mine);
         let error = self.native_error.as_ref().filter(|_| mine);
@@ -1621,24 +1611,6 @@ impl Launcher {
             .items_center()
             .gap(px(8.))
             .children(badge.map(|(label, color)| blocks::badge(label.to_string(), color, &t)));
-        if let Some(newer) = update.filter(|_| idle) {
-            right = right.child(
-                button(
-                    "native-update",
-                    trf(
-                        "Rebuild on Horizon {version}",
-                        &[("version", &native_status::horizon_label(&newer))],
-                    ),
-                    Kind::Secondary,
-                    &t,
-                )
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    this.native_update = Some(newer.clone());
-                    this.native_confirm = Some(this.native_mods_to_build().map(|(_, b)| b));
-                    cx.notify();
-                })),
-            );
-        }
         if can_build {
             right = right.child(button("native-build", "Build", Kind::Primary, &t).on_click(
                 cx.listener(|this, _: &ClickEvent, _, cx| {

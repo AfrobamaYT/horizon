@@ -1726,10 +1726,9 @@ fn pipeline(
 /// Builds `folder`'s mods on the Horizon revision they pin (else `base`'s, the installed version
 /// whose game files the build reuses: a native build's own revision when it is one, [`base_for`])
 /// and points `instance` at the build, the default one included. Returns the build's version; a
-/// build already made is used again. Mods pinning different revisions build on the newest one,
-/// with the newest horizon-mixins they name, only when the player agreed to try (`anyway`): else
-/// the error starts with [`MISMATCH`] and says which. With `on_base`, every mod builds on `base`'s
-/// own commit, pinned or not: the player's Rebuild on Horizon.
+/// build already made is used again. Mods pinning different revisions cannot build together:
+/// the error starts with [`MISMATCH`] and names them; `cargo horizon-mod update` rebuilds them
+/// for the installed version.
 pub fn build(
     base: &str,
     folder: &Path,
@@ -3326,7 +3325,7 @@ mod tests {
     }
 
     /// levzzz5154's decision (2026-10-29): a rebuild stays on the Horizon the instance plays;
-    /// only "Rebuild on Horizon {version}" moves it to a newer one.
+    /// only an update (`--update`, `base_for`'s `update`) moves it to a newer one.
     #[test]
     fn a_rebuild_stays_on_the_instances_horizon_until_an_update() {
         let installed: Vec<String> = [
