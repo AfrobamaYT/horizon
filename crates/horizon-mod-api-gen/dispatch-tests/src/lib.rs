@@ -42,6 +42,7 @@ mod tests {
         pub(super) struct ItemAttributeModifier;
         pub(super) struct ItemAttributeModifiers;
         pub(super) struct ItemEnchantments;
+        pub(super) struct Identifier;
         pub(super) struct Ticks;
         pub(super) trait LevelHost {
             fn state_block(&self, _: BlockStateId) -> Option<&str> {
