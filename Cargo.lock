@@ -1611,6 +1611,7 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
+ "horizon-mod-wasm",
  "horizon-mods",
  "horizon-narrator",
  "horizon-optifine",
@@ -1893,6 +1894,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.119",
+ "toml",
  "wit-parser 0.261.0",
 ]
 

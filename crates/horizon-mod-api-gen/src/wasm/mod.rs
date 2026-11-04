@@ -144,7 +144,7 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Wasm, String> 
     let mut surface = surface(root, included)?;
     let hooks = hook_ids(&mut surface.types)?;
     let methods: Vec<&Method> = surface.methods.iter().collect();
-    let wit = wit::package(&surface.types, &methods)?;
+    let wit = wit::package(&surface.types, &methods, &api_version(root)?)?;
     Ok(Wasm {
         guest: sides::guest(&surface.types, &methods, &wit, &hooks)?,
         host: sides::host(&surface.types, &methods, &wit, &hooks)?,
@@ -156,6 +156,20 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Wasm, String> 
             .map(|u| format!("{}::{}: {}", u.owner, u.name, u.why))
             .collect(),
     })
+}
+
+/// `horizon-mod-api`'s Cargo version, the one version of the mod API: the WIT package carries it,
+/// so a `mod.wasm` imports the interfaces of the API version it was built against.
+fn api_version(root: &Path) -> Result<String, String> {
+    let path = root.join("crates/horizon-mod-api/Cargo.toml");
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let manifest: toml::Table = text.parse().map_err(|e| format!("{}: {e}", path.display()))?;
+    manifest
+        .get("package")
+        .and_then(|p| p.get("version"))
+        .and_then(toml::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| format!("{}: package.version missing", path.display()))
 }
 
 /// The variants of the generated `HookId`, each with its hook's name.

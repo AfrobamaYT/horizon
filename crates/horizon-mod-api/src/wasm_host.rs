@@ -367,15 +367,17 @@ pub struct Group {
     running: AtomicU64,
     poisoned: AtomicBool,
     budgets: Budgets,
+    wait: Duration,
 }
 
-/// A thread's number, for `Group::running` (0 is no thread).
-fn thread_number() -> u64 {
-    thread_local!(static NUMBER: u64 = {
+thread_local! {
+    /// This thread's number, for `Group::running` (0 is no thread).
+    static THREAD: u64 = {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         NEXT.fetch_add(1, Ordering::Relaxed)
-    });
-    NUMBER.with(|n| *n)
+    };
+    /// How many groups this thread is inside now.
+    static INSIDE: Cell<u32> = const { Cell::new(0) };
 }
 
 /// Why a call into a group didn't run.
@@ -385,32 +387,64 @@ pub enum CallRefused {
     Stopped,
     /// The call came back into the group from inside one of its own calls.
     Reentered,
-    /// Another thread kept the group busy past the wait.
+    /// Another thread is running the group: past the wait, or at once when this thread is
+    /// inside another group, since two threads each holding a group and waiting for the
+    /// other's would deadlock.
     Busy,
 }
 
+/// A group entered by this thread, left when dropped.
+struct Entered<'a> {
+    group: &'a Group,
+    store: MutexGuard<'a, Store<State>>,
+}
+
+impl Drop for Entered<'_> {
+    fn drop(&mut self) {
+        self.group.running.store(0, Ordering::Release);
+        INSIDE.with(|n| n.set(n.get() - 1));
+    }
+}
+
 impl Group {
-    fn enter(&self) -> Result<MutexGuard<'_, Store<State>>, CallRefused> {
+    fn new(store: Store<State>, budgets: Budgets, wait: Duration) -> Self {
+        Self {
+            store: Mutex::new(store),
+            running: AtomicU64::new(0),
+            poisoned: AtomicBool::new(false),
+            budgets,
+            wait,
+        }
+    }
+
+    fn enter(&self) -> Result<Entered<'_>, CallRefused> {
         if self.poisoned.load(Ordering::Relaxed) {
             return Err(CallRefused::Stopped);
         }
-        let me = thread_number();
+        let me = THREAD.with(|n| *n);
         if self.running.load(Ordering::Acquire) == me {
             return Err(CallRefused::Reentered);
         }
-        let deadline = Instant::now() + GROUP_WAIT;
-        let guard = loop {
+        // A thread already inside a group never waits for another one.
+        let deadline = Instant::now()
+            + if INSIDE.with(Cell::get) > 0 {
+                Duration::ZERO
+            } else {
+                self.wait
+            };
+        let store = loop {
             match self.store.try_lock() {
                 Ok(guard) => break guard,
                 Err(TryLockError::Poisoned(e)) => break e.into_inner(),
                 Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
-                    std::thread::yield_now()
+                    std::thread::sleep(Duration::from_micros(50))
                 }
                 Err(TryLockError::WouldBlock) => return Err(CallRefused::Busy),
             }
         };
         self.running.store(me, Ordering::Release);
-        Ok(guard)
+        INSIDE.with(|n| n.set(n.get() + 1));
+        Ok(Entered { group: self, store })
     }
 }
 
@@ -461,22 +495,22 @@ impl WasmMod {
         mut frame: Frame,
         f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
     ) -> T {
-        let mut store = match self.group.enter() {
-            Ok(store) => store,
+        let mut entered = match self.group.enter() {
+            Ok(entered) => entered,
             Err(refused) => {
                 log::warn!("wasm mod {}: call refused: {refused:?}", self.id);
                 return T::no_answer();
             }
         };
+        let store = &mut *entered.store;
         let budget = self.group.budgets.call;
         let _ = store.set_fuel(budget);
         let previous = CURRENT.replace(&mut frame);
-        let result = f(&self.exports, &mut store);
+        let result = f(&self.exports, store);
         CURRENT.set(previous);
         self.fuel
             .fetch_add(budget - store.get_fuel().unwrap_or(0), Ordering::Relaxed);
-        self.group.running.store(0, Ordering::Release);
-        drop(store);
+        drop(entered);
         match result {
             Ok(value) => value,
             Err(error) => {
@@ -522,12 +556,7 @@ pub fn instantiate(
     for id in members {
         found.push((*id, glue::ModExports::find(&mut store, &instance, id)?));
     }
-    let group = Arc::new(Group {
-        store: Mutex::new(store),
-        running: AtomicU64::new(0),
-        poisoned: AtomicBool::new(false),
-        budgets,
-    });
+    let group = Arc::new(Group::new(store, budgets, GROUP_WAIT));
     let mut entries = Vec::new();
     for (id, exports) in found {
         let module = WasmMod {
@@ -577,4 +606,78 @@ mod codec {
 mod glue {
     use super::{array, intern};
     include!(concat!(env!("OUT_DIR"), "/wasm_host_generated.rs"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn group(wait: Duration) -> Arc<Group> {
+        let engine = wasmtime::Engine::default();
+        let limits = wasmtime::StoreLimitsBuilder::new().build();
+        Arc::new(Group::new(
+            Store::new(&engine, State { limits }),
+            Budgets::default(),
+            wait,
+        ))
+    }
+
+    #[test]
+    fn a_call_back_into_its_own_group_is_refused_at_once() {
+        let group = group(Duration::from_secs(60));
+        let _inside = group.enter().unwrap();
+        let started = Instant::now();
+        assert_eq!(group.enter().err(), Some(CallRefused::Reentered));
+        assert!(started.elapsed() < Duration::from_millis(100));
+    }
+
+    #[test]
+    fn two_threads_each_inside_a_group_calling_the_other_refuse_at_once() {
+        let (a, b) = (
+            group(Duration::from_secs(60)),
+            group(Duration::from_secs(60)),
+        );
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let cross = |mine: Arc<Group>, theirs: Arc<Group>, barrier: Arc<std::sync::Barrier>| {
+            std::thread::spawn(move || {
+                let _inside = mine.enter().unwrap();
+                barrier.wait();
+                let started = Instant::now();
+                let refused = theirs.enter().err();
+                // Hold on until the other thread has tried too.
+                barrier.wait();
+                (refused, started.elapsed())
+            })
+        };
+        let one = cross(a.clone(), b.clone(), barrier.clone());
+        let two = cross(b, a, barrier);
+        for thread in [one, two] {
+            let (refused, took) = thread.join().unwrap();
+            assert_eq!(refused, Some(CallRefused::Busy));
+            assert!(took < Duration::from_millis(100), "{took:?}");
+        }
+    }
+
+    #[test]
+    fn a_call_waits_for_another_thread_then_refuses_or_runs() {
+        let group = group(Duration::from_millis(200));
+        let inside = group.enter().unwrap();
+        let other = group.clone();
+        let refused = std::thread::spawn(move || other.enter().err())
+            .join()
+            .unwrap();
+        assert_eq!(refused, Some(CallRefused::Busy));
+        let other = group.clone();
+        let waiting = std::thread::spawn(move || other.enter().is_ok());
+        std::thread::sleep(Duration::from_millis(20));
+        drop(inside);
+        assert!(waiting.join().unwrap());
+    }
+
+    #[test]
+    fn a_stopped_group_runs_nothing() {
+        let group = group(Duration::ZERO);
+        group.poisoned.store(true, Ordering::Relaxed);
+        assert_eq!(group.enter().err(), Some(CallRefused::Stopped));
+    }
 }

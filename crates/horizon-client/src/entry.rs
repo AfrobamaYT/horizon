@@ -5,14 +5,19 @@ use mod_api::__private::game::*;
 
 /// Start the game. The executable supplies the allocator and retains the mod API marker.
 pub fn main() {
-    main_with(Default::default(), &[]);
+    main_with(Vec::new(), &[]);
 }
 
 /// Start the game with named trait mods in dispatch order.
-pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::BuiltMod]) {
-    let native: crate::Result<_> = std::env::current_exe()
-        .map_err(Into::into)
-        .and_then(|exe| horizon_mods::runtime::Runtime::load(&exe, built).map_err(Into::into));
+pub fn main_with(
+    mut mods: Vec<mod_api::ModEntry>,
+    built: &'static [horizon_mods::runtime::BuiltMod],
+) {
+    let exe = std::env::current_exe();
+    let native: crate::Result<_> = exe
+        .as_ref()
+        .map_err(|e| e.to_string().into())
+        .and_then(|exe| horizon_mods::runtime::Runtime::load(exe, built).map_err(Into::into));
     let native = match native {
         Ok(native) => native,
         Err(error) => {
@@ -21,8 +26,6 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
         }
     };
     crate::gfx::native_render::set_mods_built_in(!native.built().is_empty());
-    // First: a trait injection into anything below (logging, the crash handler) calls its mod.
-    mod_api::__private::install(mods);
     horizon_threads::configure_allocator();
     horizon_client::telemetry::mark_start();
     horizon_client::spans::startup::init(std::time::Instant::now());
@@ -41,6 +44,27 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
             std::process::exit(game::exit_code::USAGE);
         }
     };
+    // Wasm mods join the native ones after them, in dependency order, from the same selection
+    // as content mods. Then the mods are installed, before anything below (logging, the crash
+    // handler) that a trait injection may call into.
+    if let Ok(exe) = &exe {
+        let config = horizon_mod_wasm::RuntimeConfig {
+            pulley: launch
+                .rest
+                .iter()
+                .any(|arg| matches!(arg, Argument::Switch(s) if s == "--wasm-interpreter")),
+            cache: Some(launch.context.home.join("wasm-cache")),
+            ..Default::default()
+        };
+        let game_dir = &launch.context.game_dir;
+        mods.extend(horizon_mod_wasm::load_installed(
+            exe,
+            game_dir,
+            &launch.context.dev_mods,
+            &config,
+        ));
+    }
+    mod_api::__private::install(mods.into());
     let help = launch.is_information_request();
     logging::set_game_home(launch.context.home.clone());
     // The dedicated server logs in its own folder, as vanilla's does; the game in its home.

@@ -8,7 +8,12 @@
 use horizon_mods::manifest::{Dependency, Manifest};
 use mod_api::wasm_host::{Budgets, LoadError};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+/// The game's shared Rust standard library member, shipped beside the executable and linked
+/// first into every group (members are built against the same pinned toolchain).
+pub const STD_MEMBER: &str = "horizon-wasm-std.wasm";
 
 /// The runtime's settings.
 #[derive(Clone, Debug, Default)]
@@ -42,6 +47,10 @@ pub enum Refusal {
     Link(String),
     /// The group's component didn't compile.
     Compile(String),
+    /// This game has no wasm standard library member beside it, so no wasm mod can link.
+    NoStd,
+    /// The package's `mod.wasm` failed its checks.
+    Package(String),
     /// The group didn't instantiate or its exports aren't this game's.
     Load(LoadError),
 }
@@ -56,16 +65,21 @@ impl std::fmt::Display for Refusal {
                 write!(f, "needs {dependency} {version}, which isn't installed")
             }
             Self::LinkedAgainst { dependency } => {
-                write!(f, "was built against another build of {dependency}")
+                write!(f, "built against another build of {dependency}")
             }
             Self::Toolchain { found, group } => {
-                write!(f, "was built with {found}, its dependencies with {group}")
+                write!(f, "built with {found}, its dependencies with {group}")
             }
             Self::DependencyRefused { dependency } => {
                 write!(f, "its dependency {dependency} didn't load")
             }
             Self::Link(why) => write!(f, "didn't link: {why}"),
             Self::Compile(why) => write!(f, "didn't compile: {why}"),
+            Self::NoStd => write!(
+                f,
+                "this game was built without wasm mod support ({STD_MEMBER})"
+            ),
+            Self::Package(why) => write!(f, "{why}"),
             Self::Load(why) => write!(f, "{why}"),
         }
     }
@@ -337,6 +351,66 @@ pub fn load(config: &RuntimeConfig, std_member: &[u8], packages: Vec<WasmPackage
         }
     }
     Loaded { mods, refused }
+}
+
+static REFUSED: OnceLock<Vec<(String, Refusal)>> = OnceLock::new();
+
+/// The wasm mods refused at startup, each with its reason, for the Mods page.
+pub fn refused() -> &'static [(String, Refusal)] {
+    REFUSED.get().map_or(&[], Vec::as_slice)
+}
+
+/// Loads the wasm mods the player turned on in `game_dir` (and every `dev` package), once at
+/// startup: the same selection as content mods (`horizon_mods::selection`), so a wasm mod's
+/// `assets/` and `data/` load as content beside its code. Refusals are kept for [`refused`].
+pub fn load_installed(
+    executable: &Path,
+    game_dir: &Path,
+    dev: &[PathBuf],
+    config: &RuntimeConfig,
+) -> Vec<mod_api::ModEntry> {
+    let enabled = horizon_mods::mod_list::ModList::load(game_dir).enabled;
+    let mut refused = Vec::new();
+    let packages: Vec<WasmPackage> =
+        horizon_mods::selection::content_packages(game_dir, &enabled, dev)
+            .filter(|selected| selected.package.manifest.wasm.is_some())
+            .filter_map(
+                |selected| match horizon_mods::Package::read_wasm(&selected.path) {
+                    Ok(module) => Some(WasmPackage {
+                        manifest: selected.package.manifest,
+                        module,
+                    }),
+                    Err(why) => {
+                        refused.push((selected.package.manifest.id, Refusal::Package(why)));
+                        None
+                    }
+                },
+            )
+            .collect();
+    let mods = if packages.is_empty() {
+        Vec::new()
+    } else {
+        match std::fs::read(executable.with_file_name(STD_MEMBER)) {
+            Ok(std_member) => {
+                let loaded = load(config, &std_member, packages);
+                refused.extend(loaded.refused);
+                loaded.mods
+            }
+            Err(_) => {
+                refused.extend(
+                    packages
+                        .into_iter()
+                        .map(|p| (p.manifest.id, Refusal::NoStd)),
+                );
+                Vec::new()
+            }
+        }
+    };
+    for (id, why) in &refused {
+        log::warn!("wasm mod {id} refused: {why}");
+    }
+    let _ = REFUSED.set(refused);
+    mods
 }
 
 #[cfg(test)]

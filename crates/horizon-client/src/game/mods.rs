@@ -1,6 +1,6 @@
 //! Mods in the game (`docs/modding/src/how-to/content-mods.md`): content mods' blocks, items, data and
-//! assets (`content_root`), and the Mods page's rows. Code mods are native
-//! (`native_hooks.rs`); executable components in content packages are refused.
+//! assets (`content_root`), and the Mods page's rows. Code mods are native (`native_hooks.rs`)
+//! or wasm (`horizon-mod-wasm`, loaded at startup); any other executable file is refused.
 use super::{Game, execution_role::ExecutionRole};
 use horizon_client::mod_list::{self, Installed};
 use horizon_world::{
@@ -31,11 +31,12 @@ impl ModsState {
     ) {
         self.selected = horizon_mods::selection::content_packages(game_dir, enabled, &self.dev)
             .filter(|selected| {
-                !self
-                    .native
-                    .built()
-                    .iter()
-                    .any(|built| built.id == selected.package.manifest.id)
+                let id = &selected.package.manifest.id;
+                // A refused wasm mod's content stays out with its code.
+                !self.native.built().iter().any(|built| built.id == *id)
+                    && !horizon_mod_wasm::refused()
+                        .iter()
+                        .any(|(refused, _)| refused == id)
             })
             .collect();
     }
@@ -460,11 +461,14 @@ impl Game<'_> {
                     }
                 };
                 let m = &package.manifest;
+                let refused = horizon_mod_wasm::refused()
+                    .iter()
+                    .find(|(id, _)| *id == m.id);
                 Installed {
                     id: m.id.clone(),
                     title: format!("{} {}", m.name, m.version),
                     description: m.description.clone(),
-                    problem: None,
+                    problem: refused.map(|(_, why)| format!("Not loaded: {why}")),
                     dev: self.mods.dev.contains(path),
                     native: None,
                 }

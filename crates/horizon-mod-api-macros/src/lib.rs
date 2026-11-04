@@ -102,7 +102,13 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     implementation.items.push(subscribed);
     let export = if export && !render && part.is_none() {
         let ty = &implementation.self_ty;
-        quote!(pub fn hooks() -> Box<dyn mod_api::Hooks> { Box::new(<#ty as Default>::default()) })
+        quote! {
+            pub fn hooks() -> Box<dyn mod_api::Hooks> { Box::new(<#ty as Default>::default()) }
+            /// The mod's hooks for the guest glue in `mod_api::wasm`, when built to `mod.wasm`.
+            #[cfg(target_arch = "wasm32")]
+            #[unsafe(no_mangle)]
+            fn __horizon_mod_hooks() -> Box<dyn mod_api::Hooks> { hooks() }
+        }
     } else {
         quote!()
     };
