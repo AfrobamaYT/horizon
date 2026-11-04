@@ -193,12 +193,17 @@ impl Game<'_> {
             .map(|m| super::creatures::seen(m, self.level.player_uuid))
             .collect();
         let mut mobs = std::mem::take(&mut self.mobs);
+        let mut lent = horizon_client::health::LentLevel::take(&mut self.world);
         let mut w = self.mob_world_base(&snapshot);
         let pos = mobs[index].position;
         w.difficulty = self.local_difficulty([pos.x, pos.y, pos.z]);
-        let mut lr = self.world.random.clone();
         let mut events = Vec::new();
         let removed = {
+            let mut level = horizon_client::health::DamageLevel::lent(
+                &self.world,
+                self.pack.assets.registry,
+                &mut lent,
+            );
             let m = &mut mobs[index];
             let mut selector = if targets {
                 std::mem::take(&mut m.ai.targets)
@@ -207,7 +212,7 @@ impl Game<'_> {
             };
             let mut cx = Cx {
                 w: &w,
-                lr: &mut lr,
+                level: &mut level,
                 events: &mut events,
             };
             let removed = selector.remove_all(|g| goal_id(g.name()) == id, m, &mut cx);
@@ -218,7 +223,8 @@ impl Game<'_> {
             }
             removed
         };
-        self.world.random = lr;
+        drop(w);
+        lent.give_back(&mut self.world);
         mobs::apply_brain_events(&mut mobs, &mut events, 0);
         self.mobs = mobs;
         self.handle_mob_events(events).ok();
@@ -627,7 +633,7 @@ mod tests {
             }
             fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
                 m.extra.followers = cx.w.others.len() as i32;
-                m.health = cx.lr.next_int_bound(1000).unwrap() as f32;
+                m.health = cx.level.random().next_int_bound(1000).unwrap() as f32;
             }
         }
         with_game(|game| {
@@ -638,7 +644,8 @@ mod tests {
                 .iter()
                 .map(|m| super::super::creatures::seen(m, game.level.player_uuid))
                 .collect();
-            let mut random = game.world.random.clone();
+            let mut test_level = horizon_client::health::TestLevel::new(0);
+            let mut level = test_level.level();
             let mut events = Vec::new();
             let mut selector = std::mem::take(&mut mobs[0].ai.goals);
             selector.clear();
@@ -647,7 +654,7 @@ mod tests {
                 let world = game.mob_world_base(&snapshot);
                 let mut cx = Cx {
                     w: &world,
-                    lr: &mut random,
+                    level: &mut level,
                     events: &mut events,
                 };
                 selector.tick(&mut mobs[0], &mut cx);
@@ -682,7 +689,8 @@ mod tests {
                 .iter()
                 .map(|m| super::super::creatures::seen(m, game.level.player_uuid))
                 .collect();
-            let mut random = game.world.random.clone();
+            let mut test_level = horizon_client::health::TestLevel::new(0);
+            let mut level = test_level.level();
             let mut events = Vec::new();
             let mut selector = std::mem::take(&mut mobs[0].ai.goals);
             selector.clear();
@@ -691,7 +699,7 @@ mod tests {
                 let world = game.mob_world_base(&snapshot);
                 let mut cx = Cx {
                     w: &world,
-                    lr: &mut random,
+                    level: &mut level,
                     events: &mut events,
                 };
                 selector.tick(&mut mobs[0], &mut cx);
@@ -719,7 +727,8 @@ mod tests {
                 .iter()
                 .map(|m| m.seen(game.level.player_uuid))
                 .collect();
-            let mut random = game.world.random.clone();
+            let mut test_level = horizon_client::health::TestLevel::new(0);
+            let mut level = test_level.level();
             let mut events = Vec::new();
             let mut selector = std::mem::take(&mut mobs[0].ai.goals);
             selector.clear();
@@ -728,7 +737,7 @@ mod tests {
                 let world = game.mob_world_base(&snapshot);
                 let mut context = Cx {
                     w: &world,
-                    lr: &mut random,
+                    level: &mut level,
                     events: &mut events,
                 };
                 selector.tick(&mut mobs[0], &mut context);

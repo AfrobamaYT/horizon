@@ -547,6 +547,14 @@ macro_rules! entity_lists_of {
     };
 }
 pub(super) use entity_lists_of;
+/// The level `$game` ticks, lent to a hit's damage hooks: it borrows only the game's world
+/// and block registry, so a mob or the player beside them can take the hit.
+macro_rules! damage_level_of {
+    ($game:expr) => {
+        &mut horizon_client::health::DamageLevel::of(&mut $game.world, $game.pack.assets.registry)
+    };
+}
+pub(super) use damage_level_of;
 
 macro_rules! walk_lists {
     (($lists:expr, $entity:ident, $body:block)

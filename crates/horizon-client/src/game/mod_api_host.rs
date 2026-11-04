@@ -259,6 +259,36 @@ impl horizon_client::mod_api::LevelRandomHost for super::GameLevel<'_> {
     }
 }
 
+impl horizon_client::mod_api::LevelHost for super::native_hooks::HitLevel<'_> {
+    fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
+        self.0.block(pos)
+    }
+    fn state_block(&self, state: BlockStateId) -> Option<&str> {
+        self.0.registry().state(state).map(|s| &*s.name)
+    }
+    fn state_with_property(
+        &self,
+        state: BlockStateId,
+        key: &str,
+        value: &str,
+    ) -> Option<BlockStateId> {
+        super::native_hooks::with_property(self.0.registry(), state, key, value)
+    }
+}
+
+impl horizon_client::mod_api::LevelRandomHost for super::native_hooks::HitLevel<'_> {
+    fn attachments(
+        &mut self,
+        holder: horizon_client::mod_api::Holder,
+    ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
+    {
+        self.0.attachments(holder)
+    }
+    fn random(&mut self) -> Option<&mut horizon_client::mod_api::LegacyRandom> {
+        Some(self.0.random())
+    }
+}
+
 pub(super) struct LevelTicks<'a, L> {
     pub level: L,
     pub ticks: &'a mut Ticks,

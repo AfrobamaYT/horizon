@@ -10,6 +10,7 @@ use super::{
     splash_water::thrown_block_hit,
 };
 use horizon_assets::item_model::DisplayContext;
+use horizon_client::health::DamageLevel;
 use horizon_client::{
     block_entity_render::vertex_light,
     brewing,
@@ -815,7 +816,11 @@ impl Game<'_> {
                             // `LivingEntity.addEffect` refuses nothing here; the
                             // tick hurts with magic (6 << amp) or heals (4 << amp).
                             if (effect == "instant_damage") != inverted {
-                                m.damage((6 << amp.min(30)) as f32, Damage::of(DamageKind::Magic));
+                                m.damage(
+                                    crate::game::entity::damage_level_of!(self),
+                                    (6 << amp.min(30)) as f32,
+                                    Damage::of(DamageKind::Magic),
+                                );
                             } else {
                                 m.heal((4 << amp.min(30)) as f32);
                             }
@@ -870,7 +875,14 @@ impl Game<'_> {
                 let mut canceled = false;
                 if !creative
                     && let Some(id) = self.motion.health.damage.id(source)
-                    && let Ok(o) = p.hurt_blocking(&self.motion.health, rules, id, amount, None)
+                    && let Ok(o) = p.hurt_blocking(
+                        crate::game::entity::damage_level_of!(self),
+                        &self.motion.health,
+                        rules,
+                        id,
+                        amount,
+                        None,
+                    )
                 {
                     canceled = o.canceled;
                 }
@@ -881,7 +893,13 @@ impl Game<'_> {
                     && p.health.health() > 1.0
                     && let Some(id) = self.motion.health.damage.id("minecraft:magic")
                 {
-                    let _ = p.hurt(&self.motion.health, rules, id, 1.0);
+                    let _ = p.hurt(
+                        crate::game::entity::damage_level_of!(self),
+                        &self.motion.health,
+                        rules,
+                        id,
+                        1.0,
+                    );
                 }
             }
             EffectAction::Exhaust(amount) => {
@@ -1532,7 +1550,7 @@ impl Game<'_> {
                                 |base: i32| (0.5 * f64::from(base << amp) + 0.5) as i32 as f32;
                             if (*id == "instant_damage") != inverted {
                                 let harm = m.potion_harm(amount(6));
-                                m.hurt(harm, Some(at), &mut self.world.random);
+                                m.hurt(crate::game::entity::damage_level_of!(self), harm, Some(at));
                             } else {
                                 m.heal(amount(4));
                             }
@@ -1876,7 +1894,11 @@ impl Game<'_> {
                 let m = &mut self.mobs[i];
                 if harm {
                     let harm = m.potion_harm((intensity * f64::from(6 << amp) + 0.5) as i32 as f32);
-                    m.hurt(harm, Some([at.x, at.y, at.z]), &mut self.world.random);
+                    m.hurt(
+                        crate::game::entity::damage_level_of!(self),
+                        harm,
+                        Some([at.x, at.y, at.z]),
+                    );
                 } else {
                     m.heal((intensity * f64::from(4 << amp) + 0.5) as i32 as f32);
                 }
@@ -1958,6 +1980,7 @@ impl Game<'_> {
 impl horizon_client::mobs::ModEffectTicks for Game<'_> {
     fn tick_mod_effect(
         &self,
+        level: &mut DamageLevel<'_>,
         effect: &str,
         mob: &mut Mob,
         tick_count: i32,
@@ -1981,7 +2004,7 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
             match change {
                 EffectTickChange::Heal(amount) => mob.heal(amount),
                 EffectTickChange::Hurt(source, amount) => {
-                    mob.damage(amount, Damage::of(source.mob_kind()));
+                    mob.damage(level, amount, Damage::of(source.mob_kind()));
                 }
                 _ => {}
             }

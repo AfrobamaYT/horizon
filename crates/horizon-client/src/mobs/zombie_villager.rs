@@ -246,11 +246,12 @@ mod tests {
             m.persistent = true;
             m.no_ai = no_ai;
             start_converting(&mut m, None, 3, &mut Vec::new());
-            let mut level_random = horizon_core::random::LegacyRandom::new(0);
+            let mut test_level = crate::health::TestLevel::new(0);
+            let level = &mut test_level.level();
             let mut ticks = 0;
             while ticks < 10 {
                 let mut events = Vec::new();
-                m.tick(&w, &mut level_random, &mut events);
+                m.tick(&w, level, &mut events);
                 ticks += 1;
                 if events
                     .iter()

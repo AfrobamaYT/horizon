@@ -3,6 +3,7 @@
 //! fluid slowdown and falling adjustment), fluid immersion heights, fall
 //! damage, fire and the walk animation.
 use super::{Mob, MobEvent, MobWorld};
+use crate::health::DamageLevel;
 use crate::{
     blocks::Fluid,
     collisions::{PowderSnowSubject, SceneCollisions},
@@ -639,7 +640,12 @@ impl Mob {
     }
     /// Entity.move with block collisions and step-up; updates collision flags
     /// and fall distance (Entity.checkFallDamage).
-    pub fn do_move(&mut self, w: &MobWorld, events: &mut Vec<MobEvent>) {
+    pub fn do_move(
+        &mut self,
+        w: &MobWorld,
+        level: &mut DamageLevel<'_>,
+        events: &mut Vec<MobEvent>,
+    ) {
         let mut wanted = self.velocity;
         // Entity.move: a block the mob is stuck in (sweet berry bush) scales
         // this move once and stops it.
@@ -688,7 +694,7 @@ impl Mob {
         if self.kind.flags.lava_walker && self.fluids.in_lava {
             self.fall_distance = 0.0;
         } else if !matches!(self.kind.species, super::Species::Bat | super::Species::Bee) {
-            self.check_fall_damage(w, moved, events);
+            self.check_fall_damage(w, level, moved, events);
         }
         // Entity.restituteMovementAfterCollisions: the colliding components
         // bounce back by the entity's bounciness or the block's (a slime
@@ -764,7 +770,13 @@ impl Mob {
     }
     /// LivingEntity.checkFallDamage: the fluid state refreshed out of water
     /// (touching water resets the fall), then Entity.checkFallDamage.
-    fn check_fall_damage(&mut self, w: &MobWorld, moved: Vec3, events: &mut Vec<MobEvent>) {
+    fn check_fall_damage(
+        &mut self,
+        w: &MobWorld,
+        level: &mut DamageLevel<'_>,
+        moved: Vec3,
+        events: &mut Vec<MobEvent>,
+    ) {
         if !self.fluids.in_water {
             self.update_fluids(w, events);
         }
@@ -774,7 +786,7 @@ impl Mob {
         if self.on_ground {
             if self.fall_distance > 0.0 {
                 self.landing_dust(w, events);
-                self.fall_on_block(w, events);
+                self.fall_on_block(w, level, events);
             }
             self.fall_distance = 0.0;
         }
@@ -1031,7 +1043,12 @@ impl Mob {
     /// `Block.fallOn` of the block under the mob (`Entity.checkFallDamage`):
     /// the block's own rule (hay, honey, slime, powder snow, a bed, a
     /// stalagmite, farmland, a turtle egg) decides how much of the fall hurts.
-    fn fall_on_block(&mut self, w: &MobWorld, events: &mut Vec<MobEvent>) {
+    fn fall_on_block(
+        &mut self,
+        w: &MobWorld,
+        level: &mut DamageLevel<'_>,
+        events: &mut Vec<MobEvent>,
+    ) {
         let pos = self.block_on_legacy(w);
         let state = w.world.block(pos[0], pos[1], pos[2]);
         let species = self.species();
@@ -1049,6 +1066,7 @@ impl Mob {
             &mut super::landing::MobLanding {
                 mob: self,
                 w,
+                level,
                 events,
                 pos,
             },
@@ -1060,6 +1078,7 @@ impl Mob {
         // A block outside the landing registry falls back to the plain fall.
         if result.is_err() {
             self.cause_fall_damage_at(
+                level,
                 distance,
                 1.0,
                 events,
@@ -1095,15 +1114,24 @@ impl Mob {
     /// horse first and passes the fall on only when it was hurt.
     pub fn cause_fall_damage_from(
         &mut self,
+        level: &mut DamageLevel<'_>,
         distance: f64,
         modifier: f32,
         events: &mut Vec<MobEvent>,
     ) {
-        self.cause_fall_damage_at(distance, modifier, events, None, super::DamageKind::Fall);
+        self.cause_fall_damage_at(
+            level,
+            distance,
+            modifier,
+            events,
+            None,
+            super::DamageKind::Fall,
+        );
     }
     /// True when the fall hurt (`causeFallDamage`'s result).
     pub(super) fn cause_fall_damage_at(
         &mut self,
+        level: &mut DamageLevel<'_>,
         distance: f64,
         modifier: f32,
         events: &mut Vec<MobEvent>,
@@ -1193,7 +1221,7 @@ impl Mob {
             if !horse {
                 events.push(MobEvent::Sound(sound, at, 1.0, 1.0));
             }
-            self.damage(damage as f32, super::Damage::of(source));
+            self.damage(level, damage as f32, super::Damage::of(source));
             if horse {
                 self.fall_to_passengers(distance, modifier, events);
             }
@@ -1248,12 +1276,18 @@ impl Mob {
         }
     }
     /// LivingEntity.travel.
-    pub fn travel(&mut self, w: &MobWorld, input: Vec3, events: &mut Vec<MobEvent>) {
-        if super::ai::custom_travel(self, w, input, events) {
+    pub fn travel(
+        &mut self,
+        w: &MobWorld,
+        level: &mut DamageLevel<'_>,
+        input: Vec3,
+        events: &mut Vec<MobEvent>,
+    ) {
+        if super::ai::custom_travel(self, w, level, input, events) {
             return;
         }
         if self.kind.flags.flying {
-            return self.travel_flying(w, input, events);
+            return self.travel_flying(w, level, input, events);
         }
         // shouldTravelInFluid: not where the fluid at its feet holds it up.
         let (x, y, z) = (
@@ -1263,15 +1297,21 @@ impl Mob {
         );
         let stands_on_fluid = self.kind.flags.lava_walker && w.fluid(x, y, z) == Fluid::Lava;
         if self.is_in_liquid() && self.affected_by_fluids() && !stands_on_fluid {
-            self.travel_in_fluid(w, input, events);
+            self.travel_in_fluid(w, level, input, events);
         } else {
-            self.travel_in_air(w, input, events);
+            self.travel_in_air(w, level, input, events);
         }
     }
     /// LivingEntity.travelFlying: no gravity, `0.91F` drag in the air,
     /// `0.8F` in water and 0.5 in lava. A happy ghast swims as fast as it
     /// flies (`HappyGhast.travel`); the others at 0.02.
-    fn travel_flying(&mut self, w: &MobWorld, input: Vec3, events: &mut Vec<MobEvent>) {
+    fn travel_flying(
+        &mut self,
+        w: &MobWorld,
+        level: &mut DamageLevel<'_>,
+        input: Vec3,
+        events: &mut Vec<MobEvent>,
+    ) {
         let fluid_speed = if self.species() == super::Species::HappyGhast {
             self.kind.air_speed
         } else {
@@ -1279,6 +1319,7 @@ impl Mob {
         };
         self.travel_flying_speeds(
             w,
+            level,
             input,
             events,
             fluid_speed,
@@ -1292,6 +1333,7 @@ impl Mob {
     pub fn travel_flying_speeds(
         &mut self,
         w: &MobWorld,
+        level: &mut DamageLevel<'_>,
         input: Vec3,
         events: &mut Vec<MobEvent>,
         water_speed: f32,
@@ -1306,7 +1348,7 @@ impl Mob {
             (air_speed, f64::from(0.91_f32))
         };
         self.move_relative(speed, input);
-        self.do_move(w, events);
+        self.do_move(w, level, events);
         self.velocity = Vec3::new(
             self.velocity.x * drag,
             self.velocity.y * drag,
@@ -1350,7 +1392,13 @@ impl Mob {
         let y = if v.y.is_nan() { v.y } else { v.y.max(-limit) };
         Vec3::new(v.x.clamp(-limit, limit), y, v.z.clamp(-limit, limit))
     }
-    fn travel_in_air(&mut self, w: &MobWorld, input: Vec3, events: &mut Vec<MobEvent>) {
+    fn travel_in_air(
+        &mut self,
+        w: &MobWorld,
+        level: &mut DamageLevel<'_>,
+        input: Vec3,
+        events: &mut Vec<MobEvent>,
+    ) {
         let friction = if self.on_ground {
             // FRICTION_MODIFIER scales the block's slipperiness.
             let modifier = super::sulfur_cube::physics(self)
@@ -1367,7 +1415,7 @@ impl Mob {
             self.fall_distance = 0.0;
             self.velocity = Self::climbable_velocity(self.velocity);
         }
-        self.do_move(w, events);
+        self.do_move(w, level, events);
         let mut movement = self.velocity;
         if (self.horizontal_collision || self.ai.jumping) && self.on_climbable(w) {
             movement.y = 0.2;
@@ -1412,7 +1460,13 @@ impl Mob {
             movement.z * f64::from(f),
         );
     }
-    fn travel_in_fluid(&mut self, w: &MobWorld, input: Vec3, events: &mut Vec<MobEvent>) {
+    fn travel_in_fluid(
+        &mut self,
+        w: &MobWorld,
+        level: &mut DamageLevel<'_>,
+        input: Vec3,
+        events: &mut Vec<MobEvent>,
+    ) {
         let falling = self.velocity.y <= 0.0;
         let old_y = self.position.y;
         let gravity = self.effective_gravity();
@@ -1432,7 +1486,7 @@ impl Mob {
                 speed += (self.ai.speed - speed) * efficiency;
             }
             self.move_relative(speed, input);
-            self.do_move(w, events);
+            self.do_move(w, level, events);
             let mut m = self.velocity;
             if self.horizontal_collision && self.kind.flags.climber {
                 m.y = 0.2;
@@ -1445,7 +1499,7 @@ impl Mob {
             self.velocity = fluid_falling(gravity, falling, self.extra.sprinting, m);
         } else {
             self.move_relative(0.02, input);
-            self.do_move(w, events);
+            self.do_move(w, level, events);
             if self.fluids.lava <= self.fluid_jump_threshold() {
                 self.velocity = Vec3::new(
                     self.velocity.x * 0.5,
@@ -1860,6 +1914,8 @@ mod tests {
     /// stone, 1 on hay or honey, 0 on slime, 1 on a bed, and a stalagmite kills.
     #[test]
     fn a_mob_bounces_off_a_bouncy_block_and_not_off_stone() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -1952,7 +2008,7 @@ mod tests {
             // Falling faster than gravity, so the landing is hard enough.
             m.velocity = Vec3::new(0.0, -1.0, 0.0);
             m.fall_distance = 8.0;
-            m.do_move(&w, &mut Vec::new());
+            m.do_move(&w, level, &mut Vec::new());
             assert_eq!(m.health, health, "{ground}: health after an 8 block fall");
             assert!(
                 m.vertical_collision_below,
@@ -1982,6 +2038,8 @@ mod tests {
     /// gets nothing and goes on sinking.
     #[test]
     fn a_ridden_horse_floats_in_deep_water() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -2083,7 +2141,7 @@ mod tests {
             }
             m.fluids.in_water = true;
             m.fluids.water = 1.0;
-            m.travel(&w, Vec3::ZERO, &mut Vec::new());
+            m.travel(&w, level, Vec3::ZERO, &mut Vec::new());
             if ridden {
                 floated = m.velocity.y;
             } else {
@@ -2105,7 +2163,9 @@ mod tests {
     /// the lift (0.06 for each column block its box touches) on top of it.
     #[test]
     fn a_bubble_column_lifts_a_mob_after_travel_not_inside_it() {
-        let run = |column: bool| {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut run = |column: bool| {
             let mut out = None;
             let build =
                 |world: &mut crate::world::World,
@@ -2141,7 +2201,7 @@ mod tests {
                 let mut m = Mob::new(1, kind, Vec3::new(1.5, 2.0, 1.5), 0.0);
                 m.fluids.in_water = true;
                 m.fluids.water = 1.0;
-                m.travel(w, Vec3::ZERO, &mut Vec::new());
+                m.travel(w, level, Vec3::ZERO, &mut Vec::new());
                 let after_travel = m.velocity.y;
                 m.apply_effects_from_blocks(w, &mut Vec::new());
                 out = Some((after_travel, m.velocity.y));
@@ -2168,6 +2228,8 @@ mod tests {
     /// on stone it keeps all of it, and its vertical speed is untouched.
     #[test]
     fn a_mob_on_soul_sand_or_honey_is_slowed_by_the_move() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         for (block, factor) in [
             ("minecraft:stone", 1.0),
             ("minecraft:soul_sand", 0.4),
@@ -2192,7 +2254,7 @@ mod tests {
                 let mut m = Mob::new(1, kind, Vec3::new(0.5, 1.0, 1.5), 0.0);
                 m.on_ground = true;
                 m.velocity = Vec3::new(0.2, 0.0, 0.0);
-                m.do_move(w, &mut Vec::new());
+                m.do_move(w, level, &mut Vec::new());
                 let expected = f64::from(factor as f32) * 0.2;
                 assert!(
                     (m.velocity.x - expected).abs() < 1.0e-9,
@@ -2208,6 +2270,8 @@ mod tests {
     /// has its east wall at x = 13.
     #[test]
     fn the_world_border_stops_a_mob() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let border =
             horizon_core::geometry::border::BorderGeometry::new([8.0, 8.0], 10.0, 29_999_984)
                 .unwrap();
@@ -2229,7 +2293,7 @@ mod tests {
                 // 1.5 blocks east from x = 11.5: past the wall at 13 if nothing stops it.
                 let mut m = Mob::new(1, kind.clone(), Vec3::new(11.5, 64.0, 8.5), 0.0);
                 m.velocity = Vec3::new(1.5, 0.0, 0.0);
-                m.do_move(&w, &mut Vec::new());
+                m.do_move(&w, level, &mut Vec::new());
                 east_edge[i] = m.bounds().max_position().x;
                 assert_eq!(m.horizontal_collision, bordered);
             }
@@ -2420,7 +2484,9 @@ mod tests {
     /// and the fall distance, reset before each move, is that one move.
     #[test]
     fn a_mob_in_vines_slides_down_slowly() {
-        let run = |vines: bool| {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut run = |vines: bool| {
             let mut out = None;
             let build =
                 |world: &mut crate::world::World,
@@ -2451,7 +2517,7 @@ mod tests {
                 let mut drops = Vec::new();
                 for _ in 0..12 {
                     let before = m.position.y;
-                    m.travel(w, Vec3::ZERO, &mut Vec::new());
+                    m.travel(w, level, Vec3::ZERO, &mut Vec::new());
                     drops.push(before - m.position.y);
                 }
                 out = Some((drops, m.fall_distance));

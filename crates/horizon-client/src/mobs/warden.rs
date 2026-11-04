@@ -9,10 +9,11 @@ use super::{
     path::PathType,
     warden_brain::{self, Brain},
 };
+use crate::health::DamageLevel;
 use crate::sculk::{self, Context, Info};
 use horizon_core::{
     geometry::{Vec3, trig::Mth},
-    random::{LegacyRandom, RandomSource},
+    random::RandomSource,
 };
 use std::{collections::HashMap, f32::consts::PI};
 
@@ -458,7 +459,7 @@ pub(super) fn do_hurt_target(
     m: &mut Mob,
     target: Who,
     w: &MobWorld,
-    lr: &mut LegacyRandom,
+    level: &mut DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
 ) {
     m.anim.states[ROAR].stop();
@@ -471,7 +472,7 @@ pub(super) fn do_hurt_target(
     let pitch = voice_pitch(m);
     sound(m, "entity.warden.attack_impact", 10.0, pitch, events);
     warden_brain::mem(m).sonic_boom_cooldown.set_ttl((), 40);
-    let mut cx = warden_brain::cx(w, lr, events);
+    let mut cx = warden_brain::cx(w, level, events);
     super::ai::do_hurt_target(m, target, &mut cx);
 }
 
@@ -679,14 +680,14 @@ pub fn pre_tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
 pub fn server_ai_step(
     m: &mut Mob,
     w: &MobWorld,
-    level_random: &mut LegacyRandom,
+    level: &mut DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
 ) {
     if m.extra.warden.is_none() {
         return;
     }
     handle_hurt(m, w, events);
-    warden_brain::tick(m, w, level_random, events);
+    warden_brain::tick(m, w, level, events);
     if (i64::from(m.age) + i64::from(m.id)) % 120 == 0 {
         events.push(MobEvent::Darkness {
             at: at(m),

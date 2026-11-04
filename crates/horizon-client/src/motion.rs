@@ -1231,8 +1231,12 @@ impl MotionWorld<'_, '_, '_> {
         // The resident scene accepts the resolved local movement directly.
         // Vanilla dispatches this separately from travel, on packet acceptance.
         self.check_movement_statistics(previous.vector_to(self.player.position))?;
-        self.player
-            .food_tick(&self.resources.health, self.scene.health_rules)
+        let rules = self.scene.health_rules;
+        self.player.food_tick(
+            &mut crate::health::DamageLevel::of(self.scene, self.assets.registry),
+            &self.resources.health,
+            rules,
+        )
     }
     pub fn controlled_simulation_tick(&mut self, keys: crate::sprint::Keys) -> Result<()> {
         self.controlled_simulation_tick_with_sprint_window(keys, 7)
@@ -1463,7 +1467,13 @@ impl MotionWorld<'_, '_, '_> {
             crate::health::HealthEvent::FreezeDamage(1.0),
         ));
         let rules = self.scene.health_rules;
-        self.player.hurt(&self.resources.health, rules, id, 1.0)?;
+        self.player.hurt(
+            &mut crate::health::DamageLevel::of(self.scene, self.assets.registry),
+            &self.resources.health,
+            rules,
+            id,
+            1.0,
+        )?;
         Ok(())
     }
     /// `Entity.applyEffectsFromBlocks` for the blocks Horizon's player reacts
@@ -1957,7 +1967,13 @@ impl MotionWorld<'_, '_, '_> {
                 crate::health::HealthEvent::SweetBerryBushDamage(1.0),
             ));
             let rules = self.scene.health_rules;
-            self.player.hurt(&self.resources.health, rules, id, 1.0)?;
+            self.player.hurt(
+                &mut crate::health::DamageLevel::of(self.scene, self.assets.registry),
+                &self.resources.health,
+                rules,
+                id,
+                1.0,
+            )?;
         }
         Ok(())
     }
@@ -2099,7 +2115,13 @@ impl MotionWorld<'_, '_, '_> {
                     .id("minecraft:fly_into_wall")
                     .ok_or("missing fly_into_wall damage type")?;
                 let rules = self.scene.health_rules;
-                self.player.hurt(&self.resources.health, rules, id, dmg)?;
+                self.player.hurt(
+                    &mut crate::health::DamageLevel::of(self.scene, self.assets.registry),
+                    &self.resources.health,
+                    rules,
+                    id,
+                    dmg,
+                )?;
                 if self.player.server_copy {
                     self.player.wall_hit_events = Some(first..self.player.events.len());
                 }
@@ -3743,6 +3765,8 @@ mod tests {
 
     #[test]
     fn creative_and_spectator_preserve_hunger_when_switching_from_survival() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::env::var_os("HORIZON_TEST_RESOURCES")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| {
@@ -3770,7 +3794,7 @@ mod tests {
                 for _ in 0..160 {
                     player.cause_food_exhaustion(0.2);
                     player
-                        .food_tick(&resources.health, Default::default())
+                        .food_tick(level, &resources.health, Default::default())
                         .unwrap();
                 }
                 assert_eq!(player.health.food.food, food);
@@ -3785,7 +3809,7 @@ mod tests {
                 player.health.food.exhaustion = 5.0;
                 player.health.food.timer = 79;
                 player
-                    .food_tick(&resources.health, Default::default())
+                    .food_tick(level, &resources.health, Default::default())
                     .unwrap();
                 assert_eq!(player.health.food.food, (food - 1).max(0));
                 assert_eq!(player.health.food.exhaustion, 1.0);
@@ -3802,7 +3826,7 @@ mod tests {
                 player.health.food.exhaustion = 5.0;
                 player.health.food.timer = 79;
                 player
-                    .food_tick(&resources.health, Default::default())
+                    .food_tick(level, &resources.health, Default::default())
                     .unwrap();
                 assert_eq!(player.health.food.food, (food - 1).max(0));
                 assert_eq!(player.health.health(), if food <= 1 { 19.0 } else { 20.0 });
@@ -3812,6 +3836,8 @@ mod tests {
 
     #[test]
     fn player_fire_damage_queues_hurt_sound_only_for_fresh_hits() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::env::var_os("HORIZON_TEST_RESOURCES")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| {
@@ -3834,7 +3860,7 @@ mod tests {
                 .unwrap();
             assert!(
                 player
-                    .hurt(&resources.health, Default::default(), source, 1.0)
+                    .hurt(level, &resources.health, Default::default(), source, 1.0)
                     .unwrap()
             );
             assert_eq!(
@@ -3853,7 +3879,7 @@ mod tests {
             player.events.clear();
             assert!(
                 !player
-                    .hurt(&resources.health, Default::default(), source, 1.0)
+                    .hurt(level, &resources.health, Default::default(), source, 1.0)
                     .unwrap()
             );
             assert!(
@@ -3874,7 +3900,7 @@ mod tests {
             player.events.clear();
             assert!(
                 !player
-                    .hurt(&resources.health, Default::default(), source, 1.0)
+                    .hurt(level, &resources.health, Default::default(), source, 1.0)
                     .unwrap()
             );
             assert!(
@@ -3888,7 +3914,14 @@ mod tests {
         let source = resources.health.damage.id("minecraft:mob_attack").unwrap();
         assert!(
             player
-                .hurt_blocking(&resources.health, Default::default(), source, 2.0, None)
+                .hurt_blocking(
+                    level,
+                    &resources.health,
+                    Default::default(),
+                    source,
+                    2.0,
+                    None
+                )
                 .unwrap()
                 .hurt
         );
@@ -3904,7 +3937,7 @@ mod tests {
         let mut dying = PlayerMotion::new(&resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
         assert!(
             dying
-                .hurt(&resources.health, Default::default(), source, 100.0)
+                .hurt(level, &resources.health, Default::default(), source, 100.0)
                 .unwrap()
         );
         assert!(dying.health.dead_or_dying());
@@ -3941,6 +3974,7 @@ mod tests {
         };
         let outcome = player
             .hurt_blocking(
+                level,
                 &resources.health,
                 Default::default(),
                 source,
@@ -3969,7 +4003,7 @@ mod tests {
         }
         assert!(
             player
-                .hurt(&resources.health, Default::default(), source, 4.0)
+                .hurt(level, &resources.health, Default::default(), source, 4.0)
                 .unwrap()
         );
         assert_eq!(player.health.hurt_animation_time, 10);
@@ -3977,6 +4011,7 @@ mod tests {
         assert!(
             !player
                 .hurt_blocking(
+                    level,
                     &resources.health,
                     Default::default(),
                     source,
@@ -3994,7 +4029,7 @@ mod tests {
         starving.health.food.food = 0;
         starving.health.food.timer = 79;
         starving
-            .food_tick(&resources.health, Default::default())
+            .food_tick(level, &resources.health, Default::default())
             .unwrap();
         assert_eq!(starving.health.health(), 19.0);
         assert_eq!(
