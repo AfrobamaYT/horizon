@@ -7104,7 +7104,7 @@ impl Game<'_> {
     /// Deliver the contacts the batch just ticked recorded, in order. A contact is skipped
     /// when its entity is gone (an item merged away later in the batch) or the block at
     /// `pos` is no longer the state it touched, as vanilla never sees a stale one.
-    pub(super) fn native_drain_entity_inside(&mut self) {
+    pub(super) fn drain_entity_inside(&mut self) {
         for contact in horizon_client::block_contact::take_inside() {
             let Some(entity) = u32::try_from(contact.entity)
                 .ok()
@@ -11461,12 +11461,12 @@ mod entity_inside_tests {
                     // No such entity: it merged away.
                     inside(9999, stone, at(1), true);
                 });
-                game.native_drain_entity_inside();
+                game.drain_entity_inside();
                 assert_eq!(
                     *heard.0.lock().unwrap(),
                     vec![(kept.id(), at(1), true), (kept.id(), at(2), false)]
                 );
-                game.native_drain_entity_inside();
+                game.drain_entity_inside();
                 assert_eq!(
                     heard.0.lock().unwrap().len(),
                     2,

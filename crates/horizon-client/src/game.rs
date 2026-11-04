@@ -4458,7 +4458,7 @@ impl Game<'_> {
             }
         }
         self.tick_dropped_items(&mut round);
-        self.native_drain_entity_inside();
+        self.drain_entity_inside();
         self.native_tick_post_batch(round);
     }
     fn tick_dropped_items(&mut self, round: &mut native_ticks::TickRound) {

@@ -1350,10 +1350,10 @@ impl Game<'_> {
         }
         self.handle_mob_events(events)?;
         self.lan_guest_mob_events(guest_events);
-        self.native_drain_entity_inside();
+        self.drain_entity_inside();
         self.ordered_before(super::ordered_tick::Batch::Projectiles)?;
         self.tick_projectiles()?;
-        self.native_drain_entity_inside();
+        self.drain_entity_inside();
         self.tick_fangs();
         self.tick_allays();
         self.tick_pandas();

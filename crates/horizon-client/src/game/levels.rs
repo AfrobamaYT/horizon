@@ -496,7 +496,7 @@ impl Game<'_> {
                     }
                 },
             );
-            self.native_drain_entity_inside();
+            self.drain_entity_inside();
             if result.is_err() {
                 break;
             }
