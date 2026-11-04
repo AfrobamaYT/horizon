@@ -1460,6 +1460,7 @@ impl Game<'_> {
                     id: 1505,
                     pos: target_pos,
                     data: 15,
+                    source: None,
                 });
         }
         self.process_level_events()?;
@@ -2172,6 +2173,7 @@ impl Game<'_> {
                 id: 3003,
                 pos: Self::pos_of(target),
                 data: 0,
+                source: None,
             });
         self.process_level_events()?;
         self.audio.play(
