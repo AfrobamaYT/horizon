@@ -120,6 +120,7 @@ pub fn main() -> Result<()> {
                 collision_binding: &binding,
                 resources: &resources,
                 tag_items: None,
+                block_registries: None,
             }
             .update_auto_jump(fl(&c["xa"]), fl(&c["za"]))?;
         }

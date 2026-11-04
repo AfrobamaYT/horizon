@@ -25,7 +25,12 @@ impl MotionWorld<'_, '_, '_> {
             .ok_or("missing environment damage type")?;
         let rules = self.scene.health_rules;
         self.player.hurt(
-            &mut crate::health::DamageLevel::of(self.scene, self.assets.registry, self.tag_items),
+            &mut crate::health::DamageLevel::of(
+                self.scene,
+                self.assets.registry,
+                self.tag_items,
+                self.block_registries,
+            ),
             &self.resources.health,
             rules,
             id,
@@ -144,6 +149,7 @@ impl MotionWorld<'_, '_, '_> {
                     self.scene,
                     self.assets.registry,
                     self.tag_items,
+                    self.block_registries,
                 ),
                 &self.resources.health,
                 rules,
