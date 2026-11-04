@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "สิ่งที่สวมใส่ให้ผู้เล่นของคุณ ทุกคนที่เล่นบน Horizon มองเห็น",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Launcher รุ่นนี้ไม่มีการลงชื่อเข้าใช้ Microsoft (HORIZON_MSA_CLIENT_ID) ดังนั้นจึงไม่สามารถเริ่มเกมได้",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "ซอร์สโค้ดเกมนี้ไม่มีเทมเพลตสำหรับรายการในทะเบียนเนทีฟ ให้อัปเดต Horizon แล้วสร้างม็อดใหม่สำหรับเกมนี้",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "การดำเนินการนี้จะย้ายอินสแตนซ์ไปยัง Horizon {version} โดยคอมไพล์เกมใหม่ตั้งแต่ต้น จึงใช้เวลานานกว่าการสร้างใหม่ปกติ: สูงสุด 30 นาที",
   "This server's Horizon": "Horizon ของเซิร์ฟเวอร์นี้",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizon ของเซิร์ฟเวอร์นี้เก่าเกินกว่าจะแสดงรายการข้อมูลสำรองที่นี่: อยู่ในโฟลเดอร์ข้อมูลสำรอง อัปเดตด้านล่าง",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Horizon ของเซิร์ฟเวอร์นี้เก่าเกินไปที่จะแสดงการตั้งค่าที่นี่ อัปเดตบนแท็บข้อมูลสำรอง จากนั้นจะปรากฏขึ้น",

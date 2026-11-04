@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Работи за облекување на вашиот играч, што ги гледаат сите што играат на Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Оваа верзија на фрлачот нема најавување на Microsoft (HORIZON_MSA_CLIENT_ID), така што не може да ја започне играта.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Ова ја преместува инстанцата во Horizon {version}. Ја составува играта од нула, така што е потребно подолго време од нормалната обнова: до 30 минути.",
   "This server's Horizon": "Овој сервер е Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizon на овој сервер е премногу стар за да ги наведе неговите резервни копии овде: тие се во папката со резервни копии. Ажурирајте го подолу.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Horizon на овој сервер е премногу стар за да ги прикаже неговите поставки овде. Ажурирајте го на табулаторот Backups, а потоа тие се појавуваат.",

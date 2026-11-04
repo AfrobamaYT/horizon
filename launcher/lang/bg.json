@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Неща за обличане на твоя играч, видими за всички, които играят на Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Тази компилация на стартовия панел няма влизане в Microsoft (HORIZON_MSA_CLIENT_ID), така че не може да стартира играта.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Този изходен код на играта няма шаблон за запис в нативния инвентар. Обновете Horizon и компилирайте модовете отново за тази игра.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Това премества екземпляра в Horizon {version}. Той компилира играта от нулата, така че отнема повече време от нормалното възстановяване: до 30 минути.",
   "This server's Horizon": "Този сървър е Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizon на този сървър е твърде стар, за да изброи резервните си копия тук: те са в неговата папка с резервни копия. Актуализирайте го по-долу.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Horizon на този сървър е твърде стар, за да показва настройките си тук. Актуализирайте го в раздела Резервни копия, след което се появяват.",

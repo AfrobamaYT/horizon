@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Coses per portar al vostre jugador, que veu tothom qui juga a Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Aquesta versió del llançador no té cap inici de sessió de Microsoft (HORIZON_MSA_CLIENT_ID), de manera que no pot iniciar el joc.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Això mou la instància a Horizon {version}. Compila el joc des de zero, de manera que triga més temps que una reconstrucció normal: fins a 30 minuts.",
   "This server's Horizon": "Aquest servidor és Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "L'Horizon d'aquest servidor és massa antic per enumerar les seves còpies de seguretat aquí: es troben a la seva carpeta de còpies de seguretat. Actualitzeu-lo a continuació.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "L'Horizon d'aquest servidor és massa antic per mostrar la seva configuració aquí. Actualitzeu-lo a la pestanya Còpies de seguretat i després apareixeran.",

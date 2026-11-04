@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Traoù da wiskañ evit ho c’hoarier, gwelet gant an holl a c’hoari war Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "N'eus Microsoft kennaskañ ebet gant ar stumm-mañ eus al lañser (HORIZON_MSA_CLIENT_ID), neuze ne c'hell ket kregiñ gant ar c'hoari.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Dilec'hiañ a ra an ensavadur da Horizon {version}. Dastum a ra ar c'hoari adalek ar penn-kentañ, setu e pad hiroc'h eget un adsevel reizh : betek 30 munutenn.",
   "This server's Horizon": "Horizon eo ar servijer-mañ",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Re gozh eo Horizon ar servijer-mañ evit menegiñ e enrolladennoù amañ : en e renkell enrolladennoù emaint. Hizivait anezhañ amañ dindan.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Re gozh eo Horizon ar servijer-mañ evit diskouez e arventennoù amañ. Hizivaat anezhañ war an ivinell Gwareziñ, ha neuze e teuont war wel.",

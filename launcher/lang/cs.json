@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Věci k nošení pro vašeho hráče, viditelné pro všechny, kdo hrají na Horizonu.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Toto sestavení spouštěče nemá žádné přihlášení k Microsoftu (HORIZON_MSA_CLIENT_ID), takže nemůže spustit hru.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Tento zdrojový kód hry nemá šablonu položky nativního inventáře. Aktualizujte Horizon a sestavte mody znovu pro tuto hru.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Tím se instance přesune do Horizon {version}. Kompiluje hru od začátku, takže trvá déle než normální přestavba: až 30 minut.",
   "This server's Horizon": "Horizon tohoto serveru",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizon tohoto serveru je příliš starý na to, aby zde vypsal své zálohy: jsou ve složce záloh. Aktualizujte jej níže.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Horizon tohoto serveru je příliš starý na to, aby zde bylo možné zobrazit jeho nastavení. Aktualizujte je na kartě Zálohy, poté se zobrazí.",

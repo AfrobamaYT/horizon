@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "أشياء يرتديها لاعبك، يراها كل من يلعب على Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "هذا الإصدار من المشغل لا يحتوي على ميزة تسجيل دخول مايكروسوفت (HORIZON_MSA_CLIENT_ID)، لذا لا يمكنه بدء اللعبة.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "لا يحتوي مصدر اللعبة هذا على قالب إدخال جرد المودات الأصلية. حدّث Horizon وأعد بناء المودات مقابل هذه اللعبة.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "ينقل هذا الإجراء النسخة إلى هورايزون {version}. يتم تجميع اللعبة من الصفر، لذا يستغرق وقتًا أطول من البناء العادي: ما يصل إلى 30 دقيقة.",
   "This server's Horizon": "إصدار هورايزون لهذا الخادم",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "إصدار هورايزون لهذا الخادم قديم جداً لعرض نسخه الاحتياطية هنا: وهي موجودة في مجلد النسخ الاحتياطي الخاص به. قم بتحديثه أدناه.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "إصدار هورايزون لهذا الخادم قديم جدًا بحيث لا يمكن عرض إعداداته هنا. قم بتحديثه من تبويب النسخ الاحتياطي، وسوف تظهر حينها.",

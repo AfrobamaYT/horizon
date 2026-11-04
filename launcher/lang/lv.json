@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Lietas, ko valkāt jūsu spēlētājam, kuras redz ikviens, kas spēlē Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Šai palaišanas programmas versijai nav Microsoft pierakstīšanās (HORIZON_MSA_CLIENT_ID), tāpēc tā nevar sākt spēli.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Tas pārvieto gadījumu uz Horizon {version}. Tas apkopo spēli no nulles, tāpēc tas aizņem vairāk laika nekā parasta atjaunošana: līdz 30 minūtēm.",
   "This server's Horizon": "Šī servera Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Šī servera Horizon ir pārāk vecs, lai šeit uzskaitītu tā dublējumus: tie atrodas tā dublējumu mapē. Atjauniniet to zemāk.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Šī servera Horizon ir pārāk vecs, lai šeit parādītu tā iestatījumus. Atjauniniet to cilnē Dublējumkopijas, un pēc tam tie tiek parādīti.",

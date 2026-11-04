@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Res quas lusor tuus gerat, ab omnibus visae qui in Horizon ludunt.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Hoc constructum de launcher non habetMicrosoftinscribe (HORIZON_MSA_CLIENT_ID), ut a ludum incipere non potest.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Hoc movet instantiamHorizon {version}. Ludum de scabere componit, sic longiorem accipit quam normalem reaedificationem: usque ad 30 minuta.",
   "This server's Horizon": "Hoc server'sHorizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Hoc server'sHorizonNimis vetus est ut eius tergum hic enumerem: in tergum folder es. Renova infra.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Hoc server'sHorizonNimis senex est ut hic suos uncinos monstret. Renova in Tergum tab, tunc apparent.",

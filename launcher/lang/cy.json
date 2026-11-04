@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Pethau i’w gwisgo ar eich chwaraewr, i’w gweld gan bawb sy’n chwarae ar Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Nid oes gan y llun hwn o'r lansiwr unrhyw mewngofnodi Microsoft (HORIZON_MSA_CLIENT_ID), felly ni all ddechrau'r gêm.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Mae hyn yn symud yr enghraifft i Horizon {version}. Mae'n llunio'r gêm o'r dechrau, felly mae'n cymryd mwy o amser nag ailadeiladu arferol: hyd at 30 munud.",
   "This server's Horizon": "Mae'r gweinydd hwn yn Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Mae Horizon y gweinydd hwn yn rhy hen i restru ei gopïau wrth gefn yma: maen nhw yn ei ffolder copïau wrth gefn. Diweddarwch ef isod.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Mae Horizon y gweinydd hwn yn rhy hen i ddangos ei osodiadau yma. Diweddarwch ef ar y tab Backups, yna maent yn ymddangos.",

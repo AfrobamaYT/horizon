@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Puettavaa pelaajallesi, kaikkien Horizonissa pelaavien nähtäväksi.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Tässä käynnistysohjelman koontiversiossa ei ole Microsoftin kirjautumista (HORIZON_MSA_CLIENT_ID), joten se ei voi käynnistää peliä.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Tästä pelin lähdekoodista puuttuu natiivin luettelomerkinnän malli. Päivitä Horizon ja käännä modit uudelleen tätä peliä varten.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Tämä siirtää ilmentymän Horizoniin {version}. Se kokoaa pelin tyhjästä, joten se kestää kauemmin kuin normaali uusinta: jopa 30 minuuttia.",
   "This server's Horizon": "Tämä palvelin on Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Tämän palvelimen Horizon on liian vanha luettelemaan sen varmuuskopiot tähän: ne ovat sen varmuuskopiot-kansiossa. Päivitä se alla.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Tämän palvelimen Horizon on liian vanha näyttämään sen asetuksia tässä. Päivitä se Varmuuskopiot-välilehdellä, jolloin ne tulevat näkyviin.",

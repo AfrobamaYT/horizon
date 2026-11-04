@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "De causas de portar per vòstre jogador, vistas per totes los que jogan a Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Aquesta version del lançaire a pas cap de connexion Microsoft (HORIZON_MSA_CLIENT_ID), doncas pòt pas aviar lo jòc.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Aquò desplaça l'instància a Horizon {version}. Compila lo jòc de zéro, doncas pren mai de temps qu'una reconstruccion normala: fins a 30 minutas.",
   "This server's Horizon": "Aqueste servidor es Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Lo Horizon d'aqueste servidor es tròp vièlh per listar sas còpias de seguretat aicí : son dins son dorsièr de còpias de seguretat. Metètz-lo a jorn çai-jos.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Lo Horizon d'aqueste servidor es tròp vièlh per mostrar sos paramètres aicí. Metètz-lo a jorn sus l'onglet Sauvagardas, puèi apareisson.",
