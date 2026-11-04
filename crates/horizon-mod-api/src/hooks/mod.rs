@@ -54,6 +54,7 @@ mod arrow_nock;
 mod baby_entity_spawn;
 mod block_drops;
 mod block_entity_refs;
+mod block_entity_view_distance;
 mod block_factors;
 mod block_grow_feature;
 mod block_landing;

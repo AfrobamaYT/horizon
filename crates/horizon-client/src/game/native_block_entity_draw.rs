@@ -24,6 +24,49 @@ use horizon_world::registry::BlockStateId;
 
 /// `BlockEntityRenderer.getViewDistance`'s default, in blocks.
 const VIEW_DISTANCE: f64 = 64.0;
+
+/// Each mod block entity's view distance (`BlockEntityRenderer.getViewDistance`), by block
+/// state, as the parts answered `native_block_entity_view_distance` once for each mod block;
+/// states with none keep [`VIEW_DISTANCE`]. `furthest` is how far block entities are gathered.
+pub(super) struct ViewDistances {
+    by_state: FxHashMap<u32, f64>,
+    furthest: f64,
+}
+
+impl ViewDistances {
+    /// The distances of the block states `states` (id, block): `ask` is asked once for each
+    /// mod block, never for vanilla's, and an answer that isn't finite and above 0 keeps
+    /// [`VIEW_DISTANCE`].
+    fn of_states<'a>(
+        states: impl Iterator<Item = (u32, &'a str)>,
+        mut ask: impl FnMut(&str) -> f64,
+    ) -> Self {
+        let mut by_block: FxHashMap<&str, f64> = FxHashMap::default();
+        let mut by_state = FxHashMap::default();
+        for (state, block) in states {
+            if block.starts_with("minecraft:") {
+                continue;
+            }
+            let distance = *by_block.entry(block).or_insert_with(|| {
+                let distance = ask(block);
+                if distance.is_finite() && distance > 0.0 {
+                    distance
+                } else {
+                    VIEW_DISTANCE
+                }
+            });
+            if distance != VIEW_DISTANCE {
+                by_state.insert(state, distance);
+            }
+        }
+        let furthest = by_state.values().copied().fold(VIEW_DISTANCE, f64::max);
+        Self { by_state, furthest }
+    }
+    /// How far the block entity of `state` draws.
+    fn of(&self, state: u32) -> f64 {
+        self.by_state.get(&state).copied().unwrap_or(VIEW_DISTANCE)
+    }
+}
 /// A mod block entity's bounds until its mod says otherwise: the block with
 /// the block of margin Horizon culls vanilla's block entities with.
 const DEFAULT_BOUNDS: [f32; 6] = [-1.0, -1.0, -1.0, 2.0, 2.0, 2.0];
@@ -279,10 +322,27 @@ impl Game<'_> {
     pub(super) fn untemplated_mod_block_entities(&self, camera: DVec3) -> Vec<([i32; 3], u32)> {
         self.world
             .block_entities
-            .mods_near(camera.x, camera.z, VIEW_DISTANCE)
+            .mods_near(camera.x, camera.z, self.view_distances().furthest)
             .map(|p| ([p.0, p.1, p.2], self.world.block(p.0, p.1, p.2).0))
             .filter(|&(_, state)| !self.res.facts().get(BlockStateId(state)).block_entity)
             .collect()
+    }
+    /// The mod block entities' view distances: the parts are asked once for each mod block
+    /// (`native_block_entity_view_distance`) the first time they're needed, and kept.
+    fn view_distances(&self) -> &ViewDistances {
+        self.mod_view_distances.get_or_init(|| {
+            let registry = self.pack.assets.registry;
+            let states = (0..registry.len() as u32).filter_map(|i| {
+                registry
+                    .state(BlockStateId(i))
+                    .map(|state| (i, state.name.as_str()))
+            });
+            ViewDistances::of_states(states, |block| {
+                let mut distance = VIEW_DISTANCE;
+                self.native_block_entity_view_distance(block, &mut distance);
+                distance
+            })
+        })
     }
     /// `native_block_entity_submit` for each of `blocks` (in drawn sections,
     /// drawn by no vanilla renderer) whose block entity is a mod's, closer than
@@ -310,10 +370,12 @@ impl Game<'_> {
         let now = self.world.game_time;
         let mut kept = self.kept_block_entities.borrow_mut();
         kept.sweep(now);
+        let distances = self.view_distances();
         for &(pos, state) in blocks {
             let corner = DVec3::new(f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]));
             // Vec3.closerThan: strictly closer.
-            if (corner + 0.5).distance_squared(camera) >= VIEW_DISTANCE * VIEW_DISTANCE {
+            let distance = distances.of(state);
+            if (corner + 0.5).distance_squared(camera) >= distance * distance {
                 continue;
             }
             let Some(BlockEntity::Mod(entity)) =
@@ -691,6 +753,38 @@ mod tests {
             assert!(!drawn.model("mymod:block/shaft_half", 0xFFFFFF));
             assert!(surface.vertices.is_empty());
         });
+    }
+
+    /// Each mod block is asked once, whatever its number of states; vanilla blocks never are;
+    /// an answer that isn't finite and above 0 keeps the default; the gather reaches the
+    /// furthest.
+    #[test]
+    fn view_distances_are_asked_once_per_mod_block() {
+        let states = [
+            (1, "minecraft:stone"),
+            (2, "mymod:beam"),
+            (3, "mymod:beam"),
+            (4, "mymod:screw"),
+            (5, "mymod:gear"),
+        ];
+        let mut asked = Vec::new();
+        let distances = ViewDistances::of_states(states.into_iter(), |block| {
+            asked.push(block.to_owned());
+            match block {
+                "mymod:beam" => 256.0,
+                "mymod:screw" => f64::NAN,
+                _ => VIEW_DISTANCE,
+            }
+        });
+        assert_eq!(asked, ["mymod:beam", "mymod:screw", "mymod:gear"]);
+        assert_eq!(distances.of(2), 256.0);
+        assert_eq!(distances.of(3), 256.0);
+        assert_eq!(distances.of(4), VIEW_DISTANCE);
+        assert_eq!(distances.of(5), VIEW_DISTANCE);
+        assert_eq!(distances.of(1), VIEW_DISTANCE);
+        assert_eq!(distances.furthest, 256.0);
+        let none = ViewDistances::of_states(std::iter::empty(), |_| unreachable!());
+        assert_eq!(none.furthest, VIEW_DISTANCE);
     }
 
     /// `BlockEntityDrawContext::text` lays the font's glyphs out under the pose, a quad per
