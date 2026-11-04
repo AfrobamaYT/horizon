@@ -1373,6 +1373,9 @@ pub struct Mob {
     /// `LivingEntity.getAbsorptionAmount`: golden hearts that soak damage before health.
     pub absorption: f32,
     pub last_damage: Option<(Damage, i64)>,
+    /// `DamageSource.getDirectEntity` of `last_damage` when [`Damage`] cannot name it (a
+    /// thrown potion, an area effect cloud): its entity type.
+    pub last_direct: Option<&'static str>,
     /// `LivingEntity.combatTracker`: the hits taken lately.
     pub combat: combat::Tracker,
     /// Set by `remove`: the mob disappears without dying (conversion, despawn, pickup).
@@ -2976,6 +2979,7 @@ impl Mob {
             last_hurt: 0.0,
             absorption: 0.0,
             last_damage: None,
+            last_direct: None,
             combat: combat::Tracker::default(),
             removed: false,
             custom_name: None,
@@ -3389,6 +3393,7 @@ impl Mob {
         if success {
             self.last_damage = Some((source, i64::from(self.age)));
         }
+        self.last_direct = None;
         if let Some(who) = source.attacker {
             self.ai.last_hurt_by = Some(who);
             self.ai.last_hurt_by_time = self.age as i32;
@@ -3461,19 +3466,28 @@ impl Mob {
         if equine::is_equine(self.species()) {
             equine::after_hurt_server(self);
         }
-        if self.species() == Species::GlowSquid {
+        // GlowSquid.hurtServer dims the squid only when Squid.hurtServer took the
+        // hit, which it reports only for a living entity's blow: environmental
+        // damage (suffocation, a campfire, drying out) leaves the glow alone.
+        if self.species() == Species::GlowSquid && self.ai.last_hurt_by.is_some() {
             aquatic::hurt_server(self);
         }
         success
     }
-    /// A splash or cloud's harming effect on this mob: the potion's
-    /// `indirect_magic` is in `#witch_resistant_to`, so a witch takes 15%.
-    pub fn potion_harm(&self, amount: f32) -> f32 {
-        if self.species() == Species::Witch {
-            amount * 0.15
-        } else {
-            amount
+    /// `damage` by a source whose direct entity is `direct` (an entity type id), which `source`
+    /// cannot carry: `DamageSources.indirectMagic(potion or cloud, owner)`.
+    pub fn damage_by(
+        &mut self,
+        level: &mut DamageLevel<'_>,
+        amount: f32,
+        source: Damage,
+        direct: &'static str,
+    ) -> bool {
+        let hurt = self.damage(level, amount, source);
+        if hurt {
+            self.last_direct = Some(direct);
         }
+        hurt
     }
     /// `Wolf.canArmorAbsorb`: it wears wolf armor and the damage type is not
     /// in `#bypasses_wolf_armor` (drowning, magic, thorns, in a wall, out of
@@ -3887,6 +3901,13 @@ impl Mob {
         !(self.kind.flags.undead && matches!(effect, "minecraft:poison" | "minecraft:regeneration"))
     }
     pub fn add_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) {
+        let effect = horizon_client_core::potions::namespaced(effect);
+        // LivingEntity.addEffect: an effect the mob refuses is never added, so it
+        // never joins the list the client draws or an effect tick reads.
+        // WitherBoss.addEffect returns false for every effect.
+        if self.species() == Species::Wither || !self.can_be_affected(effect) {
+            return;
+        }
         self.add_effect_with(effect, ticks, amplifier, false, true);
     }
     pub fn speed_bonus(&self) -> f64 {
@@ -5097,6 +5118,45 @@ mod magic_absorb_tests {
         m.damage(level, 20.0, own);
         assert_eq!(m.health, 10.0);
     }
+
+    /// `damage_by` with a thrown potion's `indirectMagic(potion, owner)`: the
+    /// hit keeps the potion as its direct entity and is the thrower's (a
+    /// player's sets `lastHurtByPlayer`, a dispenser's names nobody); the next
+    /// hit that names no direct entity forgets it.
+    #[test]
+    fn a_potion_hit_keeps_its_direct_entity_and_owner() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut m = Mob::new(1, kind(), Vec3::ZERO, 0.0);
+        let thrown = Damage::indirect_magic(Some(Who::Player), [0.0, 1.0, 0.0]);
+        assert!(m.damage_by(level, 1.0, thrown, "minecraft:splash_potion"));
+        assert_eq!(m.last_direct, Some("minecraft:splash_potion"));
+        let (last, _) = m.last_damage.unwrap();
+        assert_eq!(last.kind, DamageKind::IndirectMagic);
+        assert_eq!(last.attacker, Some(Who::Player));
+        assert_eq!(m.ai.last_hurt_by_player, 100);
+        m.invulnerable = 0;
+        assert!(m.damage(level, 1.0, Damage::of(DamageKind::Generic)));
+        assert_eq!(m.last_direct, None);
+
+        let mut m = Mob::new(1, kind(), Vec3::ZERO, 0.0);
+        let dispensed = Damage::indirect_magic(None, [0.0, 1.0, 0.0]);
+        assert!(m.damage_by(level, 1.0, dispensed, "minecraft:area_effect_cloud"));
+        assert_eq!(m.last_direct, Some("minecraft:area_effect_cloud"));
+        assert_eq!(m.ai.last_hurt_by_player, 0);
+    }
+
+    /// A harming potion's hit on a witch through `damage_by` is cut to 15%
+    /// once (`getDamageAfterMagicAbsorb`), not again by the potion code.
+    #[test]
+    fn a_witch_takes_15_percent_of_a_potion_hit() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut m = witch();
+        let thrown = Damage::indirect_magic(Some(Who::Player), [0.0, 1.0, 0.0]);
+        assert!(m.damage_by(level, 20.0, thrown, "minecraft:splash_potion"));
+        assert_eq!(m.health, 7.0);
+    }
 }
 
 #[cfg(test)]
@@ -5407,7 +5467,8 @@ mod effect_refusal_tests {
     /// effect the mob's type refuses never joins the list, so the cloud on its head,
     /// the `/effect` reply and an effect tick never see it. The refused ones are the
     /// `ignores_poison_and_regen` tag (which is `#minecraft:undead`), a silverfish's
-    /// infested and a slime's oozing, plus the five classes that override the rule.
+    /// infested and a slime's oozing, the classes that override the rule, and the
+    /// wither, whose `addEffect` refuses every effect.
     #[test]
     fn an_effect_the_mobs_type_refuses_is_never_added() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -5430,7 +5491,6 @@ mod effect_refusal_tests {
             "minecraft:skeleton",
             "minecraft:phantom",
             "minecraft:zombie_horse",
-            "minecraft:wither",
         ] {
             for effect in ["minecraft:poison", "minecraft:regeneration"] {
                 assert_eq!(refused(undead, effect), (false, 0), "{undead} {effect}");
@@ -5464,11 +5524,29 @@ mod effect_refusal_tests {
             assert_eq!(refused(spider, "minecraft:poison"), (false, 0), "{spider}");
         }
         assert_eq!(refused("minecraft:cow", "minecraft:poison"), (true, 1));
-        // WitherBoss.canBeAffected and WitherSkeleton.canBeAffected: the wither
-        // effect only, which a zombie takes.
-        for wither in ["minecraft:wither", "minecraft:wither_skeleton"] {
-            assert_eq!(refused(wither, "minecraft:wither"), (false, 0), "{wither}");
+        // WitherBoss.addEffect returns false: the boss takes no effect at all.
+        for effect in [
+            "minecraft:wither",
+            "minecraft:strength",
+            "minecraft:speed",
+            "minecraft:poison",
+        ] {
+            assert_eq!(
+                refused("minecraft:wither", effect),
+                (false, 0),
+                "wither {effect}"
+            );
         }
+        // WitherSkeleton.canBeAffected refuses the wither effect only, which a
+        // zombie takes.
+        assert_eq!(
+            refused("minecraft:wither_skeleton", "minecraft:wither"),
+            (false, 0)
+        );
+        assert_eq!(
+            refused("minecraft:wither_skeleton", "minecraft:strength"),
+            (true, 1)
+        );
         assert_eq!(refused("minecraft:zombie", "minecraft:wither"), (true, 1));
         // Parched.canBeAffected: weakness only, slowness takes.
         assert_eq!(
@@ -5479,6 +5557,27 @@ mod effect_refusal_tests {
             refused("minecraft:parched", "minecraft:slowness"),
             (true, 1)
         );
+    }
+
+    /// Squid.hurtServer reports a hit only when a living entity dealt it, so
+    /// environmental damage leaves a glow squid glowing; a mob's blow dims it.
+    #[test]
+    fn only_a_mobs_blow_dims_a_glow_squid() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-types.json").exists() {
+            return;
+        }
+        let types = MobTypes::load_for_server(&root).unwrap();
+        let mut burned = mob(&types, "minecraft:glow_squid");
+        burned.health = 10.0;
+        assert!(burned.damage(1.0, Damage::of(DamageKind::Campfire)));
+        assert_eq!(aquatic::dark_ticks(&burned), 0);
+        let mut struck = mob(&types, "minecraft:glow_squid");
+        struck.health = 10.0;
+        assert!(struck.damage(1.0, Damage::mob(2, [0.0, 64.0, 0.0])));
+        assert_eq!(aquatic::dark_ticks(&struck), 100);
     }
 }
 crate::impl_joined!(Mob);
