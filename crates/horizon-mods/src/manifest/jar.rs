@@ -31,10 +31,36 @@ impl TryFrom<Fields> for JarRef {
 }
 
 /// One exact file and every Horizon mod requiring it, in load order.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(try_from = "RequirementFields")]
 pub struct JarRequirement {
     pub owners: Vec<String>,
     pub jar: JarRef,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RequirementFields {
+    owners: Vec<String>,
+    jar: JarRef,
+}
+
+impl TryFrom<RequirementFields> for JarRequirement {
+    type Error = String;
+
+    fn try_from(fields: RequirementFields) -> Result<Self, Self::Error> {
+        let unique: std::collections::BTreeSet<_> = fields.owners.iter().collect();
+        if fields.owners.is_empty()
+            || fields.owners.iter().any(|id| !super::valid_mod_id(id))
+            || unique.len() != fields.owners.len()
+        {
+            return Err(format!("invalid jar owners: {:?}", fields.owners));
+        }
+        Ok(Self {
+            owners: fields.owners,
+            jar: fields.jar,
+        })
+    }
 }
 
 /// One missing original file, shared by launcher preparation and game refusals.
@@ -113,6 +139,41 @@ pub fn collect_jar_requirements<'a>(
     Ok(hashes.into_values().collect())
 }
 
+/// Missing exact files in a jar cache, with every requiring mod retained.
+/// Byte identity is verified by launcher preparation, not rehashed on a reload.
+pub fn missing_jars(
+    store: &Path,
+    requirements: &[JarRequirement],
+) -> std::io::Result<Vec<MissingJar>> {
+    let mut missing = Vec::new();
+    for requirement in requirements {
+        let path = requirement.jar.cache_path(store);
+        match std::fs::metadata(&path) {
+            Ok(metadata) if metadata.is_file() => {}
+            Ok(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    path.display().to_string(),
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing.push(MissingJar {
+                    owners: requirement.owners.clone(),
+                    jar: requirement.jar.clone(),
+                    path,
+                })
+            }
+            Err(error) => {
+                return Err(std::io::Error::new(
+                    error.kind(),
+                    format!("{}: {error}", path.display()),
+                ));
+            }
+        }
+    }
+    Ok(missing)
+}
+
 impl JarRef {
     /// The exact file's path in the supplied jar-cache directory.
     pub fn cache_path(&self, store: &Path) -> PathBuf {
@@ -167,6 +228,32 @@ impl JarRef {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoded_root_requirements_validate_owners_at_the_read_boundary() {
+        let valid = serde_json::json!({
+            "owners": ["zeta", "alpha"],
+            "jar": {"id":"original", "version":"1", "sha512":"a".repeat(128)}
+        });
+        let requirement: JarRequirement = serde_json::from_value(valid.clone()).unwrap();
+        assert_eq!(requirement.owners, ["zeta", "alpha"]);
+        for owners in [
+            serde_json::json!([]),
+            serde_json::json!(["alpha", "alpha"]),
+            serde_json::json!(["UPPER"]),
+            serde_json::json!(["../alpha"]),
+        ] {
+            let mut invalid = valid.clone();
+            invalid["owners"] = owners;
+            assert!(serde_json::from_value::<JarRequirement>(invalid).is_err());
+        }
+        let mut invalid = valid.clone();
+        invalid["jar"]["sha512"] = serde_json::json!("A".repeat(128));
+        assert!(serde_json::from_value::<JarRequirement>(invalid).is_err());
+        let mut invalid = valid;
+        invalid["extra"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<JarRequirement>(invalid).is_err());
+    }
 
     #[test]
     fn shared_jar_requirements_keep_all_owners_in_load_order() {

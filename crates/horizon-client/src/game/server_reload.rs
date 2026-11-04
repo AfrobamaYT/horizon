@@ -4,7 +4,7 @@
 #[path = "server_reload_tests.rs"]
 mod tests;
 use super::{Game, functions::PackStack};
-pub(super) use horizon_client::mod_api::reload::ReloadStageError;
+use horizon_client::mod_api::reload::ReloadStageError;
 use horizon_client::{
     datapack::DataStore,
     mod_api::{
@@ -50,7 +50,11 @@ impl Game<'_> {
     pub(super) fn prepare_server_reload(
         &self,
         stack: &PackStack,
-    ) -> Result<PreparedServerReload, ReloadStageError> {
+    ) -> horizon_client::Result<PreparedServerReload> {
+        horizon_client::mod_content::check_jars(
+            &self.options.resources,
+            &horizon_client::logging::game_home().join("jars"),
+        )?;
         // Nobody listens: no registration graph, only the vanilla function library.
         if !crate::mod_api::listened(crate::mod_api::HookId::AddServerReloadListeners) {
             return Ok(PreparedServerReload {

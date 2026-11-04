@@ -155,7 +155,7 @@ impl Game<'_> {
         &mut self,
         run_load: bool,
         enabled_features: &[String],
-    ) -> Result<PackStack, super::server_reload::ReloadStageError> {
+    ) -> horizon_client::Result<PackStack> {
         let stack = pack_stack(
             &self.world_root,
             &self.options.resources,
@@ -934,9 +934,7 @@ impl Game<'_> {
         Ok(())
     }
 
-    fn reload_failure(
-        error: super::server_reload::ReloadStageError,
-    ) -> horizon_client::command::CommandError {
+    fn reload_failure(error: impl std::fmt::Display) -> horizon_client::command::CommandError {
         log::warn!("Horizon: {error}");
         horizon_client::command::CommandError::new(
             Text::translate("commands.reload.failure", &[])

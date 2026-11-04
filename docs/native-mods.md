@@ -668,15 +668,28 @@ They are not runtime pack resources and do not participate in resource reloads.
 `LICENCE*`, `COPYING*`, `NOTICE*`). Source and resource size limits are checked separately;
 anything else refuses the archive ([api/mod-files.md](api/mod-files.md)).
 
-**Pack order.** A content mod's resources reach the game as pack layers, and the order is fixed. From top to
-bottom: the player's resource packs, then each content mod with every Java jar it lists under its own files — a
-later mod (its files or its jars) over an earlier one — then vanilla. Within one mod, the mod's own files win over
-its jars for the same path (the log lists each such path once at load); the files every pack stacks (atlases,
-lang, sounds, blockstates) merge across vanilla, the jars and the mods in that same order instead of being
-replaced. A jar may use any namespace, so a port can read the original `assets/` in place while the mod's own
-files override single paths. Only a jar's `assets/` is layered; nothing else in it is read. Jars are found in the
-jar cache (`<game home>/jars/<sha512>.jar`, which the launcher fills), are read once per resource reload, and a
-jar that is not in the cache is skipped with a warning until the launcher downloads it.
+**Pack order.** A mod's resources reach the game as pack layers. From bottom to top, assets use vanilla,
+then each mod's jars in `[[jar]]` order, then that mod's own files, with later mods above earlier ones and the
+player's resource packs above all mods. The mod's own files win over its jars for the same path (the log lists
+each duplicate asset path once at load). Files every resource pack stacks (atlases, lang, sounds, blockstates)
+merge in that same order through the normal pack merger.
+
+Data uses vanilla, then each mod's jars in `[[jar]]` order and that mod's own `data/`, then the world's
+enabled datapacks. Later mods override earlier ones, tags merge with their normal replacement rules, and a
+later recipe replaces an earlier recipe at the same id. A jar may use any namespace. Only its passive
+`assets/` and `data/` participate: Java classes and the jar's own pack metadata are not loaded.
+
+Original jars stay in `<game home>/jars/<sha512>.jar`; no bytes are copied into a mod. The launcher checks
+and supplies exact files, and the existing ZIP readers write only the decoded resource cache. The ordered
+jar reference list contributes to the composed root's stamp, so changing it rebuilds on the next resource
+load. Server `/reload` uses the accepted inputs of that composed root, not another package scan.
+
+**Unavailable originals.** Launcher preparation refuses before a native build or game launch and names all
+requiring mods, the original jar and its expected cache path. Direct game resource or world loading with a
+missing native requirement fails as a whole; it never publishes code without the matching data. A missing
+input during `/reload` reports the typed failure to the command source and keeps the previous data and
+composed root. Content-only mods have no code to strand: each whole mod can instead be refused on its Mods
+page row, including every owner of a shared missing file. The game never downloads jars.
 
 **One `.hmod` for content and code.** Without root `Cargo.toml`, nothing compiles. With it and `[native]`,
 the launcher builds the code and the game loads the same package's content through `horizon_mods::Content`.

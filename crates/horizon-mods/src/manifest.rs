@@ -3,7 +3,9 @@
 //! Raw injection schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
 mod jar;
-pub use jar::{JarConflict, JarRef, JarRequirement, MissingJar, collect_jar_requirements};
+pub use jar::{
+    JarConflict, JarRef, JarRequirement, MissingJar, collect_jar_requirements, missing_jars,
+};
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -210,25 +212,24 @@ pub fn revision(value: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
+pub(super) fn valid_mod_id(id: &str) -> bool {
+    (1..=64).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
         let m: Manifest = toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
-        let id_ok = (1..=64).contains(&m.id.len())
-            && m.id
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
-        if !id_ok {
+        if !valid_mod_id(&m.id) {
             return Err(format!(
                 "{MANIFEST}: id {:?} is not [a-z0-9_]{{1,64}}",
                 m.id
             ));
         }
         for id in m.dependencies.keys() {
-            if !(1..=64).contains(&id.len())
-                || !id
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-            {
+            if !valid_mod_id(id) {
                 return Err(format!("{MANIFEST}: invalid dependency id {id:?}"));
             }
         }

@@ -88,13 +88,7 @@ impl fmt::Display for PrepareError {
 }
 fn write_missing_jars(f: &mut fmt::Formatter<'_>, missing: &[MissingJar]) -> fmt::Result {
     for entry in missing {
-        writeln!(
-            f,
-            "{} {}: {}",
-            entry.jar.id(),
-            entry.jar.version(),
-            entry.path.display()
-        )?;
+        writeln!(f, "{entry}")?;
     }
     Ok(())
 }

@@ -583,7 +583,7 @@ fn pack_files(pack: &Pack) -> io::Result<BTreeMap<String, Provided>> {
 /// Whether a zip entry's name, joined to the overlay folder, stays in it: `/`-separated parts
 /// (zip.rs turns `\` into `/`), none empty, `.` or `..`, and no `:` (a drive or a stream on
 /// Windows). A pack, a server's too, may name entries anything.
-fn stays_inside(name: &str) -> bool {
+pub(crate) fn stays_inside(name: &str) -> bool {
     !name.contains([':', '\0'])
         && name
             .split('/')

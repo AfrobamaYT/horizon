@@ -173,6 +173,23 @@ fn all_missing_hashes_share_one_consent_and_each_download_once() {
     assert_eq!(lookups.get(), 1);
     assert_eq!(downloads, 2);
     assert_eq!(fs::read_dir(home.0.join("jars")).unwrap().count(), 2);
+    fs::remove_file(a.cache_path(&home.0.join("jars"))).unwrap();
+    let refusal = prepare_with(
+        &home.0,
+        &jars,
+        Permission::Refuse,
+        |_| panic!("a shared missing jar must refuse before lookup"),
+        |_, _, _| panic!("a shared missing jar must refuse before downloads"),
+    )
+    .unwrap_err();
+    let PrepareError::Refused { missing } = &refusal else {
+        panic!("expected the shared typed missing-file payload");
+    };
+    assert_eq!(missing.len(), 1);
+    assert_eq!(missing[0].owners, ["alpha", "beta"]);
+    assert_eq!(missing[0].jar, a);
+    assert_eq!(missing[0].path, a.cache_path(&home.0.join("jars")));
+    assert!(refusal.to_string().contains("alpha, beta: example 1:"));
 }
 
 #[test]
@@ -322,7 +339,12 @@ fn failed_metadata_lookup_names_every_missing_jar_but_not_cache_hits() {
             assert_eq!(&entry.jar, jar);
             assert_eq!(entry.owners, ["example"]);
             assert_eq!(entry.path, path);
-            let line = format!("{} {}: {}", jar.id(), jar.version(), path.display());
+            let line = format!(
+                "example: {} {}: {}",
+                jar.id(),
+                jar.version(),
+                path.display()
+            );
             assert!(display.lines().any(|actual| actual == line));
         }
         assert!(!display.contains(&cached_path.display().to_string()));

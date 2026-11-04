@@ -6,9 +6,11 @@ use horizon_mods::manifest::JarRef;
 mod block_entity_tests;
 #[path = "mod_content_farmland_tests.rs"]
 mod farmland_tests;
+#[path = "mod_content_jar_tests.rs"]
+mod jar_tests;
 
 /// A Java jar's assets are a pack layer under the mod's own files, in mod
-/// order under the later mods: only `assets/` leaves the jar, and the files
+/// order under the later mods. Passive assets/data leave the jar, and the files
 /// every pack stacks (atlases here) merge across vanilla, the jars and the
 /// mods in that same order.
 #[test]
@@ -138,7 +140,7 @@ fn a_mods_jars_layer_under_its_files_in_mod_order() {
         b"jar-b-only"
     );
     // The stacked files merge across vanilla, the jars and the mods in the
-    // same order, and only `assets/` ever leaves the jar.
+    // same order, and no root Java bytecode leaves the jar.
     let sources: Vec<_> = serde_json::from_slice::<serde_json::Value>(
         &fs::read(root.join("assets/minecraft/atlases/blocks.json")).unwrap(),
     )
@@ -176,10 +178,10 @@ fn a_mods_jars_layer_under_its_files_in_mod_order() {
     let _ = fs::remove_dir_all(&scratch);
 }
 
-/// A jar the launcher has not downloaded costs its layer, warned once, not
-/// the mod's own files or the rest of the root.
+/// An absent original refuses publication before either the tables or the
+/// decoded pack root exists.
 #[test]
-fn a_missing_jar_warns_and_the_rest_loads() {
+fn a_missing_jar_refuses_the_whole_load_before_decoded_output() {
     let scratch =
         std::env::temp_dir().join(format!("horizon-mod-jar-missing-{}", std::process::id()));
     let _ = fs::remove_dir_all(&scratch);
@@ -207,16 +209,21 @@ fn a_missing_jar_warns_and_the_rest_loads() {
     );
     m.jars = vec![JarRef::new("porteda".into(), "1.0".into(), "2".repeat(128)).unwrap()];
     let root = scratch.join("root");
-    let warnings = build(
+    let error = build(
         &base,
         &scratch.join("jars"),
         std::slice::from_ref(&m),
         &root,
     )
-    .unwrap();
-    assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("porteda"), "{}", warnings[0]);
-    assert!(root.join(shared).is_file());
+    .unwrap_err();
+    let missing = error
+        .downcast_ref::<horizon_mods::manifest::MissingJar>()
+        .unwrap();
+    assert_eq!(missing.owners, ["alpha"]);
+    assert_eq!(missing.jar, m.jars[0]);
+    assert_eq!(missing.path, m.jars[0].cache_path(&scratch.join("jars")));
+    assert!(!root.exists());
+    assert!(!scratch.join("root-tables").exists());
     let _ = fs::remove_dir_all(&scratch);
 }
 
