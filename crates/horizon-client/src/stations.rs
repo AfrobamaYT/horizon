@@ -507,11 +507,20 @@ pub struct StationRecipes {
     /// `trim_material` registry: id -> (asset name, description).
     pub trim_materials: Vec<(String, String)>,
 }
-fn ingredient(v: &Value, items: &Items, context: &horizon_world::native_load_context::LoadContext) -> Ingredient {
+fn ingredient(
+    v: &Value,
+    items: &Items,
+    context: &horizon_world::native_load_context::LoadContext,
+) -> Ingredient {
     Ingredient::parse(v, items, context).unwrap_or_else(|| Ingredient::of(Vec::new()))
 }
 impl StationRecipes {
-    pub fn load(root: &Path, items: &Items, overlay: &PackOverlay, context: &horizon_world::native_load_context::LoadContext) -> Self {
+    pub fn load(
+        root: &Path,
+        items: &Items,
+        overlay: &PackOverlay,
+        context: &horizon_world::native_load_context::LoadContext,
+    ) -> Self {
         // Vanilla's recipes, then the content mods' (docs/modpacks.md).
         let mut files = Vec::new();
         let namespaces =
@@ -987,7 +996,13 @@ mod tests {
         }
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = Items::tags_only(&root, &PackOverlay::NONE, &defaults).unwrap();
-        let data = StationData::load(&root, &items, &PackOverlay::NONE, &defaults);
+        let data = StationData::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &defaults,
+            &crate::test_resources::server_load(),
+        );
         let e = &data.enchantments;
         assert_eq!(e.list.len(), 43);
         assert_eq!(
@@ -1083,11 +1098,16 @@ mod tests {
     #[test]
     fn smithing_ingredient_parses_holders() {
         let items = sample_items();
-        let a = ingredient(&serde_json::json!("minecraft:diamond_sword"), &items);
+        let a = ingredient(
+            &serde_json::json!("minecraft:diamond_sword"),
+            &items,
+            &crate::test_resources::server_load(),
+        );
         assert_eq!(a.order, vec!["minecraft:diamond_sword"]);
         let b = ingredient(
             &serde_json::json!(["minecraft:diamond_sword", "minecraft:diamond_axe"]),
             &items,
+            &crate::test_resources::server_load(),
         );
         assert_eq!(
             b.order,

@@ -20369,7 +20369,11 @@ impl Game<'_> {
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
-        let recipes = match Recipes::load(root, &items, &overlay) {
+        let context = self.res.core.item_data.context().for_load(
+            self.options.execution_role.data_load_origin(),
+            mod_api::__private::loaded_mods().ids(),
+        );
+        let recipes = match Recipes::load(root, &items, &overlay, &context) {
             Ok(recipes) => recipes,
             Err(e) => {
                 log::warn!("Horizon: the world's data packs are not applied: {e}");
@@ -20381,6 +20385,7 @@ impl Game<'_> {
             &items,
             &overlay,
             self.res.item_defaults(),
+            &context,
         );
         let mut data_map_types = Vec::new();
         self.native_data_map_types(&mut data_map_types);
@@ -20415,10 +20420,7 @@ impl Game<'_> {
                 self.res.item_defaults(),
             ) {
                 Ok(mut loot) => {
-                    let context = self.res.core.item_data.context().for_load(
-                        horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
-                        mod_api::__private::loaded_mods().ids(),
-                    );
+                    let context = lan::server_data_load(&self.res.core.item_data);
                     loot.apply_native_table_loads(&context);
                     Some(Arc::new(loot))
                 }
@@ -21205,13 +21207,16 @@ fn load_world_rest(
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
-        let recipes = startup::time("rest.recipes", || Recipes::load(root, &items, overlay))?;
+        let recipes = startup::time("rest.recipes", || {
+            Recipes::load(root, &items, overlay, resources.core.item_data.context())
+        })?;
         let stations = startup::time("rest.stations", || {
             horizon_client::stations::StationData::load(
                 root,
                 &items,
                 overlay,
                 resources.item_defaults(),
+                resources.core.item_data.context(),
             )
         });
         Ok((items, recipes, stations))
@@ -23763,4 +23768,15 @@ fn write_level_for_role(
     } else {
         level.write_without_player(dir)
     }
+}
+
+/// A server's data load with no mods and no settings, for loaders under test.
+#[cfg(test)]
+fn test_server_load() -> horizon_world::native_load_context::LoadContext {
+    use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
+    LoadContext::new(
+        DataLoadOrigin::ServerDataLoad,
+        Arc::new(LoadInputs::new(Default::default(), Default::default())),
+        [],
+    )
 }

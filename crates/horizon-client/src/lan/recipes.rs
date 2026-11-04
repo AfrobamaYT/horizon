@@ -110,12 +110,13 @@ fn flat(
     if !ing.is_object() {
         return None;
     }
-    let parsed = horizon_client::crafting::Ingredient::parse(ing, items, context).or_else(|| {
-        // A brewing slot's item predicate: its `ingredient`, as the
-        // property sets have always read it.
-        ing.get("item")
-            .and_then(|v| horizon_client::crafting::Ingredient::parse(v, items, context))
-    })?;
+    let parsed =
+        horizon_client::crafting::Ingredient::parse(ing, items, context).or_else(|| {
+            // A brewing slot's item predicate: its `ingredient`, as the
+            // property sets have always read it.
+            ing.get("item")
+                .and_then(|v| horizon_client::crafting::Ingredient::parse(v, items, context))
+        })?;
     Some(Value::Array(
         parsed
             .order
@@ -385,6 +386,87 @@ pub fn content() -> Arc<Vec<Vec<u8>>> {
 mod content_tests {
     use super::*;
     use serde_json::json;
+
+    use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
+
+    struct AspectListener(std::sync::Arc<std::sync::Mutex<Vec<(DataLoadOrigin, String)>>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for AspectListener {
+        fn ingredient(
+            &self,
+            context: &mod_api::DataLoadContext<'_>,
+            event: &mut mod_api::IngredientEvent<'_>,
+        ) {
+            self.0
+                .lock()
+                .unwrap()
+                .push((context.origin(), event.data["aspect"].to_string()));
+            event.items.push("minecraft:emerald".into());
+        }
+    }
+
+    fn load(origin: DataLoadOrigin) -> LoadContext {
+        LoadContext::new(
+            origin,
+            std::sync::Arc::new(LoadInputs::new(Default::default(), Default::default())),
+            [],
+        )
+    }
+
+    /// The `ingredient` hook hears each custom-ingredient occurrence once per
+    /// parse, with the origin of the load that owns the parse. A server open
+    /// parses the recipes (`Ingredient::parse`) and then builds the guests'
+    /// copy (`normalize_ingredients`), so each occurrence is heard twice with
+    /// `ServerDataLoad` until the copy reuses the server's parse; that change
+    /// flips the last assertion of this test on purpose.
+    #[test]
+    fn ingredient_hook_hears_each_occurrence_once_per_parse_with_its_load_origin() {
+        let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "aspects",
+            Box::new(AspectListener(heard.clone())),
+        )];
+        let items = horizon_client::items::Items::for_tests(Default::default());
+        let recipe = json!({
+            "type": "minecraft:crafting_shapeless",
+            "ingredients": [
+                {"type": "neoforge:compound", "children": [
+                    {"type": "mymod:aspect", "aspect": "nested"}, "minecraft:stone"]},
+                {"type": "mymod:aspect", "aspect": "plain"}
+            ],
+            "result": {"id": "minecraft:stick", "count": 1}
+        });
+        mod_api::testing::with_mods(mods.into(), || {
+            let server = load(DataLoadOrigin::ServerDataLoad);
+            for ingredient in recipe["ingredients"].as_array().unwrap() {
+                horizon_client::crafting::Ingredient::parse(ingredient, &items, &server).unwrap();
+            }
+            let once = heard.lock().unwrap().clone();
+            let server_origin = DataLoadOrigin::ServerDataLoad;
+            assert_eq!(
+                once,
+                [
+                    (server_origin, "\"nested\"".to_owned()),
+                    (server_origin, "\"plain\"".to_owned())
+                ]
+            );
+
+            heard.lock().unwrap().clear();
+            let client = load(DataLoadOrigin::ClientPreload);
+            horizon_client::crafting::Ingredient::parse(&recipe["ingredients"][1], &items, &client)
+                .unwrap();
+            assert_eq!(
+                *heard.lock().unwrap(),
+                [(DataLoadOrigin::ClientPreload, "\"plain\"".to_owned())]
+            );
+
+            // The guests' copy parses the same occurrences again.
+            heard.lock().unwrap().clear();
+            let mut copy = recipe.clone();
+            assert!(normalize_ingredients(&mut copy, &items, &server));
+            assert_eq!(heard.lock().unwrap().len(), 2);
+        });
+    }
 
     #[test]
     fn content_keeps_the_asked_types_and_ends_with_them() {
