@@ -1,0 +1,23 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "entity_reset_fall_distance",
+      "side": "server",
+      "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_reset_fall_distance",
+      "receiver": "entity"
+    },
+    {
+      "name": "minecart_push",
+      "side": "server",
+      "target": "horizon_client::game::native_minecart_refs::Game<'_>::native_minecart_push",
+      "receiver": "minecart"
+    },
+    {
+      "name": "minecart_set_push",
+      "side": "server",
+      "target": "horizon_client::game::native_minecart_refs::Game<'_>::native_minecart_set_push",
+      "receiver": "minecart"
+    }
+  ]
+}

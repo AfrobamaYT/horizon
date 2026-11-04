@@ -482,10 +482,14 @@ impl Game<'_> {
                 .as_ref()
                 .map(|p| [p.position.x, p.position.y, p.position.z]),
         };
-        let _wearer = self.knockback_scope_for(source.attacker);
+        let attack = self.attack_of_who(source.attacker);
         for damage in self.thorns_damage() {
             let m = &mut self.mobs[index];
-            m.damage(crate::game::entity::damage_level_of!(self), damage, source);
+            m.damage(
+                crate::game::entity::damage_level_of!(self, &attack),
+                damage,
+                source,
+            );
             let center = [m.position.x, m.position.y, m.position.z];
             self.audio
                 .play("minecraft:enchant.thorns.hit", Some(center), 1.0, 1.0);

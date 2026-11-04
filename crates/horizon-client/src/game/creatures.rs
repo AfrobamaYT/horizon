@@ -13,7 +13,7 @@ use horizon_client::{
     blocks::Fluid,
     collisions::SceneCollisions,
     crafting::Recipes,
-    health::{HurtSource, Hurting, Knock},
+    health::{Attack, HurtSource, Hurting, Knock},
     items::ItemStack,
     mesher::Vertex,
     mobs::{
@@ -1998,10 +1998,10 @@ impl Game<'_> {
         let mut infested = false;
         let aim = self.attacker_aim(source.attacker);
         // So `living_knockback` sees who hit and what they hold.
-        let _attacker = self.knockback_scope_for(source.attacker);
+        let attack = self.attack_of_who(source.attacker);
         if let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
             let hit = t.damage_aimed(
-                crate::game::entity::damage_level_of!(self),
+                crate::game::entity::damage_level_of!(self, &attack),
                 amount,
                 source,
                 aim,
@@ -2467,7 +2467,7 @@ impl Game<'_> {
                 } => match target {
                     // A player's source names no melee attacker, as its damage's doesn't.
                     Who::Player => {
-                        let _attacker = self.knockback_scope(match source.attacker {
+                        let attack = self.attack_of(match source.attacker {
                             Some(Who::Mob(id)) => id as i32,
                             _ => 0,
                         });
@@ -2477,11 +2477,12 @@ impl Game<'_> {
                             direct: 0,
                             position: None,
                         };
-                        self.knock_back_player(power, x, z, source);
+                        self.knock_back_player(power, x, z, source, &attack);
                     }
                     Who::Mob(id) => {
+                        let attack = self.attack_of_who(source.attacker);
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                            let level = crate::game::entity::damage_level_of!(self);
+                            let level = crate::game::entity::damage_level_of!(self, &attack);
                             m.knockback(level, power, x, z, &source);
                         }
                     }
@@ -2775,7 +2776,7 @@ impl Game<'_> {
                 MobEvent::HurtSelf { mob, kind, amount } => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
                         m.damage(
-                            crate::game::entity::damage_level_of!(self),
+                            crate::game::entity::damage_level_of!(self, scoped),
                             amount,
                             horizon_client::mobs::Damage::of(kind),
                         );
@@ -4010,11 +4011,12 @@ impl Game<'_> {
         };
         // The causing entity for the death message.
         let owner = self.combat.projectile_owner.take();
-        let _attacker = self.knockback_scope(
-            attacker
-                .or(owner)
-                .map_or_else(horizon_client::health::knockback_attacker, |id| id as i32),
-        );
+        // The mob that caused the hit, else the attack the caller landed it in (a projectile's
+        // owner, another player's blow): `combat.attack`, read through `current_attack`.
+        let attack = match attacker.or(owner) {
+            Some(id) => self.attack_of(id as i32),
+            None => self.current_attack(),
+        };
         if let Some(a) = attacker.or(owner) {
             self.note_attacker(damage_type, a);
         }
@@ -4041,7 +4043,7 @@ impl Game<'_> {
         if let Some(player) = self.player.as_mut()
             && let Some(id) = self.motion.health.damage.id(damage_type)
             && let Ok(o) = player.hurt_caused_by(
-                crate::game::entity::damage_level_of!(self),
+                crate::game::entity::damage_level_of!(self, &attack),
                 &self.motion.health,
                 rules,
                 id,
@@ -4120,12 +4122,12 @@ impl Game<'_> {
                 direct: 0,
                 position: None,
             };
-            self.after_block(outcome, (attacker, projectile), source);
+            self.after_block(outcome, (attacker, projectile), source, &attack);
         }
         // `LivingEntity.dealDefaultKnockback`: after the item's block push, so
         // a half-blocked hit pushes the defender back the way vanilla does.
         if let Some(([xd, zd], source)) = default_push {
-            self.knock_back_player(f64::from(0.4_f32), xd, zd, source);
+            self.knock_back_player(f64::from(0.4_f32), xd, zd, source, &attack);
             if let Some(p) = self.player.as_mut()
                 && let Some(r) = p.hurt_log.last_mut()
             {
@@ -4145,17 +4147,20 @@ impl Game<'_> {
         xd: f64,
         zd: f64,
         source: HurtSource<'_>,
+        attack: &Attack,
     ) {
-        let credit = match self.player_hurt_by() {
-            Some((Who::Mob(id), _)) => id as i32,
-            _ => 0,
+        // No attacker named: the mob the player was last hurt by.
+        let credited;
+        let attack = if attack.attacker == 0
+            && let Some((Who::Mob(id), _)) = self.player_hurt_by()
+        {
+            credited = self.attack_of(id as i32);
+            &credited
+        } else {
+            attack
         };
-        let _attacker = self.knockback_scope(match horizon_client::health::knockback_attacker() {
-            0 => credit,
-            attacker => attacker,
-        });
         if let Some(p) = self.player.as_mut() {
-            let level = crate::game::entity::damage_level_of!(self);
+            let level = crate::game::entity::damage_level_of!(self, attack);
             knock_back(p, level, power, (xd, zd), source);
         }
     }
@@ -4911,8 +4916,12 @@ impl Game<'_> {
             }
         }
     }
+    /// A projectile's hit, landed in the attack of its owner.
     pub(super) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
-        let _attacker = self.knockback_scope_for(p.owner);
+        let attack = self.attack_of_who(p.owner);
+        self.with_attack(attack, |g| g.projectile_hit_landed(p, hit))
+    }
+    fn projectile_hit_landed(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
         // Projectile.onHitBlock: BlockState.onProjectileHit, for every
         // projectile (a wind charge out of the world's top has no face).
         if let Hit::Block { pos, at, face } = hit
@@ -5107,7 +5116,7 @@ impl Game<'_> {
                     ),
                     Who::Mob(id) => self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                         m.damage_projectile(
-                            crate::game::entity::damage_level_of!(self),
+                            crate::game::entity::damage_level_of!(self, scoped),
                             amount,
                             source,
                             aim,
@@ -5167,7 +5176,7 @@ impl Game<'_> {
                     Who::Mob(id) => {
                         let hurt = self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                             m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self),
+                                crate::game::entity::damage_level_of!(self, scoped),
                                 amount,
                                 source,
                                 aim,
@@ -5323,7 +5332,7 @@ impl Game<'_> {
                         0.0
                     };
                     if m.damage_projectile(
-                        crate::game::entity::damage_level_of!(self),
+                        crate::game::entity::damage_level_of!(self, scoped),
                         amount,
                         source,
                         aim,
@@ -5351,7 +5360,7 @@ impl Game<'_> {
                         let push = [p.velocity.x, p.velocity.z];
                         let hurt = self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                             m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self),
+                                crate::game::entity::damage_level_of!(self, scoped),
                                 t.damage,
                                 source,
                                 aim,
@@ -5394,7 +5403,7 @@ impl Game<'_> {
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
                     if m.damage_projectile(
-                        crate::game::entity::damage_level_of!(self),
+                        crate::game::entity::damage_level_of!(self, scoped),
                         0.0,
                         source,
                         aim,
@@ -5435,7 +5444,7 @@ impl Game<'_> {
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
                     if m.damage_projectile(
-                        crate::game::entity::damage_level_of!(self),
+                        crate::game::entity::damage_level_of!(self, scoped),
                         0.0,
                         source,
                         aim,
@@ -5549,7 +5558,7 @@ impl Game<'_> {
                                 m.ignite_for_ticks(100);
                             }
                             let hurt = m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self),
+                                crate::game::entity::damage_level_of!(self, scoped),
                                 5.0,
                                 source,
                                 aim,
@@ -5612,7 +5621,7 @@ impl Game<'_> {
                         Who::Mob(id) => {
                             if self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                                 m.damage_projectile(
-                                    crate::game::entity::damage_level_of!(self),
+                                    crate::game::entity::damage_level_of!(self, scoped),
                                     6.0,
                                     source,
                                     aim,
@@ -5689,7 +5698,7 @@ impl Game<'_> {
                 Who::Mob(id) => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                         m.damage_projectile(
-                            crate::game::entity::damage_level_of!(self),
+                            crate::game::entity::damage_level_of!(self, scoped),
                             1.0,
                             source,
                             aim,
@@ -5715,7 +5724,7 @@ impl Game<'_> {
                 Who::Mob(id) => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                         && m.damage_projectile(
-                            crate::game::entity::damage_level_of!(self),
+                            crate::game::entity::damage_level_of!(self, scoped),
                             4.0,
                             source,
                             aim,

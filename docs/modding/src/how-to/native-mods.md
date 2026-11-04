@@ -325,8 +325,9 @@ spacing, the structure's `biomes` and `terrain_adaptation` are placed by the eng
 for a fortress.
 
 Each piece is a `StructurePiece` (`Debug + Send + Sync`): `bounding_box`, `post_process` and
-`add_additional_save_data` are required, `after_place` (vanilla's `Structure.afterPlace`, on the
-first piece once per chunk, with every piece's current box) defaults to doing nothing. The
+`add_additional_save_data` are required. After all pieces of the start were placed, the type's own
+`after_place` (vanilla's `Structure.afterPlace`) runs once per chunk with every piece's current
+box; it defaults to doing nothing. The
 `PieceContext` of `post_process` and `after_place` is the chunk being placed: `set_block` writes a
 block and drops a position outside the writable box silently, as vanilla's
 `StructurePiece.placeBlock` skips it; `block` and `height` read, `state`/`state_with` resolve a

@@ -37,7 +37,8 @@ use horizon_client::{
     fast_hash::FxHashMap,
     first_person::Hand,
     health::{
-        DamageContainer, DamageHooks, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock, Victim,
+        Attack, DamageContainer, DamageHooks, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock,
+        Victim,
     },
     hud::{HudBatch, rgba},
     item_tooltip::TooltipDisplay,
@@ -8278,7 +8279,7 @@ pub(super) fn use_totem(level: DamageLevel<'_>, hurting: Hurting<'_>, off_hand: 
     if !mod_api::__private::listened(mod_api::HookId::LivingUseTotem) {
         return false;
     }
-    let (entity, kind, source) = hurt_server_args(hurting);
+    let (entity, kind, source) = hurt_server_args(hurting, level.attack());
     let hand = if off_hand { Hand::Off } else { Hand::Main };
     let mut cancel = false;
     HitLevel(level).native_living_use_totem(
@@ -8515,19 +8516,18 @@ pub(super) fn incoming_damage(
     if !mod_api::__private::listened(mod_api::HookId::LivingIncomingDamage) {
         return false;
     }
-    let (entity, kind, source) = hurt_server_args(hurting);
+    let (entity, kind, source) = hurt_server_args(hurting, level.attack());
     let mut canceled = false;
-    horizon_client::health::with_weapon_of(source.direct, |weapon| {
-        HitLevel(level).native_living_incoming_damage(
-            entity,
-            kind,
-            &source,
-            &victim,
-            weapon,
-            container,
-            &mut canceled,
-        );
-    });
+    let attack = level.attack();
+    HitLevel(level).native_living_incoming_damage(
+        entity,
+        kind,
+        &source,
+        &victim,
+        attack.weapon_of(source.direct),
+        container,
+        &mut canceled,
+    );
     canceled
 }
 
@@ -8540,7 +8540,7 @@ pub(super) fn damage_pre(
     if !mod_api::__private::listened(mod_api::HookId::LivingDamagePre) {
         return;
     }
-    let (entity, kind, source) = hurt_server_args(hurting);
+    let (entity, kind, source) = hurt_server_args(hurting, level.attack());
     HitLevel(level).native_living_damage_pre(entity, kind, &source, container);
 }
 
@@ -8553,7 +8553,7 @@ pub(super) fn damage_post(
     if !mod_api::__private::listened(mod_api::HookId::LivingDamagePost) {
         return;
     }
-    let (entity, kind, source) = hurt_server_args(hurting);
+    let (entity, kind, source) = hurt_server_args(hurting, level.attack());
     HitLevel(level).native_living_damage_post(entity, kind, &source, container);
 }
 
@@ -8566,7 +8566,7 @@ pub(super) fn shield_block(
     original_blocked: bool,
     block: &mut ShieldBlock,
 ) {
-    let (entity, kind, source) = hurt_server_args(hurting);
+    let (entity, kind, source) = hurt_server_args(hurting, level.attack());
     HitLevel(level).native_living_shield_block(
         entity,
         kind,
@@ -8578,16 +8578,14 @@ pub(super) fn shield_block(
 }
 
 impl Game<'_> {
-    /// `health::knockback_from` that, while a native mod listens, also records what the attacker
-    /// holds (the player's selected and off-hand stacks, a mob's main hand) for
-    /// `living_knockback`. A nested scope for the same attacker keeps what the outer recorded.
-    pub(super) fn knockback_scope(&self, attacker: i32) -> impl Drop + use<> {
-        use horizon_client::health::{knockback_attacker, knockback_from_holding, knockback_held};
-        if mod_api::__private::mods().is_empty() {
-            return knockback_from_holding(attacker, [None, None]);
-        }
-        let held = if attacker != 0 && attacker == knockback_attacker() {
-            knockback_held()
+    /// The [`Attack`] of `attacker` (an entity id, 0 for none) for the level a hit lands in
+    /// ([`DamageLevel::attacked_by`]). While a native mod listens it also records what the
+    /// attacker holds (the player's selected and off-hand stacks, a mob's main hand) for
+    /// `living_knockback` and the weapon of `living_incoming_damage`; without one it is the
+    /// id alone, two `None`s and no allocation. Taken before the level's borrows of the game.
+    pub(super) fn attack_of(&self, attacker: i32) -> Attack {
+        let held = if mod_api::__private::mods().is_empty() {
+            [None, None]
         } else if self
             .player
             .as_ref()
@@ -8596,19 +8594,28 @@ impl Game<'_> {
             [self.stack_in(self.selected).cloned(), self.offhand.clone()]
         } else if let Some(mob) = self.mobs.iter().find(|m| m.id as i32 == attacker) {
             [mob.extra.main_hand_stack().cloned(), None]
+        } else if let Some(guest) = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.guests.iter().find(|g| g.entity_id == attacker))
+        {
+            [
+                guest.inventory.get(guest.selected).cloned().flatten(),
+                guest.offhand.clone(),
+            ]
         } else {
             [None, None]
         };
-        knockback_from_holding(attacker, held)
+        Attack { attacker, held }
     }
-    /// [`Self::knockback_scope`] for the attacker a damage source names: the player, a mob, or
-    /// (none) whoever the enclosing scope already names.
-    pub(super) fn knockback_scope_for(&self, attacker: Option<Who>) -> impl Drop + use<> {
-        self.knockback_scope(match attacker {
-            Some(Who::Player) => self.player.as_ref().map_or(0, |p| p.entity_id),
-            Some(Who::Mob(id)) => id as i32,
-            None => horizon_client::health::knockback_attacker(),
-        })
+    /// [`Self::attack_of`] for the attacker a damage source names: the player, a mob, or (none)
+    /// the attack the enclosing [`Self::with_attack`] lends.
+    pub(super) fn attack_of_who(&self, attacker: Option<Who>) -> Attack {
+        match attacker {
+            Some(Who::Player) => self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id)),
+            Some(Who::Mob(id)) => self.attack_of(id as i32),
+            None => self.current_attack(),
+        }
     }
 }
 
@@ -8622,7 +8629,7 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
     let attacker = match &pushed {
         Hurting::Mob(mob, damage) => match damage.attacker.or(mob.ai.last_hurt_by) {
             Some(Who::Mob(id)) => id as i32,
-            _ => horizon_client::health::knockback_attacker(),
+            _ => level.attack().attacker,
         },
         Hurting::Player(_, source)
         | Hurting::Dragon(_, source)
@@ -8630,26 +8637,26 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
             if source.causing != 0 {
                 source.causing
             } else {
-                horizon_client::health::knockback_attacker()
+                level.attack().attacker
             }
         }
     };
-    let (entity, kind, source) = hurt_server_args(pushed);
+    let attack = level.attack();
+    let (entity, kind, source) = hurt_server_args(pushed, level.attack());
     let mut canceled = false;
-    horizon_client::health::with_held(|[main, off]| {
-        HitLevel(level).native_living_knockback(
-            entity,
-            kind,
-            &source,
-            attacker,
-            main.as_ref(),
-            off.as_ref(),
-            &mut knock.strength,
-            &mut knock.x,
-            &mut knock.z,
-            &mut canceled,
-        );
-    });
+    let [main, off] = &attack.held;
+    HitLevel(level).native_living_knockback(
+        entity,
+        kind,
+        &source,
+        attacker,
+        main.as_ref(),
+        off.as_ref(),
+        &mut knock.strength,
+        &mut knock.x,
+        &mut knock.z,
+        &mut canceled,
+    );
     canceled
 }
 
@@ -8709,21 +8716,25 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
     };
 
 /// `native_living_incoming_damage`'s entity, entity type and source for a hit.
-fn hurt_server_args(hurting: Hurting<'_>) -> (i32, &str, HurtSource<'_>) {
+fn hurt_server_args<'a>(hurting: Hurting<'a>, attack: &Attack) -> (i32, &'a str, HurtSource<'a>) {
     match hurting {
         Hurting::Player(entity, source) => (entity, "minecraft:player", source),
-        Hurting::Mob(mob, damage) => (mob.id as i32, mob.kind.id.as_str(), mob_source(damage)),
+        Hurting::Mob(mob, damage) => (
+            mob.id as i32,
+            mob.kind.id.as_str(),
+            mob_source(damage, attack),
+        ),
         Hurting::Dragon(entity, source) => (entity, "minecraft:ender_dragon", source),
         Hurting::ArmorStand(entity, source) => (entity, "minecraft:armor_stand", source),
     }
 }
 /// A mob's damage as its `DamageSource`: the causing entity is known when it
-/// is a mob, or the player whose attack scope the hit lands in, and is the direct one too
+/// is a mob, or the player whose attack the level lends, and is the direct one too
 /// when it deals the damage itself.
-fn mob_source(damage: &Damage) -> HurtSource<'static> {
+fn mob_source(damage: &Damage, attack: &Attack) -> HurtSource<'static> {
     let causing = match damage.attacker {
         Some(Who::Mob(id)) => id as i32,
-        Some(Who::Player) => horizon_client::health::knockback_attacker(),
+        Some(Who::Player) => attack.attacker,
         None => 0,
     };
     let melee = super::creatures::melee(damage.kind);
@@ -12529,14 +12540,21 @@ mod tests {
 
     #[test]
     fn the_damage_hook_names_the_source() {
-        use super::{HurtSource, Hurting, hurt_server_args, mob_source};
+        use super::{Attack, HurtSource, Hurting, hurt_server_args, mob_source};
+        use horizon_client::health::NO_ATTACK;
         use horizon_client::mobs::{Damage, DamageKind as K, Who};
         let source = |kind, attacker| {
-            let s = mob_source(&Damage {
-                kind,
-                attacker,
-                from: None,
-            });
+            let s = mob_source(
+                &Damage {
+                    kind,
+                    attacker,
+                    from: None,
+                },
+                &Attack {
+                    attacker: 7,
+                    held: Default::default(),
+                },
+            );
             (s.damage_type, s.causing, s.direct)
         };
         let zombie = Some(Who::Mob(3));
@@ -12545,11 +12563,8 @@ mod tests {
         assert_eq!(source(K::Arrow, zombie), ("minecraft:arrow", 3, 0));
         let blast = source(K::Explosion, zombie);
         assert_eq!(blast, ("minecraft:player_explosion", 3, 0));
-        // A player behind a mob's hit is the one whose attack it lands in (none outside one);
-        // a fall has no source.
-        let hit = source(K::PlayerAttack, Some(Who::Player));
-        assert_eq!(hit, ("minecraft:player_attack", 0, 0));
-        let _attack = horizon_client::health::knockback_from(7);
+        // A player behind a mob's hit is the one whose attack the level lends; a fall has no
+        // source.
         let hit = source(K::PlayerAttack, Some(Who::Player));
         assert_eq!(hit, ("minecraft:player_attack", 7, 7));
         assert_eq!(source(K::Fall, None), ("minecraft:fall", 0, 0));
@@ -12560,9 +12575,15 @@ mod tests {
             position: None,
         };
         let player = (2, "minecraft:player", arrow);
-        assert_eq!(hurt_server_args(Hurting::Player(2, arrow)), player);
+        assert_eq!(
+            hurt_server_args(Hurting::Player(2, arrow), &NO_ATTACK),
+            player
+        );
         let dragon = (5, "minecraft:ender_dragon", arrow);
-        assert_eq!(hurt_server_args(Hurting::Dragon(5, arrow)), dragon);
+        assert_eq!(
+            hurt_server_args(Hurting::Dragon(5, arrow), &NO_ATTACK),
+            dragon
+        );
     }
 
     /// A mod container opens a slot grid or a furnace's menu, by its slot
