@@ -1,5 +1,5 @@
 //! A level's blocks and time for native server mods, through a `LevelRef`
-//! (docs/native-mods.md, "Entity and level handles", #7387). They read any
+//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387). They read any
 //! level the server has loaded, the one in place or another, and return
 //! `None` (or `false`) on a client, for a handle of an earlier open, or for a
 //! block in a chunk that isn't loaded.

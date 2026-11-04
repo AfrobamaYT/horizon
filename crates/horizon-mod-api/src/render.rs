@@ -1,4 +1,4 @@
-//! Render hook points for native mods (docs/native-mods.md): empty functions the renderer calls at
+//! Render hook points for native mods (docs/modding/src/how-to/native-mods.md): empty functions the renderer calls at
 //! fixed places of a frame, which a mod's mixins hook like those of
 //! `horizon-client/src/game/native_hooks.rs`, and listed with them in `native-hooks.json`.
 
@@ -443,7 +443,7 @@ pub struct Vertex {
     /// Smooth light, 16x fixed point: sky in bits 0..8, block in bits 8..16.
     pub light: u32,
     /// RGBA8_SNORM face normal; w = -127 for two-sided lighting, 0 to keep baked/unlit colour,
-    /// [`CULL_BACK`] to keep it and also drop back-facing pixels.
+    /// `CULL_BACK` to keep it and also drop back-facing pixels.
     pub normal: [i8; 4],
     /// The `GLINT_TEXTURING` atlas UV for a foil item quad; zero elsewhere.
     pub glint_uv: [f32; 2],

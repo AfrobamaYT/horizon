@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "add_client_reload_listeners",
+      "doc": "Register client asset reload listeners before a reload stages its\nassets (NeoForge's `AddClientReloadListenersEvent`, the client's\ncounterpart of `native_add_server_reload_listeners`): the first load\nbefore the loader thread runs, then every later reload — the player\nchanged resource packs, F3+T was pressed, or a server sent its packs.\nThe listener's `prepare` then reads the merged asset view with\nresource-pack overrides resolved, and its returned apply publishes the\nparsed state, all applies after all prepares, before\n`native_client_resources_reloaded`. A listener that returns an error\naborts the reload and keeps every listener's previous assets.\nClient-side.",
       "side": "client",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_add_client_reload_listeners",

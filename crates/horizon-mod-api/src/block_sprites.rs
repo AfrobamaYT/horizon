@@ -16,7 +16,7 @@ pub struct SpriteRef {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FaceSprite {
     pub sprite: SpriteRef,
-    /// Where the face lies on the side, in the side's two axes ([`side_axes`]), from 0 to 1 across the block:
+    /// Where the face lies on the side, in the side's two axes (`side_axes`), from 0 to 1 across the block:
     /// `[a0, b0, a1, b1]`. `[0, 0, 1, 1]` for a whole face.
     pub rect: [f32; 4],
     /// How deep into the block the face lies from the side's own plane (0 for a cube's face, 0.5 for a slab's top).

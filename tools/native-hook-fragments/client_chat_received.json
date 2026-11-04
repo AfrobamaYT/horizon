@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "client_chat_received",
+      "doc": "NeoForge's `ClientChatReceivedEvent`: a chat line from the server is\nabout to show, once Chat Delay lets it through. `system` is a system\nmessage (`ClientChatReceivedEvent.System`), shown in the action bar\nwhen `overlay` is set; otherwise a player or disguised message in its\nchat type `chat_type` (`getBoundChatType`, its registry name; `None`\nfor a system message or an inline chat type). `sender` is the player's\nUUID, 0 (`Util.NIL_UUID`) for system and disguised messages. `message`\nstarts as the decorated line; replace it and the chat shows the new\none, while the narrator still says the original. Set `cancel` and it\ndoesn't show: a delayed message lets the next one through. Lines the\nclient adds itself and validation errors are not told. Client-side.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_client_chat_received",
       "neoforge": "ClientChatReceivedEvent",
       "side": "client",

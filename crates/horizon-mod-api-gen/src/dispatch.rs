@@ -371,7 +371,13 @@ pub(super) fn emit(
         } else {
             &mut dispatch
         };
-        let mut method_source = doc_comments(&method.attrs, name, false)?;
+        let mut method_source = String::new();
+        for line in hook["doc"].as_str().ok_or("doc missing")?.trim().lines() {
+            method_source.push_str(&format!(
+                "///{}{line}\n",
+                if line.is_empty() { "" } else { " " }
+            ));
+        }
         let side = match hook.side {
             HelperSide::Server => "server",
             HelperSide::Client => "client",
@@ -406,7 +412,7 @@ pub(super) fn emit(
             .as_ref()
             .map_or(trait_name, |(part_trait, _)| part_trait);
         dispatch.push_str(&format!(
-            "/// What [`{trait_name}::{name}`] is told.\npub struct {event_type}{generics} {{\n{fields}}}\n"
+            "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
         let build = format!("let mut {event} = {event_type} {{ {} }};", inits.join(", "));
         // A trait mod's call is marked with the mod for a panic to name; render hooks are called bare.
@@ -473,7 +479,7 @@ pub(super) fn emit(
             format!("if !super::listened(HookId::{hook_id}) {{ return; }}")
         };
         dispatch.push_str(&format!(
-            "pub fn dispatch_{name}({dispatch_params}) {{ {early_return}\n{body} }}\n"
+            "#[doc(hidden)] pub fn dispatch_{name}({dispatch_params}) {{ {early_return}\n{body} }}\n"
         ));
     }
     Ok(HookSources {

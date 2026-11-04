@@ -537,7 +537,7 @@ fn tidy(slot: &mut Option<ItemStack>) {
     }
 }
 
-/// Hook point for native mods (docs/native-mods.md, listed in `native-hooks.json`
+/// Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`
 /// with the game's): container slot `slot` of the content mod menu type `menu`
 /// (`data/<id>/horizon/menu/`) is asked whether it takes `stack`
 /// (`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).

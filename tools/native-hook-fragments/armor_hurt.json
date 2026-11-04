@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "armor_hurt",
+      "doc": "Armor is about to take durability damage from a hit (NeoForge's\n`ArmorHurtEvent`, vanilla's `LivingEntity.doHurtEquipment`): once per\nhit, for the pieces that would wear. `entity` is the wearer's entity id,\n`player` its UUID (None for a mob), `kind` its type and `source` the hit's\ndamage type (`causing` and `direct` are 0: the hit does not carry them here). Each entry has\nits `slot`, the `stack`, the `damage` vanilla worked out and a\n`new_damage` a mod may change (0 for none; Unbreaking is applied\nafter). Canceling means no armor damage. A server player's `feet`,\n`legs`, `chest` and `head`; a mob's `body` (a horse's armor).\nFalling-block helmet hits (`hurtHelmet`) are not ported yet.\nServer-side.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_armor_hurt",
       "neoforge": "ArmorHurtEvent",
       "side": "server",

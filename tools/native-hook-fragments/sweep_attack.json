@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "sweep_attack",
+      "doc": "NeoForge's `SweepAttackEvent`: a player's damaging melee hit on a\n`target` (`minecraft:zombie`, `minecraft:oak_boat`) is about to sweep or\nnot, after `native_critical_hit`. `vanilla_sweep` is `Player.isSweepAttack`\n(a charged, grounded, not critical sword hit below the speed limit);\n`sweeping` starts as it and may force or stop the sweep; `canceled` skips\nthe later mods and keeps `sweeping` as it is (a mod doing its own sweep\ncancels with `sweeping` false). A critical hit that sweeps has both\nsounds. Fires on the Game that runs the attack, and on the attacking\nclient, which only asks.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_sweep_attack",
       "neoforge": "SweepAttackEvent",
       "side": "both",
