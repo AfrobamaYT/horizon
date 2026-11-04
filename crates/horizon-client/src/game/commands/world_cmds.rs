@@ -1,6 +1,7 @@
 //! `/recipe`, `/damage`, `/rotate`, `/swing`, `/playsound`, `/stopsound`,
 //! `/particle`, `/attribute`, `/ride` and `/spreadplayers`.
 use super::{Arg, Context, Game, R, Target, err, wrap_degrees};
+use crate::game::living_attributes::AttributeWrite;
 use horizon_client::{
     mobs::{
         Damage, DamageKind, Who,
@@ -841,15 +842,8 @@ impl Game<'_> {
                         Ok((v * scale) as i32)
                     }
                     "attribute.base.set" => {
-                        let handle = player
-                            .attributes
-                            .get_instance(Some(key))
-                            .ok()
-                            .flatten()
+                        self.write_attribute(target, &attribute, AttributeWrite::Base(value_arg))
                             .ok_or_else(|| no_attribute(&name, &description))?;
-                        let _ = player.attributes.edit(&handle, |value, observer| {
-                            value.set_base_value(value_arg, observer)
-                        });
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.set.success",
                             &[description, name, java_double_text(value_arg)],
@@ -857,16 +851,12 @@ impl Game<'_> {
                         Ok(1)
                     }
                     "attribute.base.reset" => {
-                        if !player
-                            .attributes
-                            .reset_base(Some(key.clone()))
-                            .unwrap_or(false)
-                        {
-                            return Err(no_attribute(&name, &description));
-                        }
-                        let v = player
-                            .attributes
-                            .value(Some(key.clone()), ValueKind::Base)
+                        self.write_attribute(target, &attribute, AttributeWrite::ResetBase)
+                            .ok_or_else(|| no_attribute(&name, &description))?;
+                        let v = self
+                            .player
+                            .as_mut()
+                            .and_then(|p| p.attributes.value(Some(key), ValueKind::Base).ok())
                             .unwrap_or(0.0);
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.reset.success",
@@ -875,11 +865,16 @@ impl Game<'_> {
                         Ok(1)
                     }
                     "attribute.modifier.add" => {
-                        if player
-                            .attributes
-                            .has_modifier(Some(key), &modifier_id)
-                            .unwrap_or(false)
-                        {
+                        let added = AttributeWrite::add(
+                            &modifier_id,
+                            value_arg,
+                            command_operation(ctx),
+                            true,
+                            false,
+                        )
+                        .and_then(|write| self.write_attribute(target, &attribute, write))
+                        .ok_or_else(|| no_attribute(&name, &description))?;
+                        if !added {
                             return Err(text_error(
                                 "commands.attribute.failed.modifier_already_present",
                                 &[
@@ -889,14 +884,6 @@ impl Game<'_> {
                                 ],
                             ));
                         }
-                        let op = ctx
-                            .literals
-                            .last()
-                            .cloned()
-                            .unwrap_or_else(|| "add_value".into());
-                        player
-                            .set_modifier(&attribute, &modifier_id, value_arg, &op, true)
-                            .map_err(|_| no_attribute(&name, &description))?;
                         self.feedback(Text::translate(
                             "commands.attribute.modifier.add.success",
                             &[Text::literal(modifier_id), description, name],
@@ -904,11 +891,12 @@ impl Game<'_> {
                         Ok(1)
                     }
                     "attribute.modifier.remove" => {
-                        if !player
-                            .attributes
-                            .has_modifier(Some(key), &modifier_id)
-                            .unwrap_or(false)
-                        {
+                        let removed = self.write_attribute(
+                            target,
+                            &attribute,
+                            AttributeWrite::Remove(modifier_id.clone()),
+                        );
+                        if removed != Some(true) {
                             return Err(text_error(
                                 "commands.attribute.failed.no_modifier",
                                 &[
@@ -918,8 +906,6 @@ impl Game<'_> {
                                 ],
                             ));
                         }
-                        let _ =
-                            player.set_modifier(&attribute, &modifier_id, 0.0, "add_value", false);
                         self.feedback(Text::translate(
                             "commands.attribute.modifier.remove.success",
                             &[Text::literal(modifier_id), description, name],
@@ -1023,8 +1009,8 @@ impl Game<'_> {
                     }
                     "attribute.base.set" => {
                         // AttributeInstance keeps the raw base and clamps only the
-                        // effective value; Health is unchanged.
-                        finalize::set_base(m, attr, value_arg);
+                        // effective value.
+                        self.write_attribute(target, &attribute, AttributeWrite::Base(value_arg));
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.set.success",
                             &[description, name, java_double_text(value_arg)],
@@ -1032,9 +1018,12 @@ impl Game<'_> {
                         Ok(1)
                     }
                     "attribute.base.reset" => {
-                        let default = finalize::default_value(m, attr).unwrap_or_default();
-                        finalize::set_base(m, attr, default);
-                        let v = finalize::base_value(m, attr);
+                        self.write_attribute(target, &attribute, AttributeWrite::ResetBase);
+                        let v = self
+                            .mobs
+                            .iter()
+                            .find(|m| m.id == mob_id)
+                            .map_or(0.0, |m| finalize::base_value(m, attr));
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.reset.success",
                             &[description, name, java_double_text(v)],
@@ -1042,18 +1031,20 @@ impl Game<'_> {
                         Ok(1)
                     }
                     "attribute.modifier.add" => {
-                        if finalize::has_modifier(m, attr, &modifier_id) {
+                        let added = AttributeWrite::add(
+                            &modifier_id,
+                            value_arg,
+                            command_operation(ctx),
+                            true,
+                            false,
+                        )
+                        .and_then(|write| self.write_attribute(target, &attribute, write));
+                        if added != Some(true) {
                             return Err(text_error(
                                 "commands.attribute.failed.modifier_already_present",
                                 &[Text::literal(modifier_id.clone()), description, name],
                             ));
                         }
-                        let op = match ctx.literals.last().map(String::as_str) {
-                            Some("add_multiplied_base") => finalize::Op::AddMultipliedBase,
-                            Some("add_multiplied_total") => finalize::Op::AddMultipliedTotal,
-                            _ => finalize::Op::AddValue,
-                        };
-                        finalize::add_modifier(m, attr, modifier_id.clone(), value_arg, op);
                         self.feedback(Text::translate(
                             "commands.attribute.modifier.add.success",
                             &[Text::literal(modifier_id.clone()), description, name],
@@ -1061,10 +1052,14 @@ impl Game<'_> {
                         Ok(1)
                     }
                     "attribute.modifier.remove" => {
-                        if !finalize::has_modifier(m, attr, &modifier_id) {
+                        let removed = self.write_attribute(
+                            target,
+                            &attribute,
+                            AttributeWrite::Remove(modifier_id.clone()),
+                        );
+                        if removed != Some(true) {
                             return Err(no_modifier);
                         }
-                        finalize::remove_modifier(m, attr, &modifier_id);
                         self.feedback(Text::translate(
                             "commands.attribute.modifier.remove.success",
                             &[Text::literal(modifier_id.clone()), description, name],
@@ -1128,7 +1123,6 @@ impl Game<'_> {
         (name, description): (&Text, &Text),
         (value_arg, scale, modifier_id, op): (f64, f64, &str, &str),
     ) -> R<i32> {
-        use horizon_world::attributes::{Modifier, Operation};
         let no_attribute = || {
             text_error(
                 "commands.attribute.failed.no_attribute",
@@ -1172,9 +1166,8 @@ impl Game<'_> {
                 )
             }
             "attribute.base.set" => {
-                map.edit(key, |a, o| {
-                    let _ = a.set_base_value(value_arg, o);
-                });
+                self.write_attribute(target, attribute, AttributeWrite::Base(value_arg))
+                    .ok_or_else(no_attribute)?;
                 (
                     "commands.attribute.base_value.set.success",
                     vec![
@@ -1186,8 +1179,12 @@ impl Game<'_> {
                 )
             }
             "attribute.base.reset" => {
-                map.reset_base(key);
-                let v = map.base_value(key).unwrap_or(0.0);
+                self.write_attribute(target, attribute, AttributeWrite::ResetBase)
+                    .ok_or_else(no_attribute)?;
+                let v = self
+                    .generic_attributes(target, attribute)
+                    .and_then(|map| map.base_value(key).ok())
+                    .unwrap_or(0.0);
                 (
                     "commands.attribute.base_value.reset.success",
                     vec![description.clone(), name.clone(), java_double_text(v)],
@@ -1195,7 +1192,13 @@ impl Game<'_> {
                 )
             }
             "attribute.modifier.add" => {
-                if map.has_modifier(key, modifier_id) {
+                let write =
+                    AttributeWrite::add(modifier_id, value_arg, operation_named(op), true, false)
+                        .ok_or_else(no_attribute)?;
+                if !self
+                    .write_attribute(target, attribute, write)
+                    .ok_or_else(no_attribute)?
+                {
                     return Err(text_error(
                         "commands.attribute.failed.modifier_already_present",
                         &[
@@ -1205,16 +1208,6 @@ impl Game<'_> {
                         ],
                     ));
                 }
-                let operation = match op {
-                    "add_multiplied_base" => Operation::AddMultipliedBase,
-                    "add_multiplied_total" => Operation::AddMultipliedTotal,
-                    _ => Operation::AddValue,
-                };
-                let m =
-                    Modifier::new(modifier_id, value_arg, operation).map_err(|_| no_attribute())?;
-                map.edit(key, |a, o| {
-                    let _ = a.add_permanent(m, o);
-                });
                 (
                     "commands.attribute.modifier.add.success",
                     vec![
@@ -1226,12 +1219,10 @@ impl Game<'_> {
                 )
             }
             "attribute.modifier.remove" => {
-                if !map.has_modifier(key, modifier_id) {
+                let write = AttributeWrite::Remove(modifier_id.to_owned());
+                if self.write_attribute(target, attribute, write) != Some(true) {
                     return Err(no_modifier());
                 }
-                map.edit(key, |a, o| {
-                    let _ = a.remove(modifier_id, o);
-                });
                 (
                     "commands.attribute.modifier.remove.success",
                     vec![
@@ -1696,6 +1687,21 @@ pub(super) fn look_at(from: [f64; 3], to: [f64; 3]) -> [f32; 2] {
     let pitch = wrap_degrees((-(dy.atan2(horizontal) * 57.295_776_367_187_5)) as f32);
     let yaw = (dz.atan2(dx) * 57.295_776_367_187_5) as f32 - 90.0;
     [wrap_degrees(yaw), pitch]
+}
+
+/// `AttributeModifier.Operation` by its name in `/attribute … modifier add`.
+fn operation_named(op: &str) -> horizon_world::attributes::Operation {
+    use horizon_world::attributes::Operation;
+    match op {
+        "add_multiplied_base" => Operation::AddMultipliedBase,
+        "add_multiplied_total" => Operation::AddMultipliedTotal,
+        _ => Operation::AddValue,
+    }
+}
+
+/// The operation `/attribute … modifier add` names last.
+fn command_operation(ctx: &Context) -> horizon_world::attributes::Operation {
+    operation_named(ctx.literals.last().map_or("add_value", String::as_str))
 }
 
 #[cfg(test)]

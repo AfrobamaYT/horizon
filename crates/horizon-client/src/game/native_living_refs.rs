@@ -7,11 +7,16 @@
 //! client answer for the local player from the client's own copy.
 use super::Game;
 use super::commands::{Target, items::Owner};
+use super::living_attributes::AttributeWrite;
 use crate::mobs::Who;
 use horizon_client::items::ItemStack;
 use horizon_client::mobs::Mob;
+use horizon_world::attributes::Operation;
 use mod_api::first_person::Hand;
-use mod_api::{EntityRef, EquipmentSlot, LivingRef};
+use mod_api::{
+    AttributeModifier, AttributeOperation, EntityRef, EquipmentSlot, Identifier, LivingRef,
+    ModifierLifetime,
+};
 
 /// A player's armour slots (`armor`, head first) by equipment slot.
 fn armor_index(slot: EquipmentSlot) -> Option<usize> {
@@ -116,6 +121,105 @@ impl Game<'_> {
     /// (`AttributeMap.getBaseValue`), read as the effective value is.
     pub(super) fn native_living_attribute_base(&self, living: LivingRef, id: &str) -> Option<f64> {
         self.native_living_attribute(living, id, horizon_world::attribute_map::ValueKind::Base)
+    }
+
+    /// Adds an attribute modifier (`AttributeInstance.addTransientModifier`
+    /// or `addPermanentModifier`). A permanent one is saved with the entity;
+    /// a transient one lasts until it unloads. It goes where `/attribute`
+    /// writes (`Game::write_attribute`), so gameplay and the entity's clients
+    /// see it. False when the entity already has a modifier with that id on
+    /// the attribute (vanilla throws), for an attribute the entity type does
+    /// not have, a non-finite amount, the dragon (whose attributes nothing
+    /// reads yet), a stale handle, or on a client.
+    pub(super) fn native_living_add_attribute_modifier(
+        &mut self,
+        living: LivingRef,
+        attribute: &str,
+        modifier: AttributeModifier,
+        lifetime: ModifierLifetime,
+    ) -> bool {
+        self.native_living_add_modifier(living, attribute, modifier, lifetime, false)
+    }
+
+    /// Adds an attribute modifier in place of the one with the same id, if
+    /// any (`addOrUpdateTransientModifier`, `addOrReplacePermanentModifier`):
+    /// the new one's lifetime wins. False as `add_attribute_modifier` is,
+    /// except that a taken id is replaced.
+    pub(super) fn native_living_replace_attribute_modifier(
+        &mut self,
+        living: LivingRef,
+        attribute: &str,
+        modifier: AttributeModifier,
+        lifetime: ModifierLifetime,
+    ) -> bool {
+        self.native_living_add_modifier(living, attribute, modifier, lifetime, true)
+    }
+
+    /// Removes the modifier with id `id` from the attribute
+    /// (`AttributeInstance.removeModifier`), whatever its lifetime. False when
+    /// there was none, and in the cases `add_attribute_modifier` is.
+    pub(super) fn native_living_remove_attribute_modifier(
+        &mut self,
+        living: LivingRef,
+        attribute: &str,
+        id: &Identifier,
+    ) -> bool {
+        self.native_living_write(living, attribute, AttributeWrite::Remove(id.to_string()))
+    }
+
+    /// Sets the attribute's base value (`AttributeInstance.setBaseValue`);
+    /// the value stays within the attribute's range. False for a non-finite
+    /// base, and in the cases `add_attribute_modifier` is.
+    pub(super) fn native_living_set_attribute_base(
+        &mut self,
+        living: LivingRef,
+        attribute: &str,
+        base: f64,
+    ) -> bool {
+        base.is_finite() && self.native_living_write(living, attribute, AttributeWrite::Base(base))
+    }
+
+    fn native_living_add_modifier(
+        &mut self,
+        living: LivingRef,
+        attribute: &str,
+        modifier: AttributeModifier,
+        lifetime: ModifierLifetime,
+        replace: bool,
+    ) -> bool {
+        let operation = match modifier.operation {
+            AttributeOperation::AddValue => Operation::AddValue,
+            AttributeOperation::AddMultipliedBase => Operation::AddMultipliedBase,
+            AttributeOperation::AddMultipliedTotal => Operation::AddMultipliedTotal,
+            _ => unreachable!("AttributeOperation: unhandled variant"),
+        };
+        let permanent = match lifetime {
+            ModifierLifetime::Transient => false,
+            ModifierLifetime::Permanent => true,
+            _ => unreachable!("ModifierLifetime: unhandled variant"),
+        };
+        if !modifier.amount.is_finite() {
+            return false;
+        }
+        AttributeWrite::add(
+            &modifier.id.to_string(),
+            modifier.amount,
+            operation,
+            permanent,
+            replace,
+        )
+        .is_some_and(|write| self.native_living_write(living, attribute, write))
+    }
+
+    fn native_living_write(
+        &mut self,
+        living: LivingRef,
+        name: &str,
+        write: AttributeWrite,
+    ) -> bool {
+        self.native_living_target(living)
+            .and_then(|t| self.write_attribute(t, name, write))
+            .unwrap_or(false)
     }
 
     fn native_living_attribute(

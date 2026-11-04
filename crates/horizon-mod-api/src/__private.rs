@@ -15,8 +15,8 @@ pub fn listened(hook: HookId) -> bool {
 
 pub use crate::block_entity_type::validate_block_entity_type_keys;
 pub use crate::part_table::{
-    HookParts, KnownIds, PartsRef, block_entity_types, has_part_hook, has_scoped_hook,
-    install_parts, mark_game_thread, parts, resolve_parts,
+    HookParts, KnownIds, PartsRef, block_entity_types, block_listens, has_part_hook,
+    has_scoped_hook, install_parts, mark_game_thread, parts, resolve_parts,
 };
 pub use crate::phase::install_packages;
 #[cfg(any(test, feature = "testing"))]

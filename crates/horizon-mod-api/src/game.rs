@@ -13,6 +13,7 @@ pub enum NativeHeightmap {
 /// A run: `height` blocks up a column from `y` (from the column's `surface` height when one is
 /// given), set to palette entry `block`, only where filter `only` matches when one is given.
 #[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeBlockRun {
     pub x: i32,
     pub z: i32,
@@ -25,6 +26,7 @@ pub struct NativeBlockRun {
 /// A bulk edit: block states and block predicates as commands write them (without NBT), and the runs naming them
 /// by index.
 #[derive(Clone, Debug, PartialEq, Default)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeBlockEdit {
     pub palette: Vec<String>,
     pub filters: Vec<String>,
@@ -33,6 +35,7 @@ pub struct NativeBlockEdit {
 /// The camera shake native mods ask for (`native_camera_shake`): turns in
 /// degrees, and an offset in blocks along the camera's right, up and back.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeShake {
     pub pitch: f32,
     pub yaw: f32,
@@ -61,6 +64,7 @@ pub enum SleepProblem {
 }
 /// The world's clock as a client mod reads it (`native_clock`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeClock {
     /// Ticks since the world was created (`Level.getGameTime`).
     pub game_time: i64,
@@ -72,6 +76,7 @@ pub struct NativeClock {
 /// What `native_read_columns` read: the blocks round each column's height (`bases`, none where it isn't loaded),
 /// as indexes into `palette`, a column after another, and three biome tints a column (grass, foliage, water).
 #[derive(Clone, Debug, PartialEq, Default)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeColumnBlocks {
     pub palette: Vec<String>,
     pub bases: Vec<Option<i32>>,
@@ -80,6 +85,7 @@ pub struct NativeColumnBlocks {
 }
 /// Which side reads a config and when (NeoForge's `ModConfig.Type`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum NativeConfigKind {
     /// The window only, when the game starts.
     Client,
@@ -142,6 +148,7 @@ pub struct NativeConfigFile {
 }
 /// A data map type a mod registers (`RegisterDataMapTypesEvent`).
 #[derive(Clone, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeDataMapType {
     /// `mod_id:name`: not in the `minecraft` namespace. Its files are
     /// `data/<mod_id>/data_maps/<registry path>/<name>.json`.
@@ -152,6 +159,7 @@ pub struct NativeDataMapType {
 /// An experience orb as a server mod reads it (`native_experience_orbs`).
 /// Read by mods only.
 #[derive(Clone, Debug)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeExperienceOrb {
     /// The entity's ID, as `native_entity_join_level` names it.
     pub id: u32,
@@ -163,6 +171,7 @@ pub struct NativeExperienceOrb {
 }
 /// What a mod's falling block does when it lands and when it hits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NativeFalling {
     /// `FallingBlockEntity.dropItem`: whether it drops as an item where it
     /// can't be placed.
@@ -181,6 +190,7 @@ impl Default for NativeFalling {
 }
 /// A stack as a client mod's use events carry it.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeHeldItem {
     pub id: String,
     pub count: u32,
@@ -193,6 +203,7 @@ pub struct NativeHeldItem {
 }
 /// The block a ray along the view meets.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeHit {
     pub block_x: i32,
     pub block_y: i32,
@@ -218,6 +229,7 @@ pub enum NativeModEvent {
 /// A map as a native mod sees it when `native_map_decorations` is asked.
 // Native mods read it; nothing in Horizon does.
 #[derive(Clone, Copy, Debug)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeMapInfo<'a> {
     /// The map's id (`map_<id>`).
     pub id: i32,
@@ -234,6 +246,7 @@ pub struct NativeMapInfo<'a> {
 /// An icon a native mod puts on a map: the same place and pose as vanilla's
 /// decorations (`MapDecoration`).
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeMapDecoration {
     /// An atlas sprite: vanilla's `map/decorations/<name>`, or a content
     /// mod's texture. An unknown sprite is left out.
@@ -254,6 +267,7 @@ pub struct NativeMapDecoration {
 /// Angles are in degrees, interpolated to the frame's partial tick.
 // Native mods read it; nothing in Horizon does.
 #[derive(Clone, Debug)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeMobRender<'a> {
     /// The mob's network id, as the mob helpers and mod messages name it.
     pub id: u32,
@@ -288,6 +302,7 @@ pub struct NativeMobRender<'a> {
 /// `native_mob_layer`.
 // Native mods read it; nothing in Horizon does.
 #[derive(Clone, Copy, Debug)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativePlayerRender<'a> {
     /// The player's profile name.
     pub name: &'a str,
@@ -298,6 +313,7 @@ pub struct NativePlayerRender<'a> {
 /// `mymod:block/casing`) and its UVs in texels of 16 per side, as a model
 /// face's `uv` (none takes the box's own, as a model's default).
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct CubeFace<'a> {
     pub sprite: &'a str,
     pub uv: Option<[f32; 4]>,
@@ -307,6 +323,7 @@ pub struct CubeFace<'a> {
 pub(crate) mod built {
     #[allow(unused_imports)]
     use super::*;
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativeConfigFile {
         pub mod_id: String,
         pub kind: NativeConfigKind,

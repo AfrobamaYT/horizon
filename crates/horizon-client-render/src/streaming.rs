@@ -1068,6 +1068,7 @@ impl<G: ChunkGenerator> Jobs<G> {
                     cutout_leaves: settings.cutout_leaves,
                     translucent_layers: &settings.translucent_layers,
                     leaf_culling: settings.leaf_culling,
+                    hidden_states: &context.hidden_states,
                     assets: &context.assets,
                     render: &context.render,
                     tables: &context.tables,
@@ -1090,6 +1091,9 @@ pub struct WorkerContext {
     pub tables: Arc<MeshTables>,
     pub biomes: Arc<crate::biome::Biomes>,
     pub light: Arc<LightTables>,
+    /// The block states a mod hides from the mesher, by state id (`Mesher::hidden_states`); empty
+    /// for none.
+    pub hidden_states: Arc<[bool]>,
 }
 impl Streaming {
     pub fn new<G: ChunkGenerator>(
@@ -3505,6 +3509,7 @@ mod tests {
             biomes: Arc::new(Biomes::load(&root).unwrap()),
             assets,
             render,
+            hidden_states: Arc::from([]),
         });
         let generator = Arc::new(Generator::default());
         let mut streaming = Streaming::new(generator.clone(), context, 1);

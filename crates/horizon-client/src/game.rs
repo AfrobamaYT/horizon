@@ -277,6 +277,7 @@ mod native_projectiles;
 mod native_quick_move;
 mod native_raid_refs;
 mod native_recipes;
+mod native_render_visibility;
 mod native_server;
 mod native_shaders;
 mod native_sound_refs;
@@ -2403,6 +2404,7 @@ impl PackResources {
             tables: old.tables.clone(),
             biomes,
             light: old.light.clone(),
+            hidden_states: old.hidden_states.clone(),
         })
     }
     /// The pack tables over their parts, which `load_resources` builds on
@@ -2430,6 +2432,7 @@ impl PackResources {
                 tables,
                 biomes,
                 light,
+                hidden_states: Arc::from([]),
             }),
             assets,
             render,
@@ -4459,6 +4462,7 @@ impl Game<'_> {
             }
         }
         self.tick_dropped_items(&mut round);
+        self.drain_entity_inside();
         self.native_tick_post_batch(round);
     }
     fn tick_dropped_items(&mut self, round: &mut native_ticks::TickRound) {
@@ -5336,7 +5340,7 @@ impl Game<'_> {
                     // The last answer, asked from Y `from` at a world revision:
                     // the next ticking section and its mask. It stands for a
                     // later Y up to that section's until a block changes.
-                    let mut last: Option<(u64, i32, Option<(i32, Arc<_>)>)> = None;
+                    let mut last: Option<(u64, i32, Option<(i32, std::rc::Rc<_>)>)> = None;
                     let pos = horizon_core::position::ChunkPos::new(x, z);
                     b.tick_chunk_random_masked(level, ticks, pos, |level, from| {
                         let revision = level.world.revision;
@@ -7433,64 +7437,112 @@ impl Game<'_> {
         }
         self.award_stat("used", &stack.item, 1);
     }
-    fn apply_consume_effect(&mut self, effect: &horizon_client::items::ConsumeEffect) {
+    fn apply_consume_effect(
+        &mut self,
+        effect: &horizon_client::items::ConsumeEffect,
+        mob: Option<mod_api::LivingRef>,
+        allow_native: bool,
+    ) -> Option<bool> {
         use horizon_client::items::ConsumeEffect;
-        match effect {
+        Some(match effect {
             ConsumeEffect::ApplyEffects {
                 effects,
                 probability,
             } => {
-                // ApplyStatusEffectsConsumeEffect.apply: the user's random
-                // (the level's stands in, as for every player draw) is drawn
-                // even at probability 1.
-                if self.world.random.next_float() < *probability {
-                    for eff in effects {
-                        if let Some(def) = horizon_client::brewing::effect(&eff.id) {
-                            if def.instant {
-                                if let Some(a) =
-                                    horizon_client::effects::instant(def.id, eff.amplifier, 1.0)
-                                {
-                                    self.apply_effect_action(a);
-                                }
-                            } else {
-                                let mut instance = horizon_client::effects::EffectInstance::new(
-                                    def.id,
-                                    eff.duration,
-                                    eff.amplifier,
-                                );
-                                instance.ambient = eff.ambient;
-                                instance.visible = eff.show_particles;
-                                self.add_player_effect(instance);
-                            }
-                        }
+                // ApplyStatusEffectsConsumeEffect draws from the user's random,
+                // even at probability 1. The level random stands in for a player's.
+                let draw = match mob {
+                    Some(living) => {
+                        let commands::Target::Mob(id) = self.native_living_target(living)? else {
+                            return None;
+                        };
+                        self.mobs
+                            .iter_mut()
+                            .find(|m| m.id == id)?
+                            .random
+                            .next_float()
+                    }
+                    None => self.world.random.next_float(),
+                };
+                if draw >= *probability {
+                    return Some(false);
+                }
+                let mut changed = false;
+                for eff in effects {
+                    let Some(def) = horizon_client::brewing::effect(&eff.id) else {
+                        continue;
+                    };
+                    if let Some(living) = mob {
+                        let effect = mod_api::NativeActiveEffect::new(
+                            horizon_client::brewing::namespaced(def.id),
+                            eff.duration,
+                            eff.amplifier,
+                            eff.ambient,
+                            eff.show_particles,
+                        );
+                        changed |= self.native_living_add_effect(living, &effect);
+                    } else {
+                        let mut instance = horizon_client::effects::EffectInstance::new(
+                            def.id,
+                            eff.duration,
+                            eff.amplifier,
+                        );
+                        instance.ambient = eff.ambient;
+                        instance.visible = eff.show_particles;
+                        changed |= self.add_player_effect(instance);
                     }
                 }
+                changed
             }
-            ConsumeEffect::ClearAllEffects => {
-                self.potions.effects.clear();
-                self.apply_effect_status();
-            }
-            ConsumeEffect::RemoveEffects(to_remove) => {
-                for target in to_remove {
-                    let id = target.trim_start_matches("minecraft:");
-                    self.potions.effects.list.retain(|e| e.id != id);
+            ConsumeEffect::ClearAllEffects => match mob {
+                Some(living) => self.native_living_remove_all_effects(living),
+                None => self.remove_player_effects(None),
+            },
+            ConsumeEffect::RemoveEffects(effects) => {
+                let mut changed = false;
+                for effect in effects {
+                    changed |= match mob {
+                        Some(living) => self.native_living_remove_effect(living, effect),
+                        None => self
+                            .remove_player_effects(Some(effect.trim_start_matches("minecraft:"))),
+                    };
                 }
-                self.apply_effect_status();
+                changed
             }
-            ConsumeEffect::TeleportRandomly(teleport) => self.teleport_randomly(teleport),
+            ConsumeEffect::TeleportRandomly(teleport) => {
+                if mob.is_some() {
+                    return None;
+                }
+                self.teleport_randomly(teleport)
+            }
             ConsumeEffect::PlaySound(sound) => {
-                // PlaySoundConsumeEffect: at the user's block position.
-                let at = self.player.as_ref().map(|p| {
-                    let b = horizon_core::position::BlockPos::containing(p.position);
-                    [b.x, b.y, b.z].map(|v| f64::from(v) + 0.5)
-                });
-                self.audio.play(sound, at, 1.0, 1.0);
+                let at = match mob {
+                    Some(living) => {
+                        let commands::Target::Mob(id) = self.native_living_target(living)? else {
+                            return None;
+                        };
+                        self.mobs.iter().find(|m| m.id == id).map(|m| m.position)?
+                    }
+                    None => self.player.as_ref()?.position,
+                };
+                let b = horizon_core::position::BlockPos::containing(at);
+                let at = [b.x, b.y, b.z].map(|v| f64::from(v) + 0.5);
+                let level = self.native_level(self.dim.id())?;
+                let source = match mob {
+                    Some(living) => self.native_entity_sound_source(living.entity())?,
+                    None => mod_api::NativeSoundSource::Players,
+                };
+                self.native_queue_sound(level, sound, at, source, 1.0, 1.0, None)?;
+                true
             }
-            // A mod's own kind: the owning mod's hook answers.
             ConsumeEffect::Native { kind, data } => {
+                if !allow_native {
+                    return None;
+                }
                 self.native_consume_effect(kind, data);
+                return None;
             }
-        }
+        })
     }
     fn consume_held(&mut self) {
         if self.creative {
@@ -12896,7 +12948,7 @@ impl Game<'_> {
         self.carried = None;
         self.using = None;
         self.set_screen(Screen::Playing);
-        self.title = None;
+        self.hide_title();
         self.clear_lod();
         self.pending_uploads.clear();
         if let Some(r) = self.renderer.as_mut() {
@@ -13146,17 +13198,14 @@ impl Game<'_> {
         // Clear sync data (registries, dialog tags) so dialogs don't leak
         // between worlds.
         lan::forget_sync_data();
-        self.title = Some(
-            Title::new(
-                std::env::current_dir()?.join("saves"),
-                &self.options.resources,
-            )
-            .with_user(|| self.options.player_name()),
-        );
-        if let Some(title) = &mut self.title {
-            title.last_server = self.settings.file.string("lastServer");
-            title.skip_multiplayer_warning = self.settings.file.bool("skipMultiplayerWarning");
-        }
+        let mut title = Title::new(
+            std::env::current_dir()?.join("saves"),
+            &self.options.resources,
+        )
+        .with_user(|| self.options.player_name());
+        title.last_server = self.settings.file.string("lastServer");
+        title.skip_multiplayer_warning = self.settings.file.bool("skipMultiplayerWarning");
+        self.show_title(title);
         self.capture(false);
         Ok(())
     }
@@ -18195,6 +18244,10 @@ impl Game<'_> {
             self.screen_chars_typed(typed.as_deref());
             return;
         }
+        // The Post a mouse input owes once the screen's arms below have handled
+        // it (`ScreenEvent.MouseButtonPressed.Post` and its siblings): set where
+        // the Pre lets the input through, fired after the arms ran.
+        let mut mouse_post: Option<native_hooks::ScreenMousePost> = None;
         let result: Result<()> = (|| {
             if let WindowEvent::MouseInput { state, button, .. } = &event
                 && !self.pad_synthetic_input()
@@ -18242,6 +18295,10 @@ impl Game<'_> {
                 if canceled {
                     return Ok(());
                 }
+                mouse_post = Some(native_hooks::ScreenMousePost::Button {
+                    button,
+                    pressed: *state == ElementState::Pressed,
+                });
             }
             self.key_focus_mouse_press(&event);
             match event {
@@ -18314,8 +18371,10 @@ impl Game<'_> {
                         let b = HudBatch::new([r.config.width, r.config.height]);
                         let previous = self.cursor;
                         self.cursor = (position.x as f32 / b.scale, position.y as f32 / b.scale);
-                        if self.screen_mouse_dragged(previous) {
-                            return Ok(());
+                        match self.screen_mouse_dragged(previous) {
+                            native_hooks::ScreenMousePre::Canceled => return Ok(()),
+                            native_hooks::ScreenMousePre::Passed(post) => mouse_post = Some(post),
+                            native_hooks::ScreenMousePre::NotFired => {}
                         }
                         if self.dialog_open() {
                             self.dialog_drag();
@@ -18392,6 +18451,10 @@ impl Game<'_> {
                         if canceled {
                             return Ok(());
                         }
+                        mouse_post = Some(native_hooks::ScreenMousePost::Scroll([
+                            scaled(raw_x),
+                            scaled(raw_y),
+                        ]));
                     }
                     if self.dialog_open() {
                         self.dialog_scroll(d);
@@ -19069,6 +19132,14 @@ impl Game<'_> {
                     {
                         self.smooth_camera = !self.smooth_camera;
                     }
+                    // ScreenEvent.KeyPressed.Post / KeyReleased.Post: no screen arm
+                    // took the key, so the open screen's `keyPressed` returned
+                    // false; a cancel marks it handled and the game's own key
+                    // handling never sees it.
+                    if self.screen_key_post(key, event.state == ElementState::Pressed, event.repeat)
+                    {
+                        return Ok(());
+                    }
                     self.mapped_key_event(key, event.state == ElementState::Pressed, event.repeat)?;
                 }
                 WindowEvent::RedrawRequested => {
@@ -19324,6 +19395,11 @@ impl Game<'_> {
 
             Ok(())
         })();
+        if let Some(post) = mouse_post
+            && result.is_ok()
+        {
+            self.screen_mouse_post(post);
+        }
         // ScreenEvent.CharacterTyped.Pre: GLFW's char callback comes after its
         // key callback, so a key's characters reach the screen the key left
         // open, after the key's own effects (`KeyboardHandler.charTyped`).
@@ -20161,13 +20237,12 @@ impl Game<'_> {
         }
         self.perf.world_opening();
         if self.title.is_none() {
-            self.title = Some(
-                Title::new(
-                    std::env::current_dir()?.join("saves"),
-                    &self.options.resources,
-                )
-                .with_user(|| self.options.player_name()),
-            );
+            let title = Title::new(
+                std::env::current_dir()?.join("saves"),
+                &self.options.resources,
+            )
+            .with_user(|| self.options.player_name());
+            self.show_title(title);
         }
         self.pending_entry = Some(entry);
         log::info!("Horizon: world entry waiting for world resources");
@@ -20418,7 +20493,11 @@ impl Game<'_> {
                 self.res.item_defaults(),
             ) {
                 Ok(mut loot) => {
-                    loot.apply_native_table_loads();
+                    let context = self.res.core.item_data.context().for_load(
+                        horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
+                        mod_api::__private::loaded_mods().ids(),
+                    );
+                    loot.apply_native_table_loads(&context);
                     Some(Arc::new(loot))
                 }
                 Err(e) => {
@@ -20830,12 +20909,6 @@ fn gameplay_tables(
     let (facts, gameplay_projection) =
         BlockFacts::load_with_projection(root, assets.registry, &behaviour_json, parallel)
             .map_err(|e| e.to_string())?;
-    horizon_client::block_contact::set_mod_blocks(
-        facts
-            .states
-            .iter()
-            .any(|s| !s.name.starts_with("minecraft:")),
-    );
     drop(facts_step);
     progress.set(2);
     let (light, motion) = std::thread::scope(|scope| {
@@ -21704,13 +21777,12 @@ fn start_game<'a>(
             } else {
                 // Start after the window is handed over, so --world uses the
                 // same responsive initialization path as the title screen.
-                game.title = Some(
-                    Title::new(
-                        std::env::current_dir()?.join("saves"),
-                        &game.options.resources,
-                    )
-                    .with_user(|| game.options.player_name()),
-                );
+                let title = Title::new(
+                    std::env::current_dir()?.join("saves"),
+                    &game.options.resources,
+                )
+                .with_user(|| game.options.player_name());
+                game.show_title(title);
                 game.pending_entry = Some(PendingWorldEntry::Local {
                     folder,
                     name: None,
@@ -21733,7 +21805,7 @@ fn start_game<'a>(
             if game.settings.file.bool("onboardAccessibility") {
                 title.start_onboarding();
             }
-            game.title = Some(title);
+            game.show_title(title);
         }
     }
     if std::env::var_os("HORIZON_COMMAND_SCRIPT").is_some()
@@ -22319,7 +22391,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         return Ok(());
     }
     let _ = horizon_client::health::HURT_SERVER.set(native_hooks::incoming_damage);
-    let _ = horizon_client::block_contact::HOOK.set(native_hooks::block_contact);
+    let _ = horizon_client::block_contact::HOOKS.set(native_hooks::BLOCK_CONTACT_HOOKS);
     let _ = horizon_client::health::KNOCKBACK.set(native_hooks::knockback);
     let _ = horizon_client::health::SHIELD_BLOCK.set(native_hooks::shield_block);
     let _ = horizon_client::health::DAMAGE_PRE.set(native_hooks::damage_pre);

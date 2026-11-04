@@ -20,6 +20,7 @@ use super::{
     native_panel_recipes::RecipePage,
 };
 use horizon_assets::item_model::StackView;
+use horizon_client::block_contact::Pending;
 use horizon_client::creative::Creative;
 use horizon_client::{
     atlas_sources::qualified,
@@ -65,16 +66,17 @@ use mod_api::NativePermissionLevel;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EntityRef,
-    EquipmentSlot, GameRuleActor, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
-    NativeHandRender, NativeItemDrop, NativeLifecycleContext, NativeNoteBlockChange,
-    NativePlayerFood, NativeProgressType, NativeServerPlayer, PathComputationType, Placement,
-    RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase, TicketController,
-    ToolUse, WorldPhase,
+    EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand,
+    NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
+    NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
+    PathComputationType, Placement, RecipeBookCategory, ScreenOpening, ServerReloadListeners,
+    ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
-    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult,
-    NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion, TooltipElement, UsePhase,
+    LandingWrite, LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeBlockUpdateFlags,
+    NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
+    TooltipElement, UsePhase,
 };
 pub(crate) use mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -430,6 +432,62 @@ impl Game<'_> {
         self.native_screen_init_post(&screen_view_with_id(&none, id));
     }
 
+    /// Shows `title`, as `Minecraft.setScreen(new TitleScreen())` (or the
+    /// screen it opens on: the multiplayer list, a disconnect, an error)
+    /// does at startup and when a world closes. `screen_opening` fires to its
+    /// screen, then `screen_closing` for an overlay it replaces, before it
+    /// shows; `screen_init_post` follows. With no world open nothing else can
+    /// show, so a mod's `Cancel` or its own screen doesn't keep it shut (a
+    /// mod's screen can't open over the title).
+    pub(super) fn show_title(&mut self, title: horizon_client::title::Title) {
+        if !self.screen_hooks_heard() {
+            self.title = Some(title);
+            return;
+        }
+        let id = title.mode.id();
+        self.title_change(Some(id));
+        self.title = Some(title);
+        self.observed_screen = self.observed_now();
+        let none = self.screen_change_view(Screen::Playing);
+        self.native_screen_init_post(&screen_view_with_id(&none, id));
+    }
+    /// Takes the title down as a world opens over it (`setScreen` to the
+    /// loading screen, then null): `screen_opening` to no screen, then
+    /// `screen_closing` for the title's screen, before it goes. The world
+    /// is opening, so a `Cancel` doesn't keep it.
+    pub(super) fn hide_title(&mut self) {
+        if self.title.is_none() {
+            return;
+        }
+        if self.screen_hooks_heard() {
+            self.title_change(None);
+        }
+        self.title = None;
+        self.observed_screen = self.observed_now();
+    }
+    /// The hooks of the title appearing (`to` is its screen) or going
+    /// (`None`), from what shows now. What changed before is told first.
+    fn title_change(&mut self, to: Option<&'static str>) {
+        let now = self.observed_now();
+        self.observe_change(now);
+        let none = self.screen_change_view(Screen::Playing);
+        // The title's screen or an overlay; a `Screen` told its own change.
+        let from = self.observed_screen.as_ref().filter(|old| old.overlay);
+        let from = match (from, self.title.as_ref()) {
+            (Some(old), _) => Some(old.view()),
+            // No renderer yet (startup, a test): the title is still known.
+            (None, Some(title)) => Some(screen_view_with_id(&none, title.mode.id())),
+            (None, None) => None,
+        };
+        let to = to.map(|id| screen_view_with_id(&none, id));
+        self.screen_change(
+            from.as_ref().unwrap_or(&none),
+            to.as_ref().unwrap_or(&none),
+            true,
+            from.is_some(),
+        );
+    }
+
     pub(super) fn observe_screen(&mut self) {
         self.settle_title_mode();
         // Free with no native mod: the snapshot clones the title and menu.
@@ -439,13 +497,13 @@ impl Game<'_> {
         let current = self.observed_now();
         self.observe_change(current);
     }
-    /// What the frame's screen changed since the last one. The `Screen` list
-    /// announces its own changes in `set_screen`; the title's screens and the
-    /// overlays have no single place they open or close, so they are
-    /// announced here, through the same `screen_change` and in the same order,
-    /// but after the change: a mod's answer to `screen_opening` cannot keep
-    /// them shut. `screen_init_post` follows for every kind, on opening and on
-    /// a resize.
+    /// What the frame's screen changed since the last one. The `Screen` list,
+    /// the overlays' opening and the title's screens announce their own
+    /// changes before they apply (`set_screen`, `open_screen_overlay`,
+    /// `settle_title_mode`, `show_title`, `hide_title`); what is left, an
+    /// overlay closing, is announced here, through the same `screen_change`
+    /// and in the same order, but after the change. `screen_init_post`
+    /// follows for every kind, on opening and on a resize.
     fn observe_change(&mut self, current: Option<ObservedScreen>) {
         let changed = match (&self.observed_screen, &current) {
             (Some(old), Some(new)) => old.id != new.id || old.menu != new.menu,
@@ -1493,6 +1551,22 @@ const MAPPINGS: [(&str, Option<KeyCode>); 9] = [
     ("key.use", None),
 ];
 
+/// The Post a mouse input owes once the screen has handled it, built when
+/// its Pre let the input through (`Game::screen_mouse_post`).
+pub(super) enum ScreenMousePost {
+    Button { button: i32, pressed: bool },
+    Scroll([f64; 2]),
+    Drag { button: i32, delta: [f32; 2] },
+}
+
+/// What a drag's Pre decided (`Game::screen_mouse_dragged`).
+pub(super) enum ScreenMousePre {
+    /// No screen hook ran: no drag, a synthetic move or no screen open.
+    NotFired,
+    Canceled,
+    Passed(ScreenMousePost),
+}
+
 /// What a `ScreenEvent.CharacterTyped.Pre` leaves of `text`, given `canceled`
 /// (whether a hook cancelled character `c`): the cancelled printable
 /// characters are gone and every other character stays, control characters
@@ -2103,24 +2177,22 @@ impl Game<'_> {
         );
     }
     /// An interaction key acts on what the crosshair points at
-    /// (`InputEvent.InteractionKeyMappingTriggered`), while playing: `button` 0 is
-    /// the attack key (`key_mapping` `key.attack`), 1 the use key (`key.use`, once
-    /// for each hand it tries, the main hand first), 2 pick block (`key.pickItem`,
-    /// only with something aimed at). The attack fires when an attack is allowed
-    /// and again each tick a held attack key keeps digging a block. Set `canceled`
+    /// (`InputEvent.InteractionKeyMappingTriggered`), while playing: `key` says which.
+    /// The attack fires when an attack is allowed and again each tick a held attack
+    /// key keeps digging a block; the use key fires once for each hand it tries, the
+    /// main hand first; pick block fires only with something aimed at. Set `canceled`
     /// to skip the action: a cancelled use also skips the other hand. A cancelled
     /// attack or use still swings `hand` unless the mod clears `swing_hand` (it
     /// starts true). A server's player and a single player's window only; a mod
     /// that claims an item's use (`mod_use_start`) sees the event first.
-    pub(super) fn native_interaction_key(
+    pub(super) fn native_interaction_key_mapping_triggered(
         &mut self,
-        button: i32,
-        key_mapping: &str,
-        hand: mod_api::first_person::Hand,
+        key: InteractionKey,
+        hand: Hand,
         swing_hand: &mut bool,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_interaction_key(self, button, key_mapping, hand, swing_hand, canceled);
+        mod_api::dispatch_interaction_key_mapping_triggered(self, key, hand, swing_hand, canceled);
     }
     /// A command typed or clicked in chat, without its slash, before the
     /// server and Horizon's commands see it: set `ran` when the mod ran it.
@@ -2964,6 +3036,74 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_screen_char_typed_pre(self, screen, c, modifiers, canceled);
     }
+    /// A mouse press after the open screen's arms ran (`ScreenEvent.MouseButtonPressed.Post`).
+    pub(super) fn native_screen_mouse_button_pressed_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        button: i32,
+        modifiers: u32,
+    ) {
+        mod_api::dispatch_screen_mouse_button_pressed_post(self, screen, button, modifiers);
+    }
+    /// A mouse release after the open screen's arms ran (`ScreenEvent.MouseButtonReleased.Post`).
+    pub(super) fn native_screen_mouse_button_released_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        button: i32,
+        modifiers: u32,
+    ) {
+        mod_api::dispatch_screen_mouse_button_released_post(self, screen, button, modifiers);
+    }
+    /// A drag the open screen's handlers have seen (`ScreenEvent.MouseDragged.Post`).
+    pub(super) fn native_screen_mouse_dragged_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        button: i32,
+        delta: [f32; 2],
+        modifiers: u32,
+    ) {
+        mod_api::dispatch_screen_mouse_dragged_post(self, screen, button, delta, modifiers);
+    }
+    /// A wheel turn the open screen has scrolled by (`ScreenEvent.MouseScrolled.Post`).
+    pub(super) fn native_screen_mouse_scrolled_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        scroll: [f64; 2],
+        modifiers: u32,
+    ) {
+        mod_api::dispatch_screen_mouse_scrolled_post(self, screen, scroll, modifiers);
+    }
+    /// A key press no screen took (`ScreenEvent.KeyPressed.Post`).
+    pub(super) fn native_screen_key_pressed_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        key: &str,
+        repeat: bool,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_screen_key_pressed_post(self, screen, key, repeat, modifiers, canceled);
+    }
+    /// A key release no screen took (`ScreenEvent.KeyReleased.Post`).
+    pub(super) fn native_screen_key_released_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        key: &str,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_screen_key_released_post(self, screen, key, modifiers, canceled);
+    }
+    /// A character no text box took (`ScreenEvent.CharacterTyped.Post`).
+    pub(super) fn native_screen_char_typed_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        c: char,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_screen_char_typed_post(self, screen, c, modifiers, canceled);
+    }
     /// The open screen as a native mod sees it (`NativeScreenView`): its id,
     /// the open menu's type and title, its slot count, and its panel's
     /// rectangle, with the mouse and the partial tick. `screen` is the screen
@@ -3034,28 +3174,109 @@ impl Game<'_> {
         // left down, right down, left up sends no drag while right is still held.
         self.drag_button = pressed.then_some(button);
     }
-    pub(super) fn screen_mouse_dragged(&self, previous: (f32, f32)) -> bool {
+    pub(super) fn screen_mouse_dragged(&self, previous: (f32, f32)) -> ScreenMousePre {
         if self.pad_synthetic_input() || self.cursor == previous {
-            return false;
+            return ScreenMousePre::NotFired;
         }
         let Some(button) = self
             .drag_button
             .filter(|b| self.physical_buttons.contains(b))
         else {
-            return false;
+            return ScreenMousePre::NotFired;
         };
         let Some(screen) = self.screen_view_now() else {
-            return false;
+            return ScreenMousePre::NotFired;
         };
+        let button = super::glfw_button(button);
+        let delta = [self.cursor.0 - previous.0, self.cursor.1 - previous.1];
         let mut canceled = false;
         self.native_screen_mouse_dragged_pre(
             &screen,
-            super::glfw_button(button),
-            [self.cursor.0 - previous.0, self.cursor.1 - previous.1],
+            button,
+            delta,
             super::glfw_modifiers(self.modifiers),
             &mut canceled,
         );
+        if canceled {
+            ScreenMousePre::Canceled
+        } else {
+            ScreenMousePre::Passed(ScreenMousePost::Drag { button, delta })
+        }
+    }
+    /// The Post of a mouse input whose Pre let it through, once the screen's
+    /// own handling has run. The screen is the one open then (none, and no
+    /// Post, when the input closed it). Nothing is built with no subscriber.
+    pub(super) fn screen_mouse_post(&self, post: ScreenMousePost) {
+        use mod_api::HookId;
+        let hook = match post {
+            ScreenMousePost::Button { pressed: true, .. } => HookId::ScreenMouseButtonPressedPost,
+            ScreenMousePost::Button { pressed: false, .. } => HookId::ScreenMouseButtonReleasedPost,
+            ScreenMousePost::Scroll(_) => HookId::ScreenMouseScrolledPost,
+            ScreenMousePost::Drag { .. } => HookId::ScreenMouseDraggedPost,
+        };
+        if !mod_api::__private::listened(hook) {
+            return;
+        }
+        let Some(screen) = self.screen_view_now() else {
+            return;
+        };
+        let modifiers = super::glfw_modifiers(self.modifiers);
+        match post {
+            ScreenMousePost::Button {
+                button,
+                pressed: true,
+            } => self.native_screen_mouse_button_pressed_post(&screen, button, modifiers),
+            ScreenMousePost::Button {
+                button,
+                pressed: false,
+            } => self.native_screen_mouse_button_released_post(&screen, button, modifiers),
+            ScreenMousePost::Scroll(scroll) => {
+                self.native_screen_mouse_scrolled_post(&screen, scroll, modifiers)
+            }
+            ScreenMousePost::Drag { button, delta } => {
+                self.native_screen_mouse_dragged_post(&screen, button, delta, modifiers)
+            }
+        }
+    }
+    /// Whether a Post of the key `key` over the open screen cancelled it
+    /// (`ScreenEvent.KeyPressed.Post` / `KeyReleased.Post`): asked where the
+    /// key no screen arm took reaches the game's own key handling, which a
+    /// cancel then skips. False with no subscriber, no screen of the hooks'
+    /// open, or a key with no vanilla name.
+    pub(super) fn screen_key_post(&self, key: KeyCode, pressed: bool, repeat: bool) -> bool {
+        let hook = if pressed {
+            mod_api::HookId::ScreenKeyPressedPost
+        } else {
+            mod_api::HookId::ScreenKeyReleasedPost
+        };
+        if !mod_api::__private::listened(hook) {
+            return false;
+        }
+        let (Some(name), Some(screen)) = (keybinds::key_name(key), self.screen_view_now()) else {
+            return false;
+        };
+        let modifiers = super::glfw_modifiers(self.modifiers);
+        let mut canceled = false;
+        if pressed {
+            self.native_screen_key_pressed_post(&screen, name, repeat, modifiers, &mut canceled);
+        } else {
+            self.native_screen_key_released_post(&screen, name, modifiers, &mut canceled);
+        }
         canceled
+    }
+    /// `ScreenEvent.CharacterTyped.Post` for each character of `text` that no
+    /// text box took.
+    fn screen_chars_post(&self, text: &str) {
+        if !mod_api::__private::listened(mod_api::HookId::ScreenCharTypedPost) {
+            return;
+        }
+        let Some(screen) = self.screen_view_now() else {
+            return;
+        };
+        let modifiers = super::glfw_modifiers(self.modifiers);
+        for c in text.chars() {
+            self.native_screen_char_typed_post(&screen, c, modifiers, &mut false);
+        }
     }
     /// A screen the native mods' input hooks are for is open: the window has a
     /// renderer, either the title's own (`title`, `world_select`,
@@ -3164,11 +3385,10 @@ impl Game<'_> {
             return;
         };
         // A held edit modifier makes a shortcut of the key, not text.
-        if !self.types_text() {
-            return;
-        }
         // `Err` only says no text box of the screen takes the characters.
-        let _ = self.type_chars_into_screen(&text);
+        if !self.types_text() || self.type_chars_into_screen(&text).is_err() {
+            self.screen_chars_post(&text);
+        }
     }
     /// A left or right (`right`) press at `at` (GUI pixels from the screen's
     /// top left, so outside it too) on block `block`'s screen, a mod's, over
@@ -6255,6 +6475,11 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_is_pathfindable(self, state, kind, pathfindable);
     }
+    /// Whether a mod hides `state` from the mesher (`hidden` starts false); asked once for every
+    /// state at join and on `native_refresh_render_visibility`. Client-side.
+    pub(super) fn native_block_render_visibility(&self, state: BlockStateId, hidden: &mut bool) {
+        mod_api::dispatch_block_render_visibility(self, state, hidden);
+    }
     /// `BlockBehaviour.getCloneItemStack`, asked by
     /// `ServerGamePacketListenerImpl.handlePickItemFromBlock`. `include_data`
     /// is true for a creative player picking with Ctrl. Leave `stack` unset to
@@ -7363,30 +7588,70 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_block_step_on(dimension, entity, kind, state, position);
     }
-    /// `Block.entityInside` for each mod block touched along the entity's movement.
-    /// Repeated sweep hits in one contact pass are suppressed; idle overlap still fires.
-    pub(super) fn native_block_entity_inside(
-        dimension: &str,
-        entity: i32,
-        kind: &str,
+    /// `Block.entityInside`: an entity's sweep crossed a block with a part for it (`precise`
+    /// is `Entity.checkInsideBlocks`' flag). The part gets `&mut dyn ServerHost` once the
+    /// entity's batch (mobs, projectiles, items) has ticked, not mid-sweep.
+    pub(super) fn native_entity_inside(
+        &mut self,
         state: BlockStateId,
-        position: [i32; 3],
+        pos: BlockPos,
+        entity: EntityRef,
+        precise: bool,
     ) {
-        mod_api::dispatch_block_entity_inside(dimension, entity, kind, state, position);
+        mod_api::dispatch_entity_inside(self, state, pos, entity, precise);
     }
-    /// `Block.fallOn` for a mod block. Change calculated damage before generic fall sounds
-    /// and hurt handling; zero prevents both. Creative and fall-immune entities
-    /// notify with zero damage and retain their immunity. Server-side only.
-    pub(super) fn native_block_fall_on(
-        dimension: &str,
-        entity: i32,
-        kind: &str,
-        state: BlockStateId,
-        position: [i32; 3],
-        distance: f64,
-        damage: &mut f32,
+    /// Deliver the contacts the batch just ticked recorded, in order: `entity_inside` to the
+    /// parts, and the writes a landing asked for to the level. A contact is skipped when its
+    /// entity is gone (an item merged away later in the batch) or the block at its position
+    /// is no longer the state it touched, as vanilla never sees a stale one.
+    pub(super) fn drain_entity_inside(&mut self) {
+        for contact in horizon_client::block_contact::take_pending() {
+            let (state, pos) = match &contact {
+                Pending::Inside(inside) => (inside.state, inside.position),
+                Pending::Landed(landed) => (landed.state, landed.position),
+            };
+            let Some(level) = self.native_level(self.dim.id()) else {
+                continue;
+            };
+            if self.native_level_state(level, [pos.x, pos.y, pos.z]) != Some(state) {
+                continue;
+            }
+            match contact {
+                Pending::Inside(inside) => {
+                    if let Some(entity) = u32::try_from(inside.entity)
+                        .ok()
+                        .and_then(|id| self.native_entity(id))
+                    {
+                        self.native_entity_inside(state, pos, entity, inside.precise);
+                    }
+                }
+                Pending::Landed(landed) => {
+                    for write in landed.writes {
+                        self.apply_landing_write(level, pos, write);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Apply one write a landing asked for, at the block the entity landed on.
+    fn apply_landing_write(
+        &mut self,
+        level: mod_api::LevelRef,
+        pos: BlockPos,
+        write: LandingWrite,
     ) {
-        mod_api::dispatch_block_fall_on(dimension, entity, kind, state, position, distance, damage);
+        let at = [pos.x, pos.y, pos.z];
+        match write {
+            LandingWrite::SetBlock(state) => {
+                self.native_level_set_block(level, at, state, NativeBlockUpdateFlags::NEIGHBORS);
+            }
+            LandingWrite::DestroyBlock { drop } => {
+                self.native_level_destroy_block(level, at, drop);
+            }
+            // A write a later API adds that this game does not know is not applied.
+            _ => {}
+        }
     }
 }
 
@@ -7410,13 +7675,58 @@ pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
     cancel
 }
 
-/// The level a hit lands in, as its damage hooks' level host: its blocks, its random and its
+/// The level a hit or a landing happens in, as its hooks' level host: its blocks, its random and its
 /// own attachments. Not `GameLevel`, which a hit can't build: a mob's hit lands in the mob
 /// tick, where the world is read by every mob and its random is lent out, and building one
 /// per hit would allocate its entity boxes.
 pub(super) struct HitLevel<'a>(pub(super) DamageLevel<'a>);
 
 impl HitLevel<'_> {
+    /// `Block.fallOn`: entity `entity` of type `kind` landed on `state` at `pos` after falling
+    /// `distance` blocks. `damage` is the fall damage `causeFallDamage` calculated, before hurt
+    /// handling and the fall sounds: change it, and zero prevents both. A creative or
+    /// fall-immune entity is told with zero damage and keeps its immunity. Players and mobs
+    /// land here; dropped items, projectiles and the other entities do not yet.
+    pub(super) fn native_fall_on(
+        &mut self,
+        dimension: &str,
+        entity: i32,
+        kind: &str,
+        state: BlockStateId,
+        pos: BlockPos,
+        distance: f64,
+        damage: &mut f32,
+        writes: &mut Vec<LandingWrite>,
+    ) {
+        mod_api::dispatch_fall_on(
+            self, dimension, entity, kind, state, pos, distance, writes, damage,
+        );
+    }
+    /// `Block.bounceOn`: entity `entity` of type `kind` bounced off `state` at `pos` and fell
+    /// `fall_distance` blocks. `movement` is the movement the bounce leaves it, before
+    /// vanilla sets it: change it to change what the entity keeps. Players and mobs bounce
+    /// here; dropped items and the other entities do not yet.
+    pub(super) fn native_bounce_on(
+        &mut self,
+        dimension: &str,
+        entity: i32,
+        kind: &str,
+        state: BlockStateId,
+        pos: BlockPos,
+        fall_distance: f64,
+        movement: &mut [f64; 3],
+    ) {
+        mod_api::dispatch_bounce_on(
+            self,
+            dimension,
+            entity,
+            kind,
+            state,
+            pos,
+            fall_distance,
+            movement,
+        );
+    }
     /// NeoForge's `LivingIncomingDamageEvent`: `LivingEntity.hurtServer`, past its guards (an
     /// invulnerable or dead entity, fire on a fire-resistant one), is about to hurt entity
     /// `entity` of type `kind` (`minecraft:zombie`, `minecraft:player`) by `source`: its damage
@@ -7680,38 +7990,48 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
     canceled
 }
 
-pub(super) fn block_contact(
-    dimension: &str,
-    event: horizon_client::block_contact::Event<'_>,
-    damage: &mut f32,
-) {
-    use horizon_client::block_contact::Event;
-    match event {
-        Event::StepOn(c) => Game::native_block_step_on(
-            dimension,
-            c.entity,
-            c.kind,
-            c.state,
-            [c.position.x, c.position.y, c.position.z],
-        ),
-        Event::Inside(c) => Game::native_block_entity_inside(
-            dimension,
-            c.entity,
-            c.kind,
-            c.state,
-            [c.position.x, c.position.y, c.position.z],
-        ),
-        Event::FallOn(c, distance) => Game::native_block_fall_on(
-            dimension,
-            c.entity,
-            c.kind,
-            c.state,
-            [c.position.x, c.position.y, c.position.z],
-            distance,
-            damage,
-        ),
-    }
-}
+/// The contacts of a simulating entity with a block, as the simulation's own code (client-lib)
+/// reports them.
+pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
+    horizon_client::block_contact::Hooks {
+        step_on: |dimension, c| {
+            Game::native_block_step_on(
+                dimension,
+                c.entity,
+                c.kind,
+                c.state,
+                [c.position.x, c.position.y, c.position.z],
+            );
+        },
+        any_inside: || mod_api::__private::has_scoped_hook(mod_api::HookId::EntityInside),
+        inside_listens: |state| {
+            mod_api::__private::block_listens(mod_api::HookId::EntityInside, "entity_inside", state)
+        },
+        fall_listens: |state| {
+            mod_api::__private::block_listens(mod_api::HookId::FallOn, "fall_on", state)
+        },
+        bounce_listens: |state| {
+            mod_api::__private::block_listens(mod_api::HookId::BounceOn, "bounce_on", state)
+        },
+        fall_on: |dimension, level, c, distance, damage, writes| {
+            HitLevel(level.reborrow()).native_fall_on(
+                dimension, c.entity, c.kind, c.state, c.position, distance, damage, writes,
+            );
+        },
+        bounce_on: |dimension, level, c, fall_distance, movement| {
+            let mut answer = [movement.x, movement.y, movement.z];
+            HitLevel(level.reborrow()).native_bounce_on(
+                dimension,
+                c.entity,
+                c.kind,
+                c.state,
+                c.position,
+                fall_distance,
+                &mut answer,
+            );
+            *movement = horizon_core::geometry::Vec3::new(answer[0], answer[1], answer[2]);
+        },
+    };
 
 /// `native_living_incoming_damage`'s entity, entity type and source for a hit.
 fn hurt_server_args(hurting: Hurting<'_>) -> (i32, &str, HurtSource<'_>) {
@@ -10187,21 +10507,12 @@ impl Game<'_> {
             self.native_panel_key(name);
         }
     }
-    /// `ClientHooks.onClickInput`: tells `native_interaction_key` that `button`
-    /// (0 attack, 1 use, 2 pick) is about to act with `hand`. `None` when the
-    /// action goes on; when a mod cancelled it, `Some` of whether the hand swings.
-    pub(super) fn native_interaction(
-        &mut self,
-        button: i32,
-        hand: mod_api::first_person::Hand,
-    ) -> Option<bool> {
-        let key_mapping = match button {
-            0 => "key.attack",
-            1 => "key.use",
-            _ => "key.pickItem",
-        };
+    /// `ClientHooks.onClickInput`: tells `native_interaction_key_mapping_triggered` that
+    /// `key` is about to act with `hand`. `None` when the action goes on; when a mod
+    /// cancelled it, `Some` of whether the hand swings.
+    pub(super) fn native_interaction(&mut self, key: InteractionKey, hand: Hand) -> Option<bool> {
         let (mut swing_hand, mut canceled) = (true, false);
-        self.native_interaction_key(button, key_mapping, hand, &mut swing_hand, &mut canceled);
+        self.native_interaction_key_mapping_triggered(key, hand, &mut swing_hand, &mut canceled);
         canceled.then_some(swing_hand)
     }
     /// A native mod's command.
@@ -11549,7 +11860,8 @@ mod tests {
 mod screen_open_tests {
     use super::*;
     use mod_api::{
-        ClientHost, Hooks, ModEntry, ScreenClosingEvent, ScreenOpeningEvent, testing::with_mods,
+        ClientHost, Flow, Hooks, InteractionKeyMappingTriggeredEvent, ModEntry, ScreenClosingEvent,
+        ScreenOpeningEvent, testing::with_mods,
     };
     use std::sync::{Arc, Mutex};
 
@@ -11587,6 +11899,54 @@ mod screen_open_tests {
                 assert_eq!(areas[1], [x, y + 136.0, 195.0, 28.0]);
             });
         });
+    }
+
+    struct KeyProbe(Arc<Mutex<Vec<String>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for KeyProbe {
+        fn interaction_key_mapping_triggered(
+            &self,
+            _host: &mut dyn ClientHost,
+            event: &mut InteractionKeyMappingTriggeredEvent,
+        ) -> Flow {
+            self.0.lock().unwrap().push(format!("{:?}", event.key));
+            match event.key {
+                InteractionKey::Attack => {
+                    event.swing_hand = false;
+                    Flow::Cancel
+                }
+                InteractionKey::Use => Flow::Cancel,
+                _ => Flow::Continue,
+            }
+        }
+    }
+
+    /// Each key reaches a listener as its own kind; a cancelled attack that clears
+    /// `swing_hand` reports no swing, a cancelled use keeps its swing, and an
+    /// uncancelled pick goes on.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn an_interaction_key_reaches_a_mod_as_its_kind_and_can_be_cancelled() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new("keys", Box::new(KeyProbe(log.clone())))].into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let hand = Hand::Main;
+                assert_eq!(
+                    game.native_interaction(InteractionKey::Attack, hand),
+                    Some(false)
+                );
+                assert_eq!(
+                    game.native_interaction(InteractionKey::Use, hand),
+                    Some(true)
+                );
+                assert_eq!(
+                    game.native_interaction(InteractionKey::PickBlock, hand),
+                    None
+                );
+            });
+        });
+        assert_eq!(take(&log), ["Attack", "Use", "PickBlock"]);
     }
 
     struct Probe {
@@ -11818,6 +12178,32 @@ mod screen_open_tests {
         });
     }
 
+    /// The title appearing (a world closed) and going (a world opened) fires
+    /// `screen_opening`, then `screen_closing` for what it leaves, before the
+    /// change, so the frame's observer has nothing left to announce. With no
+    /// world, `Cancel` doesn't keep the title shut.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn the_title_appears_and_goes_through_screen_opening() {
+        use horizon_client::title::Title;
+        run(|game, log, answer| {
+            let saves = std::env::temp_dir().join("horizon-title-gate-test-no-saves");
+            game.title = None;
+            *answer.lock().unwrap() = Some(ScreenOpening::Cancel);
+            game.show_title(Title::new(saves, &game.options.resources));
+            assert!(game.title.is_some());
+            assert_eq!(take(log), ["opening playing->title"]);
+            game.observe_screen();
+            assert!(take(log).is_empty());
+            *answer.lock().unwrap() = None;
+            game.hide_title();
+            assert!(game.title.is_none());
+            assert_eq!(take(log), ["opening title->playing", "closing title"]);
+            game.observe_screen();
+            assert!(take(log).is_empty());
+        });
+    }
+
     /// `screen_init_post` follows an overlay that opened, after its Opening.
     #[test]
     #[ignore = "needs prepared resources"]
@@ -11907,6 +12293,134 @@ mod screen_open_tests {
 }
 
 #[cfg(test)]
+mod entity_inside_tests {
+    use super::*;
+    use horizon_client::block_contact::{in_level, inside};
+    use mod_api::{
+        BlockPart, EntityInsideEvent, Hooks, ModEntry, Registrar, ServerHost, testing::with_mods,
+    };
+    use std::sync::{Arc, Mutex};
+
+    /// Landing writes reach the level at the batch end, in the order asked, and only
+    /// where the block is still the state landed on.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn landing_writes_apply_at_the_batch_end() {
+        use horizon_client::block_contact::{landed, take_pending};
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let state = |name| game.pack.assets.registry.default_state(name).unwrap();
+            let (farmland, dirt, stone, air) = (
+                state("minecraft:farmland"),
+                state("minecraft:dirt"),
+                state("minecraft:stone"),
+                state("minecraft:air"),
+            );
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            game.world.set(1, 64, 1, farmland).unwrap();
+            game.world.set(2, 64, 1, farmland).unwrap();
+            game.world.set(3, 64, 1, stone).unwrap();
+            let at = |x| BlockPos::new(x, 64, 1);
+            landed(farmland, at(1), vec![LandingWrite::SetBlock(dirt)]);
+            // The block changed after the landing: dropped.
+            landed(stone, at(2), vec![LandingWrite::SetBlock(dirt)]);
+            landed(
+                stone,
+                at(3),
+                vec![LandingWrite::DestroyBlock { drop: false }],
+            );
+            // Nothing asked: nothing kept.
+            landed(farmland, at(1), Vec::new());
+            assert_eq!(
+                game.world.block(1, 64, 1),
+                farmland,
+                "nothing writes mid-batch"
+            );
+            game.drain_entity_inside();
+            assert_eq!(game.world.block(1, 64, 1), dirt);
+            assert_eq!(game.world.block(2, 64, 1), farmland);
+            assert_eq!(game.world.block(3, 64, 1), air, "the stone is destroyed");
+            assert!(take_pending().is_empty());
+        });
+    }
+
+    /// What the part on stone heard: the entity's id, the position and `precise`.
+    #[derive(Clone, Default)]
+    struct Stone(Arc<Mutex<Vec<(u32, BlockPos, bool)>>>);
+    #[mod_api::horizon_part]
+    impl BlockPart for Stone {
+        fn entity_inside(&self, _: &mut dyn ServerHost, event: &mut EntityInsideEvent) {
+            self.0
+                .lock()
+                .unwrap()
+                .push((event.entity.id(), event.pos, event.precise));
+        }
+    }
+    struct Mod(Stone);
+    #[mod_api::__subscriptions]
+    impl Hooks for Mod {
+        fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+            r.block_part("minecraft:stone", self.0.clone());
+        }
+    }
+
+    /// A contact is delivered once, in order, with its flag; one whose entity is gone
+    /// (an item merged later in the batch) or whose block changed is dropped, and a
+    /// block with no part is never recorded.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn contacts_reach_the_part_unless_stale() {
+        let heard = Stone::default();
+        let mods: mod_api::Mods =
+            vec![ModEntry::new("inside", Box::new(Mod(heard.clone())))].into();
+        mod_api::__private::install_parts(&mods).unwrap();
+        let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let state = |name| game.pack.assets.registry.default_state(name).unwrap();
+                let (stone, dirt) = (state("minecraft:stone"), state("minecraft:dirt"));
+                game.world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+                );
+                game.world.set(1, 64, 1, stone).unwrap();
+                game.world.set(2, 64, 1, stone).unwrap();
+                game.world.set(3, 64, 1, dirt).unwrap();
+                let level = game.native_level(game.dim.id()).unwrap();
+                let stack = || ItemStack::new("minecraft:stone", 1);
+                let kept = game
+                    .native_level_spawn_item(level, 1.5, 70.0, 1.5, stack())
+                    .unwrap();
+                let at = |x| BlockPos::new(x, 64, 1);
+                in_level(Some(game.dim.id()), || {
+                    inside(kept.id() as i32, stone, at(1), true);
+                    inside(kept.id() as i32, stone, at(2), false);
+                    // The block under a contact changed after it was noted.
+                    inside(kept.id() as i32, dirt, at(2), true);
+                    // No part on dirt: never recorded.
+                    inside(kept.id() as i32, dirt, at(3), true);
+                    // No such entity: it merged away.
+                    inside(9999, stone, at(1), true);
+                });
+                game.drain_entity_inside();
+                assert_eq!(
+                    *heard.0.lock().unwrap(),
+                    vec![(kept.id(), at(1), true), (kept.id(), at(2), false)]
+                );
+                game.drain_entity_inside();
+                assert_eq!(
+                    heard.0.lock().unwrap().len(),
+                    2,
+                    "a drain empties the queue"
+                );
+            });
+        });
+    }
+}
+
 mod entity_place_tests {
     use super::*;
     use mod_api::{EntityPlaceEvent, Flow, Hooks, ModEntry, ServerHost, testing::with_mods};

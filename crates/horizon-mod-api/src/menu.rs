@@ -2,6 +2,7 @@
 #[allow(unused_imports)]
 use crate::*;
 /// Identity and location of a player pressing a mod container button.
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct MenuButtonContext {
     pub player: u128,
     pub player_entity_id: i32,
@@ -10,6 +11,7 @@ pub struct MenuButtonContext {
 }
 /// The logical side on which a menu click runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: a closed set the game matches without a wildcard
 pub enum LogicalSide {
     Client,
     Server,
@@ -24,6 +26,7 @@ pub trait SlotView {
     fn safe_take(&mut self, count: u32, max: u32) -> Option<ItemStack>;
 }
 /// Access to the carried stack, as `createCarriedSlotAccess`.
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct CarriedAccess<'a>(#[doc(hidden)] pub &'a mut Option<ItemStack>);
 impl CarriedAccess<'_> {
     pub fn get(&self) -> Option<&ItemStack> {
@@ -34,6 +37,7 @@ impl CarriedAccess<'_> {
     }
 }
 /// A pickup click's slot and cursor, including empty stacks.
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct StackedOnOther<'a> {
     pub player: Option<u128>,
     pub player_entity_id: Option<i32>,
@@ -51,6 +55,7 @@ pub struct StackedOnOther<'a> {
 /// its level `cost` and `material_cost`, the units of `right` used (0 or
 /// more than it holds: all of it), each starting at vanilla's.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct AnvilUpdate {
     pub left: ItemStack,
     pub right: Option<ItemStack>,
@@ -66,6 +71,7 @@ pub struct AnvilUpdate {
 /// `AnvilUpdateEvent.VanillaResult`: the output, level cost and material
 /// cost `createResult` made.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct AnvilVanilla {
     pub output: Option<ItemStack>,
     pub xp_cost: i32,
@@ -116,6 +122,7 @@ impl AnvilUpdate {
 /// with it, `xp` (-1 for vanilla's experience). `vanilla_output` is the
 /// vanilla's result, to read; set `output` to replace it.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct GrindstonePlace {
     pub top: Option<ItemStack>,
     pub bottom: Option<ItemStack>,
@@ -127,6 +134,7 @@ pub struct GrindstonePlace {
 /// the inputs, the experience (-1 for vanilla's, or what OnPlaceItem set)
 /// and what the inputs hold afterwards (empty, as vanilla's).
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct GrindstoneTake {
     pub top: Option<ItemStack>,
     pub bottom: Option<ItemStack>,
@@ -137,6 +145,7 @@ pub struct GrindstoneTake {
 /// An anvil craft as `AnvilCraftEvent` reports it: the inputs and the result
 /// taken, before the crafting changed anything.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct AnvilCraft {
     pub left: Option<ItemStack>,
     pub right: Option<ItemStack>,

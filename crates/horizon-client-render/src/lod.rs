@@ -3462,6 +3462,7 @@ mod tests {
             assets: assets.clone(),
             render,
             biomes: biomes.clone(),
+            hidden_states: Arc::from([]),
         });
         let source = Arc::new(TestTerrain::new(assets.registry, &biomes)?);
         let mut lod = Lod::new(source, context);
@@ -4760,6 +4761,7 @@ mod tests {
             assets,
             render,
             biomes,
+            hidden_states: Arc::from([]),
         });
         Ok((context, facts))
     }

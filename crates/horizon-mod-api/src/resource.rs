@@ -12,6 +12,7 @@ use std::fmt;
 /// where a mod names it: what [`ItemResource`]'s component methods take, as NeoForge's take a
 /// `DataComponentType`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ComponentId(Box<str>);
 
 impl ComponentId {
@@ -31,6 +32,7 @@ impl ComponentId {
 /// An enchantment effect component type (`EnchantmentEffectComponents`): what an enchantment's
 /// `effects` are keyed by, and what [`ItemResource::has_enchantment_effect`] asks for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct EnchantmentEffect(&'static str);
 
 impl EnchantmentEffect {
@@ -54,6 +56,7 @@ pub const PREVENT_ARMOR_CHANGE: EnchantmentEffect =
 /// An item and its components, without a count, as NeoForge's `ItemResource`: what a slot holds.
 /// An empty slot holds none.
 #[derive(Clone)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ItemResource(ItemStack);
 
 impl ItemResource {
@@ -324,6 +327,7 @@ pub trait ResourceHandler<R> {
 /// the mod. Returned from a `host.transaction` closure with `?`, it aborts the whole move, so
 /// neither end keeps any of it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Overanswered {
     /// The mod whose handler answered, or "the game".
     pub owner: String,
