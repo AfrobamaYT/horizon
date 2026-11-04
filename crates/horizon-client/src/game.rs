@@ -196,7 +196,7 @@ mod mob_index;
 mod mob_looting;
 mod mob_sounds;
 mod mod_api_host;
-mod mods;
+pub(crate) mod mods;
 mod mount_menu;
 mod mounts;
 mod moving_pistons;
@@ -699,7 +699,7 @@ impl Options {
             benchmark: None,
             mods: mods::ModsState {
                 dev: context.dev_mods,
-                native: Default::default(),
+                ..Default::default()
             },
             execution_role: execution_role::ExecutionRole::Client,
             fullscreen: false,
@@ -2851,9 +2851,8 @@ struct Game<'a> {
     /// swap just before an attack keeps them, with the new item's enchantments
     /// (attribute swapping).
     attack_item: Option<Arc<str>>,
-    /// Mobs a player hurt (`LivingEntity.lastHurtByPlayer`), with the guest
-    /// it was by connection (None: the host).
-    last_hurt_by_player: HashMap<u32, Option<u32>>,
+    /// Mobs a player hurt (`LivingEntity.lastHurtByPlayer`), by player UUID.
+    last_hurt_by_player: HashMap<u32, combat::PlayerCredit>,
     /// Leashed mobs a player killed, with the killer's UUID: the lead drops
     /// on the corpse's next tick (`Leashable.tickLeash`), for the mods. With
     /// the corpse's dimension: each level's tick prunes only its own.
@@ -12377,8 +12376,7 @@ impl Game<'_> {
                     randomization: 0,
                 });
             }
-            self.last_hurt_by_player
-                .insert(self.mobs[index].id, self.lan_acting);
+            self.remember_mob_player_credit(self.mobs[index].id);
             let sound = if crit {
                 "minecraft:entity.player.attack.crit"
             } else if scale > 0.9 {
@@ -22243,9 +22241,16 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
             log::warn!("could not add the official server to servers.dat: {e}");
         }
     }
+    let mut early_settings = Settings::load(&Game::options_path());
+    options
+        .mods
+        .select(&std::env::current_dir()?, &early_settings.mods.enabled);
+    crate::mod_api::install_packages(options.mods.native.packages(), &options.mods.selected);
+    if let Err(refused) = crate::mod_api::install_parts(crate::mod_api::mods()) {
+        panic!("Mod parts refused:\n{}", refused.join("\n"));
+    }
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models(options.execution_role);
-    let mut early_settings = Settings::load(&Game::options_path());
     // Minecraft.<init>: read the last start's flag, then mark this one as not
     // finished until onGameLoadFinished. A dedicated server has no options.txt.
     if options.execution_role.is_client() {
@@ -22283,13 +22288,12 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         &vanilla_root,
         &early_settings.resource_packs,
         &[],
-        &early_settings.mods.enabled,
         &options.mods,
     )
     .or_else(|e| {
         log::warn!("Horizon: resource packs not applied: {e}");
         pack_error = Some(e.to_string());
-        mods::content_root(&vanilla_root, &early_settings.mods.enabled, &options.mods)
+        mods::content_root(&vanilla_root, &options.mods)
     })?;
     let mut loaded = load_resources(
         options.resources.clone(),
@@ -22639,7 +22643,11 @@ mod tests {
         struct ReloadMod;
         #[mod_api::__subscriptions]
         impl Hooks for ReloadMod {
-            fn register(&self, registrar: &mut Registrar) {
+            fn register(
+                &self,
+                registrar: &mut Registrar,
+                _: &crate::mod_api::RegistrationContext<'_>,
+            ) {
                 registrar.block_part_tag("test:reload", TagPart);
             }
             fn data_pack_files(&self, _: &mut dyn ServerHost, event: &mut DataPackFilesEvent<'_>) {

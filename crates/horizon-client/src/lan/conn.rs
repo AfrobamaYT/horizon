@@ -993,7 +993,21 @@ fn login_and_configure(
                 cfg::Serverbound::CustomPayload(p)
                     if p.channel == horizon_protocol::mod_list::CHANNEL =>
                 {
-                    client_mods = horizon_protocol::mod_list::decode(&p.data).map_err(e)?;
+                    match horizon_protocol::mod_list::decode(&p.data) {
+                        Ok(list) => client_mods = list,
+                        Err(error) => {
+                            let text = mod_list_unreadable(&error);
+                            let reason = super::data::component_nbt(&text.component());
+                            let _ =
+                                send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
+                            lost(
+                                shared,
+                                &format!("{name} ({})", uuid_string(uuid)),
+                                &text.plain(),
+                            );
+                            return Ok(None);
+                        }
+                    }
                 }
                 cfg::Serverbound::Pong(p) if p.id == 1 => break,
                 cfg::Serverbound::ClientInformation(i) => info = i,
@@ -1141,6 +1155,20 @@ fn mod_mismatch(difference: &horizon_protocol::mod_list::Difference) -> crate::t
         ));
     }
     text
+}
+
+/// A mod list that breaks a cap is refused whole, never compared in part or
+/// read as empty: like a mismatch, the reason reaches the client as a
+/// configuration disconnect naming the decode error, and the join never
+/// reaches play.
+fn mod_list_unreadable(error: &horizon_protocol::Error) -> crate::text::Text {
+    use crate::{lang::Language, text::Text};
+    let english = Language::load(&[], crate::lang::DEFAULT);
+    Text::translate_with_fallback(
+        "horizon.mods.unreadable",
+        english.get("horizon.mods.unreadable").unwrap(),
+        &[Text::literal(error.to_string())],
+    )
 }
 
 /// ServerCommonPacketListenerImpl.handleResourcePackResponse: a player who
@@ -1757,6 +1785,65 @@ mod tests {
                     break;
                 }
                 cfg::Clientbound::FinishConfiguration(_) => panic!("extra mod was accepted"),
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn a_malformed_mod_list_gets_a_disconnect_reason() {
+        use horizon_protocol::mod_list;
+        let config = crate::lan::NetConfig {
+            announce: false,
+            listen: false,
+            ..crate::lan::NetConfig::lan(0, "Owner - World".into(), 8)
+        };
+        let lan = crate::lan::Lan::start_with(Arc::new(SyncData::empty()), config).unwrap();
+        let mut c = Connection::local(lan.connect_local().unwrap());
+        c.reader
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        login_profile(&mut c, "Owner");
+        c.send(&login::Serverbound::LoginAcknowledged(horizon_protocol::packets::Empty).encode())
+            .unwrap();
+        let mut brand = horizon_protocol::buf::Writer::new();
+        brand.string("horizon");
+        c.send(
+            &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                channel: "minecraft:brand".into(),
+                data: brand.data,
+            })
+            .encode(),
+        )
+        .unwrap();
+        let mut malformed = mod_list::encode(&[]);
+        malformed.push(0); // Trailing bytes: the list is refused whole, not read as empty.
+        loop {
+            let (id, payload) = c.recv().unwrap();
+            match cfg::Clientbound::decode(id, &payload).unwrap() {
+                cfg::Clientbound::SelectKnownPacks(p) => c
+                    .send(&cfg::Serverbound::SelectKnownPacks(p).encode())
+                    .unwrap(),
+                cfg::Clientbound::CustomPayload(p) if p.channel == mod_list::CHANNEL => {
+                    c.send(
+                        &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                            channel: mod_list::CHANNEL.into(),
+                            data: malformed.clone(),
+                        })
+                        .encode(),
+                    )
+                    .unwrap();
+                }
+                cfg::Clientbound::Ping(p) => {
+                    c.send(&cfg::Serverbound::Pong(p).encode()).unwrap();
+                }
+                cfg::Clientbound::Disconnect(d) => {
+                    let text = horizon_protocol::text::plain(&d.reason, &Default::default());
+                    assert!(text.contains("couldn't be read"));
+                    assert!(text.contains("trailing bytes"));
+                    break;
+                }
+                cfg::Clientbound::FinishConfiguration(_) => panic!("malformed list was accepted"),
                 _ => {}
             }
         }

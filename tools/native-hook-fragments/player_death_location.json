@@ -2,7 +2,7 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "player_last_death_location", "side": "server",
+      "name": "player_last_death_location", "side": "both",
       "target": "horizon_client::game::native_player_death::Game<'_>::native_player_last_death_location",
       "receiver": "player"
     },

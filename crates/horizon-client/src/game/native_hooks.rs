@@ -30,7 +30,7 @@ use horizon_client::mod_api::{
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
     LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult,
-    NativeItemClick, NativeTriState, Suggestion, UsePhase,
+    NativeItemClick, NativeTriState, Suggestion, TooltipElement, UsePhase,
 };
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -5366,6 +5366,35 @@ impl Game<'_> {
             lines,
         );
     }
+    /// `RenderTooltipEvent.GatherComponents`: the elements of `stack`'s
+    /// tooltip (`ItemStack.getTooltipLines` as text lines, then the image
+    /// component its item's `tooltip_component` part answered), once
+    /// `item_tooltip` has run and before any wrapping or measuring. Add,
+    /// change, reorder or remove elements; the lines draw in order, then the
+    /// images in order, under any bundle's contents. `max_width` starts at -1,
+    /// no limit, which leaves the lines as they are; a mod that sets it
+    /// wraps every line wider than that, in GUI pixels. Set `cancel` and
+    /// nothing is drawn, and no `tooltip_color` is asked. Asked each frame
+    /// the tooltip shows, never for one the stack hides. Client-side.
+    pub(super) fn native_render_tooltip_gather_components(
+        &self,
+        stack: &ItemStack,
+        screen_width: i32,
+        screen_height: i32,
+        elements: &mut Vec<TooltipElement>,
+        max_width: &mut i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_render_tooltip_gather_components(
+            self,
+            stack,
+            screen_width,
+            screen_height,
+            elements,
+            max_width,
+            cancel,
+        );
+    }
     /// Change a tooltip box's background and border gradient colors, as ARGB.
     /// Stack is None for tooltips not associated with an item.
     pub(super) fn native_tooltip_color(
@@ -9904,7 +9933,7 @@ mod tests {
         }
         #[horizon_client::mod_api::__subscriptions]
         impl Hooks for User {
-            fn register(&self, registrar: &mut Registrar) {
+            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 let kind = registrar.block_entity_type_key("be_test:shared");
                 registrar
                     .block_entity_part(&kind, Press)
@@ -9927,7 +9956,7 @@ mod tests {
         }
         #[horizon_client::mod_api::__subscriptions]
         impl Hooks for TestMod {
-            fn register(&self, registrar: &mut Registrar) {
+            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 let kind = registrar
                     .block_entity_type("shared")
                     .blocks(if self.invalid {
@@ -9983,8 +10012,7 @@ mod tests {
         horizon_client::mod_api::install(mods.clone());
         horizon_client::mod_api::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root =
-            super::super::mods::content_root(&base, &Default::default(), &Default::default());
+        let root = super::super::mods::content_root(&base, &Default::default());
         if invalid {
             let error = root.unwrap_err().to_string();
             assert!(error.contains("be_test:shared"), "{error}");
@@ -10752,8 +10780,7 @@ mod tests {
         let hunger_hooks = free_hooks(include_str!("../hunger.rs"));
         let landing_hooks = free_hooks(include_str!("../landing.rs"));
         let motion_hooks = free_hooks(include_str!("../motion.rs"));
-        // The chat relay's (`horizon_client_lib::lan::hub::chat`).
-        let chat_hooks = free_hooks(include_str!("../lan/hub/chat.rs"));
+        let hub_hooks = free_hooks(include_str!("../lan/hub.rs"));
         let ender_hooks = free_hooks(include_str!("../mobs/enderman.rs"));
         let declared: BTreeSet<_> = section
             .lines()
@@ -10774,7 +10801,7 @@ mod tests {
             .chain(hunger_hooks.iter().copied())
             .chain(landing_hooks.iter().copied())
             .chain(motion_hooks.iter().copied())
-            .chain(chat_hooks.iter().copied())
+            .chain(hub_hooks.iter().copied())
             .chain(ender_hooks.iter().copied())
             .collect();
         let mut names = BTreeSet::new();
@@ -10803,8 +10830,8 @@ mod tests {
                 format!("horizon_client_lib::landing::native_{name}")
             } else if motion_hooks.contains(name) {
                 format!("horizon_client_lib::motion::native_{name}")
-            } else if chat_hooks.contains(name) {
-                format!("horizon_client_lib::lan::hub::chat::native_{name}")
+            } else if hub_hooks.contains(name) {
+                format!("horizon_client_lib::lan::hub::native_{name}")
             } else if menu_hooks.contains(name) {
                 // menu.rs compiles into horizon-client-lib (#5446's
                 // split): horizon-mixins resolves the crate by its package.
