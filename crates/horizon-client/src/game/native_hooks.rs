@@ -53,6 +53,7 @@ use horizon_client::{
     first_person::Hand,
     health::{HurtSource, Hurting, Knock, ShieldBlock},
     hud::{HudBatch, rgba},
+    item_tooltip::TooltipDisplay,
     items::ItemStack,
     keybinds,
     lan::menu::Slots,
@@ -5311,6 +5312,36 @@ impl Game<'_> {
     pub(super) fn native_tooltip(&self, stack: &ItemStack, lines: &mut Vec<(Text, u32)>) {
         mod_api::dispatch_tooltip(self, stack, lines);
     }
+    /// `ItemTooltipEvent`: the whole tooltip of `stack` (`ItemStack.getTooltipLines`),
+    /// once its name, the item's own lines, the components' lines, the
+    /// advanced lines and the operator warning are in `lines`, each with a
+    /// colour as `rgba` packs it (`u32::MAX` keeps the text's own). Add,
+    /// change, reorder or remove lines. `player` and `player_entity_id` are
+    /// the local player's, `display` the stack's `minecraft:tooltip_display`,
+    /// `advanced` (F3+H) and `creative` (a creative tab's own slot) its
+    /// `TooltipFlag`. Asked each frame the tooltip shows, never for one the
+    /// stack hides or a crossbow's loaded projectile. Client-side.
+    pub(super) fn native_item_tooltip(
+        &self,
+        player: u128,
+        player_entity_id: i32,
+        stack: &ItemStack,
+        display: &TooltipDisplay<'_>,
+        advanced: bool,
+        creative: bool,
+        lines: &mut Vec<(Text, u32)>,
+    ) {
+        mod_api::dispatch_item_tooltip(
+            self,
+            player,
+            player_entity_id,
+            stack,
+            display,
+            advanced,
+            creative,
+            lines,
+        );
+    }
     /// Change a tooltip box's background and border gradient colors, as ARGB.
     /// Stack is None for tooltips not associated with an item.
     pub(super) fn native_tooltip_color(
@@ -7426,7 +7457,7 @@ impl GameLevel<'_> {
     /// Horizon's own. The one place both whole-block write paths make it.
     pub(super) fn new_block_entity(&self, name: &str) -> Option<BlockEntity> {
         let mut nbt = None;
-        if horizon_client::containers::block_entity_types::type_for(name).is_some() {
+        if horizon_client::block_entity_types::type_for(name).is_some() {
             self.native_block_entity(name, &mut nbt);
         }
         block_entity_for_block(self.registry, self.facts, name, nbt.unwrap_or_default())
@@ -7550,7 +7581,7 @@ fn block_entity_for_block(
     name: &str,
     initial: Compound,
 ) -> Option<BlockEntity> {
-    if let Some(kind) = horizon_client::containers::block_entity_types::type_for(name) {
+    if let Some(kind) = horizon_client::block_entity_types::type_for(name) {
         return Some(BlockEntity::Mod(Box::new(ModBlockEntity::new(
             kind.to_owned(),
             ModBlockEntityFields {
@@ -8946,7 +8977,7 @@ impl Game<'_> {
     /// (`GameLevel::new_block_entity`). Only a declared mod type builds the
     /// level.
     pub(super) fn new_block_entity(&mut self, name: &str) -> Option<BlockEntity> {
-        if horizon_client::containers::block_entity_types::type_for(name).is_none() {
+        if horizon_client::block_entity_types::type_for(name).is_none() {
             return block_entity_for_block(
                 self.pack.assets.registry,
                 self.res.facts(),
@@ -9442,23 +9473,27 @@ impl Game<'_> {
     pub(super) fn list_native_mods(&mut self) {
         let mut mods = Vec::new();
         self.native_mods(&mut mods);
-        // A WebAssembly mod of the same id: the native row stands for it,
-        // and alone toggles its `mod.<id>` line.
+        let native = self.mods.native.clone();
         self.settings
             .mods
             .installed
-            .retain(|row| row.native.is_none() && !mods.iter().any(|m| m.id == row.id));
-        for m in mods {
+            .retain(|row| row.native.is_none() && !native.built().iter().any(|m| m.id == row.id));
+        for package in native.packages() {
+            let m = &package.manifest;
             let mut buttons = Vec::new();
             self.native_settings(&m.id, &mut buttons);
             let page = NativePage {
-                keys: m.keys,
+                keys: mods
+                    .iter_mut()
+                    .find(|page| page.id == m.id)
+                    .map(|page| std::mem::take(&mut page.keys))
+                    .unwrap_or_default(),
                 buttons,
             };
             self.settings.mods.installed.push(Installed {
-                id: m.id,
-                title: m.title,
-                description: m.description,
+                id: m.id.clone(),
+                title: [m.name.as_str(), " ", m.version.as_str()].concat(),
+                description: m.description.clone(),
                 problem: None,
                 dev: false,
                 native: Some(page),
@@ -9861,7 +9896,8 @@ mod tests {
         horizon_client::mod_api::install(mods.clone());
         horizon_client::mod_api::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root = super::super::mods::content_root(&base, &Default::default(), &[]);
+        let root =
+            super::super::mods::content_root(&base, &Default::default(), &Default::default());
         if invalid {
             let error = root.unwrap_err().to_string();
             assert!(error.contains("be_test:shared"), "{error}");
@@ -9874,7 +9910,7 @@ mod tests {
             assert!(error.contains("be_user"), "{error}");
             assert!(error.contains("unknown block entity type"), "{error}");
             assert!(error.contains(id), "{error}");
-            assert!(horizon_client::containers::block_entity_types::current().is_none());
+            assert!(horizon_client::block_entity_types::current().is_none());
             return;
         }
         assert_eq!(keys.shared.get(), keys.own.get());

@@ -75,6 +75,7 @@ mod tests {
         pub(super) enum BonemealSource {
             Interaction,
         }
+        pub(super) struct TooltipDisplay<'a>(pub &'a ());
         pub(super) struct NativeTriState;
         pub(super) struct NativeInteractionResult;
         pub(super) struct NativeMobRender<'a>(pub &'a ());

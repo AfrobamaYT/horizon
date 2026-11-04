@@ -953,7 +953,6 @@
   "Others look like plain players to you. Also in the game's Horizon settings.": "다른 플레이어가 일반 플레이어처럼 보입니다. 게임의 Horizon 설정에도 있습니다.",
   "Show other players' auras and trails": "다른 플레이어의 오라와 자취 보이기",
   "Off by default. Also in the game's Horizon settings.": "기본값은 끔입니다. 게임의 Horizon 설정에도 있습니다.",
-  "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "이 게임 소스에는 읽을 수 있는 네이티브 진입점 템플릿이 없습니다. Horizon을 업데이트하고 이 게임에 맞게 모드를 다시 빌드하세요.",
   "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.": "네이티브 빌드 {version}의 native-mods.json 기록이 없거나 올바르지 않습니다. 설치된 Horizon 버전에서 다시 빌드하세요.",
   "Friend": "친구",
   "Friends on the same Wi-Fi: Multiplayer, Add server, paste.": "같은 Wi-Fi의 친구: 멀티플레이, 서버 추가, 붙여넣기.",
@@ -1040,5 +1039,10 @@
   "SHA-512 mismatch at {path}: expected {expected}, got {actual}. Replace this cache entry with the exact original file, or remove it and retry with --allow-jar-downloads.": "{path}의 SHA-512가 일치하지 않습니다: 예상 {expected}, 실제 {actual}. 이 캐시 항목을 정확한 원본 파일로 바꾸거나, 삭제한 뒤 --allow-jar-downloads를 지정하여 다시 시도하세요.",
   "SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.": "SHA-512 {hash}가 {first_id} {first_version} 및 {second_id} {second_version} 모두를 가리킵니다.",
   "no exact file on Modrinth": "Modrinth에 정확히 일치하는 파일이 없음",
-  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}"
+  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
+  "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "이 게임 소스에는 네이티브 인벤토리 진입 템플릿이 없습니다. Horizon을 업데이트하고 이 게임에 맞게 모드를 다시 빌드하세요.",
+  "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml에 패키지 이름이 없습니다.",
+  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml에 horizon-client 의존성이 없습니다.",
+  "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client가 {fields}을(를) 요청합니다. 서버 빌드는 헤드리스이며 horizon-client 기능은 런처가 관리합니다. features를 제거하고 default-features = false를 사용하거나 생략하세요.",
+  "{mod}: {error}": "{mod}: {error}"
 }
