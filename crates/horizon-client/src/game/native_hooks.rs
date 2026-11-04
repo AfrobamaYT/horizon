@@ -6821,7 +6821,7 @@ impl Game<'_> {
         &mut self,
         dimension: &str,
         controller: TicketController,
-        validation: &mut mod_api::mod_chunk_tickets::TicketValidation,
+        validation: &mut dyn mod_api::TicketValidation,
     ) {
         mod_api::dispatch_validate_tickets(self, dimension, controller, validation);
     }

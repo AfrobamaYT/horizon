@@ -150,10 +150,10 @@ impl Game<'_> {
                 };
                 let (own, rest): (Vec<_>, Vec<_>) =
                     loaded.into_iter().partition(|t| t.controller == slot);
-                let (mut validation, removals) =
-                    mod_api::mod_chunk_tickets::TicketValidation::new(owner, own.clone());
+                let mut validation =
+                    mod_api::mod_chunk_tickets::ControllerTickets::new(owner, own.clone());
                 self.native_validate_tickets(dim.id(), controller, &mut validation);
-                let removed = removals.into_removed();
+                let removed = validation.into_removed();
                 loaded = rest;
                 loaded.extend(own.into_iter().filter(|t| !removed.contains(t)));
             }

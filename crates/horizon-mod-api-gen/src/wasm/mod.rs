@@ -29,6 +29,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "menu::SlotView",
     "Registrar",
     "CapabilityProviders",
+    "TicketValidation",
 ];
 
 /// Imported traits a call never hands over, each reached through another's method instead.

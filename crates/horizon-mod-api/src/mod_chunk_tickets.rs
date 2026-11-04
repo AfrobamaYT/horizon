@@ -1,7 +1,6 @@
 //! Moved here from the game so mods can name it.
 #[allow(unused_imports)]
 use crate::*;
-use std::sync::Mutex;
 /// What a ticket belongs to: a block (a machine) or an entity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 // exhaustive: a closed set the game matches without a wildcard
@@ -47,53 +46,68 @@ impl TicketSet {
 /// The tickets one controller loaded, as `validate_tickets` hands them out
 /// (NeoForge's `TicketHelper`, one for each controller). Every call acts as
 /// the mod marked as running, and only the controller's owning mod sees or
-/// removes anything, block owners and entity owners apart. The removals made
-/// are the game's: a removal goes to a [`TicketRemovals`] queue only the game
-/// holds.
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct TicketValidation {
-    /// The `[mod] id` that owns the controller.
-    owner: &'static str,
-    loaded: Vec<ModTicket>,
-    removed: Arc<Mutex<Vec<ModTicket>>>,
-}
-impl std::fmt::Debug for TicketValidation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TicketValidation")
-            .field("own", &self.own().count())
-            .finish()
-    }
-}
-/// The tickets the mods removed in one validation, for the game to release.
-#[derive(Debug)]
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct TicketRemovals(Arc<Mutex<Vec<ModTicket>>>);
-impl TicketRemovals {
-    /// The tickets removed.
-    pub fn into_removed(self) -> Vec<ModTicket> {
-        std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()))
-    }
-}
-impl TicketValidation {
-    /// A validation of the `loaded` tickets of one controller, owned by mod
-    /// `owner`, and the queue of what is removed. For the game.
-    // hidden: a game-side helper, not part of the mod surface
-    #[doc(hidden)]
-    pub fn new(owner: &'static str, loaded: Vec<ModTicket>) -> (Self, TicketRemovals) {
-        let removed = Arc::new(Mutex::new(Vec::new()));
-        (
-            Self {
-                owner,
-                loaded,
-                removed: removed.clone(),
-            },
-            TicketRemovals(removed),
-        )
-    }
+/// removes anything, block owners and entity owners apart. The game releases
+/// what was removed once the hook returns.
+pub trait TicketValidation {
     /// The controller's block tickets: each block position with the chunks it
     /// holds without and with natural spawning (`TicketHelper.getBlockTickets`'
     /// `TicketSet`: `nonNaturalSpawning`, `naturalSpawning`), in position order.
-    pub fn block_tickets(&self) -> Vec<([i32; 3], TicketSet)> {
+    fn block_tickets(&self) -> Vec<([i32; 3], TicketSet)>;
+    /// The controller's entity tickets: each entity UUID with the chunks it
+    /// holds without and with natural spawning (`TicketHelper.getEntityTickets`),
+    /// in UUID order.
+    fn entity_tickets(&self) -> Vec<(u128, TicketSet)>;
+    /// Remove every ticket the block holds, of both kinds
+    /// (`removeAllTickets(BlockPos)`): how many went.
+    fn remove_block_tickets(&mut self, pos: [i32; 3]) -> usize;
+    /// Remove every ticket the entity holds, of both kinds
+    /// (`removeAllTickets(UUID)`).
+    fn remove_entity_tickets(&mut self, uuid: u128) -> usize;
+    /// Remove the block's ticket of one kind on one chunk
+    /// (`removeTicket(BlockPos, ChunkPos, forceNaturalSpawning)`): whether it
+    /// held one. The other kind on the chunk stays.
+    fn remove_block_ticket(
+        &mut self,
+        pos: [i32; 3],
+        chunk: [i32; 2],
+        natural_spawning: bool,
+    ) -> bool;
+    /// Remove the entity's ticket of one kind on one chunk
+    /// (`removeTicket(UUID, ChunkPos, forceNaturalSpawning)`).
+    fn remove_entity_ticket(&mut self, uuid: u128, chunk: [i32; 2], natural_spawning: bool)
+    -> bool;
+}
+
+/// The game's [`TicketValidation`]: one controller's loaded tickets, and those removed.
+#[derive(Debug)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct ControllerTickets {
+    /// The `[mod] id` that owns the controller.
+    owner: &'static str,
+    loaded: Vec<ModTicket>,
+    removed: Vec<ModTicket>,
+}
+impl ControllerTickets {
+    /// A validation of the `loaded` tickets of one controller, owned by mod
+    /// `owner`. For the game.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn new(owner: &'static str, loaded: Vec<ModTicket>) -> Self {
+        Self {
+            owner,
+            loaded,
+            removed: Vec::new(),
+        }
+    }
+    /// The tickets removed. For the game.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn into_removed(self) -> Vec<ModTicket> {
+        self.removed
+    }
+}
+impl TicketValidation for ControllerTickets {
+    fn block_tickets(&self) -> Vec<([i32; 3], TicketSet)> {
         let mut grouped = std::collections::BTreeMap::<[i32; 3], TicketSet>::new();
         for (owner, chunk, spawning) in self.own() {
             if let TicketOwner::Block(pos) = owner {
@@ -102,10 +116,7 @@ impl TicketValidation {
         }
         grouped.into_iter().collect()
     }
-    /// The controller's entity tickets: each entity UUID with the chunks it
-    /// holds without and with natural spawning (`TicketHelper.getEntityTickets`),
-    /// in UUID order.
-    pub fn entity_tickets(&self) -> Vec<(u128, TicketSet)> {
+    fn entity_tickets(&self) -> Vec<(u128, TicketSet)> {
         let mut grouped = std::collections::BTreeMap::<u128, TicketSet>::new();
         for (owner, chunk, spawning) in self.own() {
             if let TicketOwner::Entity(uuid) = owner {
@@ -114,20 +125,13 @@ impl TicketValidation {
         }
         grouped.into_iter().collect()
     }
-    /// Remove every ticket the block holds, of both kinds
-    /// (`removeAllTickets(BlockPos)`): how many went.
-    pub fn remove_block_tickets(&mut self, pos: [i32; 3]) -> usize {
+    fn remove_block_tickets(&mut self, pos: [i32; 3]) -> usize {
         self.remove(TicketOwner::Block(pos), None)
     }
-    /// Remove every ticket the entity holds, of both kinds
-    /// (`removeAllTickets(UUID)`).
-    pub fn remove_entity_tickets(&mut self, uuid: u128) -> usize {
+    fn remove_entity_tickets(&mut self, uuid: u128) -> usize {
         self.remove(TicketOwner::Entity(uuid), None)
     }
-    /// Remove the block's ticket of one kind on one chunk
-    /// (`removeTicket(BlockPos, ChunkPos, forceNaturalSpawning)`): whether it
-    /// held one. The other kind on the chunk stays.
-    pub fn remove_block_ticket(
+    fn remove_block_ticket(
         &mut self,
         pos: [i32; 3],
         chunk: [i32; 2],
@@ -135,9 +139,7 @@ impl TicketValidation {
     ) -> bool {
         self.remove(TicketOwner::Block(pos), Some((chunk, natural_spawning))) > 0
     }
-    /// Remove the entity's ticket of one kind on one chunk
-    /// (`removeTicket(UUID, ChunkPos, forceNaturalSpawning)`).
-    pub fn remove_entity_ticket(
+    fn remove_entity_ticket(
         &mut self,
         uuid: u128,
         chunk: [i32; 2],
@@ -145,6 +147,8 @@ impl TicketValidation {
     ) -> bool {
         self.remove(TicketOwner::Entity(uuid), Some((chunk, natural_spawning))) > 0
     }
+}
+impl ControllerTickets {
     fn own(&self) -> impl Iterator<Item = (TicketOwner, [i32; 2], bool)> + '_ {
         let owned = crate::crash::current_native_mod() == Some(self.owner);
         self.loaded
@@ -165,10 +169,7 @@ impl TicketValidation {
             });
         self.loaded = kept;
         let count = gone.len();
-        self.removed
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .extend(gone);
+        self.removed.extend(gone);
         count
     }
 }
