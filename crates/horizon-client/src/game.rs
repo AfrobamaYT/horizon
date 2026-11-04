@@ -4454,11 +4454,14 @@ impl Game<'_> {
         let v = horizon_client::entities::drop_motion(r, self.yaw, self.pitch, randomly);
         let y = eye[1] - f64::from(0.3f32);
         // ItemTossEvent: a canceled toss never enters the world; what was thrown is gone.
-        let player = self.native_acting_id();
-        let mut canceled = false;
-        self.native_item_toss(player, &thrown.item, thrown.count, &mut canceled);
-        if canceled {
-            return None;
+        // Only `drop(.., false)` tosses fire it: a death's scatter (`randomly`) does not.
+        if !randomly {
+            let player = self.native_acting_id();
+            let mut canceled = false;
+            self.native_item_toss(player, &thrown.item, thrown.count, &mut canceled);
+            if canceled {
+                return None;
+            }
         }
         self.spawn_item(thrown, [eye[0], y, eye[2]], v, 40);
         let uuid = thrown_from_hand.then(|| self.acting_player_uuid());
