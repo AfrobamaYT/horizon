@@ -1273,6 +1273,27 @@ impl Game<'_> {
                     keep.push(!m.hostile() || m.persistent);
                     continue;
                 }
+                // `MobDespawnEvent`, before `checkDespawn`'s own draws; one branch
+                // with no listener. Cleared below: the tick may not reach the check.
+                // The wither overrides `checkDespawn` without `super`, so the
+                // event, patched into `Mob.checkDespawn`, never fires for it;
+                // a mannequin is no `Mob` and never checks despawning.
+                if mod_api::__private::listened(mod_api::HookId::MobDespawn)
+                    && !matches!(
+                        m.species(),
+                        horizon_client::mobs::Species::Wither
+                            | horizon_client::mobs::Species::Mannequin
+                    )
+                    && let Some(epoch) = self.native_lifecycle.epoch()
+                {
+                    self.native_mob_despawn(
+                        self.dim.id(),
+                        mod_api::MobRef::new(mod_api::EntityRef::new(epoch, m.id)),
+                        &m.kind.id,
+                        [m.position.x, m.position.y, m.position.z],
+                        &mut m.despawn,
+                    );
+                }
                 // ServerLevel.tick: every loaded entity checks despawning, but
                 // only those in entity-ticking chunks (within the simulation
                 // distance) tick.
@@ -1287,6 +1308,7 @@ impl Game<'_> {
                 }
                 // A mod canceled its tick: it stays as it is.
                 if round.canceled(m.id) {
+                    m.despawn = mod_api::NativeDespawn::default();
                     keep.push(true);
                     continue;
                 }
@@ -1295,6 +1317,7 @@ impl Game<'_> {
                 let from = events.len();
                 let credit_expiring = m.ai.last_hurt_by_player == 1;
                 let kept = m.tick(&w, &mut level, &mut events);
+                m.despawn = mod_api::NativeDespawn::default();
                 if credit_expiring && m.ai.last_hurt_by_player == 0 {
                     player_credit.remove(&m.id);
                 }

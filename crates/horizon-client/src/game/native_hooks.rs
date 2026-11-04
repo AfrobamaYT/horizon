@@ -81,14 +81,14 @@ use mod_api::{
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, UsePhase,
 };
+use mod_api::{
+    MobRef, NativeDespawn, NativeDifficulty, NativePermissionLevel, NativeSpawnCheck,
+    NativeSpawnReason, NativeSpawner, Recipe,
+};
 pub(crate) use mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
     NativeMinimap, NativeMod, NativeNoteInstrument, NativePanelEvent, NativePortalShape,
     NativeScreen, NativeScreenView, NativeStack, NativeZoom,
-};
-use mod_api::{
-    NativeDifficulty, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason, NativeSpawner,
-    Recipe,
 };
 use std::{
     collections::HashMap,
@@ -1216,27 +1216,14 @@ impl GameLevel<'_> {
     /// (more for redstone wire's diagonals and knock-on updates): keep it
     /// short.
     #[inline(always)]
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn native_update_shape(
         &self,
         ticks: &mut Ticks,
-        dimension: LevelDimension,
-        pos: BlockPos,
-        state: BlockStateId,
-        direction: Direction,
-        neighbour_pos: BlockPos,
-        neighbour: BlockStateId,
-        new: &mut Option<BlockStateId>,
+        call: mod_api::__private::UpdateShapeCall<'_>,
     ) {
         mod_api::dispatch_update_shape(
             &mut super::mod_api_host::LevelTicks { level: self, ticks },
-            dimension,
-            pos,
-            state,
-            direction,
-            neighbour_pos,
-            neighbour,
-            new,
+            call,
         );
     }
 
@@ -1857,20 +1844,8 @@ impl Game<'_> {
     /// sender alone as system chat, whether or not the message is canceled
     /// (no other player sees them). Commands (`/say`, `/msg`...) are not
     /// chat here. Server-side, with no player's state swapped in.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn native_server_chat(
-        &mut self,
-        player_id: i32,
-        player: u128,
-        username: &str,
-        raw_text: &str,
-        message: &mut Text,
-        replies: &mut Vec<Text>,
-        cancel: &mut bool,
-    ) {
-        mod_api::dispatch_server_chat(
-            self, player_id, player, username, raw_text, message, replies, cancel,
-        );
+    pub(super) fn native_server_chat(&mut self, call: mod_api::__private::ServerChatCall<'_>) {
+        mod_api::dispatch_server_chat(self, call);
     }
     /// NeoForge's `ClientChatEvent`: a client is about to send `message`.
     /// `original_message` is immutable; change `message` or set `cancel` to
@@ -5942,6 +5917,21 @@ impl Game<'_> {
         mod_api::dispatch_mob_spawn_position_check(self, dimension, kind, reason, pos, result);
     }
 
+    /// `Mob.checkDespawn` is about to run for mob `entity` (NeoForge's
+    /// `MobDespawnEvent`): set `result` to force or forbid the despawn. `kind`
+    /// and `pos` are the mob's, given as data because a mob taken out for its
+    /// tick does not resolve through its handle (a #29 follow-up).
+    pub(super) fn native_mob_despawn(
+        &self,
+        dimension: &str,
+        mob: MobRef,
+        kind: &str,
+        pos: [f64; 3],
+        result: &mut NativeDespawn,
+    ) {
+        mod_api::dispatch_mob_despawn(self, dimension, mob, kind, pos, result);
+    }
+
     /// `FinalizeSpawnEvent`: the mob of type `kind` at `pos` is about to be
     /// finalized (`Mob.finalizeSpawn`) for `reason`. `cancel` skips the
     /// finalization (the mob still spawns, uninitialised); `spawn_cancelled`
@@ -7346,31 +7336,11 @@ impl Game<'_> {
     /// `PlayerRespawnPositionEvent`: where `player` respawns, once the server found it. The
     /// `original_*` arguments are that point; the mods may change `level`, `position`, `yaw`,
     /// `pitch` and `copy_original_spawn_position` (`game/respawn_position.rs` applies them).
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn native_player_respawn_position(
         &mut self,
-        player: PlayerRef,
-        original_level: LevelDimension,
-        original_position: [f64; 3],
-        missing_respawn_block: bool,
-        level: &mut LevelDimension,
-        position: &mut [f64; 3],
-        yaw: &mut f32,
-        pitch: &mut f32,
-        copy_original_spawn_position: &mut bool,
+        call: mod_api::__private::PlayerRespawnPositionCall<'_>,
     ) {
-        mod_api::dispatch_player_respawn_position(
-            self,
-            player,
-            original_level,
-            original_position,
-            missing_respawn_block,
-            level,
-            position,
-            yaw,
-            pitch,
-            copy_original_spawn_position,
-        );
+        mod_api::dispatch_player_respawn_position(self, call);
     }
     /// `player` (`name`) respawned (NeoForge's `PlayerRespawnEvent`): at the
     /// end of `PlayerList.respawn`, once they are placed and their health,
