@@ -778,7 +778,9 @@ mod tests {
             game.mobs.push(wolf);
             game.mobs[0].ai.last_hurt_by = Some(Who::Mob(101));
             game.mobs[0].ai.last_hurt_by_time = game.mobs[0].age as i32;
-            let living = game.native_living(game.native_entity(100).unwrap()).unwrap();
+            let living = game
+                .native_living(game.native_entity(100).unwrap())
+                .unwrap();
             assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(101));
 
             // A player hit followed by a mob hit keeps the player credit.
@@ -788,8 +790,7 @@ mod tests {
             // A tame wolf's hit also records its owner's reference.
             game.resolve_player_responsible(100, Damage::mob(101, [0.0; 3]));
             assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
-            game.lan.as_mut().unwrap().hub.guests[0].dimension =
-                "minecraft:the_nether".into();
+            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
             assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
             game.lan.as_mut().unwrap().hub.guests[0].placed = false;
             assert_eq!(living.kill_credit(game), None);
