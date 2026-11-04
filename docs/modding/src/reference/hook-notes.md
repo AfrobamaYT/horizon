@@ -452,6 +452,13 @@ one, where vanilla gives the `by` one.
 
 - Chunks and players coming and going, on the server: `native_chunk_load` (with whether the chunk is new), `native_chunk_unload`, and
   `native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Changes made to the departing chunk in `native_chunk_unload` aren't saved: as in vanilla, the chunk is saved before it unloads.
+- Chunks a player watches, on the server: `native_chunk_watch(player, chunk)`, `native_chunk_sent(player, chunk)` and
+  `native_chunk_unwatch(player, chunk)` (NeoForge's `ChunkWatchEvent.Watch`, `Sent` and `UnWatch`). Each chunk that comes into a
+  player's view is watched, then sent; it's unwatched when it leaves the view, when the player leaves the level (a portal, a
+  teleport, a respawn) and when they disconnect, in the level it was watched in. Vanilla watches a chunk when it queues it; Horizon
+  picks a chunk only as it sends it, so the watch comes just before the send. The hub records them only while a mod listens and
+  the game tells them after the hub's network step for that level, so a handler sees the state after that step; the order per
+  player and chunk is vanilla's. The far ring's columns past the view distance aren't told, and the server stopping doesn't unwatch.
 
 - [the renderer's hook points](#render-hook-points): `native_world_drawn`, called once the world is drawn with its colour, depth, matrices and entity geometry, and
   `native_render_needs`, where a mod asks for the entity runs and the world's depth without a shader pack.
@@ -1734,6 +1741,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_entity_change_block(entity, kind, pos, from, to)`**: a mob changed a block, after the new state was applied.
 - **`native_entity_break_door(entity, kind, pos)`**: a mob finished breaking a door at `pos`, after the block was removed.
 - **`native_creeper_power(entity, lightning)`**: a lightning strike charged the creeper.
+- **`native_living_visibility(entity, looking, visibility)`**: how visible `entity` is to `looking` (NeoForge's `LivingVisibilityEvent`, last in `LivingEntity.getVisibilityPercent`). `visibility` comes in as vanilla's percent: sneaking 0.8, invisibility scaled by armour cover, a matching mob head 0.5. Multiply it to scale the range a targeting check sees the entity from. A negative answer counts as 0, and the result is clamped to 10, as vanilla clamps. Horizon computes visibility only for players, so it asks for a player seen by a mob whose targeting check scales by visibility (`TargetingConditions.testInvisible`): hostile targeting, the sensors, the happy ghast's tempt. It asks after the alive, spectator and selector checks, as `TargetingConditions.test` does. With no listener, `MobWorld::mob_hooks` is `None` and nothing is asked.
 - **`native_entity_mob_griefing(entity, can_grief)`**: may `entity` change the world (NeoForge's `EntityMobGriefingEvent`, `EventHooks.canEntityGrief`)? `can_grief` comes in as the `mob_griefing` rule. Horizon asks at each site where NeoForge 26.3 calls `canEntityGrief`, with the same entity: the exploding entity for a mob explosion, the owner for a mob's arrow or small fireball, the wither for its rose, otherwise the mob itself. Where NeoForge keeps the plain rule read (door breaking, the dragon's walls, pitcher crops, weaving, and the explosion's decorations, items and vehicles), the rule decides. The game asks through `Game::can_entity_grief` and the mob AI through `MobWorld::can_grief`. With no listener both read the rule: one `listened` check, no dispatch. A ghast fireball's fire is not placed by Horizon yet, so its `canEntityGrief(owner)` ask is missing with it.
 - **`native_enderman_anger(enderman, player, cancel)`**: `player` stares at `enderman` (NeoForge's `EnderManAngerEvent`, last in `Enderman.isBeingStaredBy`, once the look cone, line of sight and carved pumpkin checks passed). It is asked each time the enderman's goals check the stare: to get angry, to freeze while looked at, and to teleport away up close. Set `cancel` and that stare doesn't count. The mob AI asks through `MobWorld::mob_hooks`, which is set only on the server while a mod listens: with no listener the stare check costs nothing more.
 
@@ -2771,6 +2779,8 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 ## Combat hook ownership
 
 The six combat hooks (`living_incoming_damage`, `damage_pre`, `damage_post`, `living_knockback`, `living_use_totem`, `living_shield_block`) are lent to each hit by the game that runs it, not installed once per process. A mod sees no difference: order, arguments and cancel rules are unchanged.
+
+**Migration (`living_use_totem`, `living_shield_block`, now version 2):** both now take the hit's level host as their first argument, as `living_incoming_damage` does: its blocks, random and own attachments, with no writes beyond them. Add the parameter (`level: &mut dyn LevelRandomHost`); the event, its fields, its order and its cancel rules are unchanged. `living_shield_block` fires inside `hurtServer` before the armor and enchantment reductions and sees the hit's `damage` as it came in; `living_use_totem` fires after health reached 0 and before `die`. Tick-time effect: one extra pointer in the hit and the same `listened` early-outs. Diverges from upstream: the two hooks gain the level host that upstream's catalog rows did not have.
 
 ## Block drops
 

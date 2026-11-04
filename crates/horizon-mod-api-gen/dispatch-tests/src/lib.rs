@@ -30,6 +30,8 @@ mod tests {
         pub(super) struct LevelDimension;
         #[derive(Clone, Copy)]
         pub(super) struct PlayerRef;
+        #[derive(Clone, Copy)]
+        pub(super) struct ChunkRef;
         pub(super) struct NeighbourUpdate;
         #[derive(Clone, Copy)]
         pub(super) struct PathComputationType;
