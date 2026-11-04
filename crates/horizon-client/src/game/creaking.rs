@@ -297,7 +297,7 @@ impl Game<'_> {
         Ok(())
     }
     /// `ServerLevel.isSpawningMonsters`.
-    fn spawning_monsters(&self) -> bool {
+    pub(super) fn spawning_monsters(&self) -> bool {
         self.ui.difficulty != 0
             && self.ui.rules.bool("spawn_mobs")
             && self.ui.rules.bool("spawn_monsters")

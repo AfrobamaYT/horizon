@@ -6,7 +6,8 @@
 //! host, and every world change they cause reaches all players through the
 //! block log, the level events and the entity tracker.
 use super::{
-    Dim, Game, GuestUse, Hit, InteractTarget, Mining, Screen, respawn_anchor::RespawnConfig,
+    Dim, Game, GuestUse, Hit, InteractTarget, Mining, Screen, level_sounds::LevelSound,
+    respawn_anchor::RespawnConfig,
 };
 use horizon_client::{
     command::vanilla,
@@ -32,6 +33,7 @@ use horizon_protocol::{
 };
 use horizon_world::entity_move::EntityMoveWorld;
 use mod_api::ActionRefused;
+use mod_api::SoundSource;
 use winit::keyboard::KeyCode;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -153,6 +155,15 @@ pub(super) struct GuestCommand {
     pub(super) quiet: bool,
 }
 
+/// Why a guest's turn didn't start (`as_guest_at`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TurnRefused {
+    /// No guest has that `conn` at that place in the list, or it has no body.
+    Gone,
+    /// The guest is already taking a turn: its record holds an outer player's state.
+    Nested,
+}
+
 /// The game's own state while a guest's is swapped in (`enter_guest`), and
 /// the guest's records that live outside `Guest`.
 pub(super) struct GuestSwap {
@@ -175,7 +186,7 @@ pub(super) struct GuestSwap {
     /// The host's command permission, swapped for the guest's for its turn.
     permission: u8,
     xp: Experience,
-    host_keys: std::collections::HashSet<KeyCode>,
+    host_keys: horizon_client::held::HeldKeys,
     screen: Screen,
     host_sign: Option<super::sign_edit::SignEditor>,
     host_book: Option<super::books::BookScreen>,
@@ -334,7 +345,20 @@ impl Game<'_> {
     /// Run `f` as the guest `conn`: the host's player state is swapped for theirs.
     /// Returns `None` if the guest is missing or already active in a nested turn.
     pub(super) fn as_guest<R>(&mut self, conn: u32, f: impl FnOnce(&mut Self) -> R) -> Option<R> {
-        let swap = self.enter_guest(conn)?;
+        let gi = self.guest_index(conn)?;
+        self.as_guest_at(gi, conn, f).ok()
+    }
+
+    /// `as_guest` for the guest at `gi` in the hub's list, which a caller that already found it
+    /// passes with its `conn`: the turn starts without another scan, and is refused when the
+    /// guest there isn't `conn`.
+    pub(super) fn as_guest_at<R>(
+        &mut self,
+        gi: usize,
+        conn: u32,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> Result<R, TurnRefused> {
+        let swap = self.enter_guest_at(gi, conn)?;
         super::dedicated::crash_fixture("guest", || {
             self.lan
                 .as_ref()
@@ -345,7 +369,17 @@ impl Game<'_> {
         let result = horizon_client::block_contact::in_level(dimension, || f(self));
         self.drain_entity_inside();
         self.leave_guest(swap);
-        Some(result)
+        Ok(result)
+    }
+
+    /// Where guest `conn` is in the hub's list.
+    fn guest_index(&self, conn: u32) -> Option<usize> {
+        self.lan
+            .as_ref()?
+            .hub
+            .guests
+            .iter()
+            .position(|g| g.conn == conn)
     }
 
     /// `as_guest`, with the system messages the guest's action earns (the
@@ -379,12 +413,22 @@ impl Game<'_> {
     /// stays in `self.lan`, so the guest can reach other players. Guest turns
     /// can nest: the acting guest and their queued packets are restored.
     pub(super) fn enter_guest(&mut self, conn: u32) -> Option<GuestSwap> {
-        let host = self.lan.as_mut()?;
+        let i = self.guest_index(conn)?;
+        self.enter_guest_at(i, conn).ok()
+    }
+
+    /// `enter_guest` for the guest at `i`, which must be `conn`.
+    fn enter_guest_at(&mut self, i: usize, conn: u32) -> Result<GuestSwap, TurnRefused> {
+        let Some(host) = self.lan.as_mut() else {
+            return Err(TurnRefused::Gone);
+        };
+        if host.hub.guests.get(i).is_none_or(|g| g.conn != conn) {
+            return Err(TurnRefused::Gone);
+        }
         // An active guest's record holds an outer player's state, not theirs.
         if self.lan_guest_swaps.contains(&conn) {
-            return None;
+            return Err(TurnRefused::Nested);
         }
-        let i = host.hub.guests.iter().position(|g| g.conn == conn)?;
         self.lan_guest_swaps.push(conn);
         // `ServerPlayer.permissions()`: the guest's own command level for its
         // turn, so game-master checks see it (not the host's).
@@ -448,7 +492,7 @@ impl Game<'_> {
         let Some(mut motion) = g.motion.take() else {
             self.ui.registries.permission = permission;
             host.play.insert(conn, play);
-            return None;
+            return Err(TurnRefused::Gone);
         };
         std::mem::swap(
             &mut self.player_attachments,
@@ -641,7 +685,7 @@ impl Game<'_> {
         self.update_totem_ready();
         self.entity_reach = self.interaction_range("minecraft:entity_interaction_range", 3.0, 5.0);
         self.block_reach = self.interaction_range("minecraft:block_interaction_range", 4.5, 5.0);
-        Some(GuestSwap {
+        Ok(GuestSwap {
             conn,
             i,
             play,
@@ -866,6 +910,14 @@ impl Game<'_> {
         // The guest's swings are theirs: the host's own count stays the host's.
         play.swings += self.swings_started.wrapping_sub(swings);
         self.swings_started = swings;
+        // Player.playSound: everyone near but the guest, in the players' source,
+        // through `ServerLevel.playSeededSound` like any level sound.
+        for (name, at, volume, pitch) in
+            std::mem::replace(&mut self.guest_player_sounds, player_sounds)
+        {
+            let sound = LevelSound::new(&name, at, volume, pitch).in_source(SoundSource::Players);
+            self.send_level_sound(sound, Some(conn));
+        }
         let outgoing = std::mem::replace(&mut self.guest_packets, packets);
         let Some(host) = self.lan.as_mut() else {
             unreachable!("LanHost dropped inside a guest turn; closes are deferred");
@@ -892,17 +944,6 @@ impl Game<'_> {
         // LivingEntity.onEquippedItemBroken: `broadcastEntityEvent`, the guest too.
         for (event, at) in std::mem::replace(&mut self.guest_equipment_breaks, equipment_breaks) {
             host.hub.entity_event(entity_id, event, at);
-        }
-        // Player.playSound: everyone near but the guest, in the players' source.
-        let players = horizon_client::settings::SOUND_SOURCES
-            .iter()
-            .position(|s| *s == "player")
-            .unwrap_or(0) as i32;
-        for (name, at, volume, pitch) in
-            std::mem::replace(&mut self.guest_player_sounds, player_sounds)
-        {
-            host.hub
-                .sound(&name, at, volume, pitch, players, Some(conn));
         }
         // ServerItemCooldowns.onCooldownStarted: the guest's own cooldown.
         let outgoing_cooldowns = std::mem::replace(&mut self.guest_cooldowns, cooldown_events);
@@ -1227,16 +1268,16 @@ impl Game<'_> {
     /// reaches every player around but the hurt one, whose own client plays it
     /// from `handleDamageEvent` (#4149).
     fn guest_hurt_sound(&mut self, conn: u32, sound: &str) {
-        let Some(host) = self.lan.as_mut() else {
+        let Some(at) = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.guest(conn))
+            .map(|g| g.position)
+        else {
             return;
         };
-        let Some(g) = host.hub.guest(conn) else {
-            return;
-        };
-        let at = g.position;
-        let source = horizon_client::settings::sound_source(sound) as i32;
         self.audio.play_unshared(sound, Some(at), 1.0, 1.0);
-        host.hub.sound(sound, at, 1.0, 1.0, source, Some(conn));
+        self.send_level_sound(LevelSound::new(sound, at, 1.0, 1.0), Some(conn));
     }
 
     /// `ServerLevel.players()` in turn: the host's own player, then each
@@ -1313,6 +1354,7 @@ impl Game<'_> {
             .facts()
             .get(self.world.block(pos.0, pos.1, pos.2))
             .name;
+        let block = name.to_string();
         let (menu, slots) = if &**name == "minecraft:ender_chest" {
             // EnderChestBlock.useWithoutItem: the player's own inventory.
             ("minecraft:generic_9x3", Slots::Ender)
@@ -1441,15 +1483,8 @@ impl Game<'_> {
                 ],
                 _ => [0.0; 3],
             };
-            let source = horizon_client::settings::sound_source("minecraft:block.chest.locked");
-            host.hub.sound(
-                "minecraft:block.chest.locked",
-                at,
-                1.0,
-                1.0,
-                source as i32,
-                None,
-            );
+            let name = "minecraft:block.chest.locked";
+            self.send_level_sound(LevelSound::new(name, at, 1.0, 1.0), None);
             return MenuOpen::Refused;
         }
         // A mod menu type only for a client that has it: as
@@ -1476,11 +1511,31 @@ impl Game<'_> {
         // lid (a vehicle keeps its own `Container`, an ender chest has none).
         let counts_openers = matches!(slots, Slots::Block(_) | Slots::Double(_, _));
         let hidden = self.native_hidden_slots(pos, items.len());
+        // A mod menu type's block tells the client where it is, with what its
+        // mod writes (`openMenu` with an extra-data writer); a stock menu
+        // sends nothing more.
+        let extra = match slots {
+            Slots::Block(k) if self.mod_menu_at(k).is_some() => {
+                let mut data = None;
+                self.native_menu_extra_data(uuid, menu, &block, [k.0, k.1, k.2], &mut data);
+                let mut data = data.unwrap_or_default();
+                if data.len() > horizon_protocol::menu_extra::MAX_DATA {
+                    log::warn!(
+                        "Horizon: {block}'s menu extra data ({} bytes) is past {} bytes; sent without it",
+                        data.len(),
+                        horizon_protocol::menu_extra::MAX_DATA
+                    );
+                    data.clear();
+                }
+                Some(data)
+            }
+            _ => None,
+        };
         let Some(host) = self.lan.as_mut() else {
             return MenuOpen::Refused;
         };
         host.hub
-            .open_container(conn, menu, title, pos, slots, items);
+            .open_container(conn, menu, title, pos, slots, items, extra);
         if !hidden.is_empty() {
             host.hub.hide_menu_slots(conn, hidden);
         }
@@ -1545,7 +1600,7 @@ impl Game<'_> {
             return false;
         };
         host.hub
-            .open_container(conn, menu, title, pos, slots, items);
+            .open_container(conn, menu, title, pos, slots, items, None);
         true
     }
 
@@ -2308,7 +2363,9 @@ impl Game<'_> {
                 let hand = if p.hand == 1 { Hand::Off } else { Hand::Main };
                 let _ = self.guest_use_item(conn, gi, hand, Some((p.yaw, p.pitch)));
             }
-            S::Attack(p) => self.guest_attack(conn, p.id),
+            S::Attack(p) => {
+                let _ = self.guest_attack(conn, gi, p.id);
+            }
             S::Interact(p) => {
                 // handleInteract: a target inside the world border, within the entity
                 // interaction range plus 3 of its box, or nothing happens.
@@ -3244,11 +3301,8 @@ impl Game<'_> {
             .flatten();
         // PiercingWeapon.makeSound: `playSound(causer, ...)`, so the guest's
         // own client plays it.
-        if let Some(name) = sound
-            && let Some(host) = self.lan.as_ref()
-        {
-            let source = horizon_client::settings::sound_source(name) as i32;
-            host.hub.sound(name, at, 1.0, 1.0, source, Some(conn));
+        if let Some(name) = sound {
+            self.send_level_sound(LevelSound::new(name, at, 1.0, 1.0), Some(conn));
         }
     }
 
@@ -3375,24 +3429,28 @@ impl Game<'_> {
         {
             let logged = self.world.block_log.as_ref().map_or(0, Vec::len);
             let heard = self.audio.capture.as_ref().map_or(0, Vec::len);
-            let used = self.as_guest(conn, |g| {
-                let attempt = g.was_block_placement_attempt(hand);
-                let saved = (g.forced_hit, g.guest_use);
-                g.forced_hit = Some(hit);
-                g.guest_use = Some(GuestUse::OnBlock(hand));
-                let swings = g.swings_started;
-                let consumed = matches!(g.use_item(), Ok(Some(_)));
-                // handleUseItemOn: a consuming useItemOn triggers
-                // ANY_BLOCK_USE with the hand's stack as it now is.
-                if consumed && !g.use_failed {
-                    let stack = g
-                        .with_hand(hand, |g| g.held().cloned())
-                        .unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
-                    g.trigger_any_block_use(hit.pos, &stack);
-                }
-                (g.forced_hit, g.guest_use) = saved;
-                (g.swings_started != swings, consumed, attempt)
-            });
+            let used = self
+                .as_guest_at(gi, conn, |g| {
+                    let attempt = g.was_block_placement_attempt(hand);
+                    let saved = (g.forced_hit, g.guest_use);
+                    g.forced_hit = Some(hit);
+                    g.guest_use = Some(GuestUse::OnBlock(hand));
+                    let swings = g.swings_started;
+                    let consumed = matches!(g.use_item(), Ok(Some(_)));
+                    // handleUseItemOn: a consuming useItemOn triggers
+                    // ANY_BLOCK_USE with the hand's stack as it now is.
+                    if consumed && !g.use_failed {
+                        let stack = g
+                            .with_hand(hand, |g| g.held().cloned())
+                            .unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
+                        horizon_client::spans::time("use_advancements", || {
+                            g.trigger_any_block_use(hit.pos, &stack);
+                        });
+                    }
+                    (g.forced_hit, g.guest_use) = saved;
+                    (g.swings_started != swings, consumed, attempt)
+                })
+                .ok();
             consumed = used.is_some_and(|u| u.1);
             let swung = used.map(|u| u.0);
             self.lan_swing_back(conn, swung);
@@ -3470,26 +3528,29 @@ impl Game<'_> {
         };
         if held.is_some_and(|s| s.item.ends_with("_spawn_egg")) {
             let hit = self
-                .as_guest(conn, |g| g.with_hand(hand, |g| g.spawn_egg_fluid_hit()))
+                .as_guest_at(gi, conn, |g| g.with_hand(hand, |g| g.spawn_egg_fluid_hit()))
+                .ok()
                 .flatten();
             if hit.is_some_and(|h| self.under_spawn_protection(gi, h.pos)) {
                 return Err(ActionRefused::Protected);
             }
         }
         let heard = self.audio.capture.as_ref().map_or(0, Vec::len);
-        let used = self.as_guest(conn, |g| {
-            // A horn's sound, inline instruments included.
-            let horn = g.with_hand(hand, |g| {
-                let held = g.held()?;
-                g.res.items().instrument(held).map(|i| i.sound)
-            });
-            let saved = g.guest_use;
-            g.guest_use = Some(GuestUse::Item(hand));
-            let swings = g.swings_started;
-            let consumed = matches!(g.use_item(), Ok(Some(_)));
-            g.guest_use = saved;
-            (g.swings_started != swings, horn, consumed)
-        });
+        let used = self
+            .as_guest_at(gi, conn, |g| {
+                // A horn's sound, inline instruments included.
+                let horn = g.with_hand(hand, |g| {
+                    let held = g.held()?;
+                    g.res.items().instrument(held).map(|i| i.sound)
+                });
+                let saved = g.guest_use;
+                g.guest_use = Some(GuestUse::Item(hand));
+                let swings = g.swings_started;
+                let consumed = matches!(g.use_item(), Ok(Some(_)));
+                g.guest_use = saved;
+                (g.swings_started != swings, horn, consumed)
+            })
+            .ok();
         let (swung, horn, consumed) = match used {
             Some((swung, horn, consumed)) => (Some(swung), horn, consumed),
             None => (None, None, false),
@@ -3499,29 +3560,38 @@ impl Game<'_> {
         Ok(consumed)
     }
 
-    fn guest_attack(&mut self, conn: u32, id: i32) {
+    /// `ServerGamePacketListenerImpl.handleInteract`'s ATTACK for guest `conn` (at `gi`) hitting
+    /// entity `id`: the border and the attack range, the native mods' `attack_entity`, then
+    /// `Player.attack` for a player, a mob or another entity, and the deflection of a fireball,
+    /// a wind charge or a shulker bullet. True when the blow landed. A fake player's
+    /// `PlayerRef::perform_action` runs it as the packet does.
+    pub(super) fn guest_attack(
+        &mut self,
+        conn: u32,
+        gi: usize,
+        id: i32,
+    ) -> Result<bool, ActionRefused> {
         let Some(host) = self.lan.as_ref() else {
-            return;
-        };
-        let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
-            return;
+            return Err(ActionRefused::Stale);
         };
         if host.hub.guests[gi].spectator() {
-            return;
+            return Ok(false);
         }
         // handleAttack: a target inside the world border, then
         // `isWithinAttackRange(mainHandItem, box, 3.0)` before anything else, players,
         // mobs, objects and fireballs alike.
-        if let Some(target) = self.guest_target_box(gi, id)
-            && (!self.inside_border(&target)
-                || self.as_guest(conn, |g| g.within_attack_range(&target)) != Some(true))
-        {
-            return;
+        if let Some(target) = self.guest_target_box(gi, id) {
+            if !self.inside_border(&target) {
+                return Err(ActionRefused::Protected);
+            }
+            if self.as_guest_at(gi, conn, |g| g.within_attack_range(&target)) != Ok(true) {
+                return Err(ActionRefused::OutOfReach);
+            }
         }
         // Native mods, where Player.attack starts: a canceled blow does
         // nothing (game/native_hooks.rs).
         let Some(host) = self.lan.as_ref() else {
-            return;
+            return Err(ActionRefused::Stale);
         };
         let aimed = if let Some(g) = host
             .hub
@@ -3539,28 +3609,29 @@ impl Game<'_> {
             })
         };
         if let Some((kind, at)) = aimed
-            && self.as_guest(conn, |g| {
+            && self.as_guest_at(gi, conn, |g| {
                 let mut canceled = false;
                 g.native_attack_entity(id, &kind, at, &mut canceled);
                 canceled
-            }) == Some(true)
+            }) == Ok(true)
         {
-            return;
+            return Ok(false);
         }
         if let Some(victim) = self.pvp_victim(conn, id) {
-            if let Some(Some(strike)) = self.as_guest(conn, |g| g.pvp_strike())
+            if let Ok(Some(strike)) = self.as_guest_at(gi, conn, |g| g.pvp_strike())
                 && self.pvp_land(victim, &strike)
             {
                 let on_ground = self.pvp_victim_on_ground(victim);
-                self.as_guest(conn, |g| {
+                let _ = self.as_guest_at(gi, conn, |g| {
                     g.weapon_hit_player(on_ground);
                     g.pvp_exhaustion();
                     if strike.stops_sprint() {
                         g.stop_sprint_after_extra_knockback();
                     }
                 });
+                return Ok(true);
             }
-            return;
+            return Ok(false);
         }
         // A ghast's fireball or a wind charge: turned along the guest's own
         // view (ServerGamePacketListenerImpl.handleInteract, then
@@ -3571,19 +3642,20 @@ impl Game<'_> {
             .iter()
             .position(|p| p.id != 0 && p.id as i32 == id && super::deflect::attackable(p))
         {
-            self.as_guest(conn, |g| {
-                if g.within_interaction_range(i) {
-                    if matches!(
-                        g.creatures.projectiles[i].kind,
-                        horizon_client::projectiles::ProjectileKind::ShulkerBullet { .. }
-                    ) {
-                        g.hit_shulker_bullet(i);
-                    } else {
-                        g.deflect(i);
-                    }
+            return Ok(self.as_guest_at(gi, conn, |g| {
+                if !g.within_interaction_range(i) {
+                    return false;
                 }
-            });
-            return;
+                if matches!(
+                    g.creatures.projectiles[i].kind,
+                    horizon_client::projectiles::ProjectileKind::ShulkerBullet { .. }
+                ) {
+                    g.hit_shulker_bullet(i);
+                } else {
+                    g.deflect(i);
+                }
+                true
+            }) == Ok(true));
         }
         if let Some(index) = self
             .mobs
@@ -3592,15 +3664,15 @@ impl Game<'_> {
             .filter(|_| self.dragon.as_ref().is_none_or(|d| d.id as i32 != id))
         {
             let Some(host) = self.lan.as_ref() else {
-                return;
+                return Err(ActionRefused::Stale);
             };
             if host.hub.guests[gi].vehicle == Some(self.mobs[index].id) {
-                return;
+                return Ok(false);
             }
             // A mace's smash sets the attacker's velocity and sends it at once, before the
             // Wind Burst's push (MaceItem.hurtEnemy, then the post-attack effects).
             let sent = self
-                .as_guest(conn, |g| {
+                .as_guest_at(gi, conn, |g| {
                     let marked = g
                         .player
                         .as_mut()
@@ -3611,6 +3683,7 @@ impl Game<'_> {
                     let sent = std::mem::replace(&mut p.health.sync_velocity, marked);
                     sent.then_some(p.velocity)
                 })
+                .ok()
                 .flatten();
             self.send_guest_motion(conn, sent);
             // The mob now answers to this guest (game/lan_mobs.rs).
@@ -3620,19 +3693,19 @@ impl Game<'_> {
             {
                 host.mob_players.insert(id, conn);
             }
-            return;
+            return Ok(true);
         }
         let Some(host) = self.lan.as_ref() else {
-            return;
+            return Err(ActionRefused::Stale);
         };
         let (old_yaw, old_pitch) = (host.hub.guests[gi].yaw, host.hub.guests[gi].pitch);
         if self.look_at_entity(gi, id, None).is_none() {
-            return;
+            return Err(ActionRefused::InvalidTarget);
         }
         // A mace's smash sets the attacker's velocity and sends it at once, before the
         // Wind Burst's push (MaceItem.hurtEnemy, then the post-attack effects).
         let sent = self
-            .as_guest(conn, |g| {
+            .as_guest_at(gi, conn, |g| {
                 let marked = g
                     .player
                     .as_mut()
@@ -3642,11 +3715,12 @@ impl Game<'_> {
                 let sent = std::mem::replace(&mut p.health.sync_velocity, marked);
                 sent.then_some(p.velocity)
             })
+            .ok()
             .flatten();
         self.send_guest_motion(conn, sent);
         // The mob now answers to this guest (game/lan_mobs.rs).
         let Some(host) = self.lan.as_mut() else {
-            return;
+            return Err(ActionRefused::Stale);
         };
         if host.hub.guests[gi].participates_in_player_simulation()
             && let Ok(id) = u32::try_from(id)
@@ -3655,6 +3729,7 @@ impl Game<'_> {
         }
         host.hub.guests[gi].yaw = old_yaw;
         host.hub.guests[gi].pitch = old_pitch;
+        Ok(true)
     }
 
     /// Commands.performCommand for a guest with command access.
@@ -5359,16 +5434,13 @@ impl Game<'_> {
                     pitch,
                 }) if sound.block_sound().is_some() => {
                     if let Some(name) = sound.block_sound() {
-                        let source = horizon_client::settings::sound_source(name) as i32;
                         let at = [
                             f64::from(pos.x) + 0.5,
                             f64::from(pos.y) + 0.5,
                             f64::from(pos.z) + 0.5,
                         ];
                         self.audio.play_unshared(name, Some(at), volume, pitch);
-                        if let Some(host) = self.lan.as_ref() {
-                            host.hub.sound(name, at, volume, pitch, source, None);
-                        }
+                        self.send_level_sound(LevelSound::new(name, at, volume, pitch), None);
                     }
                 }
                 // LivingEntity.causeFallDamage: Player.playSound skips the
@@ -5380,11 +5452,8 @@ impl Game<'_> {
                     ..
                 }) => {
                     if let Some(name) = sound.player_fall_sound() {
-                        let source = horizon_client::settings::sound_source(name) as i32;
                         self.audio.play_unshared(name, Some(at), volume, pitch);
-                        if let Some(host) = self.lan.as_ref() {
-                            host.hub.sound(name, at, volume, pitch, source, Some(conn));
-                        }
+                        self.send_level_sound(LevelSound::new(name, at, volume, pitch), Some(conn));
                     }
                 }
                 // Player.causeFallDamage, mayfly: the mods hear the landing.
@@ -5447,11 +5516,8 @@ impl Game<'_> {
                     };
                     if sound {
                         let name = "minecraft:block.honey_block.slide";
-                        let source = horizon_client::settings::sound_source(name) as i32;
                         self.audio.play_unshared(name, Some(at), 1.0, 1.0);
-                        if let Some(host) = self.lan.as_ref() {
-                            host.hub.sound(name, at, 1.0, 1.0, source, Some(conn));
-                        }
+                        self.send_level_sound(LevelSound::new(name, at, 1.0, 1.0), Some(conn));
                     }
                     if particles {
                         self.honey_slide_particles(at);
@@ -5498,19 +5564,10 @@ impl Game<'_> {
         };
         let at = m.center();
         // LivingEntity.getSoundSource: a mob's sounds are in the neutral source.
-        let neutral = horizon_client::settings::SOUND_SOURCES
-            .iter()
-            .position(|s| *s == "neutral")
-            .unwrap_or(0) as i32;
-        let Some(host) = self.lan.as_ref() else {
-            return;
-        };
-        host.hub.sound(
-            &format!("minecraft:{sound}"),
-            at,
-            volume,
-            1.0,
-            neutral,
+        // `Entity.playSound`: at the mount's position, not bound to it.
+        let name = format!("minecraft:{sound}");
+        self.send_level_sound(
+            LevelSound::new(&name, at, volume, 1.0).in_source(SoundSource::Neutral),
             None,
         );
     }
@@ -5697,10 +5754,61 @@ impl Game<'_> {
     /// ServerPlayerGameMode.destroyBlock for a guest, its crack cleared for the others
     /// (`destroyBlockProgress(id, pos, -1)`).
     fn guest_destroy(&mut self, conn: u32, pos: [i32; 3]) {
-        self.as_guest(conn, |g| {
+        if let Some(gi) = self.guest_index(conn) {
+            let _ = self.guest_destroy_at(gi, conn, pos);
+        }
+    }
+
+    /// `guest_destroy` for the guest at `gi`.
+    fn guest_destroy_at(&mut self, gi: usize, conn: u32, pos: [i32; 3]) -> Result<(), TurnRefused> {
+        self.as_guest_at(gi, conn, |g| {
             let _ = g.break_block(pos);
-        });
+        })?;
         self.guest_crack_gone(conn, pos);
+        Ok(())
+    }
+
+    /// Guest `conn` (at `gi`) breaks the block at `pos` at once, as a fake player's `BreakBlock`
+    /// does: `handleBlockBreakAction`'s reach, build height, spawn protection and border, then
+    /// `ServerPlayerGameMode.destroyBlock`, with its game-mode and tool rules, the native mods'
+    /// `break_block`, the tool's wear and the drops, and no digging time. Outside creative, a
+    /// block no digging breaks (destroy time -1) stays. True when the block broke.
+    pub(super) fn guest_break_block(
+        &mut self,
+        conn: u32,
+        gi: usize,
+        pos: [i32; 3],
+    ) -> Result<bool, ActionRefused> {
+        let Some(host) = self.lan.as_mut() else {
+            return Err(ActionRefused::Stale);
+        };
+        if !host.hub.guests[gi].may_reach_block(pos) {
+            return Err(ActionRefused::OutOfReach);
+        }
+        let (min_y, max_y) = (self.world.shape.min_y, self.world.shape.max_y() - 1);
+        if !(min_y..=max_y).contains(&pos[1])
+            || self.under_spawn_protection(gi, pos)
+            || !self.border.contains(f64::from(pos[0]), f64::from(pos[2]))
+        {
+            return Err(ActionRefused::Protected);
+        }
+        let before = self.world.block(pos[0], pos[1], pos[2]);
+        if self.res.facts().is_air(before) {
+            return Ok(false);
+        }
+        // A survival player reaches `destroyBlock` only through its digging, which makes no
+        // progress on a block of destroy time -1 (bedrock, barriers, command blocks): only a
+        // creative one breaks those.
+        let creative = self
+            .lan
+            .as_ref()
+            .is_some_and(|host| host.hub.guests[gi].creative());
+        if !creative && self.res.facts().get(before).hardness < 0.0 {
+            return Ok(false);
+        }
+        self.guest_destroy_at(gi, conn, pos)
+            .map_err(|_| ActionRefused::Stale)?;
+        Ok(self.world.block(pos[0], pos[1], pos[2]) != before)
     }
 
     /// The crack animation other players see.
@@ -6074,9 +6182,9 @@ impl Game<'_> {
     /// `level.playSound(player, ...)` of a guest's use it predicted (`remote::hand_operated`
     /// blocks only, as the guest decides): the others hear it now, the guest already did.
     fn guest_use_sounds(&mut self, conn: u32, logged: usize, heard: usize) {
-        let Some(host) = self.lan.as_mut() else {
+        if self.lan.is_none() {
             return;
-        };
+        }
         let changed: Vec<(i32, i32, i32)> = self
             .world
             .block_log
@@ -6094,6 +6202,7 @@ impl Game<'_> {
                 (at, name.trim_start_matches("minecraft:").to_owned())
             })
             .collect();
+        let mut sounds = Vec::new();
         if let Some(capture) = self.audio.capture.as_mut() {
             let mut i = heard.min(capture.len());
             while i < capture.len() {
@@ -6102,49 +6211,51 @@ impl Game<'_> {
                     .iter()
                     .any(|(p, n)| p == at && name.trim_start_matches("minecraft:") == n.as_str());
                 if place {
-                    let (name, at, volume, pitch) = capture.remove(i);
-                    let source = horizon_client::settings::sound_source(&name) as i32;
-                    host.hub.sound(&name, at, volume, pitch, source, Some(conn));
+                    sounds.push(capture.remove(i));
                 } else {
                     i += 1;
                 }
             }
         }
-        if changed.is_empty()
-            || !changed.iter().all(|&(x, y, z)| {
+        let hand_operated = !changed.is_empty()
+            && changed.iter().all(|&(x, y, z)| {
                 super::remote::hand_operated(&facts.get(self.world.block(x, y, z)).name)
-            })
-        {
-            return;
+            });
+        if hand_operated && let Some(capture) = self.audio.capture.as_mut() {
+            sounds.extend(capture.drain(heard.min(capture.len())..));
         }
-        let Some(capture) = self.audio.capture.as_mut() else {
-            return;
-        };
-        let sounds: Vec<_> = capture.drain(heard.min(capture.len())..).collect();
         for (name, at, volume, pitch) in sounds {
-            let source = horizon_client::settings::sound_source(&name) as i32;
-            host.hub.sound(&name, at, volume, pitch, source, Some(conn));
+            self.send_level_sound(LevelSound::new(&name, at, volume, pitch), Some(conn));
         }
     }
 
     /// `InstrumentItem.play`'s `level.playSound(player, ...)`: the others hear
     /// a guest's horn now, the guest's own client played it as it used it.
+    /// The horn is bound to the guest (`playSound(player, player, ...)`).
     fn guest_instrument_sound(&mut self, conn: u32, heard: usize, horn: Option<String>) {
-        let Some(host) = self.lan.as_mut() else {
+        let Some(player) = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.guest(conn))
+            .and_then(|g| u32::try_from(g.entity_id).ok())
+        else {
             return;
         };
         let (Some(horn), Some(capture)) = (horn, self.audio.capture.as_mut()) else {
             return;
         };
+        let mut sounds = Vec::new();
         let mut i = heard.min(capture.len());
         while i < capture.len() {
             if capture[i].0 == horn {
-                let (name, at, volume, pitch) = capture.remove(i);
-                let source = horizon_client::settings::sound_source(&name) as i32;
-                host.hub.sound(&name, at, volume, pitch, source, Some(conn));
+                sounds.push(capture.remove(i));
             } else {
                 i += 1;
             }
+        }
+        for (name, at, volume, pitch) in sounds {
+            let sound = LevelSound::new(&name, at, volume, pitch).bound_to(player);
+            self.send_level_sound(sound, Some(conn));
         }
     }
 
@@ -6164,9 +6275,9 @@ impl Game<'_> {
             {
                 continue;
             }
-            let source = horizon_client::settings::sound_source(&name) as i32;
-            host.hub.sound(&name, at, volume, pitch, source, None);
+            self.send_level_sound(LevelSound::new(&name, at, volume, pitch), None);
         }
+        self.send_bound_sounds();
     }
 
     /// `LivingEntity.tick`'s arrows and bee stingers falling out of the

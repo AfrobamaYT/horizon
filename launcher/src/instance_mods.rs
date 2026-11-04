@@ -635,7 +635,9 @@ mod tests {
         ] {
             let folder = if code { native_mods::INSTALLED } else { "mods" };
             let file = format!("{folder}/{id}.hmod");
-            let mut manifest = format!("id = '{id}'\nname = '{id}'\nversion = '1'\napi = '0.2'\ncapabilities = ['registries']\n");
+            let mut manifest = format!(
+                "id = '{id}'\nname = '{id}'\nversion = '1'\napi = '0.2'\ncapabilities = ['registries']\n"
+            );
             if code {
                 manifest +=
                     &format!("[native]\ngame = '26.3'\nhorizon = '{pin}'\nmixins = '{pin}'\n");

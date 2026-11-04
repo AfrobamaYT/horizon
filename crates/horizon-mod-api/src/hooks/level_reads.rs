@@ -55,4 +55,10 @@ pub trait Helpers {
         target = "horizon_client::game::native_level_refs::Game<'_>::native_level_day_time"
     )]
     fn level_day_time();
+    #[helper(
+        side = "both",
+        receiver = "level",
+        target = "horizon_client::game::native_level_refs::Game<'_>::native_level_fluid_flow"
+    )]
+    fn level_fluid_flow();
 }

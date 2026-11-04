@@ -199,15 +199,25 @@ pub fn main_with(
             let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_flying_speed(&context, entity, kind, speed);
         },
-        player_stays_on_ground_surface: |entity, staying| {
-            mod_api::dispatch_player_stays_on_ground_surface(entity, staying);
+        block_jump_factor: |context, state, factor| {
+            let context = mod_api::OwningLoop::new(context);
+            mod_api::dispatch_block_jump_factor(&context, state, factor);
+        },
+        block_speed_factor: |context, state, factor| {
+            let context = mod_api::OwningLoop::new(context);
+            mod_api::dispatch_block_speed_factor(&context, state, factor);
+        },
+        player_stays_on_ground_surface: |context, entity, staying| {
+            let context = mod_api::OwningLoop::new(context);
+            mod_api::dispatch_player_stays_on_ground_surface(&context, entity, staying);
         },
         ender_entity_teleport: |context, entity, kind, from, target, cancel| {
             let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_ender_entity_teleport(&context, entity, kind, from, target, cancel);
         },
-        fluid_flow: |fluid, pos, flow| {
-            mod_api::dispatch_fluid_flow(fluid, pos, flow);
+        fluid_flow: |context, fluid, pos, flow| {
+            let context = mod_api::OwningLoop::new(context);
+            mod_api::dispatch_fluid_flow(&context, fluid, pos, flow);
         },
     }) {
         log::warn!("Native client hooks already installed; keeping the first callbacks");

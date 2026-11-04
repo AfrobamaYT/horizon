@@ -386,7 +386,8 @@ impl Goal for GhastTempt {
         {
             return false;
         }
-        let visibility = cx.w.player_visibility(p, m.id, p.visibility_percent());
+        let visibility =
+            cx.w.player_visibility(p, m.id, p.visibility_percent(m.species()));
         let range = (16.0_f64 * visibility).max(2.0);
         m.distance_sqr(p.position) <= range * range
     }

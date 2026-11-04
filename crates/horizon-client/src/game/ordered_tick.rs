@@ -181,6 +181,7 @@ impl Game<'_> {
                         &mut next_float,
                         Some(self.border.geometry()),
                         &self.res.motion().fluids,
+                        &self.loop_context,
                     );
                     // PowderSnowBlock.entityInside during the move, before an
                     // orb that is done is removed.

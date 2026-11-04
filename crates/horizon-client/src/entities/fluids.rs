@@ -8,6 +8,7 @@ use horizon_core::{
     geometry::{Aabb, Direction, Vec3},
     position::BlockPos,
 };
+use horizon_world::native_load_context::LoopContext;
 use horizon_world::{
     entity_fluid::{
         CurrentTarget, EntityFluidInteraction, FluidInteractionWorld, FluidMembership,
@@ -25,6 +26,7 @@ struct EntityFluidWorld<'a> {
     velocity: &'a mut Vec3,
     world: &'a World,
     fluids: &'a FluidResources,
+    context: &'a LoopContext,
 }
 /// `Entity.baseTick`'s fluid step for an entity that is pushed by fluid: its
 /// immersion heights, then the current of each fluid it sits in, added to
@@ -38,6 +40,7 @@ pub fn update_entity_fluids(
     velocity: &mut Vec3,
     world: &World,
     fluids: &FluidResources,
+    context: &LoopContext,
 ) -> (f64, f64) {
     let mut interaction = EntityFluidInteraction::new([WATER, LAVA]);
     let mut scene = EntityFluidWorld {
@@ -47,6 +50,7 @@ pub fn update_entity_fluids(
         velocity,
         world,
         fluids,
+        context,
     };
     if interaction.update(&mut scene, false, 4096).is_err() {
         return (0.0, 0.0);
@@ -73,15 +77,25 @@ impl ItemEntity {
     }
     /// The fluid push as the game runs it, for the unit tests.
     #[cfg(test)]
-    pub(super) fn update_fluids(&mut self, world: &World, fluids: &FluidResources) -> (f64, f64) {
+    pub(super) fn update_fluids(
+        &mut self,
+        world: &World,
+        fluids: &FluidResources,
+        context: &LoopContext,
+    ) -> (f64, f64) {
         let (bounds, at, eye) = (self.bounds(), self.position, self.fluid_eye_y());
-        update_entity_fluids(bounds, at, eye, &mut self.velocity, world, fluids)
+        update_entity_fluids(bounds, at, eye, &mut self.velocity, world, fluids, context)
     }
 }
 impl ExperienceOrb {
     /// `Entity.updateFluidInteraction`: refreshes fluid immersion over the
     /// orb's box and pushes its velocity by any water or lava current.
-    pub fn update_fluids(&mut self, world: &World, fluids: &FluidResources) -> (f64, f64) {
+    pub fn update_fluids(
+        &mut self,
+        world: &World,
+        fluids: &FluidResources,
+        context: &LoopContext,
+    ) -> (f64, f64) {
         update_entity_fluids(
             self.bounds(),
             self.position,
@@ -89,6 +103,7 @@ impl ExperienceOrb {
             &mut self.velocity,
             world,
             fluids,
+            context,
         )
     }
 }
@@ -105,13 +120,18 @@ impl ArmorStand {
     /// The fluid push as the game runs it, for the unit tests: whether the
     /// stand is in water (`isInWater`).
     #[cfg(test)]
-    pub fn update_fluids(&mut self, world: &World, fluids: &FluidResources) -> bool {
+    pub fn update_fluids(
+        &mut self,
+        world: &World,
+        fluids: &FluidResources,
+        context: &LoopContext,
+    ) -> bool {
         use crate::entity_rules::EntityRules;
         if !self.is_pushed_by_fluid() {
             return false;
         }
         let (bounds, at, eye) = (self.bounds(), self.position, self.fluid_eye_y());
-        update_entity_fluids(bounds, at, eye, &mut self.velocity, world, fluids).0 > 0.0
+        update_entity_fluids(bounds, at, eye, &mut self.velocity, world, fluids, context).0 > 0.0
     }
 }
 impl FluidMembership for EntityFluidWorld<'_> {
@@ -174,7 +194,15 @@ impl FluidInteractionWorld for EntityFluidWorld<'_> {
         f.camera_height_at(self, [p.x, p.y, p.z])
     }
     fn flow(&mut self, f: FluidState, p: BlockPos) -> Result<Vec3, Error> {
-        crate::motion::pushing_flow(self, f, p)
+        crate::motion::pushing_flow(
+            self.context,
+            &mut FlowLevel {
+                world: self.world,
+                fluids: self.fluids,
+            },
+            f,
+            p,
+        )
     }
 }
 impl FluidHeightWorld for EntityFluidWorld<'_> {
@@ -187,7 +215,25 @@ impl FluidHeightWorld for EntityFluidWorld<'_> {
         Ok(self.fluids.sturdy(state, Direction::Down))
     }
 }
-impl FluidFlowWorld for EntityFluidWorld<'_> {
+/// `FluidState.getFlow` at `pos` as it pushes an entity there: vanilla's vector, then the
+/// `fluid_flow` hook. Zero where no fluid flows.
+pub fn fluid_flow(
+    world: &World,
+    fluids: &FluidResources,
+    context: &LoopContext,
+    pos: BlockPos,
+) -> Vec3 {
+    let state = fluids.fluid(world.block(pos.x, pos.y, pos.z));
+    let Ok(flow) =
+        crate::motion::pushing_flow(context, &mut FlowLevel { world, fluids }, state, pos);
+    flow
+}
+/// The blocks a current reads, from a loaded world.
+struct FlowLevel<'a> {
+    world: &'a World,
+    fluids: &'a FluidResources,
+}
+impl FluidFlowWorld for FlowLevel<'_> {
     type Error = Error;
     type Block = BlockStateId;
     fn fluid(&mut self, p: BlockPos) -> Result<FluidState, Error> {
@@ -242,6 +288,7 @@ mod tests {
         }
         let at = Vec3::new(20.5, 4.0, 20.5);
         let item = ItemEntity {
+            fall_distance: 0.0,
             join: Default::default(),
             no_gravity: false,
             id: 1,
@@ -365,6 +412,7 @@ mod tests {
             &mut || 0.0,
             None,
             &fluids,
+            crate::test_resources::server_loop_context(),
         ));
         assert_eq!(still.position.x, at.x);
         assert_eq!(still.velocity.x, 0.0);
@@ -379,6 +427,7 @@ mod tests {
             &mut || 0.0,
             None,
             &fluids,
+            crate::test_resources::server_loop_context(),
         ));
         // Current pushes the orb, underwater drag damps before motion, then air
         // drag: `ExperienceOrb.tick`'s `0.98F`, a float widened to double.
@@ -394,6 +443,7 @@ mod tests {
                 &mut || 0.0,
                 None,
                 &fluids,
+                crate::test_resources::server_loop_context(),
             );
         }
         assert!(carried.position.x > at.x + 0.5);
@@ -435,11 +485,27 @@ mod tests {
             Vec3::new(at.x + half, at.y + 0.5625, at.z + half),
         );
         let mut still = Vec3::ZERO;
-        update_entity_fluids(bounds, at, at.y + 0.5625, &mut still, &world, &fluids);
+        update_entity_fluids(
+            bounds,
+            at,
+            at.y + 0.5625,
+            &mut still,
+            &world,
+            &fluids,
+            crate::test_resources::server_loop_context(),
+        );
         assert_eq!(still.x, 0.0, "source water has no current");
         world.set(21, 4, 20, flowing).unwrap();
         let mut carried = Vec3::ZERO;
-        update_entity_fluids(bounds, at, at.y + 0.5625, &mut carried, &world, &fluids);
+        update_entity_fluids(
+            bounds,
+            at,
+            at.y + 0.5625,
+            &mut carried,
+            &world,
+            &fluids,
+            crate::test_resources::server_loop_context(),
+        );
         assert!(
             carried.x > 0.0,
             "the flow pushes the boat along +x, got {}",
@@ -475,7 +541,11 @@ mod tests {
         let at = Vec3::new(20.5, 4.0, 20.5);
         let stand = ArmorStand::new(1, at, 0.0);
         let mut still = stand.clone();
-        let in_water = still.update_fluids(&world, &fluids);
+        let in_water = still.update_fluids(
+            &world,
+            &fluids,
+            crate::test_resources::server_loop_context(),
+        );
         assert!(in_water);
         let mut scene = crate::collisions::SceneCollisions {
             world: &world,
@@ -493,7 +563,11 @@ mod tests {
         world.set(21, 4, 20, flowing).unwrap();
         let mut marker = stand.clone();
         marker.marker = true;
-        let in_water = marker.update_fluids(&world, &fluids);
+        let in_water = marker.update_fluids(
+            &world,
+            &fluids,
+            crate::test_resources::server_loop_context(),
+        );
         assert!(!in_water);
         let mut scene = crate::collisions::SceneCollisions {
             world: &world,
@@ -505,7 +579,11 @@ mod tests {
         assert_eq!(marker.velocity, Vec3::ZERO);
 
         let mut carried = stand;
-        let in_water = carried.update_fluids(&world, &fluids);
+        let in_water = carried.update_fluids(
+            &world,
+            &fluids,
+            crate::test_resources::server_loop_context(),
+        );
         assert!(in_water);
         let mut scene = crate::collisions::SceneCollisions {
             world: &world,
@@ -516,7 +594,11 @@ mod tests {
         assert!((carried.position.x - (at.x + 0.014)).abs() < 1e-12);
         assert!((carried.velocity.x - 0.014 * f64::from(0.8f32)).abs() < 1e-12);
         for _ in 0..20 {
-            let in_water = carried.update_fluids(&world, &fluids);
+            let in_water = carried.update_fluids(
+                &world,
+                &fluids,
+                crate::test_resources::server_loop_context(),
+            );
             let mut scene = crate::collisions::SceneCollisions {
                 world: &world,
                 binding: &collision,

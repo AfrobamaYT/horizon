@@ -66,14 +66,31 @@ pub fn state(enabled: &[Mod], built: Option<&[Mod]>) -> State {
 pub struct Build {
     /// The release or Nightly it was built on (`native_mods::About::base`).
     pub base: String,
+    /// The Horizon commit it compiled.
+    pub horizon: String,
+    /// The mods whose pin made it compile `horizon` rather than `base`'s own commit.
+    pub pinned_by: Vec<String>,
+    /// It compiled another commit than its Nightly's, with no record of why: built before the
+    /// launcher kept which mods pinned it ([`pinning`] reads them from the instance's mods).
+    pub pinned_unknown: bool,
 }
 
 impl Build {
     /// Installed native build `version`'s, from its `native-mods.json`; None for another version.
     pub fn read(version: &str) -> Option<Build> {
-        Some(Build {
-            base: native_mods::about(version)?.base,
-        })
+        Some(Build::of(native_mods::about(version)?))
+    }
+
+    /// What build record `about` says.
+    fn of(about: native_mods::About) -> Build {
+        // The fork's manifest pins the exact Horizon commit, so a build is never on a commit
+        // its mods did not name: nothing is unknown and no pin list is recorded.
+        Build {
+            pinned_unknown: false,
+            base: about.base,
+            horizon: about.horizon,
+            pinned_by: Vec::new(),
+        }
     }
 
     /// The Horizon it was built on, as a player reads it (`horizon_label`).
@@ -118,6 +135,32 @@ pub fn enabled(home: &Path) -> Vec<Mod> {
         }
     }
     out
+}
+
+fn hnmods(home: &Path) -> Vec<std::path::PathBuf> {
+    let mut paths: Vec<_> = fs::read_dir(home.join(native_mods::INSTALLED))
+        .map(|dir| dir.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default();
+    paths.retain(|p| p.extension().is_some_and(|e| e == "hnmod"));
+    paths.sort();
+    paths
+}
+
+/// The native mods turned on in game folder `home` that pin Horizon commit `revision` (those naming
+/// a hook points' version follow the others, so they pin nothing).
+pub fn pinning(home: &Path, revision: &str) -> Vec<String> {
+    hnmods(home)
+        .into_iter()
+        .filter_map(|path| horizon_mods::index::native::Bundle::read(&path).ok())
+        .filter(|b| {
+            b.manifest
+                .native
+                .as_ref()
+                .is_some_and(|n| n.horizon == revision)
+        })
+        .filter(|b| java::is_enabled(home, &b.manifest.id))
+        .map(|b| b.manifest.id)
+        .collect()
 }
 
 /// A native file not tracked by the registry/browser, including GitHub installs.
@@ -246,7 +289,9 @@ mod tests {
                 .join(native_mods::INSTALLED)
                 .join(format!("{file}.hmod"));
             let mut zip = zip::ZipWriter::new(fs::File::create(path).unwrap());
-            let manifest = format!("id = '{id}'\nname = '{id}'\nversion = '1.2'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '{pin}'\nmixins = '{pin}'\n");
+            let manifest = format!(
+                "id = '{id}'\nname = '{id}'\nversion = '1.2'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '{pin}'\nmixins = '{pin}'\n"
+            );
             for (name, bytes) in [
                 ("horizon-mod.toml", manifest.as_str()),
                 (
@@ -404,16 +449,19 @@ mod tests {
         assert_eq!(horizon_label("nightly-2026-10-29"), "Nightly 2026-10-29");
         let build = Build {
             base: "nightly-2026-10-28-0c02067".into(),
+            ..Build::default()
         };
         assert_eq!(build.horizon(), "Nightly 2026-10-28");
         assert_eq!(build.horizon_short(), "Nightly 10-28");
         let release = Build {
             base: "v0.2.93".into(),
+            ..Build::default()
         };
         assert_eq!(release.horizon_short(), "v0.2.93");
         assert_eq!(Build::read("v0.1.0"), None, "not a native build");
     }
 
+    /// A build from before pins were recorded that compiled another commit than its Nightly's
     #[test]
     fn only_hmods_in_the_native_folder_are_native() {
         assert!(is_native_file("horizon-native-mods/veinminer.hmod"));

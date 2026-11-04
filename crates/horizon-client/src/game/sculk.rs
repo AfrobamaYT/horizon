@@ -12,7 +12,11 @@ use horizon_client::{
     particles::{ParticleOptions, ParticleType},
     sculk::{self, Context, Info, SculkEntity, SculkKind, WardenSpawnTracker},
 };
-use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
+use horizon_core::{
+    geometry::{Direction, Vec3},
+    position::BlockPos,
+    random::RandomSource,
+};
 use horizon_world::registry::BlockStateId;
 use std::collections::HashSet;
 use winit::keyboard::KeyCode;
@@ -87,6 +91,8 @@ pub(super) struct SculkState {
     pub known_revision: Option<u64>,
     // Keyed by mob ids the server gives out: the fast hasher is safe.
     steps: FxHashMap<Who, Steps>,
+    /// Items that have fallen since last touching the ground or water.
+    falling_items: HashSet<u32>,
     /// The vehicle each rider had last tick and where it stood.
     mounts: FxHashMap<Who, (u32, [f64; 3])>,
     damaged: FxHashMap<u32, i64>,
@@ -533,6 +539,7 @@ impl Game<'_> {
         Context {
             source: Some(Who::Player),
             owner: None,
+            affected_state: state,
             dampening_state: self.state_dampens(state),
             spectator: self.spectator(),
             stepping_carefully: self.keys.contains(&KeyCode::ShiftLeft),
@@ -550,6 +557,7 @@ impl Game<'_> {
         Context {
             source: Some(Who::Mob(id)),
             owner: None,
+            affected_state: state,
             dampening_state: self.state_dampens(state),
             spectator: false,
             stepping_carefully: false,
@@ -564,6 +572,7 @@ impl Game<'_> {
             Some(Who::Player) => self.player_context(state),
             Some(Who::Mob(id)) => self.mob_context(id, state),
             None => Context {
+                affected_state: state,
                 dampening_state: self.state_dampens(state),
                 ..Context::default()
             },
@@ -588,7 +597,14 @@ impl Game<'_> {
         if mod_api::__private::listened(mod_api::HookId::VanillaGameEvent) {
             let cause = event_cause(ctx.source, self.lan_acting_entity);
             let mut cancel = false;
-            self.native_vanilla_game_event(self.dim.id(), event, pos, cause, &mut cancel);
+            self.native_vanilla_game_event(
+                self.dim.id(),
+                event,
+                pos,
+                cause,
+                ctx.affected_state,
+                &mut cancel,
+            );
             if cancel {
                 return;
             }
@@ -1631,6 +1647,10 @@ impl Game<'_> {
     fn tick_entity_events(&mut self) {
         self.tick_player_sculk_events();
         self.tick_mob_sculk_events();
+        if !self.sculk.falling_items.is_empty() {
+            let present: HashSet<u32> = self.dropped.iter().map(|item| item.id).collect();
+            self.sculk.falling_items.retain(|id| present.contains(id));
+        }
         // Dropped items are entities too: Entity.applyEffectsFromBlocks.
         let items: Vec<[f64; 3]> = self
             .dropped
@@ -1641,6 +1661,48 @@ impl Game<'_> {
         for at in items {
             self.step_on_redstone_ore(at, false, false);
         }
+    }
+
+    /// `Entity.checkFallDamage` for item movement: retain a fall across an
+    /// exact-height contact, without changing the saved fall-distance getter.
+    pub(super) fn item_landing_event(
+        &mut self,
+        id: u32,
+        previous: Vec3,
+        position: Vec3,
+        on_ground: bool,
+    ) {
+        let at = [position.x, position.y, position.z];
+        if self.in_water_at(at) {
+            self.sculk.falling_items.remove(&id);
+            return;
+        }
+        if position.y < previous.y {
+            self.sculk.falling_items.insert(id);
+        }
+        if on_ground && self.sculk.falling_items.remove(&id) {
+            self.post_landing_event(position, false);
+        }
+    }
+
+    /// `Entity.checkFallDamage` emits HIT_GROUND after the block's fallOn.
+    pub(super) fn post_landing_event(&mut self, position: Vec3, living: bool) {
+        if self.remote.is_some() || self.options.execution_role.is_client() {
+            return;
+        }
+        self.sculk_prepare();
+        let state = self.world.block(
+            position.x.floor() as i32,
+            (position.y - 0.2).floor() as i32,
+            position.z.floor() as i32,
+        );
+        let mut context = self.who_context(None, Some(state));
+        context.living = living;
+        self.post_game_event(
+            "minecraft:hit_ground",
+            [position.x, position.y, position.z],
+            context,
+        );
     }
 
     /// Entity.move emits on the authoritative server too, for each ServerPlayer.
@@ -2061,6 +2123,43 @@ mod tests {
         assert_eq!(event_cause(Some(Who::Player), None), None);
         assert_eq!(event_cause(Some(Who::Mob(7)), Some(42)), Some(7));
         assert_eq!(event_cause(None, Some(42)), None);
+    }
+
+    /// `vanilla_game_event` hears `GameEvent.Context.affectedState`: the state a context
+    /// was made with reaches the listener, and a context made with none reads as None.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn vanilla_game_event_carries_the_affected_state() {
+        use crate::game::native_entity_refs::tests::with_game;
+        use mod_api::testing::with_mods;
+        use mod_api::{Hooks, ModEntry, VanillaGameEventEvent};
+        use std::sync::{Arc, Mutex};
+
+        struct Heard(Arc<Mutex<Vec<Option<BlockStateId>>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Heard {
+            fn vanilla_game_event(
+                &self,
+                _host: &mut dyn mod_api::ServerHost,
+                event: &mut VanillaGameEventEvent<'_>,
+            ) -> mod_api::Flow {
+                self.0.lock().unwrap().push(event.affected_state);
+                mod_api::Flow::Continue
+            }
+        }
+
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new("heard", Box::new(Heard(heard.clone())))].into();
+        with_mods(mods, || {
+            with_game(|game| {
+                let state = BlockStateId(3);
+                let placed = game.player_context(Some(state));
+                game.post_game_event("minecraft:block_place", [0.5, 64.0, 0.5], placed);
+                let stepped = game.who_context(None, None);
+                game.post_game_event("minecraft:step", [0.5, 64.0, 0.5], stepped);
+            });
+        });
+        assert_eq!(*heard.lock().unwrap(), vec![Some(BlockStateId(3)), None]);
     }
 
     /// Retaining keeps the insertion order and the membership in step.

@@ -2,10 +2,10 @@ use horizon_core::position::BlockPos;
 use horizon_world::{
     DATA_VERSION,
     movement_properties::{
-        MovementBlockError, MovementBlockProvider, MovementProperties, MovementTags,
-        RegistryMovementWorld,
+        BlockFactorEdits, MovementBlockError, MovementBlockProvider, MovementProperties,
+        MovementTags, NoFactorEdits, RegistryMovementWorld,
     },
-    movement_support::MovementBlockWorld,
+    movement_support::{self, MovementBlockWorld, MovementLocation},
     nbt::Tag,
     registry::{BlockRegistry, BlockStateId},
 };
@@ -131,6 +131,7 @@ fn provider_errors_and_unknown_states_remain_distinct() {
     let mut world = RegistryMovementWorld {
         properties: &properties,
         world: &mut provider,
+        edits: &NoFactorEdits,
     };
     assert!(matches!(
         world.block_state(BlockPos::default()),
@@ -141,4 +142,55 @@ fn provider_errors_and_unknown_states_remain_distinct() {
         world.block_state(BlockPos::default()),
         Err(MovementBlockError::Data(_))
     ));
+}
+
+/// An edit to a block's factor is made where the block is read, and the entity then combines the
+/// edited values as vanilla does: the block at its feet, unless that gives 1.0, then the one below.
+#[test]
+fn edited_block_factors_combine_as_the_blocks_own() {
+    struct Stone;
+    impl MovementBlockProvider for Stone {
+        type Error = ();
+        fn movement_block_state(&mut self, _: BlockPos) -> Result<BlockStateId, ()> {
+            Ok(BlockStateId(0))
+        }
+    }
+    struct Double;
+    impl BlockFactorEdits for Double {
+        fn jump(&self, state: BlockStateId, factor: f32) -> f32 {
+            assert_eq!(state, BlockStateId(0));
+            factor * 2.0
+        }
+        fn speed(&self, _: BlockStateId, factor: f32) -> f32 {
+            factor + 0.5
+        }
+    }
+    let (r, data) = fixture();
+    let registry = BlockRegistry::from_nbt(&r).unwrap();
+    let properties = MovementProperties::from_nbt(&data, &registry)
+        .unwrap()
+        .bind(&MovementTags::default())
+        .unwrap();
+    let location = MovementLocation {
+        position: horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5),
+        block_position: BlockPos::new(0, 64, 0),
+        supporting_block: None,
+    };
+    let read = |edits: &dyn BlockFactorEdits| {
+        let mut world = RegistryMovementWorld {
+            properties: &properties,
+            world: &mut Stone,
+            edits,
+        };
+        (
+            movement_support::block_jump_factor(&mut world, location).unwrap(),
+            movement_support::block_speed_factor(&mut world, location).unwrap(),
+        )
+    };
+    let (jump, speed) = read(&NoFactorEdits);
+    assert_eq!(
+        (jump.to_bits(), speed.to_bits()),
+        (1f32.to_bits(), (-0.0f32).to_bits())
+    );
+    assert_eq!(read(&Double), (2.0, 0.5));
 }

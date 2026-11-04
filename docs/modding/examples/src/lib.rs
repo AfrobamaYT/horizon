@@ -34,3 +34,16 @@ fn count(host: &mut dyn ServerHost) -> Result<(), AttachmentError> {
     COUNTER.set(host, Holder::Level, old + 1)
 }
 // ANCHOR_END: count
+
+// ANCHOR: menu_quick_move
+/// Shift-click a slot in the local player's current menu.
+pub fn quick_move(host: &mut dyn mod_api::ClientHost, slot: usize) -> bool {
+    let Some(menu) = host
+        .local_player()
+        .and_then(|player| player.container_menu(host))
+    else {
+        return false;
+    };
+    menu.click(host, &[mod_api::MenuClick::QuickMove { slot }])
+}
+// ANCHOR_END: menu_quick_move

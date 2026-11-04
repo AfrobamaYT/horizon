@@ -23,9 +23,54 @@ pub struct ChunkWatch {
     pub kind: ChunkWatchKind,
     pub uuid: u128,
     pub entity_id: i32,
-    /// The level the chunk is in (`minecraft:overworld`).
-    pub dimension: String,
     pub chunk: [i32; 2],
+}
+
+/// The events of one level, in a row: the level is named once for them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LevelWatches {
+    /// The level the chunks are in (`minecraft:overworld`).
+    pub dimension: String,
+    pub watches: Vec<ChunkWatch>,
+}
+
+/// The hub's chunk events since the game last took them, in order, run by
+/// run of the same level.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ChunkWatchLog(Vec<LevelWatches>);
+
+impl ChunkWatchLog {
+    /// A log of `runs`, as the hub would have made it.
+    pub fn new(runs: Vec<LevelWatches>) -> Self {
+        Self(runs)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Every event so far, run by run; the log is left empty.
+    pub fn take(&mut self) -> Vec<LevelWatches> {
+        std::mem::take(&mut self.0)
+    }
+
+    /// One event for `g`'s chunk `(x, z)` in its level, which a new run
+    /// names only when it isn't the last event's level.
+    pub(super) fn push(&mut self, g: &Guest, kind: ChunkWatchKind, (x, z): (i32, i32)) {
+        let watch = ChunkWatch {
+            kind,
+            uuid: g.uuid,
+            entity_id: g.entity_id,
+            chunk: [x, z],
+        };
+        match self.0.last_mut() {
+            Some(run) if run.dimension == g.dimension => run.watches.push(watch),
+            _ => self.0.push(LevelWatches {
+                dimension: g.dimension.clone(),
+                watches: vec![watch],
+            }),
+        }
+    }
 }
 
 /// Whether a mod listens to any of the three.
@@ -35,39 +80,23 @@ pub fn listened() -> bool {
         .any(mod_api::__private::listened)
 }
 
-/// One event for `g`'s chunk `(x, z)` in its level.
-pub(super) fn record(
-    out: &mut Vec<ChunkWatch>,
-    g: &Guest,
-    kind: ChunkWatchKind,
-    (x, z): (i32, i32),
-) {
-    out.push(ChunkWatch {
-        kind,
-        uuid: g.uuid,
-        entity_id: g.entity_id,
-        dimension: g.dimension.clone(),
-        chunk: [x, z],
-    });
-}
-
 /// `g` stops watching chunk `(x, z)` (`ChunkMap.dropChunk`), if it did.
-pub(super) fn unwatch(out: &mut Vec<ChunkWatch>, g: &mut Guest, key: (i32, i32)) {
+pub(super) fn unwatch(log: &mut ChunkWatchLog, g: &mut Guest, key: (i32, i32)) {
     if g.watched.remove(&key) {
-        record(out, g, ChunkWatchKind::Unwatch, key);
+        log.push(g, ChunkWatchKind::Unwatch, key);
     }
 }
 
 /// `g` stops watching every chunk (`applyChunkTrackingView(EMPTY)`): before
 /// it leaves its level, respawns or disconnects. In the order vanilla walks
 /// its square view (`ChunkTrackingView.Positioned.forEach`): by x, then z.
-pub(super) fn unwatch_all(out: &mut Vec<ChunkWatch>, g: &mut Guest) {
+pub(super) fn unwatch_all(log: &mut ChunkWatchLog, g: &mut Guest) {
     if g.watched.is_empty() {
         return;
     }
     let mut keys: Vec<_> = g.watched.drain().collect();
     keys.sort_unstable();
     for key in keys {
-        record(out, g, ChunkWatchKind::Unwatch, key);
+        log.push(g, ChunkWatchKind::Unwatch, key);
     }
 }

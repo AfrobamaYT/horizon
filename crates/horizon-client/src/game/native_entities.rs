@@ -521,6 +521,7 @@ mod tests {
                     guest: None,
                     no_gravity: false,
                     power: 4.0,
+                    block_state: None,
                 });
                 game.native_joins_flush(false, 0);
                 game.native_joins_flush(false, 0);

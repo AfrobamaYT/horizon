@@ -2,6 +2,7 @@
 //! chunk-generation spawning (`NaturalSpawner`), mob events (attacks,
 //! breeding, conversions, drops), projectiles, player interactions
 //! (feeding, shearing, milking, spawn eggs, throwing) and rendering.
+use super::level_sounds::LevelSound;
 use super::{
     Dim, Game, Hand, InteractTarget, dispenser, native_mob_draw::NativePlayerRender,
     native_projectiles::Impact, view_vector,
@@ -18,7 +19,7 @@ use horizon_client::{
     mesher::Vertex,
     mobs::{
         Damage, DamageKind, Mob, MobEvent, MobWorld, PlayerView, Seen, SpawnSetup, Species, Who,
-        ai::{eating_sound, feed_animal, takes_food},
+        ai::{eating_sound, eating_sound_is_bound, feed_animal, takes_food},
         farm::Climate,
         spawning::{self, BiomeFacts},
     },
@@ -31,7 +32,7 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
-use mod_api::{EquipmentSlot, NativeItemDrop, NativeLootDrops};
+use mod_api::{EquipmentSlot, NativeItemDrop, NativeLootDrops, SoundSource};
 use std::sync::Arc;
 
 pub(super) type SpawnReason = horizon_client::mobs::spawn_rules::Reason;
@@ -48,6 +49,7 @@ pub(super) enum SpawnSite {
 }
 
 /// What a spawn site does with a mob after `finalize_spawn` was heard.
+#[derive(Debug, PartialEq)]
 pub(super) enum Finalized {
     /// Finalized as vanilla does; the site goes on to the class's follow-ups.
     Done,
@@ -154,6 +156,8 @@ pub(super) struct Creatures {
     pub shoulder_time: std::collections::HashMap<[i32; 4], i64>,
     /// The cat spawner's countdown (`CatSpawner.nextTick`).
     pub cat_tick: i32,
+    /// Each level's custom spawners, built when its first tick asks (game/custom_spawners.rs).
+    pub custom_spawners: std::collections::HashMap<super::Dim, mod_api::CustomSpawners>,
     /// Native sounds waiting for the server host to be available.
     pub lan_sounds: Vec<NativeSound>,
     /// Particles from a guest's turn, waiting for it to end.
@@ -378,7 +382,7 @@ impl Game<'_> {
             swimming: p.swimming,
             look: view_vector(self.yaw, self.pitch),
             main_hand: self.held().map(|s| s.item.clone()),
-            off_hand: None,
+            off_hand: self.offhand.as_ref().map(|s| s.item.clone()),
             head: self.armor[0].as_ref().map(|s| s.item.clone()),
             armor_cover: self.armor.iter().filter(|a| a.is_some()).count() as f32 / 4.0,
             invisible: self.potions.effects.get("invisibility").is_some(),
@@ -470,7 +474,8 @@ impl Game<'_> {
         persistent: bool,
         site: SpawnSite,
     ) -> Option<u32> {
-        self.spawn_mob_for(kind, at, persistent, false, site)
+        let mob = self.create_mob_reason(kind, at, persistent, site)?;
+        self.insert_spawned_mob(mob)
     }
     /// `SummonCommand` and `SpawnEggItem`: vanilla spawns the mob, but it
     /// never calls `Mob.setPersistenceRequired` for it, so the mob is not
@@ -484,32 +489,17 @@ impl Game<'_> {
     ) -> Option<u32> {
         // The spawn is not a natural one (no jockeys, the patrol leader roll
         // stays), but the mob is not persistent.
-        let id = self.spawn_mob_for(kind, at, true, false, site)?;
+        let id = self.spawn_mob(kind, at, true, site)?;
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
             m.persistent = false;
         }
         Some(id)
     }
-    /// `spawn_mob` for a patrol or raid (`EntitySpawnReason.PATROL` / `EVENT`),
-    /// which never rolls a patrol leader.
-    pub(super) fn spawn_mob_for(
-        &mut self,
-        kind: &str,
-        at: [f64; 3],
-        persistent: bool,
-        scripted: bool,
-        site: SpawnSite,
-    ) -> Option<u32> {
-        let mob = self.create_mob_reason(kind, at, persistent, scripted, site)?;
-        self.insert_spawned_mob(mob, persistent, scripted, site)
-    }
-
     fn create_mob_reason(
         &mut self,
         kind: &str,
         at: [f64; 3],
         persistent: bool,
-        scripted: bool,
         site: SpawnSite,
     ) -> Option<Mob> {
         let kind = if kind.contains(':') {
@@ -528,40 +518,27 @@ impl Game<'_> {
                 Finalized::Skipped => return Some(mob),
                 Finalized::Done => {}
             },
+            // A plain spawn finalizes as a summoned one (vanilla's /summon
+            // and egg path): its few reason-gated arms behave the same.
             SpawnSite::Plain => {
                 let difficulty =
                     self.local_difficulty([mob.position.x, mob.position.y, mob.position.z]);
-                self.finalize_plain(&mut mob, &difficulty);
+                self.finalize_plain(
+                    &mut mob,
+                    &difficulty,
+                    horizon_client::mobs::spawn_rules::Reason::MobSummoned,
+                );
             }
-        }
-        if !scripted {
-            let raider_reason = if persistent {
-                horizon_client::mobs::raider::Reason::Other
-            } else {
-                horizon_client::mobs::raider::Reason::Natural
-            };
-            horizon_client::mobs::raider::finalize(&mut mob, raider_reason);
         }
         Some(mob)
     }
 
-    fn insert_spawned_mob(
-        &mut self,
-        mob: Mob,
-        persistent: bool,
-        scripted: bool,
-        site: SpawnSite,
-    ) -> Option<u32> {
+    fn insert_spawned_mob(&mut self, mob: Mob) -> Option<u32> {
         let id = mob.id;
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
         if !self.mobs.iter().any(|m| m.id == id) {
             return None;
-        }
-        self.enchant_spawn_equipment(id);
-        self.halloween_spawn_head(id);
-        if !persistent && !scripted {
-            self.spawn_jockeys(id, site);
         }
         Some(id)
     }
@@ -716,7 +693,7 @@ impl Game<'_> {
         }
     }
     /// Finalize a converted frog or witch before it joins the level.
-    fn finalize_converted(&self, mob: &mut Mob) {
+    fn finalize_converted(&mut self, mob: &mut Mob) {
         // A mod that stops a conversion's finalization leaves the mob as converted.
         self.finalize_with(mob, SpawnReason::Conversion, None);
         mob.persistent = true;
@@ -765,7 +742,7 @@ impl Game<'_> {
             horizon_client::mobs::finalize::zombie_attributes(
                 &mut mob,
                 special,
-                horizon_client::mobs::finalize::Reason::Conversion,
+                horizon_client::mobs::spawn_rules::Reason::Conversion,
             );
         }
         match (from.species(), kind) {
@@ -832,7 +809,6 @@ impl Game<'_> {
                 -24000
             };
         }
-        self.spawn_jockeys(id, SpawnSite::Finalizing(SpawnReason::Command));
         Ok(id)
     }
     /// The `mobs` command: nearby mobs with position, health and running goals.
@@ -930,6 +906,7 @@ impl Game<'_> {
             fluid_tables: &self.motion.fluids,
             movement: &self.motion.blocks,
             collision: self.collision,
+            suffocation: self.mob_suffocation(),
             data: self.res.mob_data(),
             controlling_player_movement: None,
             nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
@@ -1002,11 +979,26 @@ impl Game<'_> {
     /// follow-ups (raider flags and the like) are part of `finalizeSpawn`, so a
     /// site skips them on [`Finalized::Skipped`].
     pub(super) fn finalize_with(
-        &self,
+        &mut self,
         mob: &mut Mob,
         reason: SpawnReason,
         spawner: Option<mod_api::NativeSpawner>,
     ) -> Finalized {
+        let (outcome, difficulty) = self.finalize_spawn_event(mob, reason, spawner);
+        if outcome == Finalized::Done {
+            self.finalize_plain(mob, &difficulty, reason);
+        }
+        outcome
+    }
+    /// `Mob.finalizeSpawn`'s event, the half listeners own: they hear the
+    /// spawn, cancel it, take it over, or set its difficulty. The decision
+    /// and the difficulty the spawn finalizes with come back together.
+    pub(super) fn finalize_spawn_event(
+        &self,
+        mob: &Mob,
+        reason: SpawnReason,
+        spawner: Option<mod_api::NativeSpawner>,
+    ) -> (Finalized, spawning::LocalDifficulty) {
         let at = [mob.position.x, mob.position.y, mob.position.z];
         let mut difficulty = self.local_difficulty(at);
         if mod_api::__private::listened(mod_api::HookId::FinalizeSpawn) {
@@ -1015,7 +1007,7 @@ impl Game<'_> {
             self.native_finalize_spawn(
                 self.dim.id(),
                 &mob.kind.id,
-                reason.into(),
+                reason,
                 at,
                 spawner,
                 &mut heard,
@@ -1023,26 +1015,14 @@ impl Game<'_> {
                 &mut skip,
             );
             if spawn_cancelled {
-                return Finalized::Cancelled;
+                return (Finalized::Cancelled, difficulty);
             }
             if skip {
-                return Finalized::Skipped;
+                return (Finalized::Skipped, difficulty);
             }
             difficulty = heard.into();
         }
-        self.finalize_plain(mob, &difficulty);
-        Finalized::Done
-    }
-    /// The game's own finalization of a mob, with no event: for a mob vanilla
-    /// makes without calling `finalizeSpawn`.
-    fn finalize_plain(&self, mob: &mut Mob, difficulty: &spawning::LocalDifficulty) {
-        let at = mob.position;
-        let facts = self.biome_facts(
-            at.x.floor() as i32,
-            at.y.floor() as i32,
-            at.z.floor() as i32,
-        );
-        spawning::finalize(mob, &facts, difficulty);
+        (Finalized::Done, difficulty)
     }
     /// `ServerLevel.getCurrentDifficultyAt`.
     pub(super) fn local_difficulty(&self, at: [f64; 3]) -> spawning::LocalDifficulty {
@@ -1096,10 +1076,7 @@ impl Game<'_> {
         horizon_client::spans::time("spawn_natural", || self.spawn_natural());
         // ServerChunkCache.tickChunks: the custom spawners tick only with spawn_mobs.
         if self.ui.rules.bool("spawn_mobs") {
-            self.tick_wandering_trader();
-            self.tick_patrol_spawner();
-            self.tick_cat_spawner();
-            self.tick_village_siege();
+            self.tick_custom_spawners();
         }
         self.tick_raids();
         self.lan_synced_since(from);
@@ -1273,6 +1250,27 @@ impl Game<'_> {
                     keep.push(!m.hostile() || m.persistent);
                     continue;
                 }
+                // `MobDespawnEvent`, before `checkDespawn`'s own draws; one branch
+                // with no listener. Cleared below: the tick may not reach the check.
+                // The wither overrides `checkDespawn` without `super`, so the
+                // event, patched into `Mob.checkDespawn`, never fires for it;
+                // a mannequin is no `Mob` and never checks despawning.
+                if mod_api::__private::listened(mod_api::HookId::MobDespawn)
+                    && !matches!(
+                        m.species(),
+                        horizon_client::mobs::Species::Wither
+                            | horizon_client::mobs::Species::Mannequin
+                    )
+                    && let Some(epoch) = self.native_lifecycle.epoch()
+                {
+                    self.native_mob_despawn(
+                        self.dim.id(),
+                        mod_api::MobRef::new(mod_api::EntityRef::new(epoch, m.id)),
+                        &m.kind.id,
+                        [m.position.x, m.position.y, m.position.z],
+                        &mut m.despawn,
+                    );
+                }
                 // ServerLevel.tick: every loaded entity checks despawning, but
                 // only those in entity-ticking chunks (within the simulation
                 // distance) tick.
@@ -1287,6 +1285,7 @@ impl Game<'_> {
                 }
                 // A mod canceled its tick: it stays as it is.
                 if round.canceled(m.id) {
+                    m.despawn = mod_api::NativeDespawn::default();
                     keep.push(true);
                     continue;
                 }
@@ -1295,6 +1294,7 @@ impl Game<'_> {
                 let from = events.len();
                 let credit_expiring = m.ai.last_hurt_by_player == 1;
                 let kept = m.tick(&w, &mut level, &mut events);
+                m.despawn = mod_api::NativeDespawn::default();
                 if credit_expiring && m.ai.last_hurt_by_player == 0 {
                     player_credit.remove(&m.id);
                 }
@@ -2338,6 +2338,18 @@ impl Game<'_> {
                     self.audio
                         .play(&format!("minecraft:{name}"), Some(at), volume, pitch)
                 }
+                MobEvent::BoundSound {
+                    mob,
+                    sound,
+                    source,
+                    at,
+                    volume,
+                    pitch,
+                } => {
+                    let name = format!("minecraft:{sound}");
+                    let sound = LevelSound::new(&name, at, volume, pitch).in_source(source);
+                    self.play_bound_sound(sound, mob, None);
+                }
                 MobEvent::LevelEventSound {
                     sound,
                     at,
@@ -2369,6 +2381,13 @@ impl Game<'_> {
                         m.id == source && matches!(m.species(), Species::Chicken | Species::Parrot)
                     }) =>
                 {
+                    let ctx = self.who_context(Some(Who::Mob(source)), None);
+                    self.post_game_event(event, at, ctx);
+                }
+                // Armadillo.rollUp/rollOut: `gameEvent(ENTITY_ACTION)`.
+                MobEvent::GameEvent {
+                    event, at, source, ..
+                } if event == "minecraft:entity_action" => {
                     let ctx = self.who_context(Some(Who::Mob(source)), None);
                     self.post_game_event(event, at, ctx);
                 }
@@ -3697,7 +3716,6 @@ impl Game<'_> {
             &kind,
             [p.position.x, p.position.y, p.position.z],
             true,
-            false,
             SpawnSite::Plain,
         )?;
         'offspring: {
@@ -3875,14 +3893,14 @@ impl Game<'_> {
         let at = [p.position.x, p.position.y, p.position.z];
         match order {
             OrbOrder::AfterChild => {
-                let joined = self.insert_spawned_mob(child, true, false, SpawnSite::Plain);
+                let joined = self.insert_spawned_mob(child);
                 self.mob_event_particles(parent, 18);
                 self.breeding_orb(parent, at, experience);
                 joined
             }
             OrbOrder::BeforeChild => {
                 self.breeding_orb(parent, at, experience);
-                self.insert_spawned_mob(child, true, false, SpawnSite::Plain)
+                self.insert_spawned_mob(child)
             }
         }
     }
@@ -4274,7 +4292,8 @@ impl Game<'_> {
     fn tick_projectiles(&mut self) -> Result<()> {
         let mut projectiles = std::mem::take(&mut self.creatures.projectiles);
         let mut hits = Vec::new();
-        let mut deflections: Vec<[f64; 3]> = Vec::new();
+        // The breezes that deflected a projectile, and where.
+        let mut deflections: Vec<(u32, [f64; 3])> = Vec::new();
         let mut arrow_events = Vec::new();
         let mut shoot_events = Vec::new();
         let mut trails = Vec::new();
@@ -4448,7 +4467,7 @@ impl Game<'_> {
                         let a = p.arrow.as_mut().expect("an arrow");
                         arrow_events.extend(a.events.drain(..).map(|e| (p.position, e)));
                     }
-                    deflections.push([at.x, at.y, at.z]);
+                    deflections.push((id, [at.x, at.y, at.z]));
                     continue;
                 }
                 // AbstractWindCharge.tick: out of the world's top it bursts.
@@ -4529,9 +4548,12 @@ impl Game<'_> {
         for pos in bubble_tops {
             self.bubble_column_particles(pos);
         }
-        for at in deflections {
-            self.audio
-                .play("minecraft:entity.breeze.deflect", Some(at), 1.0, 1.0);
+        // Breeze.onProjectileDeflect: level.playSound(null, breeze,
+        // BREEZE_DEFLECT, HOSTILE, 1, 1).
+        for (breeze, at) in deflections {
+            let sound = LevelSound::new("minecraft:entity.breeze.deflect", at, 1.0, 1.0)
+                .in_source(SoundSource::Hostile);
+            self.play_bound_sound(sound, breeze, None);
         }
         for (at, event) in arrow_events {
             self.arrow_event(at, event);
@@ -4852,6 +4874,7 @@ impl Game<'_> {
             facts: self.res.facts(),
             collision: self.collision,
             fluids: &self.motion.fluids,
+            loop_context: &self.loop_context,
             raining: rain,
             mob_griefing: self.ui.rules.bool("mob_griefing"),
             tnt_explodes: self.ui.rules.bool("tnt_explodes"),
@@ -5638,7 +5661,10 @@ impl Game<'_> {
                 // The blast's source names the owner, so a dragon it kills
                 // remembers the player who shot it.
                 self.set_blast_by_player(p.owner == Some(Who::Player));
-                let result = self.explode(Some(p.id), atp, *power as f32);
+                // LargeFireball.onHit: both fire and MOB block destruction
+                // follow mob_griefing; other mob explosions keep their default.
+                let fire = self.ui.rules.bool("mob_griefing");
+                let result = self.explode_mob(atp, *power as f32, fire);
                 self.set_blast_by_player(false);
                 self.combat.explosion_owner = None;
                 self.combat.explosion_in_water = false;
@@ -6045,6 +6071,12 @@ impl Game<'_> {
         if self.interact_shear_mob(index, &item) {
             self.swing_arm();
             return Ok(true);
+        }
+        if let Some(sheared) = self.shear_pig_saddle(index, &item) {
+            if sheared {
+                self.swing_arm();
+            }
+            return Ok(sheared);
         }
         // AbstractHorse.mobInteract: feed, equip or ride.
         if self.interact_mount(index, &item) {
@@ -6670,15 +6702,36 @@ impl Game<'_> {
             }])?;
         }
         self.swing_arm();
-        if let Some(s) = sound {
-            let pitch =
-                (self.world.random.next_float() - self.world.random.next_float()) * 0.2 + 1.0;
-            self.audio
-                .play(&format!("minecraft:{s}"), Some(center), 1.0, pitch);
+        match sound {
+            // Sheep.shear: level.playSound(null, this, SHEEP_SHEAR, PLAYERS, 1, 1).
+            // DyeItem.interactLivingEntity: level.playSound(player, sheep,
+            // DYE_USE, PLAYERS, 1, 1), whose player is left out because their
+            // client played it; Horizon's own client plays it from the packet,
+            // so every player gets it.
+            Some(s @ ("entity.sheep.shear" | "item.dye.use")) => {
+                let name = format!("minecraft:{s}");
+                let id = self.mobs[index].id;
+                let sound = LevelSound::new(&name, feet, 1.0, 1.0).in_source(SoundSource::Players);
+                self.play_bound_sound(sound, id, None);
+            }
+            Some(s) => {
+                let pitch =
+                    (self.world.random.next_float() - self.world.random.next_float()) * 0.2 + 1.0;
+                self.audio
+                    .play(&format!("minecraft:{s}"), Some(center), 1.0, pitch);
+            }
+            None => {}
         }
         if let Some((s, volume, pitch)) = eat {
-            self.audio
-                .play(&format!("minecraft:{s}"), Some(feet), volume, pitch);
+            let name = format!("minecraft:{s}");
+            if eating_sound_is_bound(species) {
+                let id = self.mobs[index].id;
+                let sound =
+                    LevelSound::new(&name, feet, volume, pitch).in_source(SoundSource::Neutral);
+                self.play_bound_sound(sound, id, None);
+            } else {
+                self.audio.play(&name, Some(feet), volume, pitch);
+            }
         }
         if consume
             && !creative
@@ -6783,7 +6836,10 @@ impl Game<'_> {
         let at = m.position;
         let mob = (m.id, super::native_hooks::mob_kind(m));
         let tool = self.held().cloned();
-        self.audio.play(sound, Some([at.x, at.y, at.z]), 1.0, 1.0);
+        // shear: level.playSound(null, this, sound, PLAYERS, 1, 1).
+        let shear =
+            LevelSound::new(sound, [at.x, at.y, at.z], 1.0, 1.0).in_source(SoundSource::Players);
+        self.play_bound_sound(shear, mob.0, None);
         self.mobs[index].extra.sheared = true;
         let mut stacks = self.sequence_loot(table, table, tool.as_ref());
         let origin = [at.x, at.y, at.z];
@@ -7903,6 +7959,7 @@ pub(super) fn melee(kind: horizon_client::mobs::DamageKind) -> bool {
 pub(super) fn damage_type(kind: horizon_client::mobs::DamageKind, caused: bool) -> &'static str {
     use horizon_client::mobs::DamageKind as K;
     match kind {
+        K::Named(named) => named.name,
         K::PlayerAttack => "minecraft:player_attack",
         K::MaceSmash => "minecraft:mace_smash",
         K::Spear => "minecraft:spear",
@@ -8979,6 +9036,24 @@ mod breeze_random_tests {
 mod damage_type_tests {
     use super::*;
 
+    #[test]
+    fn named_damage_keeps_its_registry_id_with_or_without_an_attacker() {
+        let named = horizon_client::mobs::NamedDamage::new(
+            "example:fan_fire",
+            horizon_client::mobs::NamedDamage::IS_FIRE,
+        );
+        for attacker in [None, Some(Who::Mob(7)), Some(Who::Player)] {
+            assert_eq!(
+                source_damage_type(Damage {
+                    kind: DamageKind::Named(named),
+                    attacker,
+                    from: None,
+                }),
+                "example:fan_fire"
+            );
+        }
+    }
+
     /// `DamageSources.explosion`: a blast with a causing entity is
     /// `player_explosion` whoever caused it, so an exploding creeper's too.
     #[test]
@@ -9036,7 +9111,11 @@ mod pearl_tests {
             &defaults,
         )
         .unwrap();
-        let collision = horizon_client::collisions::load(&root, registry).unwrap();
+        let collision =
+            std::sync::Arc::new(horizon_client::collisions::load(&root, registry).unwrap());
+        let suffocation =
+            horizon_client::mobs::suffocation::bind(collision.clone(), &motion.causes_suffocation)
+                .unwrap();
         let mut world = horizon_client::world::World::test_scene(&assets, &render, 3).unwrap();
         // A pool of still water one block deep at y = 4, from x = 20 on (clear of the
         // scene's pyramid): its
@@ -9058,6 +9137,7 @@ mod pearl_tests {
             fluid_tables: &motion.fluids,
             movement: &motion.blocks,
             collision: &collision,
+            suffocation: &suffocation,
             data: &data,
             player: None,
             controlling_player_movement: None,

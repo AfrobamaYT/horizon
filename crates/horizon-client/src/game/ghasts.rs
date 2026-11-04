@@ -2,9 +2,11 @@
 //! off), riding, getting off on top, and the ghastling a dried ghast block
 //! hatches.
 use super::Game;
+use super::level_sounds::LevelSound;
 use horizon_client::mobs::{MobEvent, happy_ghast};
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
+use mod_api::SoundSource;
 
 impl Game<'_> {
     /// Client `EntityGetter.getEntityCollisions` for the player: the
@@ -169,9 +171,12 @@ impl Game<'_> {
             m.yaw = yaw;
             m.body_yaw = yaw;
             m.head_yaw = yaw;
-            let at = m.center();
-            self.audio
-                .play("minecraft:entity.ghastling.spawn", Some(at), 1.0, 1.0);
+            // DriedGhastBlock.spawnGhastling: level.playSound(null, ghastling,
+            // GHASTLING_SPAWN, BLOCKS, 1, 1).
+            let (id, at) = (m.id, [m.position.x, m.position.y, m.position.z]);
+            let sound = LevelSound::new("minecraft:entity.ghastling.spawn", at, 1.0, 1.0)
+                .in_source(SoundSource::Blocks);
+            self.play_bound_sound(sound, id, None);
         }
     }
 }

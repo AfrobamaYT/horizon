@@ -616,8 +616,17 @@ impl Game<'_> {
                     lines.push(format!("game {rest}"));
                 }
             }
-            for (sound, at, volume, pitch) in
-                self.audio.capture.replace(Vec::new()).unwrap_or_default()
+            // The sounds bound to an entity are the server's too.
+            let bound = std::mem::take(&mut self.bound_sounds)
+                .into_iter()
+                .map(|s| (s.name, s.at, s.volume, s.pitch));
+            for (sound, at, volume, pitch) in self
+                .audio
+                .capture
+                .replace(Vec::new())
+                .unwrap_or_default()
+                .into_iter()
+                .chain(bound)
             {
                 if CLIENT_SOUNDS.contains(&sound.as_str()) {
                     continue;

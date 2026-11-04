@@ -155,10 +155,20 @@ pub trait Hooks {
         key = "state",
         target = "horizon_client::game::native_hooks::GameLevel<'_>::native_update_shape"
     )]
-    fn update_shape();
-    /// A command typed or clicked in chat, without its slash, before the
-    /// server and Horizon's commands see it: set `ran` when the mod ran it.
-    #[hook(side = "both", contract = "cancel", out = "ran")]
+    fn update_shape(
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Direction,
+        neighbour_pos: BlockPos,
+        neighbour: BlockStateId,
+        new: &mut Option<BlockStateId>,
+    );
+    /// A command the local player typed or clicked in chat, without its
+    /// slash, before the server and Horizon's commands see it: set `ran`
+    /// when the mod ran it. Client-side: a server never asks, not for
+    /// command blocks, guests or the console.
+    #[hook(side = "client", contract = "cancel", out = "ran", version = 2)]
     fn command();
     /// The client's own commands (NeoForge's `RegisterClientCommandsEvent`), which
     /// `command` runs: push a `NativeCommand` per usage (`x <mode:word>`).
@@ -1191,7 +1201,8 @@ pub trait Hooks {
     fn render_hand();
     /// Render-thread notification after a resource-pack reload has applied successfully.
     /// Atlas, models, renderer and client caches already refer to the new resources.
-    /// Selection/F3+T and server-pack reloads share this point; initial startup does not.
+    /// Selection/F3+T and server-pack reloads share this point; initial startup does not
+    /// (`client_setup` is the once-only moment after the initial load).
     #[hook(side = "client", contract = "listen")]
     fn client_resources_reloaded();
     /// Append an item's custom decorations after its default bar, cooldown and count.
@@ -1518,7 +1529,17 @@ pub trait Hooks {
         contract = "listen",
         neoforge = "PlayerRespawnPositionEvent"
     )]
-    fn player_respawn_position();
+    fn player_respawn_position(
+        player: PlayerRef,
+        original_level: LevelDimension,
+        original_position: [f64; 3],
+        missing_respawn_block: bool,
+        level: &mut LevelDimension,
+        position: &mut [f64; 3],
+        yaw: &mut f32,
+        pitch: &mut f32,
+        copy_original_spawn_position: &mut bool,
+    );
     /// `player` (`name`) respawned (NeoForge's `PlayerRespawnEvent`): at the
     /// end of `PlayerList.respawn`, once they are placed and their health,
     /// food and experience reset, with their state swapped in. Once for each
@@ -4155,21 +4176,28 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)"
     )]
     fn trade_select();
-    /// A server player traded with a villager or a wandering trader
-    /// (NeoForge's `TradeWithVillagerEvent`, at vanilla's
-    /// `MerchantResultSlot.onTake` once the offer is taken): `merchant` is
+    /// A trade of a villager or a wandering trader was made
+    /// (`MerchantResultSlot.onTake` once the offer is taken): `merchant` is
     /// the trader's entity id and `kind` its type (`minecraft:villager`,
-    /// `minecraft:wandering_trader`), `offer` the trade as it is after this
-    /// one (its `uses` counted, `result` what the player got). Once per
-    /// trade, so a shift-click that trades several times is heard for each,
-    /// after the trade's statistic and `villager_trade` trigger. Listen
-    /// only: the trade is made. The player's state is swapped in
-    /// (`native_acting_player`).
+    /// `minecraft:wandering_trader`), `offer` the live one in the trading
+    /// session (not a copy) as the trade left it: `uses` counted, `result`
+    /// what the player got. Once per trade, so a shift-click that trades
+    /// several times is heard for each, after the trade's statistic and
+    /// `villager_trade` trigger. A mod may change the offer (Bukkit's
+    /// `PlayerTradeEvent#getTrade` is mutable): `uses`, `max_uses`, `demand`,
+    /// `special_price_diff`, `price_multiplier`, `xp`. The change stands: the
+    /// next click and the offers sent to the player see it. Not asked for a
+    /// trade window without a trader. The player's state is swapped in
+    /// (`native_acting_player`). Server-side. Version 2: was a listen hook
+    /// returning the offer read-only; now collects the live offer as `out`
+    /// (the moment upstream's separate `merchant_offer_traded` covered).
     #[hook(
         side = "server",
-        contract = "listen",
+        contract = "collect",
+        out = "offer",
         neoforge = "TradeWithVillagerEvent",
-        cancellable = false
+        cancellable = false,
+        version = 2
     )]
     fn trade_with_villager();
     /// A vault at `pos` changed to `state`. Its block state is updated.
