@@ -58,7 +58,9 @@ thread_local! {
 }
 mod mod_api {
     pub enum HookId { LivingKnockback }
-    pub fn listened(_: HookId) -> bool { super::ENABLED.get() }
+    pub mod __private {
+        pub fn listened(_: super::HookId) -> bool { crate::ENABLED.get() }
+    }
 }
 use horizon_client::health::DamageLevel;
 struct HitLevel<'a>(DamageLevel<'a>);
