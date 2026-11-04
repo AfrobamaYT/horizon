@@ -514,3 +514,21 @@ impl Recipe {
         }
     }
 }
+
+/// What a crafting grid makes (`CraftingRecipe.assemble` and `getRemainingItems`), as
+/// [`LevelRef::craft`] answers it.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct CraftResult {
+    /// The stack the recipe makes.
+    pub output: ItemStack,
+    /// What each slot of the grid keeps once the craft takes one item from it, row by row as
+    /// the grid was given: an empty bucket for a milk bucket, `None` for most.
+    pub remainders: Vec<Option<ItemStack>>,
+}
+impl CraftResult {
+    /// New.
+    pub fn new(output: ItemStack, remainders: Vec<Option<ItemStack>>) -> Self {
+        Self { output, remainders }
+    }
+}

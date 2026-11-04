@@ -145,6 +145,7 @@ mod item_tooltip;
 mod item_toss;
 mod left_click_empty;
 mod level_block_writes;
+mod level_craft;
 mod level_effects;
 mod level_entities_in;
 mod level_events;
