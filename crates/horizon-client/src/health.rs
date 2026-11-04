@@ -1515,7 +1515,16 @@ mod tests {
             };
             let before = player.health.health();
             player
-                .hurt_caused_by(health, rules, id, 4.0, None, living, 0)
+                .hurt_caused_by(
+                    &mut super::TestLevel::new(0).level(),
+                    health,
+                    rules,
+                    id,
+                    4.0,
+                    None,
+                    living,
+                    0,
+                )
                 .unwrap();
             before - player.health.health()
         };

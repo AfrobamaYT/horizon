@@ -2420,7 +2420,7 @@ mod brute_home_tests {
     #[test]
     fn a_brute_that_wanders_off_walks_back_home() {
         with_built_test_world(&[], build, |w, _| {
-            let mut lr = LegacyRandom::new(3);
+            let mut test_level = crate::health::TestLevel::new(3);
             let mut events = Vec::new();
             for (label, home, walks) in [
                 ("far enough to walk back", Some([24, 0, 0]), true),
@@ -2432,7 +2432,7 @@ mod brute_home_tests {
                 register_brute(&mut m);
                 let mut cx = Cx {
                     w,
-                    lr: &mut lr,
+                    level: &mut test_level.level(),
                     events: &mut events,
                 };
                 let (running, target) = tick_goals(&mut m, &mut cx);
@@ -2451,11 +2451,11 @@ mod brute_home_tests {
     #[test]
     fn a_brute_tries_the_way_home_once_every_80_ticks() {
         with_built_test_world(&[], build, |w, _| {
-            let mut lr = LegacyRandom::new(3);
+            let mut test_level = crate::health::TestLevel::new(3);
             let mut events = Vec::new();
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level: &mut test_level.level(),
                 events: &mut events,
             };
             let mut m = brute(Vec3::new(0.5, 0.0, 0.5), Some([24, 0, 0]));
