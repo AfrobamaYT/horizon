@@ -454,26 +454,8 @@ pub fn hop_event(m: &mut Mob) {
 }
 
 fn block_jump_factor(m: &Mob, w: &MobWorld) -> f32 {
-    let properties = w.movement;
-    let current = w.world.block(
-        m.position.x.floor() as i32,
-        m.position.y.floor() as i32,
-        m.position.z.floor() as i32,
-    );
-    let below = m.on_pos(0.500_001);
-    // shortcut: use mobs' existing on_pos until they track supporting blocks like the player.
-    let lower = w.world.block(below[0], below[1], below[2]);
-    let current = properties
-        .get(current)
-        .expect("validated movement registry")
-        .coefficients
-        .jump_factor;
-    let lower = properties
-        .get(lower)
-        .expect("validated movement registry")
-        .coefficients
-        .jump_factor;
-    if current == 1.0 { lower } else { current }
+    // shortcut: mobs track no supporting block yet, so the block below is the one under the feet.
+    crate::motion::block_jump_factor_at(w.world, w.movement, w.loop_context, m.position, None)
 }
 
 #[cfg(test)]
