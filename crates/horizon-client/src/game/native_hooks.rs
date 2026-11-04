@@ -1810,9 +1810,16 @@ impl Game<'_> {
     }
     /// Render-thread notification after a resource-pack reload has applied successfully.
     /// Atlas, models, renderer and client caches already refer to the new resources.
-    /// Selection/F3+T and server-pack reloads share this point; initial startup does not.
+    /// Selection/F3+T and server-pack reloads share this point; initial startup does not
+    /// (`client_setup` is the once-only moment after the initial load).
     pub(super) fn native_client_resources_reloaded(&mut self) {
         mod_api::dispatch_client_resources_reloaded(self);
+    }
+    /// NeoForge's `FMLClientSetupEvent`: the client started. Fires once per game process,
+    /// after the first client load has applied and before the title screen's first frame;
+    /// never again on a reload (`client_resources_reloaded`) or a new world.
+    pub(super) fn native_client_setup(&mut self) {
+        mod_api::dispatch_client_setup(self);
     }
     /// The client made a new level for `dimension` (NeoForge's
     /// `LevelEvent.Load` from the `ClientLevel` constructor): on joining a
@@ -7345,9 +7352,10 @@ impl Game<'_> {
     }
     /// A sound bound to `entity` is about to play (NeoForge's
     /// `PlayLevelSoundEvent.AtEntity`, in `ServerLevel.playSeededSound`'s
-    /// entity overload, `playSound(except, sourceEntity, ...)`): a goat horn
-    /// and a mod's sound bound to an entity. The fields and their rules are
-    /// `native_play_level_sound_at_position`'s. Server-side.
+    /// entity overload, `playSound(except, sourceEntity, ...)`): vanilla's
+    /// entity-bound sites (`Game::play_bound_sound`, `MobEvent::BoundSound`),
+    /// the goat horn and a mod's sound bound to an entity. The fields and
+    /// their rules are `native_play_level_sound_at_position`'s. Server-side.
     pub(super) fn native_play_level_sound_at_entity(
         &mut self,
         call: mod_api::__private::PlayLevelSoundAtEntityCall<'_>,
@@ -8308,8 +8316,10 @@ impl Game<'_> {
     ) {
         let at = [pos.x, pos.y, pos.z];
         match write {
+            // `Level.setBlockAndUpdate`: flag 3, the neighbours and the clients.
             LandingWrite::SetBlock(state) => {
-                self.native_level_set_block(level, at, state, NativeBlockUpdateFlags::NEIGHBORS);
+                let flags = NativeBlockUpdateFlags::NEIGHBORS | NativeBlockUpdateFlags::CLIENTS;
+                self.native_level_set_block(level, at, state, flags);
             }
             LandingWrite::DestroyBlock { drop } => {
                 self.native_level_destroy_block(level, at, drop);
@@ -13124,10 +13134,23 @@ mod entity_inside_tests {
                 farmland,
                 "nothing writes mid-batch"
             );
+            game.world.block_log = Some(Vec::new());
             game.drain_entity_inside();
             assert_eq!(game.world.block(1, 64, 1), dirt);
             assert_eq!(game.world.block(2, 64, 1), farmland);
             assert_eq!(game.world.block(3, 64, 1), air, "the stone is destroyed");
+            // Both writes reach the clients (`setBlockAndUpdate` and `destroyBlock` are
+            // flag 3); the dropped one sends nothing.
+            let log = game.world.block_log.take().unwrap();
+            assert!(log.contains(&(1, 64, 1)), "the set block is sent: {log:?}");
+            assert!(
+                log.contains(&(3, 64, 1)),
+                "the destroyed block is sent: {log:?}"
+            );
+            assert!(
+                !log.contains(&(2, 64, 1)),
+                "the dropped write sends nothing"
+            );
             assert!(take_pending().is_empty());
         });
     }

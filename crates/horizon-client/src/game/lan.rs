@@ -1519,6 +1519,7 @@ impl Game<'_> {
         self.world.block_log = None;
         self.world.light_log = None;
         self.audio.capture = None;
+        self.bound_sounds.clear();
         self.lan_events.clear();
         self.lan_songs.clear();
         self.lan_critical_hits.clear();

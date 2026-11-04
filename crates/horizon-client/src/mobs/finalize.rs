@@ -51,6 +51,57 @@ pub enum Reason {
     Load,
     DimensionTravel,
 }
+impl From<Reason> for super::spawn_rules::Reason {
+    fn from(reason: Reason) -> Self {
+        match reason {
+            Reason::Natural => Self::Natural,
+            Reason::ChunkGeneration => Self::ChunkGeneration,
+            Reason::Spawner => Self::Spawner,
+            Reason::TrialSpawner => Self::TrialSpawner,
+            Reason::Reinforcement => Self::Reinforcement,
+            Reason::Patrol => Self::Patrol,
+            Reason::Structure => Self::Structure,
+            Reason::Event => Self::Event,
+            Reason::Command => Self::Command,
+            Reason::SpawnItemUse => Self::SpawnItemUse,
+            Reason::MobSummoned => Self::MobSummoned,
+            Reason::Conversion => Self::Conversion,
+            Reason::Breeding => Self::Breeding,
+            Reason::Triggered => Self::Triggered,
+            Reason::Jockey => Self::Jockey,
+            Reason::Dispenser => Self::Dispenser,
+            Reason::Bucket => Self::Bucket,
+            Reason::Load => Self::Load,
+            Reason::DimensionTravel => Self::DimensionTravel,
+        }
+    }
+}
+impl From<super::spawn_rules::Reason> for Reason {
+    fn from(reason: super::spawn_rules::Reason) -> Self {
+        use super::spawn_rules::Reason as R;
+        match reason {
+            R::Natural => Self::Natural,
+            R::ChunkGeneration => Self::ChunkGeneration,
+            R::Spawner => Self::Spawner,
+            R::TrialSpawner => Self::TrialSpawner,
+            R::Reinforcement => Self::Reinforcement,
+            R::Patrol => Self::Patrol,
+            R::Structure => Self::Structure,
+            R::Event => Self::Event,
+            R::Command => Self::Command,
+            R::SpawnItemUse => Self::SpawnItemUse,
+            R::MobSummoned => Self::MobSummoned,
+            R::Conversion => Self::Conversion,
+            R::Breeding => Self::Breeding,
+            R::Triggered => Self::Triggered,
+            R::Jockey => Self::Jockey,
+            R::Dispenser => Self::Dispenser,
+            R::Bucket => Self::Bucket,
+            R::Load => Self::Load,
+            R::DimensionTravel => Self::DimensionTravel,
+        }
+    }
+}
 impl Reason {
     pub const ALL: [Self; 19] = [
         Self::Natural,
@@ -101,6 +152,17 @@ impl Reason {
     }
 }
 
+/// What a level's finalizeSpawn event decided for a mob another mob's
+/// finalizeSpawn created: the rider is dropped, added without its own rolls,
+/// or finalized. Vanilla fires the event for every `finalizeSpawn` call,
+/// riders included.
+#[derive(Debug, PartialEq)]
+pub enum SpawnEvent {
+    Cancelled,
+    Skip,
+    Finalize,
+}
+
 /// The level as finalizeSpawn reads it.
 pub trait FinalizeLevel {
     /// The biome id at a block.
@@ -129,6 +191,15 @@ pub trait FinalizeLevel {
     /// own random from the caller), or None where it cannot exist (monsters
     /// in peaceful).
     fn create(&mut self, kind: &str, reason: Reason) -> Option<Mob>;
+    /// Fires the level's finalizeSpawn event for a mob another mob's
+    /// finalizeSpawn creates (`ZombieHorse`'s zombie, a chicken jockey).
+    /// The default finalizes: a level without the event keeps vanilla's flow.
+    fn spawn_event(&mut self, _: &mut Mob, _: Reason) -> SpawnEvent {
+        SpawnEvent::Finalize
+    }
+    /// What finalizeSpawn needs besides the level: the variant registries,
+    /// enchantments and items the level owns.
+    fn spawn_data(&self) -> SpawnData<'_>;
 }
 
 /// `AgeableMob.AgeableMobGroupData`.
@@ -385,7 +456,6 @@ pub struct Ctx<'a, L: FinalizeLevel + ?Sized, R: RandomSource> {
     pub level: &'a mut L,
     pub random: &'a mut R,
     pub difficulty: LocalDifficulty,
-    pub data: &'a SpawnData<'a>,
     /// Jockeys and mounts made along the way, finalized, with their riding
     /// links set (`Extra::mount` / `Extra::rider`).
     pub created: Vec<Mob>,
@@ -1382,9 +1452,10 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
     fn enchant_by_cost(&mut self, m: &mut Mob, slot: usize, id: &str) {
         let top = 5 + (self.special() * 17.0) as i32;
         let cost = self.random.next_int_between_inclusive(5, top).unwrap_or(5);
-        let e = self.data.enchantments;
+        let d = self.level.spawn_data();
+        let e = d.enchantments;
         let pool = e.tag("minecraft:on_mob_spawn_equipment");
-        let picked = e.select(self.data.items, self.random, id, cost, pool);
+        let picked = e.select(d.items, self.random, id, cost, pool);
         for (enchantment, level) in picked {
             gear::upgrade(m, gear_slot(slot), &enchantment, level);
         }
@@ -1406,6 +1477,19 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
         j.head_yaw = at.yaw;
         j.head_pitch = 0.0;
         Some(j)
+    }
+    /// The finalizeSpawn event for a rider one of the classes above created:
+    /// `false` drops it, otherwise it is finalized unless the level said the
+    /// listener already did (`Mob.finalizeSpawn` fires for riders too).
+    fn rider_kept(&mut self, j: &mut Mob, reason: Reason, group: Option<Group>) -> bool {
+        match self.level.spawn_event(j, reason) {
+            SpawnEvent::Cancelled => false,
+            SpawnEvent::Skip => true,
+            SpawnEvent::Finalize => {
+                self.finalize(j, reason, group);
+                true
+            }
+        }
     }
     /// `startRiding`: the rider leaves the vehicle it was on.
     fn ride(&mut self, rider: &mut Mob, vehicle: &mut Mob) {
@@ -1453,8 +1537,8 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
                     } else if f64::from(self.float()) < 0.05
                         && let Some(mut chicken) =
                             self.create("minecraft:chicken", Reason::Jockey, m)
+                        && self.rider_kept(&mut chicken, Reason::Jockey, None)
                     {
-                        self.finalize(&mut chicken, Reason::Jockey, None);
                         chicken.extra.jockey = true;
                         self.ride(m, &mut chicken);
                         self.jockey_rider = Some(m.clone());
@@ -1495,7 +1579,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
                 m.position.y.floor(),
                 m.position.z.floor(),
             );
-            let (w, h) = self.data.camel_husk_size;
+            let (w, h) = self.level.spawn_data().camel_husk_size;
             let half = w / 2.0;
             let bounds = Aabb::new(
                 horizon_core::geometry::Vec3::new(
@@ -1519,17 +1603,18 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
                         // setPos: the husk's position, the camel's own rotation.
                         camel.position = m.position;
                         camel.previous = m.position;
-                        self.finalize(&mut camel, reason, None);
-                        self.ride(m, &mut camel);
-                        if let Some(mut parched) =
-                            self.create("minecraft:parched", Reason::Natural, m)
-                        {
-                            self.finalize(&mut parched, reason, None);
-                            self.ride(&mut parched, &mut camel);
-                            self.created.push(camel);
-                            self.created.push(parched);
-                        } else {
-                            self.created.push(camel);
+                        if self.rider_kept(&mut camel, reason, None) {
+                            self.ride(m, &mut camel);
+                            if let Some(mut parched) =
+                                self.create("minecraft:parched", Reason::Natural, m)
+                                && self.rider_kept(&mut parched, reason, None)
+                            {
+                                self.ride(&mut parched, &mut camel);
+                                self.created.push(camel);
+                                self.created.push(parched);
+                            } else {
+                                self.created.push(camel);
+                            }
                         }
                     }
                 }
@@ -1556,11 +1641,11 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
                 .level
                 .biome_tag("minecraft:more_frequent_drowned_spawns", at)
             && let Some(mut nautilus) = self.create("minecraft:zombie_nautilus", Reason::Jockey, m)
+            && self.rider_kept(&mut nautilus, reason, None)
         {
             if reason == Reason::Structure {
                 nautilus.persistent = true;
             }
-            self.finalize(&mut nautilus, reason, None);
             self.ride(m, &mut nautilus);
             self.created.push(nautilus);
         }
@@ -1581,8 +1666,8 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
         let mut g = self.mob(m, g);
         if self.int(100) == 0
             && let Some(mut skeleton) = self.create("minecraft:skeleton", Reason::Jockey, m)
+            && self.rider_kept(&mut skeleton, reason, None)
         {
-            self.finalize(&mut skeleton, reason, None);
             self.ride(&mut skeleton, m);
             self.created.push(skeleton);
         }
@@ -1654,15 +1739,18 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
         if self.int(30) == 0 && self.level.spawning_monsters() {
             if let Some(mut jockey) = self.create("minecraft:zombified_piglin", Reason::Jockey, m) {
                 let baby = self.float() < 0.05;
-                g = Some(self.strider_jockey(
-                    m,
+                if !self.rider_kept(
                     &mut jockey,
+                    Reason::Jockey,
                     Some(Group::Zombie {
                         baby,
                         jockey: false,
                         husk: None,
                     }),
-                ));
+                ) {
+                    return self.ageable(m, Some(Group::Ageable(Ageable::chance(0.0))));
+                }
+                g = Some(self.strider_jockey(m, &mut jockey));
                 set_item(&mut jockey, MAINHAND, "minecraft:warped_fungus_on_a_stick");
                 set_item(m, SADDLE, "minecraft:saddle");
                 set_drop_chance(m, SADDLE, 2.0);
@@ -1671,7 +1759,10 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
         } else if self.int(10) == 0 {
             if let Some(mut jockey) = self.create("minecraft:strider", Reason::Jockey, m) {
                 set_age(&mut jockey, -24000);
-                g = Some(self.strider_jockey(m, &mut jockey, None));
+                if !self.rider_kept(&mut jockey, Reason::Jockey, None) {
+                    return self.ageable(m, Some(Group::Ageable(Ageable::chance(0.0))));
+                }
+                g = Some(self.strider_jockey(m, &mut jockey));
                 self.created.push(jockey);
             }
         } else {
@@ -1680,10 +1771,9 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
         self.ageable(m, g)
     }
     /// `Strider.spawnJockey`.
-    fn strider_jockey(&mut self, m: &mut Mob, jockey: &mut Mob, g: Option<Group>) -> Group {
+    fn strider_jockey(&mut self, m: &mut Mob, jockey: &mut Mob) -> Group {
         jockey.position = m.position;
         jockey.yaw = m.yaw;
-        self.finalize(jockey, Reason::Jockey, g);
         self.ride(jockey, m);
         Group::Ageable(Ageable::chance(0.0))
     }
@@ -1748,7 +1838,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
     }
     /// `VariantUtils.selectVariantToSpawn` into `variant`, by registry name.
     fn variant(&mut self, m: &mut Mob, registry: fn(&SpawnRegistries) -> &VariantRegistry) {
-        let r = registry(self.data.registries);
+        let r = registry(self.level.spawn_data().registries);
         let at = block(m);
         if let Some(i) = r.select(&*self.level, at, self.random) {
             let name = r.names[i].clone();
@@ -1756,7 +1846,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
         }
     }
     fn sound(&mut self, m: &mut Mob, registry: fn(&SpawnRegistries) -> &VariantRegistry) {
-        let r = registry(self.data.registries);
+        let r = registry(self.level.spawn_data().registries);
         m.extra.sound_variant = Some(r.random(self.random) as u8);
     }
 
@@ -1791,7 +1881,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
                         Some(Group::Wolf(a, v))
                     }
                     other => {
-                        let r = &self.data.registries.wolf;
+                        let r = &self.level.spawn_data().registries.wolf;
                         let at = block(m);
                         match r.select(&*self.level, at, self.random) {
                             Some(i) => {
@@ -1908,8 +1998,8 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
             S::ZombieHorse => {
                 if reason == Reason::Natural
                     && let Some(mut zombie) = self.create("minecraft:zombie", Reason::Jockey, m)
+                    && self.rider_kept(&mut zombie, reason, None)
                 {
-                    self.finalize(&mut zombie, reason, None);
                     set_item(&mut zombie, MAINHAND, "minecraft:iron_spear");
                     self.ride(&mut zombie, m);
                     self.created.push(zombie);

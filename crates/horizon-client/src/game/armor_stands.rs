@@ -818,7 +818,7 @@ impl Game<'_> {
             // aiStep's freezing step (removeFrost) makes the speed instance.
             a.speed_instance = true;
             let (water_height, lava_height) =
-                a.push_by_fluid(&self.world, &self.res.motion().fluids);
+                a.push_by_fluid(&self.world, &self.res.motion().fluids, &self.loop_context);
             let in_water = water_height > 0.0;
             let medium =
                 horizon_client::entities::StandMedium::from_heights(water_height, lava_height);

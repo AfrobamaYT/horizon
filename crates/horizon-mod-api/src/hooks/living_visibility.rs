@@ -5,9 +5,9 @@ pub trait Hooks {
     /// `LivingVisibilityEvent`, last in `LivingEntity.getVisibilityPercent`):
     /// the range a mob's targeting check sees it from is scaled by
     /// `visibility`. It comes in as vanilla's percent (sneaking 0.8,
-    /// invisibility by armour cover, a matching mob head 0.5); multiply it
-    /// to scale. Values below 0 count as 0, and the result is clamped to
-    /// 10. Asked for a player, by the mobs whose targeting checks scale by
+    /// invisibility by armour cover, a worn head's `mob_visibility`: 0.5 to
+    /// its own mob type); multiply it to scale. Values below 0 count as 0,
+    /// and the result is clamped to 10. Asked for a player, by the mobs whose targeting checks scale by
     /// visibility (hostile targeting, sensors, the happy ghast's tempt).
     /// Server-side.
     #[hook(

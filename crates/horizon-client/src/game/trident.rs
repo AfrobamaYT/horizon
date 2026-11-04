@@ -3,6 +3,7 @@
 //! 8 damage plus Impaling, the reversed bounce off a hit, sticking, Loyalty's
 //! return to the owner, pickup) with `ThrownTridentRenderer`, and Channeling's
 //! lightning on a hit (`channeling.json`).
+use super::level_sounds::LevelSound;
 use super::{Game, view_vector};
 use horizon_client::{
     arrows::{back_off, clip_block_hit},
@@ -18,6 +19,7 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
+use mod_api::SoundSource;
 
 pub(super) struct ThrownTrident {
     /// When it joined its list (`horizon_client::join_seq`); set by the list.
@@ -402,7 +404,15 @@ impl Game<'_> {
             }
             if !server_client {
                 let sound = format!("minecraft:item.trident.riptide_{}", riptide.min(3));
-                self.audio.play(&sound, at, 1.0, 1.0);
+                // level.playSound(null, player, sound, PLAYERS, 1, 1).
+                match (self.lan_acting_entity, at) {
+                    (Some(player), Some(at)) => {
+                        let sound =
+                            LevelSound::new(&sound, at, 1.0, 1.0).in_source(SoundSource::Players);
+                        self.play_bound_sound(sound, player, None);
+                    }
+                    _ => self.audio.play(&sound, at, 1.0, 1.0),
+                }
                 if let (Some(player), Some(name)) =
                     (self.lan_acting_uuid, self.lan_acting_name.clone())
                 {
@@ -467,8 +477,15 @@ impl Game<'_> {
             random: horizon_client::projectiles::unique_random(start),
         });
         self.player_projectile_shot();
-        self.audio
-            .play("minecraft:item.trident.throw", at, 1.0, 1.0);
+        // level.playSound(null, trident, sound, PLAYERS, 1, 1).
+        let throw = LevelSound::new(
+            "minecraft:item.trident.throw",
+            [start.x, start.y, start.z],
+            1.0,
+            1.0,
+        )
+        .in_source(SoundSource::Players);
+        self.play_bound_sound(throw, id, None);
     }
     /// The thrower's `PLAYER_HURT_ENTITY` for a trident hit: run as the
     /// guest that threw it, and not at all once they have left.
