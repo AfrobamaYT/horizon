@@ -1881,6 +1881,7 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mods",
+ "horizon-protocol",
  "horizon-world",
  "log",
  "serde",

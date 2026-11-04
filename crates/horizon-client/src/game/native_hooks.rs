@@ -1027,14 +1027,14 @@ use mod_api::{
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, UsePhase,
 };
+pub(crate) use mod_api::{
+    ClientboundPlayPacket, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
+    NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativeNoteInstrument,
+    NativePanelEvent, NativePortalShape, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
+};
 use mod_api::{
     MobRef, NativeDespawn, NativeDifficulty, NativePermissionLevel, NativeSpawnCheck,
     NativeSpawnReason, NativeSpawner, Recipe,
-};
-pub(crate) use mod_api::{
-    NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
-    NativeMinimap, NativeMod, NativeNoteInstrument, NativePanelEvent, NativePortalShape,
-    NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
 use std::{
     collections::HashMap,
@@ -8272,6 +8272,20 @@ impl Game<'_> {
     /// is the sender's own bytes. The window's game only.
     pub(super) fn native_net_from_server(&mut self, channel: &str, data: &[u8]) {
         mod_api::dispatch_net_from_server(self, channel, data);
+    }
+    /// A play packet from the server reached the window's game, decoded,
+    /// just before the game handles it (`Connection.genericsFtw` handing it
+    /// to `ClientPacketListener`): every packet of the play phase, custom
+    /// payloads included, in the order the server sent them. Packets the
+    /// network thread handles itself are not heard: keep-alives, bundle
+    /// delimiters, resource pack pushes and pops, cookies, server links,
+    /// transfers, disconnects, the configuration switch, `minecraft:brand`
+    /// and far terrain tiles; neither is the configuration phase.
+    /// Read-only: the game handles the packet as it would without the mod.
+    /// Client-side, on any server, single player's own included.
+    /// Not on wasm: the full decoded protocol packet enum has no generated API codec.
+    pub(super) fn native_client_packet(&mut self, packet: &ClientboundPlayPacket) {
+        mod_api::dispatch_client_packet(self, packet);
     }
     /// `dimension`'s level opened on the server (NeoForge's `LevelEvent.Load`,
     /// posted in `MinecraftServer.createLevels`): before any of its chunks

@@ -51,3 +51,43 @@ mod sidebar {
         let _: ModEntry = ModEntry::new("sidebar", hooks());
     }
 }
+
+#[test]
+fn client_packet_hands_a_mod_the_decoded_packet() {
+    use horizon_protocol::packets::configuration::{CustomPayload, Ping};
+    use mod_api::{ClientPacketEvent, ClientboundPlayPacket, Host, dispatch_client_packet};
+    use std::sync::Mutex;
+    static HEARD: Mutex<Vec<(String, Vec<u8>)>> = Mutex::new(Vec::new());
+    struct TestHost;
+    impl Host for TestHost {}
+    impl ClientHost for TestHost {}
+    // A plugin-channel listener, matching the packet by the name `mod_api` exports.
+    #[derive(Default)]
+    struct Channels;
+    #[mod_api::horizon_mod]
+    impl Hooks for Channels {
+        fn client_packet(&self, _host: &mut dyn ClientHost, event: &mut ClientPacketEvent<'_>) {
+            if let ClientboundPlayPacket::CustomPayload(p) = event.packet {
+                HEARD
+                    .lock()
+                    .unwrap()
+                    .push((p.channel.clone(), p.data.clone()));
+            }
+        }
+    }
+    mod_api::testing::with_mods(vec![ModEntry::new("channels", hooks())].into(), || {
+        dispatch_client_packet(&mut TestHost, &ClientboundPlayPacket::Ping(Ping { id: 7 }));
+        let payload = CustomPayload {
+            channel: "voicechat:secret".into(),
+            data: vec![1, 2, 3],
+        };
+        dispatch_client_packet(
+            &mut TestHost,
+            &ClientboundPlayPacket::CustomPayload(payload),
+        );
+    });
+    assert_eq!(
+        *HEARD.lock().unwrap(),
+        [("voicechat:secret".to_string(), vec![1, 2, 3])]
+    );
+}

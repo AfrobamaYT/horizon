@@ -78,6 +78,7 @@ mod client_chat;
 mod client_chat_received;
 mod client_information_updated;
 mod client_input_reads;
+mod client_packet;
 mod client_pause_change;
 mod client_pause_read;
 mod client_player_change_game_type;

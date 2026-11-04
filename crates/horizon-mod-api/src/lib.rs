@@ -5,6 +5,8 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 #![deny(missing_docs)]
 extern crate self as mod_api;
+/// The server's play packets `client_packet` hands over, decoded.
+pub use horizon_protocol::packets::play::Clientbound as ClientboundPlayPacket;
 // Never compiled: the generator reads these declarations to build the `Hooks` trait and its dispatch.
 #[cfg(any())]
 mod hooks;

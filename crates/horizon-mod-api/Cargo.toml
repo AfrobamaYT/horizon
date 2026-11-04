@@ -11,6 +11,7 @@ name = "mod_api"
 
 [dependencies]
 horizon-core = { path = "../horizon-core" }
+horizon-protocol = { path = "../horizon-protocol" }
 horizon-world = { path = "../horizon-world" }
 horizon-items = { path = "../horizon-items" }
 horizon-client-core = { path = "../horizon-client-core" }

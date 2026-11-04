@@ -1,5 +1,17 @@
 # Hook notes
 
+## Decoded client packets
+
+`Hooks::client_packet` receives `&mut dyn ClientHost` and a read-only
+`ClientPacketEvent` before the window handles a decoded server play packet.
+Match `event.packet` using `mod_api::ClientboundPlayPacket`; the hook cannot
+cancel or replace a packet. It also observes chunk packets handled by the
+batching path, once each. Configuration packets and the network thread's
+own handling (including keep-alives and resource pack messages) do not fire it.
+
+This hook is native-only until the decoded protocol enum has a generated
+mod API codec. Its catalog documentation records that wasm exclusion.
+
 ## Conditional item model properties
 
 A client mod supplies its own namespaced `minecraft:condition` property by implementing
