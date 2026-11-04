@@ -1098,29 +1098,19 @@ impl GameLevel<'_> {
         );
     }
 
-    /// `FenceBlock.connectsTo`: set `connected` to say whether the fence
-    /// `state` at `pos` connects an arm toward `neighbour`, the state beside it,
-    /// `direction` pointing from the fence to that neighbour and `face_solid`
-    /// whether the neighbour's face toward the fence is sturdy. `connected` holds
-    /// vanilla's answer (a solid face, a fence of the same kind or a gate across the
-    /// arm): change it, to false as well as to true, when the fence is your own.
-    /// Asked whenever the fence settles its shape or is placed, inside the level's
-    /// update: answer from the arguments without touching the world. Only the fence block's own part is asked, so vanilla fences cost
-    /// nothing. Authoritative servers only.
+    /// Whether a fence, wall, or iron bars or pane connects a side
+    /// (`FenceBlock.connectsTo`, `WallBlock.connectsTo`,
+    /// `IronBarsBlock.attachsTo`, named by `kind`): set `connected` to say
+    /// whether the block `state` at `pos` connects toward `neighbour`, the
+    /// state beside it, `direction` pointing from the block to that neighbour
+    /// and `face_solid` whether the neighbour's face toward it is sturdy.
+    /// `connected` holds vanilla's answer: change it, to false as well as to
+    /// true, when the block is your own. Asked whenever the block settles its
+    /// shape or is placed, inside the level's update. Only the block's own
+    /// part is asked, so vanilla blocks cost nothing. Authoritative servers only.
     #[inline(always)]
-    pub(super) fn native_fence_connects_to(
-        &self,
-        dimension: LevelDimension,
-        pos: BlockPos,
-        state: BlockStateId,
-        neighbour: BlockStateId,
-        direction: Direction,
-        face_solid: bool,
-        connected: &mut bool,
-    ) {
-        mod_api::dispatch_fence_connects_to(
-            self, dimension, pos, state, neighbour, direction, face_solid, connected,
-        );
+    pub(super) fn native_connects_to(&self, call: mod_api::__private::ConnectsToCall<'_>) {
+        mod_api::dispatch_connects_to(self, call);
     }
 
     /// `BlockState.hasAnalogOutputSignal`: set `output` for a block of yours
@@ -2344,7 +2334,7 @@ impl Game<'_> {
     /// A command typed or clicked in chat, without its slash, before the
     /// server and Horizon's commands see it: set `ran` when the mod ran it.
     pub(super) fn native_command(&mut self, command: &str, ran: &mut bool) {
-        mod_api::dispatch_command(super::execution_role::host_side(self), command, ran);
+        mod_api::dispatch_command(self, command, ran);
     }
     /// The client's own commands (`RegisterClientCommandsEvent`), which
     /// `native_command` runs: push a `NativeCommand` per usage. Asked when a
@@ -4137,19 +4127,30 @@ impl Game<'_> {
     /// `VanillaGameEvent`, vanilla's `Level.gameEvent`): every event, in
     /// `dimension`. `event` is its id (`minecraft:step`), `pos` where it
     /// happened and `cause` the network id of the entity that caused it
-    /// (None for none). The context's affected block state is not tracked
-    /// here. Canceling keeps the sculk sensors, wardens and allays from
-    /// hearing it. The affected block state in NeoForge's context is not
-    /// currently exposed. Server-side.
+    /// (None for none). `affected_state` is the block state the event touched
+    /// (`GameEvent.Context.affectedState`, with `cause` its `sourceEntity`): the
+    /// block a player broke or placed, the block a mob stepped on; None where
+    /// vanilla passes none (`Context.of(entity)`).
+    /// Canceling keeps the sculk sensors, wardens and allays from hearing it.
+    /// Server-side.
     pub(super) fn native_vanilla_game_event(
         &mut self,
         dimension: &str,
         event: &str,
         pos: [f64; 3],
         cause: Option<u32>,
+        affected_state: Option<BlockStateId>,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_vanilla_game_event(self, dimension, event, pos, cause, cancel);
+        mod_api::dispatch_vanilla_game_event(
+            self,
+            dimension,
+            event,
+            pos,
+            cause,
+            affected_state,
+            cancel,
+        );
     }
     /// A server player a command teleported (NeoForge's
     /// `EntityTeleportEvent`, for a player): `/tp` and `/teleport`, inside
@@ -9930,19 +9931,29 @@ impl Game<'_> {
     pub(super) fn native_translate(&self, key: &str) -> Option<String> {
         horizon_client::lang::has(key).then(|| horizon_client::lang::get(key))
     }
-    /// A line of text at `(x, y)` in GUI pixels, opaque `rgb`.
+    /// A line of text at `(x, y)` in GUI pixels, in `argb` as vanilla's `GuiGraphics` takes it
+    /// (`0xFFFFFFFF` is opaque white). Fully transparent text draws nothing, as vanilla's.
     pub(super) fn native_text(
         &self,
         batch: &mut HudBatch,
         text: &str,
         at: [f32; 2],
-        rgb: u32,
+        argb: u32,
         shadow: bool,
     ) {
+        let [a, r, g, b] = argb.to_be_bytes();
+        if a == 0 {
+            return;
+        }
         let [x, y] = at;
-        let [_, r, g, b] = rgb.to_be_bytes();
-        let color = rgba(r, g, b, 0xFF);
-        batch.text_styled(&self.gui.atlas, &Text::literal(text), x, y, color, shadow);
+        batch.text_styled(
+            &self.gui.atlas,
+            &Text::literal(text),
+            x,
+            y,
+            rgba(r, g, b, a),
+            shadow,
+        );
     }
     /// The player, in a world.
     pub(super) fn native_player(&self) -> Option<NativePlayer> {
@@ -11347,7 +11358,7 @@ impl Game<'_> {
         self.native_interaction_key_mapping_triggered(key, hand, &mut swing_hand, &mut canceled);
         canceled.then_some(swing_hand)
     }
-    /// A native mod's command.
+    /// A client mod's command (the `command` hook); a server never asks.
     pub(super) fn client_mod_command(&mut self, command: &str) -> bool {
         let mut ran = false;
         self.native_command(command, &mut ran);
@@ -13391,6 +13402,38 @@ mod item_toss_tests {
                 assert!(game.throw_from_eyes(stack(), eye, true, false).is_some());
                 assert_eq!(*heard.lock().unwrap(), 1);
             });
+        });
+    }
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::*;
+
+    /// `DrawContext::text` takes ARGB as vanilla's `GuiGraphics` does: the alpha reaches the
+    /// vertices, and fully transparent text draws nothing.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn text_takes_argb_and_skips_transparent_text() {
+        use mod_api::DrawContext;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let drawn = |argb: u32| {
+                let mut batch = HudBatch::new([640, 480]);
+                super::super::mod_api_host::generated::GameDrawContext {
+                    game,
+                    surface: &mut batch,
+                }
+                .text("Hi", [4.0, 4.0], argb, false);
+                batch.vertices
+            };
+            let opaque = drawn(0xFFFF_FFFF);
+            let half = drawn(0x80FF_FFFF);
+            assert!(!opaque.is_empty());
+            assert_eq!(opaque.len(), half.len());
+            assert!(opaque.iter().all(|v| v.color >> 24 == 0xFF));
+            assert!(half.iter().all(|v| v.color >> 24 == 0x80));
+            // RGB alone, as the API took before, is fully transparent now.
+            assert!(drawn(0x00FF_FFFF).is_empty());
         });
     }
 }

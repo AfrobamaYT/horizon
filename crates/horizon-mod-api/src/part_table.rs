@@ -1651,16 +1651,17 @@ pub mod tests {
             event.connected = true;
         }
 
-        fn fence_connects_to(&self, _: &dyn LevelHost, event: &mut FenceConnectsToEvent) {
-            event.connected = false;
+        fn connects_to(&self, _: &dyn LevelHost, event: &mut ConnectsToEvent) {
+            event.connected = event.kind == ConnectionKind::Wall;
         }
     }
 
-    /// Makes an oak fence flip vanilla's answer toward the east and refuse every other side.
-    struct FenceRule;
+    /// Makes a fence, wall or pane flip vanilla's answer toward the east and refuse every other
+    /// side.
+    struct ConnectionRule;
     #[mod_api::horizon_part]
-    impl BlockPart for FenceRule {
-        fn fence_connects_to(&self, _: &dyn LevelHost, event: &mut FenceConnectsToEvent) {
+    impl BlockPart for ConnectionRule {
+        fn connects_to(&self, _: &dyn LevelHost, event: &mut ConnectsToEvent) {
             event.connected = event.direction == Direction::East && !event.connected;
         }
     }
@@ -3153,16 +3154,24 @@ pub mod tests {
         mark_game_thread();
     }
 
-    /// Install a fence rule on oak fences for real-game tests: it flips vanilla's answer.
-    pub fn fence_game_thread() {
-        struct FenceMod;
+    /// Install a connection rule on oak fences, cobblestone walls and glass panes for real-game
+    /// tests: it flips vanilla's answer.
+    pub fn connection_game_thread() {
+        struct ConnectionMod;
         #[mod_api::__subscriptions]
-        impl Hooks for FenceMod {
+        impl Hooks for ConnectionMod {
             fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
-                r.block_part("minecraft:oak_fence", FenceRule);
+                for block in [
+                    "minecraft:oak_fence",
+                    "minecraft:cobblestone_wall",
+                    "minecraft:glass_pane",
+                ] {
+                    r.block_part(block, ConnectionRule);
+                }
             }
         }
-        let mods: super::super::Mods = vec![ModEntry::new("fence_test", Box::new(FenceMod))].into();
+        let mods: super::super::Mods =
+            vec![ModEntry::new("connection_test", Box::new(ConnectionMod))].into();
         super::super::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
@@ -3348,22 +3357,34 @@ pub mod tests {
     }
 
     #[test]
-    fn fence_connection_is_answered_only_by_the_fences_own_part() {
+    fn a_connection_is_answered_only_by_the_blocks_own_part_with_its_kind() {
         game_thread();
         resolve(&[]).unwrap();
-        for (state, expected) in [(3, false), (2, true)] {
-            let mut connected = true;
-            dispatch_fence_connects_to(
-                &Level,
-                LevelDimension::Overworld,
-                BlockPos::new(0, 64, 0),
-                BlockStateId(state),
-                BlockStateId(1),
-                Direction::West,
-                true,
-                &mut connected,
-            );
-            assert_eq!(connected, expected);
+        for kind in [
+            ConnectionKind::Fence,
+            ConnectionKind::Wall,
+            ConnectionKind::Bars,
+        ] {
+            // `test:connector` answers whether the kind is a wall, from the
+            // opposite answer; `test:other` has no part and keeps it.
+            let answer = kind == ConnectionKind::Wall;
+            for (state, expected) in [(3, answer), (2, !answer)] {
+                let mut connected = !answer;
+                dispatch_connects_to(
+                    &Level,
+                    crate::__private::ConnectsToCall {
+                        dimension: LevelDimension::Overworld,
+                        pos: BlockPos::new(0, 64, 0),
+                        state: BlockStateId(state),
+                        kind,
+                        neighbour: BlockStateId(1),
+                        direction: Direction::West,
+                        face_solid: true,
+                        connected: &mut connected,
+                    },
+                );
+                assert_eq!(connected, expected, "{kind:?} on state {state}");
+            }
         }
     }
 

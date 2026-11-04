@@ -37,6 +37,8 @@ mod tests {
         pub(super) struct NeighbourUpdate;
         #[derive(Clone, Copy)]
         pub(super) struct PathComputationType;
+        #[derive(Clone, Copy)]
+        pub(super) struct ConnectionKind;
         pub(super) struct GlobalPos;
         pub(super) struct AttributeModifier;
         #[derive(Clone, Copy)]

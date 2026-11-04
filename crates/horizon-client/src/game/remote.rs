@@ -11178,19 +11178,58 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_menu_reads_follow_packets_and_lifetimes() {
-        use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
+        use super::super::{
+            Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
+        };
         use horizon_client::level_loading::Reason;
         use horizon_protocol::{
-            connection::Pipe,
+            connection::{Connection, Pipe},
             item::Stack,
-            packets::play::{self, Clientbound as C, SpawnInfo},
+            packets::{
+                Empty, configuration as cfg, login,
+                play::{self, Clientbound as C, SpawnInfo},
+            },
         };
         use horizon_world::nbt::Tag;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
-            let (client, _server) = Pipe::pair();
+            let (client, server) = Pipe::pair();
             game.connect_local(client, "MenuReadTest").unwrap();
+            let (mut reader, mut writer) = Connection::local(server).split();
+            reader
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            reader.recv().unwrap();
+            reader.recv().unwrap();
+            writer
+                .send(
+                    &login::Clientbound::LoginFinished(login::LoginFinished {
+                        profile: login::GameProfile {
+                            uuid: 42,
+                            name: "MenuReadTest".into(),
+                            properties: vec![],
+                        },
+                        session: 1,
+                    })
+                    .encode(),
+                )
+                .unwrap();
+            let (id, body) = reader.recv().unwrap();
+            assert!(matches!(
+                login::Serverbound::decode(id, &body).unwrap(),
+                login::Serverbound::LoginAcknowledged(_)
+            ));
+            reader.recv().unwrap();
+            reader.recv().unwrap();
+            writer
+                .send(&cfg::Clientbound::FinishConfiguration(Empty).encode())
+                .unwrap();
+            let (id, body) = reader.recv().unwrap();
+            assert!(matches!(
+                cfg::Serverbound::decode(id, &body).unwrap(),
+                cfg::Serverbound::FinishConfiguration(_)
+            ));
             assert!(
                 game.native_local_player()
                     .and_then(|player| game.native_menu_ref(player))
@@ -11200,7 +11239,7 @@ mod tests {
                 dimension_type: 0,
                 dimension: "minecraft:overworld".into(),
                 seed: 0,
-                game_type: 1,
+                game_type: 0,
                 previous_game_type: None,
                 debug: false,
                 flat: true,
@@ -11227,6 +11266,105 @@ mod tests {
             }))
             .unwrap();
             assert_eq!(game.native_menu_slot(menu, 36).unwrap().unwrap().count, 3);
+            use mod_api::{DragKind, MenuClick, MouseButton, SwapWith};
+            let pickup = |slot| MenuClick::Pickup {
+                slot: Some(slot),
+                button: MouseButton::Left,
+            };
+            for invalid in [
+                pickup(46),
+                pickup(usize::MAX),
+                MenuClick::Swap {
+                    slot: 36,
+                    with: SwapWith::Hotbar(9),
+                },
+                MenuClick::Clone { slot: 36 },
+                MenuClick::Drag {
+                    kind: DragKind::Clone,
+                    slots: vec![36],
+                },
+                MenuClick::Drag {
+                    kind: DragKind::Split,
+                    slots: vec![36, usize::MAX],
+                },
+            ] {
+                assert!(!menu.click(game, &[invalid]));
+                assert_eq!(menu.slot(game, 36).unwrap().unwrap().count, 3);
+                assert_eq!(menu.carried(game), Some(None));
+            }
+            game.options.execution_role = ExecutionRole::IntegratedServer;
+            assert!(!menu.click(game, &[pickup(36)]));
+            game.options.execution_role = ExecutionRole::Client;
+            let screen = game.screen;
+            game.screen = Screen::Creative;
+            assert!(!menu.click(game, &[pickup(36)]));
+            game.screen = screen;
+            game.remote.as_mut().unwrap().state_id = 17;
+            assert!(menu.click(game, &[pickup(36)]));
+            let (id, body) = reader.recv().unwrap();
+            let play::Serverbound::ContainerClick(sent) =
+                play::Serverbound::decode(id, &body).unwrap()
+            else {
+                panic!("expected the first valid click, not a refused request");
+            };
+            assert_eq!(
+                (
+                    sent.container,
+                    sent.state,
+                    sent.slot,
+                    sent.button,
+                    sent.input
+                ),
+                (0, 17, 36, 0, 0)
+            );
+            assert_eq!(sent.changed.len(), 1);
+            assert_eq!(sent.changed[0].0, 36);
+            assert!(sent.changed[0].1.is_none());
+            assert_eq!(sent.carried.unwrap().count, 3);
+            assert_eq!(menu.slot(game, 36), Some(None));
+            assert_eq!(menu.carried(game).unwrap().unwrap().count, 3);
+            assert!(!menu.click(game, &[pickup(36), pickup(usize::MAX),]));
+            assert_eq!(menu.slot(game, 36), Some(None));
+            assert_eq!(menu.carried(game).unwrap().unwrap().count, 3);
+            assert!(menu.click(
+                game,
+                &[MenuClick::Drag {
+                    kind: DragKind::Split,
+                    slots: vec![37]
+                },]
+            ));
+            assert_eq!(menu.slot(game, 37).unwrap().unwrap().count, 3);
+            assert_eq!(menu.carried(game), Some(None));
+            assert!(menu.click(game, &[pickup(37)]));
+            assert!(menu.click(game, &[pickup(36)]));
+            assert_eq!(menu.carried(game), Some(None));
+            assert_eq!(menu.slot(game, 36).unwrap().unwrap().count, 3);
+            game.handle_packet(C::SetPlayerInventory(play::SetPlayerInventory {
+                slot: 0,
+                item: Some(Stack::new(game.item_id("minecraft:stone"), 2)),
+            }))
+            .unwrap();
+            assert_eq!(menu.slot(game, 36).unwrap().unwrap().count, 2);
+            assert!(menu.click(game, &[MenuClick::QuickMove { slot: 36 }]));
+            assert_eq!(menu.slot(game, 36), Some(None));
+            assert_eq!(menu.slot(game, 9).unwrap().unwrap().count, 2);
+            assert!(menu.click(
+                game,
+                &[MenuClick::Swap {
+                    slot: 9,
+                    with: SwapWith::Hotbar(1)
+                }]
+            ));
+            assert_eq!(menu.slot(game, 9), Some(None));
+            assert_eq!(menu.slot(game, 37).unwrap().unwrap().count, 2);
+            assert!(menu.click(
+                game,
+                &[MenuClick::Throw {
+                    slot: 37,
+                    whole_stack: true
+                }]
+            ));
+            assert_eq!(menu.slot(game, 37), Some(None));
             game.handle_packet(C::SetCursorItem(play::SetCursorItem {
                 item: stone.clone(),
             }))
@@ -11250,6 +11388,7 @@ mod tests {
             };
             game.handle_packet(open()).unwrap();
             assert_eq!(game.native_menu_slot_count(menu), None);
+            assert!(!menu.click(game, &[pickup(36)]));
             let crafting = game
                 .native_local_player()
                 .and_then(|player| game.native_menu_ref(player))
@@ -11279,6 +11418,7 @@ mod tests {
             );
             game.handle_packet(open()).unwrap();
             assert_eq!(game.native_menu_slot_count(crafting), None);
+            assert!(!crafting.click(game, &[pickup(1)]));
             let crafting = game
                 .native_local_player()
                 .and_then(|player| game.native_menu_ref(player))
@@ -11289,6 +11429,7 @@ mod tests {
             }))
             .unwrap();
             assert_eq!(game.native_menu_slot_count(crafting), None);
+            assert!(!crafting.click(game, &[pickup(1)]));
             let inventory = game
                 .native_local_player()
                 .and_then(|player| game.native_menu_ref(player))
@@ -11324,6 +11465,56 @@ mod tests {
             .unwrap();
             assert_eq!(game.native_menu_slot(chest, 2).unwrap().unwrap().count, 4);
             assert_eq!(game.native_menu_slot(chest, 3), Some(None));
+            game.handle_packet(C::SetCursorItem(play::SetCursorItem { item: None }))
+                .unwrap();
+            assert!(chest.click(game, &[pickup(2)]));
+            assert_eq!(chest.slot(game, 2), Some(None));
+            assert_eq!(chest.carried(game).unwrap().unwrap().count, 4);
+            assert!(chest.click(game, &[pickup(2)]));
+            assert_eq!(chest.slot(game, 2).unwrap().unwrap().count, 4);
+            assert_eq!(chest.carried(game), Some(None));
+            for expected in [
+                (0, 17, -999, 0, 5),
+                (0, 17, 37, 1, 5),
+                (0, 17, -999, 2, 5),
+                (0, 17, 37, 0, 0),
+                (0, 17, 36, 0, 0),
+                (0, 17, 36, 0, 1),
+                (0, 17, 9, 1, 2),
+                (0, 17, 37, 1, 4),
+                (7, 0, 2, 0, 0),
+                (7, 0, 2, 0, 0),
+            ] {
+                let sent = (0..32)
+                    .find_map(|_| {
+                        let (id, body) = reader.recv().unwrap();
+                        match play::Serverbound::decode(id, &body).unwrap() {
+                            play::Serverbound::ContainerClick(sent) => Some(sent),
+                            _ => None,
+                        }
+                    })
+                    .expect("expected click packet");
+                assert_eq!(
+                    (
+                        sent.container,
+                        sent.state,
+                        sent.slot,
+                        sent.button,
+                        sent.input
+                    ),
+                    expected
+                );
+                if expected == (0, 17, -999, 2, 5) {
+                    assert!(sent.carried.is_none());
+                    assert_eq!(sent.changed.len(), 1);
+                    assert_eq!(sent.changed[0].0, 37);
+                    assert_eq!(sent.changed[0].1.as_ref().unwrap().count, 3);
+                }
+            }
+            reader
+                .set_read_timeout(Some(std::time::Duration::from_millis(20)))
+                .unwrap();
+            assert!(reader.recv().unwrap_err().is_timed_out());
             game.remote
                 .as_mut()
                 .unwrap()
@@ -11345,12 +11536,14 @@ mod tests {
             other.dimension = "test:other_overworld".into();
             game.enter_remote_dimension(&other, true, Reason::Other);
             assert_eq!(game.native_menu_slot_count(before_replacement), None);
+            assert!(!before_replacement.click(game, &[pickup(36)]));
             let before_logout = game
                 .native_local_player()
                 .and_then(|player| game.native_menu_ref(player))
                 .unwrap();
             game.client_logging_out();
             assert_eq!(game.native_menu_slot_count(before_logout), None);
+            assert!(!before_logout.click(game, &[pickup(36)]));
             assert!(
                 game.native_local_player()
                     .and_then(|player| game.native_menu_ref(player))

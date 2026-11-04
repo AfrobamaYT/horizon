@@ -770,7 +770,7 @@ pub fn main() -> horizon_client::Result<()> {
         };
         let mut random = LegacyRandom::new(get("seed", "0").parse()?);
         let mut log: Vec<String> = Vec::new();
-        let mut spawn = |l: &World, r: &SpawnRequest| -> Option<Spawned> {
+        let mut spawn = |l: &World, r: &SpawnRequest, _: &mut LegacyRandom| -> Option<Spawned> {
             let bounds = neutral_box(l, r);
             l.entities.borrow_mut().push((r.entity.to_owned(), bounds));
             Some(Spawned {
@@ -800,7 +800,7 @@ pub fn main() -> horizon_client::Result<()> {
                 chunk,
                 &mut gen_random,
                 &mut rules,
-                &mut |l, r, _| spawn(l, r).is_some(),
+                &mut |l, r, rng| spawn(l, r, rng).is_some(),
                 &mut |e| match e {
                     GenEvent::Column(x, z) => log.push(format!("col {x} {z}")),
                     GenEvent::Spawn(t, p, yaw) => spawns.push(format!(
@@ -927,33 +927,34 @@ fn spawner_case(
     for tick in 0..ticks {
         let mut events = Vec::new();
         let mut spawned = std::collections::VecDeque::new();
-        let mut spawn = |l: &World, r: &SpawnerSpawn| -> Option<SpawnerAdded> {
-            let t = l.s.types.types.get(r.id)?;
-            let [x, y, z] = r.position;
-            let bounds = spawn_box(x, y, z, t.width as f32, t.height as f32);
-            l.entities.borrow_mut().push((r.id.to_owned(), bounds));
-            spawned.push_back(format!(
-                "{tick} spawn {} {} {} {} {}",
-                r.id,
-                bits(x),
-                bits(y),
-                bits(z),
-                // Shulker.finalizeSpawn faces it south.
-                yaw_text(
+        let mut spawn =
+            |l: &World, r: &SpawnerSpawn, _: &mut LegacyRandom| -> Option<SpawnerAdded> {
+                let t = l.s.types.types.get(r.id)?;
+                let [x, y, z] = r.position;
+                let bounds = spawn_box(x, y, z, t.width as f32, t.height as f32);
+                l.entities.borrow_mut().push((r.id.to_owned(), bounds));
+                spawned.push_back(format!(
+                    "{tick} spawn {} {} {} {} {}",
                     r.id,
-                    if r.finalize && r.id == "minecraft:shulker" {
-                        0.0
-                    } else {
-                        r.yaw
-                    }
-                )
-            ));
-            Some(SpawnerAdded {
-                id: spawned.len() as u32,
-                bounds,
-                mob: true,
-            })
-        };
+                    bits(x),
+                    bits(y),
+                    bits(z),
+                    // Shulker.finalizeSpawn faces it south.
+                    yaw_text(
+                        r.id,
+                        if r.finalize && r.id == "minecraft:shulker" {
+                            0.0
+                        } else {
+                            r.yaw
+                        }
+                    )
+                ));
+                Some(SpawnerAdded {
+                    id: spawned.len() as u32,
+                    bounds,
+                    mob: true,
+                })
+            };
         spawner.server_tick(world, random, pos, &mut spawn, &mut events);
         for e in events {
             match e {
@@ -1034,7 +1035,7 @@ fn trial_case(
         let mut events = Vec::new();
         let mut spawned = std::collections::VecDeque::new();
         let mut items = Vec::new();
-        let mut spawn = |l: &World, r: &SpawnerSpawn| {
+        let mut spawn = |l: &World, r: &SpawnerSpawn, _: &mut LegacyRandom| {
             let t = l.s.types.types.get(r.id)?;
             // Slime.readAdditionalSaveData: size Size + 1, clamped to 1..=127.
             let size = match r.entity.get(&horizon_world::nbt::JavaString::from("Size")) {

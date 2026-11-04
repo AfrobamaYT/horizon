@@ -529,6 +529,39 @@ impl Game<'_> {
         true
     }
 
+    /// Draws a line of `text` under `draw`'s pose, at `(x, y)` in font pixels with y down, as
+    /// vanilla's `Font.drawInBatch` lays it out (a sign scales and flips its pose first), in
+    /// the opaque 0xRRGGBB `rgb` and `draw`'s light (`set_light` to full bright for a glowing
+    /// display). The game's font: the same glyphs as a sign's text.
+    pub(super) fn native_draw_text(
+        &self,
+        draw: &mut BlockEntityDraw,
+        text: &str,
+        at: [f32; 2],
+        rgb: u32,
+    ) {
+        let [x, y] = at;
+        let call = horizon_client::block_entity_render::TextRun {
+            matrix: draw.pose(),
+            x,
+            y,
+            text,
+            color: 0xFF00_0000 | rgb,
+            outline: 0,
+            light: draw.light,
+        };
+        horizon_client::block_entity_render::push_text(
+            &|c| self.gui.atlas.glyph_cell(c),
+            &call,
+            &mut draw.vertices,
+        );
+    }
+    /// The width of `text` in font pixels, as [`Self::native_draw_text`] draws it, to centre a
+    /// line (`Font.width`).
+    pub(super) fn native_draw_text_width(&self, _draw: &BlockEntityDraw, text: &str) -> f32 {
+        horizon_client::hud::HudBatch::text_width(&self.gui.atlas, text)
+    }
+
     /// Draws a box from `from` to `to` (texels of 16 per block, as a block
     /// model's element) under `draw`'s pose, with the faces given, by
     /// `Direction` (down, up, north, south, west, east), baked as a model
@@ -752,6 +785,35 @@ mod tests {
         assert_eq!(distances.furthest, 256.0);
         let none = ViewDistances::of_states(std::iter::empty(), |_| unreachable!());
         assert_eq!(none.furthest, VIEW_DISTANCE);
+    }
+
+    /// `BlockEntityDrawContext::text` lays the font's glyphs out under the pose, a quad per
+    /// glyph from left to right, in the frame's light and the opaque colour it was given.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn text_lays_glyphs_out_under_the_pose_in_the_frames_light() {
+        use super::super::mod_api_host::generated::GameBlockEntityDrawContext;
+        use mod_api::BlockEntityDrawContext;
+
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let mut surface = draw();
+            let mut drawn = GameBlockEntityDrawContext {
+                game,
+                surface: &mut surface,
+            };
+            let a = drawn.text_width("A");
+            let both = drawn.text_width("AB");
+            assert!(a > 0.0 && both > a);
+            drawn.text("AB", [0.0, 0.0], 0xFF0000);
+            assert_eq!(surface.vertices.len(), 8, "a quad per glyph");
+            // The first glyph's lower left corner (0, 8) under the pose's 10-block shift.
+            assert_eq!(surface.vertices[0].pos, [10.0, 8.0, 0.0]);
+            // The second glyph starts one advance of `A` further on.
+            assert_eq!(surface.vertices[4].pos, [10.0 + a, 8.0, 0.0]);
+            // Red, as a vertex colour stores it (ABGR), opaque.
+            assert!(surface.vertices.iter().all(|v| v.color == 0xFF00_00FF));
+            assert!(surface.vertices.iter().all(|v| v.light == 0xF0F0));
+        });
     }
 
     #[test]

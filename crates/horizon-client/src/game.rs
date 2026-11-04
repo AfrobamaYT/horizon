@@ -135,6 +135,7 @@ mod explosion;
 mod extras;
 mod falling_damage;
 mod fangs;
+mod finalize_spawn;
 mod fireworks;
 mod fishing;
 mod fov;
@@ -1616,29 +1617,31 @@ impl LevelAccess for GameLevel<'_> {
         );
         connected
     }
-    fn has_fence_connection_hook(&self) -> bool {
+    fn has_connection_hook(&self) -> bool {
         self.native_authoritative
-            && mod_api::__private::has_scoped_hook(mod_api::HookId::FenceConnectsTo)
+            && mod_api::__private::has_scoped_hook(mod_api::HookId::ConnectsTo)
     }
-    fn adjust_fence_connects_to(
+    fn adjust_connects_to(
         &self,
+        kind: horizon_world::level::ConnectionKind,
         pos: BlockPos,
-        fence: BlockStateId,
+        state: BlockStateId,
         neighbour: BlockStateId,
         direction: Direction,
         face_solid: bool,
         vanilla: bool,
     ) -> bool {
         let mut connected = vanilla;
-        self.native_fence_connects_to(
-            self.dimension,
+        self.native_connects_to(mod_api::__private::ConnectsToCall {
+            dimension: self.dimension,
             pos,
-            fence,
+            state,
+            kind,
             neighbour,
             direction,
             face_solid,
-            &mut connected,
-        );
+            connected: &mut connected,
+        });
         connected
     }
     fn adjust_signal(
@@ -2257,6 +2260,7 @@ struct WorldCore {
     environment: Environment,
     collision: BlockCollisionRegistry<'static>,
     motion: MotionResources,
+    spawn_registries: horizon_client::mobs::finalize::SpawnRegistries,
     threads: usize,
 }
 
@@ -2366,6 +2370,11 @@ impl Resources {
     }
     fn motion(&self) -> &MotionResources {
         &self.core.motion
+    }
+    /// The variant registries finalizeSpawn selects from
+    /// (`data/minecraft/<registry>`), shared with world generation.
+    pub fn spawn_registries(&self) -> &horizon_client::mobs::finalize::SpawnRegistries {
+        &self.core.spawn_registries
     }
     fn threads(&self) -> usize {
         self.core.threads
@@ -21420,6 +21429,7 @@ fn load_resources(
             environment,
             collision,
             motion,
+            spawn_registries: horizon_client::mobs::finalize::SpawnRegistries::load(&root),
             threads,
         },
         rest: std::sync::OnceLock::new(),

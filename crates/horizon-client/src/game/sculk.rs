@@ -533,6 +533,7 @@ impl Game<'_> {
         Context {
             source: Some(Who::Player),
             owner: None,
+            affected_state: state,
             dampening_state: self.state_dampens(state),
             spectator: self.spectator(),
             stepping_carefully: self.keys.contains(&KeyCode::ShiftLeft),
@@ -550,6 +551,7 @@ impl Game<'_> {
         Context {
             source: Some(Who::Mob(id)),
             owner: None,
+            affected_state: state,
             dampening_state: self.state_dampens(state),
             spectator: false,
             stepping_carefully: false,
@@ -564,6 +566,7 @@ impl Game<'_> {
             Some(Who::Player) => self.player_context(state),
             Some(Who::Mob(id)) => self.mob_context(id, state),
             None => Context {
+                affected_state: state,
                 dampening_state: self.state_dampens(state),
                 ..Context::default()
             },
@@ -588,7 +591,14 @@ impl Game<'_> {
         if mod_api::__private::listened(mod_api::HookId::VanillaGameEvent) {
             let cause = event_cause(ctx.source, self.lan_acting_entity);
             let mut cancel = false;
-            self.native_vanilla_game_event(self.dim.id(), event, pos, cause, &mut cancel);
+            self.native_vanilla_game_event(
+                self.dim.id(),
+                event,
+                pos,
+                cause,
+                ctx.affected_state,
+                &mut cancel,
+            );
             if cancel {
                 return;
             }
@@ -2061,6 +2071,43 @@ mod tests {
         assert_eq!(event_cause(Some(Who::Player), None), None);
         assert_eq!(event_cause(Some(Who::Mob(7)), Some(42)), Some(7));
         assert_eq!(event_cause(None, Some(42)), None);
+    }
+
+    /// `vanilla_game_event` hears `GameEvent.Context.affectedState`: the state a context
+    /// was made with reaches the listener, and a context made with none reads as None.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn vanilla_game_event_carries_the_affected_state() {
+        use crate::game::native_entity_refs::tests::with_game;
+        use mod_api::testing::with_mods;
+        use mod_api::{Hooks, ModEntry, VanillaGameEventEvent};
+        use std::sync::{Arc, Mutex};
+
+        struct Heard(Arc<Mutex<Vec<Option<BlockStateId>>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Heard {
+            fn vanilla_game_event(
+                &self,
+                _host: &mut dyn mod_api::ServerHost,
+                event: &mut VanillaGameEventEvent<'_>,
+            ) -> mod_api::Flow {
+                self.0.lock().unwrap().push(event.affected_state);
+                mod_api::Flow::Continue
+            }
+        }
+
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new("heard", Box::new(Heard(heard.clone())))].into();
+        with_mods(mods, || {
+            with_game(|game| {
+                let state = BlockStateId(3);
+                let placed = game.player_context(Some(state));
+                game.post_game_event("minecraft:block_place", [0.5, 64.0, 0.5], placed);
+                let stepped = game.who_context(None, None);
+                game.post_game_event("minecraft:step", [0.5, 64.0, 0.5], stepped);
+            });
+        });
+        assert_eq!(*heard.lock().unwrap(), vec![Some(BlockStateId(3)), None]);
     }
 
     /// Retaining keeps the insertion order and the membership in step.
