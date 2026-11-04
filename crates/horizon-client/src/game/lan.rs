@@ -1944,12 +1944,12 @@ impl Game<'_> {
                     name,
                 } => {
                     let host = self.lan.as_ref()?;
-                    let Some(id) = host
+                    let Some((id, conn)) = host
                         .hub
                         .guests
                         .iter()
                         .find(|g| g.placed && g.participates_online() && g.uuid == message.sender)
-                        .map(|g| g.entity_id)
+                        .map(|g| (g.entity_id, g.conn))
                     else {
                         continue;
                     };
@@ -1960,7 +1960,32 @@ impl Game<'_> {
                     let original = Text::literal(raw.clone());
                     let mut text = original.clone();
                     let mut cancel = false;
-                    self.native_server_chat(id, sender, &name, &raw, &mut text, &mut cancel);
+                    let mut replies = Vec::new();
+                    self.native_server_chat(
+                        id,
+                        sender,
+                        &name,
+                        &raw,
+                        &mut text,
+                        &mut replies,
+                        &mut cancel,
+                    );
+                    // The mods' replies reach the sender alone, as a
+                    // command's do, before the message (if any) goes out.
+                    if !replies.is_empty() {
+                        let host = self.lan.as_ref()?;
+                        for line in replies {
+                            host.hub.send_to(
+                                conn,
+                                &C::SystemChat(play::SystemChat {
+                                    content: horizon_client::lan::data::component_nbt(
+                                        &line.component(),
+                                    ),
+                                    overlay: false,
+                                }),
+                            );
+                        }
+                    }
                     // Canceled, NeoForge returns before `detectRateSpam`.
                     if cancel {
                         continue;
@@ -3365,5 +3390,154 @@ mod tests {
                 "mainhand", "offhand", "head", "chest", "legs", "feet", "body", "saddle"
             ]
         );
+    }
+
+    /// `server_chat`'s replies reach the sender alone, as system chat, whether
+    /// or not the message goes out; a canceled message reaches nobody.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn server_chat_replies_reach_the_sender_alone() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::lan::hub::{HostEvent, HubConfig, chat::ChatMessage};
+        use horizon_client::lan::{Joined, NetConfig, Out, PlayerSender, guest::Guest};
+        use horizon_client::mod_api::{self, Flow, Hooks, ServerChatEvent, ServerHost};
+        use horizon_client::text::Text;
+        use horizon_protocol::packets::{configuration::ClientInformation, play};
+        use std::sync::{Arc, atomic::AtomicI32, mpsc};
+
+        struct Replier;
+        #[mod_api::__subscriptions]
+        impl Hooks for Replier {
+            fn server_chat(
+                &self,
+                _host: &mut dyn ServerHost,
+                event: &mut ServerChatEvent<'_>,
+            ) -> Flow {
+                event
+                    .replies
+                    .push(Text::literal(format!("heard {}", event.raw_text)));
+                if event.raw_text == "secret" {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+        }
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("replier", Box::new(Replier))].into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let settings = super::LanSettings {
+                    port: 0,
+                    guest_commands: false,
+                    force_game_mode: false,
+                };
+                let net = NetConfig {
+                    listen: false,
+                    announce: false,
+                    lod_distance: 0,
+                    ..NetConfig::lan(0, String::new(), 3)
+                };
+                let config = HubConfig {
+                    default_game_mode: 0,
+                    guest_commands: false,
+                    force_game_mode: false,
+                    hardcore: false,
+                    view_distance: 2,
+                    simulation_distance: 2,
+                    dimension: game.dim.id().to_owned(),
+                    allow_flight: true,
+                    seed: 0,
+                    max_players: 3,
+                    integrated: true,
+                    levels: game.level_shapes,
+                };
+                game.lan_host(settings, net, config).unwrap();
+                let mut join = |conn: u32| {
+                    let (tx, rx) = mpsc::channel();
+                    let mut guest = Guest::new(
+                        Joined {
+                            conn,
+                            uuid: conn as u128,
+                            name: format!("guest{conn}"),
+                            properties: Vec::new(),
+                            info: ClientInformation::new(8),
+                            brand: String::new(),
+                            sender: PlayerSender::new(tx, Arc::default()),
+                            latency: Arc::new(AtomicI32::new(0)),
+                            address: "127.0.0.1:1".parse().unwrap(),
+                        },
+                        conn as i32,
+                        [0.5, 64.0, 0.5],
+                        2,
+                    );
+                    guest.placed = true;
+                    game.lan.as_mut().unwrap().hub.guests.push(guest);
+                    rx
+                };
+                let (sender, other) = (join(12), join(13));
+                // The chat packets each guest got, in order.
+                let received = |rx: &mpsc::Receiver<Out>| {
+                    let mut seen = Vec::new();
+                    while let Ok(out) = rx.try_recv() {
+                        let bodies = match out {
+                            Out::Packet(body) => vec![body],
+                            Out::Packets(bodies) => bodies,
+                            Out::Disconnect(_) => continue,
+                        };
+                        for body in bodies {
+                            let mut reader = horizon_protocol::buf::Reader::new(&body);
+                            let id = reader.varint().unwrap();
+                            match play::Clientbound::decode(id, reader.rest()) {
+                                Ok(play::Clientbound::SystemChat(chat)) => seen.push(format!(
+                                    "system {}",
+                                    horizon_client::component::name_text(&chat.content).plain()
+                                )),
+                                Ok(play::Clientbound::PlayerChat(_)) => {
+                                    seen.push("player".to_owned())
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    seen
+                };
+                received(&sender);
+                received(&other);
+                let say = |game: &mut super::Game<'_>, content: &str| {
+                    let message = ChatMessage {
+                        sender: 12,
+                        index: 0,
+                        signature: None,
+                        content: content.to_owned(),
+                        timestamp: 0,
+                        salt: 0,
+                        last_seen: Vec::new(),
+                        unsigned_content: None,
+                    };
+                    let bound = play::ChatTypeBound {
+                        chat_type: 0,
+                        name: horizon_client::lan::data::component_nbt(
+                            &Text::literal("guest12").component(),
+                        ),
+                        target: None,
+                    };
+                    let event = HostEvent::ChatSubmitted {
+                        message: Box::new(message),
+                        bound: Box::new(bound),
+                        name: "guest12".into(),
+                    };
+                    let host = game.lan.take().unwrap();
+                    game.lan = game.lan_process_events(host, [event], &[], [0.5, 64.0, 0.5]);
+                };
+
+                say(game, "secret");
+                assert_eq!(received(&sender), ["system heard secret"]);
+                assert!(received(&other).is_empty());
+
+                say(game, "hello");
+                assert_eq!(received(&sender), ["system heard hello", "player"]);
+                assert_eq!(received(&other), ["player"]);
+            });
+        });
     }
 }
