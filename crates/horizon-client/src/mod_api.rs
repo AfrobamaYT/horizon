@@ -10,7 +10,9 @@ pub use horizon_mods::Side;
 pub(crate) use phase::install_packages;
 #[cfg(test)]
 pub(crate) use phase::with_test_packages;
-pub use phase::{LoadedMods, PackageInfo, PackageKind, RegistrationContext};
+pub use phase::{
+    DataLoadContext, DataLoadOrigin, LoadedMods, PackageInfo, PackageKind, RegistrationContext,
+};
 mod config_files;
 pub use config_files::{
     CONFIG_FILE_MAX, CONFIG_LIST_MAX, ConfigEntry, ConfigEntryKind, ConfigFileError, ConfigFiles,

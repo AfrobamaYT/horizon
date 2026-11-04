@@ -131,13 +131,17 @@ pub fn level_name(level: u32) -> String {
 }
 
 impl Enchantments {
-    pub fn load(root: &Path) -> Self {
-        Self::load_with(root, &horizon_world::loot::PackOverlay::NONE)
+    pub fn load(root: &Path, defaults: &horizon_world::item_defaults::ItemDefaults) -> Self {
+        Self::load_with(root, &horizon_world::loot::PackOverlay::NONE, defaults)
     }
     /// Load from a resource root; `overlay` (a world's data packs' content
     /// files) joins the game's own enchantment tags in pack order, a
     /// `replace` file dropping the lower sources' (`TagLoader.load`).
-    pub fn load_with(root: &Path, overlay: &horizon_world::loot::PackOverlay) -> Self {
+    pub fn load_with(
+        root: &Path,
+        overlay: &horizon_world::loot::PackOverlay,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
+    ) -> Self {
         let data = root.join("data/minecraft");
         let mut raw_tags = read_tag_dir(&data.join("tags/enchantment"));
         for (id, files) in overlay.tag_kind("enchantment") {
@@ -256,28 +260,25 @@ impl Enchantments {
             .map(|(i, e)| (e.id.clone(), i))
             .collect();
         let mut props = HashMap::new();
-        if let Ok(raw) = horizon_world::item_defaults::read(root) {
-            for (id, c) in raw {
-                props.insert(
-                    Arc::from(id.as_str()),
-                    ItemProps {
-                        enchantable: c["minecraft:enchantable"]["value"].as_u64().unwrap_or(0)
-                            as u32,
-                        repairable: string_list(&c["minecraft:repairable"]["items"]),
-                        glint: c["minecraft:enchantment_glint_override"]
-                            .as_bool()
-                            .unwrap_or(false),
-                        rarity: c["minecraft:rarity"]
-                            .as_str()
-                            .unwrap_or("common")
-                            .to_owned(),
-                        trim_material: c["minecraft:provides_trim_material"]
-                            .as_str()
-                            .map(str::to_owned),
-                        brewing_fuel: c.get("minecraft:brewing_fuel").is_some(),
-                    },
-                );
-            }
+        for (id, c) in defaults.entries() {
+            props.insert(
+                Arc::from(id.as_str()),
+                ItemProps {
+                    enchantable: c["minecraft:enchantable"]["value"].as_u64().unwrap_or(0) as u32,
+                    repairable: string_list(&c["minecraft:repairable"]["items"]),
+                    glint: c["minecraft:enchantment_glint_override"]
+                        .as_bool()
+                        .unwrap_or(false),
+                    rarity: c["minecraft:rarity"]
+                        .as_str()
+                        .unwrap_or("common")
+                        .to_owned(),
+                    trim_material: c["minecraft:provides_trim_material"]
+                        .as_str()
+                        .map(str::to_owned),
+                    brewing_fuel: c.get("minecraft:brewing_fuel").is_some(),
+                },
+            );
         }
         Self {
             list,

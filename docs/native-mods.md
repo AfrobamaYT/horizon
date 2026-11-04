@@ -895,7 +895,7 @@ or transactions. Declarations still go on each event or registrar.
 
 - `native_screen_exclusion()` answers the rectangles (`[x, y, width, height]`, GUI pixels) the open screen keeps clear for the things drawn beside its window: the recipe book's panel, the creative tab rows above and below the window, and the active effects right of the inventory, then every rectangle a mod added in `native_screen_exclusion_areas(screen, areas)` (a side panel, a button column; a mod that draws over a screen reports where). Compute it once per screen layout and cache it, not per frame: the rectangles move only when the window, the recipe book or the effects change. A mod that lays out panels of its own, as a recipe viewer does, shrinks its rows and columns around them. Empty and non-finite rectangles are dropped. Empty with no screen up. Vanilla has no counterpart; NeoForge recipe viewers take the same from their own API (EMI's `EmiExclusionArea`, JEI's `IGuiContainerHandler.getGuiExtraAreas`). Client-side.
 
-- `native_modify_default_components(item, components)`, in `horizon-world`'s `item_defaults.rs`: an item's default
+- `native_modify_default_components(context, item, components)`, in `horizon-world`'s `item_defaults.rs`: an item's default
   components in `items.json`'s form, for any item, vanilla's included (NeoForge's `ModifyDefaultComponentsEvent`). Insert
   or replace a component to set it (`"minecraft:max_stack_size": 16`), remove it to take it away. The item table,
   loot, enchanting and item models all read the changed defaults, and stacks are saved and sent against them as
@@ -2807,6 +2807,14 @@ handle, an entity the client doesn't track and a level it doesn't show:
   (Paper's `Entity#isDead` is its inverse; a dying mob, mid death animation, is not alive). During a nested
   player swap an outer player's displaced record is unavailable, and during a player's turn the other
   players' handles read `None` until the hub is back.
+- `living.attribute_value(host, id)` is `AttributeMap.getValue` and `attribute_base` is `getBaseValue`, for a
+  player, a guest, a mob, an armor stand and the dragon (`None` for an attribute the entity type lacks, a stale
+  handle, or on a client). A mob, a stand and the dragon answer from a live attribute map built from the type's
+  defaults, the saved `attributes` list (bases and permanent modifiers, with their ids), and the attribute modifiers
+  of the items they hold and wear, put on and taken off slot by slot in `EquipmentSlot` order as
+  `LivingEntity.collectEquipmentChanges` does (transient: never saved). The map is built when first needed. Mob
+  behavior still reads the type's defaults, so a modifier does not yet change how a mob moves or hits, and an item's
+  own `attribute_modifiers` component is not read yet, only the item type's.
 - `living.set_health(host, health)` is `LivingEntity.setHealth` (Paper's `Damageable#setHealth`), cut to the
   range from zero to the maximum, with no hook; a non-finite value is refused. This raw write can set zero
   or change a dead entity's health without running the death pipeline.
@@ -3185,9 +3193,17 @@ clicks already.
 
 ### Items' default components
 
-`crates/horizon-world/src/item_defaults.rs`: `native_modify_default_components(item, components)`, a free function a
-bundle targets as `horizon_world::item_defaults::native_modify_default_components` (NeoForge's
-`ModifyDefaultComponentsEvent`). `components` is the item's entry in `items.json`, vanilla's default-component report:
+`Hooks::modify_default_components` receives `&DataLoadContext<'_>` before its
+`ModifyDefaultComponentsEvent`. The engine supplies this read-only phase context:
+`origin()` is `DataLoadOrigin::ServerDataLoad` or `ClientPreload`, `registry(name)`
+borrows names in registry ID order, `setting(mod_id, key)` reads a setting lazily,
+and `mods()` borrows the same `LoadedMods` view used during registration. There is
+no game Host, handle construction or transaction. The origin describes the actual
+owning load, not its thread name or the side of a later reader.
+
+The lower firing target is `native_modify_default_components(context, item, components)`
+in `crates/horizon-world/src/item_defaults.rs` (NeoForge's `ModifyDefaultComponentsEvent`).
+`components` is the item's entry in `items.json`, vanilla's default-component report:
 insert or replace a key to set a component (`"minecraft:max_stack_size": 16`), remove it to take the component away.
 Any item can be changed, vanilla's included. Write values as vanilla's codec writes them: nothing decodes them with it.
 Each table reads the fields it understands and takes a default for a field it can't read, but keeps the component, so a
@@ -3196,10 +3212,13 @@ data pack's own is held to `ExtraCodecs.intRange(1, 99)`, a mod's to 1 to `i32::
 carry), and a value that is not a number leaves the data pack's own. Keep a stack above 99 to a server whose clients run
 the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot show it.
 
-- Every table that reads items' defaults reads them through it: the item table, loot, enchanting, item models,
-  banners, pot sherds, item rarity in chat. Stacks are saved and sent as their difference from the changed defaults, as from vanilla's.
-- It's asked for every item each time the defaults are read, from any thread, several times as resources load
-  and again when a world's data packs load. Answer the same each time, from the item alone.
+- One owning load decodes the defaults, asks once per item, then publishes one immutable snapshot. The item
+  table, loot, enchanting, item models, banners, pot sherds and rarity readers borrow that snapshot; workers
+  retain shared ownership. The renderers also share its canonical component prototypes. Stacks are saved and
+  sent as their difference from the changed defaults, as from vanilla's.
+- Reusing client-preloaded item data on the integrated server is not another load. Opening a world or running
+  the data-pack `/reload` does not replay this hook. A dedicated resource load supplies `ServerDataLoad`;
+  the client preload supplies `ClientPreload`. The hook may run on a load worker, before a game Host exists.
 - Client and server each apply their own mods, so both need the mod. A client without it (a vanilla Java client, or
   Horizon without the mod) fills in vanilla's defaults for the same stacks: a stone stack the server caps at 16 still
   looks like it stacks to 64 there.

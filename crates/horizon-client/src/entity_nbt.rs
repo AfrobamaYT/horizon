@@ -1117,8 +1117,8 @@ pub fn mob_to_nbt(
     ) {
         map.entry("anger_end_time".into()).or_insert(Tag::Long(-1));
     }
-    if let Some(a) = m.extra.attributes.as_deref() {
-        put_attributes(map, m, a);
+    if m.extra.attributes.is_some() {
+        put_attributes(map, m);
     }
     // The attribute their load makes, which AttributeMap.pack then saves:
     // Zombie and Piglin.setBaby (even for an adult) the speed, Rabbit.setVariant
@@ -1182,17 +1182,31 @@ pub fn mob_to_nbt(
             equipment[head] = Some(crate::mobs::raider::ominous_banner());
         }
         equipment.store(map);
+        put_live_attributes(map, &m.extra.live);
     }
     tag
 }
-/// `AttributeMap.pack` for the attributes with a base or permanent modifier
-/// finalizeSpawn set, over the saved list.
-fn put_attributes(map: &mut Compound, m: &Mob, a: &crate::mobs::finalize::Attributes) {
-    use crate::mobs::finalize::{self, Attr, Op};
+/// The live map's instances and the loaded attributes nothing else models,
+/// over the saved `attributes` list (`AttributeMap.pack`).
+pub fn put_live_attributes(map: &mut Compound, live: &crate::living_attributes::LivingAttributes) {
     let mut list = match map.get(&"attributes".into()) {
         Some(Tag::List(l)) => l.clone(),
         _ => Vec::new(),
     };
+    let before = list.clone();
+    live.save_into(&mut list);
+    if list != before {
+        map.insert("attributes".into(), Tag::List(list));
+    }
+}
+/// `AttributeInstance.Packed` of the attributes with a base or permanent
+/// modifier finalizeSpawn set (or a command or a load did), with their ids.
+pub fn attribute_entries(m: &Mob) -> Vec<(String, Tag)> {
+    use crate::mobs::finalize::{self, Attr, Op};
+    let Some(a) = m.extra.attributes.as_deref() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
     for attr in Attr::ALL {
         let modifiers: Vec<Tag> = a
             .modifiers
@@ -1222,7 +1236,18 @@ fn put_attributes(map: &mut Compound, m: &Mob, a: &crate::mobs::finalize::Attrib
         if !modifiers.is_empty() {
             entry.push(("modifiers", Tag::List(modifiers)));
         }
-        let entry = Tag::compound(entry);
+        out.push((id, Tag::compound(entry)));
+    }
+    out
+}
+/// `AttributeMap.pack` for the attributes with a base or permanent modifier
+/// finalizeSpawn set, over the saved list.
+fn put_attributes(map: &mut Compound, m: &Mob) {
+    let mut list = match map.get(&"attributes".into()) {
+        Some(Tag::List(l)) => l.clone(),
+        _ => Vec::new(),
+    };
+    for (id, entry) in attribute_entries(m) {
         match list
             .iter_mut()
             .find(|t| text(t.get("id")).as_deref() == Some(id.as_str()))
@@ -1283,6 +1308,7 @@ fn custom_name(tag: &Tag) -> Option<String> {
 }
 pub use horizon_client_core::component::name_text;
 /// Mob.finalizeSpawn's follow range bonus in the saved attributes.
+#[cfg(test)]
 pub(crate) fn spawn_bonus(tag: &Tag) -> Option<f64> {
     let Some(Tag::List(attrs)) = tag.get("attributes") else {
         return None;
@@ -1395,10 +1421,37 @@ pub fn mob_from_nbt(
             }
         }
     }
-    if let Some(bonus) = spawn_bonus(tag) {
+    // `AttributeMap.apply`: the saved permanent modifiers of the attributes the
+    // game models (the follow range bonus finalizeSpawn made among them), and
+    // the other saved attributes for the live map.
+    if let Some(Tag::List(attrs)) = tag.get("attributes") {
         use crate::mobs::finalize::{Attr, Op, add_modifier};
-        let id = "minecraft:random_spawn_bonus";
-        add_modifier(&mut m, Attr::FollowRange, id, bonus, Op::AddMultipliedBase);
+        for a in attrs {
+            let Some(attr) =
+                text(a.get("id")).and_then(|id| Attr::ALL.into_iter().find(|x| x.id() == id))
+            else {
+                continue;
+            };
+            let Some(Tag::List(modifiers)) = a.get("modifiers") else {
+                continue;
+            };
+            for x in modifiers {
+                let op = match text(x.get("operation")).as_deref() {
+                    Some("add_value") => Op::AddValue,
+                    Some("add_multiplied_base") => Op::AddMultipliedBase,
+                    Some("add_multiplied_total") => Op::AddMultipliedTotal,
+                    _ => continue,
+                };
+                if let (Some(id), Some(amount)) = (text(x.get("id")), float(x.get("amount"))) {
+                    add_modifier(&mut m, attr, id, amount, op);
+                }
+            }
+        }
+        // An attribute the type lacks is skipped (`AttributeMap.apply`).
+        let kind = m.kind.clone();
+        m.extra.live.load(tag.get("attributes"), |id| {
+            kind.attributes.contains_key(id) && !Attr::ALL.iter().any(|a| a.id() == id)
+        });
     }
     m.health = float(tag.get("Health")).map_or(m.attrs.max_health, |h| h as f32);
     m.absorption = float(tag.get("AbsorptionAmount"))
@@ -3063,6 +3116,7 @@ pub fn armor_stand_to_nbt(a: &ArmorStand, uuid: [i32; 4], raw: Option<&Tag>) -> 
         ] {
             map.entry(key.into()).or_insert(value);
         }
+        put_live_attributes(map, &a.live);
     }
     tag
 }
@@ -3076,6 +3130,7 @@ pub fn armor_stand_from_nbt(tag: &Tag, id: u32) -> Option<ArmorStand> {
     if let Some(eq) = tag.get("equipment") {
         a.equipment = horizon_items::equipment::Equipment::read(eq);
     }
+    a.live.load(tag.get("attributes"), |_| true);
     a.small = flag(tag, "Small");
     a.show_arms = flag(tag, "ShowArms");
     a.disabled_slots = number(tag.get("DisabledSlots")).unwrap_or(0) as i32;
@@ -5933,7 +5988,8 @@ mod held_item_name_tests {
         chances[drops::SLOTS.iter().position(|s| *s == "head").unwrap()] = 2.0;
         chances[drops::SLOTS.iter().position(|s| *s == "body").unwrap()] = 2.0;
         horse.extra.drop_chances = Some(Box::new(chances));
-        let loot = LootData::load(&root, &PackOverlay { files: &[] }).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let loot = LootData::load(&root, &PackOverlay { files: &[] }, &defaults).unwrap();
         let death = Death {
             loot: &loot,
             damage: None,

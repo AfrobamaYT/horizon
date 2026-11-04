@@ -3749,10 +3749,11 @@ pub(crate) mod tests {
         if !root.join("items.json").exists() {
             return;
         }
-        let items = Items::catalog(&root, &PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = Items::catalog(&root, &PackOverlay::NONE, &defaults).unwrap();
         let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
         let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
-        let banners = Banners::load(&root);
+        let banners = Banners::load(&root, &defaults);
         let station_recipes =
             crate::stations::StationRecipes::load(&root, &items, &PackOverlay::NONE);
         let enchantments = crate::enchant::Enchantments::default();

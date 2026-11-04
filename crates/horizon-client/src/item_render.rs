@@ -20,8 +20,8 @@ use horizon_assets::{
     animation::AnimationMetadata,
     item_bake::{BakedItemModel, SpriteLookup, SpriteMask, bake_item_model},
     item_model::{
-        ClientItem, Components, Context, DisplayContext, FoilType, ItemEnv, ItemModels,
-        LayerContent, LevelState, OwnerState, SpecialModel, StackView,
+        ClientItem, Context, DisplayContext, FoilType, ItemEnv, ItemModels, LayerContent,
+        LevelState, OwnerState, SpecialModel, StackView,
     },
     model::Direction,
     palette::PalettedPermutations,
@@ -666,10 +666,14 @@ fn load_definitions(root: &Path) -> BTreeMap<String, ClientItem> {
 impl ItemRenderer {
     /// Load item definitions, item prototypes (`items.json`), every model,
     /// the special renderers' entity models and the grass colormap.
-    pub fn load(root: &Path) -> crate::Result<Self> {
+    pub fn load(
+        root: &Path,
+        item_data: &horizon_world::item_defaults::ItemData,
+    ) -> crate::Result<Self> {
         Self::load_with_library(
             root,
             crate::model_library::ParsedModels::load(root).into_item_library(),
+            item_data,
         )
     }
     /// Reuse the immutable models prepared with the block resources at `root`.
@@ -677,8 +681,9 @@ impl ItemRenderer {
     pub fn load_with_library(
         root: &Path,
         library: std::result::Result<Arc<ModelLibrary>, String>,
+        item_data: &horizon_world::item_defaults::ItemData,
     ) -> crate::Result<Self> {
-        Self::load_tables(root, library, true)
+        Self::load_tables(root, library, true, item_data)
     }
     /// What a dedicated server reads: the item prototypes (the stacks'
     /// default components) and ids, without the client item definitions,
@@ -687,18 +692,17 @@ impl ItemRenderer {
     pub fn load_for_server(
         root: &Path,
         library: std::result::Result<Arc<ModelLibrary>, String>,
+        item_data: &horizon_world::item_defaults::ItemData,
     ) -> crate::Result<Self> {
-        Self::load_tables(root, library, false)
+        Self::load_tables(root, library, false, item_data)
     }
     fn load_tables(
         root: &Path,
         library: std::result::Result<Arc<ModelLibrary>, String>,
         drawn: bool,
+        item_data: &horizon_world::item_defaults::ItemData,
     ) -> crate::Result<Self> {
-        let prototypes: BTreeMap<String, Components> = horizon_world::item_defaults::read(root)?
-            .into_iter()
-            .map(|(item, components)| Ok((item, serde_json::from_value(components)?)))
-            .collect::<serde_json::Result<_>>()?;
+        let prototypes = Arc::clone(item_data.prototypes()?);
         let models = ItemModels {
             definitions: if drawn {
                 load_definitions(root)
@@ -1107,6 +1111,7 @@ pub fn cluster_poses(state: &ItemRenderState, pose: Mat4, amount: u32, seed: i64
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horizon_world::native_load_context::DataLoadOrigin;
 
     /// One frame's glint is read once and shared: every item drawn from the
     /// same `GlintFrame` scrolls by the same phase, and without the atlas
@@ -1154,16 +1159,24 @@ mod tests {
         assert!(library.is_err());
         fs::write(root.join("items.json"), "{")?;
         let load = || {
-            ItemRenderer::load_with_library(&root, library.clone())
+            crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload)
+                .and_then(|data| ItemRenderer::load_with_library(&root, library.clone(), &data))
                 .err()
                 .unwrap()
                 .to_string()
         };
         let broken_items = load();
+        fs::write(root.join("items.json"), r#"{"horizon:bad":false}"#)?;
+        let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload)?;
+        let broken_components = ItemRenderer::load_with_library(&root, library.clone(), &data)
+            .err()
+            .unwrap()
+            .to_string();
         fs::write(root.join("items.json"), "{}")?;
         let bad_model = load();
         let _ = fs::remove_dir_all(&root);
         assert!(!broken_items.starts_with("item models:"));
+        assert!(!broken_components.starts_with("item models:"));
         assert!(bad_model.starts_with("item models:"));
         Ok(())
     }
@@ -1204,8 +1217,9 @@ mod tests {
             r#"{"horizon:top":{"minecraft:max_stack_size":16}}"#,
         )?;
         let library = crate::model_library::ParsedModels::load(&root).into_item_library();
-        let client = ItemRenderer::load_with_library(&root, library.clone())?;
-        let server = ItemRenderer::load_for_server(&root, library)?;
+        let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload)?;
+        let client = ItemRenderer::load_with_library(&root, library.clone(), &data)?;
+        let server = ItemRenderer::load_for_server(&root, library, &data)?;
         let _ = fs::remove_dir_all(&root);
         assert!(client.models.definitions.contains_key("horizon:top"));
         assert!(server.models.definitions.is_empty());
@@ -1280,7 +1294,8 @@ mod tests {
             eprintln!("no prepared resources: skipped");
             return;
         }
-        let r = ItemRenderer::load(&root).unwrap();
+        let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload).unwrap();
+        let r = ItemRenderer::load(&root, &data).unwrap();
         let resolve = |id: &str| {
             let view = StackView::new(id, 1);
             r.resolve(&view, DisplayContext::Ground, None, None, 7, &NoEnv)

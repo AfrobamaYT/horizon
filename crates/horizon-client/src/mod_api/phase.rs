@@ -1,4 +1,5 @@
-//! Restricted views for bootstrap registration.
+//! Restricted views for registration and data loading.
+pub use horizon_world::native_load_context::DataLoadOrigin;
 use std::sync::OnceLock;
 
 /// Whether a package contains compiled code or content alone.
@@ -166,6 +167,60 @@ impl RegistrationContext<'_> {
     }
 
     /// The loaded-mod view, independent of this phase's event or registrar.
+    pub fn mods(&self) -> &LoadedMods<'_> {
+        &self.mods
+    }
+}
+
+/// A data load's read-only view. The owning loader supplies its origin and
+/// metadata; reading already-loaded data never creates this context.
+///
+/// ```compile_fail
+/// use horizon_client::mod_api::{DataLoadContext, Host};
+/// fn game(_: &dyn Host) {}
+/// fn load(context: &DataLoadContext<'_>) { game(context); }
+/// ```
+///
+/// ```compile_fail
+/// use horizon_client::mod_api::{DataLoadContext, Host};
+/// fn load(context: &DataLoadContext<'_>) { let _ = Host::entity(context, 1); }
+/// ```
+///
+/// ```compile_fail
+/// use horizon_client::mod_api::{DataLoadContext, HostTransaction};
+/// fn load(context: &mut DataLoadContext<'_>) {
+///     let _: Result<(), ()> = context.transaction(|_, _| Ok(()));
+/// }
+/// ```
+pub struct DataLoadContext<'a> {
+    source: &'a horizon_world::native_load_context::LoadContext,
+    mods: LoadedMods<'a>,
+}
+
+impl<'a> DataLoadContext<'a> {
+    pub(crate) fn new(source: &'a horizon_world::native_load_context::LoadContext) -> Self {
+        Self {
+            source,
+            mods: LoadedMods::new(),
+        }
+    }
+
+    /// The phase selected at the owning load boundary.
+    pub fn origin(&self) -> DataLoadOrigin {
+        self.source.origin()
+    }
+
+    /// Registry names in ID order, from this resource generation's snapshot.
+    pub fn registry(&self, name: &str) -> Option<&[String]> {
+        self.source.registry(name)
+    }
+
+    /// Read a mod's setting without creating or writing any files.
+    pub fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
+        self.source.setting(mod_id, key)
+    }
+
+    /// The same loaded-mod view available during registration.
     pub fn mods(&self) -> &LoadedMods<'_> {
         &self.mods
     }

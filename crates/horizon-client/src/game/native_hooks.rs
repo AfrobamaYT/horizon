@@ -1517,8 +1517,11 @@ impl Game<'_> {
     /// starts as that text; replace it and players see the new message
     /// (`withUnsignedContent`: a signed message keeps its signature), and
     /// the log shows it. Set `cancel` and nobody sees it, and it doesn't
-    /// count toward the chat spam limit. Commands (`/say`, `/msg`...) are
-    /// not chat here. Server-side, with no player's state swapped in.
+    /// count toward the chat spam limit. Lines pushed to `replies` go to the
+    /// sender alone as system chat, whether or not the message is canceled
+    /// (no other player sees them). Commands (`/say`, `/msg`...) are not
+    /// chat here. Server-side, with no player's state swapped in.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn native_server_chat(
         &mut self,
         player_id: i32,
@@ -1526,9 +1529,12 @@ impl Game<'_> {
         username: &str,
         raw_text: &str,
         message: &mut Text,
+        replies: &mut Vec<Text>,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_server_chat(self, player_id, player, username, raw_text, message, cancel);
+        mod_api::dispatch_server_chat(
+            self, player_id, player, username, raw_text, message, replies, cancel,
+        );
     }
     /// NeoForge's `ClientChatEvent`: a client is about to send `message`.
     /// `original_message` is immutable; change `message` or set `cancel` to
@@ -8653,13 +8659,16 @@ impl Game<'_> {
     /// where the WebAssembly mod of the same id kept its storage, so a
     /// player's settings carry over. Not created here.
     pub(super) fn native_data_dir(&self, mod_id: &str) -> PathBuf {
-        let mods = Self::game_dir().join(mod_list::DIR);
-        mods.join(".horizon-mod-data").join(mod_id)
+        Self::mod_data_root().join(mod_id)
+    }
+    pub(super) fn mod_data_root() -> PathBuf {
+        Self::game_dir()
+            .join(mod_list::DIR)
+            .join(".horizon-mod-data")
     }
     /// A mod's setting `key` (one file per key in `native_data_dir`).
     pub(super) fn native_setting(&self, mod_id: &str, key: &str) -> Option<String> {
-        let path = self.native_data_dir(mod_id).join(key);
-        fs::read_to_string(path).ok().map(|v| v.trim().to_owned())
+        horizon_world::native_load_context::read_setting(&self.native_data_dir(mod_id), key)
     }
     /// Keeps a mod's setting `key`.
     pub(super) fn native_set_setting(&self, mod_id: &str, key: &str, value: &str) {
@@ -10469,7 +10478,7 @@ mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            super::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!("no menu handoff"),
         )

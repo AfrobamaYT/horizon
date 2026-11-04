@@ -95,7 +95,7 @@ fn condition_property_defaults_to_false_at_draw_time() {
     .unwrap();
     let mut models = ItemModels::default();
     models.definitions.insert("mod:tool".into(), definition);
-    models.prototypes.insert(
+    Arc::make_mut(&mut models.prototypes).insert(
         "mod:tool".into(),
         BTreeMap::from([(
             "minecraft:item_model".into(),

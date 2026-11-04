@@ -390,6 +390,9 @@ pub(super) struct Dragon {
     /// `LivingEntity.equipment`: nothing in the fight reads it; it is kept
     /// for mods and saves.
     pub equipment: horizon_items::equipment::Equipment,
+    /// The live attribute map (`AttributeMap`), built when an item with
+    /// attribute modifiers is worn or it is read.
+    pub live: horizon_client::living_attributes::LivingAttributes,
     growl: i32,
     /// `Mob.ambientSoundTime`.
     ambient_time: i32,
@@ -529,6 +532,7 @@ impl Dragon {
             flame_count: 0,
             sitting_damage: 0.0,
             equipment: Default::default(),
+            live: Default::default(),
             growl: 100,
             ambient_time: 0,
             ticks: 0,
@@ -3338,6 +3342,7 @@ impl Dragon {
                 Tag::Float(self.sitting_damage.to_bits()),
             );
             self.equipment.store(map);
+            horizon_client::entity_nbt::put_live_attributes(map, &self.live);
         }
         tag
     }
@@ -3358,6 +3363,7 @@ impl Dragon {
         if let Some(equipment) = tag.get("equipment") {
             d.equipment = horizon_items::equipment::Equipment::read(equipment);
         }
+        d.live.load(tag.get("attributes"), |_| true);
         Some(d)
     }
 }
