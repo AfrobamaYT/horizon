@@ -510,10 +510,13 @@ pub trait LevelAccess {
     fn neighbor_notify(&self, _pos: BlockPos, _skipped: Option<Direction>) -> bool {
         false
     }
-    /// Observe `BlockState.handleNeighborChanged` before the block handles it.
-    /// The default does nothing; implementations must not alter the update queue.
+    /// Observe `BlockState.handleNeighborChanged` before the block handles it,
+    /// with the level's `ticks`, as vanilla's `neighborChanged` gets the level
+    /// itself (a diode schedules its tick there). The default does nothing;
+    /// implementations must not alter the update queue.
     fn observe_neighbor_changed(
         &self,
+        _ticks: &mut Ticks,
         _pos: BlockPos,
         _state: BlockStateId,
         _changed: BlockId,

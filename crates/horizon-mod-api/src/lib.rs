@@ -164,7 +164,7 @@ pub use horizon_client_core::gamerules::Value as GameRuleValue;
 #[horizon_mod_api_macros::wasm(via = String)]
 pub use horizon_client_core::particle_type::ParticleType;
 pub use horizon_client_core::suggestion::Suggestion;
-#[horizon_mod_api_macros::wasm(via = serde_json::Value)]
+#[horizon_mod_api_macros::wasm(via = horizon_client_core::text::TextForm)]
 pub use horizon_client_core::text::Text;
 #[horizon_mod_api_macros::wasm(via = (u64, Option<f64>))]
 pub use horizon_core::random::LegacyRandom;
@@ -3848,6 +3848,32 @@ pub trait LevelTicksHost: LevelHost {
     /// Schedule a fluid tick through `native_schedule_fluid_tick`.
     fn schedule_fluid_tick(&mut self, _pos: [i32; 3], _fluid: &str, _delay: i32) -> bool {
         unimplemented!("LevelTicksHost::schedule_fluid_tick")
+    }
+    /// How strongly the block at `pos` powers its neighbour on the `direction` side, power it
+    /// conducts included (`SignalGetter.getSignal(pos, direction)`), 0 to 15: the game's own
+    /// read, mods' `block_signal` and `should_check_weak_power` parts included, as
+    /// `LevelRef::signal` reads it. It writes nothing and draws nothing, so it leaves the
+    /// write it is read in as it was.
+    fn signal(&self, _pos: [i32; 3], _direction: Direction) -> i32 {
+        unimplemented!("LevelTicksHost::signal")
+    }
+    /// The strong power alone that the block at `pos` gives that way
+    /// (`SignalGetter.getDirectSignal(pos, direction)`), 0 to 15.
+    fn direct_signal(&self, _pos: [i32; 3], _direction: Direction) -> i32 {
+        unimplemented!("LevelTicksHost::direct_signal")
+    }
+    /// The strongest strong power reaching the block at `pos` (`SignalGetter.getDirectSignalTo`).
+    fn direct_signal_to(&self, _pos: [i32; 3]) -> i32 {
+        unimplemented!("LevelTicksHost::direct_signal_to")
+    }
+    /// The strongest power reaching the block at `pos` (`SignalGetter.getBestNeighborSignal`).
+    fn best_neighbor_signal(&self, _pos: [i32; 3]) -> i32 {
+        unimplemented!("LevelTicksHost::best_neighbor_signal")
+    }
+    /// Whether any neighbour powers the block at `pos` (`SignalGetter.hasNeighborSignal`),
+    /// asking no side past the first that does.
+    fn has_neighbor_signal(&self, _pos: [i32; 3]) -> bool {
+        unimplemented!("LevelTicksHost::has_neighbor_signal")
     }
 }
 
