@@ -22,6 +22,7 @@ pub struct Hooks {
     pub step_on: fn(&str, Contact<'_>),
     pub any_inside: fn() -> bool,
     pub inside_listens: fn(BlockStateId) -> bool,
+    pub pass_listens: fn(BlockStateId) -> bool,
     pub fall_listens: fn(BlockStateId) -> bool,
     pub bounce_listens: fn(BlockStateId) -> bool,
     /// `Block.fallOn`: change `damage`, the fall damage `causeFallDamage` calculated, and
@@ -39,6 +40,7 @@ pub static HOOKS: OnceLock<Hooks> = OnceLock::new();
 pub enum Pending {
     Inside(Inside),
     Landed(Landed),
+    MinecartPass(MinecartPass),
 }
 
 /// An entity that landed on a block whose Part asked for writes (`Block.fallOn`).
@@ -59,6 +61,14 @@ pub struct Inside {
     /// `Entity.checkInsideBlocks`' `isPrecise`: the entity moved far, or its box
     /// at the target intersects the block.
     pub precise: bool,
+}
+
+/// A minecart on a rail whose Part listens to `minecart_pass`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MinecartPass {
+    pub entity: i32,
+    pub state: BlockStateId,
+    pub position: BlockPos,
 }
 
 thread_local! {
@@ -189,6 +199,20 @@ pub fn inside(entity: i32, state: BlockStateId, position: BlockPos, precise: boo
                 state,
                 position,
                 precise,
+            }));
+        });
+    }
+}
+
+/// Note a minecart on the rail `state` at `position`, if a part there listens; a world
+/// without such a part pays one test per rail step.
+pub fn minecart_pass(entity: i32, state: BlockStateId, position: BlockPos) {
+    if LEVEL.get().is_some() && HOOKS.get().is_some_and(|hooks| (hooks.pass_listens)(state)) {
+        PENDING.with_borrow_mut(|pending| {
+            pending.push(Pending::MinecartPass(MinecartPass {
+                entity,
+                state,
+                position,
             }));
         });
     }

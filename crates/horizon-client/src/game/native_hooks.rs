@@ -8024,8 +8024,18 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_entity_inside(self, state, pos, entity, precise);
     }
-    /// Deliver the contacts the batch just ticked recorded, in order: `entity_inside` to the
-    /// parts, and the writes a landing asked for to the level. A contact is skipped when its
+    /// A minecart passed over a rail with a part for it. The part gets `&mut dyn ServerHost`
+    /// once the cart's batch has ticked, so its writes are not lost to the cart's own tick.
+    pub(super) fn native_minecart_pass(
+        &mut self,
+        state: BlockStateId,
+        pos: BlockPos,
+        entity: EntityRef,
+    ) {
+        mod_api::dispatch_minecart_pass(self, state, pos, entity);
+    }
+    /// Deliver the contacts the batch just ticked recorded, in order: `entity_inside` and
+    /// `minecart_pass` to the parts, and the writes a landing asked for to the level. A contact is skipped when its
     /// entity is gone (an item merged away later in the batch) or the block at its position
     /// is no longer the state it touched, as vanilla never sees a stale one.
     pub(super) fn drain_entity_inside(&mut self) {
@@ -8033,6 +8043,7 @@ impl Game<'_> {
             let (state, pos) = match &contact {
                 Pending::Inside(inside) => (inside.state, inside.position),
                 Pending::Landed(landed) => (landed.state, landed.position),
+                Pending::MinecartPass(pass) => (pass.state, pass.position),
             };
             let Some(level) = self.native_level(self.dim.id()) else {
                 continue;
@@ -8047,6 +8058,14 @@ impl Game<'_> {
                         .and_then(|id| self.native_entity(id))
                     {
                         self.native_entity_inside(state, pos, entity, inside.precise);
+                    }
+                }
+                Pending::MinecartPass(pass) => {
+                    if let Some(entity) = u32::try_from(pass.entity)
+                        .ok()
+                        .and_then(|id| self.native_entity(id))
+                    {
+                        self.native_minecart_pass(state, pos, entity);
                     }
                 }
                 Pending::Landed(landed) => {
@@ -8419,6 +8438,9 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
         any_inside: || mod_api::__private::has_scoped_hook(mod_api::HookId::EntityInside),
         inside_listens: |state| {
             mod_api::__private::block_listens(mod_api::HookId::EntityInside, "entity_inside", state)
+        },
+        pass_listens: |state| {
+            mod_api::__private::block_listens(mod_api::HookId::MinecartPass, "minecart_pass", state)
         },
         fall_listens: |state| {
             mod_api::__private::block_listens(mod_api::HookId::FallOn, "fall_on", state)
