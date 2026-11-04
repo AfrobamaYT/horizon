@@ -4698,4 +4698,88 @@ pub(crate) mod tests {
             "special recipe must craft with limited_crafting: true without being in known_recipes"
         );
     }
+
+    /// A server host that answers nothing: the hooks here don't call it.
+    struct NoHost;
+    impl mod_api::Host for NoHost {}
+    impl mod_api::ServerHost for NoHost {}
+
+    /// Records what `player_brewed_potion` told it.
+    struct BrewWatcher(std::sync::Arc<std::sync::Mutex<Vec<(u128, i32, ItemStack)>>>);
+
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for BrewWatcher {
+        fn player_brewed_potion(
+            &self,
+            _host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::PlayerBrewedPotionEvent<'_>,
+        ) {
+            let seen = (event.player, event.player_entity_id, event.stack.clone());
+            self.0.lock().unwrap().push(seen);
+        }
+    }
+
+    /// `BrewingStandMenu.PotionSlot.onTake`: a pickup and a shift-click on a
+    /// bottle slot each tell a listening mod once, with the taken stack and
+    /// the player's UUID and entity id; with no listener nothing is kept.
+    #[test]
+    fn a_bottle_slot_take_tells_the_listener_once_with_the_player() {
+        let root = std::env::temp_dir().join(format!("horizon-brewed-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
+        let items = horizon_items::items::Items::for_tests(Default::default());
+        let overlay = &horizon_world::loot::PackOverlay::NONE;
+        let recipes = Recipes::load(&root, &items, overlay).unwrap();
+        let brewing = Brewing::load(&root, &items, overlay);
+        let _ = std::fs::remove_dir_all(&root);
+        let (banners, station_recipes) = (Default::default(), Default::default());
+        let (enchantments, names) = (Default::default(), Default::default());
+        let env = &Env {
+            player: Some(7),
+            player_entity_id: Some(41),
+            side: LogicalSide::Server,
+            items: &items,
+            recipes: &recipes,
+            brewing: &brewing,
+            banners: &banners,
+            station_recipes: &station_recipes,
+            enchantments: &enchantments,
+            names: &names,
+            trade: None,
+            maps: None,
+            limited_crafting: false,
+            known_recipes: None,
+        };
+        let potion = ItemStack::new("minecraft:potion", 1);
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mods: Vec<mod_api::ModEntry> = vec![mod_api::ModEntry::new(
+            "brew-watcher",
+            Box::new(BrewWatcher(seen.clone())),
+        )];
+        let mut host = NoHost;
+        mod_api::testing::with_mods(mods.into(), || {
+            for input in [Input::Pickup, Input::QuickMove] {
+                let mut menu = Menu::new(Kind::Brewing);
+                menu.set_slot(env, 0, Some(potion.clone()));
+                menu.click(env, 0, 0, input).unwrap();
+                // Without a listener the take is only the advancement's.
+                assert!(menu.brewed_potion_takes.is_empty(), "{input:?}");
+                assert_eq!(menu.brewed, std::slice::from_ref(&potion), "{input:?}");
+
+                let mut menu = Menu::new(Kind::Brewing);
+                menu.brewed_potion_hook = true;
+                menu.set_slot(env, 0, Some(potion.clone()));
+                menu.click(env, 0, 0, input).unwrap();
+                assert_eq!(
+                    menu.brewed_potion_takes,
+                    std::slice::from_ref(&potion),
+                    "{input:?}"
+                );
+                for stack in &menu.brewed_potion_takes {
+                    mod_api::dispatch_player_brewed_potion(&mut host, 7, 41, stack);
+                }
+            }
+        });
+        let told = (7, 41, potion);
+        assert_eq!(*seen.lock().unwrap(), [told.clone(), told]);
+    }
 }

@@ -867,4 +867,58 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    struct Quiet;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Quiet {}
+
+    struct Broken;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Broken {
+        fn component_types(
+            &self,
+            _context: &mod_api::RegistrationContext<'_>,
+            _event: &mut mod_api::ComponentTypesEvent<'_>,
+        ) {
+            panic!("a broken mod");
+        }
+    }
+
+    #[test]
+    fn a_panic_in_a_hook_names_the_mod_and_the_hook() {
+        let mods: Vec<mod_api::ModEntry> = vec![
+            mod_api::ModEntry::new("quiet", Box::new(Quiet)),
+            mod_api::ModEntry::new("broken", Box::new(Broken)),
+        ];
+        let caught = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = caught.clone();
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let error = panic_report(info, "client").error;
+            if error.contains("a broken mod") {
+                sink.lock().unwrap().push(error);
+            }
+        }));
+        let unwound = mod_api::testing::with_mods(mods.into(), || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                mod_api::dispatch_component_types(
+                    &mod_api::RegistrationContext::new(),
+                    &mut Vec::new(),
+                )
+            }))
+        });
+        // Once the dispatch has unwound, the thread is in no mod.
+        let _ = std::panic::catch_unwind(|| panic!("a broken mod's caller"));
+        std::panic::set_hook(previous);
+        // The game stops as before: the panic goes on to the dispatch's caller.
+        assert!(unwound.is_err());
+        let errors = caught.lock().unwrap();
+        assert_eq!(errors.len(), 2);
+        assert!(
+            errors[0].ends_with("\nin native mod broken, hook component_types"),
+            "{}",
+            errors[0]
+        );
+        assert!(!errors[1].contains("in native mod"), "{}", errors[1]);
+    }
 }
