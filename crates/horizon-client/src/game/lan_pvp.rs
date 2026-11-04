@@ -171,7 +171,7 @@ impl Game<'_> {
             };
             let mut random = self.world.random.clone();
             world_stations!(self).enchantments.ignite_seconds(
-                held.enchantments(),
+                &held.all_enchantments(),
                 &ctx,
                 &mut random,
             )

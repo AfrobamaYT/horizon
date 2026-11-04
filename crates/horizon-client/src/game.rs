@@ -6314,8 +6314,9 @@ impl Game<'_> {
             .get("minecraft:breaks_decorated_pots")
             .is_some_and(|t| t.contains(&*held.item));
         let enchantments = &self.stations().enchantments;
+        // `EnchantmentHelper.hasTag`, which NeoForge asks through the mods.
         let kept = held
-            .enchantments()
+            .all_enchantments()
             .iter()
             .any(|(e, _)| enchantments.in_tag("minecraft:prevents_decorated_pot_shattering", e));
         if !breaks || kept {
