@@ -4119,7 +4119,9 @@ pub use block_states::{BlockStates, HostBlockStates};
 mod energy_capability;
 pub use energy_capability::{ENERGY, EnergyHandler, ITEM_ENERGY, move_energy};
 mod fluid_capability;
-pub use fluid_capability::{FLUIDS, FluidResource, FluidStack, ITEM_FLUIDS};
+pub use fluid_capability::{
+    FLUIDS, FluidIngredient, FluidResource, FluidStack, ITEM_FLUIDS, SizedFluidIngredient,
+};
 mod item_place;
 mod menu_slot;
 pub use menu_slot::MenuSlotBacking;

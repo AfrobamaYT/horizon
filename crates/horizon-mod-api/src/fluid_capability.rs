@@ -2,9 +2,10 @@
 //! `Capabilities.Fluid.BLOCK`, a [`ResourceHandler`] of [`FluidResource`]s as
 //! [`ITEMS`](super::ITEMS) is of items. Amounts are millibuckets: a bucket is 1000.
 use super::{
-    BlockSide, CapabilityKey, ItemCapabilityKey, ItemPlace, ItemResource, ItemStack,
-    ResourceHandler, ServerHost, Transaction,
+    BlockSide, CapabilityKey, DataLoadContext, ItemCapabilityKey, ItemPlace, ItemResource,
+    ItemStack, ResourceHandler, ServerHost, Transaction,
 };
+use crate::crafting::WalkedIngredient;
 use horizon_items::item_data::StackData;
 use std::{fmt, marker::PhantomData, sync::Arc};
 
@@ -89,6 +90,85 @@ impl Eq for FluidResource {}
 impl fmt::Debug for FluidResource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("FluidResource").field(&self.0.fluid).finish()
+    }
+}
+
+/// A set of accepted fluids, as NeoForge's `FluidIngredient`: a fluid
+/// (`minecraft:water`), a `#tag`, a list of them, or the three shapes with
+/// their children, parsed from a recipe's JSON by the same walk an item
+/// [`Ingredient`](super::Ingredient) parses its own with, over the fluid
+/// tags the load's [`DataLoadContext`] holds. A kind outside the standard
+/// shapes fails the parse: fluids have no custom ingredient hook.
+/// Components are not checked — any stack of a named fluid answers.
+#[derive(Clone, Debug)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct FluidIngredient(WalkedIngredient);
+
+impl FluidIngredient {
+    /// The fluids `v` names, as the load's fluid tags resolve them: a fluid,
+    /// a `#tag`, a list, or NeoForge's three shapes. `None` fails the
+    /// file: an empty list, a tag that isn't loaded, a kind outside the
+    /// standard shapes.
+    pub fn from_json(v: &serde_json::Value, context: &dyn DataLoadContext) -> Option<Self> {
+        let mut tags = std::collections::HashMap::new();
+        if let Some(list) = context.fluid_tags() {
+            tags.reserve(list.len());
+            for (tag, fluids) in list.iter() {
+                tags.insert(tag.clone(), fluids.iter().cloned().collect());
+            }
+        }
+        // A custom kind is the item ingredient's hook; a fluid one fails
+        // the file, as a kind outside these does.
+        WalkedIngredient::walk(v, &tags, &|_| None).map(Self)
+    }
+    /// `FluidIngredient.test`: the stack's fluid among the ones the source
+    /// named — and for a shape, each child its own way (any for
+    /// `compound`, all for `intersection`, base-but-not-subtracted for
+    /// `difference`).
+    pub fn test(&self, stack: &FluidStack) -> bool {
+        self.0.test(&stack.fluid, &|_, _| false)
+    }
+    /// The fluids it accepts, in the sources' order (`HolderSet`) — what a
+    /// recipe book shows.
+    pub fn fluids(&self) -> &[String] {
+        &self.0.order
+    }
+}
+
+/// `FluidType.BUCKET_VOLUME`: the amount [`SizedFluidIngredient`]'s
+/// `"amount"` defaults to.
+const BUCKET_VOLUME: u32 = 1000;
+
+/// A [`FluidIngredient`] with the amount it asks, as NeoForge's
+/// `SizedFluidIngredient`: the fluids the ingredient accepts, and how many
+/// millibuckets of them (a bucket is 1000).
+#[derive(Clone, Debug)]
+// exhaustive: plain data the mod reads out of a recipe and matches stacks with
+pub struct SizedFluidIngredient {
+    /// The fluids it accepts, without an amount.
+    pub ingredient: FluidIngredient,
+    /// How many millibuckets it asks of one of them; positive.
+    pub amount: u32,
+}
+
+impl SizedFluidIngredient {
+    /// The sized ingredient of `v`, as NeoForge's codec reads it:
+    /// `{"ingredient": <fluid ingredient>, "amount": n}` — `amount`
+    /// defaults to a bucket (1000 mB) and must be positive.
+    pub fn from_json(v: &serde_json::Value, context: &dyn DataLoadContext) -> Option<Self> {
+        let o = v.as_object()?;
+        let ingredient = FluidIngredient::from_json(o.get("ingredient")?, context)?;
+        // `ExtraCodecs.POSITIVE_INT` with the bucket default.
+        let amount = match o.get("amount") {
+            Some(a) => u32::try_from(a.as_u64()?).ok().filter(|n| *n > 0)?,
+            None => BUCKET_VOLUME,
+        };
+        Some(Self { ingredient, amount })
+    }
+    /// `SizedFluidIngredient.test`: the stack matches the ingredient and
+    /// carries at least `amount` of it.
+    pub fn test(&self, stack: &FluidStack) -> bool {
+        self.ingredient.test(stack) && stack.amount >= self.amount
     }
 }
 
@@ -269,5 +349,177 @@ impl ResourceHandler<FluidResource> for GameBucket {
             }
             _ => 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{DataLoadOrigin, OwningLoad};
+    use horizon_world::native_load_context::{LoadContext, LoadInputs};
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    /// The load the game's recipe pass builds: real engine context, with the
+    /// tags the game ships in `worldgen/fluid_tags.json` — water holds the
+    /// flowing fluid too.
+    fn load() -> LoadContext {
+        let mut tags = HashMap::new();
+        tags.insert(
+            "minecraft:water".to_owned(),
+            vec![
+                "minecraft:water".to_owned(),
+                "minecraft:flowing_water".to_owned(),
+            ],
+        );
+        tags.insert("c:lava".to_owned(), vec!["minecraft:lava".to_owned()]);
+        let inputs = LoadInputs::new(Default::default(), Default::default()).with_fluid_tags(tags);
+        LoadContext::new(DataLoadOrigin::ServerDataLoad, Arc::new(inputs), [])
+    }
+    fn parse(s: &str) -> Option<FluidIngredient> {
+        let load = load();
+        FluidIngredient::from_json(&serde_json::from_str(s).unwrap(), &OwningLoad::new(&load))
+    }
+    fn stack(fluid: &str, amount: u32) -> FluidStack {
+        FluidStack::new(fluid, amount)
+    }
+
+    /// A single fluid matches itself and nothing else.
+    #[test]
+    fn a_single_fluid_matches_itself() {
+        let single = parse(r#""minecraft:water""#).unwrap();
+        assert!(single.test(&stack("minecraft:water", 100)));
+        assert!(!single.test(&stack("minecraft:lava", 100)));
+        assert_eq!(single.fluids(), ["minecraft:water"]);
+    }
+
+    /// A `#tag` resolves through the fluid tags, keeping their order; a
+    /// fluid outside it and a tag that isn't loaded answer nothing.
+    #[test]
+    fn a_tag_resolves_through_the_fluid_tags() {
+        let tag = parse(r##""#minecraft:water""##).unwrap();
+        assert_eq!(tag.fluids(), ["minecraft:water", "minecraft:flowing_water"]);
+        assert!(tag.test(&stack("minecraft:flowing_water", 1)));
+        assert!(!tag.test(&stack("minecraft:lava", 1)));
+        assert!(parse(r##""#minecraft:unloaded""##).is_none());
+    }
+
+    /// A list keeps first-seen order and drops the rest.
+    #[test]
+    fn a_list_dedups_keeping_order() {
+        let list = parse(r##"["minecraft:water","#minecraft:water","minecraft:lava"]"##).unwrap();
+        assert_eq!(
+            list.fluids(),
+            [
+                "minecraft:water",
+                "minecraft:flowing_water",
+                "minecraft:lava"
+            ]
+        );
+        assert!(parse(r#"[]"#).is_none());
+    }
+
+    /// The shapes nest: compound answers any child, difference the base
+    /// without the subtracted — and a kind outside them fails the parse,
+    /// as fluids have no custom ingredient hook.
+    #[test]
+    fn the_shapes_nest_and_a_custom_kind_fails() {
+        let compound = parse(
+            r##"{"neoforge:ingredient_type":"neoforge:compound","children":["minecraft:lava","#minecraft:water"]}"##,
+        )
+        .unwrap();
+        assert!(compound.test(&stack("minecraft:water", 1)));
+        assert!(compound.test(&stack("minecraft:lava", 1)));
+        assert!(!compound.test(&stack("minecraft:milk", 1)));
+        let intersection = parse(
+            r##"{"type":"neoforge:intersection","children":["#minecraft:water",["minecraft:water","minecraft:lava"]]}"##,
+        )
+        .unwrap();
+        assert!(intersection.test(&stack("minecraft:water", 1)));
+        assert!(!intersection.test(&stack("minecraft:lava", 1)));
+        let difference = parse(
+            r##"{"type":"neoforge:difference","base":"#minecraft:water","subtracted":"minecraft:flowing_water"}"##,
+        )
+        .unwrap();
+        assert_eq!(difference.fluids(), ["minecraft:water"]);
+        assert!(!difference.test(&stack("minecraft:flowing_water", 1)));
+        // A mod's own kind, an unknown minecraft kind and a kindless
+        // object all fail the file.
+        assert!(parse(r#"{"type":"mymod:hot","heat":9}"#).is_none());
+        assert!(parse(r#"{"type":"minecraft:future_shape"}"#).is_none());
+        assert!(parse(r#"{"fluid":"minecraft:water"}"#).is_none());
+    }
+
+    /// The sized ingredient asks an amount: the stack must match and carry
+    /// at least that much; `amount` defaults to a bucket and must be
+    /// positive.
+    #[test]
+    fn the_sized_ingredient_checks_the_amount() {
+        let load = load();
+        let sized = |s: &str| {
+            SizedFluidIngredient::from_json(
+                &serde_json::from_str(s).unwrap(),
+                &OwningLoad::new(&load),
+            )
+        };
+        let half = sized(r#"{"ingredient":"minecraft:water","amount":500}"#).unwrap();
+        assert!(!half.test(&stack("minecraft:water", 499)));
+        assert!(half.test(&stack("minecraft:water", 500)));
+        assert!(half.test(&stack("minecraft:water", 1000)));
+        assert!(!half.test(&stack("minecraft:lava", 1000)));
+        // A bucket by default (`FluidType.BUCKET_VOLUME`).
+        let bucket = sized(r#"{"ingredient":"minecraft:water"}"#).unwrap();
+        assert_eq!(bucket.amount, 1000);
+        assert!(!bucket.test(&stack("minecraft:water", 999)));
+        assert!(bucket.test(&stack("minecraft:water", 1000)));
+        // A positive amount, as `ExtraCodecs.POSITIVE_INT` asks.
+        assert!(sized(r#"{"ingredient":"minecraft:water","amount":0}"#).is_none());
+        assert!(sized(r#"{"ingredient":"minecraft:water","amount":-1}"#).is_none());
+        assert!(sized(r#"{"ingredient":"minecraft:water","amount":1.5}"#).is_none());
+        assert!(sized(r##"{"ingredient":"#minecraft:unloaded"}"##).is_none());
+        assert!(sized(r#"{"ingredient":[]}"#).is_none());
+    }
+
+    /// The same walk parses item ingredients unchanged: the fluid kinds
+    /// share its code without touching its answers.
+    #[test]
+    fn item_ingredients_still_parse_the_same() {
+        let items = horizon_items::items::Items::for_tests(HashMap::new());
+        let json = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
+        let stone = crate::Ingredient::parse(&json(r#""minecraft:stone""#), &items).unwrap();
+        assert_eq!(stone.order, ["minecraft:stone"]);
+        let union = crate::Ingredient::parse(
+            &json(r#"{"type":"neoforge:compound","children":["minecraft:oak_planks","minecraft:stone"]}"#),
+            &items,
+        )
+        .unwrap();
+        assert_eq!(union.order, ["minecraft:oak_planks", "minecraft:stone"]);
+        assert!(crate::Ingredient::parse(&json(r#"{"type":"mymod:aspect"}"#), &items).is_none());
+        // A mod's kind nested in a shape brings the list its hook left at
+        // load into the shape's ids, as on main before the shared walk.
+        let aspect = r#"{"type":"mymod:aspect","horizon:resolved_items":["minecraft:oak_planks","minecraft:stone"]}"#;
+        let union = crate::Ingredient::parse(
+            &json(&format!(
+                r#"{{"type":"neoforge:compound","children":[{aspect},"minecraft:dirt"]}}"#
+            )),
+            &items,
+        )
+        .unwrap();
+        assert_eq!(
+            union.order,
+            ["minecraft:oak_planks", "minecraft:stone", "minecraft:dirt"]
+        );
+        let both = crate::Ingredient::parse(
+            &json(&format!(
+                r#"{{"type":"neoforge:intersection","children":[{aspect},["minecraft:stone","minecraft:dirt"]]}}"#
+            )),
+            &items,
+        )
+        .unwrap();
+        assert_eq!(both.order, ["minecraft:stone"]);
+        assert!(
+            crate::Ingredient::parse(&json(r#"{"type":"minecraft:future_shape"}"#), &items)
+                .is_none()
+        );
     }
 }
