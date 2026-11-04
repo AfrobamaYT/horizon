@@ -1016,6 +1016,8 @@ registration path.
 
 - A mod that hears `native_pickup_xp` sets `listened` in `native_pickup_xp_listened` (a HEAD injection); `native_pickup_xp(player, dimension, orb, value, count, canceled)` then runs before a server player takes an orb. Canceling leaves the orb and the pickup delay unchanged; otherwise the value is clamped to 1..=2,147,483,647 and the count to at least one, then one count is taken. `native_mending_repair(player, stack, experience, repair)` sees the damaged Mending item picked at random and can change the durability repair proposed for it, which is capped at its current damage. Turning a positive proposal into zero leaves the experience unspent (a zero vanilla proposal keeps vanilla's behaviour); if the picked stack is removed, changed except for its damage, or no longer eligible, the repair is skipped and the experience remains. The repair also decides how much experience is left for further repairs. It runs for `PlayerRef::give_experience_points` too. Both run on the integrated and the dedicated server, guests included.
 
+- Whom an experience orb follows (`XpOrbTargetingEvent`): `native_xp_orb_targeting(orb, scan_distance, following)`, on a server, for each orb as it ticks. `following` starts as the nearest living player within `scan_distance` (8) blocks who isn't a spectator, or `None`; set another player, or `None` to follow no one. The orb goes only for a living player who isn't a spectator and is in its level, and moves only once they are within 8 blocks. An orb that follows no one gets vanilla's push out of a block it is stuck in. Horizon looks for the nearest player on every orb tick, where vanilla keeps the player it follows while they stay within 8 blocks, so the hook is asked every tick for each orb (NeoForge asks only when the orb has no player in range). Clients still predict the orb's flight towards the nearest player; the server's position wins.
+
 - Where a loot roll happens, for a mod's own loot kinds: `ctx.place` in `native_loot_function` and
   `native_loot_condition` brings `LootContextParams.ORIGIN` (a broken block's centre, a dead mob's position), `BLOCK_ENTITY` (the broken
   block's entity as it was, saved with its id, position and `Items`) and the level (its dimension, game time, time of day, rain and
@@ -1869,6 +1871,15 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   to leave the position unchanged. Direct player flint-and-steel/fire-charge placement is not covered.
 - **`native_block_burn(dimension, pos, cancel)`** (on `GameLevel`): fire's burnout check is about to remove the block at
   `pos`. Set `cancel` to keep it.
+- **`native_crop_grow_pre(dimension, pos, state, result)`** and **`native_crop_grow_post(dimension, pos,
+  original_state, state)`** (on `GameLevel`): NeoForge's `CropGrowEvent.Pre` and `.Post`, at the random-tick growth of
+  crops (beetroot and torchflowers after their own 1 in 3 skip), stems, nether wart, cocoa, sweet berries, bamboo,
+  cactus, chorus flowers, sugar cane, kelp and the vines. `result` is a `NativeTriState`: `Default` keeps vanilla's
+  chance, `True` grows, `False` doesn't. Pre fires at NeoForge's positions (the block above for cactus and chorus,
+  the block grown into for kelp and vines). Vanilla's random roll is drawn first, in vanilla's order, and passed as
+  the default. Diverges from NeoForge, which draws bamboo's and sweet berries' roll later (only after the
+  other checks), so a NeoForge server's crops drift from vanilla's random sequence. Pitcher crops, bamboo
+  saplings and mangrove propagules don't fire, as in NeoForge.
 - **`native_dragon_egg_form(dimension, pos, cancel)`** (on `GameLevel`): the first Ender Dragon fight is about to place
   its egg at `pos`. Set `cancel` to leave the block unchanged.
 - **`native_fluid_level_change(dimension, pos, fluid, from, to, cancel)`** (on `GameLevel`): flowing `water` or `lava`
@@ -2126,7 +2137,7 @@ handle, an entity the client doesn't track and a level it doesn't show:
   vanilla. It moves the deadline the use-item Tick hook moves, so shield, bow, trident, spear, instrument and bundle uses,
   which don't count it, ignore it, and a call inside that Tick hook is overwritten by the hook's result. Nothing in use reads 0 and refuses a write. A mob's item use is a counter of its goal, so mobs read None.
 - `living.effects(host)` lists a living entity's active effects (vanilla's `activeEffects`) as `NativeActiveEffect`s — the
-  namespaced id, the ticks left (-1 infinite), the amplifier, and the `ambient` and `visible` flags; Horizon keeps no separate
+  namespaced id as an owned `Identifier`, the ticks left (-1 infinite), the amplifier, and the `ambient` and `visible` flags; Horizon keeps no separate
   show-icon flag, the icon always shows. `living.effect(host, id)` reads one (`getEffect`) and `living.potion_affected(host,
   id)` answers `hasEffect`; a bare vanilla id reads as `minecraft:`'s. `living.add_effect(host, &effect)` is
   `LivingEntity.addEffect` by the game's own path: a player's or a guest's goes through the potion machinery (its attribute
@@ -2582,13 +2593,17 @@ Look blocks up once and keep what you need (a few words a block for your own sha
 
 ### Menu slot rules
 
-`crates/horizon-client/src/menu.rs`: `native_menu_slot_rules(menu, slot, stack, may_place, max_stack)`, a free function
+`crates/horizon-client/src/menu.rs`: `native_menu_slot_rules(context, menu, slot, stack, may_place, max_stack)`, a free function
 a bundle targets as `horizon_client::menu::native_menu_slot_rules`. A content mod menu type's container slot `slot`
 (from 0) is asked whether it takes `stack` (`Slot.mayPlace`) and how many it holds (`Slot.getMaxStackSize`), as a
 NeoForge mod's own `Slot` overrides them. `may_place` and `max_stack` come in with the type's own answer (false on one
 of its `results` ([making a content mod](../how-to/content-mods.md#menu-types)), true elsewhere, and 99): change them for your own menu types.
 `max_stack` is kept to 1 to 99, and the item's own stack size still caps it. It runs inside a click, a drag or a
-shift-click (several times for one), with no level or player at hand: answer from the stack, and fast. It is asked
+shift-click (several times for one), with no level or player at hand: answer from the stack and the `LoopContext` it
+is given, and fast. The context's `side()` is `LoopSide::Server`, and a mod's setting read through it is the one captured
+when the server last loaded its data: a `/reload` builds the next context, which the next call sees. The hook's contract
+version is `2`: a mod written for `1` takes the context as a new first argument of `Hooks::menu_slot_rules` and
+`MenuPart::menu_slot_rules`. It is asked
 only for a server's players (single player's server thread, LAN guests, a dedicated server), and vanilla's menus
 never ask it. As in vanilla (`AbstractContainerMenu.moveItemStackTo`), a
 shift-click tops up a slot (not a `results` one) that already holds the same item without asking `may_place`, only `max_stack`: to keep a
@@ -2621,14 +2636,14 @@ clicks already.
 
 `LoopContext<'_>` is the read-only view for a hook fired inside a menu, recipe or
 player-list loop, where no game is at hand (a catalog entry names it with
-`"context": "loop"`; the sound hooks below are the first). `side()` is `LoopSide::Server` or
+`"context": "loop"`; `menu_slot_rules` is the first hook to take it, and the sound hooks below fire it from the sound engine). `side()` is `LoopSide::Server` or
 `LoopSide::Client`, `registry(name)` borrows names in registry ID order,
 `setting(mod_id, key)` returns a loaded mod's setting captured when the context was
 built, and `mods()` is the `LoadedMods` view of registration. It has no game Host,
 handle construction or transaction, and its answers never change while it is held.
 The side that owns the loop builds it, never a hook: the client builds one at window
-start and again after each resource reload, so a reload captures fresh settings; a
-server side comes with the first server hook that takes it.
+start and again after each resource reload, and a server builds one when it starts its
+mods and again on each `/reload`, so a reload captures fresh settings.
 
 ### Sound hooks
 

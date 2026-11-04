@@ -107,8 +107,9 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
         log::warn!("The enchantment level hook is already installed; keeping the first");
     }
     if crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
-        menu_slot_rules: |menu, slot, stack, may_place, max_stack| {
-            mod_api::dispatch_menu_slot_rules(menu, slot, stack, may_place, max_stack);
+        menu_slot_rules: |context, menu, slot, stack, may_place, max_stack| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_menu_slot_rules(&context, menu, slot, stack, may_place, max_stack);
         },
         item_stacked_on_other: |event, canceled| {
             mod_api::dispatch_item_stacked_on_other(event, canceled);

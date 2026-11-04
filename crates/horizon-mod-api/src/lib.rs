@@ -1430,17 +1430,17 @@ impl ItemEnchantments {
 
 /// A living entity's active effect (vanilla's `MobEffectInstance`), as
 /// [`LivingRef`] reads its effects and as `add_effect` gives one: the
-/// effect's id namespaced as the registry has it (`minecraft:speed`, a
-/// content mod's `mod:custom`; a bare vanilla id reads as `minecraft:`'s),
+/// effect's id, an [`Identifier`] namespaced as the registry has it
+/// (`minecraft:speed`, a content mod's `mod:custom`),
 /// the ticks left (-1 is infinite), the amplifier from 0, and the flags a
 /// beacon-style effect carries: `ambient` (an ambient one gives no
 /// particles) and `visible` (whether its particles show). Horizon keeps no
 /// separate show-icon flag: the icon always shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeActiveEffect {
     /// The effect's namespaced id.
-    pub id: &'static str,
+    pub id: Identifier,
     /// The ticks left; -1 is infinite.
     pub duration: i32,
     /// The amplifier, from 0.
@@ -1454,7 +1454,7 @@ pub struct NativeActiveEffect {
 impl NativeActiveEffect {
     /// Construct an effect with its duration, amplifier and visual flags.
     pub fn new(
-        id: &'static str,
+        id: Identifier,
         duration: i32,
         amplifier: i32,
         ambient: bool,
@@ -4890,7 +4890,8 @@ pub(crate) mod built {
                 visible,
             } = v;
             Self {
-                id,
+                id: crate::Identifier::parse_namespaced(id)
+                    .expect("the game's effect ids are namespaced"),
                 duration,
                 amplifier,
                 ambient,

@@ -93,7 +93,8 @@ impl Game<'_> {
         living: LivingRef,
         effect: &NativeActiveEffect,
     ) -> bool {
-        let Some(def) = brewing::effect(effect.id) else {
+        let text = effect.id.to_string();
+        let Some(def) = brewing::effect(&text) else {
             return false;
         };
         if effect.duration < -1 {
@@ -254,7 +255,7 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::mobs::Mob;
     use horizon_core::geometry::Vec3;
-    use mod_api::{EntityRef, LivingRef, NativeActiveEffect, NativeWorldEpoch};
+    use mod_api::{EntityRef, Identifier, LivingRef, NativeActiveEffect, NativeWorldEpoch};
 
     fn effect(id: &'static str, duration: i32, amplifier: i32) -> NativeActiveEffect {
         NativeActiveEffect::from(mod_api::__private::built::NativeActiveEffect {
@@ -264,6 +265,35 @@ mod tests {
             ambient: false,
             visible: true,
         })
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn active_effect_ids_are_owned_identifiers() {
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(21, kind, Vec3::ZERO, 0.0));
+            let zombie = game.native_living(game.native_entity(21).unwrap()).unwrap();
+            // `new` takes the id as an owned `Identifier`, and the form the
+            // game builds parses its namespaced spelling into the same value.
+            let speed = NativeActiveEffect::new(
+                Identifier::parse("minecraft:speed").unwrap(),
+                200,
+                0,
+                false,
+                true,
+            );
+            assert!(game.native_living_add_effect(zombie, &speed));
+            let listed = game.native_living_effects(zombie).unwrap();
+            assert_eq!(listed[0].id, Identifier::parse("speed").unwrap());
+            assert_eq!(listed[0].id.namespace(), "minecraft");
+            assert_eq!(listed[0].id.path(), "speed");
+        });
     }
 
     #[test]

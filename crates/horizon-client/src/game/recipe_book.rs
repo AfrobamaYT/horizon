@@ -291,7 +291,7 @@ impl Game<'_> {
             let env = Env {
                 player: None,
                 player_entity_id: None,
-                side: mod_api::menu::LogicalSide::Server,
+                loop_context: &self.loop_context,
                 items: self.items(),
                 recipes: self.recipes(),
                 brewing: &self.stations().brewing,

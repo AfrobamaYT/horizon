@@ -28,9 +28,9 @@ pub(super) fn validate(
 ) -> Result<(), String> {
     if hook.context.is_some() {
         let owns_host = mutable.is_some() || is_level || ticks;
-        if owns_host || hook.host.is_some() || hook.scope.is_some() {
+        if owns_host || hook.host.is_some() {
             return Err(format!(
-                "{name}: a phase context cannot be combined with a game/level host or Parts scope"
+                "{name}: a phase context cannot be combined with a game/level host"
             ));
         }
     }

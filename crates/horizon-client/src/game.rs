@@ -102,6 +102,8 @@ mod cosmetics;
 mod creaking;
 mod creative_hotbar;
 mod creatures;
+#[cfg(test)]
+mod crop_grow_tests;
 mod crossbow;
 pub(crate) mod cushions;
 mod debug_keys;
@@ -400,6 +402,7 @@ mod win;
 mod wind;
 mod wither;
 mod world_loading;
+mod xp_orb_targeting;
 mod zombie_reinforcements;
 mod zombie_villagers;
 use event_loop::EventLoopCtl;
@@ -1335,6 +1338,22 @@ impl LevelAccess for GameLevel<'_> {
         let mut cancel = false;
         self.native_block_grow_feature(self.dimension, pos, &mut feature, &mut cancel);
         feature.filter(|_| !cancel).map(std::borrow::Cow::Owned)
+    }
+    fn crop_grow_pre(&mut self, pos: BlockPos, state: BlockStateId, vanilla: bool) -> bool {
+        if !self.native_authoritative || !mod_api::__private::listened(mod_api::HookId::CropGrowPre)
+        {
+            return vanilla;
+        }
+        let mut result = mod_api::NativeTriState::Default;
+        self.native_crop_grow_pre(self.dimension, pos, state, &mut result);
+        result.or(vanilla)
+    }
+    fn crop_grow_post(&mut self, pos: BlockPos, original: BlockStateId) {
+        if self.native_authoritative && mod_api::__private::listened(mod_api::HookId::CropGrowPost)
+        {
+            let state = self.block_state(pos);
+            self.native_crop_grow_post(self.dimension, pos, original, state);
+        }
     }
     fn allow_block_burn(&self, pos: BlockPos) -> bool {
         let mut cancel = false;
@@ -2864,6 +2883,9 @@ struct Game<'a> {
     player_autosaves: horizon_client::lan::playerdata::Autosaves,
     session_lock: Option<horizon_client::save::SessionLock>,
     audio: Audio,
+    /// The side, registries and mod settings of this game's resource generation, which
+    /// its menus lend to the hooks they fire inside a loop; rebuilt by `refresh_loop_context`.
+    loop_context: horizon_world::native_load_context::LoopContext,
     music: horizon_client::music::MusicManager,
     /// The tracks native mods play over the music (`native_music_layers`).
     music_layers: horizon_client::music::MusicLayers,
@@ -7598,7 +7620,10 @@ impl Game<'_> {
                     };
                     if let Some(living) = mob {
                         let effect = mod_api::NativeActiveEffect::new(
-                            horizon_client::brewing::namespaced(def.id),
+                            mod_api::Identifier::parse_namespaced(
+                                horizon_client::brewing::namespaced(def.id),
+                            )
+                            .expect("the game's effect ids are namespaced"),
                             eff.duration,
                             eff.amplifier,
                             eff.ambient,
@@ -10602,11 +10627,7 @@ impl Game<'_> {
                 .lan_acting_uuid
                 .or_else(|| self.remote.as_ref().map(|r| r.profile())),
             player_entity_id: Some(self.own_entity_id()),
-            side: if self.serving.is_some() {
-                horizon_client::menu::LogicalSide::Server
-            } else {
-                horizon_client::menu::LogicalSide::Client
-            },
+            loop_context: &self.loop_context,
             items: self.items(),
             recipes: self.recipes(),
             brewing: &self.stations().brewing,
@@ -14490,8 +14511,8 @@ impl Game<'_> {
     }
     /// `ExperienceOrb.followNearbyPlayer`'s candidates: each orb goes for the
     /// nearest living player within 8 blocks, the host's own or a guest. Each
-    /// is the player's feet and the point the orb homes on.
-    pub(super) fn orb_followed(&self) -> Vec<([f64; 3], [f64; 3])> {
+    /// is the player's feet, the point the orb homes on and the player's UUID.
+    pub(super) fn orb_followed(&self) -> Vec<xp_orb_targeting::OrbCandidate> {
         let spectator = self.spectator();
         let player = self
             .player
@@ -14499,11 +14520,15 @@ impl Game<'_> {
             .filter(|p| !p.health.dead_or_dying() && !spectator && !self.lan_acting_fake);
         // ExperienceOrb.followNearbyPlayer: each orb goes for the nearest
         // living player within 8 blocks, the host's own or a guest.
-        let mut followed: Vec<([f64; 3], [f64; 3])> = player
+        let uuid = self
+            .level
+            .player_uuid
+            .map(horizon_client::lan::playerdata::ints_uuid);
+        let mut followed: Vec<xp_orb_targeting::OrbCandidate> = player
             .map(|p| {
                 let feet = [p.position.x, p.position.y, p.position.z];
                 let eye = f64::from(p.dimensions.eye_height);
-                (feet, [feet[0], feet[1] + eye / 2.0, feet[2]])
+                (feet, [feet[0], feet[1] + eye / 2.0, feet[2]], uuid)
             })
             .into_iter()
             .collect();
@@ -14522,7 +14547,7 @@ impl Game<'_> {
                     .filter(|g| !g.spectator())
                     .map(|g| {
                         let p = g.position;
-                        (p, [p[0], p[1] + g.eye_height() / 2.0, p[2]])
+                        (p, [p[0], p[1] + g.eye_height() / 2.0, p[2]], Some(g.uuid))
                     }),
             );
         }
@@ -19725,6 +19750,7 @@ impl<'a> Game<'a> {
     ) -> Result<Self> {
         // A scoped hook on this thread asks this game's parts.
         mod_api::__private::mark_game_thread();
+        let loop_side = options.execution_role.loop_side();
         let root = options.resources.clone();
         let mod_sources = options.mods.clone();
         let registry = pack.assets.registry;
@@ -19902,6 +19928,7 @@ impl<'a> Game<'a> {
             player_autosaves: Default::default(),
             session_lock: None,
             audio,
+            loop_context: res.core.item_data.context().loop_context(loop_side, []),
             music: {
                 // The manager starts with the saved option (MusicManager's constructor).
                 let mut music = horizon_client::music::MusicManager::default();
@@ -20740,6 +20767,7 @@ impl Game<'_> {
         // One pass over the recipes for this reload: the tables built next and
         // the players' copy below share it.
         lan::forget_server_sources();
+        self.refresh_loop_context();
         self.world_tables = self.build_world_tables(stack);
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();

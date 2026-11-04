@@ -483,18 +483,19 @@ fn not_built(
 }
 
 impl Game<'_> {
-    /// Build this client's loop context over the loaded registries and the mods'
-    /// current settings, and hand it to its audio. Called where a resource
-    /// generation starts or reloads; a server has no sound and builds none.
+    /// Build this game's loop context over the loaded registries and the mods'
+    /// current settings. Called where a resource generation starts or reloads: a
+    /// client at window start and after a resource reload, a server when it starts
+    /// its mods and on `/reload`. A client hands a second one to its audio.
     pub(super) fn refresh_loop_context(&mut self) {
-        if !self.options.execution_role.is_client() {
-            return;
+        let side = self.options.execution_role.loop_side();
+        let item_data = self.res.core.item_data.context();
+        self.loop_context = item_data.loop_context(side, mod_api::__private::loaded_mods().ids());
+        if self.options.execution_role.is_client() {
+            self.audio.set_loop_context(
+                item_data.loop_context(side, mod_api::__private::loaded_mods().ids()),
+            );
         }
-        let context = self.res.core.item_data.context().loop_context(
-            horizon_world::native_load_context::LoopSide::Client,
-            mod_api::__private::loaded_mods().ids(),
-        );
-        self.audio.set_loop_context(context);
     }
 
     /// Lists the installed mods on the Mods page. Content mods load with the resources
