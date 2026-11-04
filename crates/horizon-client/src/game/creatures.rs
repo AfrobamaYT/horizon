@@ -1127,6 +1127,7 @@ impl Game<'_> {
                 &self.world,
                 self.pack.assets.registry,
                 &mut lent,
+                Some(world_items!(self)),
             );
             let path_changes = horizon_client::mobs::collision_changes(&base, &path_writes);
             // Each mob keeps its snapshot slot all tick; the first slot of an
