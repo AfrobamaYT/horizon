@@ -22096,6 +22096,9 @@ fn start_game<'a>(
         game.run_dedicated()?;
         return Ok(None);
     }
+    // FMLClientSetupEvent: once per process, here in `run`, after the initial load applied.
+    // A dedicated server has no client and returned above.
+    game.native_client_setup();
     match game.options.world.clone() {
         _ if game.options.server.is_some() => {
             let (address, name) = (

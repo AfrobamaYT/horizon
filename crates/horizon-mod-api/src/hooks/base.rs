@@ -1199,7 +1199,8 @@ pub trait Hooks {
     fn render_hand();
     /// Render-thread notification after a resource-pack reload has applied successfully.
     /// Atlas, models, renderer and client caches already refer to the new resources.
-    /// Selection/F3+T and server-pack reloads share this point; initial startup does not.
+    /// Selection/F3+T and server-pack reloads share this point; initial startup does not
+    /// (`client_setup` is the once-only moment after the initial load).
     #[hook(side = "client", contract = "listen")]
     fn client_resources_reloaded();
     /// Append an item's custom decorations after its default bar, cooldown and count.

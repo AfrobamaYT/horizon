@@ -428,3 +428,38 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
     });
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// `client_setup` reaches every listener with the game's client host, one call per
+/// firing; `run` fires it once per process, so a listener sees one start.
+#[test]
+#[ignore = "needs prepared resources"]
+fn client_setup_reaches_each_listener_once_per_firing() {
+    use crate::game::native_entity_refs::tests::with_game;
+    use mod_api::testing::with_mods;
+    use mod_api::{ClientHost, Hooks, ModEntry};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Setup(Arc<AtomicUsize>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Setup {
+        fn client_setup(&self, _host: &mut dyn ClientHost, _event: &mut mod_api::ClientSetupEvent) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let (first, second) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let mods = vec![
+        ModEntry::new("setup_a", Box::new(Setup(first.clone()))),
+        ModEntry::new("setup_b", Box::new(Setup(second.clone()))),
+    ]
+    .into();
+    with_mods(mods, || {
+        with_game(|game| {
+            game.native_client_setup();
+        });
+    });
+    assert_eq!(
+        (first.load(Ordering::SeqCst), second.load(Ordering::SeqCst)),
+        (1, 1)
+    );
+}
