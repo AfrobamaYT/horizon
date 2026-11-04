@@ -758,8 +758,8 @@
 //! API 59 adds entities for server mods (`native_summon`, `native_move_entity`,
 //! `native_set_display`, `native_remove_entity`, in `native_entities.rs`).
 //!
-//! API 58 adds the renderer's hook points, in `horizon-client-render`'s
-//! `gfx/native_render.rs`: `native_world_drawn` (draw with the world's colour,
+//! API 58 adds the renderer's hook points, in `horizon-mod-api`'s
+//! `render.rs` (`gfx::native_render`): `native_world_drawn` (draw with the world's colour,
 //! depth, matrices and entity geometry before the hand and the HUD) and
 //! `native_render_needs` (entity runs and the world's depth without a pack).
 //!
