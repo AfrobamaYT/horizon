@@ -2475,11 +2475,11 @@
       }
     },
     {
-      "name": "chorus_fruit_teleport",
-      "doc": "A server player who ate chorus fruit (or another item with the\n`teleport_randomly` consume effect) is about to try a random spot\n(NeoForge's `EntityTeleportEvent.ChorusFruit`, vanilla's\n`TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),\nafter they stopped riding. `from` is their feet, `target` the spot\ndrawn; a mod may move it (its y kept inside the level's height, a\nvalue that is not a number ignored), and the game still looks down\nfrom it for ground it may land on. Canceling ends the effect: no teleport and no\nmore attempts. The player's state is swapped in\n(`native_acting_player`). Foxes are not heard.",
+      "name": "item_consumption_teleport",
+      "doc": "A server player who ate chorus fruit (or another item with the\n`teleport_randomly` consume effect) is about to try a random spot\n(NeoForge's `EntityTeleportEvent.ItemConsumption`, vanilla's\n`TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),\nafter they stopped riding. `from` is their feet, `target` the spot\ndrawn; a mod may move it (its y kept inside the level's height, a\nvalue that is not a number ignored), and the game still looks down\nfrom it for ground it may land on. Canceling ends the effect: no teleport and no\nmore attempts. The player's state is swapped in\n(`native_acting_player`). Foxes are not heard. Diverges from upstream: renamed from\n`chorus_fruit_teleport`.",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_chorus_fruit_teleport",
-      "neoforge": "EntityTeleportEvent.ChorusFruit",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_consumption_teleport",
+      "neoforge": "EntityTeleportEvent.ItemConsumption",
       "side": "server",
       "cancellable": true,
       "mod_api": {

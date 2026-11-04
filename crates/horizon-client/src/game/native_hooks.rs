@@ -3918,7 +3918,7 @@ impl Game<'_> {
     }
     /// A server player who ate chorus fruit (or another item with the
     /// `teleport_randomly` consume effect) is about to try a random spot
-    /// (NeoForge's `EntityTeleportEvent.ChorusFruit`, vanilla's
+    /// (NeoForge's `EntityTeleportEvent.ItemConsumption`, vanilla's
     /// `TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),
     /// after they stopped riding. `from` is their feet, `target` the spot
     /// drawn; a mod may move it (its y kept inside the level's height, a
@@ -3926,7 +3926,7 @@ impl Game<'_> {
     /// from it for ground it may land on. Canceling ends the effect: no teleport and no
     /// more attempts. The player's state is swapped in
     /// (`native_acting_player`). Foxes are not heard.
-    pub(super) fn native_chorus_fruit_teleport(
+    pub(super) fn native_item_consumption_teleport(
         &mut self,
         player: u128,
         name: &str,
@@ -3934,7 +3934,7 @@ impl Game<'_> {
         target: &mut [f64; 3],
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_chorus_fruit_teleport(self, player, name, from, target, cancel);
+        mod_api::dispatch_item_consumption_teleport(self, player, name, from, target, cancel);
     }
     /// Armor is about to take durability damage from a hit (NeoForge's
     /// `ArmorHurtEvent`, vanilla's `LivingEntity.doHurtEquipment`): once per
@@ -11911,6 +11911,8 @@ mod tests {
         let item_attribute_hooks = free_hooks(include_str!(
             "../../../horizon-mod-api/src/item_attributes.rs"
         ));
+        let enchantment_hooks =
+            free_hooks(include_str!("../../../horizon-mod-api/src/enchantments.rs"));
         let hunger_hooks = free_hooks(include_str!("../hunger.rs"));
         let landing_hooks = free_hooks(include_str!("../landing.rs"));
         let motion_hooks = free_hooks(include_str!("../motion.rs"));
@@ -11933,6 +11935,7 @@ mod tests {
             .chain(breath_hooks.iter().copied())
             .chain(crafting_hooks.iter().copied())
             .chain(item_attribute_hooks.iter().copied())
+            .chain(enchantment_hooks.iter().copied())
             .chain(hunger_hooks.iter().copied())
             .chain(landing_hooks.iter().copied())
             .chain(motion_hooks.iter().copied())
@@ -11961,6 +11964,8 @@ mod tests {
                 format!("mod_api::crafting::native_{name}")
             } else if item_attribute_hooks.contains(name) {
                 format!("mod_api::item_attributes::native_{name}")
+            } else if enchantment_hooks.contains(name) {
+                format!("mod_api::enchantments::native_{name}")
             } else if hunger_hooks.contains(name) {
                 format!("horizon_client_lib::hunger::native_{name}")
             } else if landing_hooks.contains(name) {
