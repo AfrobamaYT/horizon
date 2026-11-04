@@ -464,8 +464,11 @@ one, where vanilla gives the `by` one.
   `native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Changes made to the departing chunk in `native_chunk_unload` aren't saved: as in vanilla, the chunk is saved before it unloads.
 - Sounds the server plays to its players: `native_play_level_sound_at_position` and `native_play_level_sound_at_entity`
   (NeoForge's `PlayLevelSoundEvent.AtPosition` and `.AtEntity`, in `ServerLevel.playSeededSound`). As in vanilla, a mob's own
-  sounds (`Entity.playSound`) are at its position; only `playSound(except, sourceEntity, ...)` sounds are at an entity: here a
-  goat horn and a mod's sound bound to an entity. A mod may change the sound, its source, volume and pitch, or cancel it. Every
+  sounds (`Entity.playSound`) are at its position; only `playSound(except, sourceEntity, ...)` sounds are at an entity: vanilla's
+  sites go through `Game::play_bound_sound` (the mobs' through `MobEvent::BoundSound`), which queues them for the end of the
+  tick, after the tick's other sounds; the goat horn and a mod's bound sound ask directly. Two sites keep a difference: dye on a
+  sheep and an allay's sounds reach the player who caused them too, since Horizon's client plays them from the packet rather
+  than predicting them. The packet stays positional (horizon-rust/horizon#9284). A mod may change the sound, its source, volume and pitch, or cancel it. Every
   server sound packet but `/playsound`'s goes through `Game::send_level_sound` (`game/level_sounds.rs`), or the native-sound
   flush for a mod's own, so a new sound site asks the mods by calling it. The tick's sounds are asked as they go out, at the end
   of the tick. With no listener, the cost is one `listened` check per sound and nothing is allocated.

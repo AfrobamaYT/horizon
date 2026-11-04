@@ -1522,6 +1522,17 @@ pub enum MobEvent {
         count: u32,
     },
     Sound(&'static str, [f64; 3], f32, f32),
+    /// `level.playSound(null, mob, sound, source, volume, pitch)`: a sound
+    /// bound to mob `mob` (`ServerLevel.playSeededSound`'s entity overload),
+    /// in vanilla's `source`, from where the mob stands.
+    BoundSound {
+        mob: u32,
+        sound: &'static str,
+        source: mod_api::SoundSource,
+        at: [f64; 3],
+        volume: f32,
+        pitch: f32,
+    },
     /// `Entity.sendBubbleColumnParticles`: a mob at the top of the bubble column
     /// block at `pos` (the splash and bubble particles over it).
     BubbleColumnParticles {
@@ -2220,6 +2231,27 @@ pub enum MobEvent {
         distance: f64,
         modifier: f32,
     },
+}
+
+impl MobEvent {
+    /// `level.playSound(null, m, sound, source, volume, pitch)` from where
+    /// `m` stands.
+    pub fn bound_sound(
+        m: &Mob,
+        sound: &'static str,
+        source: mod_api::SoundSource,
+        volume: f32,
+        pitch: f32,
+    ) -> Self {
+        Self::BoundSound {
+            mob: m.id,
+            sound,
+            source,
+            at: [m.position.x, m.position.y, m.position.z],
+            volume,
+            pitch,
+        }
+    }
 }
 /// How a spawned-by-kind mob should be set up.
 #[derive(Clone, Debug, Default)]
