@@ -358,16 +358,14 @@ fn hook_ids(names: Vec<String>) -> &'static [Option<HookId>] {
 
 /// The game's proxy of a handler the calling mod handed over (a part it registers), which calls
 /// back into it by the index it keeps the handler under.
-fn handler_of(
-    handler: glue::horizon::mod_api::types::Handler,
-) -> Result<Arc<WasmHandler>, Refused> {
+fn handler_of(handler: glue::horizon::mod_api::types::Handler) -> Result<WasmHandler, Refused> {
     let module = CALLER.take().ok_or(Refused)?;
     CALLER.set(Some(module.clone()));
-    Ok(Arc::new(WasmHandler {
+    Ok(WasmHandler {
         module,
         index: handler.index,
         subscribed: hook_ids(handler.subscribed),
-    }))
+    })
 }
 
 /// A member of a group: its mod id, and the prefix of its exports, `<prefix>-<interface>`.

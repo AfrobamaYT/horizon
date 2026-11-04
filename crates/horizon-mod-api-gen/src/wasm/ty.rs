@@ -29,8 +29,9 @@ pub(crate) enum Ty {
     Named(usize),
     /// `&dyn Trait` or `&mut dyn Trait` (the reference is part of it): a frame resource.
     Dyn(String, bool),
-    /// `Arc<dyn Trait>` of an exported trait: a handler the mod keeps, crossing as its index.
-    Handler(String),
+    /// `Arc<dyn Trait>` or `Box<dyn Trait>` (`boxed`) of an exported trait: a handler the mod
+    /// keeps, crossing as its index.
+    Handler(String, bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -226,11 +227,11 @@ impl<'a> Types<'a> {
         {
             return Ok(ty.clone());
         }
-        if name == "Arc"
+        if (name == "Arc" || name == "Box")
             && let PathArguments::AngleBracketed(args) = &last.arguments
             && let Some(GenericArgument::Type(Type::TraitObject(object))) = args.args.first()
         {
-            return Ok(Ty::Handler(trait_name(object)?));
+            return Ok(Ty::Handler(trait_name(object)?, name == "Box"));
         }
         let args = match &last.arguments {
             PathArguments::AngleBracketed(args) => args
@@ -541,14 +542,27 @@ fn primitive(name: &str) -> Option<Ty> {
     })
 }
 
-fn trait_name(object: &syn::TypeTraitObject) -> Result<String, String> {
+/// A trait object's trait as the generator names it: its last path segment, with its type
+/// arguments as written (`ResourceHandler<ItemResource>`).
+pub(super) fn trait_name(object: &syn::TypeTraitObject) -> Result<String, String> {
     object
         .bounds
         .iter()
         .find_map(|bound| match bound {
-            syn::TypeParamBound::Trait(bound) => {
-                bound.path.segments.last().map(|s| s.ident.to_string())
-            }
+            syn::TypeParamBound::Trait(bound) => bound.path.segments.last().map(|s| {
+                let args = match &s.arguments {
+                    PathArguments::AngleBracketed(args) => format!(
+                        "<{}>",
+                        args.args
+                            .iter()
+                            .map(|a| a.to_token_stream().to_string().replace(' ', ""))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    _ => String::new(),
+                };
+                format!("{}{args}", s.ident)
+            }),
             _ => None,
         })
         .ok_or_else(|| format!("dyn {}", object.to_token_stream()))

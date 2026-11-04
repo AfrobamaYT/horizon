@@ -66,6 +66,55 @@ pub(super) fn borrowed_record(types: &Types<'_>, ty: &Ty) -> bool {
     }
 }
 
+/// An expression lowering the value `e` names, owned: a returned handler moves into the mod's
+/// table; anything else is lowered by reference.
+pub(super) fn lower_owned(types: &Types<'_>, ty: &Ty, e: &str) -> String {
+    match ty {
+        Ty::Handler(name, true) => keep_handler(types, name, &format!("std::sync::Arc::from({e})")),
+        Ty::Option(item) if matches!(**item, Ty::Handler(..)) => {
+            format!("{e}.map(|x| {})", lower_owned(types, item, "x"))
+        }
+        ty => lower(types, ty, &format!("(&{e})")),
+    }
+}
+
+/// The guest keeping handler `arc` (an `Arc<dyn name>`) under each trait it answers as, and the
+/// record the game gets: its index and the hooks it listens to as any of them.
+fn keep_handler(types: &Types<'_>, name: &str, arc: &str) -> String {
+    let views = types
+        .views
+        .iter()
+        .find(|(owner, _)| owner == name)
+        .map_or(&[][..], |(_, list)| list.as_slice());
+    let kept: Vec<String> = views
+        .iter()
+        .map(|view| {
+            format!(
+                "super::view::<dyn {}>(h.clone())",
+                super::sides::trait_path(view)
+            )
+        })
+        .collect();
+    let lists: Vec<String> = views
+        .iter()
+        .filter_map(|view| super::SUBSCRIBED.iter().find(|(owner, _)| owner == view))
+        .map(|(_, list)| format!("h.{list}().iter()"))
+        .collect();
+    let subscribed = match lists.split_first() {
+        None => "Vec::new()".to_string(),
+        Some((first, rest)) => format!(
+            "{first}{}.flatten().map(|h| hook_name(*h).to_string()).collect()",
+            rest.iter()
+                .map(|l| format!(".chain({l})"))
+                .collect::<String>()
+        ),
+    };
+    format!(
+        "{{ let h = {arc}; {W}::Handler {{ subscribed: {subscribed}, index: super::add_handler(vec![{}]) }} }}",
+        kept.join(", ")
+    )
+}
+
 /// An expression lowering `e`, of type `&R`, to its wire value.
 pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
     match ty {
@@ -80,36 +129,8 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         Ty::Wide(_) => format!("{{ let v = *{e} as u128; ((v >> 64) as u64, v as u64) }}"),
         Ty::Duration => format!("u64::try_from({e}.as_nanos()).unwrap_or(u64::MAX)"),
         // Only a mod hands one over: the guest keeps it under its views and sends its index.
-        Ty::Handler(name) => {
-            let views = types
-                .views
-                .iter()
-                .find(|(owner, _)| owner == name)
-                .map_or(&[][..], |(_, list)| list.as_slice());
-            let kept: Vec<String> = views
-                .iter()
-                .map(|view| format!("super::view::<dyn crate::{view}>({e}.clone())"))
-                .collect();
-            // The hooks it listens to as any of its views.
-            let lists: Vec<String> = views
-                .iter()
-                .filter_map(|view| super::SUBSCRIBED.iter().find(|(owner, _)| owner == view))
-                .map(|(_, list)| format!("{e}.{list}().iter()"))
-                .collect();
-            let subscribed = match lists.split_first() {
-                None => "Vec::new()".to_string(),
-                Some((first, rest)) => format!(
-                    "{first}{}.flatten().map(|h| hook_name(*h).to_string()).collect()",
-                    rest.iter()
-                        .map(|l| format!(".chain({l})"))
-                        .collect::<String>()
-                ),
-            };
-            format!(
-                "{W}::Handler {{ index: super::add_handler(vec![{}]), subscribed: {subscribed} }}",
-                kept.join(", ")
-            )
-        }
+        Ty::Handler(name, false) => keep_handler(types, name, &format!("{e}.clone()")),
+        Ty::Handler(_, true) => unreachable!("a boxed handler is lowered owned (`lower_owned`)"),
         Ty::Str(_) => format!("{e}.to_string()"),
         Ty::List(item, _) | Ty::Array(item, _) => {
             format!(
@@ -180,8 +201,15 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         }
         Ty::Duration => format!("std::time::Duration::from_nanos({e})"),
         // Only the game takes one: its proxy, calling back into the mod that handed it over.
-        Ty::Handler(name) => {
-            format!("(super::handler_of({e})? as std::sync::Arc<dyn crate::{name}>)")
+        Ty::Handler(name, boxed) => {
+            let path = super::sides::trait_path(name);
+            if *boxed {
+                format!("(Box::new(super::handler_of({e})?) as Box<dyn {path}>)")
+            } else {
+                format!(
+                    "(std::sync::Arc::new(super::handler_of({e})?) as std::sync::Arc<dyn {path}>)"
+                )
+            }
         }
         Ty::Str(Str::Owned) => e.into(),
         Ty::Str(Str::Static) => format!("super::intern({e})"),

@@ -3,7 +3,7 @@
 use super::glue::{InPlace, conversions, lift, lower, rust_path, unpack};
 use super::ty::{Kind, List, Str, Ty, Types, bound_ident, wit_ident};
 use super::wit::{self, Signature, interface, signature};
-use super::{EXPORTS, Method};
+use super::{Method, exports};
 use heck::{ToSnakeCase, ToUpperCamelCase};
 use std::fmt::Write;
 
@@ -13,7 +13,8 @@ pub(super) fn rust_ty(types: &Types<'_>, ty: &Ty, ret: bool) -> String {
         Ty::Unit => "()".into(),
         Ty::Prim(rust, _) | Ty::Wide(rust) => (*rust).into(),
         Ty::Duration => "std::time::Duration".into(),
-        Ty::Handler(name) => format!("std::sync::Arc<dyn {}>", trait_path(name)),
+        Ty::Handler(name, false) => format!("std::sync::Arc<dyn {}>", trait_path(name)),
+        Ty::Handler(name, true) => format!("Box<dyn {}>", trait_path(name)),
         Ty::Str(Str::Owned) => "String".into(),
         Ty::Str(Str::Borrowed) => "&str".into(),
         Ty::Str(Str::Static) => "&'static str".into(),
@@ -58,8 +59,12 @@ pub(super) fn rust_ty(types: &Types<'_>, ty: &Ty, ret: bool) -> String {
     }
 }
 
-fn trait_path(owner: &str) -> String {
-    format!("crate::{owner}")
+pub(super) fn trait_path(owner: &str) -> String {
+    // `ResourceHandler<ItemResource>`: each argument is a `mod_api` type too.
+    format!(
+        "crate::{}",
+        owner.replace('<', "<crate::").replace(", ", ", crate::")
+    )
 }
 
 /// A method's Rust signature, its arguments named `p0…`.
@@ -96,7 +101,7 @@ fn results(
 ) -> String {
     let mut parts = Vec::new();
     if wit::wit(types, &method.ret).ok().flatten().is_some() {
-        parts.push(lower(types, &method.ret, &format!("(&{ret})")));
+        parts.push(super::glue::lower_owned(types, &method.ret, ret));
     }
     for (_, local, ty) in outs {
         match ty {
@@ -139,7 +144,7 @@ pub(super) fn guest(
             writeln!(code, "impl {} for Guest {{}}", trait_path(owner)).unwrap();
         }
     }
-    for owner in owners.iter().filter(|o| !EXPORTS.contains(o)) {
+    for owner in owners.iter().filter(|o| !exports().contains(o)) {
         writeln!(code, "impl {} for Guest {{", trait_path(owner)).unwrap();
         match *owner {
             "Host" => code.push_str("fn backend(&self) -> Option<crate::BackendRef<'_>> { Some(crate::BackendRef::of(self)) }\n"),
@@ -213,7 +218,7 @@ pub(super) fn guest(
     .unwrap();
     // Exports.
     code.push_str("struct Exports;\nexport!(Exports);\n");
-    for owner in owners.iter().filter(|o| EXPORTS.contains(o)) {
+    for owner in owners.iter().filter(|o| exports().contains(o)) {
         let iface = bound_ident(&interface(owner));
         writeln!(
             code,
@@ -372,7 +377,7 @@ fn wire_type(types: &Types<'_>, ty: &Ty) -> String {
         .into(),
         Ty::Wide(_) => "(u64, u64)".into(),
         Ty::Duration => "u64".into(),
-        Ty::Handler(_) => format!("{}::Handler", super::glue::WIRE),
+        Ty::Handler(..) => format!("{}::Handler", super::glue::WIRE),
         Ty::Str(_) => "String".into(),
         Ty::List(item, _) | Ty::Array(item, _) => format!("Vec<{}>", wire_type(types, item)),
         Ty::Option(item) => format!("Option<{}>", wire_type(types, item)),
@@ -453,7 +458,7 @@ pub(super) fn host(
         .map(|(v, n)| format!("\"{n}\" => Some(crate::HookId::{v})"))
         .collect();
     writeln!(code, "/// The hook a mod names in its subscriptions, if this game has it.\npub(super) fn hook_id(name: &str) -> Option<crate::HookId> {{ match name {{ {}, _ => None }} }}", arms.join(", ")).unwrap();
-    for owner in owners.iter().filter(|o| !EXPORTS.contains(o)) {
+    for owner in owners.iter().filter(|o| !exports().contains(o)) {
         let iface = bound_ident(&interface(owner));
         writeln!(code, "impl api::{iface}::Host for super::State {{").unwrap();
         for method in methods.iter().filter(|m| m.owner == *owner) {
@@ -517,7 +522,7 @@ pub(super) fn host(
         code.push_str("}\n");
     }
     // Proxies: the mod's traits, each method calling its export.
-    for owner in owners.iter().filter(|o| EXPORTS.contains(o)) {
+    for owner in owners.iter().filter(|o| exports().contains(o)) {
         let iface = bound_ident(&interface(owner));
         let proxy = if super::mod_receiver(owner).is_some() {
             "super::WasmMod"
@@ -594,7 +599,7 @@ pub(super) fn host(
     let mut fields = String::new();
     let mut inits = String::new();
     let mut getters = String::new();
-    for owner in owners.iter().filter(|o| EXPORTS.contains(o)) {
+    for owner in owners.iter().filter(|o| exports().contains(o)) {
         let kebab = interface(owner);
         let iface = bound_ident(&kebab);
         let ty = format!("{}Exports", kebab.to_upper_camel_case());
@@ -771,7 +776,7 @@ fn arg(types: &Types<'_>, ty: &Ty, e: &str) -> String {
 /// Whether a type's wire value holds a string or list.
 fn heap(types: &Types<'_>, ty: &Ty) -> bool {
     match ty {
-        Ty::Str(_) | Ty::List(..) | Ty::Array(..) | Ty::Handler(_) => true,
+        Ty::Str(_) | Ty::List(..) | Ty::Array(..) | Ty::Handler(..) => true,
         Ty::Option(item) | Ty::Ref(item, _) | Ty::Boxed(item) => heap(types, item),
         Ty::Result(a, b) => heap(types, a) || heap(types, b),
         Ty::Tuple(items) => items.iter().any(|i| heap(types, i)),

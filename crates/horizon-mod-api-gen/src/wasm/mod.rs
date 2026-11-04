@@ -45,8 +45,9 @@ pub(super) const REACHED: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// Traits a mod implements: their methods are the world's exports.
-pub(super) const EXPORTS: &[&str] = &[
+/// Traits a mod implements: their methods are the world's exports. The handler traits the
+/// capability keys name join them (`exports`).
+const EXPORTS: &[&str] = &[
     "Hooks",
     "BlockPart",
     "BlockEntityPart",
@@ -54,7 +55,90 @@ pub(super) const EXPORTS: &[&str] = &[
     "MenuPart",
     "ServerReloadListener",
     "ClientReloadListener",
+    "PlaceProvider",
 ];
+
+/// Every exported trait: [`EXPORTS`], then the handler traits `mod_api`'s capability keys name
+/// (`ResourceHandler<ItemResource>`), each instance of a generic one its own export. Set once,
+/// by `surface`.
+pub(super) fn exports() -> &'static [&'static str] {
+    EXPORTED.get().map_or(EXPORTS, Vec::as_slice)
+}
+
+static EXPORTED: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+
+/// The handler traits `mod_api`'s capability keys (`CapabilityKey<dyn T>` and the item and
+/// entity forms) name, as written, in the order their keys are exported.
+fn key_handlers(types: &mut Types<'_>) -> Result<Vec<String>, String> {
+    let api = types.index.module("mod_api", &[])?;
+    let names: Vec<String> = types.index.modules[api]
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Use(item) if matches!(item.vis, syn::Visibility::Public(_)) => Some(&item.tree),
+            _ => None,
+        })
+        .flat_map(use_names)
+        .collect();
+    let mut handlers = Vec::new();
+    for name in names {
+        let Ok(Found::Item(id)) = types.index.resolve(api, &name) else {
+            continue;
+        };
+        let Item::Const(item) = types.index.item(id) else {
+            continue;
+        };
+        let syn::Type::Path(path) = &*item.ty else {
+            continue;
+        };
+        let Some(last) = path.path.segments.last() else {
+            continue;
+        };
+        if !last.ident.to_string().ends_with("CapabilityKey") {
+            continue;
+        }
+        let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+            continue;
+        };
+        if let Some(syn::GenericArgument::Type(syn::Type::TraitObject(object))) = args.args.first()
+        {
+            let handler = ty::trait_name(object)?;
+            if !handlers.contains(&handler) {
+                handlers.push(handler);
+            }
+        }
+    }
+    Ok(handlers)
+}
+
+/// Every name a `use` tree brings in.
+fn use_names(tree: &syn::UseTree) -> Vec<String> {
+    match tree {
+        syn::UseTree::Path(path) => use_names(&path.tree),
+        syn::UseTree::Name(name) => vec![name.ident.to_string()],
+        syn::UseTree::Rename(rename) => vec![rename.rename.to_string()],
+        syn::UseTree::Group(group) => group.items.iter().flat_map(use_names).collect(),
+        syn::UseTree::Glob(_) => Vec::new(),
+    }
+}
+
+/// An owner as written (`ResourceHandler<ItemResource>`): the trait's path, and its type arguments.
+fn owner_parts(owner: &str) -> Result<(Vec<String>, Vec<syn::Type>), String> {
+    let path: syn::Path = syn::parse_str(owner).map_err(|e| format!("{owner}: {e}"))?;
+    let segments: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+    let args = match &path.segments.last().unwrap().arguments {
+        syn::PathArguments::AngleBracketed(args) => args
+            .args
+            .iter()
+            .filter_map(|arg| match arg {
+                syn::GenericArgument::Type(ty) => Some(ty.clone()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    Ok((segments, args))
+}
 
 /// The exported traits the mod itself answers, with no handler index, and the guest's
 /// expression for its implementation of each; every other export is a registered handler's.
@@ -110,16 +194,28 @@ pub(super) fn surface<'a>(
 ) -> Result<Surface<'a>, String> {
     let mut types = Types::new(Index::new(root, included))?;
     let api = types.index.module("mod_api", &[])?;
+    let mut exported: Vec<&'static str> = EXPORTS.to_vec();
+    for handler in key_handlers(&mut types)? {
+        if !exported.iter().any(|e| *e == handler) {
+            exported.push(Box::leak(handler.into_boxed_str()));
+        }
+    }
+    let _ = EXPORTED.set(exported);
     let mut methods = Vec::new();
     let mut unbound = Vec::new();
-    for owner in IMPORTS.iter().chain(EXPORTS) {
-        let path: Vec<String> = owner.split("::").map(str::to_string).collect();
+    for owner in IMPORTS.iter().chain(exports()) {
+        let (path, args) = owner_parts(owner)?;
         let Found::Item(id) = types.index.resolve_path(api, &path)? else {
             return Err(format!("{owner} is not a mod_api trait"));
         };
         let Item::Trait(item) = types.index.item(id).clone() else {
             return Err(format!("{owner} is not a trait"));
         };
+        // A generic trait's instance: its parameters as the owner's arguments.
+        let mut subst = Vec::new();
+        for (param, arg) in item.generics.type_params().zip(&args) {
+            subst.push((param.ident.to_string(), types.ty(api, arg, &[])?));
+        }
         for item in &item.items {
             let TraitItem::Fn(function) = item else {
                 continue;
@@ -128,7 +224,7 @@ pub(super) fn surface<'a>(
             if hidden(&function.attrs) || name.ends_with("subscribed") {
                 continue;
             }
-            match method(&mut types, id.module, owner, function) {
+            match method(&mut types, id.module, owner, function, &subst) {
                 Ok(method) => methods.push(method),
                 Err(why) => unbound.push(Unbound { owner, name, why }),
             }
@@ -270,8 +366,9 @@ fn servers(types: &mut Types<'_>) -> Result<Vec<(&'static str, Vec<&'static str>
 fn views(types: &mut Types<'_>) -> Result<Vec<(String, Vec<String>)>, String> {
     let api = types.index.module("mod_api", &[])?;
     let mut out = Vec::new();
-    for owner in EXPORTS {
-        let Found::Item(id) = types.index.resolve_path(api, &[owner.to_string()])? else {
+    for owner in exports() {
+        let (path, _) = owner_parts(owner)?;
+        let Found::Item(id) = types.index.resolve_path(api, &path)? else {
             return Err(format!("{owner} is not a mod_api trait"));
         };
         let Item::Trait(item) = types.index.item(id) else {
@@ -281,7 +378,7 @@ fn views(types: &mut Types<'_>) -> Result<Vec<(String, Vec<String>)>, String> {
         list.extend(item.supertraits.iter().filter_map(|bound| match bound {
             syn::TypeParamBound::Trait(t) => {
                 let name = t.path.segments.last()?.ident.to_string();
-                EXPORTS.contains(&name.as_str()).then_some(name)
+                exports().contains(&name.as_str()).then_some(name)
             }
             _ => None,
         }));
@@ -316,6 +413,7 @@ fn method(
     module: usize,
     owner: &'static str,
     function: &syn::TraitItemFn,
+    subst: &[(String, Ty)],
 ) -> Result<Method, String> {
     let sig = &function.sig;
     if sig.generics.type_params().next().is_some() {
@@ -332,13 +430,13 @@ fn method(
                     _ => format!("arg{}", params.len()),
                 };
                 let name = name.trim_start_matches('_').to_string();
-                params.push((name, types.ty(module, &arg.ty, &[])?));
+                params.push((name, types.ty(module, &arg.ty, subst)?));
             }
         }
     }
     let ret = match &sig.output {
         ReturnType::Default => Ty::Unit,
-        ReturnType::Type(_, ty) => types.ty(module, ty, &[])?,
+        ReturnType::Type(_, ty) => types.ty(module, ty, subst)?,
     };
     Ok(Method {
         owner,

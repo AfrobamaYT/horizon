@@ -1,7 +1,7 @@
 //! The WIT text of the mod API: one `types` interface, an interface per bound trait, and the
 //! world `mod` that imports the traits a mod calls and exports the ones it implements.
 use super::ty::{Case, Def, Kind, Payload, Ty, Types, wit_ident};
-use super::{EXPORTS, Method};
+use super::{Method, exports};
 use heck::ToKebabCase;
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -11,8 +11,8 @@ use std::fmt::Write;
 pub(super) fn wit(types: &Types<'_>, ty: &Ty) -> Result<Option<String>, String> {
     Ok(Some(match ty {
         Ty::Unit | Ty::Dyn(..) => return Ok(None),
-        Ty::Handler(name) if super::EXPORTS.contains(&name.as_str()) => "handler".into(),
-        Ty::Handler(name) => return Err(format!("{name} is not a trait a mod implements")),
+        Ty::Handler(name, _) if exports().contains(&name.as_str()) => "handler".into(),
+        Ty::Handler(name, _) => return Err(format!("{name} is not a trait a mod implements")),
         Ty::Prim(_, wit) => (*wit).into(),
         Ty::Wide(_) => "tuple<u64, u64>".into(),
         Ty::Duration => "u64".into(),
@@ -292,7 +292,7 @@ pub(super) struct Signature {
 /// each value argument, and back the result plus each `&mut` argument's written-back form.
 pub(super) fn signature(types: &Types<'_>, method: &Method) -> Result<Signature, String> {
     let mut params = Vec::new();
-    if EXPORTS.contains(&method.owner) && super::mod_receiver(method.owner).is_none() {
+    if exports().contains(&method.owner) && super::mod_receiver(method.owner).is_none() {
         params.push(("handler".to_string(), "u32".to_string()));
     }
     let mut results = Vec::new();
@@ -477,7 +477,7 @@ pub(super) fn package(
             writeln!(text, "  subscribed: func({handler}) -> list<string>;").unwrap();
         }
         text.push_str("}\n");
-        let way = if EXPORTS.contains(owner) {
+        let way = if exports().contains(owner) {
             "export"
         } else {
             "import"
@@ -529,7 +529,7 @@ fn used(types: &Types<'_>, methods: &[&Method], owner: &str) -> Vec<String> {
 /// Whether a type holds a handler at its top level.
 fn holds_handler(ty: &Ty) -> bool {
     match ty {
-        Ty::Handler(_) => true,
+        Ty::Handler(..) => true,
         Ty::List(item, _)
         | Ty::Array(item, _)
         | Ty::Option(item)

@@ -266,6 +266,7 @@ fn defines(item: &Item, name: &str) -> bool {
         Item::Type(item) => item.ident == name,
         Item::Trait(item) => item.ident == name,
         Item::Union(item) => item.ident == name,
+        Item::Const(item) => item.ident == name,
         _ => false,
     }
 }
