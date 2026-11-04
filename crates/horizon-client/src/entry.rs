@@ -48,13 +48,20 @@ pub fn main_with(
     // as content mods. Then the mods are installed, before anything below (logging, the crash
     // handler) that a trait injection may call into.
     if let Ok(exe) = &exe {
-        let config = horizon_mod_wasm::RuntimeConfig {
-            pulley: launch
+        let switch = |name: &str| {
+            launch
                 .rest
                 .iter()
-                .any(|arg| matches!(arg, Argument::Switch(s) if s == "--wasm-interpreter")),
+                .any(|arg| matches!(arg, Argument::Switch(s) if s == name))
+        };
+        let mut budgets = mod_api::__private::wasm_host::Budgets::default();
+        if switch("--wasm-fuel") {
+            budgets.fuel = Some(Default::default());
+        }
+        let config = horizon_mod_wasm::RuntimeConfig {
+            pulley: switch("--wasm-interpreter"),
             cache: Some(launch.context.home.join("wasm-cache")),
-            ..Default::default()
+            budgets,
         };
         let game_dir = &launch.context.game_dir;
         mods.extend(horizon_mod_wasm::load_installed(

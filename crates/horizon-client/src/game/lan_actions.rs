@@ -31,6 +31,7 @@ use horizon_protocol::{
     text::literal,
 };
 use horizon_world::entity_move::EntityMoveWorld;
+use mod_api::ActionRefused;
 use winit::keyboard::KeyCode;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2286,35 +2287,9 @@ impl Game<'_> {
                     return;
                 };
                 host.hub.ack(conn, p.sequence);
-                // handleUseItemOn: within reach, then the hit point within
-                // a block of the block's centre (logged when it isn't).
-                if !host.hub.guests[gi].may_reach_block(p.pos) {
-                    return;
-                }
-                let inside = p
-                    .cursor
-                    .iter()
-                    .all(|&c| (f64::from(c) - 0.5).abs() < 1.0000001);
-                if !inside {
-                    let d = horizon_client::java_text::double_to_string;
-                    let at = |k: usize| d(f64::from(p.pos[k]) + f64::from(p.cursor[k]));
-                    let line = format!(
-                        "Rejecting UseItemOnPacket from {}: Location ({}, {}, {}) too far away from hit block BlockPos{{x={}, y={}, z={}}}.",
-                        host.hub.guests[gi].name,
-                        at(0),
-                        at(1),
-                        at(2),
-                        p.pos[0],
-                        p.pos[1],
-                        p.pos[2]
-                    );
-                    self.lan_log_event(horizon_client::lan::hub::HostEvent::Warn(line));
-                    return;
-                }
-                let face = direction(p.face);
                 let hit = Hit {
                     pos: p.pos,
-                    face,
+                    face: direction(p.face),
                     point: [
                         f64::from(p.pos[0]) + f64::from(p.cursor[0]),
                         f64::from(p.pos[1]) + f64::from(p.cursor[1]),
@@ -2323,129 +2298,15 @@ impl Game<'_> {
                     inside: p.inside,
                 };
                 let hand = if p.hand == 1 { Hand::Off } else { Hand::Main };
-                // handleUseItemOn: above or below the world nothing is used and
-                // the player is told the limit (the blocks are not resent);
-                // under spawn protection nothing is used or placed; the player
-                // is told and the blocks below go back. mayInteract: nothing is
-                // used on a block outside the world border either.
-                let min_y = self.world.shape.min_y;
-                let max_y = self.world.shape.max_y() - 1;
-                if p.pos[1] > max_y {
-                    self.build_limit_message(conn, true, max_y);
-                    return;
-                }
-                if p.pos[1] < min_y {
-                    self.build_limit_message(conn, false, min_y);
-                    return;
-                }
-                if self.under_spawn_protection(gi, p.pos) {
-                    self.spawn_protection_message(conn, p.pos);
-                } else if self
-                    .border
-                    .contains(f64::from(p.pos[0]), f64::from(p.pos[2]))
-                {
-                    let logged = self.world.block_log.as_ref().map_or(0, Vec::len);
-                    let heard = self.audio.capture.as_ref().map_or(0, Vec::len);
-                    let used = self.as_guest(conn, |g| {
-                        let attempt = g.was_block_placement_attempt(hand);
-                        g.forced_hit = Some(hit);
-                        g.guest_use = Some(GuestUse::OnBlock(hand));
-                        let swings = g.swings_started;
-                        let consumed = matches!(g.use_item(), Ok(Some(_)));
-                        // handleUseItemOn: a consuming useItemOn triggers
-                        // ANY_BLOCK_USE with the hand's stack as it now is.
-                        if consumed && !g.use_failed {
-                            let stack = g
-                                .with_hand(hand, |g| g.held().cloned())
-                                .unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
-                            g.trigger_any_block_use(p.pos, &stack);
-                        }
-                        g.forced_hit = None;
-                        g.guest_use = None;
-                        (g.swings_started != swings, consumed, attempt)
-                    });
-                    let swung = used.map(|u| u.0);
-                    self.lan_swing_back(conn, swung);
-                    self.guest_use_sounds(conn, logged, heard);
-                    // A placement that did nothing at the top or bottom of the
-                    // world says why. Vanilla asks twice for the top (once
-                    // before the swing, once in the check that also has the
-                    // bottom), so a player there is told twice.
-                    if let Some((_, false, true)) = used {
-                        if p.face == 1 && p.pos[1] >= max_y {
-                            self.build_limit_message(conn, true, max_y);
-                            self.build_limit_message(conn, true, max_y);
-                        } else if p.face == 0 && p.pos[1] <= min_y {
-                            self.build_limit_message(conn, false, min_y);
-                        }
-                    }
-                } else {
-                    self.build_limit_message(conn, true, max_y);
-                }
-                // The client predicted a result: correct it with what really is.
-                let Some(host) = self.lan.as_mut() else {
-                    return;
-                };
-                for pos in [
-                    p.pos,
-                    [p.pos[0] + face[0], p.pos[1] + face[1], p.pos[2] + face[2]],
-                ] {
-                    let state = self.world.block(pos[0], pos[1], pos[2]).0 as i32;
-                    host.hub
-                        .send_to(conn, &C::BlockUpdate(play::BlockUpdate { pos, state }));
-                }
+                let _ = self.guest_use_item_on(conn, gi, hit, hand);
             }
             S::UseItem(p) => {
                 let Some(host) = self.lan.as_mut() else {
                     return;
                 };
                 host.hub.ack(conn, p.sequence);
-                if spectator {
-                    return;
-                }
-                // handleUseItem: the client's rotation (absSnapRotationTo, which
-                // sends nothing back), then the item alone. What it looked at a
-                // moment ago (a block, a mob) is UseItemOn's or Interact's.
                 let hand = if p.hand == 1 { Hand::Off } else { Hand::Main };
-                let Some(host) = self.lan.as_mut() else {
-                    return;
-                };
-                let g = &mut host.hub.guests[gi];
-                (g.yaw, g.pitch) = (p.yaw, p.pitch);
-                // SpawnEggItem.use calls ServerLevel.mayInteract at its own
-                // fluid ray's position, unlike useOn's packet-supplied block.
-                let held = if hand == Hand::Off {
-                    g.offhand.as_ref()
-                } else {
-                    g.inventory.get(g.selected).and_then(Option::as_ref)
-                };
-                if held.is_some_and(|s| s.item.ends_with("_spawn_egg")) {
-                    let hit = self
-                        .as_guest(conn, |g| g.with_hand(hand, |g| g.spawn_egg_fluid_hit()))
-                        .flatten();
-                    if hit.is_some_and(|h| self.under_spawn_protection(gi, h.pos)) {
-                        return;
-                    }
-                }
-                let heard = self.audio.capture.as_ref().map_or(0, Vec::len);
-                let used = self.as_guest(conn, |g| {
-                    // A horn's sound, inline instruments included.
-                    let horn = g.with_hand(hand, |g| {
-                        let held = g.held()?;
-                        g.res.items().instrument(held).map(|i| i.sound)
-                    });
-                    g.guest_use = Some(GuestUse::Item(hand));
-                    let swings = g.swings_started;
-                    let _ = g.use_item();
-                    g.guest_use = None;
-                    (g.swings_started != swings, horn)
-                });
-                let (swung, horn) = match used {
-                    Some((swung, horn)) => (Some(swung), horn),
-                    None => (None, None),
-                };
-                self.lan_swing_back(conn, swung);
-                self.guest_instrument_sound(conn, heard, horn);
+                let _ = self.guest_use_item(conn, gi, hand, Some((p.yaw, p.pitch)));
             }
             S::Attack(p) => self.guest_attack(conn, p.id),
             S::Interact(p) => {
@@ -3447,6 +3308,195 @@ impl Game<'_> {
             .iter()
             .find(|&(_, &knot)| knot as i32 == id)
             .map(|(&fence, _)| fence)
+    }
+
+    /// `ServerGamePacketListenerImpl.handleUseItemOn` for guest `conn` (at `gi`) clicking
+    /// `hit` with `hand`, after the packet's sequence is acknowledged: reach, the hit's place in
+    /// its block, the build height, spawn protection and the border, then
+    /// `ServerPlayerGameMode.useItemOn`, and the blocks the client predicted sent back. True
+    /// when the use consumed (`InteractionResult` a success or a consume). A fake player's
+    /// `PlayerRef::perform_action` runs it as the packet does.
+    pub(super) fn guest_use_item_on(
+        &mut self,
+        conn: u32,
+        gi: usize,
+        hit: Hit,
+        hand: Hand,
+    ) -> Result<bool, ActionRefused> {
+        let mut consumed = false;
+        let Some(host) = self.lan.as_mut() else {
+            return Err(ActionRefused::Stale);
+        };
+        // handleUseItemOn: within reach, then the hit point within
+        // a block of the block's centre (logged when it isn't).
+        if !host.hub.guests[gi].may_reach_block(hit.pos) {
+            return Err(ActionRefused::OutOfReach);
+        }
+        let inside = (0..3).all(|k| (hit.point[k] - f64::from(hit.pos[k]) - 0.5).abs() < 1.0000001);
+        if !inside {
+            let d = horizon_client::java_text::double_to_string;
+            let at = |k: usize| d(hit.point[k]);
+            let line = format!(
+                "Rejecting UseItemOnPacket from {}: Location ({}, {}, {}) too far away from hit block BlockPos{{x={}, y={}, z={}}}.",
+                host.hub.guests[gi].name,
+                at(0),
+                at(1),
+                at(2),
+                hit.pos[0],
+                hit.pos[1],
+                hit.pos[2]
+            );
+            self.lan_log_event(horizon_client::lan::hub::HostEvent::Warn(line));
+            return Err(ActionRefused::OutOfReach);
+        }
+        let face = hit.face;
+        // handleUseItemOn: above or below the world nothing is used and
+        // the player is told the limit (the blocks are not resent);
+        // under spawn protection nothing is used or placed; the player
+        // is told and the blocks below go back. mayInteract: nothing is
+        // used on a block outside the world border either.
+        let min_y = self.world.shape.min_y;
+        let max_y = self.world.shape.max_y() - 1;
+        if hit.pos[1] > max_y {
+            self.build_limit_message(conn, true, max_y);
+            return Err(ActionRefused::Protected);
+        }
+        if hit.pos[1] < min_y {
+            self.build_limit_message(conn, false, min_y);
+            return Err(ActionRefused::Protected);
+        }
+        let mut refused = None;
+        if self.under_spawn_protection(gi, hit.pos) {
+            self.spawn_protection_message(conn, hit.pos);
+            refused = Some(ActionRefused::Protected);
+        } else if self
+            .border
+            .contains(f64::from(hit.pos[0]), f64::from(hit.pos[2]))
+        {
+            let logged = self.world.block_log.as_ref().map_or(0, Vec::len);
+            let heard = self.audio.capture.as_ref().map_or(0, Vec::len);
+            let used = self.as_guest(conn, |g| {
+                let attempt = g.was_block_placement_attempt(hand);
+                let saved = (g.forced_hit, g.guest_use);
+                g.forced_hit = Some(hit);
+                g.guest_use = Some(GuestUse::OnBlock(hand));
+                let swings = g.swings_started;
+                let consumed = matches!(g.use_item(), Ok(Some(_)));
+                // handleUseItemOn: a consuming useItemOn triggers
+                // ANY_BLOCK_USE with the hand's stack as it now is.
+                if consumed && !g.use_failed {
+                    let stack = g
+                        .with_hand(hand, |g| g.held().cloned())
+                        .unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
+                    g.trigger_any_block_use(hit.pos, &stack);
+                }
+                (g.forced_hit, g.guest_use) = saved;
+                (g.swings_started != swings, consumed, attempt)
+            });
+            consumed = used.is_some_and(|u| u.1);
+            let swung = used.map(|u| u.0);
+            self.lan_swing_back(conn, swung);
+            self.guest_use_sounds(conn, logged, heard);
+            // A placement that did nothing at the top or bottom of the
+            // world says why. Vanilla asks twice for the top (once
+            // before the swing, once in the check that also has the
+            // bottom), so a player there is told twice.
+            if let Some((_, false, true)) = used {
+                if face == [0, 1, 0] && hit.pos[1] >= max_y {
+                    self.build_limit_message(conn, true, max_y);
+                    self.build_limit_message(conn, true, max_y);
+                } else if face == [0, -1, 0] && hit.pos[1] <= min_y {
+                    self.build_limit_message(conn, false, min_y);
+                }
+            }
+        } else {
+            self.build_limit_message(conn, true, max_y);
+            refused = Some(ActionRefused::Protected);
+        }
+        // The client predicted a result: correct it with what really is.
+        let Some(host) = self.lan.as_mut() else {
+            return refused.map_or(Ok(consumed), Err);
+        };
+        for pos in [
+            hit.pos,
+            [
+                hit.pos[0] + face[0],
+                hit.pos[1] + face[1],
+                hit.pos[2] + face[2],
+            ],
+        ] {
+            let state = self.world.block(pos[0], pos[1], pos[2]).0 as i32;
+            host.hub
+                .send_to(conn, &C::BlockUpdate(play::BlockUpdate { pos, state }));
+        }
+        refused.map_or(Ok(consumed), Err)
+    }
+
+    /// `ServerGamePacketListenerImpl.handleUseItem` for guest `conn` (at `gi`) using the item in
+    /// `hand`, after the packet's sequence is acknowledged: the rotation the client sent, if any
+    /// (`absSnapRotationTo`), a spawn egg's own `mayInteract`, then `ServerPlayerGameMode.useItem`.
+    /// True when the use consumed (`InteractionResult` a success or a consume). A fake player's
+    /// `PlayerRef::perform_action` runs it as the packet does, with no rotation.
+    pub(super) fn guest_use_item(
+        &mut self,
+        conn: u32,
+        gi: usize,
+        hand: Hand,
+        rotation: Option<(f32, f32)>,
+    ) -> Result<bool, ActionRefused> {
+        let Some(host) = self.lan.as_ref() else {
+            return Err(ActionRefused::Stale);
+        };
+        // ServerPlayerGameMode.useItem: a spectator's use passes.
+        if host.hub.guests[gi].spectator() {
+            return Ok(false);
+        }
+        // handleUseItem: the client's rotation (absSnapRotationTo, which
+        // sends nothing back), then the item alone. What it looked at a
+        // moment ago (a block, a mob) is UseItemOn's or Interact's.
+        let Some(host) = self.lan.as_mut() else {
+            return Err(ActionRefused::Stale);
+        };
+        let g = &mut host.hub.guests[gi];
+        if let Some((yaw, pitch)) = rotation {
+            (g.yaw, g.pitch) = (yaw, pitch);
+        }
+        // SpawnEggItem.use calls ServerLevel.mayInteract at its own
+        // fluid ray's position, unlike useOn's packet-supplied block.
+        let held = if hand == Hand::Off {
+            g.offhand.as_ref()
+        } else {
+            g.inventory.get(g.selected).and_then(Option::as_ref)
+        };
+        if held.is_some_and(|s| s.item.ends_with("_spawn_egg")) {
+            let hit = self
+                .as_guest(conn, |g| g.with_hand(hand, |g| g.spawn_egg_fluid_hit()))
+                .flatten();
+            if hit.is_some_and(|h| self.under_spawn_protection(gi, h.pos)) {
+                return Err(ActionRefused::Protected);
+            }
+        }
+        let heard = self.audio.capture.as_ref().map_or(0, Vec::len);
+        let used = self.as_guest(conn, |g| {
+            // A horn's sound, inline instruments included.
+            let horn = g.with_hand(hand, |g| {
+                let held = g.held()?;
+                g.res.items().instrument(held).map(|i| i.sound)
+            });
+            let saved = g.guest_use;
+            g.guest_use = Some(GuestUse::Item(hand));
+            let swings = g.swings_started;
+            let consumed = matches!(g.use_item(), Ok(Some(_)));
+            g.guest_use = saved;
+            (g.swings_started != swings, horn, consumed)
+        });
+        let (swung, horn, consumed) = match used {
+            Some((swung, horn, consumed)) => (Some(swung), horn, consumed),
+            None => (None, None, false),
+        };
+        self.lan_swing_back(conn, swung);
+        self.guest_instrument_sound(conn, heard, horn);
+        Ok(consumed)
     }
 
     fn guest_attack(&mut self, conn: u32, id: i32) {

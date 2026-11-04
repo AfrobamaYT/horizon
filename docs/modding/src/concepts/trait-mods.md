@@ -540,6 +540,34 @@ each other's handlers. So the game refuses that at startup, naming both mods and
 `CapabilityRegistry.create` refuses one name created with a different type, and it refuses a key whose name has no
 namespace. Both checks run once, when the mods register.
 
+### Fake players
+
+`host.fake_player(level, uuid, name)` makes, or finds again, a player with no connection in the level in place, as
+NeoForge's `FakePlayerFactory` does: a machine that acts as a player (a deployer, a block breaker). It is no
+online player: the tab list, player counts, sleeping, natural spawning, chunk tickets, statistics and saves leave
+it out. `player.is_fake(host)` tells one apart; `player.remove_fake(host)` removes it.
+
+`player.perform_action(host, action)` makes it act as a player does, through the game's own path for the action, as
+that player's packet would run it:
+- `PlayerAction::UseOn { hand, pos, hit }` is a click on a block (`ServerPlayerGameMode.useItemOn`): reach, the
+  hit's place on the block, the build height, spawn protection and the border, then the block's use and the item's
+  `useOn`, which is how a block item is placed;
+- `PlayerAction::UseItem { hand }` is a use in the air (`ServerPlayerGameMode.useItem`), by the item's own ray from
+  the player's eyes and look: a bucket clicked on a block passes, as vanilla's does, and empties when used.
+
+Its items are its own inventory: set the stack in its hand first (through `ENTITY_ITEMS` or an `ItemPlace`), and
+read what is left after. The answer says what happened:
+
+| Answer | Meaning |
+|---|---|
+| `Ok(ActionOutcome::Consumed)` | Vanilla's `InteractionResult` consumed (a success or a consume) |
+| `Ok(ActionOutcome::Passed)` | Nothing used the click |
+| `Ok(ActionOutcome::EffectBlocked(effect))` | The click ran, but what it would start was stopped: a menu or screen, sleeping, riding, or going to another dimension (`FakeEffect`). The click's own side effects have still happened then: the swing seen by others, the hooks that run before the use, vanilla's `Success` |
+| `Err(ActionRefused::…)` | Nothing ran: `NotFake` (a real player's handle), `Stale`, `Busy` (another player's turn, an open transaction, or a hook inside another `perform_action`), `OutOfReach` or `Protected` |
+
+What a machine does beyond a player's action stays in the mod: a deployer's reach and eye height, its own mining
+progress, catching its drops.
+
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it, so a test double implements only what its hook calls, and an

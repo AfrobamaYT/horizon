@@ -7,6 +7,7 @@
 use std::time::{Duration, Instant};
 
 use mod_api::__private::game::Fields;
+use mod_api::__private::wasm_host::{Budgets, Fuel};
 use mod_api::{Hooks, Host, LevelRef, NativeWorldEpoch, ServerChatEvent, ServerHost, Text};
 
 #[path = "bench/src/lib.rs"]
@@ -20,9 +21,16 @@ impl Host for World {
         (dimension == "minecraft:overworld")
             .then(|| LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld"))
     }
+    fn entity(&self, _id: u32) -> Option<mod_api::EntityRef> {
+        None
+    }
 }
 
-impl ServerHost for World {}
+impl ServerHost for World {
+    fn tick_stats(&self) -> (f32, f64) {
+        (20.0, 50.0)
+    }
+}
 
 /// One call of the hook `work` names: the server tick for `tick`, else the chat hook with
 /// `work` as the message; what the mod wrote back.
@@ -87,14 +95,16 @@ fn shown(time: Duration) -> String {
     }
 }
 
-#[test]
-#[ignore = "needs tests/bench built to mod.wasm and a release build (CI's wasm-bench job)"]
-fn a_wasm_mod_against_the_same_mod_native() {
+/// The bench mod loaded with `budgets`.
+fn load(budgets: Budgets) -> horizon_mod_wasm::Loaded {
     let path = |var: &str| std::path::PathBuf::from(std::env::var(var).expect(var));
     let package = path("HORIZON_WASM_BENCH");
     let std_member = std::fs::read(path("HORIZON_WASM_STD")).unwrap();
     let loaded = horizon_mod_wasm::load(
-        &horizon_mod_wasm::RuntimeConfig::default(),
+        &horizon_mod_wasm::RuntimeConfig {
+            budgets,
+            ..Default::default()
+        },
         &std_member,
         vec![horizon_mod_wasm::WasmPackage {
             manifest: horizon_mods::Package::read(&package).unwrap().manifest,
@@ -102,6 +112,43 @@ fn a_wasm_mod_against_the_same_mod_native() {
         }],
     );
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
+    loaded
+}
+
+#[test]
+#[ignore = "needs tests/bench built to mod.wasm (CI's wasm-bench job)"]
+fn a_call_past_its_time_stops_its_group() {
+    let mut budgets = Budgets::default();
+    budgets.call = Duration::from_millis(20);
+    let loaded = load(budgets);
+    let wasm = loaded.mods[0].fields().hooks;
+    // About 200 ms of work, stopped at its limit: no answer, and the group answers nothing after.
+    let started = Instant::now();
+    assert_eq!(chat(wasm, "compute 10000000"), "");
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(chat(wasm, "text"), "");
+}
+
+#[test]
+#[ignore = "needs tests/bench built to mod.wasm (CI's wasm-bench job)"]
+fn a_call_past_its_fuel_stops_its_group() {
+    let mut budgets = Budgets::default();
+    budgets.fuel = Some(Fuel::default());
+    let loaded = load(budgets);
+    let wasm = loaded.mods[0].fields().hooks;
+    assert_eq!(chat(wasm, "text"), "a message the mod wrote");
+    assert_eq!(chat(wasm, "compute 1000000"), "");
+    assert_eq!(chat(wasm, "text"), "");
+}
+
+#[test]
+#[ignore = "needs tests/bench built to mod.wasm and a release build (CI's wasm-bench job)"]
+fn a_wasm_mod_against_the_same_mod_native() {
+    let loaded = load(Budgets::default());
     let wasm = loaded.mods[0].fields().hooks;
     let native = &*bench_mod::hooks();
 
@@ -111,8 +158,19 @@ fn a_wasm_mod_against_the_same_mod_native() {
         ("text", "a message lowered back", 20_000),
         ("untouched", "100 replies left as they were", 2_000),
         ("imports 100", "100 calls into the game", 1_000),
+        (
+            "entities 100",
+            "100 entity lookups (an id in, none out)",
+            1_000,
+        ),
+        (
+            "tickstats 100",
+            "100 tick stats (nothing in, two numbers out)",
+            1_000,
+        ),
         ("compute 1000", "logic on 1,000 values", 1_000),
         ("compute 10000", "logic on 10,000 values", 100),
+        ("compute 100000", "logic on 100,000 values", 10),
     ];
     let mut table = String::from(
         "### A wasm mod against the same mod native\n\n\

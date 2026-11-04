@@ -6,7 +6,7 @@
 //! mod API as its only imports. A group runs sandboxed from the others and from the game; a
 //! trap stops its group. Every refusal names its reason for the Mods page.
 use horizon_mods::manifest::{Dependency, Manifest};
-use mod_api::__private::wasm_host::{Budgets, LoadError, Member};
+use mod_api::__private::wasm_host::{Budgets, EPOCH, LoadError, Member};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -19,7 +19,7 @@ pub const STD_MEMBER: &str = "horizon-wasm-std.wasm";
 #[derive(Clone, Debug, Default)]
 pub struct RuntimeConfig {
     /// Run mods on Pulley, wasmtime's interpreter, instead of compiling them: for hosts that
-    /// can't map executable memory. About 19× slower on compute; off by default.
+    /// can't map executable memory. About 30–40× slower on compute; off by default.
     pub pulley: bool,
     /// Where compiled groups are kept between runs; none compiles every start.
     pub cache: Option<PathBuf>,
@@ -94,14 +94,32 @@ pub struct Loaded {
     pub refused: Vec<(String, Refusal)>,
 }
 
-/// The engine every group runs on.
+/// The engine every group runs on: calls limited by time, its epoch advanced by a thread of
+/// its own for as long as the engine lives, or by instructions with `budgets.fuel`.
 pub fn engine(config: &RuntimeConfig) -> wasmtime::Result<wasmtime::Engine> {
     let mut engine = wasmtime::Config::new();
-    engine.wasm_component_model(true).consume_fuel(true);
+    let fuel = config.budgets.fuel.is_some();
+    engine
+        .wasm_component_model(true)
+        .consume_fuel(fuel)
+        .epoch_interruption(!fuel);
     if config.pulley {
         engine.target("pulley64")?;
     }
-    wasmtime::Engine::new(&engine)
+    let engine = wasmtime::Engine::new(&engine)?;
+    if !fuel {
+        let weak = engine.weak();
+        std::thread::Builder::new()
+            .name("wasm epoch".into())
+            .spawn(move || {
+                while let Some(engine) = weak.upgrade() {
+                    engine.increment_epoch();
+                    drop(engine);
+                    std::thread::sleep(EPOCH);
+                }
+            })?;
+    }
+    Ok(engine)
 }
 
 fn dependency_version(dependency: &Dependency) -> (&semver::VersionReq, bool) {
@@ -271,6 +289,12 @@ fn component(
         }
         key.push_str(&horizon_mods::manifest::sha512_of(std_member));
         key.push_str(if config.pulley { "pulley" } else { "native" });
+        // Code compiled to count fuel differs from code checking the epoch.
+        key.push_str(if config.budgets.fuel.is_some() {
+            "fuel"
+        } else {
+            "epoch"
+        });
         horizon_mods::manifest::sha512_of(key.as_bytes())
     };
     let cached = config

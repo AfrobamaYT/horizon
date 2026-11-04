@@ -6155,58 +6155,59 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires prepared language data in HORIZON_TEST_RESOURCES; run alone"]
+    #[ignore = "requires prepared language data in HORIZON_TEST_RESOURCES"]
     fn the_new_video_options_read_as_vanilla_words_them() {
         use crate::graphics::GraphicsApi;
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
         );
-        lang::set(lang::Language::load(&[&root], "en_us"));
-        let mut s = Settings::default();
-        assert_eq!(Opt::ExclusiveMode.label(&s).plain(), "Setting unavailable");
-        s.video_modes = vec![mode(1280, 60.0), mode(1920, 144.0), mode(2560, 59.94)];
-        assert_eq!(
-            Opt::ExclusiveMode.label(&s).plain(),
-            "Exclusive Fullscreen Mode: Current"
-        );
-        Opt::ExclusiveMode.set_slider(&mut s, 2.0 / 3.0);
-        assert_eq!(
-            Opt::ExclusiveMode.label(&s).plain(),
-            "Exclusive Fullscreen Mode: 1920x1080@144 (24bit)"
-        );
-        Opt::ExclusiveMode.set_slider(&mut s, 1.0);
-        assert_eq!(
-            Opt::ExclusiveMode.label(&s).plain(),
-            "Exclusive Fullscreen Mode: 2560x1440@59.94 (24bit)"
-        );
-        s.horizon.api = GraphicsApi::Vulkan;
-        assert_eq!(
-            Opt::GraphicsBackend.label(&s).plain(),
-            "Graphics API: Prefer Vulkan (Experimental)"
-        );
-        assert!(
-            graphics_api_tooltip(&s)
-                .plain()
-                .starts_with("Requires a game restart to take effect.\n\n")
-        );
-        s.startup_api = GraphicsApi::Vulkan;
-        assert!(
-            graphics_api_tooltip(&s)
-                .plain()
-                .starts_with("Which graphics API")
-        );
-        s.file
-            .set("maxAnisotropyBit", crate::options_file::V::Int(2));
-        s.file
-            .set("textureFiltering", crate::options_file::V::Int(2));
-        assert_eq!(
-            Opt::MaxAnisotropy.label(&s).plain(),
-            "Anisotropic Filtering: 4x"
-        );
-        assert_eq!(
-            Opt::TextureFiltering.label(&s).plain(),
-            "Texture Filtering: Anisotropic"
-        );
+        lang::scoped(lang::Language::load(&[&root], "en_us"), || {
+            let mut s = Settings::default();
+            assert_eq!(Opt::ExclusiveMode.label(&s).plain(), "Setting unavailable");
+            s.video_modes = vec![mode(1280, 60.0), mode(1920, 144.0), mode(2560, 59.94)];
+            assert_eq!(
+                Opt::ExclusiveMode.label(&s).plain(),
+                "Exclusive Fullscreen Mode: Current"
+            );
+            Opt::ExclusiveMode.set_slider(&mut s, 2.0 / 3.0);
+            assert_eq!(
+                Opt::ExclusiveMode.label(&s).plain(),
+                "Exclusive Fullscreen Mode: 1920x1080@144 (24bit)"
+            );
+            Opt::ExclusiveMode.set_slider(&mut s, 1.0);
+            assert_eq!(
+                Opt::ExclusiveMode.label(&s).plain(),
+                "Exclusive Fullscreen Mode: 2560x1440@59.94 (24bit)"
+            );
+            s.horizon.api = GraphicsApi::Vulkan;
+            assert_eq!(
+                Opt::GraphicsBackend.label(&s).plain(),
+                "Graphics API: Prefer Vulkan (Experimental)"
+            );
+            assert!(
+                graphics_api_tooltip(&s)
+                    .plain()
+                    .starts_with("Requires a game restart to take effect.\n\n")
+            );
+            s.startup_api = GraphicsApi::Vulkan;
+            assert!(
+                graphics_api_tooltip(&s)
+                    .plain()
+                    .starts_with("Which graphics API")
+            );
+            s.file
+                .set("maxAnisotropyBit", crate::options_file::V::Int(2));
+            s.file
+                .set("textureFiltering", crate::options_file::V::Int(2));
+            assert_eq!(
+                Opt::MaxAnisotropy.label(&s).plain(),
+                "Anisotropic Filtering: 4x"
+            );
+            assert_eq!(
+                Opt::TextureFiltering.label(&s).plain(),
+                "Texture Filtering: Anisotropic"
+            );
+        });
     }
 
     #[test]
@@ -6235,50 +6236,51 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires prepared language data in HORIZON_TEST_RESOURCES; run alone"]
+    #[ignore = "requires prepared language data in HORIZON_TEST_RESOURCES"]
     fn classic_hover_draws_the_selected_options_wrapped_tooltip() {
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
         );
-        lang::set(lang::Language::load(&[&root], "en_us"));
-        let atlas = atlas();
-        let mut s = Settings::default();
-        let mut ui = OptionsUi::default();
-        ui.show(Page::Video);
-        for mode in ["afk", "minimized"] {
-            s.inactivity_fps_limit = mode.into();
-            let (widgets, _, _, _) = ui.layout(&s, 480.0, 480.0);
-            let option = widgets
-                .iter()
-                .find(|w| {
-                    matches!(
-                        w.kind,
-                        WKind::Button {
-                            act: Act::Cycle(Opt::InactivityFps),
-                            ..
-                        }
-                    )
-                })
-                .unwrap();
-            let cursor = (option.x + 1.0, option.y + 1.0);
-            let mut actual = HudBatch::new([480, 480]);
-            ui.draw(&s, &mut actual, &atlas, cursor);
-            let key = format!("options.inactivityFpsLimit.{mode}.tooltip");
-            assert!(lang::has(&key));
-            let mut expected = HudBatch::new([480, 480]);
-            ui::tooltip(
-                &mut expected,
-                &atlas,
-                &atlas.font.split(&tr(&key), 170.0),
-                cursor,
-            );
-            assert!(!expected.vertices.is_empty());
-            let tail = &actual.vertices[actual.vertices.len() - expected.vertices.len()..];
-            assert_eq!(
-                bytemuck::cast_slice::<_, u8>(tail),
-                bytemuck::cast_slice::<_, u8>(&expected.vertices)
-            );
-        }
+        lang::scoped(lang::Language::load(&[&root], "en_us"), || {
+            let atlas = atlas();
+            let mut s = Settings::default();
+            let mut ui = OptionsUi::default();
+            ui.show(Page::Video);
+            for mode in ["afk", "minimized"] {
+                s.inactivity_fps_limit = mode.into();
+                let (widgets, _, _, _) = ui.layout(&s, 480.0, 480.0);
+                let option = widgets
+                    .iter()
+                    .find(|w| {
+                        matches!(
+                            w.kind,
+                            WKind::Button {
+                                act: Act::Cycle(Opt::InactivityFps),
+                                ..
+                            }
+                        )
+                    })
+                    .unwrap();
+                let cursor = (option.x + 1.0, option.y + 1.0);
+                let mut actual = HudBatch::new([480, 480]);
+                ui.draw(&s, &mut actual, &atlas, cursor);
+                let key = format!("options.inactivityFpsLimit.{mode}.tooltip");
+                assert!(lang::has(&key));
+                let mut expected = HudBatch::new([480, 480]);
+                ui::tooltip(
+                    &mut expected,
+                    &atlas,
+                    &atlas.font.split(&tr(&key), 170.0),
+                    cursor,
+                );
+                assert!(!expected.vertices.is_empty());
+                let tail = &actual.vertices[actual.vertices.len() - expected.vertices.len()..];
+                assert_eq!(
+                    bytemuck::cast_slice::<_, u8>(tail),
+                    bytemuck::cast_slice::<_, u8>(&expected.vertices)
+                );
+            }
+        });
     }
 
     #[test]

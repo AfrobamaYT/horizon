@@ -465,6 +465,7 @@ fn wire_type(types: &Types<'_>, ty: &Ty) -> String {
         Ty::Wide(_) => "(u64, u64)".into(),
         Ty::Duration => "u64".into(),
         Ty::Handler(..) => format!("{}::Handler", super::glue::WIRE),
+        Ty::Str(Str::Static) => "u32".into(),
         Ty::Str(_) => "String".into(),
         Ty::List(item, _) | Ty::Array(item, _) => format!("Vec<{}>", wire_type(types, item)),
         Ty::Option(item) => format!("Option<{}>", wire_type(types, item)),
@@ -639,13 +640,14 @@ pub(super) fn host(
             if !sent.is_empty() {
                 let sent = sent.join(", ");
                 prep = format!(
-                    "let ({sent},) = match (|| -> Result<_, super::Refused> {{ {prep} Ok(({sent},)) }})() {{ Ok(a) => a, Err(why) => return super::unsent(&self.module, why, {no_answer}) }};"
+                    "let ({sent},) = match super::lowering(&self.module, || -> Result<_, super::Refused> {{ {prep} Ok(({sent},)) }}) {{ Ok(a) => a, Err(why) => return super::unsent(&self.module, why, {no_answer}) }};"
                 );
             }
             writeln!(
                 code,
-                "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ let mut frame = super::Frame::default(); {frame} {prep} self.call_or(frame, {no_answer}, |m, store| -> wasmtime::Result<_> {{ let {pattern} = m.horizon_mod_api_{iface}().call_{}(store, {})?; {back} Ok({value}) }}) }}",
+                "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ let mut frame = super::Frame::default(); {frame} {prep} self.call_or(frame, {}, {no_answer}, |m, store| -> wasmtime::Result<_> {{ let {pattern} = m.horizon_mod_api_{iface}().call_{}(store, {})?; {back} Ok({value}) }}) }}",
                 rust_sig(types, method),
+                super::loads(types, method),
                 bound_ident(&wit_ident(&method.name)),
                 args.join(", ")
             )
@@ -860,6 +862,7 @@ fn results_type(
 /// Whether `ty`'s wire value is a string or list, which the bindings borrow as a slice.
 fn wire_is_list(types: &Types<'_>, ty: &Ty) -> bool {
     match ty {
+        Ty::Str(Str::Static) => false,
         Ty::Str(_) | Ty::List(..) | Ty::Array(..) => true,
         Ty::Named(def) => {
             matches!(&types.defs[*def].kind, Kind::Via(form) if wire_is_list(types, form))
@@ -871,8 +874,10 @@ fn wire_is_list(types: &Types<'_>, ty: &Ty) -> bool {
 /// The form the bindings take an argument in: borrowed where it holds a string or list.
 fn arg(types: &Types<'_>, ty: &Ty, e: &str) -> String {
     match ty {
+        Ty::Str(Str::Static) => e.into(),
         Ty::Str(_) | Ty::List(..) | Ty::Array(..) => format!("&{e}"),
         Ty::Option(item) => match &**item {
+            Ty::Str(Str::Static) => e.into(),
             Ty::Str(_) | Ty::List(..) | Ty::Array(..) => format!("{e}.as_deref()"),
             Ty::Ref(inner, _) | Ty::Boxed(inner) | Ty::Shared(inner) => {
                 arg(types, &Ty::Option(inner.clone()), e)
@@ -905,6 +910,7 @@ fn arg(types: &Types<'_>, ty: &Ty, e: &str) -> String {
 /// Whether a type's wire value holds a string or list.
 fn heap(types: &Types<'_>, ty: &Ty) -> bool {
     match ty {
+        Ty::Str(Str::Static) => false,
         Ty::Str(_) | Ty::List(..) | Ty::Array(..) | Ty::Handler(..) => true,
         Ty::Option(item) | Ty::Ref(item, _) | Ty::Boxed(item) | Ty::Shared(item) => {
             heap(types, item)
