@@ -82,7 +82,7 @@ pub(crate) use mod_api::{
     NativeMinimap, NativeMod, NativeNoteInstrument, NativePanelEvent, NativePortalShape,
     NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
-use mod_api::{NativePermissionLevel, Recipe};
+use mod_api::{NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason, Recipe};
 use std::{
     collections::HashMap,
     fs,
@@ -5882,6 +5882,44 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_potential_spawns(self, dimension, category, pos, entries, canceled);
+    }
+
+    /// `MobSpawnEvent.SpawnPlacementCheck`: the entity type `kind` may spawn
+    /// at `pos` for `reason` (light, ground, biome: `SpawnPlacements.checkSpawnRules`).
+    /// `default_result` is what vanilla's predicate answered; `result` starts
+    /// as `Default` (vanilla's answer stands). Server-side.
+    pub(super) fn native_mob_spawn_placement_check(
+        &self,
+        dimension: &str,
+        kind: &str,
+        reason: NativeSpawnReason,
+        pos: BlockPos,
+        default_result: bool,
+        result: &mut NativeSpawnCheck,
+    ) {
+        mod_api::dispatch_mob_spawn_placement_check(
+            self,
+            dimension,
+            kind,
+            reason,
+            pos,
+            default_result,
+            result,
+        );
+    }
+    /// `MobSpawnEvent.PositionCheck`: the freshly created mob of type `kind`
+    /// may stand at `pos` for `reason` (`Mob.checkSpawnRules` and
+    /// `checkSpawnObstruction`). `result` starts as `Default`: vanilla's two
+    /// checks decide; `Succeed` or `Fail` skips them. Server-side.
+    pub(super) fn native_mob_spawn_position_check(
+        &self,
+        dimension: &str,
+        kind: &str,
+        reason: NativeSpawnReason,
+        pos: [f64; 3],
+        result: &mut NativeSpawnCheck,
+    ) {
+        mod_api::dispatch_mob_spawn_position_check(self, dimension, kind, reason, pos, result);
     }
 
     /// The world's spawn point changed to `pos` and `angle`.

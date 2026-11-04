@@ -11,7 +11,7 @@ use horizon_client::{
         Mob, MobWorld, Species,
         data::{self, MobData},
         seen_grid::SeenGrid,
-        spawn_rules::{Dimension, SpawnLevel},
+        spawn_rules::{Dimension, Reason, SpawnLevel},
         spawn_selection::{
             self, Category, Counted, Heightmap, NaturalLevel, SpawnCost, SpawnPlayer, SpawnRequest,
             SpawnState, Spawned, StructureAt, StructureSpawns,
@@ -20,12 +20,14 @@ use horizon_client::{
 };
 use horizon_core::{
     geometry::{Aabb, Vec3},
+    position::BlockPos,
     random::{LegacyRandom, RandomSource, WorldgenRandom, XoroshiroRandom},
 };
 use horizon_world::{
     nbt::{Compound, Tag},
     registry::BlockStateId,
 };
+use mod_api::NativeSpawnCheck;
 use std::collections::HashMap;
 
 /// Natural spawning's candidate chunks (`ChunkMap.collectSpawningChunks`):
@@ -397,6 +399,25 @@ impl GameLevel<'_, '_> {
     }
 }
 impl SpawnLevel for GameLevel<'_, '_> {
+    fn placement_check(&self, entity: &str, reason: Reason, at: [i32; 3], vanilla: bool) -> bool {
+        if !mod_api::__private::listened(mod_api::HookId::MobSpawnPlacementCheck) {
+            return vanilla;
+        }
+        let mut result = NativeSpawnCheck::Default;
+        self.game.native_mob_spawn_placement_check(
+            self.game.dim.id(),
+            entity,
+            reason.into(),
+            BlockPos::new(at[0], at[1], at[2]),
+            vanilla,
+            &mut result,
+        );
+        match result {
+            NativeSpawnCheck::Succeed => true,
+            NativeSpawnCheck::Fail => false,
+            _ => vanilla,
+        }
+    }
     fn state(&self, x: i32, y: i32, z: i32) -> BlockStateId {
         self.w.state(x, y, z)
     }
@@ -454,6 +475,19 @@ impl SpawnLevel for GameLevel<'_, '_> {
 impl NaturalLevel for GameLevel<'_, '_> {
     fn spawn_hooks(&self) -> bool {
         !mod_api::__private::mods().is_empty()
+    }
+    fn position_check(&self, entity: &str, reason: Reason, at: [f64; 3]) -> NativeSpawnCheck {
+        let mut result = NativeSpawnCheck::Default;
+        if mod_api::__private::listened(mod_api::HookId::MobSpawnPositionCheck) {
+            self.game.native_mob_spawn_position_check(
+                self.game.dim.id(),
+                entity,
+                reason.into(),
+                at,
+                &mut result,
+            );
+        }
+        result
     }
     fn potential_spawns(&self, category: Category, pos: [i32; 3], entries: &mut Vec<SpawnEntry>) {
         let mut canceled = false;
@@ -1123,5 +1157,101 @@ mod tests {
                 .nearest(0.0, 0.0, 0.0)
                 .is_none()
         );
+    }
+
+    /// Answers both spawn checks with one fixed result.
+    struct ChecksMod(NativeSpawnCheck);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for ChecksMod {
+        fn mob_spawn_placement_check(
+            &self,
+            _: &dyn mod_api::Host,
+            event: &mut mod_api::MobSpawnPlacementCheckEvent<'_>,
+        ) {
+            *event.result = self.0;
+        }
+        fn mob_spawn_position_check(
+            &self,
+            _: &dyn mod_api::Host,
+            event: &mut mod_api::MobSpawnPositionCheckEvent<'_>,
+        ) {
+            *event.result = self.0;
+        }
+    }
+
+    /// The placement check runs after vanilla's predicate (`default_result` is its answer), so
+    /// its draws are vanilla's whatever a mod answers. The position check replaces vanilla's two
+    /// checks: no listener and `Default` draw exactly as vanilla, `Succeed` and `Fail` draw nothing.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    fn spawn_checks_pin_the_random_draws_of_both_halves() {
+        use super::super::native_entity_refs::tests::with_game;
+        with_game(|game| {
+            let level = game.natural_level();
+            let placement = |random: &mut LegacyRandom| {
+                let ok = horizon_client::mobs::spawn_rules::check_spawn_rules(
+                    "minecraft:sulfur_cube",
+                    Species::SulfurCube,
+                    &level,
+                    Reason::Natural,
+                    random,
+                    [8, 64, 8],
+                );
+                (ok, random.next_int())
+            };
+            let position = |random: &mut LegacyRandom| {
+                let ok = spawn_selection::position_ok(
+                    &level,
+                    "minecraft:sulfur_cube",
+                    Reason::Natural,
+                    [8.5, 64.0, 8.5],
+                    || {
+                        random.next_int();
+                        false
+                    },
+                );
+                (ok, random.next_int())
+            };
+            let run = |answer: Option<NativeSpawnCheck>| {
+                let go = || {
+                    (
+                        placement(&mut LegacyRandom::new(11)),
+                        position(&mut LegacyRandom::new(11)),
+                    )
+                };
+                match answer {
+                    None => go(),
+                    Some(a) => mod_api::testing::with_mods(
+                        vec![mod_api::ModEntry::new(
+                            "spawn-checks",
+                            Box::new(ChecksMod(a)),
+                        )]
+                        .into(),
+                        go,
+                    ),
+                }
+            };
+            let mut seed = LegacyRandom::new(11);
+            let first = seed.next_int();
+            let second = seed.next_int();
+            let none = run(None);
+            assert!(none.0.0, "the sulfur cube's predicate has no conditions");
+            assert_eq!(none.1, (false, second), "vanilla's closure drew once");
+            assert_eq!(run(Some(NativeSpawnCheck::Default)), none);
+            let succeed = run(Some(NativeSpawnCheck::Succeed));
+            assert_eq!(
+                succeed.0,
+                (true, none.0.1),
+                "placement draws stay vanilla's"
+            );
+            assert_eq!(
+                succeed.1,
+                (true, first),
+                "Succeed skips the checks and their draws"
+            );
+            let fail = run(Some(NativeSpawnCheck::Fail));
+            assert_eq!(fail.0, (false, none.0.1));
+            assert_eq!(fail.1, (false, first));
+        });
     }
 }

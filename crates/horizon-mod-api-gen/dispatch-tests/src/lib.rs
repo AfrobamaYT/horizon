@@ -55,6 +55,8 @@ mod tests {
         pub(super) trait LevelRandomHost: LevelHost {}
         pub(super) trait LevelWriteHost: LevelTicksHost + LevelRandomHost {}
         pub(super) struct Compound;
+        pub(super) struct NativeSpawnReason;
+        pub(super) struct NativeSpawnCheck;
         pub(super) enum Placement {
             Single,
         }
