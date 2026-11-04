@@ -19,6 +19,7 @@ pub(super) fn emit(
     root: &Path,
     hooks: &[CatalogHook],
     methods: &[syn::ItemFn],
+    contexts: &[DrawContext],
 ) -> Result<HookSources, String> {
     let mut hook_ids = String::new();
     let mut hook_constants = String::new();
@@ -268,13 +269,36 @@ pub(super) fn emit(
         let mut inits = Vec::new();
         let mut write_back = String::new();
         let collected = output.as_ref().filter(|_| contract == "collect");
+        // A draw surface reaches mods as its context's trait object, which the native call
+        // builds from `Game` and the surface.
+        let mut surface_calls = std::collections::HashMap::new();
         for (name, ty) in args.iter().chain(collected) {
+            let drawn = DrawContext::of(contexts, ty);
+            if let Some((context, mutable)) = drawn {
+                if !mutable || receiver_mut != Some(false) {
+                    return Err(format!(
+                        "{}: a drawing hook takes &self and its surface as &mut",
+                        hook["name"].as_str().unwrap_or_default()
+                    ));
+                }
+                surface_calls.insert(
+                    name.as_str(),
+                    format!(
+                        "&mut super::mod_api_host::generated::{} {{ game: self, surface: {name} }}",
+                        context.game_struct()
+                    ),
+                );
+            }
+            let drawn: Option<Type> = drawn.map(|(context, _)| {
+                syn::parse_str(&format!("&mut dyn {}", context.trait_name)).expect("a trait name")
+            });
+            let ty = drawn.as_ref().unwrap_or(ty);
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
             let mutable_entity = ty.to_token_stream().to_string() == "& mut ModBlockEntity";
             let field_ty = if mutable_entity {
                 syn::parse_quote!(ModBlockEntityView<'_>)
             } else {
-                (**ty).clone()
+                ty.clone()
             };
             let (field, scalar) = lifetimes.field(&field_ty);
             let visibility = if event_type == "ApplyEffectTickEvent" && name == "changes" {
@@ -317,10 +341,15 @@ pub(super) fn emit(
         if fill {
             // The dispatch's parameters in order: the host, the arguments,
             // and the output last.
-            let host = host.as_ref().map(|(_, param)| param.call);
+            let host = host.as_ref().map(|(_, param)| param.call.to_owned());
             let passed = host
                 .into_iter()
-                .chain(args.iter().chain(output.as_ref()).map(|(n, _)| n.as_str()))
+                .chain(args.iter().chain(output.as_ref()).map(|(n, _)| {
+                    surface_calls
+                        .get(n.as_str())
+                        .cloned()
+                        .unwrap_or_else(|| n.clone())
+                }))
                 .collect::<Vec<_>>()
                 .join(", ");
             fills.push(Fill {

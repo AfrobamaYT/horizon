@@ -211,6 +211,16 @@ mod tests {
     trait Host {}
     trait ServerHost: Host {}
     trait ClientHost: Host {}
+    trait DrawContext {}
+    /// Records which part drew, in order.
+    trait BlockEntityDrawContext {
+        fn mark(&mut self, part: u32);
+    }
+    impl BlockEntityDrawContext for BlockEntityDraw {
+        fn mark(&mut self, part: u32) {
+            self.0.push(part);
+        }
+    }
     enum HostSide<'a> {
         Server(&'a mut dyn ServerHost),
         Client(&'a mut dyn ClientHost),
@@ -656,7 +666,7 @@ mod tests {
         fn block_entity_submit(&self, _: &dyn ClientHost, event: &mut BlockEntitySubmitEvent<'_>) {
             assert_eq!(event.pos, [1, 2, 3]);
             assert_eq!(event.block, "example:machine");
-            event.draw.0.push(self.id);
+            event.draw.mark(self.id);
         }
     }
     impl MenuPart for Mod {

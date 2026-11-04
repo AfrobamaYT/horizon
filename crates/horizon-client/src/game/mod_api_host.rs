@@ -157,7 +157,7 @@ impl Game<'_> {
     }
 }
 
-mod generated {
+pub(super) mod generated {
     include!(concat!(env!("OUT_DIR"), "/mod_api_host_generated.rs"));
 }
 

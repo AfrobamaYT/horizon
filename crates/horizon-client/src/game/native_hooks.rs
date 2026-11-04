@@ -1775,8 +1775,15 @@ impl Game<'_> {
     /// `corners.place` (boxes stack away from their edge) and draw it with
     /// `native_fill` and `native_text`. Skip a corner `native_corner_shown`
     /// says is taken.
-    pub(super) fn native_hud(&mut self, batch: &mut HudBatch, corners: &mut Corners) {
-        mod_api::dispatch_hud(self, batch, corners);
+    pub(super) fn native_hud(&self, draw: &mut HudBatch, corners: &mut Corners) {
+        mod_api::dispatch_hud(
+            &*self,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+            corners,
+        );
     }
     /// Before one of vanilla's HUD layers is drawn (`RenderGuiLayerEvent.Pre`):
     /// draw here to put something below the layer, or set `canceled` to hide
@@ -1791,23 +1798,38 @@ impl Game<'_> {
     /// screen draws the focused chat itself, so `chat` is only the unfocused
     /// lines. The camera overlays and the debug screen are not layers here:
     /// they are not drawn in this pass. Draw with `native_fill`, `native_text`
-    /// and the sprite helpers; `batch.width` and `batch.height` are the GUI
+    /// and the sprite helpers; `draw.size()` is the GUI
     /// size. Together with `native_gui_layer_post` this is NeoForge's
     /// `RegisterGuiLayersEvent`: a mod keeps its own list of what it draws
     /// above or below which layer.
     pub(super) fn native_gui_layer_pre(
-        &mut self,
+        &self,
         layer: &str,
-        batch: &mut HudBatch,
+        draw: &mut HudBatch,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_gui_layer_pre(self, layer, batch, canceled);
+        mod_api::dispatch_gui_layer_pre(
+            &*self,
+            layer,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+            canceled,
+        );
     }
     /// After one of vanilla's HUD layers (or after the layer a mod hid), with
     /// the ids of `native_gui_layer_pre`: draw here to put something above
     /// the layer (`RenderGuiLayerEvent.Post`).
-    pub(super) fn native_gui_layer_post(&mut self, layer: &str, batch: &mut HudBatch) {
-        mod_api::dispatch_gui_layer_post(self, layer, batch);
+    pub(super) fn native_gui_layer_post(&self, layer: &str, draw: &mut HudBatch) {
+        mod_api::dispatch_gui_layer_post(
+            &*self,
+            layer,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+        );
     }
     /// A player right-clicks the entity `entity` (`Entity.getId`) of type
     /// `kind` (`minecraft:cow`) with `self.hand`, holding `stack` (none in an
@@ -2063,7 +2085,17 @@ impl Game<'_> {
         draw: &mut BlockEntityDraw,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_render_arm(self, player, player_entity_id, left, draw, canceled);
+        mod_api::dispatch_render_arm(
+            &*self,
+            player,
+            player_entity_id,
+            left,
+            &mut super::mod_api_host::generated::GameBlockEntityDrawContext {
+                game: self,
+                surface: draw,
+            },
+            canceled,
+        );
     }
     /// Before a visible item frame's item or map is drawn. Cancel hides the item, not the frame.
     pub(super) fn native_render_item_in_frame(
@@ -2350,7 +2382,17 @@ impl Game<'_> {
         entity: &ModBlockEntity,
         draw: &mut BlockEntityDraw,
     ) {
-        mod_api::dispatch_block_entity_submit(self, pos, block, state, entity, draw);
+        mod_api::dispatch_block_entity_submit(
+            &*self,
+            pos,
+            block,
+            state,
+            entity,
+            &mut super::mod_api_host::generated::GameBlockEntityDrawContext {
+                game: self,
+                surface: draw,
+            },
+        );
     }
     /// Where the mod block entity at `pos` draws, for culling
     /// (NeoForge's `getRenderBoundingBox`): `bounds` is min x, y, z then max
@@ -2389,7 +2431,15 @@ impl Game<'_> {
         draw: &mut BlockEntityDraw,
         drawn: &mut bool,
     ) {
-        mod_api::dispatch_mob_submit(self, mob, draw, drawn);
+        mod_api::dispatch_mob_submit(
+            &*self,
+            mob,
+            &mut super::mod_api_host::generated::GameBlockEntityDrawContext {
+                game: self,
+                surface: draw,
+            },
+            drawn,
+        );
     }
     /// Whether a mod listens to `native_player_submit` or `native_mob_layer`: a
     /// mod that hooks either hooks this one too and sets `listened` (HEAD,
@@ -2413,7 +2463,16 @@ impl Game<'_> {
         draw: &mut BlockEntityDraw,
         drawn: &mut bool,
     ) {
-        mod_api::dispatch_player_submit(self, player, who, draw, drawn);
+        mod_api::dispatch_player_submit(
+            &*self,
+            player,
+            who,
+            &mut super::mod_api_host::generated::GameBlockEntityDrawContext {
+                game: self,
+                surface: draw,
+            },
+            drawn,
+        );
     }
     /// A layer on every mob and player in view, once a frame after its
     /// vanilla model and layers (`EntityRenderersEvent.AddLayers`, with
@@ -2429,7 +2488,15 @@ impl Game<'_> {
         who: Option<&NativePlayerRender<'_>>,
         draw: &mut BlockEntityDraw,
     ) {
-        mod_api::dispatch_mob_layer(self, mob, who, draw);
+        mod_api::dispatch_mob_layer(
+            &*self,
+            mob,
+            who,
+            &mut super::mod_api_host::generated::GameBlockEntityDrawContext {
+                game: self,
+                surface: draw,
+            },
+        );
     }
     /// Icons a mod puts on map `map` each time it is drawn: held, in an
     /// item frame or on the cartography table's screen (a map's pixels are
@@ -2468,10 +2535,19 @@ impl Game<'_> {
         &self,
         block: &str,
         data: &[i32],
-        batch: &mut HudBatch,
+        draw: &mut HudBatch,
         origin: [f32; 2],
     ) {
-        mod_api::dispatch_screen_draw(self, block, data, batch, origin);
+        mod_api::dispatch_screen_draw(
+            &*self,
+            block,
+            data,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+            origin,
+        );
     }
     /// `Gui.setScreen` is about to replace the `current` screen with `new`
     /// (`ScreenEvent.Opening`; the screen `playing` is none: vanilla's null).
@@ -2515,10 +2591,17 @@ impl Game<'_> {
     /// their `rect`, and no dialog or prompt over them.
     pub(super) fn native_screen_render_post(
         &self,
-        batch: &mut HudBatch,
+        draw: &mut HudBatch,
         screen: &NativeScreenView<'_>,
     ) {
-        mod_api::dispatch_screen_render_post(self, batch, screen);
+        mod_api::dispatch_screen_render_post(
+            &*self,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+            screen,
+        );
     }
     /// A mouse button went down over the open screen
     /// (`ScreenEvent.MouseButtonPressed.Pre`, vanilla's
@@ -5571,11 +5654,20 @@ impl Game<'_> {
     pub(super) fn native_tooltip_component_draw(
         &self,
         stack: &ItemStack,
-        batch: &mut HudBatch,
+        draw: &mut HudBatch,
         origin: [f32; 2],
         size: [f32; 2],
     ) {
-        mod_api::dispatch_tooltip_component_draw(self, stack, batch, origin, size);
+        mod_api::dispatch_tooltip_component_draw(
+            &*self,
+            stack,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+            origin,
+            size,
+        );
     }
 
     /// The small bar `GuiGraphicsExtractor.itemDecorations` draws under an
@@ -5614,9 +5706,18 @@ impl Game<'_> {
         stack: &ItemStack,
         x: f32,
         y: f32,
-        batch: &mut HudBatch,
+        draw: &mut HudBatch,
     ) {
-        mod_api::dispatch_item_decorations(self, stack, x, y, batch);
+        mod_api::dispatch_item_decorations(
+            &*self,
+            stack,
+            x,
+            y,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+        );
     }
     /// A player uses `stack` (right click) with `self.hand` on the block at
     /// `pos`, `face` the face clicked (`[0, 1, 0]` is the top), once the
@@ -8221,6 +8322,10 @@ impl Game<'_> {
     pub(super) fn native_corner_shown(&self, corner: Corner) -> bool {
         let charts = self.debug_charts.corners(!self.has_singleplayer_server());
         !debug_takes(corner, self.debug, charts)
+    }
+    /// The GUI's size in GUI pixels, width then height.
+    pub(super) fn native_size(&self, draw: &HudBatch) -> [f32; 2] {
+        [draw.width, draw.height]
     }
     /// The width of `text` in GUI pixels.
     pub(super) fn native_text_width(&self, text: &str) -> f32 {
