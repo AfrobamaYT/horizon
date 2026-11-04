@@ -2752,3 +2752,7 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 ## Minecart pass
 
 - **`BlockPart::minecart_pass(host, event)`** (`MinecartPassEvent { state, pos, entity }`): a minecart passed over a rail block state the Part is attached to, at the moment vanilla calls `activateMinecart` for an activator rail, here for every rail. It is the Part form of Forge's `IBaseRailExtension.onMinecartPass`, which NeoForge 26.3 no longer has, so there is no global hook. With the old minecart physics it fires once per tick the cart is on a rail; with `minecart_improvements` once per track iteration, so a fast cart can pass several times in a tick. It is recorded during the cart's step and delivered after the cart's batch has ticked, through the same drain as `entity_inside`, with a `&mut dyn ServerHost`, so a write the part makes (a velocity change through `EntityRef`) lands on the stored cart. A pass whose cart is gone or whose rail changed is dropped. Only a rail state a Part listens for is recorded: with no such Part, one `block_listens` test per rail step. Beyond NeoForge; Diverges from upstream: new hook.
+
+## Combat hook ownership
+
+The six combat hooks (`living_incoming_damage`, `damage_pre`, `damage_post`, `living_knockback`, `living_use_totem`, `living_shield_block`) are lent to each hit by the game that runs it, not installed once per process. A mod sees no difference: order, arguments and cancel rules are unchanged.
