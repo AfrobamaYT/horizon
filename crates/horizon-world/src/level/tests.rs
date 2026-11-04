@@ -2352,6 +2352,7 @@ fn breaking_a_moving_piston_removes_its_extended_base() {
         BlockPos::new(1, 1, 0),
         false,
         true,
+        None,
     );
     assert_eq!(
         w.get(BlockPos::new(0, 1, 0)),
@@ -2366,6 +2367,7 @@ fn breaking_a_moving_piston_removes_its_extended_base() {
         BlockPos::new(6, 1, 0),
         false,
         true,
+        None,
     );
     assert_eq!(
         w.get(BlockPos::new(5, 1, 0)),
@@ -2901,10 +2903,14 @@ fn player_breaks_fire_with_extinguish_not_generic_break_event() {
         let state = w.id(name, &[]);
         w.put(pos, state);
         w.level.events.clear();
-        assert!(
-            w.f.behaviours
-                .player_destroy_block(&mut w.level, &mut w.ticks, pos, false, true)
-        );
+        assert!(w.f.behaviours.player_destroy_block(
+            &mut w.level,
+            &mut w.ticks,
+            pos,
+            false,
+            true,
+            None
+        ));
         let is_fire = name != "white_wool";
         assert_eq!(
             w.level
@@ -3023,7 +3029,7 @@ fn creative_breaking_piston_head_does_not_drop_piston() {
         // Breaking the head in creative mode. Destroying the base first makes the
         // head's shape update remove it, so its own removeBlock finds air.
         w.f.behaviours
-            .player_destroy_block(&mut w.level, &mut w.ticks, head_pos, true, true);
+            .player_destroy_block(&mut w.level, &mut w.ticks, head_pos, true, true, None);
 
         // Both head and base must be removed:
         assert_eq!(w.get(head_pos), w.b().air(), "head should become air");
@@ -3058,8 +3064,14 @@ fn survival_breaking_piston_head_drops_piston() {
 
         // Breaking the head in survival mode:
         assert!(
-            w.f.behaviours
-                .player_destroy_block(&mut w.level, &mut w.ticks, head_pos, false, true),
+            w.f.behaviours.player_destroy_block(
+                &mut w.level,
+                &mut w.ticks,
+                head_pos,
+                false,
+                true,
+                None
+            ),
             "head should be destroyed"
         );
 
