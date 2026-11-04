@@ -711,7 +711,9 @@ impl Game<'_> {
     /// A saved armor stand.
     pub(super) fn load_armor_stand(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
         self.next_entity += 1;
-        if let Some(a) = entity_nbt::armor_stand_from_nbt(&tag, self.next_entity) {
+        if let Some(mut a) = entity_nbt::armor_stand_from_nbt(&tag, self.next_entity) {
+            a.live
+                .retain_supplier(&self.motion.attributes, "minecraft:armor_stand");
             self.remember(a.id, uuid, tag);
             self.armor_stands.push(a);
         }
@@ -725,6 +727,8 @@ impl Game<'_> {
         {
             // EnderDragon's constructor takes its id and its
             // parts' from the entity counter.
+            d.live
+                .retain_supplier(&self.motion.attributes, "minecraft:ender_dragon");
             d.id = self.next_entity + 1;
             self.next_entity += 9;
             self.remember_tags(d.id, &tag);

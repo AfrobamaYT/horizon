@@ -62,6 +62,7 @@ mod marker_particles_probe;
 mod menu_fixture;
 mod mipmap_probe;
 mod mob_ai_probe;
+mod mob_attribute_nbt_fixture;
 mod mob_attributes_fixture;
 mod music_fixture;
 mod natural_spawn_fixture;
@@ -161,6 +162,7 @@ probes! {
     menu_fixture,
     mipmap_probe,
     mob_ai_probe,
+    mob_attribute_nbt_fixture,
     mob_attributes_fixture,
     music_fixture,
     natural_spawn_fixture,

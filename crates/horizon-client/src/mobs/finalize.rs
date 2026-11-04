@@ -627,6 +627,7 @@ pub fn set_base(m: &mut Mob, a: Attr, v: f64) {
         Some(b) => b.1 = v,
         None => s.bases.push((a, v)),
     }
+    m.extra.live.invalidate();
     refresh(m, a);
 }
 pub fn has_modifier(m: &Mob, a: Attr, id: &str) -> bool {
@@ -663,6 +664,7 @@ pub fn add_modifier(
         Some(x) => *x = new,
         None => s.modifiers.push(new),
     }
+    m.extra.live.invalidate();
     refresh(m, a);
 }
 /// `AttributeInstance.removeModifier`.
@@ -670,6 +672,7 @@ pub fn remove_modifier(m: &mut Mob, a: Attr, id: &str) {
     if let Some(s) = m.extra.attributes.as_mut() {
         s.modifiers.retain(|x| x.attr != a || x.id != id);
     }
+    m.extra.live.invalidate();
     refresh(m, a);
 }
 /// `Mob.finalizeSpawn`, which every mob's own `finalizeSpawn` reaches

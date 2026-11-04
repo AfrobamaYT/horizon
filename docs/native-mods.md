@@ -2799,6 +2799,14 @@ handle, an entity the client doesn't track and a level it doesn't show:
   (Paper's `Entity#isDead` is its inverse; a dying mob, mid death animation, is not alive). During a nested
   player swap an outer player's displaced record is unavailable, and during a player's turn the other
   players' handles read `None` until the hub is back.
+- `living.attribute_value(host, id)` is `AttributeMap.getValue` and `attribute_base` is `getBaseValue`, for a
+  player, a guest, a mob, an armor stand and the dragon (`None` for an attribute the entity type lacks, a stale
+  handle, or on a client). A mob, a stand and the dragon answer from a live attribute map built from the type's
+  defaults, the saved `attributes` list (bases and permanent modifiers, with their ids), and the attribute modifiers
+  of the items they hold and wear, put on and taken off slot by slot in `EquipmentSlot` order as
+  `LivingEntity.collectEquipmentChanges` does (transient: never saved). The map is built when first needed. Mob
+  behavior still reads the type's defaults, so a modifier does not yet change how a mob moves or hits, and an item's
+  own `attribute_modifiers` component is not read yet, only the item type's.
 - `living.set_health(host, health)` is `LivingEntity.setHealth` (Paper's `Damageable#setHealth`), cut to the
   range from zero to the maximum, with no hook; a non-finite value is refused. This raw write can set zero
   or change a dead entity's health without running the death pipeline.
