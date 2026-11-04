@@ -130,7 +130,7 @@ pub fn main_with(
     {
         log::warn!("The enchantment level hook is already installed; keeping the first");
     }
-    if crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
+    if !crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
         menu_slot_rules: |context, menu, slot, stack, may_place, max_stack| {
             let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_menu_slot_rules(&context, menu, slot, stack, may_place, max_stack);
@@ -182,12 +182,13 @@ pub fn main_with(
         living_flying_speed: |entity, kind, speed| {
             mod_api::dispatch_living_flying_speed(entity, kind, speed);
         },
+        player_stays_on_ground_surface: |entity, staying| {
+            mod_api::dispatch_player_stays_on_ground_surface(entity, staying);
+        },
         ender_entity_teleport: |entity, kind, from, target, cancel| {
             mod_api::dispatch_ender_entity_teleport(entity, kind, from, target, cancel);
         },
-    })
-    .is_err()
-    {
+    }) {
         log::warn!("Native client hooks already installed; keeping the first callbacks");
     }
     raise_open_file_limit();

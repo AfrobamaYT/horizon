@@ -128,7 +128,7 @@ fn results(
             Ty::Named(def) if sig.results.contains(&wit::out_name(&types.defs[*def])) => {
                 parts.push(format!("lower_out_{def}(&{local})"))
             }
-            Ty::Named(_) => {}
+            Ty::Named(def) if matches!(types.defs[*def].kind, Kind::Record(_)) => {}
             ty => parts.push(lower(types, ty, &format!("(&{local})"))),
         }
     }
@@ -326,7 +326,8 @@ fn guest_call(
                     writeln!(back, "write_back_{def}(p{i}, {})?;", names[next]).unwrap();
                     next += 1;
                 }
-                Ty::Named(_) | Ty::Dyn(..) => {}
+                Ty::Dyn(..) => {}
+                Ty::Named(def) if matches!(types.defs[*def].kind, Kind::Record(_)) => {}
                 inner => {
                     writeln!(back, "*p{i} = {};", lift(types, inner, &names[next])).unwrap();
                     next += 1;
@@ -361,6 +362,11 @@ fn guest_call(
 fn wire_rust(wire: &str) -> String {
     fn parse(text: &mut &str) -> String {
         *text = text.trim_start();
+        // `result<_, e>`: no ok value.
+        if let Some(rest) = text.strip_prefix('_') {
+            *text = rest;
+            return "()".into();
+        }
         let end = text
             .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '%'))
             .unwrap_or(text.len());
@@ -592,7 +598,8 @@ pub(super) fn host(
                             writeln!(back, "write_back_{def}(p{i}, {})?;", names[next]).unwrap();
                             next += 1;
                         }
-                        Ty::Named(_) | Ty::Dyn(..) => {}
+                        Ty::Dyn(..) => {}
+                        Ty::Named(def) if matches!(types.defs[*def].kind, Kind::Record(_)) => {}
                         inner => {
                             writeln!(back, "*p{i} = {};", lift(types, inner, &names[next]))
                                 .unwrap();
@@ -606,8 +613,10 @@ pub(super) fn host(
             } else {
                 "()".into()
             };
-            // A fallible export answers its error when the call doesn't run; the rest, nothing.
+            // A fallible export answers its error when the call doesn't run, or success where
+            // that is doing nothing (a piece that places nothing); the rest, nothing.
             let no_answer = match &method.ret {
+                Ty::Result(ok, _) if **ok == Ty::Unit => "|| Ok(())",
                 Ty::Result(..) => "|| Err(super::refused())",
                 _ => "super::NoAnswer::no_answer",
             };
@@ -814,7 +823,7 @@ fn results_type(
                     "horizon::mod_api::types::{}",
                     wit::out_name(&types.defs[*def]).to_upper_camel_case()
                 )),
-            Ty::Named(_) => {}
+            Ty::Named(def) if matches!(types.defs[*def].kind, Kind::Record(_)) => {}
             ty => parts.push(wire_type(types, ty)),
         }
     }

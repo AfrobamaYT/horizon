@@ -9,6 +9,7 @@ pub mod jigsaw;
 pub mod legacy;
 pub mod mansion;
 pub mod mineshaft;
+pub mod mod_types;
 pub mod monument;
 pub mod nether_fossil;
 pub mod ocean_ruin;
@@ -115,8 +116,8 @@ impl Mirror {
     }
 }
 
-/// Inclusive integer box (vanilla BoundingBox).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// Inclusive integer box (vanilla BoundingBox). The default is the one block at the origin.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct BoundingBox {
     pub min: [i32; 3],
     pub max: [i32; 3],

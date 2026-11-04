@@ -235,6 +235,17 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         Ty::Handler(name, false) if types.guest.get() && name == super::ERASED => format!(
             "{{ let h = {e}; if h.held {{ std::sync::Arc::new(super::Held(h.index)) as std::sync::Arc<dyn std::any::Any + Send + Sync> }} else {{ super::erased_at(h.index) }} }}"
         ),
+        // A handler the game never holds of its own is always the mod's.
+        Ty::Handler(name, true) if types.guest.get() && !super::held(name) => {
+            let path = super::sides::trait_path(name);
+            format!(
+                "Box::new(super::Shared(super::handler::<dyn {path}>({e}.index))) as Box<dyn {path}>"
+            )
+        }
+        Ty::Handler(name, false) if types.guest.get() && !super::held(name) => format!(
+            "super::handler::<dyn {}>({e}.index)",
+            super::sides::trait_path(name)
+        ),
         Ty::Handler(name, boxed) if types.guest.get() => {
             let path = super::sides::trait_path(name);
             if *boxed {

@@ -32,6 +32,9 @@ pub(super) const IMPORTS: &[&str] = &[
     "TicketValidation",
     "DataLoadContext",
     "LoopContext",
+    "GenerationContext",
+    "PieceContext",
+    "StructureRandom",
     "AttachmentStore",
     "ServerReloadListeners",
     "ClientReloadListeners",
@@ -74,6 +77,8 @@ pub(super) const REACHED: &[(&str, &str, &str)] = &[
 const EXPORTS: &[&str] = &[
     "Hooks",
     "ReloadApply",
+    "StructureType",
+    "StructurePiece",
     "BlockPart",
     "BlockEntityPart",
     "ItemPart",

@@ -382,6 +382,16 @@ impl WasmHandler {
     }
 }
 
+/// A mod's handler shows as its index, the game knowing nothing more of it.
+impl std::fmt::Debug for WasmHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WasmHandler")
+            .field("mod", &self.module.id)
+            .field("index", &self.index)
+            .finish()
+    }
+}
+
 impl Drop for WasmHandler {
     fn drop(&mut self) {
         OWNED

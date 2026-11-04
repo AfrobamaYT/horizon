@@ -169,7 +169,7 @@ mod tests {
                 "&LoadContext<'_>",
                 "&dyn DataLoadContext",
             ),
-            (PhaseContext::Loop, "&LoopContext<'_>", "&dyn LoopContext"),
+            (PhaseContext::Loop, "&LoopContext", "&dyn LoopContext"),
         ] {
             let hook = Hook {
                 context: Some(kind),

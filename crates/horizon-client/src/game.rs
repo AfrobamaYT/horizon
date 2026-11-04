@@ -293,6 +293,8 @@ mod native_world_edit;
 mod native_world_read;
 mod natural_spawning;
 mod nautili;
+#[cfg(test)]
+mod neighbor_notify_tests;
 mod net_harness;
 mod nether_portal;
 mod no_resources;
@@ -1251,6 +1253,17 @@ impl LevelAccess for GameLevel<'_> {
         if self.native_authoritative {
             self.native_block_changed(self.dimension, pos, old, new);
         }
+    }
+    fn neighbor_notify(&self, pos: BlockPos, skipped: Option<Direction>) -> bool {
+        if !self.native_authoritative
+            || !mod_api::__private::listened(mod_api::HookId::NeighborNotify)
+        {
+            return false;
+        }
+        let mut cancel = false;
+        let state = self.block_state(pos);
+        self.native_neighbor_notify(self.dimension, pos, state, skipped, &mut cancel);
+        cancel
     }
     fn observe_neighbor_changed(
         &self,
@@ -8279,7 +8292,6 @@ impl Game<'_> {
         self.tick_totem();
         self.update_totem_ready();
         self.tick_command_extras();
-        self.native_tick();
         self.tick_world(running)
     }
     /// What the tick runs after the local player's own update: effects, the
@@ -19411,6 +19423,8 @@ impl Game<'_> {
                     let steps = self.clock.advance(elapsed);
                     for _ in 0..steps {
                         let started = Instant::now();
+                        // Minecraft.tick: every client tick, paused or not, in menus too.
+                        self.native_client_tick_pre();
                         if self.title.is_none() && !self.pause {
                             horizon_client::spans::time("tick", || self.tick())?;
                             self.tick_ambience();
@@ -19422,6 +19436,7 @@ impl Game<'_> {
                         self.tick_chat_queue();
                         self.tick_music();
                         self.tick_sound_engine();
+                        self.native_client_tick_post();
                         self.clock.record(started.elapsed());
                         if let Some(report) = self.clock.take_sprint_report() {
                             self.sprint_report(&report);
@@ -19442,6 +19457,7 @@ impl Game<'_> {
                         }
                         result => result?,
                     };
+                    self.native_render_frame_post(elapsed);
                     self.apply_cursor_icon();
                     // The frame's spans, taken every frame they are recorded so they never
                     // pile up: the slow-frame line's, and the session's (`perf.frame`).
@@ -22708,6 +22724,15 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     mod_api::__private::install_packages(options.mods.native.packages(), &options.mods.selected);
     if let Err(refused) = mod_api::__private::install_parts(mod_api::__private::mods()) {
         panic!("Mod parts refused:\n{}", refused.join("\n"));
+    }
+    // The structure types those mods registered, handed to the engine before
+    // any world opens, as its StructureRegistry reads them.
+    if horizon_world::worldgen::structure::mod_types::install_mod_structure_types(
+        mod_api::__private::installed_structure_types(),
+    )
+    .is_err()
+    {
+        log::warn!("Mod structure types already installed; keeping the first table");
     }
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models(options.execution_role);

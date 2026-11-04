@@ -272,6 +272,17 @@ mod tests {
                     Some(&oak[..])
                 );
             }
+            {
+                let host: &dyn mod_api::Host = game;
+                assert_eq!(
+                    host.tag_members(TagRegistry::Item, "oak_logs").as_deref(),
+                    Some(&oak[..])
+                );
+                assert_eq!(
+                    host.item_stack_in_tag(&ItemStack::new("minecraft:oak_log", 1), "oak_logs"),
+                    Some(true)
+                );
+            }
             assert_eq!(
                 game.native_tag_members(TagRegistry::Fluid, "minecraft:water")
                     .unwrap(),
@@ -484,6 +495,13 @@ mod tests {
                 assert_eq!(hit.fluid_in_tag("minecraft:water", "minecraft:water"), None);
             }
             assert_eq!(game.world.chunks.len(), chunks, "nothing was loaded");
+            game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
+            let host: &dyn mod_api::Host = game;
+            assert_eq!(host.tag_members(TagRegistry::Item, "oak_logs"), None);
+            assert_eq!(
+                host.item_stack_in_tag(&ItemStack::new("minecraft:oak_log", 1), "oak_logs"),
+                None
+            );
             game.session_lock = None;
             let _ = std::fs::remove_dir_all(dir);
         });

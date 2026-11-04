@@ -217,6 +217,8 @@ mod tests {
                 self.0
             }
         }
+        pub(super) struct SoundPlay;
+        pub(super) struct ChannelRef;
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
         #[derive(Clone, Copy)]
