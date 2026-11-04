@@ -140,6 +140,7 @@ fn a_tall_column_streams_lights_and_meshes_to_its_top() {
             assets: &context.assets,
             render: &context.render,
             tables: &context.tables,
+            hidden_states: &context.hidden_states,
             biomes: &context.biomes,
             visibility: context.tables.visibility.clone(),
         };

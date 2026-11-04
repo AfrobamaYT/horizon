@@ -229,6 +229,7 @@ fn relit_columns_keep_every_mesh_current() {
             assets: &context.assets,
             render: &context.render,
             tables: &context.tables,
+            hidden_states: &context.hidden_states,
             biomes: &context.biomes,
             visibility: context.tables.visibility.clone(),
         };
