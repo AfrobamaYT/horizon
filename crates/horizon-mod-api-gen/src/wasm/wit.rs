@@ -215,9 +215,10 @@ fn def_wit(types: &Types<'_>, def: &Def, out: &mut String, used_out: bool) -> Re
                             write!(text, "{}: {}, ", field.wit, out_name(&types.defs[*id]))
                                 .unwrap();
                         }
+                        // `none`: left as it was, so not sent back.
                         ty => {
                             if let Some(ty) = wit(types, ty)? {
-                                write!(text, "{}: {ty}, ", field.wit).unwrap();
+                                write!(text, "{}: option<{ty}>, ", field.wit).unwrap();
                             }
                         }
                     }

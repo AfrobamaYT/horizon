@@ -24,10 +24,33 @@ impl Host for World {
 
 impl ServerHost for World {}
 
-/// One call of the chat hook with `work` as the message; what the mod wrote back.
+/// One call of the hook `work` names: the server tick for `tick`, else the chat hook with
+/// `work` as the message; what the mod wrote back.
 fn chat(hooks: &dyn Hooks, work: &str) -> String {
+    if work == "tick" {
+        let context = mod_api::__private::built::NativeLifecycleContext {
+            authority: mod_api::NativeAuthority::DedicatedServer,
+            epoch: NativeWorldEpoch::new(1),
+            tick: mod_api::NativeTickId::new(1),
+        }
+        .into();
+        let mut event = mod_api::ServerTickEvent {
+            context: &context,
+            phase: mod_api::ServerTickPhase::ServerTickStart {
+                world_running: true,
+            },
+        };
+        hooks.server_tick(&mut World, &mut event);
+        return String::new();
+    }
     let mut message = Text::literal("");
-    let mut replies = Vec::new();
+    // `untouched`: a large writable field the mod leaves as it was.
+    let mut replies: Vec<Text> = match work {
+        "untouched" => (0..100)
+            .map(|i| Text::literal(format!("reply {i}")))
+            .collect(),
+        _ => Vec::new(),
+    };
     let mut event = ServerChatEvent {
         player_id: 1,
         player: 1,
@@ -83,8 +106,10 @@ fn a_wasm_mod_against_the_same_mod_native() {
     let native = &*bench_mod::hooks();
 
     let cases = [
-        ("empty", "the call alone", 20_000),
+        ("tick", "a call with a small event", 20_000),
+        ("empty", "a call with the chat event", 20_000),
         ("text", "a message lowered back", 20_000),
+        ("untouched", "100 replies left as they were", 2_000),
         ("imports 100", "100 calls into the game", 1_000),
         ("compute 1000", "logic on 1,000 values", 1_000),
         ("compute 10000", "logic on 10,000 values", 100),
