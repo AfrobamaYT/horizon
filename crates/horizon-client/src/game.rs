@@ -249,6 +249,8 @@ mod native_inventories;
 mod native_item_container;
 mod native_item_entity_refs;
 mod native_item_places;
+#[cfg(test)]
+mod native_knockback_tests;
 mod native_level_effects;
 mod native_level_events;
 mod native_level_items;

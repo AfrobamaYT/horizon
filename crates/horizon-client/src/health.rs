@@ -1416,6 +1416,7 @@ impl ServerPlayerHurtWorld for Environment<'_> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     #[test]
     fn knockback_attacker_scopes_restore_on_return_and_unwind() {
         assert_eq!(super::knockback_attacker(), 0);
@@ -1436,6 +1437,46 @@ mod tests {
             );
         }
         assert_eq!(super::knockback_attacker(), 0);
+    }
+    #[test]
+    fn a_knockback_hook_cannot_make_the_push_nonfinite() {
+        fn hook(_: DamageLevel<'_>, _: Hurting<'_>, knock: &mut Knock) -> bool {
+            knock.strength = f64::NAN;
+            knock.x = knock.x * 2.0;
+            false
+        }
+        let mut level = crate::health::TestLevel::with_hooks(
+            0,
+            DamageHooks {
+                knockback: Some(hook),
+                ..DamageHooks::NONE
+            },
+        );
+        let source = HurtSource {
+            damage_type: "minecraft:generic",
+            causing: 0,
+            direct: 0,
+            position: None,
+        };
+        let mut knock = Knock {
+            strength: 0.4,
+            x: 1.0,
+            z: 0.5,
+        };
+        assert!(
+            !level
+                .level()
+                .knockback_canceled(Hurting::Player(1, source), &mut knock)
+        );
+        // A value left that is not a number is put back; one that is finite stays changed.
+        assert_eq!(
+            knock,
+            Knock {
+                strength: 0.4,
+                x: 2.0,
+                z: 0.5
+            }
+        );
     }
     #[test]
     fn a_hit_in_the_hurt_cooldown_knocks_nobody_back() {
