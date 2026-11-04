@@ -9,21 +9,25 @@ use serde_json::{Map, Value, json};
 fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
     let root = std::env::temp_dir().join(format!("horizon-load-hooks-{}", std::process::id()));
     let context = LoadContext::new(
-        DataLoadOrigin::ServerDataLoad,
+        DataLoadOrigin::ClientPreload,
         std::sync::Arc::new(LoadInputs::new(Default::default(), root.join("settings"))),
         [],
     );
+    let server_context = context.for_load(DataLoadOrigin::ServerDataLoad, []);
     let mut table = json!([]);
     let mut components = Map::new();
-    loot::native_loot_table_load("table", &mut table);
+    loot::native_loot_table_load(&server_context, "table", &mut table);
     item_defaults::native_modify_default_components(&context, "item", &mut components);
     assert_eq!(table, json!([]));
     assert!(components.is_empty());
 
     let hooks = || NativeLoadHooks {
-        loot_table_load: |id, table| table.as_array_mut().unwrap().push(id.into()),
-        modify_default_components: |context, item, components| {
+        loot_table_load: |context, id, table| {
             assert_eq!(context.origin(), DataLoadOrigin::ServerDataLoad);
+            table.as_array_mut().unwrap().push(id.into());
+        },
+        modify_default_components: |context, item, components| {
+            assert_eq!(context.origin(), DataLoadOrigin::ClientPreload);
             components.insert("item".into(), Value::String(item.into()));
         },
         loot_function: |_, _, _, stack| stack.count += 1,
@@ -32,14 +36,14 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
     assert!(native_load_hooks::install(hooks()).is_ok());
     assert!(
         native_load_hooks::install(NativeLoadHooks {
-            loot_table_load: |_, table| *table = json!("second"),
+            loot_table_load: |_, _, table| *table = json!("second"),
             modify_default_components: |_, _, components| components.clear(),
             loot_function: |_, _, _, stack| stack.count = 0,
             loot_condition: |_, _, _, holds| *holds = false,
         })
         .is_err()
     );
-    loot::native_loot_table_load("table", &mut table);
+    loot::native_loot_table_load(&server_context, "table", &mut table);
     item_defaults::native_modify_default_components(&context, "item", &mut components);
     assert_eq!(table, json!(["table"]));
     assert_eq!(components["item"], json!("item"));
@@ -51,6 +55,7 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
     std::fs::write(root.join("items.json"), r#"{"probe:token":{}}"#).unwrap();
     std::fs::write(dir.join("test.json"), "[]").unwrap();
     let item_data = item_defaults::ItemData::load(&root, context).unwrap();
+    // The server loot load owns its context even when the item data came from a client preload.
     assert_eq!(
         item_data.defaults().entries()["probe:token"]["item"],
         "probe:token"
@@ -60,7 +65,7 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
     for _ in 0..2 {
         let mut server =
             loot::LootData::load(&root, &loot::PackOverlay::NONE, item_data.defaults()).unwrap();
-        server.apply_native_table_loads();
+        server.apply_native_table_loads(&server_context);
         assert_eq!(server.tables()["minecraft:test"], json!(["minecraft:test"]));
         assert_eq!(raw["minecraft:test"], json!([]));
     }
