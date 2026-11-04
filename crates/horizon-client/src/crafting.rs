@@ -1128,6 +1128,8 @@ pub struct Recipes {
     /// The first cooking recipe of each kind taking each item, built at the
     /// first lookup (furnaces look theirs up every tick).
     cook_index: std::sync::OnceLock<CookIndex>,
+    /// What mods added to the recipe property sets this load (`property_set`).
+    property_additions: PropertyAdditions,
 }
 type CookIndex = HashMap<String, crate::fast_hash::FxHashMap<String, Vec<usize>>>;
 /// `MinMaxBounds.Ints` as (min, max) with the given defaults.
@@ -1248,6 +1250,54 @@ pub struct ResolvedRecipe {
 #[derive(Default)]
 pub struct ResolvedSources {
     pub recipes: Vec<ResolvedRecipe>,
+    /// What mods added to the recipe property sets, asked once per load.
+    pub property_additions: PropertyAdditions,
+}
+/// The items mods added to the recipe property sets
+/// (`RecipeManager.RECIPE_PROPERTY_SETS`) in one load, by set key without
+/// its `minecraft:` prefix (`furnace_input`). The one answer every reader of
+/// the sets takes: the cooking, station and brewing acceptance and the
+/// network copy.
+#[derive(Clone, Debug, Default)]
+pub struct PropertyAdditions(HashMap<&'static str, HashSet<String>>);
+impl PropertyAdditions {
+    /// Asks the `recipe_property_sets` hook once. An unknown set key and an
+    /// item that is air are logged and skipped.
+    fn ask(context: &horizon_world::native_load_context::LoadContext) -> Self {
+        let mut asked = Vec::new();
+        mod_api::crafting::native_recipe_property_sets(context, &mut asked);
+        let mut sets = HashMap::<&'static str, HashSet<String>>::new();
+        for addition in asked {
+            let key = addition
+                .set
+                .strip_prefix("minecraft:")
+                .unwrap_or(&addition.set);
+            let Some((key, ..)) = crate::lan::recipes::PROPERTY_SETS
+                .iter()
+                .find(|(set, ..)| *set == key)
+            else {
+                log::warn!("recipe_property_sets: unknown set {}", addition.set);
+                continue;
+            };
+            let set = sets.entry(key).or_default();
+            for item in addition.items {
+                if item == "minecraft:air" {
+                    log::warn!("recipe_property_sets: air skipped in {key}");
+                } else {
+                    set.insert(item);
+                }
+            }
+        }
+        Self(sets)
+    }
+    /// The items mods added to the set `key` (`furnace_input`).
+    pub fn get(&self, key: &str) -> Option<&HashSet<String>> {
+        self.0.get(key)
+    }
+    /// Whether a mod added `item` to the set `key`.
+    pub fn adds(&self, key: &str, item: &str) -> bool {
+        self.get(key).is_some_and(|set| set.contains(item))
+    }
 }
 impl ResolvedSources {
     /// The recipes under `root` and `overlay`, resolved for `context`'s load.
@@ -1319,7 +1369,10 @@ impl ResolvedSources {
                 }
             })
             .collect();
-        Self { recipes }
+        Self {
+            recipes,
+            property_additions: PropertyAdditions::ask(context),
+        }
     }
 }
 
@@ -1333,6 +1386,7 @@ impl Recipes {
             facts: HashMap::new(),
             curses: HashSet::new(),
             cook_index: std::sync::OnceLock::new(),
+            property_additions: PropertyAdditions::default(),
         }
     }
 
@@ -1620,6 +1674,7 @@ impl Recipes {
             facts,
             curses,
             cook_index: Default::default(),
+            property_additions: sources.property_additions.clone(),
         })
     }
     /// Match a `size`x`size` grid (row-major) against the crafting recipes.
@@ -1832,6 +1887,21 @@ impl Recipes {
             .get(&*input.item)?
             .iter()
             .find_map(|i| self.cooking.get(*i).filter(|c| c.ingredient.test(input)))
+    }
+    /// What mods added to the property set `key` (`furnace_input`).
+    pub fn property_set(&self, key: &str) -> Option<&HashSet<String>> {
+        self.property_additions.get(key)
+    }
+    /// Whether a furnace of recipe type `kind` (`minecraft:smelting`) takes
+    /// `input` (`RecipePropertySet.test`): a recipe of that type names it, or
+    /// a mod added it to the kind's input set.
+    pub fn cooking_accepts(&self, kind: &str, input: &ItemStack) -> bool {
+        self.cook(kind, input).is_some()
+            || crate::lan::recipes::PROPERTY_SETS
+                .iter()
+                .any(|(set, recipe_type, _)| {
+                    *recipe_type == kind && self.property_additions.adds(set, &input.item)
+                })
     }
     /// `cook` by scanning every recipe, as it was before the index.
     #[cfg(test)]
@@ -2055,6 +2125,7 @@ mod tests {
             facts: HashMap::new(),
             curses: HashSet::new(),
             cook_index: Default::default(),
+            property_additions: PropertyAdditions::default(),
         }
     }
     #[test]
@@ -2390,6 +2461,7 @@ mod tests {
             facts: HashMap::new(),
             curses: HashSet::new(),
             cook_index: Default::default(),
+            property_additions: PropertyAdditions::default(),
         };
         let ctx = Context {
             recipes: &recipes,

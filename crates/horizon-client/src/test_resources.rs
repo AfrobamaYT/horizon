@@ -48,6 +48,6 @@ pub(crate) fn server_load() -> LoadContext {
     dead_code,
     reason = "standalone probes that include this file may not build menus"
 )]
-pub(crate) fn loop_context(side: LoopSide) -> LoopContext {
-    server_load().loop_context(side, [])
+pub(crate) fn loop_context(side: LoopSide) -> std::sync::Arc<LoopContext> {
+    std::sync::Arc::new(server_load().loop_context(side, []))
 }

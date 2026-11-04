@@ -625,6 +625,25 @@ impl GameLevel<'_> {
         mod_api::dispatch_fluid_level_change(self, dimension, pos, fluid, from, to, cancel);
     }
 
+    /// A fluid source at `pos` (`state`) is about to count towards turning
+    /// the flowing fluid beside it into a source (NeoForge's
+    /// `CreateFluidSourceEvent`, `FlowingFluid.getNewLiquid`): two counted
+    /// sources beside a block over a solid block or a source make it one.
+    /// Asked for each horizontal neighbour source, whenever the game works
+    /// out a block's new fluid, spread checks included: answer fast.
+    /// `can_convert` starts as the fluid's rule (`water_source_conversion`
+    /// or `lava_source_conversion`). Server-side.
+    #[inline(always)]
+    pub(super) fn native_create_fluid_source(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        can_convert: &mut bool,
+    ) {
+        mod_api::dispatch_create_fluid_source(self, dimension, pos, state, can_convert);
+    }
+
     /// A non-persistent leaf block at distance 7 is about to decay at `pos`.
     /// Set `cancel` to keep it. Server-side.
     #[inline(always)]
@@ -7131,6 +7150,35 @@ impl Game<'_> {
         cancel: &mut bool,
     ) {
         mod_api::dispatch_create_spawn_position(self, position, rotation, cancel);
+    }
+    /// `PlayerRespawnPositionEvent`: where `player` respawns, once the server found it. The
+    /// `original_*` arguments are that point; the mods may change `level`, `position`, `yaw`,
+    /// `pitch` and `copy_original_spawn_position` (`game/respawn_position.rs` applies them).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn native_player_respawn_position(
+        &mut self,
+        player: PlayerRef,
+        original_level: LevelDimension,
+        original_position: [f64; 3],
+        missing_respawn_block: bool,
+        level: &mut LevelDimension,
+        position: &mut [f64; 3],
+        yaw: &mut f32,
+        pitch: &mut f32,
+        copy_original_spawn_position: &mut bool,
+    ) {
+        mod_api::dispatch_player_respawn_position(
+            self,
+            player,
+            original_level,
+            original_position,
+            missing_respawn_block,
+            level,
+            position,
+            yaw,
+            pitch,
+            copy_original_spawn_position,
+        );
     }
     /// `player` (`name`) respawned (NeoForge's `PlayerRespawnEvent`): at the
     /// end of `PlayerList.respawn`, once they are placed and their health,

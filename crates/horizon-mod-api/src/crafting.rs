@@ -23,6 +23,44 @@ pub fn native_ingredient(
 ) {
     crate::dispatch_ingredient(&DataLoadContext::new(context), kind, data, items);
 }
+/// Items a mod adds to one of the recipe property sets: the items a furnace,
+/// blast furnace, smoker, campfire, smithing table slot or brewing stand slot
+/// accepts (`RecipeManager.RECIPE_PROPERTY_SETS`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RecipePropertyAddition {
+    /// The set's key, `minecraft:furnace_input` for instance.
+    pub set: String,
+    /// The item ids to add.
+    pub items: Vec<String>,
+}
+impl RecipePropertyAddition {
+    /// `items` added to the set named `set`.
+    pub fn new(set: impl Into<String>, items: Vec<String>) -> Self {
+        Self {
+            set: set.into(),
+            items,
+        }
+    }
+}
+/// Items a mod's own recipe type takes in a station slot, added to the
+/// recipe property sets (`RecipeManager.RECIPE_PROPERTY_SETS`): what a
+/// furnace, blast furnace, smoker, campfire, smithing table slot or brewing
+/// stand slot accepts, and what a client predicts it accepts. Push one
+/// `RecipePropertyAddition` per set to add to; the vanilla recipes' own
+/// items stay in. Called once per load, after the recipes are resolved, with
+/// the `DataLoadContext` of the load that owns them (`origin()`
+/// `ServerDataLoad` on a server, `ClientPreload` on a client's own load),
+/// and again after `/reload`. An unknown set key, an item that is air or
+/// not a registered item is logged and skipped. The answer must be the same
+/// every time.
+#[inline(never)]
+pub fn native_recipe_property_sets(
+    context: &LoadContext,
+    additions: &mut Vec<RecipePropertyAddition>,
+) {
+    crate::dispatch_recipe_property_sets(&DataLoadContext::new(context), additions);
+}
 /// A mod's own ingredient kind, matching a concrete stack at craft time:
 /// the ingredient's `test` calls here with the kind, its JSON and the
 /// stack being matched, `accept` already true (the load-time list named

@@ -100,6 +100,8 @@ mod control;
 mod copper_golems;
 mod cosmetics;
 mod creaking;
+#[cfg(test)]
+mod create_fluid_source_tests;
 mod creative_hotbar;
 mod creatures;
 #[cfg(test)]
@@ -337,6 +339,7 @@ mod render_control;
 mod render_tick;
 mod repro;
 mod respawn_anchor;
+mod respawn_position;
 mod saves_control;
 mod saving;
 mod scoreboard;
@@ -1052,6 +1055,7 @@ struct GameLevel<'w> {
     /// Container loot tables (`unpackLootTable`).
     loot: Option<std::sync::Arc<horizon_world::loot::LootData>>,
     registry: &'static horizon_world::registry::BlockRegistry,
+    block_registries: &'w horizon_client::command::args::Registries,
     rules: horizon_world::level::GameRules,
     /// `Difficulty.getId()` (peaceful 0 .. hard 3).
     difficulty: i32,
@@ -1316,6 +1320,13 @@ impl LevelAccess for GameLevel<'_> {
             self.native_fluid_level_change(self.dimension, pos, fluid, from, to, &mut cancel);
         }
         !cancel
+    }
+    fn create_fluid_source(&self, pos: BlockPos, state: BlockStateId, vanilla: bool) -> bool {
+        let mut can_convert = vanilla;
+        if self.native_authoritative {
+            self.native_create_fluid_source(self.dimension, pos, state, &mut can_convert);
+        }
+        can_convert
     }
     fn allow_block_ignite(&self, pos: BlockPos, cause: &'static str) -> bool {
         let mut cancel = false;
@@ -2427,6 +2438,7 @@ impl UiResources {
 #[derive(Clone)]
 pub struct PackResources {
     assets: Arc<Assets>,
+    block_registries: Arc<horizon_client::command::args::Registries>,
     render: Arc<RenderAssets>,
     context: Arc<WorkerContext>,
     layer_names: Arc<HashMap<u32, String>>,
@@ -2510,6 +2522,7 @@ impl PackResources {
                 light,
                 hidden_states: Arc::from([]),
             }),
+            block_registries: native_block_states::block_registries(assets.registry),
             assets,
             render,
             item_renderer: Arc::new(item_renderer),
@@ -2885,7 +2898,7 @@ struct Game<'a> {
     audio: Audio,
     /// The side, registries and mod settings of this game's resource generation, which
     /// its menus lend to the hooks they fire inside a loop; rebuilt by `refresh_loop_context`.
-    loop_context: horizon_world::native_load_context::LoopContext,
+    loop_context: Arc<horizon_world::native_load_context::LoopContext>,
     music: horizon_client::music::MusicManager,
     /// The tracks native mods play over the music (`native_music_layers`).
     music_layers: horizon_client::music::MusicLayers,
@@ -5018,6 +5031,7 @@ impl Game<'_> {
                 self.server_loot.get()
             },
             registry: self.pack.assets.registry,
+            block_registries: &self.pack.block_registries,
             rules,
             difficulty: i32::from(self.ui.difficulty),
             fire_players,
@@ -19928,7 +19942,7 @@ impl<'a> Game<'a> {
             player_autosaves: Default::default(),
             session_lock: None,
             audio,
-            loop_context: res.core.item_data.context().loop_context(loop_side, []),
+            loop_context: Arc::new(res.core.item_data.context().loop_context(loop_side, [])),
             music: {
                 // The manager starts with the saved option (MusicManager's constructor).
                 let mut music = horizon_client::music::MusicManager::default();

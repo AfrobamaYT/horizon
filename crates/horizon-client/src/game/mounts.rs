@@ -724,6 +724,7 @@ impl Game<'_> {
             collision_binding: self.collision,
             resources: self.motion,
             tag_items: Some(world_items!(self)),
+            block_registries: Some(&self.pack.block_registries),
         }
         .cause_mount_fall(distance, modifier);
     }

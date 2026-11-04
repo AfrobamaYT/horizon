@@ -1399,7 +1399,16 @@ pub(super) mod tests {
                 integrated: false,
                 levels: Default::default(),
             };
-            let mut hub = Hub::new(lan, sync, encoder, config.clone());
+            let mut hub = Hub::new(
+                lan,
+                sync,
+                encoder,
+                config.clone(),
+                std::sync::Arc::new(
+                    crate::game::test_server_load()
+                        .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+                ),
+            );
             let motion = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
             let fake = Guest::connectionless(fake_id, 2, "fake".into(), 2, [0.0; 3], motion);
             assert!(fake.placed && fake.motion.is_some());

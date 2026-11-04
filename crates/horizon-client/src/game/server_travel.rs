@@ -10,6 +10,7 @@
 use super::end::GatewayJob;
 use super::nether_portal::{PLAYER_DELAY, Plan};
 use super::respawn_anchor::RespawnConfig;
+use super::respawn_position::Respawn;
 use super::{Dim, Game, Mob, boats, lan::LanHost, minecarts};
 use horizon_client::{lan::hub::TickCtx, world_spawn::PlayerSpawnFinder};
 use horizon_core::{geometry::Vec3, position::BlockPos};
@@ -40,6 +41,9 @@ pub(super) struct Trip {
     /// A respawn at the world spawn, moved onto a free column within the
     /// respawn radius once the chunks around it have loaded.
     world_spawn: bool,
+    /// The respawn point whose bed or anchor was gone, for a world-spawn
+    /// respawn that replaces it (`TeleportTransition.missingRespawnBlock`).
+    missing: Option<RespawnConfig>,
     /// The search for that column while a candidate's chunk loads.
     finder: Option<PlayerSpawnFinder>,
     /// Sent by a command: the player is already where it goes.
@@ -540,6 +544,7 @@ impl Game<'_> {
             gateway: None,
             respawn: None,
             world_spawn: false,
+            missing: None,
             finder: None,
             placed: false,
             left: Some(source),
@@ -564,6 +569,7 @@ impl Game<'_> {
             gateway: None,
             respawn: Some(config),
             world_spawn: false,
+            missing: None,
             finder: None,
             placed: false,
             left: None,
@@ -609,7 +615,7 @@ impl Game<'_> {
     /// TeleportTransition.createDefault and missingRespawnBlock: the player
     /// waits at the world spawn for its chunks, then PlayerSpawnFinder puts
     /// it on a free column within the respawn radius.
-    pub(super) fn world_spawn_trip(&mut self, conn: u32) {
+    pub(super) fn world_spawn_trip(&mut self, conn: u32, missing: Option<RespawnConfig>) {
         let Some([x, y, z]) = self.level.world_spawn else {
             return;
         };
@@ -625,6 +631,7 @@ impl Game<'_> {
             gateway: None,
             respawn: None,
             world_spawn: true,
+            missing,
             finder: None,
             placed: false,
             left: None,
@@ -633,7 +640,7 @@ impl Game<'_> {
 
     /// TeleportTransition.missingRespawnBlock: the world spawn, in the
     /// Overworld.
-    fn respawn_at_world_spawn(&mut self, conn: u32) {
+    fn respawn_at_world_spawn(&mut self, conn: u32, missing: RespawnConfig) {
         let at = self.level.world_spawn.map_or(
             self.spawn.map_or([0.5, 80.0, 0.5], |s| [s.x, s.y, s.z]),
             |[x, y, z]| [f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5],
@@ -645,7 +652,7 @@ impl Game<'_> {
             rotation: None,
         });
         self.run_level_teleports();
-        self.world_spawn_trip(conn);
+        self.world_spawn_trip(conn, Some(missing));
     }
 
     /// `TheEndGatewayBlockEntity.getPortalPosition` and the teleport within
@@ -680,6 +687,7 @@ impl Game<'_> {
             gateway: Some(job),
             respawn: None,
             world_spawn: false,
+            missing: None,
             finder: None,
             placed: false,
             left: None,
@@ -735,7 +743,7 @@ impl Game<'_> {
                         if let Some(host) = self.lan.as_mut() {
                             host.hub.missing_respawn_block(trip.conn);
                         }
-                        self.respawn_at_world_spawn(trip.conn);
+                        self.respawn_at_world_spawn(trip.conn, config);
                         // The move to the world spawn ends the player's move
                         // from the level they left.
                         if let Some(left) = trip.left
@@ -759,6 +767,28 @@ impl Game<'_> {
                         }) =>
                     {
                         self.tell_mods_changed_dimension(trip.conn, trip.left, trip.dim);
+                        // PlayerRespawnPositionEvent: the column is the point.
+                        let pitch = self.lan.as_ref().map_or(0.0, |h| h.hub.guests[i].pitch);
+                        let found = Respawn {
+                            dim: trip.dim,
+                            at,
+                            yaw,
+                            pitch,
+                        };
+                        if let Some(d) = self.respawn_position(trip.conn, found, trip.missing) {
+                            self.apply_respawn_copy(trip.conn, &d, trip.missing);
+                            if d.moved && d.to.dim != trip.dim {
+                                self.respawn_into_other_level(trip.conn, d.to);
+                            } else if d.moved
+                                && let Some(host) = self.lan.as_mut()
+                            {
+                                let g = &mut host.hub.guests[i];
+                                (g.yaw, g.pitch) = (d.to.yaw, d.to.pitch);
+                                g.new_body(true);
+                                host.hub
+                                    .teleport(i, Some([d.to.at.x, d.to.at.y, d.to.at.z]));
+                            }
+                        }
                         continue;
                     }
                     Ok(at) => (at, yaw),
@@ -813,6 +843,32 @@ impl Game<'_> {
                     _ => (trip.target, yaw),
                 }
             };
+            // PlayerRespawnPositionEvent: a deferred respawn's point is found.
+            let mut pitch = None;
+            let (position, yaw) = if trip.respawn.is_some() || trip.world_spawn {
+                let pitch_now = self.lan.as_ref().map_or(0.0, |h| h.hub.guests[i].pitch);
+                let found = Respawn {
+                    dim: trip.dim,
+                    at: position,
+                    yaw,
+                    pitch: pitch_now,
+                };
+                match self.respawn_position(trip.conn, found, trip.missing) {
+                    Some(d) => {
+                        self.apply_respawn_copy(trip.conn, &d, trip.missing);
+                        if d.to.dim != trip.dim {
+                            self.tell_mods_changed_dimension(trip.conn, trip.left, trip.dim);
+                            self.respawn_into_other_level(trip.conn, d.to);
+                            continue;
+                        }
+                        pitch = Some(d.to.pitch);
+                        (d.to.at, d.to.yaw)
+                    }
+                    None => (position, yaw),
+                }
+            } else {
+                (position, yaw)
+            };
             // The vehicle the player rode comes with it, and waits for it
             // where it arrives (`Entity.teleportCrossDimension` carries the
             // passengers).
@@ -826,6 +882,9 @@ impl Game<'_> {
             host.play.entry(trip.conn).or_default().portal.cooldown = 10;
             let g = &mut host.hub.guests[i];
             g.yaw = yaw;
+            if let Some(pitch) = pitch {
+                g.pitch = pitch;
+            }
             // A new body at the exit: no fall distance or motion carried over,
             // but the player's attributes (ServerPlayer.teleport keeps the entity).
             g.new_body(true);
@@ -951,6 +1010,7 @@ impl Game<'_> {
                 gateway: None,
                 respawn: None,
                 world_spawn: false,
+                missing: None,
                 finder: None,
                 placed: true,
                 left: Some(source),

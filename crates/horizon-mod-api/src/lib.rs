@@ -122,7 +122,7 @@ pub use crate::biome::{BiomeColors, SpawnEntry};
 pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
-pub use crate::crafting::{Ingredient, RecipeFile};
+pub use crate::crafting::{Ingredient, RecipeFile, RecipePropertyAddition};
 pub use crate::extras::Corner;
 pub use crate::extras_hud::Corners;
 pub use crate::first_person::Hand;
@@ -3563,6 +3563,14 @@ pub trait LevelHost {
     fn state_block(&self, _state: BlockStateId) -> Option<&str> {
         unimplemented!("LevelHost::state_block")
     }
+    /// Parse a block name and properties as `BlockStateParser.parseForBlock`; None for invalid input or unavailable context.
+    fn block_state_id(&self, _name: &str) -> Option<BlockStateId> {
+        unimplemented!("LevelHost::block_state_id")
+    }
+    /// The block's default state (`Block.defaultBlockState`), or None for an unknown block.
+    fn block_state_default(&self, _block: &str) -> Option<BlockStateId> {
+        unimplemented!("LevelHost::block_state_default")
+    }
     /// The full block state name and properties, as `BlockStateParser.serialize`; None for an unknown id.
     fn state_string(&self, _state: BlockStateId) -> Option<String> {
         unimplemented!("LevelHost::state_string")
@@ -3575,8 +3583,8 @@ pub trait LevelHost {
     fn height(&self) -> i32 {
         unimplemented!("LevelHost::height")
     }
-    /// Whether the block registry name is in the merged block tag. Unknown names and tags
-    /// return false; unavailable authoritative tags return None.
+    /// `BlockState.is(TagKey)`: whether the block registry name is in the merged block tag.
+    /// Unknown names and tags return false; unavailable authoritative tags return None.
     fn block_in_tag(&self, _block: &str, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::block_in_tag")
     }
@@ -3595,7 +3603,7 @@ pub trait LevelHost {
     fn state_fluid_state(&self, _state: BlockStateId) -> Option<FluidState> {
         unimplemented!("LevelHost::state_fluid_state")
     }
-    /// Whether the fluid registry name is in the merged fluid tag, as `block_in_tag` reads.
+    /// `FluidState.is(TagKey)`: whether the fluid registry name is in the merged fluid tag, as `block_in_tag` reads.
     fn fluid_in_tag(&self, _fluid: &str, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::fluid_in_tag")
     }

@@ -1596,6 +1596,17 @@
       }
     },
     {
+      "name": "player_respawn_position",
+      "doc": "`PlayerRespawnPositionEvent`: where `player` respawns, once the server has\nfound it: the bed or anchor they stand up at (facing it), or the world\nspawn's free column. `original_level` and `original_position` are that\npoint; `missing_respawn_block` says the bed or anchor was gone, so the\nplayer came back at the world spawn. Change `level`, `position`, `yaw`\nand `pitch` to send them elsewhere: within the level a teleport, into\nanother level a level change. `copy_original_spawn_position` (default:\nthe block wasn't missing) says whether they keep their respawn point for\nnext time. Horizon places the player first and finds the point once its\nchunks have loaded, so this fires then, before `player_respawned` only\nwhen no chunks had to load. Not for the End exit, which isn't a respawn\nhere (as for `player_respawned`). Server-side.",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_respawn_position",
+      "neoforge": "PlayerRespawnPositionEvent",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
       "name": "player_respawned",
       "doc": "`player` (`name`) respawned (NeoForge's `PlayerRespawnEvent`): at the\nend of `PlayerList.respawn`, once they are placed and their health,\nfood and experience reset, with their state swapped in. Once for each\ndeath that ends in a respawn, on a server; not for the End-exit one.",
       "version": 1,
