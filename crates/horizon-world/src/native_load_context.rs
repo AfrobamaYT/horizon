@@ -233,7 +233,7 @@ mod tests {
 
         assert_eq!(client.side(), LoopSide::Client);
         assert_eq!(server.side(), LoopSide::Server);
-        assert_eq!(client.registry("item"), Some(&["a:b".to_owned()][..]));
+        assert_eq!(client.registry("item").as_deref(), Some(&["a:b".to_owned()][..]));
         assert_eq!(server.registry("item"), client.registry("item"));
         assert_eq!(client.setting("active", "mode").as_deref(), Some("one"));
         assert_eq!(server.setting("active", "mode").as_deref(), Some("two"));
