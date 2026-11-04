@@ -78,7 +78,7 @@ namespaces = []              # optional: more namespaces the mod's files use (be
 
 Unknown keys are refused, so a typo is an error, not a silently ignored permission. The shared manifest
 uses exactly `api = "0.2"` and `capabilities = ["registries"]`, with `side = "client"` (the default) or `"both"`.
-Code mods add `[native]` for exact build pins and optional raw injections; their id and version still come only
+Code mods add `[native]` for exact build pins and optional raw injections ([Injections](modding/src/injections.md)); their id and version still come only
 from this manifest, not Cargo metadata ([Native mods](native-mods.md#a-bundle)). Nonempty `[dependencies]`
 is supported only for code mods. Both kinds may include a fixed-name `icon.png` at the top level, with no
 manifest key: a valid square PNG, at most 512 × 512 pixels and 256 KiB encoded ([Mod files](api/mod-files.md)).
@@ -518,7 +518,7 @@ radius. `kernel_size` 0 is none.
 Behaviour that needs code (a new key, a HUD, a tool that changes how mining works) is a native mod.
 It is one flat Rust project with `horizon-mod.toml`, `Cargo.toml` and `src/`, beside its `assets/` and `data/`.
 Start with `cargo horizon-mod new my_mod --template native --horizon <commit>` and implement the typed hooks;
-raw injections are a rare escape hatch. How the launcher builds one, what it pins and why it is not sandboxed:
+raw injections are a rare escape hatch ([Injections](modding/src/injections.md)). How the launcher builds one, what it pins and why it is not sandboxed:
 [native-mods.md](native-mods.md).
 The typed hook API is generated automatically at build time, in debug and release builds alike; its generated
 Rust files are build output, not files to regenerate or commit. Engine contributors adding a hook only run

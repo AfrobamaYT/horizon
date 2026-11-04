@@ -164,6 +164,7 @@ fn new_native(
     let files = [
         ("Cargo.toml", include_str!("../template/native/api.toml")),
         ("src/lib.rs", include_str!("../template/native/lib.rs")),
+        ("README.md", include_str!("../template/native/README.md")),
         (MANIFEST, manifest.as_str()),
         (".gitignore", include_str!("../template/gitignore")),
     ];

@@ -50,7 +50,8 @@ refuse the manifest. Code adds `[native]`:
 
 An injection has a unique, nonempty `id` and a `kind`; it selects exactly one of `hook` or `target`, and
 exactly one of `helper` or `trait_method`. A helper is a selected `.rs` file under `src/`, or `build.rs`.
-See [Native mods](../native-mods.md#a-bundle) for bindings, named hook contracts and trait injections.
+See [Injections](../modding/src/injections.md) for the fields, bindings and trait injections, and
+[Native mods](../native-mods.md#named-hook-points) for the named hook contracts.
 
 Top-level `[dependencies]` declares other code mods by id: a semver requirement string, or
 `{ version = "^1", optional = true }`. These versions refer to `horizon-mod.toml`, not Cargo metadata.
