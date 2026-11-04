@@ -323,7 +323,8 @@ impl ItemEntity {
         entity_boxes: &[Aabb],
         border: Option<&BorderGeometry>,
     ) -> bool {
-        let (water, lava) = self.update_fluids(world, fluids);
+        let (water, lava) =
+            self.update_fluids(world, fluids, crate::test_resources::server_loop_context());
         self.water_entry(water > 0.0, self.ticks == 0, &mut |_| {});
         let step = self.tick_move(
             world,
@@ -343,7 +344,8 @@ impl ItemEntity {
             &mut self.velocity,
         );
         let alive = self.tick_settle(world, facts, no_physics, step);
-        let (water, _) = self.update_fluids(world, fluids);
+        let (water, _) =
+            self.update_fluids(world, fluids, crate::test_resources::server_loop_context());
         self.water_entry(water > 0.0, false, &mut |_| {});
         alive
     }
@@ -1121,10 +1123,11 @@ impl ExperienceOrb {
         next_float: &mut dyn FnMut() -> f32,
         border: Option<&BorderGeometry>,
         fluids: &crate::motion::FluidResources,
+        context: &horizon_world::native_load_context::LoopContext,
     ) -> bool {
         self.ticks += 1;
         self.previous = self.position;
-        self.update_fluids(world, fluids);
+        self.update_fluids(world, fluids, context);
         let block = world.block(
             self.position.x.floor() as i32,
             self.position.y.floor() as i32,
@@ -2606,6 +2609,7 @@ mod world_border_tests {
                 &mut || 0.0,
                 border,
                 &fluids,
+                crate::test_resources::server_loop_context(),
             );
             for (what, east) in [
                 ("item", item.bounds().max_position().x),

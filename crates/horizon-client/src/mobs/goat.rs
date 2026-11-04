@@ -10,6 +10,7 @@ use super::{
     goals::{Cx, Goal, LOOK, MOVE, goal_clone},
 };
 use horizon_core::{geometry::Vec3, random::RandomSource};
+use mod_api::SoundSource;
 
 /// `GoatAi.TIME_BETWEEN_RAMS` and `TIME_BETWEEN_RAMS_SCREAMER`.
 const RAMS: (i32, i32) = (600, 6000);
@@ -180,8 +181,14 @@ fn block_of(p: Vec3) -> [i32; 3] {
 }
 fn play(m: &Mob, events: &mut Vec<MobEvent>, sound: &'static str, pitch: f32) {
     if !m.silent {
-        let at = [m.position.x, m.position.y, m.position.z];
-        events.push(MobEvent::Sound(sound, at, 1.0, pitch));
+        // level.playSound(null, body, sound, NEUTRAL, 1, pitch).
+        events.push(MobEvent::bound_sound(
+            m,
+            sound,
+            SoundSource::Neutral,
+            1.0,
+            pitch,
+        ));
     }
 }
 

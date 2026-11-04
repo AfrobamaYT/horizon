@@ -406,7 +406,7 @@ impl FluidInteractionWorld for MotionWorld<'_, '_, '_> {
         f.camera_height_at(self, [p.x, p.y, p.z])
     }
     fn flow(&mut self, f: FluidState, p: BlockPos) -> Result<Vec3> {
-        super::pushing_flow(self, f, p)
+        super::pushing_flow(self.loop_context, self, f, p)
     }
 }
 impl EntityFluidTickWorld for MotionWorld<'_, '_, '_> {

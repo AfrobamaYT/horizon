@@ -3526,6 +3526,8 @@ struct Game<'a> {
     /// pitch): `level.playSound(player, ...)` leaves the guest out, whose
     /// own client plays it.
     guest_player_sounds: Vec<(String, [f64; 3], f32, f32)>,
+    /// Sounds bound to an entity this tick, for the players (`game/level_sounds.rs`).
+    bound_sounds: Vec<level_sounds::BoundSound>,
     /// `broadcastToAdmins` lines a guest's command queued, sent once it
     /// returns: the line, whether operators get it and whether the console
     /// logs it.
@@ -4712,6 +4714,7 @@ impl Game<'_> {
                 self.res.facts(),
                 self.collision,
                 &self.res.motion().fluids,
+                &self.loop_context,
                 no_physics,
                 &nearby,
                 Some(self.border.geometry()),
@@ -4725,6 +4728,7 @@ impl Game<'_> {
                 &self.world,
                 self.res.facts(),
                 &self.res.motion().fluids,
+                &self.loop_context,
                 no_physics,
                 step,
                 &mut |splash| entered.push(splash),
@@ -20361,6 +20365,7 @@ impl<'a> Game<'a> {
             guest_entity_events: Vec::new(),
             guest_equipment_breaks: Vec::new(),
             guest_player_sounds: Vec::new(),
+            bound_sounds: Vec::new(),
             lan_acting_name: None,
             lan_acting_uuid: None,
             tnt_refused: None,

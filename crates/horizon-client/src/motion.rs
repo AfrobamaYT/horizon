@@ -110,27 +110,32 @@ impl BlockFactorEdits for ModBlockFactors<'_> {
 /// (`Player.isStayingOnGroundSurface`; beyond NeoForge: there is no counterpart). Mods may change it.
 /// Fires on replayed ticks too, so a listener must be a pure function of its inputs.
 #[inline(never)]
-pub fn native_player_stays_on_ground_surface(entity: u32, staying: &mut bool) {
-    crate::native_client_hooks::player_stays_on_ground_surface(entity, staying);
+pub fn native_player_stays_on_ground_surface(
+    context: &LoopContext,
+    entity: u32,
+    staying: &mut bool,
+) {
+    crate::native_client_hooks::player_stays_on_ground_surface(context, entity, staying);
 }
 
 /// The current a fluid block pushes with (`FlowingFluid.getFlow`) is about to push an entity
 /// (beyond NeoForge: there is no counterpart). Mods may change it. Fires on replayed ticks too, so a
 /// listener must be a pure function of its inputs.
 #[inline(never)]
-pub fn native_fluid_flow(fluid: &str, pos: BlockPos, flow: &mut [f64; 3]) {
-    crate::native_client_hooks::fluid_flow(fluid, pos, flow);
+pub fn native_fluid_flow(context: &LoopContext, fluid: &str, pos: BlockPos, flow: &mut [f64; 3]) {
+    crate::native_client_hooks::fluid_flow(context, fluid, pos, flow);
 }
 
 /// `FlowingFluid.getFlow` as it pushes an entity: the vanilla vector, then `fluid_flow`.
 pub(crate) fn pushing_flow<W: horizon_world::fluid_flow::FluidFlowWorld>(
+    context: &LoopContext,
     world: &mut W,
     state: horizon_world::fluid::FluidState,
     pos: BlockPos,
 ) -> std::result::Result<Vec3, W::Error> {
     let flow = horizon_world::fluid_flow::flow_at(world, state, pos)?;
     let mut edited = [flow.x, flow.y, flow.z];
-    native_fluid_flow(state.kind().name(), pos, &mut edited);
+    native_fluid_flow(context, state.kind().name(), pos, &mut edited);
     Ok(Vec3::new(edited[0], edited[1], edited[2]))
 }
 
@@ -2334,7 +2339,11 @@ impl EdgeBackoffWorld for MotionWorld<'_, '_, '_> {
     }
     fn staying_on_ground_surface(&mut self) -> Result<bool> {
         let mut staying = self.player.shift_key_down;
-        native_player_stays_on_ground_surface(self.player.entity_id as u32, &mut staying);
+        native_player_stays_on_ground_surface(
+            self.loop_context,
+            self.player.entity_id as u32,
+            &mut staying,
+        );
         Ok(staying)
     }
     fn on_ground(&mut self) -> Result<bool> {
