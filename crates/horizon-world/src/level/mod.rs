@@ -247,7 +247,12 @@ pub enum LevelEvent {
     /// (e.g. 2001 block destroyed with `data` = state ID, 1501 lava
     /// extinguished, 1009 fire extinguished, 1502 redstone torch burnout,
     /// 2009 dripping water/sponge, 1033/1034 ... per `LevelEvent.java`).
-    LevelEvent { id: i32, pos: BlockPos, data: i32 },
+    LevelEvent {
+        id: i32,
+        pos: BlockPos,
+        data: i32,
+        source: Option<LevelEventPlayer>,
+    },
     /// `Level.playSound(null, pos, sound, BLOCKS, volume, pitch)`.
     Sound {
         pos: BlockPos,
