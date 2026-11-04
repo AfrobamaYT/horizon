@@ -74,6 +74,30 @@ or a cross-release compatibility range.
 Hook and helper authors add [catalog fragments](../tools/native-hook-fragments/README.md). Collection updates
 the catalog, not a global API number, source comments or documentation histories.
 
+## Runtime packages and identity
+
+The launcher generates the game's embedded native inventory from the selected `horizon-mod.toml`
+manifests: mod id, version and side. Cargo package metadata and hook factories do not supply identity.
+The game validates each compiled mod's package at
+`<executable directory>/horizon-native-mods/<id>/` before installing hooks or starting a world.
+Missing, unreadable, content-only or identity-mismatched packages refuse startup with the affected
+mods and paths; restore the packages exported with that executable or rebuild it. There is no
+build-record fallback and no discovery of native runtime packages from the working directory.
+Content-only mods still follow the working directory, player toggles and explicit `--dev-mod` paths;
+a content package cannot shadow a compiled mod's id.
+
+Move the executable, prepared resources and canonical package directory together. The copied
+projects retain their flat manifest, crate, assets and data. The game's mod list and crash details
+use its embedded inventory, including code-only mods. Display names and descriptions come from the
+validated manifests; `NativeMod.title` and `NativeMod.description` are removed.
+
+`native-mods.json` is provenance and rebuild status, not game identity, authentication, announcements
+or startup input. The launcher retains it for build/status displays. The separate `horizon-server`
+supervisor may report the adjacent record as a provenance snapshot, not a query of the running engine.
+Its SHA-256 values and revision describe the built binary's inputs, not the running mod set.
+The launcher prepares jar data from canonical manifests as non-authoritative candidates; the engine
+validates identity against its embedded inventory.
+
 ## Hook and helper capabilities
 
 - The item panel beside container screens and its recipe pages (`native_panel_items`,
@@ -110,6 +134,10 @@ the catalog, not a global API number, source comments or documentation histories
 
 - Item tooltips: an `ItemPart`'s `tooltip` adds its item's own lines where `Item.appendHoverText` does, after
   the name and before the components' lines, never for a tooltip the stack hides.
+  `Hooks::item_tooltip` (NeoForge's `ItemTooltipEvent`) then gets every item's whole tooltip once it is
+  complete, with the local player, the stack's `TooltipDisplay` and its `TooltipFlag` (`advanced`, `creative`),
+  and may add, change or remove any line. Horizon's creative search reads vanilla's exported tooltip text, so it
+  does not fire with no player while search trees are built, as NeoForge does.
 
 - An item's own server behaviour: `ItemPart::use_on(host, event)` hears a right click with its item on a
   block once the block let it through (`ItemStack.useOn`), and `ItemPart::use_item(host, event)` hears the
@@ -174,7 +202,7 @@ the catalog, not a global API number, source comments or documentation histories
   own GUI textures (`assets/<namespace>/textures/gui`, drawn with `native_sprite`).
 
 - Buttons, tooltips and item icons on mod screens: `native_screen_click` and `native_screen_tooltip` (the client), `native_menu_button`
-  (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `native_data`, `native_block`,
+  (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `native_block`,
   `native_block_property` and `native_cursor`. A mod inserts items through the block's item capability,
   `level.capability(host, &ITEMS, pos, side)`.
 - `click_menu_button(button)`, a client helper, presses button `button` of the open menu as a click on one of its buttons does
@@ -300,6 +328,7 @@ the catalog, not a global API number, source comments or documentation histories
   `native_item_dropped` (a throw; not the items scattered when a player dies) and `native_item_picked_up` (`canceled` leaves the stack on the ground). They name a player by UUID.
 
 - [Server data reload listeners](#server-data-reload-listeners) read a mod's pack resources with datapack overrides, once per reload.
+- [Client asset reload listeners](#client-asset-reload-listeners) read a mod's pack resources with resource-pack overrides, once per reload.
 
 - The item entities near a block, for machines that pick up items as a hopper does:
   `native_item_entities(dimension, min, max)` lists those whose box meets `min`..`max` (vanilla's
@@ -618,8 +647,9 @@ winning bytes from selected datapacks and the mod's own `data/`. Parse once in p
 apply, not on the tick. The original pack trees remain separate from the launcher's code-only
 horizon-mixins input.
 
-Client-side asset reads in mod code come with client reload PR b; server listeners cannot read
-`assets/`. Packaged assets still participate in the game's normal resource packs.
+Client-side asset reads use [client asset reload listeners](#client-asset-reload-listeners); server
+listeners cannot read `assets/`. Packaged assets also participate in the game's normal resource
+packs.
 
 Code-only bytes belong inside the crate: use Cargo's ordinary `build.rs` to generate a table in
 `OUT_DIR`, then compile it with `include_bytes!(concat!(env!("OUT_DIR"), "/table.bin"))`.
@@ -1007,7 +1037,7 @@ trailing `/`, or empty, `.` or `..` components. Converter fields and reload-view
 
 The prepare context is the pack view only, as vanilla's `ResourceManager`. Like vanilla's
 `SimplePreparableReloadListener`, `ServerReloadListener::prepare` parses and validates without
-changing live state and returns `ServerReloadApply::new(move || { /* publish parsed state */ })`.
+changing live state and returns `ReloadApply::new(move || { /* publish parsed state */ })`.
 All listeners prepare before **any** apply runs. Do not read another listener's new published
 state in prepare: dependencies order both phases but do not remove this barrier. Publication
 cannot fail. As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a listener that
@@ -1029,9 +1059,10 @@ listeners run after vanilla by default, in registration order; an explicit depen
 objects, dependencies and vanilla anchor. Horizon does not expose NeoForge's condition
 context here.
 
-`event.listeners.add_retained_listener(id, converter, listener)` also keeps the listener object
-for other hooks, the counterpart of NeoForge's `addRetainedListener`: it returns a typed
-`ListenerKey<T>` that reads the object back from any server hook through
+`event.listeners.add_retained_listener(&key, converter, listener)` also keeps the listener
+object for other hooks, the counterpart of NeoForge's `addRetainedListener(key, listener)`: the
+caller builds the typed key — `let key: ListenerKey<MyListener> = ListenerKey::new(id)` — and
+reads the object back from any server hook through
 `host.reload_resources().listener(&key)` — an `Arc<T>` of the live object the last successful
 reload installed, as NeoForge's `ReloadableServerResources.getListener`. Registration rules and
 prepare/apply semantics are `add_listener`'s. Retention follows the reload: a new reload
@@ -1043,21 +1074,21 @@ for a key whose id or type does not match a registration, `listener` gives `None
 use std::sync::{Arc, RwLock};
 use horizon_client::mod_api::{
     self, AddServerReloadListenersEvent, FileToIdConverter, Host, Hooks, Identifier,
-    ServerReloadApply, ServerReloadContext, ServerReloadError, ServerReloadListener,
+    ReloadApply, ServerReloadContext, ReloadResourceError, ServerReloadListener,
 };
 
 #[derive(Default)]
 struct MachineData(Arc<RwLock<serde_json::Value>>);
 impl ServerReloadListener for MachineData {
-    fn prepare(&self, context: &ServerReloadContext) -> Result<ServerReloadApply, ServerReloadError> {
+    fn prepare(&self, context: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
         let id = Identifier::parse("my_mod:press").unwrap();
         let next = match context.read(&id) {
             Some(bytes) => serde_json::from_slice(bytes)
-                .map_err(|error| ServerReloadError::new(id, error))?,
+                .map_err(|error| ReloadResourceError::new(id, error))?,
             None => serde_json::Value::Null,
         };
         let live = self.0.clone();
-        Ok(ServerReloadApply::new(move || *live.write().unwrap() = next))
+        Ok(ReloadApply::new(move || *live.write().unwrap() = next))
     }
 }
 #[derive(Default)]
@@ -1080,6 +1111,82 @@ The existing post-success server-data notice below is a different moment, not a 
 reload registration path.
 
 - `native_server_data_loaded(reload)` fires once the server's data tables are built (NeoForge's `TagsUpdatedEvent` with `SERVER_DATA_LOAD`): the recipes, tags, loot and advancements of the world's data packs and of `native_data_pack_files` are what the helpers read from then on. `reload` is false on a world's first open, before its chunks and players are loaded, and true after `/reload`, once the players were sent the new data. It is where a mod drops caches derived from the data and rebinds what depends on it. Server-side, the single player's integrated server included; a client connected to a server never fires it.
+
+### Client asset reload listeners
+
+Trait mods implement `Hooks::add_client_reload_listeners` (client only), the counterpart of
+NeoForge 26.3's `AddClientReloadListenersEvent`. Registration runs when a resource reload is
+assembled — the player changed resource packs, pressed F3+T, or a server sent its packs —
+after the selection is known and before the reload's assets are staged. The `&dyn ClientHost`
+beside the event is the client read host. Register an `Arc<impl ClientReloadListener>` with a
+unique `Identifier` and the same converters as the server side
+(`FileToIdConverter::json("ui")`). The listener's `ClientReloadContext` lists converted IDs and
+reads their bytes from `assets/*/ui/` with resource-pack overrides already resolved: a selected
+pack's file wins over the mod's packaged one, and a pack added later wins over both. A file
+`assets/my_mod/ui/theme.json` becomes `my_mod:theme`. It cannot read data files, other
+directories, or filesystem paths. Files resolve like vanilla resource packs: every file
+except `lang/*.json` is delivered as the exact bytes of the winning pack's file, while
+language files arrive key-wise merged across the packs, as vanilla loads them.
+
+Prepare and apply semantics, error handling, crash attribution, dependency ordering and the
+read-only registry views are the [server listener's](#server-data-reload-listeners):
+`ClientReloadListener::prepare` parses without changing live state and returns a `ReloadApply`;
+all prepares finish before any apply, a prepare, registration or ordering error aborts the
+reload and keeps every listener's previous assets, and a panic names the listener and its
+registering mod in the crash report. `VanillaClientListeners::model_manager()` names vanilla's
+model manager, the anchor of the 26.3 `Minecraft` registration order; `first()` and `last()`
+are the ordering boundaries. Mod applies run on the main thread after the staged pack is
+published, before `client_resources_reloaded`. Listeners are registered fresh for every
+load: the initial resource load registers them once, before any prepare runs (as
+NeoForge's construction-time event does — no game exists yet, and a host read during
+registration panics), prepares them beside the rest of the load on the loading thread —
+the title screen's loader worker or the direct launch, one path — and the game applies
+them once it owns the assets; every later reload — F3+T, a pack change, a server's
+packs — registers through the game the same way. A listener whose prepare fails on the
+initial load leaves the game running without mod reload listeners, logged as a
+warning. NeoForge's client event offers no
+retained listeners, and Horizon has none: the `Arc` the mod registers with is the listener's
+own live state.
+
+```rust,ignore
+use std::sync::{Arc, RwLock};
+use horizon_client::mod_api::{
+    self, AddClientReloadListenersEvent, ClientHost, ClientReloadContext, ClientReloadListener,
+    FileToIdConverter, Hooks, Identifier, ReloadApply, ReloadResourceError,
+};
+
+#[derive(Default)]
+struct Theme(Arc<RwLock<serde_json::Value>>);
+impl ClientReloadListener for Theme {
+    fn prepare(&self, context: &ClientReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+        let id = Identifier::parse("my_mod:theme").unwrap();
+        let next = match context.read(&id) {
+            Some(bytes) => serde_json::from_slice(bytes)
+                .map_err(|error| ReloadResourceError::new(id, error))?,
+            None => serde_json::Value::Null,
+        };
+        let live = self.0.clone();
+        Ok(ReloadApply::new(move || *live.write().unwrap() = next))
+    }
+}
+#[derive(Default)]
+struct MyMod(Arc<Theme>);
+#[mod_api::horizon_mod]
+impl Hooks for MyMod {
+    fn add_client_reload_listeners(&self, _host: &dyn ClientHost, event: &mut AddClientReloadListenersEvent<'_>) {
+        event.listeners.add_listener(
+            Identifier::parse("my_mod:theme").unwrap(),
+            FileToIdConverter::json("ui").unwrap(),
+            self.0.clone(),
+        ).unwrap();
+    }
+}
+```
+
+Reload work only: graph ordering, listing selected files, reading the winning bytes and one
+boxed apply closure per listener. No new work or filesystem reads run on the tick path. The
+existing post-success client-resources notice is a different moment, not a second reload
+registration path.
 
 - `native_compute_fov(partial, camera, degrees)` receives the computed world FOV after settings, ordinary FOV effects and zoom, before projection/Nausea. `camera` is its world position and `partial` the interpolation fraction. Mods can narrow or widen the angle; only finite values in 1..=179 degrees are accepted, otherwise the original computed angle is used. It runs for world rendering and near-plane overlays, not just once per frame. Hand/HUD FOV and the title panorama keep their existing paths.
 
@@ -1697,7 +1804,8 @@ trusting native code is the player's decision, never an agent's.
 6. **Install**: a new version, `native-<commit>-<key>`, a copy of the starting version's folder (resources
    included, cloned on APFS, Btrfs and ReFS) with the built game in place of its own, and a `native-mods.json`
    saying which release or Nightly it started from (`base`) and which commit, mods, horizon-mixins and Rust made
-   it. The game lists its `mods` with their versions in a crash report's details (`Native Mods: id version, …`;
+   it. Canonical mod projects are copied into `horizon-native-mods/<id>/` beside the executable.
+   The game lists its embedded inventory in a crash report's details (`Native Mods: id version, …`;
    they stay in the local report, not in crash telemetry). The instance the mods are installed in plays it, the default **Horizon** instance included: the build
    pins its version, as picking a version does. Updates of the launcher's version leave a pinned instance where
    it is, and their clean-up never removes a native build. The **Native mods**
@@ -1863,23 +1971,36 @@ each was built or last used): switching a mod off and on again plays the kept bu
 
 - **Single player and LAN host:** the mods run in the host's game and its integrated server, so a server-side
   hook applies to every player of the world.
-- **Joining a server:** only client-side hooks do anything; the protocol is unchanged.
+- **Joining a server:** client-side hooks run locally. Configuration requires matching both-side mod ids
+  and versions; a refusal names the missing, extra or different-version mods ([configuration policy](mods.md)).
 - **Dedicated server:** native mods run in a standalone engine export built with `--server-output`, not in an
   instance build (`--server-output` conflicts with `--instance` and needs an explicit mod `FOLDER`). See
   [Standalone server export](#standalone-server-export).
 
 ### Standalone server export
 
-`horizon-launcher native-build FOLDER --server-output DIR --version TAG --trust-native-code [--profile PROFILE]`
+`horizon-launcher native-build FOLDER --server-output DIR --version TAG --trust-native-code [--profile PROFILE] [--allow-jar-downloads]`
 
 Builds a standalone dedicated-server engine into `DIR`, which must not exist yet. `FOLDER` (a mod folder or a
 folder of them) is required; no instance is read, selected, edited or played, and no launcher config is written.
 It reuses the pinned toolchain, source and horizon-mixins and compiles `--no-default-features` (no audio or
 controllers). `--version` pins the Horizon release/Nightly the
 export reuses (explicit for reproducibility). The export holds the built `horizon-engine` executable, prepared resources
-and `native-mods.json`, and prints its absolute path. It runs on the same OS/architecture as the
+the canonical `horizon-native-mods/<id>/` projects and the provenance `native-mods.json`, and prints its absolute path. It runs on the same OS/architecture as the
 host only (no cross compilation), needs a prepared installed launcher base release, and survives cache pruning
 because it is copied outside the managed folders. On Windows use the printed `horizon-engine.exe` path.
+
+Server projects must not request `horizon-client`'s `default-features = true` or any dependency
+`features` field, even an empty array. This covers aliases, target-specific declarations and SDK
+feature requests through Cargo feature tables. Omit `default-features` or set it to `false`; the
+launcher stages the server SDK dependencies with defaults disabled. Refusals name the mod and the
+requested fields, before toolchain work. Client build behavior is unchanged.
+
+Declared jars use the same exact-hash preparation as ordinary launches. A server export refuses
+missing jars by default and never asks interactively; `--allow-jar-downloads` permits the shared
+preparer to download the exact files into the local cache. Cached jar bytes are **never exported**.
+When moving the runtime to another machine or game home, prepare its jar cache separately; errors
+name the required files and cache paths. No Java code from a jar runs.
 
 Point a server at it:
 
@@ -1888,8 +2009,9 @@ Point a server at it:
 
 Updates do not rebuild a pinned `engine.path`: build a new export folder, set `engine.path` to it, restart, and keep
 the old folder for manual rollback. The supervisor does not auto-update or rebuild a pinned engine path, and there
-is no compatibility handshake yet (shared server build crate / native config / updates / handshake are follow-up
-#6304, not implemented). Native mods run unsandboxed: only build code you have read and trust.
+is no supervisor-to-engine inventory query or managed native rebuild/update workflow yet (remaining work in
+horizon-rust/horizon#6304). Configuration mod matching is implemented as described above.
+Native mods run unsandboxed: only build code you have read and trust.
 `--trust-native-code` records the operator's decision; an agent must not supply that consent.
 
 ### Developer acceptance workflow
@@ -2477,6 +2599,10 @@ Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global l
   NeoForge's `GetEquipmentDropChanceEvent`. Change the chance a dying mob rolls for the item `stack` in `slot`; `original_chance`
   is the recorded chance before enchantments and `preserved` says the slot drops without a player kill. Each slot is asked at its
   own point of `Mob.dropCustomDeathLoot`, just before its roll, and the roll is drawn whatever the chance is.
+
+### A mod block entity's data on its item
+
+A mod's block entity carries its saved data on the item as vanilla's do: Ctrl + Pick Block, a loot function that copies the block entity (`minecraft:copy_components`-style) or a `/give` with `minecraft:block_entity_data:{id:"mod:type",...}` puts the compound (without `x`, `y`, `z`) in the item's `minecraft:block_entity_data`, and placing the item merges it into the new block entity before `native_place_block` runs, the counterpart of NeoForge's `BlockItem.updateCustomBlockEntityTag` and `BlockEntity.saveToItem`. Data tagged with another type is ignored. `/give` and `item replace` accept a type id a mod declared (its content's block entity types) and refuse any other as vanilla refuses an unknown one. The data is the compound the block entity saves, without its position and its components (`saveCustomOnly`): a component patch, a custom name say, rides as the item's own components and comes back as the block entity's on placing. A mod reads the data back in its own load as it does for a chunk.
 
 ### A block's items
 
@@ -3478,8 +3604,22 @@ entity energy and fluid handlers (NeoForge 26.3's `Capabilities.Energy.ENTITY` a
 `side` is the `Option<Direction>` of the entity the lookup reaches it from, `None` for no particular side. Vanilla
 answers neither; register a provider with `r.entity_capability(&ENTITY_ENERGY, "mymod:robot", |host, robot, side| …)`,
 which is given that side and may answer differently for each. An entity capability's context is its key's second type:
-`()` for `ENTITY_ITEMS`, `Option<Direction>` for these two. The existing `move_energy` and `move_resources` transfer
+`()` for `ENTITY_ITEMS`, `Option<Direction>` for these two and for `ENTITY_AUTOMATION`. The existing `move_energy` and `move_resources` transfer
 between these and block or item handlers inside a transaction.
+
+#### Entity automation
+
+`entity.capability(host, &ENTITY_AUTOMATION, side)` (NeoForge 26.3's `Capabilities.Item.ENTITY_AUTOMATION`, "automation-accessible
+inventory of an entity (boats, minecarts, etc)") is the items of an entity as a hopper reaches them, with the same
+`Option<Direction>` context as the energy and fluid keys. The game answers it for the container entities
+`EntitySelector.CONTAINER_ENTITY_SELECTOR` picks (chest and hopper minecarts, chest boats) with the slots their
+[`ENTITY_ITEMS`](#an-entitys-items) handler has; a player and a chested donkey, mule or llama answer none. A hopper
+pushing into the entity in front of it asks for the side it faces the entity from (`Up` for a hopper over it), a hopper
+pulling from the entity above it for `Down`, and a dropper for the side it drops onto. Beside the game's container
+entities, those entities at the target whose mod provider answers it join the candidates, and the hopper picks one at
+random with the draw `getEntityContainer` makes; a mod handler takes the container's place and moves one item at a time
+in a transaction, as a mod block's `ITEMS` does. `r.entity_capability(&ENTITY_AUTOMATION, "mymod:robot", |host, robot, side| …)`
+registers one, and `r.entity_capability_before_game` answers ahead of the game's own for a minecart or a boat.
 
 #### A menu's slots
 

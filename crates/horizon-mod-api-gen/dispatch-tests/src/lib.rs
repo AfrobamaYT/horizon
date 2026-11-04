@@ -75,6 +75,7 @@ mod tests {
         pub(super) enum BonemealSource {
             Interaction,
         }
+        pub(super) struct TooltipDisplay<'a>(pub &'a ());
         pub(super) struct NativeTriState;
         pub(super) struct NativeInteractionResult;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
@@ -174,6 +175,7 @@ mod tests {
         #[derive(Clone, Copy)]
         pub(super) struct WorldPhase;
         pub(super) struct ServerReloadListeners;
+        pub(super) struct ClientReloadListeners;
     }
     use serde_json::{Map, Value};
     use stubs::*;

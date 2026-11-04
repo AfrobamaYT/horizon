@@ -953,7 +953,6 @@
   "Others look like plain players to you. Also in the game's Horizon settings.": "दूसरे आपको साधारण खिलाड़ियों जैसे दिखते हैं। गेम की Horizon सेटिंग्स में भी है।",
   "Show other players' auras and trails": "दूसरे खिलाड़ियों की ऑरा और ट्रेल दिखाएँ",
   "Off by default. Also in the game's Horizon settings.": "डिफ़ॉल्ट रूप से बंद। गेम की Horizon सेटिंग्स में भी है।",
-  "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "इस गेम के स्रोत में पढ़ने योग्य नेटिव एंट्री टेम्प्लेट नहीं है। Horizon अपडेट करें और इस गेम के लिए मॉड फिर से बिल्ड करें।",
   "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.": "नेटिव बिल्ड {version} का native-mods.json रिकॉर्ड गायब या अमान्य है। इसे इंस्टॉल किए गए Horizon संस्करण से फिर से बिल्ड करें।",
   "Friend": "दोस्त",
   "Friends on the same Wi-Fi: Multiplayer, Add server, paste.": "एक ही Wi-Fi पर दोस्त: मल्टीप्लेयर, सर्वर जोड़ें, पेस्ट करें।",
@@ -1040,5 +1039,10 @@
   "SHA-512 mismatch at {path}: expected {expected}, got {actual}. Replace this cache entry with the exact original file, or remove it and retry with --allow-jar-downloads.": "{path} पर SHA-512 का मिलान नहीं हुआ: अपेक्षित {expected}, मिला {actual}। इस कैश प्रविष्टि को सटीक मूल फ़ाइल से बदलें या इसे हटाकर --allow-jar-downloads के साथ दोबारा कोशिश करें।",
   "SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.": "SHA-512 {hash}, {first_id} {first_version} और {second_id} {second_version} दोनों को दर्शाता है।",
   "no exact file on Modrinth": "Modrinth पर कोई सटीक फ़ाइल नहीं है",
-  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}"
+  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
+  "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "इस गेम स्रोत में नेटिव इन्वेंटरी एंट्री टेम्पलेट नहीं है। Horizon अपडेट करें और मॉड्स को इस गेम के लिए फिर से बिल्ड करें।",
+  "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml में पैकेज नाम नहीं है।",
+  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml में horizon-client निर्भरता नहीं है।",
+  "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client को {fields} चाहिए। सर्वर बिल्ड बिना इंटरफ़ेस के हैं; horizon-client की सुविधाएँ लॉन्चर तय करता है। features हटाएँ और default-features = false का उपयोग करें या इसे हटा दें।",
+  "{mod}: {error}": "{mod}: {error}"
 }

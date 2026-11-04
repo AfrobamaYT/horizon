@@ -266,7 +266,7 @@ fn text(nbt: &Compound, key: &str) -> Option<String> {
 /// hands the template's block entity NBT to `loadWithComponents`, which is
 /// what a chunk load does with a saved one.
 fn generated_block_entity(block: &str, nbt: &Compound) -> Option<BlockEntity> {
-    let declared = crate::containers::block_entity_types::type_for(block);
+    let declared = crate::block_entity_types::type_for(block);
     // A mod sign has no vanilla block name; its saved entity id is still vanilla's.
     let fallback = BlockEntity::for_block(block).or_else(|| {
         let id = text(nbt, "id")?;
@@ -352,7 +352,7 @@ mod tests {
             );
             return;
         }
-        use crate::containers::block_entity_types::{self, BlockEntityTypes};
+        use crate::block_entity_types::{self, BlockEntityTypes};
         block_entity_types::install(BlockEntityTypes::new(
             [
                 ("test:ornate_banner".into(), "test:machine".into()),

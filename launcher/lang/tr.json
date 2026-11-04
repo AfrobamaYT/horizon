@@ -953,7 +953,6 @@
   "Others look like plain players to you. Also in the game's Horizon settings.": "Diğerleri sana sıradan oyuncular gibi görünür. Oyunun Horizon ayarlarında da var.",
   "Show other players' auras and trails": "Diğer oyuncuların aura ve izlerini göster",
   "Off by default. Also in the game's Horizon settings.": "Varsayılan olarak kapalı. Oyunun Horizon ayarlarında da var.",
-  "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "Bu oyun kaynağında okunabilir bir yerel giriş şablonu yok. Horizon'ı güncelleyin ve modları bu oyun için yeniden derleyin.",
   "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.": "{version} yerel derlemesinin native-mods.json kaydı eksik veya geçersiz. Yüklü bir Horizon sürümünden yeniden derleyin.",
   "Friend": "Arkadaş",
   "Friends on the same Wi-Fi: Multiplayer, Add server, paste.": "Aynı Wi-Fi'daki arkadaşlar: Çok Oyunculu, Sunucu Ekle, yapıştır.",
@@ -1040,5 +1039,10 @@
   "SHA-512 mismatch at {path}: expected {expected}, got {actual}. Replace this cache entry with the exact original file, or remove it and retry with --allow-jar-downloads.": "{path} konumunda SHA-512 uyuşmazlığı: beklenen {expected}, alınan {actual}. Bu önbellek girdisini tam özgün dosyayla değiştirin veya silip --allow-jar-downloads ile yeniden deneyin.",
   "SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.": "SHA-512 {hash}, hem {first_id} {first_version} hem de {second_id} {second_version} kimliğini belirtiyor.",
   "no exact file on Modrinth": "Modrinth'te tam olarak eşleşen dosya yok",
-  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}"
+  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
+  "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Bu oyun kaynak kodunda yerel envanter giriş şablonu yok. Horizon'u güncelleyin ve modları bu oyuna karşı yeniden derleyin.",
+  "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml'da paket adı yok.",
+  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml'da horizon-client bağımlılığı yok.",
+  "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client {fields} istiyor. Sunucu derlemeleri arayüzsüzdür; horizon-client özelliklerini başlatıcı yönetir. features'u kaldırın ve default-features = false kullanın ya da tamamen kaldırın.",
+  "{mod}: {error}": "{mod}: {error}"
 }

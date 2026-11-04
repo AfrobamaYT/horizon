@@ -953,7 +953,6 @@
   "Others look like plain players to you. Also in the game's Horizon settings.": "Інші виглядатимуть для вас як звичайні гравці. Також у налаштуваннях Horizon у грі.",
   "Show other players' auras and trails": "Показувати аури та сліди інших гравців",
   "Off by default. Also in the game's Horizon settings.": "Типово вимк. Також у налаштуваннях Horizon у грі.",
-  "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "Цей вихідний код гри не має читабельного шаблону нативної точки входу. Оновіть Horizon і перебудуйте моди для цієї гри.",
   "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.": "У нативної збірки {version} відсутній або пошкоджений запис native-mods.json. Перебудуйте її на основі встановленої версії Horizon.",
   "Friend": "Друг",
   "Friends on the same Wi-Fi: Multiplayer, Add server, paste.": "Друзі в тій самій мережі Wi-Fi: Мережева гра, Додати сервер, вставити.",
@@ -1040,5 +1039,10 @@
   "SHA-512 mismatch at {path}: expected {expected}, got {actual}. Replace this cache entry with the exact original file, or remove it and retry with --allow-jar-downloads.": "Невідповідність SHA-512 у {path}: очікувалося {expected}, отримано {actual}. Замініть цей запис кешу точним оригінальним файлом або видаліть його й повторіть спробу з --allow-jar-downloads.",
   "SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.": "SHA-512 {hash} позначає і {first_id} {first_version}, і {second_id} {second_version}.",
   "no exact file on Modrinth": "на Modrinth немає точно відповідного файлу",
-  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}"
+  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
+  "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "У цьому вихідному коді гри немає шаблону запису нативного інвентаря. Оновіть Horizon і перезберіть моди для цієї гри.",
+  "{mod}: Cargo.toml has no package name.": "{mod}: у Cargo.toml немає назви пакета.",
+  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: у Cargo.toml немає залежності horizon-client.",
+  "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client вимагає {fields}. Серверні збірки працюють без інтерфейсу; можливостями horizon-client керує лаунчер. Вилучіть features і використовуйте default-features = false або приберіть його.",
+  "{mod}: {error}": "{mod}: {error}"
 }

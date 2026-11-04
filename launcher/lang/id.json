@@ -953,7 +953,6 @@
   "Others look like plain players to you. Also in the game's Horizon settings.": "Pemain lain terlihat seperti pemain biasa bagimu. Juga ada di pengaturan Horizon dalam game.",
   "Show other players' auras and trails": "Tampilkan aura dan jejak pemain lain",
   "Off by default. Also in the game's Horizon settings.": "Nonaktif secara bawaan. Juga ada di pengaturan Horizon dalam game.",
-  "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "Sumber game ini tidak memiliki templat entri native yang dapat dibaca. Perbarui Horizon dan bangun ulang mod untuk game ini.",
   "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.": "Build native {version} memiliki catatan native-mods.json yang hilang atau tidak valid. Bangun ulang dari versi Horizon yang terpasang.",
   "Friend": "Teman",
   "Friends on the same Wi-Fi: Multiplayer, Add server, paste.": "Teman di Wi-Fi yang sama: Multipemain, Tambah server, tempel.",
@@ -1040,5 +1039,10 @@
   "SHA-512 mismatch at {path}: expected {expected}, got {actual}. Replace this cache entry with the exact original file, or remove it and retry with --allow-jar-downloads.": "SHA-512 tidak cocok di {path}: diharapkan {expected}, didapat {actual}. Ganti entri cache ini dengan berkas asli yang persis, atau hapus dan coba lagi dengan --allow-jar-downloads.",
   "SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.": "SHA-512 {hash} menunjuk ke {first_id} {first_version} sekaligus {second_id} {second_version}.",
   "no exact file on Modrinth": "tidak ada berkas yang persis di Modrinth",
-  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}"
+  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
+  "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Sumber game ini tidak memiliki templat entri inventaris native. Perbarui Horizon dan bangun ulang mod terhadap game ini.",
+  "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml tidak memiliki nama paket.",
+  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml tidak memiliki dependensi horizon-client.",
+  "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client meminta {fields}. Build server tanpa antarmuka; peluncur yang mengatur fitur horizon-client. Hapus features dan gunakan default-features = false atau hilangkan.",
+  "{mod}: {error}": "{mod}: {error}"
 }

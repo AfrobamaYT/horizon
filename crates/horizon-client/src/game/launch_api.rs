@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn game_uses_the_command_selection_context() {
-        use horizon_mods::selection::{LaunchArguments, packages};
+        use horizon_mods::selection::{LaunchArguments, content_packages};
         use std::{collections::BTreeSet, fs, process::Command};
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -310,10 +310,9 @@ mod tests {
             .unwrap();
             assert_eq!(launch.context.home, root.join(case.home));
             let game = super::super::Options::from_launch(launch).unwrap().unwrap();
-            let selected: Vec<_> =
-                packages(&game.game_dir, &enabled, &BTreeSet::new(), &game.dev_mods)
-                    .map(|p| p.package.manifest.id)
-                    .collect();
+            let selected: Vec<_> = content_packages(&game.game_dir, &enabled, &game.mods.dev)
+                .map(|p| p.package.manifest.id)
+                .collect();
             assert_eq!(selected, case.ids);
         }
         fs::remove_dir_all(root).unwrap();
