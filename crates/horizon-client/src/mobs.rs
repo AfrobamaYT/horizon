@@ -3222,12 +3222,13 @@ impl Mob {
         // LivingEntity.applyItemBlocking: no mob raises a blocking item, but a native
         // mod may block for it.
         let blocked = if amount > 0.0 {
-            crate::health::shield_block(
-                crate::health::Hurting::Mob(self, &source),
-                amount,
-                crate::health::no_block(amount),
-            )
-            .map_or(0.0, |b| b.blocked_damage)
+            level
+                .shield_block(
+                    crate::health::Hurting::Mob(self, &source),
+                    amount,
+                    crate::health::no_block(amount),
+                )
+                .map_or(0.0, |b| b.blocked_damage)
         } else {
             0.0
         };
@@ -3414,7 +3415,7 @@ impl Mob {
             self.health = 0.0;
             // `LivingEntity.hurtServer`: a killing blow is taken by a
             // `death_protection` item in either hand instead of dying.
-            self.use_death_protection(&source);
+            self.use_death_protection(level, &source);
         }
         if knock {
             // playHurtSound (Mob: also resets the ambient sound clock) or the
@@ -3588,7 +3589,7 @@ impl Mob {
             z: zd,
         };
         let pushed = crate::health::Hurting::Mob(self, source);
-        if crate::health::knockback_canceled(level.reborrow(), pushed, &mut knock) {
+        if level.knockback_canceled(pushed, &mut knock) {
             return;
         }
         let crate::health::Knock {
@@ -3788,7 +3789,7 @@ impl Mob {
     /// `LivingEntity.checkTotemDeathProtection`: the first hand with a
     /// `death_protection` item uses it up, the mob survives at 1 health with
     /// the totem's effects, and entity event 35 tells the clients.
-    fn use_death_protection(&mut self, source: &Damage) -> bool {
+    fn use_death_protection(&mut self, level: &DamageLevel<'_>, source: &Damage) -> bool {
         // `DamageTypeTags.BYPASSES_INVULNERABILITY`: the void and /kill take it.
         if source.kind.bypasses_invulnerability() {
             return false;
@@ -3802,10 +3803,7 @@ impl Mob {
             return false;
         }
         // `LivingUseTotemEvent`: a native mod may cancel, and the mob dies.
-        if crate::health::USE_TOTEM
-            .get()
-            .is_some_and(|hook| hook(crate::health::Hurting::Mob(self, source), off))
-        {
+        if level.totem_canceled(crate::health::Hurting::Mob(self, source), off) {
             return false;
         }
         if main {

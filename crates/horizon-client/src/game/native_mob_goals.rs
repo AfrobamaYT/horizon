@@ -202,6 +202,7 @@ impl Game<'_> {
                 &mut lent,
                 Some(world_items!(self)),
                 Some(&self.pack.block_registries),
+                &self.damage_hooks,
             );
             let m = &mut mobs[index];
             let mut selector = if targets {

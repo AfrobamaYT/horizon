@@ -562,6 +562,7 @@ macro_rules! damage_level_of {
             $game.pack.assets.registry,
             Some(world_items!($game)),
             Some(&$game.pack.block_registries),
+            &$game.damage_hooks,
         )
     };
 }
