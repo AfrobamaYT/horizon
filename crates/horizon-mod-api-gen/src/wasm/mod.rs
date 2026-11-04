@@ -29,6 +29,21 @@ pub(super) const IMPORTS: &[&str] = &[
     "menu::SlotView",
 ];
 
+/// Imported traits a call never hands over, each reached through another's method instead.
+pub(super) const REACHED: &[(&str, &str, &str)] = &[
+    ("ConfigFiles", "host", "Ok(h.config_files())"),
+    (
+        "Backend",
+        "host",
+        "h.backend().map(crate::BackendRef::open).ok_or_else(|| missing(\"game backend\"))",
+    ),
+    (
+        "BackendMut",
+        "server_host_mut",
+        "crate::backend_mut_of(h).ok_or_else(|| missing(\"game backend\"))",
+    ),
+];
+
 /// Traits a mod implements: their methods are the world's exports.
 const EXPORTS: &[&str] = &[
     "Hooks",
@@ -184,11 +199,12 @@ pub struct Wasm {
 pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Wasm, String> {
     let mut surface = surface(root, included)?;
     let hooks = hook_ids(&mut surface.types)?;
+    let servers = servers(&mut surface.types)?;
     let methods: Vec<&Method> = surface.methods.iter().collect();
     let wit = wit::package(&surface.types, &methods, &api_version(root)?)?;
     Ok(Wasm {
         guest: sides::guest(&surface.types, &methods, &wit, &hooks)?,
-        host: sides::host(&surface.types, &methods, &wit, &hooks)?,
+        host: sides::host(&surface.types, &methods, &wit, &hooks, &servers)?,
         wit,
         sources: surface.types.index.read.take(),
         unbound: surface
@@ -213,6 +229,56 @@ fn api_version(root: &Path) -> Result<String, String> {
         .and_then(toml::Value::as_str)
         .map(str::to_owned)
         .ok_or_else(|| format!("{}: package.version missing", path.display()))
+}
+
+/// Each imported trait with the imported traits whose objects also serve it: itself first, then
+/// its subtraits (a server host serves a call that asks for a host).
+fn servers(types: &mut Types<'_>) -> Result<Vec<(&'static str, Vec<&'static str>)>, String> {
+    let api = types.index.module("mod_api", &[])?;
+    let mut supers: Vec<(&str, Vec<String>)> = Vec::new();
+    for owner in IMPORTS {
+        let path: Vec<String> = owner.split("::").map(str::to_string).collect();
+        let Found::Item(id) = types.index.resolve_path(api, &path)? else {
+            return Err(format!("{owner} is not a mod_api trait"));
+        };
+        let Item::Trait(item) = types.index.item(id) else {
+            return Err(format!("{owner} is not a trait"));
+        };
+        let names = item
+            .supertraits
+            .iter()
+            .filter_map(|bound| match bound {
+                syn::TypeParamBound::Trait(t) => Some(t.path.segments.last()?.ident.to_string()),
+                _ => None,
+            })
+            .collect();
+        supers.push((owner, names));
+    }
+    let short = |owner: &str| owner.rsplit("::").next().unwrap().to_string();
+    let serves = |sub: &str, of: &str| {
+        let mut stack = vec![sub.to_string()];
+        while let Some(t) = stack.pop() {
+            if t == short(of) {
+                return true;
+            }
+            if let Some((_, s)) = supers.iter().find(|(o, _)| short(o) == t) {
+                stack.extend(s.iter().cloned());
+            }
+        }
+        false
+    };
+    Ok(IMPORTS
+        .iter()
+        .map(|of| {
+            let mut list = vec![*of];
+            list.extend(
+                IMPORTS
+                    .iter()
+                    .filter(|sub| *sub != of && serves(&short(sub), of)),
+            );
+            (*of, list)
+        })
+        .collect())
 }
 
 /// The variants of the generated `HookId`, each with its hook's name.

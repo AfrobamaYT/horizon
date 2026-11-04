@@ -2,10 +2,8 @@
 //! forwarding answers a mod's imports from the hosts of the call in progress, and the
 //! generated proxies make a wasm mod a [`Hooks`] and its handlers parts. Loading, linking and
 //! checking packages is `horizon-mod-wasm`'s; this module runs what it instantiated.
-use crate::{
-    BackendMut, BlockEntityDrawContext, ClientHost, DrawContext, HookId, Host, LevelHost,
-    LevelRandomHost, LevelTicksHost, LevelWriteHost, ServerHost,
-};
+use crate::HookId;
+use glue::Frame;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -79,225 +77,23 @@ pub(crate) struct State {
     limits: wasmtime::StoreLimits,
 }
 
-/// The hosts one call into a mod hands over, valid only while that call runs.
-#[derive(Default)]
-pub(crate) struct Frame {
-    host: Option<*const dyn Host>,
-    server_host: Option<*mut dyn ServerHost>,
-    client_host: Option<*const dyn ClientHost>,
-    client_host_mut: Option<*mut dyn ClientHost>,
-    level_host: Option<*const dyn LevelHost>,
-    level_write_host: Option<*mut dyn LevelWriteHost>,
-    level_ticks_host: Option<*mut dyn LevelTicksHost>,
-    level_random_host: Option<*mut dyn LevelRandomHost>,
-    draw_context: Option<*mut dyn DrawContext>,
-    block_entity_draw_context: Option<*mut dyn BlockEntityDrawContext>,
-}
-
-/// Erases a borrow's lifetime: the frame holding it lives only for the call it was made for.
-fn erase<T: ?Sized>(value: &T) -> *const T {
-    value
-}
-
-fn erase_mut<T: ?Sized>(value: &mut T) -> *mut T {
-    value
-}
-
-#[allow(clippy::transmute_ptr_to_ptr)]
-impl Frame {
-    pub(crate) fn host(&mut self, host: &dyn Host) {
-        // SAFETY (all setters): only the lifetime is erased; `frame::*` hands the pointer out
-        // only while the call that set it runs.
-        self.host =
-            Some(unsafe { std::mem::transmute::<*const dyn Host, *const dyn Host>(erase(host)) });
-    }
-    pub(crate) fn server_host_mut(&mut self, host: &mut dyn ServerHost) {
-        self.server_host = Some(unsafe {
-            std::mem::transmute::<*mut dyn ServerHost, *mut dyn ServerHost>(erase_mut(host))
-        });
-    }
-    pub(crate) fn client_host(&mut self, host: &dyn ClientHost) {
-        self.client_host = Some(unsafe {
-            std::mem::transmute::<*const dyn ClientHost, *const dyn ClientHost>(erase(host))
-        });
-    }
-    pub(crate) fn client_host_mut(&mut self, host: &mut dyn ClientHost) {
-        self.client_host_mut = Some(unsafe {
-            std::mem::transmute::<*mut dyn ClientHost, *mut dyn ClientHost>(erase_mut(host))
-        });
-    }
-    pub(crate) fn level_host(&mut self, host: &dyn LevelHost) {
-        self.level_host = Some(unsafe {
-            std::mem::transmute::<*const dyn LevelHost, *const dyn LevelHost>(erase(host))
-        });
-    }
-    pub(crate) fn level_write_host_mut(&mut self, host: &mut dyn LevelWriteHost) {
-        self.level_write_host = Some(unsafe {
-            std::mem::transmute::<*mut dyn LevelWriteHost, *mut dyn LevelWriteHost>(erase_mut(host))
-        });
-    }
-    pub(crate) fn level_ticks_host_mut(&mut self, host: &mut dyn LevelTicksHost) {
-        self.level_ticks_host = Some(unsafe {
-            std::mem::transmute::<*mut dyn LevelTicksHost, *mut dyn LevelTicksHost>(erase_mut(host))
-        });
-    }
-    pub(crate) fn level_random_host_mut(&mut self, host: &mut dyn LevelRandomHost) {
-        self.level_random_host = Some(unsafe {
-            std::mem::transmute::<*mut dyn LevelRandomHost, *mut dyn LevelRandomHost>(erase_mut(
-                host,
-            ))
-        });
-    }
-    pub(crate) fn draw_context_mut(&mut self, draw: &mut dyn DrawContext) {
-        self.draw_context = Some(unsafe {
-            std::mem::transmute::<*mut dyn DrawContext, *mut dyn DrawContext>(erase_mut(draw))
-        });
-    }
-    pub(crate) fn block_entity_draw_context_mut(&mut self, draw: &mut dyn BlockEntityDrawContext) {
-        self.block_entity_draw_context = Some(unsafe {
-            std::mem::transmute::<*mut dyn BlockEntityDrawContext, *mut dyn BlockEntityDrawContext>(
-                erase_mut(draw),
-            )
-        });
-    }
-}
-
 thread_local! {
     /// The frame of the innermost call into a mod on this thread.
     static CURRENT: Cell<*mut Frame> = const { Cell::new(std::ptr::null_mut()) };
 }
 
-/// The hosts of the call in progress, as the generated host forwarding asks for them. A
-/// host the call didn't hand over is a typed trap: the mod asked for what its hook doesn't
+/// The objects of the call in progress on this thread (`glue::Frame`).
+fn current() -> wasmtime::Result<&'static mut Frame> {
+    let frame = CURRENT.get();
+    // SAFETY: `call` sets the pointer to a frame on its stack and restores the previous
+    // one before that frame drops; imports run only inside a call.
+    unsafe { frame.as_mut() }.ok_or_else(|| wasmtime::Error::msg("a mod import ran outside a call"))
+}
+
+/// The trap for an object the call didn't hand over: the mod asked for what its hook doesn't
 /// give (a client call from a server hook).
-pub(crate) mod frame {
-    use super::*;
-
-    fn current() -> wasmtime::Result<&'static mut Frame> {
-        let frame = CURRENT.get();
-        // SAFETY: `call` sets the pointer to a frame on its stack and restores the previous
-        // one before that frame drops; imports run only inside a call.
-        unsafe { frame.as_mut() }
-            .ok_or_else(|| wasmtime::Error::msg("a mod import ran outside a call"))
-    }
-
-    fn missing(what: &str) -> wasmtime::Error {
-        wasmtime::Error::msg(format!("this hook gives no {what}"))
-    }
-
-    pub(crate) fn server_host_mut() -> wasmtime::Result<&'static mut dyn ServerHost> {
-        // SAFETY (all getters): the frame's pointers are live for the call (see `Frame`).
-        current()?
-            .server_host
-            .map(|h| unsafe { &mut *h })
-            .ok_or_else(|| missing("server host"))
-    }
-    pub(crate) fn server_host() -> wasmtime::Result<&'static dyn ServerHost> {
-        server_host_mut().map(|h| &*h)
-    }
-    pub(crate) fn client_host_mut() -> wasmtime::Result<&'static mut dyn ClientHost> {
-        current()?
-            .client_host_mut
-            .map(|h| unsafe { &mut *h })
-            .ok_or_else(|| missing("mutable client host"))
-    }
-    pub(crate) fn client_host() -> wasmtime::Result<&'static dyn ClientHost> {
-        let frame = current()?;
-        match (frame.client_host, frame.client_host_mut) {
-            (Some(h), _) => Ok(unsafe { &*h }),
-            (None, Some(h)) => Ok(unsafe { &*h }),
-            (None, None) => Err(missing("client host")),
-        }
-    }
-    pub(crate) fn host() -> wasmtime::Result<&'static dyn Host> {
-        let frame = current()?;
-        if let Some(h) = frame.host {
-            return Ok(unsafe { &*h });
-        }
-        if let Some(h) = frame.server_host {
-            return Ok(unsafe { &*h });
-        }
-        client_host()
-            .map(|h| h as &dyn Host)
-            .map_err(|_| missing("host"))
-    }
-    pub(crate) fn host_mut() -> wasmtime::Result<&'static mut dyn Host> {
-        let frame = current()?;
-        if let Some(h) = frame.server_host {
-            return Ok(unsafe { &mut *h });
-        }
-        client_host_mut()
-            .map(|h| h as &mut dyn Host)
-            .map_err(|_| missing("mutable host"))
-    }
-    pub(crate) fn level_write_host_mut() -> wasmtime::Result<&'static mut dyn LevelWriteHost> {
-        current()?
-            .level_write_host
-            .map(|h| unsafe { &mut *h })
-            .ok_or_else(|| missing("level write host"))
-    }
-    pub(crate) fn level_ticks_host_mut() -> wasmtime::Result<&'static mut dyn LevelTicksHost> {
-        let frame = current()?;
-        match (frame.level_ticks_host, frame.level_write_host) {
-            (Some(h), _) => Ok(unsafe { &mut *h }),
-            (None, Some(h)) => Ok(unsafe { &mut *h }),
-            _ => Err(missing("level ticks host")),
-        }
-    }
-    pub(crate) fn level_host() -> wasmtime::Result<&'static dyn LevelHost> {
-        let frame = current()?;
-        if let Some(h) = frame.level_host {
-            return Ok(unsafe { &*h });
-        }
-        if let Some(h) = frame.level_write_host {
-            return Ok(unsafe { &*h });
-        }
-        if let Some(h) = frame.level_ticks_host {
-            return Ok(unsafe { &*h });
-        }
-        frame
-            .level_random_host
-            .map(|h| unsafe { &*h as &dyn LevelHost })
-            .ok_or_else(|| missing("level host"))
-    }
-    pub(crate) fn draw_context_mut() -> wasmtime::Result<&'static mut dyn DrawContext> {
-        current()?
-            .draw_context
-            .map(|h| unsafe { &mut *h })
-            .ok_or_else(|| missing("draw context"))
-    }
-    pub(crate) fn draw_context() -> wasmtime::Result<&'static dyn DrawContext> {
-        draw_context_mut().map(|h| &*h)
-    }
-    pub(crate) fn block_entity_draw_context_mut()
-    -> wasmtime::Result<&'static mut dyn BlockEntityDrawContext> {
-        current()?
-            .block_entity_draw_context
-            .map(|h| unsafe { &mut *h })
-            .ok_or_else(|| missing("block entity draw context"))
-    }
-    pub(crate) fn block_entity_draw_context()
-    -> wasmtime::Result<&'static dyn BlockEntityDrawContext> {
-        block_entity_draw_context_mut().map(|h| &*h)
-    }
-    pub(crate) fn slot_view() -> wasmtime::Result<&'static dyn crate::menu::SlotView> {
-        Err(missing("slot view"))
-    }
-    pub(crate) fn slot_view_mut() -> wasmtime::Result<&'static mut dyn crate::menu::SlotView> {
-        Err(missing("slot view"))
-    }
-    pub(crate) fn config_files() -> wasmtime::Result<&'static dyn crate::ConfigFiles> {
-        Ok(host()?.config_files())
-    }
-    pub(crate) fn backend() -> wasmtime::Result<&'static dyn crate::Backend> {
-        host()?
-            .backend()
-            .map(crate::BackendRef::open)
-            .ok_or_else(|| missing("game backend"))
-    }
-    pub(crate) fn backend_mut_mut() -> wasmtime::Result<&'static mut dyn BackendMut> {
-        crate::backend_mut_of(server_host_mut()?).ok_or_else(|| missing("game backend"))
-    }
+fn missing(what: &str) -> wasmtime::Error {
+    wasmtime::Error::msg(format!("this hook gives no {what}"))
 }
 
 fn array<T, const N: usize>(items: Vec<T>) -> Result<[T; N], Refused> {

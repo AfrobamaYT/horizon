@@ -429,6 +429,7 @@ pub(super) fn host(
     methods: &[&Method],
     wit_text: &str,
     hooks: &[(String, String)],
+    servers: &[(&str, Vec<&str>)],
 ) -> Result<String, String> {
     let (defs, outs) = wit::reached(types, methods);
     let mut code = header(
@@ -444,6 +445,7 @@ pub(super) fn host(
         }
     }
     code.push_str("impl api::types::Host for super::State {}\n");
+    code.push_str(&frame(servers));
     let arms: Vec<String> = hooks
         .iter()
         .map(|(v, n)| format!("\"{n}\" => Some(crate::HookId::{v})"))
@@ -456,7 +458,7 @@ pub(super) fn host(
             let sig = signature(types, method)?;
             let object = |name: &str, mutable: bool| {
                 format!(
-                    "super::frame::{}{}()?",
+                    "frame::{}{}()?",
                     name.rsplit("::").next().unwrap().to_snake_case(),
                     if mutable { "_mut" } else { "" }
                 )
@@ -488,7 +490,7 @@ pub(super) fn host(
                 }
             }
             let receiver = format!(
-                "super::frame::{}{}()?",
+                "frame::{}{}()?",
                 owner.rsplit("::").next().unwrap().to_snake_case(),
                 if method.receiver == Some(true) {
                     "_mut"
@@ -783,6 +785,76 @@ fn heap(types: &Types<'_>, ty: &Ty) -> bool {
         }
         _ => false,
     }
+}
+
+/// The call's frame: a slot for each imported trait's object, set by the export that hands it
+/// over, and the getters the imports reach it by. A trait is served by its own slot, else by a
+/// subtrait's (`servers`), and mutably only by a slot set mutably; a trait no call hands over is
+/// reached through another's method (`REACHED`).
+fn frame(servers: &[(&str, Vec<&str>)]) -> String {
+    let snake = |owner: &str| owner.rsplit("::").next().unwrap().to_snake_case();
+    let path = |owner: &str| format!("dyn crate::{owner}");
+    let mut fields = String::new();
+    let mut setters = String::new();
+    let mut getters = String::new();
+    for (owner, list) in servers {
+        let name = snake(owner);
+        let ty = path(owner);
+        if let Some((_, from, expr)) = super::REACHED.iter().find(|(o, ..)| o == owner) {
+            let mutable = from.ends_with("_mut");
+            writeln!(
+                getters,
+                "pub(crate) fn {name}{m}() -> wasmtime::Result<&'static {mm}{ty}> {{ let h = {from}()?; {expr} }}",
+                m = if mutable { "_mut" } else { "" },
+                mm = if mutable { "mut " } else { "" },
+            )
+            .unwrap();
+            continue;
+        }
+        writeln!(fields, "{name}: Option<(*mut ({ty} + 'static), bool)>,").unwrap();
+        // SAFETY (setters): only the lifetime is erased, and a shared borrow is never written
+        // through (`mutable` false); the getters hand the pointer out only while the call that
+        // set it runs.
+        writeln!(
+            setters,
+            "#[allow(clippy::transmute_ptr_to_ptr)] pub(crate) fn {name}(&mut self, v: &({ty} + '_)) {{ self.{name} = Some((unsafe {{ std::mem::transmute::<*const ({ty} + '_), *mut ({ty} + 'static)>(v) }}, false)); }}\n#[allow(clippy::transmute_ptr_to_ptr)] pub(crate) fn {name}_mut(&mut self, v: &mut ({ty} + '_)) {{ self.{name} = Some((unsafe {{ std::mem::transmute::<*mut ({ty} + '_), *mut ({ty} + 'static)>(v) }}, true)); }}"
+        )
+        .unwrap();
+        let shared: Vec<String> = list
+            .iter()
+            .filter(|s| !super::REACHED.iter().any(|(o, ..)| o == *s))
+            .map(|s| format!("f.{}.map(|(p, _)| unsafe {{ &*p as &{ty} }})", snake(s)))
+            .collect();
+        let exclusive: Vec<String> = list
+            .iter()
+            .filter(|s| !super::REACHED.iter().any(|(o, ..)| o == *s))
+            .map(|s| {
+                format!(
+                    "f.{}.filter(|(_, m)| *m).map(|(p, _)| unsafe {{ &mut *p as &mut {ty} }})",
+                    snake(s)
+                )
+            })
+            .collect();
+        let what = name.replace('_', " ");
+        writeln!(
+            getters,
+            "pub(crate) fn {name}() -> wasmtime::Result<&'static {ty}> {{ let f = current()?; {}.ok_or_else(|| missing(\"{what}\")) }}\npub(crate) fn {name}_mut() -> wasmtime::Result<&'static mut {ty}> {{ let f = current()?; {}.ok_or_else(|| missing(\"mutable {what}\")) }}",
+            chain(&shared),
+            chain(&exclusive)
+        )
+        .unwrap();
+    }
+    format!(
+        "/// The objects the call in progress handed over, by imported trait.\n#[derive(Default)]\npub(crate) struct Frame {{ {fields} }}\nimpl Frame {{ {setters} }}\n/// The call's objects, as the imports ask for them; one the call didn't hand over is a typed trap.\npub(crate) mod frame {{ #![allow(clippy::all, dead_code)] use super::super::{{current, missing}};\n{getters} }}\n"
+    )
+}
+
+/// The first of `options` that is some: `a.or_else(|| b.or_else(|| c))`.
+fn chain(options: &[String]) -> String {
+    let (last, rest) = options.split_last().expect("a trait serves itself");
+    rest.iter().rev().fold(last.clone(), |inner, option| {
+        format!("{option}.or_else(|| {inner})")
+    })
 }
 
 /// Statements putting the trait objects a parameter holds into the frame.
