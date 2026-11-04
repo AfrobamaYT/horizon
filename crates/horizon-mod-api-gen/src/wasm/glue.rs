@@ -784,65 +784,105 @@ pub(super) fn conversions(
                 continue;
             }
             let out = format!("{W}::{}", bound_type(&wit::out_name(def)));
+            // What the call started with, to send back only what it changed: an owned copy of
+            // each field that holds no borrow, and of each `&mut` record's own.
+            let mut kept = Vec::new();
+            let mut copies = Vec::new();
             let parts: Vec<String> = writable
                 .iter()
                 .map(|f| {
+                    let name = &f.rust;
                     let value = match &f.ty {
                         Ty::Ref(inner, true)
                             if let Ty::Named(inner) = &**inner
                                 && wit::has_out(types, &types.defs[*inner]) =>
                         {
-                            format!("lower_out_{inner}(&*v.{})?", f.rust)
+                            kept.push(format!("{name}: Before{inner}"));
+                            copies.push(format!("{name}: before_{inner}(&*v.{name})"));
+                            format!("lower_out_{inner}(&*v.{name}, &b.{name})?")
                         }
-                        ty => lower(types, ty, &format!("(&v.{})", f.rust)),
+                        Ty::Ref(inner, true) if !borrows(types, inner) => {
+                            kept.push(format!(
+                                "{name}: {}",
+                                super::sides::rust_ty(types, inner, true)
+                            ));
+                            copies.push(format!("{name}: (*v.{name}).clone()"));
+                            format!(
+                                "if *v.{name} != b.{name} {{ Some({}) }} else {{ None }}",
+                                lower(types, inner, &format!("(&*v.{name})"))
+                            )
+                        }
+                        ty if !borrows(types, ty) => {
+                            kept.push(format!(
+                                "{name}: {}",
+                                super::sides::rust_ty(types, ty, true)
+                            ));
+                            copies.push(format!("{name}: v.{name}.clone()"));
+                            format!(
+                                "if v.{name} != b.{name} {{ Some({}) }} else {{ None }}",
+                                lower(types, ty, &format!("(&v.{name})"))
+                            )
+                        }
+                        ty => format!("Some({})", lower(types, ty, &format!("(&v.{name})"))),
                     };
                     format!("{}: {value}", bound_ident(&f.wit))
                 })
                 .collect();
-            writeln!(code, "#[allow(unused_variables, clippy::all)] fn lower_out_{id}(v: &{rust}) -> Result<{out}, Refused> {{ Ok({out} {{ {} }}) }}", parts.join(", ")).unwrap();
+            writeln!(
+                code,
+                "#[allow(dead_code, non_camel_case_types)] pub(super) struct Before{id} {{ {} }}",
+                kept.join(", ")
+            )
+            .unwrap();
+            writeln!(code, "#[allow(unused_variables, clippy::all)] fn before_{id}(v: &{rust}) -> Before{id} {{ Before{id} {{ {} }} }}", copies.join(", ")).unwrap();
+            writeln!(code, "#[allow(unused_variables, clippy::all)] fn lower_out_{id}(v: &{rust}, b: &Before{id}) -> Result<{out}, Refused> {{ Ok({out} {{ {} }}) }}", parts.join(", ")).unwrap();
             let mut writes = String::new();
             for f in &writable {
-                let source = format!("o.{}", bound_ident(&f.wit));
+                let field = format!("o.{}", bound_ident(&f.wit));
+                // A field the other side left as it was comes back as `None`.
+                let source = "x".to_string();
+                let unchanged = |write: String| format!("if let Some(x) = {field} {{ {write} }}\n");
                 match &f.ty {
                     Ty::Ref(inner, true)
                         if let Ty::Named(inner) = &**inner
                             && wit::has_out(types, &types.defs[*inner]) =>
                     {
-                        writeln!(writes, "write_back_{inner}(&mut *v.{}, {source})?;", f.rust)
+                        writeln!(writes, "write_back_{inner}(&mut *v.{}, {field})?;", f.rust)
                             .unwrap();
                     }
-                    Ty::Ref(inner, true) if !borrows(types, inner) => {
-                        writeln!(writes, "*v.{} = {};", f.rust, lift(types, inner, &source))
-                            .unwrap()
-                    }
+                    Ty::Ref(inner, true) if !borrows(types, inner) => writes.push_str(&unchanged(
+                        format!("*v.{} = {};", f.rust, lift(types, inner, &source)),
+                    )),
                     Ty::Ref(inner, true) => {
                         if let Ty::Named(inner) = &**inner
                             && outs.contains(inner)
                         {
-                            writeln!(writes, "write_back_{inner}(v.{}, {source})?;", f.rust)
-                                .unwrap();
+                            writes.push_str(&unchanged(format!(
+                                "write_back_{inner}(v.{}, {source})?;",
+                                f.rust
+                            )));
                         } else {
-                            writeln!(writes, "let _ = {source};").unwrap();
+                            writeln!(writes, "let _ = {field};").unwrap();
                         }
                     }
-                    ty if !borrows(types, ty) => {
-                        writeln!(writes, "v.{} = {};", f.rust, lift(types, ty, &source)).unwrap()
-                    }
+                    ty if !borrows(types, ty) => writes.push_str(&unchanged(format!(
+                        "v.{} = {};",
+                        f.rust,
+                        lift(types, ty, &source)
+                    ))),
                     // A wrapper around one mutable borrow (`CarriedAccess`): write through it.
                     Ty::Named(inner)
                         if let Kind::TupleRecord(items) = &types.defs[*inner].kind
                             && let [Ty::Ref(target, true)] = items.as_slice()
                             && !borrows(types, target) =>
                     {
-                        writeln!(
-                            writes,
+                        writes.push_str(&unchanged(format!(
                             "*v.{}.0 = {};",
                             f.rust,
                             lift(types, target, &source)
-                        )
-                        .unwrap()
+                        )))
                     }
-                    _ => writeln!(writes, "let _ = {source};").unwrap(),
+                    _ => writeln!(writes, "let _ = {field};").unwrap(),
                 }
             }
             writeln!(code, "#[allow(unused_variables, clippy::all)] fn write_back_{id}(v: &mut {rust}, o: {out}) -> Result<(), Refused> {{ {writes} Ok(()) }}").unwrap();

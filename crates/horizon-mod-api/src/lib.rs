@@ -283,7 +283,7 @@ pub enum KeyAction {
 /// damage vanilla works out for it (`damage`, `max(1, hit / 4)`) and the damage it
 /// takes (`new_damage`, starts equal; a mod may change it, below 1 for none; the
 /// game casts it to a whole number as vanilla does).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeArmorHurt {
     /// The equipment slot the armor piece sits in.
@@ -424,7 +424,7 @@ pub struct NativeLootDrops<'a> {
 
 /// An item that drops where a living entity died, before it is an item entity
 /// in the level (`living_drops`): what `ItemEntity`'s constructor was given.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct NativeItemDrop {
     /// The dropped stack.
@@ -2800,6 +2800,7 @@ pub enum NativeEffectDamage {
 /// A change requested by an effect tick, applied after its hooks return.
 // hidden: a game-side type, not part of the mod surface
 #[doc(hidden)]
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum EffectTickChange {
     Heal(f32),
@@ -3960,6 +3961,8 @@ pub(crate) use part_table::{InstalledProviders, answered, ask_providers, has_par
 mod wasm;
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
 mod wasm_host;
+#[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+mod wasm_refused;
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));

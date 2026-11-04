@@ -8,27 +8,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// A value that can't cross between the game and the mod (a stack that doesn't decode, a list
-/// of the wrong length), and why: the call traps with it.
-#[derive(Debug)]
-pub(crate) struct Refused(std::borrow::Cow<'static, str>);
-
-impl Refused {
-    /// A value of the wrong shape: a list of the wrong length, a case or handler that doesn't
-    /// exist.
-    pub(crate) const SHAPE: Self = Self(std::borrow::Cow::Borrowed("a value of the wrong shape"));
-
-    /// A value its conversion refused, for the reason it gives.
-    pub(crate) fn because(why: impl std::fmt::Display) -> Self {
-        Self(why.to_string().into())
-    }
-}
-
-impl std::fmt::Display for Refused {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+use crate::wasm_refused::Refused;
 
 fn expect<T>(value: Result<T, Refused>) -> T {
     match value {
