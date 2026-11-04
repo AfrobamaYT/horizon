@@ -8007,8 +8007,7 @@ mod tests {
                 let host = game.lan.as_ref().unwrap();
                 assert_eq!(host.play[&12].stats.get("custom", "minecraft:mob_kills"), 2);
                 assert!(host.hub.guests[0].advancements.has("test:catalyst", "kill"));
-                game.lan.as_mut().unwrap().hub.guests[0].dimension =
-                    "minecraft:the_nether".into();
+                game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
                 let mut third = victim.clone();
                 third.id = 103;
                 game.resolve_player_responsible(101, Damage::mob(100, [0.0; 3]));
