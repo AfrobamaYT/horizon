@@ -132,6 +132,7 @@ fn handler<T: ?Sized + 'static>(index: u32) -> &'static T {
 
 #[allow(
     clippy::all,
+    unreachable_code,
     unused_imports,
     unused_variables,
     unused_parens,

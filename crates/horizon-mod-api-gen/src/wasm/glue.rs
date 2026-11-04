@@ -70,6 +70,7 @@ pub(super) fn borrowed_record(types: &Types<'_>, ty: &Ty) -> bool {
 /// table; anything else is lowered by reference.
 pub(super) fn lower_owned(types: &Types<'_>, ty: &Ty, e: &str) -> String {
     match ty {
+        Ty::Handler(..) if !types.guest.get() => lower(types, ty, e),
         Ty::Handler(name, true) => keep_handler(types, name, &format!("std::sync::Arc::from({e})")),
         Ty::Option(item) if matches!(**item, Ty::Handler(..)) => {
             format!("{e}.map(|x| {})", lower_owned(types, item, "x"))
@@ -81,6 +82,7 @@ pub(super) fn lower_owned(types: &Types<'_>, ty: &Ty, e: &str) -> String {
 /// The guest keeping handler `arc` (an `Arc<dyn name>`) under each trait it answers as, and the
 /// record the game gets: its index and the hooks it listens to as any of them.
 fn keep_handler(types: &Types<'_>, name: &str, arc: &str) -> String {
+    let path = super::sides::trait_path(name);
     let views = types
         .views
         .iter()
@@ -110,7 +112,7 @@ fn keep_handler(types: &Types<'_>, name: &str, arc: &str) -> String {
         ),
     };
     format!(
-        "{{ let h = {arc}; {W}::Handler {{ subscribed: {subscribed}, index: super::add_handler(vec![{}]) }} }}",
+        "{{ let h: std::sync::Arc<dyn {path}> = {arc}; {W}::Handler {{ subscribed: {subscribed}, index: super::add_handler(vec![{}]) }} }}",
         kept.join(", ")
     )
 }
@@ -129,6 +131,9 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         Ty::Wide(_) => format!("{{ let v = *{e} as u128; ((v >> 64) as u64, v as u64) }}"),
         Ty::Duration => format!("u64::try_from({e}.as_nanos()).unwrap_or(u64::MAX)"),
         // Only a mod hands one over: the guest keeps it under its views and sends its index.
+        Ty::Handler(..) if !types.guest.get() => {
+            "unreachable!(\"only a mod hands a handler over\")".into()
+        }
         Ty::Handler(name, false) => keep_handler(types, name, &format!("{e}.clone()")),
         Ty::Handler(_, true) => unreachable!("a boxed handler is lowered owned (`lower_owned`)"),
         Ty::Str(_) => format!("{e}.to_string()"),
@@ -201,6 +206,10 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         }
         Ty::Duration => format!("std::time::Duration::from_nanos({e})"),
         // Only the game takes one: its proxy, calling back into the mod that handed it over.
+        // Only the game takes one: its proxy, calling back into the mod that handed it over.
+        Ty::Handler(..) if types.guest.get() => {
+            "unreachable!(\"only the game takes a handler\")".into()
+        }
         Ty::Handler(name, boxed) => {
             let path = super::sides::trait_path(name);
             if *boxed {
@@ -371,7 +380,10 @@ impl<'t, 'a> InPlace<'t, 'a> {
             Kind::Variant(cases) => {
                 // Only cases carrying a trait object borrow: the side enums.
                 let mut arms = Vec::new();
-                for Case { rust, wit, payload } in cases {
+                for Case {
+                    rust, wit, payload, ..
+                } in cases
+                {
                     let Payload::Tuple(items) = payload else {
                         return Err(format!("{} borrows in a record case", def.rust));
                     };
@@ -467,6 +479,7 @@ pub(super) fn conversions(
                              rust: case,
                              wit: w,
                              payload,
+                             ..
                          }| {
                             let target = format!("{wire}::{}", bound_type(&wit_ident(w)));
                             match payload {
@@ -508,7 +521,7 @@ pub(super) fn conversions(
                                         })
                                         .collect();
                                     format!(
-                                        "{path}::{case} {{ {} }} => {target}({W}::{} {{ {} }})",
+                                        "{path}::{case} {{ {}, .. }} => {target}({W}::{} {{ {} }})",
                                         names.join(", "),
                                         bound_type(record),
                                         parts.join(", ")
@@ -524,6 +537,11 @@ pub(super) fn conversions(
                 "{{ let f: {} = ::core::convert::From::from(v); {} }}",
                 super::sides::rust_ty(types, form, false),
                 lower(types, form, "(&f)")
+            ),
+            Kind::Chain { frame, case, link } => format!(
+                "{{ let mut frames = Vec::new(); let mut v = v; loop {{ frames.push({}); match v {{ {}::{case} {{ {link}, .. }} => v = &**{link}, _ => break frames }} }} }}",
+                lower(types, frame, "v"),
+                rust.split('<').next().unwrap()
             ),
             Kind::Json => "serde_json::to_string(v).unwrap_or_default()".into(),
             Kind::Opaque(_) => unreachable!(),
@@ -589,6 +607,7 @@ pub(super) fn conversions(
                                  rust: case,
                                  wit: w,
                                  payload,
+                                 link,
                              }| {
                                 let source = format!("{wire}::{}", bound_type(&wit_ident(w)));
                                 match payload {
@@ -613,6 +632,10 @@ pub(super) fn conversions(
                                                 values.join(", ")
                                             )
                                         }
+                                    }
+                                    // A chain's link: only the chain, holding the next, builds it.
+                                    Payload::Record(..) if link.is_some() => {
+                                        format!("{source}(_) => return Err(Refused)")
                                     }
                                     Payload::Record(_, fields) => {
                                         let parts: Vec<String> = fields
@@ -645,6 +668,36 @@ pub(super) fn conversions(
                     super::sides::rust_ty(types, form, false),
                     lift(types, form, "w")
                 ),
+                Kind::Chain { frame, case, link } => {
+                    let Ty::Named(frame_id) = frame else {
+                        unreachable!("a frame is a def")
+                    };
+                    let frame_def = &types.defs[*frame_id];
+                    let Kind::Variant(cases) = &frame_def.kind else {
+                        unreachable!("a frame is a variant")
+                    };
+                    let linked = cases.iter().find(|c| &c.rust == case).unwrap();
+                    let Payload::Record(_, fields) = &linked.payload else {
+                        unreachable!("a link is a record's field")
+                    };
+                    let parts: Vec<String> = fields
+                        .iter()
+                        .map(|f| {
+                            format!(
+                                "{}: {}",
+                                f.rust,
+                                lift(types, &f.ty, &format!("p.{}", bound_ident(&f.wit)))
+                            )
+                        })
+                        .collect();
+                    format!(
+                        "{{ let mut frames = w.into_iter().rev(); let mut v = {}; for frame in frames {{ v = match frame {{ {}::{}(p) => {path}::{case} {{ {link}: Box::new(v), {} }}, _ => return Err(Refused) }}; }} v }}",
+                        lift(types, frame, "frames.next().ok_or(Refused)?"),
+                        wire_path(frame_def),
+                        bound_type(&linked.wit),
+                        parts.join(", ")
+                    )
+                }
                 Kind::Json => "serde_json::from_str(&w).map_err(|_| Refused)?".into(),
                 Kind::Opaque(_) => unreachable!(),
             };

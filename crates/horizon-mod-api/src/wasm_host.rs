@@ -423,6 +423,7 @@ pub fn instantiate(
 
 #[allow(
     clippy::all,
+    unreachable_code,
     unused_imports,
     unused_variables,
     unused_parens,

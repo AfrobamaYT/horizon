@@ -101,7 +101,7 @@ impl EntityRef {
             super::ask_providers::<EntityProvider<T, C>, T>(
                 parts,
                 host,
-                |provider, host| provider(host, self, context),
+                |provider, host| provider.provide(host, self, context),
                 |host| {
                     game = key.default.and_then(|default| default(host, self, context));
                     game.is_some()

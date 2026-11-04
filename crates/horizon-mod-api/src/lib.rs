@@ -3404,8 +3404,10 @@ pub(crate) use part_table::install_parts;
 #[cfg(test)]
 pub(crate) use part_table::mark_game_thread;
 pub use part_table::{
-    Attached, BlockEntityProviders, BlockProvider, EntityProvider, EntityProviders, ItemProvider,
-    Parts, Registrar, block_entity_providers, entity_providers, has_entity_providers,
+    Attached, BlockCapabilityProvider, BlockEntityProviders, BlockProvider, BlockProviderOf,
+    EntityCapabilityProvider, EntityProvider, EntityProviderOf, EntityProviders,
+    ItemCapabilityProvider, ItemProvider, ItemProviderOf, OwnErased, OwnProvider, Parts, Registrar,
+    block_entity_providers, entity_providers, has_entity_providers,
 };
 pub(crate) use part_table::{
     ProvidedBy, answered, ask_providers, has_part_hook, parts, place_provider, providers,

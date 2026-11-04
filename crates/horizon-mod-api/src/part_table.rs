@@ -141,16 +141,110 @@ pub(crate) struct CapabilityPart {
 }
 
 /// What answers a capability for a block entity of one type: given the block entity and the
-/// side asked about, its handler, or none to leave it to the next provider.
-pub type BlockProvider<T> = dyn Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync;
+/// side asked about, its handler, or none to leave it to the next provider. A closure
+/// `|host, at| Some(Box::new(Tank(at)))` is one.
+pub trait BlockCapabilityProvider<T: ?Sized>: Send + Sync {
+    /// The handler for the block entity at `at`, or none.
+    fn provide(&self, host: &mut dyn ServerHost, at: BlockSide) -> Option<Box<T>>;
+}
+impl<T: ?Sized, F> BlockCapabilityProvider<T> for F
+where
+    F: Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync,
+{
+    fn provide(&self, host: &mut dyn ServerHost, at: BlockSide) -> Option<Box<T>> {
+        self(host, at)
+    }
+}
 /// What answers an item capability for one item: given where the stack lives, its handler, or
-/// none to leave it to the next provider.
-pub type ItemProvider<T> = dyn Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync;
+/// none to leave it to the next provider. A closure is one.
+pub trait ItemCapabilityProvider<T: ?Sized>: Send + Sync {
+    /// The handler for the stack at `at`, or none.
+    fn provide(&self, host: &mut dyn ServerHost, at: &ItemPlace) -> Option<Box<T>>;
+}
+impl<T: ?Sized, F> ItemCapabilityProvider<T> for F
+where
+    F: Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync,
+{
+    fn provide(&self, host: &mut dyn ServerHost, at: &ItemPlace) -> Option<Box<T>> {
+        self(host, at)
+    }
+}
 /// What answers an entity capability for one entity type: given the entity and the lookup's
 /// context (its [`EntityCapabilityKey`]'s `C`), its handler, or none to leave it to the next
-/// provider.
-pub type EntityProvider<T, C = ()> =
-    dyn Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync;
+/// provider. A closure is one.
+pub trait EntityCapabilityProvider<T: ?Sized, C>: Send + Sync {
+    /// The handler for `entity`, asked with `context`, or none.
+    fn provide(&self, host: &mut dyn ServerHost, entity: EntityRef, context: C) -> Option<Box<T>>;
+}
+impl<T: ?Sized, C, F> EntityCapabilityProvider<T, C> for F
+where
+    F: Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync,
+{
+    fn provide(&self, host: &mut dyn ServerHost, entity: EntityRef, context: C) -> Option<Box<T>> {
+        self(host, entity, context)
+    }
+}
+/// A block capability provider, as the registrar keeps it.
+pub type BlockProvider<T> = dyn BlockCapabilityProvider<T>;
+/// An item capability provider, as the registrar keeps it.
+pub type ItemProvider<T> = dyn ItemCapabilityProvider<T>;
+/// An entity capability provider, as the registrar keeps it.
+pub type EntityProvider<T, C = ()> = dyn EntityCapabilityProvider<T, C>;
+
+/// A capability provider whose handler type is a mod's own (a key a library's `[api]` crate
+/// publishes), erased: only mods linked with that crate know its handler type.
+// hidden: the registrar's erased provider, not part of the mod surface
+// exhaustive: its fields are private, so mods cannot build or destructure it
+#[doc(hidden)]
+pub struct OwnProvider {
+    pub(crate) provider: OwnErased,
+    pub(crate) handler: &'static str,
+}
+
+/// An own-type provider: here, or a wasm mod's, by its address in its group's memory, which only
+/// mods of that group (linked with the handler type's crate) turn back into the provider.
+// hidden: the registrar's erased provider, not part of the mod surface
+#[doc(hidden)]
+#[horizon_mod_api_macros::wasm(via = u64)]
+#[non_exhaustive]
+pub enum OwnErased {
+    /// The provider, as the registrar keeps it.
+    Here(Arc<dyn Any + Send + Sync>),
+    /// A wasm mod's provider, at this address in its group's memory.
+    InGroup(u64),
+}
+
+/// A provider's address in its group's memory: the guest hands it over once, and it lives as long
+/// as the mod.
+impl From<&OwnErased> for u64 {
+    fn from(provider: &OwnErased) -> Self {
+        match provider {
+            OwnErased::Here(provider) => Box::into_raw(Box::new(provider.clone())) as usize as u64,
+            OwnErased::InGroup(address) => *address,
+        }
+    }
+}
+
+impl From<u64> for OwnErased {
+    fn from(address: u64) -> Self {
+        OwnErased::InGroup(address)
+    }
+}
+
+/// A provider by its handler type: one case for each handler type `mod_api`'s keys name
+/// (generated from them), and [`OwnProvider`] for a mod's own.
+#[allow(missing_docs)]
+mod providers_of {
+    use super::*;
+    // The keys' handler types and contexts, as the generated cases name them.
+    #[allow(unused_imports)]
+    use crate::*;
+    include!(concat!(
+        env!("OUT_DIR"),
+        "/capability_providers_generated.rs"
+    ));
+}
+pub use providers_of::{BlockProviderOf, EntityProviderOf, ItemProviderOf};
 
 /// Which things a capability's providers are registered by.
 #[derive(Clone, Copy)]
@@ -607,7 +701,7 @@ impl<T: ?Sized + 'static> BlockEntityProviders<T> {
         let answer = ask_providers::<BlockProvider<T>, T>(
             self.parts,
             host,
-            |provider, host| provider(host, at),
+            |provider, host| provider.provide(host, at),
             |_| game,
         );
         match answer {
@@ -653,7 +747,7 @@ impl<T: ?Sized + 'static, C: Copy + 'static> EntityProviders<T, C> {
         match ask_providers::<EntityProvider<T, C>, T>(
             self.parts,
             host,
-            |provider, host| provider(host, entity, context),
+            |provider, host| provider.provide(host, entity, context),
             |_| game,
         ) {
             Answer::Mod(found) => Some(found),
@@ -720,13 +814,36 @@ pub trait Registrar {
     fn attach_block_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn BlockPart>);
     /// Attach `part`, of kind `kind`, to every item in tag `tag`.
     fn attach_item_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn ItemPart>);
-    /// The game's registrar, for what doesn't cross to a wasm mod yet: capability and place
-    /// providers.
-    // hidden: the game's own registrar, not part of the mod surface
-    #[doc(hidden)]
-    fn game(&mut self) -> Option<&mut PartRegistrar> {
-        None
-    }
+    /// Answer block entity capability `name` for type `kind` with `provider`, asked ahead of the
+    /// game's own when `before_game`; mods reach it through `block_entity_capability`.
+    fn provide_block_entity_capability(
+        &mut self,
+        name: &'static str,
+        kind: &super::BlockEntityTypeKey,
+        before_game: bool,
+        provider: BlockProviderOf,
+    );
+    /// Answer item capability `name` for item `item` with `provider`; mods reach it through
+    /// `item_capability`.
+    fn provide_item_capability(
+        &mut self,
+        name: &'static str,
+        item: &str,
+        before_game: bool,
+        provider: ItemProviderOf,
+    );
+    /// Answer entity capability `name` for entity type `kind` with `provider`; mods reach it
+    /// through `entity_capability`.
+    fn provide_entity_capability(
+        &mut self,
+        name: &'static str,
+        kind: &str,
+        before_game: bool,
+        provider: EntityProviderOf,
+    );
+    /// Read and write the item places `ItemPlace::Mod { provider: name, .. }` with `provider`,
+    /// as an accessory mod exposes its slots. One provider a name.
+    fn place_provider(&mut self, name: &'static str, provider: Arc<dyn PlaceProvider>);
 }
 
 impl dyn Registrar + '_ {
@@ -768,12 +885,6 @@ impl dyn Registrar + '_ {
     pub fn menu_part<P: MenuPart>(&mut self, menu: &str, part: P) {
         self.attach_menu_part(menu, type_name::<P>(), Arc::new(part));
     }
-    /// The game's registrar, for capability and place providers, which don't cross to a wasm
-    /// mod yet.
-    fn providers(&mut self) -> &mut PartRegistrar {
-        self.game()
-            .expect("capability and place providers are not available to wasm mods yet")
-    }
     /// Answer capability `key` for block entity type `kind` with `provider`, which gives
     /// a handler for one block entity and side, or none:
     /// `r.block_entity_capability(&ITEMS, &press, |_, _| Some(Box::new(PressItems)))`.
@@ -786,8 +897,12 @@ impl dyn Registrar + '_ {
         kind: &super::BlockEntityTypeKey,
         provider: impl Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
-        self.providers()
-            .block_entity_capability(key, kind, provider);
+        self.provide_block_entity_capability(
+            key.name,
+            kind,
+            false,
+            BlockProviderOf::of(Arc::new(provider)),
+        );
     }
     /// [`block_entity_capability`](Self::block_entity_capability), asked ahead of the game's own
     /// provider (NeoForge's priority), as a mod that replaces how a block entity's slots are
@@ -798,8 +913,12 @@ impl dyn Registrar + '_ {
         kind: &super::BlockEntityTypeKey,
         provider: impl Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
-        self.providers()
-            .block_entity_capability_before_game(key, kind, provider);
+        self.provide_block_entity_capability(
+            key.name,
+            kind,
+            true,
+            BlockProviderOf::of(Arc::new(provider)),
+        );
     }
     /// Answer item capability `key` for item `item` (`mymod:backpack`) with `provider`, which
     /// gives a handler for the stack at one place, or none: `r.item_capability(&ITEM_ITEMS,
@@ -811,7 +930,12 @@ impl dyn Registrar + '_ {
         item: &str,
         provider: impl Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
-        self.providers().item_capability(key, item, provider);
+        self.provide_item_capability(
+            key.name,
+            item,
+            false,
+            ItemProviderOf::of(Arc::new(provider)),
+        );
     }
     /// [`item_capability`](Self::item_capability), asked ahead of the game's own provider.
     pub fn item_capability_before_game<T: ?Sized + 'static>(
@@ -820,8 +944,7 @@ impl dyn Registrar + '_ {
         item: &str,
         provider: impl Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
-        self.providers()
-            .item_capability_before_game(key, item, provider);
+        self.provide_item_capability(key.name, item, true, ItemProviderOf::of(Arc::new(provider)));
     }
     /// Answer entity capability `key` for entity type `kind` (`mymod:robot`,
     /// `minecraft:player`) with `provider`, which gives a handler for one entity, or none:
@@ -833,7 +956,12 @@ impl dyn Registrar + '_ {
         kind: &str,
         provider: impl Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
-        self.providers().entity_capability(key, kind, provider);
+        self.provide_entity_capability(
+            key.name,
+            kind,
+            false,
+            EntityProviderOf::of(Arc::new(provider)),
+        );
     }
     /// [`entity_capability`](Self::entity_capability), asked ahead of the game's own provider,
     /// as a mod that replaces how a player's inventory is reached.
@@ -843,13 +971,12 @@ impl dyn Registrar + '_ {
         kind: &str,
         provider: impl Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
-        self.providers()
-            .entity_capability_before_game(key, kind, provider);
-    }
-    /// Read and write the item places `ItemPlace::Mod { provider: name, .. }` with `provider`,
-    /// as an accessory mod exposes its slots. One provider a name.
-    pub fn place_provider(&mut self, name: &'static str, provider: Arc<dyn PlaceProvider>) {
-        self.providers().place_provider(name, provider);
+        self.provide_entity_capability(
+            key.name,
+            kind,
+            true,
+            EntityProviderOf::of(Arc::new(provider)),
+        );
     }
 }
 
@@ -920,150 +1047,18 @@ impl PartRegistrar {
             parts.sort_by_key(|part| (part.mod_index, part.order));
         }
     }
-    /// Answer capability `key` for block entity type `kind` with `provider`, which gives
-    /// a handler for one block entity and side, or none:
-    /// `r.block_entity_capability(&ITEMS, &press, |_, _| Some(Box::new(PressItems)))`.
-    /// Like NeoForge's `RegisterCapabilitiesEvent`, providers add up: in the fork's chosen order
-    /// (NeoForge's javadoc states none), the game's own is asked first, then the mods' in
-    /// registration order, and the first to answer wins.
-    fn block_entity_capability<T: ?Sized + 'static>(
-        &mut self,
-        key: &CapabilityKey<T>,
-        kind: &super::BlockEntityTypeKey,
-        provider: impl Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
-    ) {
-        let provider: Arc<BlockProvider<T>> = Arc::new(provider);
-        self.capability::<T, _>(
-            |p| &mut p.capabilities,
-            key.name,
-            ProviderTarget::BlockEntity(kind),
-            false,
-            provider,
-        );
-    }
-    /// [`block_entity_capability`](Self::block_entity_capability), asked ahead of the game's own
-    /// provider (NeoForge's priority), as a mod that replaces how a block entity's slots are
-    /// reached.
-    fn block_entity_capability_before_game<T: ?Sized + 'static>(
-        &mut self,
-        key: &CapabilityKey<T>,
-        kind: &super::BlockEntityTypeKey,
-        provider: impl Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
-    ) {
-        let provider: Arc<BlockProvider<T>> = Arc::new(provider);
-        self.capability::<T, _>(
-            |p| &mut p.capabilities,
-            key.name,
-            ProviderTarget::BlockEntity(kind),
-            true,
-            provider,
-        );
-    }
-    /// Answer item capability `key` for item `item` (`mymod:backpack`) with `provider`, which
-    /// gives a handler for the stack at one place, or none: `r.item_capability(&ITEM_ITEMS,
-    /// "mymod:backpack", |_, _| Some(Box::new(Backpack)))`. Asked as
-    /// [`block_entity_capability`](Self::block_entity_capability)'s are.
-    fn item_capability<T: ?Sized + 'static>(
-        &mut self,
-        key: &ItemCapabilityKey<T>,
-        item: &str,
-        provider: impl Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
-    ) {
-        let provider: Arc<ItemProvider<T>> = Arc::new(provider);
-        self.capability::<T, _>(
-            |p| &mut p.item_capabilities,
-            key.name,
-            ProviderTarget::Id(item),
-            false,
-            provider,
-        );
-    }
-    /// [`item_capability`](Self::item_capability), asked ahead of the game's own provider.
-    fn item_capability_before_game<T: ?Sized + 'static>(
-        &mut self,
-        key: &ItemCapabilityKey<T>,
-        item: &str,
-        provider: impl Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
-    ) {
-        let provider: Arc<ItemProvider<T>> = Arc::new(provider);
-        self.capability::<T, _>(
-            |p| &mut p.item_capabilities,
-            key.name,
-            ProviderTarget::Id(item),
-            true,
-            provider,
-        );
-    }
-    /// Answer entity capability `key` for entity type `kind` (`mymod:robot`,
-    /// `minecraft:player`) with `provider`, which gives a handler for one entity, or none:
-    /// `r.entity_capability(&ENTITY_ITEMS, "mymod:robot", |_, robot, ()| Some(Box::new(Cargo(robot))))`.
-    /// Asked as [`block_entity_capability`](Self::block_entity_capability)'s are.
-    fn entity_capability<T: ?Sized + 'static, C: 'static>(
-        &mut self,
-        key: &EntityCapabilityKey<T, C>,
-        kind: &str,
-        provider: impl Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync + 'static,
-    ) {
-        let provider: Arc<EntityProvider<T, C>> = Arc::new(provider);
-        self.capability::<T, _>(
-            |p| &mut p.entity_capabilities,
-            key.name,
-            ProviderTarget::Id(kind),
-            false,
-            provider,
-        );
-    }
-    /// [`entity_capability`](Self::entity_capability), asked ahead of the game's own provider,
-    /// as a mod that replaces how a player's inventory is reached.
-    fn entity_capability_before_game<T: ?Sized + 'static, C: 'static>(
-        &mut self,
-        key: &EntityCapabilityKey<T, C>,
-        kind: &str,
-        provider: impl Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync + 'static,
-    ) {
-        let provider: Arc<EntityProvider<T, C>> = Arc::new(provider);
-        self.capability::<T, _>(
-            |p| &mut p.entity_capabilities,
-            key.name,
-            ProviderTarget::Id(kind),
-            true,
-            provider,
-        );
-    }
-    /// Read and write the item places `ItemPlace::Mod { provider: name, .. }` with `provider`,
-    /// as an accessory mod exposes its slots. One provider a name.
-    fn place_provider(&mut self, name: &'static str, provider: Arc<dyn PlaceProvider>) {
-        if !namespaced(name) {
-            self.refused.push(format!(
-                "{} provides item places {name:?}, which is not a namespaced name",
-                self.mod_id
-            ));
-            return;
-        }
-        if let Some((other, _)) = self.parts.place_providers.get(name) {
-            self.refused.push(format!(
-                "item places {name} are provided twice, by {} and {}",
-                *other, self.mod_id
-            ));
-            return;
-        }
-        self.parts
-            .place_providers
-            .insert(name, (self.mod_id, provider));
-    }
-
     /// Adds `provider` for capability `name` and `id` to `table`. Refused for a capability name
     /// or an id with no namespace, and for a capability name another provider answers with
     /// another handler type (two mods each declaring their own key under one name, rather than
     /// sharing the one the defining mod's `[api]` crate publishes): asked by one type, the other's
     /// providers would never answer.
-    fn capability<T: ?Sized + 'static, P: ?Sized + Send + Sync + 'static>(
+    fn capability(
         &mut self,
         table: fn(&mut Parts) -> &mut Capabilities,
         name: &'static str,
         target: ProviderTarget<'_>,
         before_game: bool,
-        provider: Arc<P>,
+        (provider, handler): (Arc<dyn Any + Send + Sync>, &'static str),
     ) {
         let me = self.mod_id;
         if !namespaced(name) {
@@ -1086,13 +1081,11 @@ impl PartRegistrar {
         };
         let providers = table(&mut self.parts).entry(name).or_default();
         if let Some(other) = providers.values().flatten().next()
-            && !other.provider.is::<Arc<P>>()
+            && (*other.provider).type_id() != (*provider).type_id()
         {
             self.refused.push(format!(
-                "capability {name} is answered with two handler types, {} by {} and {} by {me}",
-                other.type_name,
-                other.mod_id,
-                type_name::<T>(),
+                "capability {name} is answered with two handler types, {} by {} and {handler} by {me}",
+                other.type_name, other.mod_id,
             ));
             return;
         }
@@ -1101,9 +1094,9 @@ impl PartRegistrar {
             .or_default()
             .push(CapabilityPart {
                 mod_id: self.mod_id,
-                type_name: type_name::<T>(),
+                type_name: handler,
                 before_game,
-                provider: Arc::new(provider),
+                provider,
             });
     }
     /// `part`, of kind `kind`, for tag `tag`; none if it is refused.
@@ -1254,8 +1247,74 @@ impl Registrar for PartRegistrar {
         self.tags.items.extend(part);
     }
 
-    fn game(&mut self) -> Option<&mut PartRegistrar> {
-        Some(self)
+    fn provide_block_entity_capability(
+        &mut self,
+        name: &'static str,
+        kind: &super::BlockEntityTypeKey,
+        before_game: bool,
+        provider: BlockProviderOf,
+    ) {
+        self.capability(
+            |p| &mut p.capabilities,
+            name,
+            ProviderTarget::BlockEntity(kind),
+            before_game,
+            provider.erase(),
+        );
+    }
+
+    fn provide_item_capability(
+        &mut self,
+        name: &'static str,
+        item: &str,
+        before_game: bool,
+        provider: ItemProviderOf,
+    ) {
+        self.capability(
+            |p| &mut p.item_capabilities,
+            name,
+            ProviderTarget::Id(item),
+            before_game,
+            provider.erase(),
+        );
+    }
+
+    fn provide_entity_capability(
+        &mut self,
+        name: &'static str,
+        kind: &str,
+        before_game: bool,
+        provider: EntityProviderOf,
+    ) {
+        self.capability(
+            |p| &mut p.entity_capabilities,
+            name,
+            ProviderTarget::Id(kind),
+            before_game,
+            provider.erase(),
+        );
+    }
+
+    /// Read and write the item places `ItemPlace::Mod { provider: name, .. }` with `provider`,
+    /// as an accessory mod exposes its slots. One provider a name.
+    fn place_provider(&mut self, name: &'static str, provider: Arc<dyn PlaceProvider>) {
+        if !namespaced(name) {
+            self.refused.push(format!(
+                "{} provides item places {name:?}, which is not a namespaced name",
+                self.mod_id
+            ));
+            return;
+        }
+        if let Some((other, _)) = self.parts.place_providers.get(name) {
+            self.refused.push(format!(
+                "item places {name} are provided twice, by {} and {}",
+                *other, self.mod_id
+            ));
+            return;
+        }
+        self.parts
+            .place_providers
+            .insert(name, (self.mod_id, provider));
     }
 }
 

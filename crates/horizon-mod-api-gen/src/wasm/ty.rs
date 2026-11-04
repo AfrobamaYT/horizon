@@ -76,6 +76,14 @@ pub(crate) enum Kind {
     Variant(Vec<Case>),
     /// Crosses as its form, declared on the type with `#[wasm(via = Form)]`.
     Via(Ty),
+    /// An enum one case of which holds another of it in a box (`ItemPlace::Nested`): it crosses
+    /// as the list of its frames (`frame`, a variant of the same cases less that field),
+    /// outermost first, the last one not that case.
+    Chain {
+        frame: Ty,
+        case: String,
+        link: String,
+    },
     /// Crosses as JSON through its own serde derives.
     Json,
     /// It can't cross; why.
@@ -94,6 +102,9 @@ pub(crate) struct Case {
     pub(super) rust: String,
     pub(super) wit: String,
     pub(super) payload: Payload,
+    /// The field of its record holding the next of a chain, left out of the frame
+    /// (`Kind::Chain`).
+    pub(super) link: Option<String>,
 }
 
 #[derive(Debug)]
@@ -121,6 +132,8 @@ pub(crate) struct Types<'a> {
     exported_via_names: HashMap<String, Type>,
     /// Each exported trait with the exported traits its handlers answer as (`super::views`).
     pub(super) views: Vec<(String, Vec<String>)>,
+    /// Whether the side being generated is the guest's: only a mod hands a handler over.
+    pub(super) guest: std::cell::Cell<bool>,
 }
 
 impl<'a> Types<'a> {
@@ -151,6 +164,7 @@ impl<'a> Types<'a> {
             exported_via,
             exported_via_names,
             views: Vec::new(),
+            guest: std::cell::Cell::new(false),
             defs: Vec::new(),
             refused: Vec::new(),
             by_item: HashMap::new(),
@@ -210,6 +224,8 @@ impl<'a> Types<'a> {
                 }
             }
             Type::Path(path) if path.qself.is_none() => self.path(module, &path.path, subst)?,
+            // A trait object behind a box or `Arc` (`Box<T>` with `T = dyn Handler`).
+            Type::TraitObject(object) => Ty::Dyn(trait_name(object)?, false),
             ty => return Err(format!("unsupported type {}", ty.to_token_stream())),
         })
     }
@@ -226,12 +242,6 @@ impl<'a> Types<'a> {
             && let Some((_, ty)) = subst.iter().find(|(param, _)| *param == name)
         {
             return Ok(ty.clone());
-        }
-        if (name == "Arc" || name == "Box")
-            && let PathArguments::AngleBracketed(args) = &last.arguments
-            && let Some(GenericArgument::Type(Type::TraitObject(object))) = args.args.first()
-        {
-            return Ok(Ty::Handler(trait_name(object)?, name == "Box"));
         }
         let args = match &last.arguments {
             PathArguments::AngleBracketed(args) => args
@@ -286,11 +296,13 @@ impl<'a> Types<'a> {
                     Ty::Result(one(&args)?, Box::new(err))
                 }
                 "Box" => match *one(&args)? {
+                    Ty::Dyn(name, _) => Ty::Handler(name, true),
                     Ty::Str(_) => Ty::Str(Str::Boxed),
                     Ty::List(item, _) => Ty::List(item, List::Boxed),
                     ty => Ty::Boxed(Box::new(ty)),
                 },
                 "Arc" | "Rc" => match *one(&args)? {
+                    Ty::Dyn(name, _) if std == "Arc" => Ty::Handler(name, false),
                     Ty::Str(_) => Ty::Str(Str::Shared),
                     Ty::List(item, _) => Ty::List(item, List::Shared),
                     ty => return Err(format!("{std}<{ty:?}>")),
@@ -397,7 +409,7 @@ impl<'a> Types<'a> {
         });
         self.by_item.insert(id, def);
         let kind = self.kind(id, &item, name, &wit)?;
-        self.defs[def].kind = kind;
+        self.defs[def].kind = self.chain(def, kind);
         Ok(Ty::Named(def))
     }
 
@@ -463,6 +475,7 @@ impl<'a> Types<'a> {
                         rust: v.ident.to_string(),
                         wit: v.ident.to_string().to_kebab_case(),
                         payload,
+                        link: None,
                     })
                 })
                 .collect::<Result<_, String>>()
@@ -474,6 +487,40 @@ impl<'a> Types<'a> {
             Err(_) if serde => Kind::Json,
             Err(why) => Kind::Opaque(why),
         })
+    }
+
+    /// `kind` of def `id`, as a chain when one case's record holds a boxed `id`: that field
+    /// leaves the case, which becomes the frame's (a def of its own).
+    fn chain(&mut self, id: usize, kind: Kind) -> Kind {
+        let Kind::Variant(mut cases) = kind else {
+            return kind;
+        };
+        let own = Ty::Boxed(Box::new(Ty::Named(id)));
+        let linked = cases.iter_mut().find_map(|case| match &mut case.payload {
+            Payload::Record(_, fields) => {
+                let at = fields.iter().position(|f| f.ty == own)?;
+                let link = fields.remove(at).rust;
+                case.link = Some(link.clone());
+                Some((case.rust.clone(), link))
+            }
+            _ => None,
+        });
+        let Some((case, link)) = linked else {
+            return Kind::Variant(cases);
+        };
+        let def = &self.defs[id];
+        let frame = Def {
+            rust: def.rust.clone(),
+            wit: format!("{}-frame", def.wit),
+            lifetimes: def.lifetimes,
+            kind: Kind::Variant(cases),
+        };
+        let frame = self.push(frame);
+        Kind::Chain {
+            frame: Ty::Named(frame),
+            case,
+            link,
+        }
     }
 
     fn fields<'f>(
@@ -555,7 +602,7 @@ pub(super) fn trait_name(object: &syn::TypeTraitObject) -> Result<String, String
                         "<{}>",
                         args.args
                             .iter()
-                            .map(|a| a.to_token_stream().to_string().replace(' ', ""))
+                            .map(|a| written(a))
                             .collect::<Vec<_>>()
                             .join(", ")
                     ),
@@ -566,6 +613,20 @@ pub(super) fn trait_name(object: &syn::TypeTraitObject) -> Result<String, String
             _ => None,
         })
         .ok_or_else(|| format!("dyn {}", object.to_token_stream()))
+}
+
+/// Tokens as written, without the spaces `quote` puts around punctuation
+/// (`Option<Direction>`, `dyn ResourceHandler<ItemResource>`).
+pub(super) fn written(tokens: &impl ToTokens) -> String {
+    tokens
+        .to_token_stream()
+        .to_string()
+        .replace(" < ", "<")
+        .replace("< ", "<")
+        .replace(" <", "<")
+        .replace(" >", ">")
+        .replace(" ,", ",")
+        .replace("( )", "()")
 }
 
 fn generics(item: &Item) -> syn::Generics {

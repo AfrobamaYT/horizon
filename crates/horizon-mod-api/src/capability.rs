@@ -177,7 +177,7 @@ impl LevelRef {
             super::ask_providers::<super::BlockProvider<T>, T>(
                 parts,
                 host,
-                |provider, host| provider(host, at),
+                |provider, host| provider.provide(host, at),
                 |host| {
                     game = key.default.and_then(|default| default(host, at));
                     game.is_some()

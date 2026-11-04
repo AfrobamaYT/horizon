@@ -60,11 +60,23 @@ pub(super) fn rust_ty(types: &Types<'_>, ty: &Ty, ret: bool) -> String {
 }
 
 pub(super) fn trait_path(owner: &str) -> String {
-    // `ResourceHandler<ItemResource>`: each argument is a `mod_api` type too.
-    format!(
-        "crate::{}",
-        owner.replace('<', "<crate::").replace(", ", ", crate::")
-    )
+    // Every name in it is `mod_api`'s, but the prelude's (`ResourceHandler<ItemResource>`,
+    // `EntityCapabilityProvider<dyn EnergyHandler, Option<Direction>>`).
+    struct Qualify;
+    impl syn::visit_mut::VisitMut for Qualify {
+        fn visit_path_mut(&mut self, path: &mut syn::Path) {
+            syn::visit_mut::visit_path_mut(self, path);
+            let outside = ["Option", "Vec", "Box", "String", "Result", "crate", "std"];
+            if path.leading_colon.is_none()
+                && !outside.contains(&path.segments[0].ident.to_string().as_str())
+            {
+                path.segments.insert(0, syn::parse_quote!(crate));
+            }
+        }
+    }
+    let mut path: syn::Path = syn::parse_str(owner).expect("an owner is a path");
+    syn::visit_mut::VisitMut::visit_path_mut(&mut Qualify, &mut path);
+    super::ty::written(&path)
 }
 
 /// A method's Rust signature, its arguments named `p0…`.
@@ -128,6 +140,7 @@ pub(super) fn guest(
 ) -> Result<String, String> {
     let (defs, outs) = wit::reached(types, methods);
     let mut code = header(wit_text, "wit_bindgen::generate", "generate_all");
+    types.guest.set(true);
     code.push_str(&conversions(types, &defs, &outs));
     code.push_str(
         "/// The host as the guest reaches it: each method calls its import.\npub struct Guest;\n",
@@ -444,6 +457,7 @@ pub(super) fn host(
         "wasmtime::component::bindgen",
         "imports: { default: trappable }",
     );
+    types.guest.set(false);
     code.push_str(&conversions(types, &defs, &outs));
     let mut owners: Vec<&str> = Vec::new();
     for method in methods {
@@ -630,6 +644,8 @@ pub(super) fn host(
         }
         for (wit_name, params, results) in entries {
             let name = bound_ident(&wit_name);
+            // A function's name in the component, without the `%` a WIT keyword is escaped with.
+            let wit_name = wit_name.trim_start_matches('%');
             let ret = match results.as_slice() {
                 [] => "()".to_string(),
                 [one] => one.clone(),

@@ -43,6 +43,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                 ("mod_api_generated.rs", hooks),
                 ("mod_api_generated_host.rs", generated.host),
                 ("native_render_generated.rs", generated.render),
+                ("capability_providers_generated.rs", wasm.providers),
                 ("wasm_guest_generated.rs", wasm.guest),
                 ("wasm_host_generated.rs", wasm.host),
             ]

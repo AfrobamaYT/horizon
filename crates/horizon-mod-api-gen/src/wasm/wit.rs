@@ -127,7 +127,7 @@ pub(super) fn def_fields(def: &Def) -> Vec<&Ty> {
     match &def.kind {
         Kind::Record(fields) => fields.iter().map(|f| &f.ty).collect(),
         Kind::TupleRecord(items) => items.iter().collect(),
-        Kind::Via(form) => vec![form],
+        Kind::Via(form) | Kind::Chain { frame: form, .. } => vec![form],
         Kind::Variant(cases) => cases
             .iter()
             .flat_map(|case| match &case.payload {
@@ -275,6 +275,9 @@ fn def_wit(types: &Types<'_>, def: &Def, out: &mut String, used_out: bool) -> Re
             let form =
                 wit(types, form)?.ok_or_else(|| format!("{}: its form doesn't cross", def.rust))?;
             writeln!(out, "  type {name} = {form};").unwrap();
+        }
+        Kind::Chain { frame, .. } => {
+            writeln!(out, "  type {name} = list<{}>;", value(types, frame)?).unwrap()
         }
         Kind::Json => writeln!(out, "  type {name} = string;").unwrap(),
         Kind::Opaque(why) => return Err(format!("{}: {why}", def.rust)),

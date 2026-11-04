@@ -549,7 +549,7 @@ impl ItemPlace {
             super::ask_providers::<super::ItemProvider<T>, T>(
                 parts,
                 host,
-                |provider, host| provider(host, self),
+                |provider, host| provider.provide(host, self),
                 |host| {
                     game = key.default.and_then(|default| default(host, self, &stack));
                     game.is_some()
