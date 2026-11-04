@@ -4,7 +4,7 @@
 //! friends reach the open one. Below, what the mockup has no room for: the server's Players,
 //! Settings and Backups, then Sculk's banner (sponsor). Dark appearance only.
 use super::*;
-use crate::glass_ui::{self as ui, white, Tone};
+use crate::glass_ui::{self as ui, Tone, white};
 use horizon_theme::glass::{fill, ink, radius};
 
 /// The right column's width (`lg:grid-cols-[minmax(0,1fr)_320px]`).
@@ -31,7 +31,9 @@ impl Launcher {
     pub(super) fn glass_servers_page(&mut self, cx: &mut Context<Self>) -> Div {
         let head = glass_ui::page_head(
             tr("Servers"),
-            tr("Host a world for your friends with buttons and no commands. The same program runs on a VPS."),
+            tr(
+                "Host a world for your friends with buttons and no commands. The same program runs on a VPS.",
+            ),
         );
         // The mockup always shows a server: the open one, else the first.
         if self.servers.open.is_none() {

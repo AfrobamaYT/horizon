@@ -5,8 +5,8 @@
 //! a "Hide" appears on either, and hiding one hides both for good.
 use crate::theme::Theme;
 use gpui::{
-    div, img, prelude::*, px, rgb, ClickEvent, Div, FontWeight, HighlightStyle, Image, ImageFormat,
-    Rgba, SharedString, Stateful, StyledText,
+    ClickEvent, Div, FontWeight, HighlightStyle, Image, ImageFormat, Rgba, SharedString, Stateful,
+    StyledText, div, img, prelude::*, px, rgb,
 };
 use std::sync::{Arc, LazyLock};
 

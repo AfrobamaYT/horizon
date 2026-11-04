@@ -83,10 +83,10 @@ mod while_playing;
 mod worlds_page;
 
 use gpui::{
-    actions, div, ease_out_quint, prelude::*, px, relative, size, Animation, AnimationExt,
-    AnyElement, App, Bounds, ClickEvent, Context, Div, ElementId, FocusHandle, FontWeight, Hsla,
-    KeyBinding, KeyDownEvent, Menu, MenuItem, MouseDownEvent, PathPromptOptions, Pixels, Point,
-    SharedString, Stateful, Subscription, Window, WindowBounds, WindowOptions,
+    Animation, AnimationExt, AnyElement, App, Bounds, ClickEvent, Context, Div, ElementId,
+    FocusHandle, FontWeight, Hsla, KeyBinding, KeyDownEvent, Menu, MenuItem, MouseDownEvent,
+    PathPromptOptions, Pixels, Point, SharedString, Stateful, Subscription, Window, WindowBounds,
+    WindowOptions, actions, div, ease_out_quint, prelude::*, px, relative, size,
 };
 use horizon_launcher::account::{self, Accounts, SignIn, SignInState};
 use horizon_launcher::backend::{self, Job, Msg, Release, Running, Settings, Updates};
@@ -99,9 +99,9 @@ use horizon_launcher::telemetry;
 use scrollbar::Scrollbar;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::Ordering;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Mutex;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 use theme::Theme;
 
@@ -264,8 +264,6 @@ struct Launcher {
     /// on the Horizon the instance plays.
     native_update: Option<String>,
     /// The build waiting for the trust warning builds every mod on its Horizon's own commit,
-    /// pinned or not (`native_mods::build`'s `on_base`): Rebuild on Horizon's.
-    native_on_base: bool,
     /// What each installed native build was made from, by version. A build's version names its
     /// contents, so an entry never goes stale.
     native_builds:
@@ -487,39 +485,44 @@ impl Launcher {
             cx.notify();
         });
         let window_handle = window.window_handle();
-        cx.spawn(async move |this, cx| loop {
-            cx.background_executor()
-                .timer(Duration::from_millis(80))
-                .await;
-            if this
-                .update(cx, |this, cx| this.drain(window_handle, cx))
-                .is_err()
-            {
-                break;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(80))
+                    .await;
+                if this
+                    .update(cx, |this, cx| this.drain(window_handle, cx))
+                    .is_err()
+                {
+                    break;
+                }
             }
         })
         .detach();
         // Counts the time a partner banner is on screen, until it may be hidden.
-        cx.spawn(async move |this, cx| loop {
-            cx.background_executor()
-                .timer(Duration::from_secs(10))
-                .await;
-            let counting = this.update(cx, |this, cx| {
-                let s = &mut this.settings;
-                if s.partner_hidden || s.partner_seen_secs >= partner::SEEN_BEFORE_HIDE {
-                    return false;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_secs(10))
+                    .await;
+                let counting = this.update(cx, |this, cx| {
+                    let s = &mut this.settings;
+                    if s.partner_hidden || s.partner_seen_secs >= partner::SEEN_BEFORE_HIDE {
+                        return false;
+                    }
+                    // On screen on every page: the card in the sidebar, the banner on Servers.
+                    s.partner_seen_secs += 10;
+                    if s.partner_seen_secs % 60 == 0
+                        || s.partner_seen_secs >= partner::SEEN_BEFORE_HIDE
+                    {
+                        this.save_settings();
+                        cx.notify();
+                    }
+                    true
+                });
+                if !matches!(counting, Ok(true)) {
+                    break;
                 }
-                // On screen on every page: the card in the sidebar, the banner on Servers.
-                s.partner_seen_secs += 10;
-                if s.partner_seen_secs % 60 == 0 || s.partner_seen_secs >= partner::SEEN_BEFORE_HIDE
-                {
-                    this.save_settings();
-                    cx.notify();
-                }
-                true
-            });
-            if !matches!(counting, Ok(true)) {
-                break;
             }
         })
         .detach();
@@ -594,7 +597,6 @@ impl Launcher {
             native_confirm: None,
             native_for: None,
             native_update: None,
-            native_on_base: false,
             native_builds: Default::default(),
             native_log: Default::default(),
             confirm_remove: None,
@@ -941,7 +943,6 @@ impl Launcher {
         let instance = instances::selected();
         self.native_for = Some(instance.id.clone());
         let plays = self.version_of(&instance).cloned();
-        let on_base = std::mem::take(&mut self.native_on_base);
         let base = match self.native_update.take() {
             Some(newer) => Some(newer),
             None => native_mods::base_for(plays.as_deref(), &self.installed, false),
@@ -966,17 +967,9 @@ impl Launcher {
         let profile = native_mods::Profile::chosen(&self.settings);
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let result = native_mods::build(
-                &base,
-                &folder,
-                &instance,
-                anyway,
-                on_base,
-                profile,
-                |step| {
-                    let _ = tx.send(Msg::NativeProgress(step.label()));
-                },
-            );
+            let result = native_mods::build(&base, &folder, &instance, profile, |step| {
+                let _ = tx.send(Msg::NativeProgress(step.label()));
+            });
             let _ = tx.send(Msg::Native(result));
         });
     }
@@ -3923,7 +3916,6 @@ impl Launcher {
                 |this, _: &ClickEvent, _, cx| {
                     this.native_confirm = None;
                     this.native_update = None;
-                    this.native_on_base = false;
                     cx.notify();
                 },
             )),
@@ -4641,7 +4633,7 @@ impl Launcher {
                             },
                         )),
                     ),
-                )
+                );
             }
             Load::Ready(r) if r.is_empty() => {
                 return page.child(centered(tr("No releases yet."), &t));
@@ -4857,7 +4849,7 @@ impl Launcher {
                             }),
                         ),
                     ),
-                )
+                );
             }
             Load::Ready(r) => r,
         };
@@ -5485,7 +5477,7 @@ mod tests {
     #[test]
     fn a_menu_button_stays_closed_after_the_press_that_closed_its_menu() {
         use super::closed_by_press;
-        use gpui::{point, px, ClickEvent, KeyboardClickEvent, MouseClickEvent, MouseDownEvent};
+        use gpui::{ClickEvent, KeyboardClickEvent, MouseClickEvent, MouseDownEvent, point, px};
         let click = |x: f32| {
             ClickEvent::Mouse(MouseClickEvent {
                 down: MouseDownEvent {
@@ -5508,7 +5500,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn cmd_q_quits_and_cmd_w_closes_the_window() {
-        use super::{key_bindings, CloseWindow, Quit};
+        use super::{CloseWindow, Quit, key_bindings};
         use gpui::{Keymap, Keystroke};
         let keymap = Keymap::new(key_bindings());
         let key = |s: &'static str| [Keystroke::parse(s).unwrap()];
@@ -5552,7 +5544,7 @@ mod tests {
     /// it stays off: signing in comes first.
     #[test]
     fn play_prepares_first_for_an_owner() {
-        use super::{play_press, PlayPress};
+        use super::{PlayPress, play_press};
         assert_eq!(play_press(true, Some(true), false), PlayPress::Play);
         assert_eq!(play_press(true, None, false), PlayPress::Play);
         assert_eq!(
@@ -5582,7 +5574,7 @@ mod tests {
 
     #[test]
     fn a_completed_sign_in_is_handled_once_across_ui_polls() {
-        use super::{sign_in_change, SignInState};
+        use super::{SignInState, sign_in_change};
         let mut shown = None;
         let completed = SignInState::Done(Ok(horizon_launcher::account::Account {
             uuid: "11111111111111111111111111111111".into(),

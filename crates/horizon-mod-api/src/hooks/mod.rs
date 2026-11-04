@@ -176,7 +176,6 @@ mod living_writes;
 mod menu_extra_data;
 mod menu_refs;
 mod menu_slots;
-mod merchant_offer_traded;
 mod merchant_refs;
 mod minecart_pass;
 mod minecart_refs;

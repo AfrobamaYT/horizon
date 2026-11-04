@@ -4306,6 +4306,7 @@ mod tests {
                 yaw: 0.0,
                 pitch: 0.0,
                 entity_id: 0,
+                address: String::new(),
             })
         }
         fn action_bar(&mut self, _uuid: u128, line: Text) -> bool {

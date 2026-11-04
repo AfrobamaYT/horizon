@@ -218,21 +218,24 @@ mod tests {
         let first = super::shared(&root).unwrap();
         write(64);
         let second = super::shared(&root).unwrap();
-        assert_eq!(second["test:item"]["minecraft:max_stack_size"], 16);
+        assert_eq!(
+            second.entries()["test:item"]["minecraft:max_stack_size"],
+            16
+        );
         // Explicit fresh reads remain available even while a load owns its snapshot.
         assert_eq!(
-            super::read(&root).unwrap()["test:item"]["minecraft:max_stack_size"],
+            super::read(&root).unwrap().entries()["test:item"]["minecraft:max_stack_size"],
             64
         );
         drop((first, second));
         let next = super::shared(&root).unwrap();
-        assert_eq!(next["test:item"]["minecraft:max_stack_size"], 64);
+        assert_eq!(next.entries()["test:item"]["minecraft:max_stack_size"], 64);
         drop(next);
         fs::write(root.join("items.json"), "broken").unwrap();
         assert!(super::shared(&root).is_err());
         write(2);
         assert_eq!(
-            super::shared(&root).unwrap()["test:item"]["minecraft:max_stack_size"],
+            super::shared(&root).unwrap().entries()["test:item"]["minecraft:max_stack_size"],
             2
         );
         fs::remove_dir_all(root).unwrap();

@@ -3,7 +3,7 @@
 //! are offered as `game_<name>`, and calls go to it unchanged. `play` starts the game
 //! with the control socket that child talks to.
 use horizon_launcher::backend;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Stdio};
@@ -195,10 +195,12 @@ mod tests {
         let tools = prefixed(&listed);
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["name"], "game_click_slot");
-        assert!(tools[0]["description"]
-            .as_str()
-            .unwrap()
-            .ends_with("Click a slot"));
+        assert!(
+            tools[0]["description"]
+                .as_str()
+                .unwrap()
+                .ends_with("Click a slot")
+        );
         assert_eq!(tools[0]["inputSchema"], json!({ "type": "object" }));
     }
 
@@ -208,10 +210,12 @@ mod tests {
         let result = explain_unreachable(
             json!({ "content": [{ "type": "text", "text": text }], "isError": true }),
         );
-        assert!(result["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("with play"));
+        assert!(
+            result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("with play")
+        );
         let other = json!({ "content": [{ "type": "text", "text": "{\"error\":\"no world\"}" }], "isError": true });
         assert_eq!(explain_unreachable(other.clone()), other);
     }

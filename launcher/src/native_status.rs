@@ -83,11 +83,13 @@ impl Build {
 
     /// What build record `about` says.
     fn of(about: native_mods::About) -> Build {
+        // The fork's manifest pins the exact Horizon commit, so a build is never on a commit
+        // its mods did not name: nothing is unknown and no pin list is recorded.
         Build {
-            pinned_unknown: about.off_its_nightly(),
+            pinned_unknown: false,
             base: about.base,
             horizon: about.horizon,
-            pinned_by: about.pinned_by,
+            pinned_by: Vec::new(),
         }
     }
 
@@ -135,13 +137,27 @@ pub fn enabled(home: &Path) -> Vec<Mod> {
     out
 }
 
+fn hnmods(home: &Path) -> Vec<std::path::PathBuf> {
+    let mut paths: Vec<_> = fs::read_dir(home.join(native_mods::INSTALLED))
+        .map(|dir| dir.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default();
+    paths.retain(|p| p.extension().is_some_and(|e| e == "hnmod"));
+    paths.sort();
+    paths
+}
+
 /// The native mods turned on in game folder `home` that pin Horizon commit `revision` (those naming
 /// a hook points' version follow the others, so they pin nothing).
 pub fn pinning(home: &Path, revision: &str) -> Vec<String> {
     hnmods(home)
         .into_iter()
         .filter_map(|path| horizon_mods::index::native::Bundle::read(&path).ok())
-        .filter(|b| b.manifest.hooks.is_none() && b.manifest.horizon == revision)
+        .filter(|b| {
+            b.manifest
+                .native
+                .as_ref()
+                .is_some_and(|n| n.horizon == revision)
+        })
         .filter(|b| java::is_enabled(home, &b.manifest.id))
         .map(|b| b.manifest.id)
         .collect()
@@ -258,7 +274,7 @@ mod tests {
 
     #[test]
     fn github_and_local_files_are_listed_once_and_drive_build_state() {
-        use crate::browser::{installed, Kind, SourceId};
+        use crate::browser::{Kind, SourceId, installed};
         use std::io::Write;
         let home = std::env::temp_dir().join(format!("native-list-{}", std::process::id()));
         let _ = fs::remove_dir_all(&home);
@@ -273,7 +289,9 @@ mod tests {
                 .join(native_mods::INSTALLED)
                 .join(format!("{file}.hmod"));
             let mut zip = zip::ZipWriter::new(fs::File::create(path).unwrap());
-            let manifest = format!("id = '{id}'\nname = '{id}'\nversion = '1.2'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '{pin}'\nmixins = '{pin}'\n");
+            let manifest = format!(
+                "id = '{id}'\nname = '{id}'\nversion = '1.2'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '{pin}'\nmixins = '{pin}'\n"
+            );
             for (name, bytes) in [
                 ("horizon-mod.toml", manifest.as_str()),
                 (

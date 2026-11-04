@@ -2,14 +2,14 @@
 //! `docs/design-system.md`): the night look (`horizon_theme::night`, a night sky or a dawn with
 //! Horizon's violet) in Bricolage Grotesque, with Geist Mono for paths and codes (all bundled, SIL
 //! Open Font License). Screens not rebuilt yet draw the Blocks parts in the night's colours.
-use gpui::{rgb, Hsla, WindowAppearance};
+use gpui::{Hsla, WindowAppearance, rgb};
 use horizon_launcher::backend::Appearance;
 use horizon_launcher::themes::Accent;
 use horizon_theme as tokens;
 use std::time::Duration;
 
 pub use tokens::night::{self, Night};
-pub use tokens::{Step, CAPTION, DISPLAY, HEADING, LABEL, MICRO, TITLE, UI, WORDMARK};
+pub use tokens::{CAPTION, DISPLAY, HEADING, LABEL, MICRO, Step, TITLE, UI, WORDMARK};
 pub const FONT: &str = night::FONT;
 pub const DISPLAY_FONT: &str = night::DISPLAY_FONT;
 pub const MONO: &str = tokens::MONO;
@@ -139,7 +139,7 @@ impl Theme {
     /// pages not rebuilt for it yet draw with these tokens comes out as the mockup's parts do,
     /// white text and fills at a few opacities, no borders, no bevels.
     fn glass(self, accent: Accent) -> Self {
-        use horizon_theme::glass::{fill, ink, Glass, BLUR, DANGER, LIVE, TINT, WARN};
+        use horizon_theme::glass::{BLUR, DANGER, Glass, LIVE, TINT, WARN, fill, ink};
         let dark = self.dark;
         // Light: the ink where dark has white, as `glass_ui::white` does.
         let white = |a: f32| {
@@ -224,7 +224,7 @@ pub const SELECTION: f32 = 0.22;
 
 #[cfg(test)]
 mod tests {
-    use super::{tokens, SELECTION};
+    use super::{SELECTION, tokens};
 
     /// `top` at `alpha` over `under`, as the GPU blends them.
     fn blend(top: u32, under: u32, alpha: f32) -> u32 {

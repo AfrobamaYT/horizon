@@ -3271,37 +3271,14 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_input_key(self, key, action, modifiers);
     }
-    /// A key the game names (`key.keyboard.a`, `key.mouse.left`) went down or
-    /// came up after handling, for `native_key`. Not cancellable.
-    pub(super) fn native_key(&mut self, key: &str, pressed: bool) {
-        mod_api::dispatch_key(self, key, pressed);
-    }
-    /// Wheel steps while playing: set `claimed` to keep them from the hotbar.
-    pub(super) fn native_wheel(&mut self, steps: f32, claimed: &mut bool) {
-        mod_api::dispatch_wheel(self, steps, claimed);
-    }
-    /// A key event for `native_key`: a press a mod panel hears too.
-    pub(super) fn native_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) {
-        if repeat {
-            return;
+    /// Deliver a non-repeat key press to the native panel.
+    pub(super) fn native_panel_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) {
+        if pressed
+            && !repeat
+            && let Some(name) = keybinds::key_name(key)
+        {
+            self.native_panel_key(name);
         }
-        if let Some(name) = keybinds::key_name(key) {
-            if pressed {
-                self.native_panel_key(name);
-            }
-            self.native_key(name, pressed);
-        }
-    }
-    /// A mouse button while playing, for `native_key`.
-    pub(super) fn native_mouse_event(&mut self, button: MouseButton, pressed: bool) {
-        let name = keybinds::mouse_name(button);
-        self.native_key(&name, pressed);
-    }
-    /// Wheel steps while playing: whether a native mod took them.
-    pub(super) fn native_wheel_event(&mut self, steps: f32) -> bool {
-        let mut claimed = false;
-        self.native_wheel(steps, &mut claimed);
-        claimed
     }
     /// Raw mouse button input on any screen, before dispatch; cancel skips dispatch and Post.
     /// Button/modifiers use the same GLFW encoding as screen hooks. Synthetic clicks skip it.
@@ -6293,30 +6270,9 @@ impl Game<'_> {
         &mut self,
         merchant: u32,
         kind: &str,
-        offer: &MerchantOffer,
-    ) {
-        mod_api::dispatch_trade_with_villager(self, merchant, kind, offer);
-    }
-    /// A trade of a villager or a wandering trader was made and its `offer`
-    /// (the live one in the trading session, not a copy) is in the state the
-    /// trade left it in: `uses` counted. A mod may change it (Bukkit's
-    /// `PlayerTradeEvent#getTrade` is mutable): `uses`, `max_uses`, `demand`,
-    /// `special_price_diff`, `price_multiplier`, `xp`. The change stands: the
-    /// next click and the offers sent to the player see it. Once per trade (a
-    /// shift-click that trades several times asks for each trade only after
-    /// the click, so the stock it ran down in that click is not given back
-    /// before the click ends), before the trade's statistic and
-    /// `trade_with_villager`, which hear the offer as the trade left it.
-    /// `merchant` is the trader's entity id, `kind` its type. Not asked for a
-    /// trade window without a trader. Server-side. API
-    /// @API:merchant_offer_traded@.
-    pub(super) fn native_merchant_offer_traded(
-        &mut self,
-        merchant: u32,
-        kind: &str,
         offer: &mut MerchantOffer,
     ) {
-        mod_api::dispatch_merchant_offer_traded(self, merchant, kind, offer);
+        mod_api::dispatch_trade_with_villager(self, merchant, kind, offer);
     }
     /// A server player's shield was disabled by a blocked melee hit. The
     /// shield cooldown is set immediately after this call. Helpers looking up

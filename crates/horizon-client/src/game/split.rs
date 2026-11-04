@@ -853,9 +853,7 @@ impl ApplicationHandler for Split<'_> {
 impl Game<'_> {
     /// Keyboard and mouse go to another player: release everything they held here.
     pub(super) fn release_keyboard_mouse(&mut self) {
-        for key in std::mem::take(&mut self.physical_keys) {
-            self.native_key_event(key, false, false);
-        }
+        self.physical_keys.clear();
         // Only what the keyboard held: this player's pad keeps its presses.
         for key in self
             .keys

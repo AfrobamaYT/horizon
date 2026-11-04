@@ -220,10 +220,12 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&compiled.stderr)
         );
-        assert!(std::process::Command::new(binary)
-            .status()
-            .unwrap()
-            .success());
+        assert!(
+            std::process::Command::new(binary)
+                .status()
+                .unwrap()
+                .success()
+        );
     }
 
     #[test]

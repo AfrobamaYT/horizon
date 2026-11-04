@@ -9,8 +9,8 @@
 use super::line_edit::{self, Key, LineEdit};
 use super::*;
 use horizon_launcher::browser::{
-    self, horizon, installed, java, java_instance, Kind as PackKind, Project, Query, SourceId,
-    Support,
+    self, Kind as PackKind, Project, Query, SourceId, Support, horizon, installed, java,
+    java_instance,
 };
 use horizon_launcher::modpacks;
 use horizon_launcher::native_status;
@@ -1553,7 +1553,8 @@ impl Launcher {
                 line(format!(
                     "{step} - {}",
                     native_mods::duration_label(
-                        self.native_started.map_or(0, |(s, _)| s.elapsed().as_secs())
+                        self.native_started
+                            .map_or(0, |(s, _)| s.elapsed().as_secs())
                     )
                 ))
                 .text_color(t.accent),
@@ -1633,7 +1634,6 @@ impl Launcher {
                 )
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     this.native_update = Some(newer.clone());
-                    this.native_on_base = true;
                     this.native_confirm = Some(this.native_mods_to_build().map(|(_, b)| b));
                     cx.notify();
                 })),
@@ -1643,7 +1643,6 @@ impl Launcher {
             right = right.child(button("native-build", "Build", Kind::Primary, &t).on_click(
                 cx.listener(|this, _: &ClickEvent, _, cx| {
                     this.native_update = None;
-                    this.native_on_base = false;
                     this.native_confirm = Some(this.native_mods_to_build().map(|(_, b)| b));
                     cx.notify();
                 }),
@@ -1673,9 +1672,9 @@ impl Launcher {
         );
         let said = match profile {
             native_mods::Profile::Performance => tr("The everyday build for playing with mods"),
-            native_mods::Profile::Dev => {
-                tr("For developing a mod: about 6× faster to rebuild a mod edit, game logic up to about twice as slow")
-            }
+            native_mods::Profile::Dev => tr(
+                "For developing a mod: about 6× faster to rebuild a mod edit, game logic up to about twice as slow",
+            ),
             native_mods::Profile::Release => {
                 tr("Release build: slower to build, slightly faster game")
             }

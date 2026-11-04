@@ -1627,17 +1627,6 @@ pub trait Hooks {
     /// modifier bits the screen hooks' GLFW encoding. Not cancellable.
     #[hook(side = "client", contract = "listen", neoforge = "InputEvent.Key")]
     fn input_key();
-    /// A key the game names (`key.keyboard.a`, `key.mouse.left` for buttons)
-    /// went down or came up after the game handled it, including presses a
-    /// screen took and auto-repeats; a cancelled `native_screen_key_pressed_pre`
-    /// press still reports its release. Not cancellable.
-    #[hook(side = "client", contract = "listen")]
-    fn key();
-    /// Wheel steps while playing, before the hotbar or the spectator menu take
-    /// them: `steps` is the vertical delta. Set `claimed` to keep them from the
-    /// hotbar. A screen over gameplay hears nothing.
-    #[hook(side = "client", contract = "cancel", out = "claimed")]
-    fn wheel();
     /// Gameplay scrolling after accumulation, before hotbar/spectator handling.
     /// `scroll` is scaled x/y, `accumulated` whole x/y steps, `buttons` left/middle/right,
     /// and `cursor` the GUI position. Cancel skips gameplay scrolling.
@@ -4184,19 +4173,23 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)"
     )]
     fn trade_select();
-    /// A server player traded with a villager or a wandering trader
-    /// (NeoForge's `TradeWithVillagerEvent`, at vanilla's
-    /// `MerchantResultSlot.onTake` once the offer is taken): `merchant` is
+    /// A trade of a villager or a wandering trader was made
+    /// (`MerchantResultSlot.onTake` once the offer is taken): `merchant` is
     /// the trader's entity id and `kind` its type (`minecraft:villager`,
-    /// `minecraft:wandering_trader`), `offer` the trade as it is after this
-    /// one (its `uses` counted, `result` what the player got). Once per
-    /// trade, so a shift-click that trades several times is heard for each,
-    /// after the trade's statistic and `villager_trade` trigger. Listen
-    /// only: the trade is made. The player's state is swapped in
-    /// (`native_acting_player`).
+    /// `minecraft:wandering_trader`), `offer` the live one in the trading
+    /// session (not a copy) as the trade left it: `uses` counted, `result`
+    /// what the player got. Once per trade, so a shift-click that trades
+    /// several times is heard for each, after the trade's statistic and
+    /// `villager_trade` trigger. A mod may change the offer (Bukkit's
+    /// `PlayerTradeEvent#getTrade` is mutable): `uses`, `max_uses`, `demand`,
+    /// `special_price_diff`, `price_multiplier`, `xp`. The change stands: the
+    /// next click and the offers sent to the player see it. Not asked for a
+    /// trade window without a trader. The player's state is swapped in
+    /// (`native_acting_player`). Server-side.
     #[hook(
         side = "server",
-        contract = "listen",
+        contract = "collect",
+        out = "offer",
         neoforge = "TradeWithVillagerEvent",
         cancellable = false
     )]

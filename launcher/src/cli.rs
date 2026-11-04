@@ -826,13 +826,6 @@ enum Cmd {
         /// You read the mods' source and trust it with full access to this computer
         #[arg(long)]
         trust_native_code: bool,
-        /// Build mods made for different Horizon versions together anyway, on the newest of them
-        #[arg(long)]
-        allow_version_mismatch: bool,
-        /// Build every mod on the commit of the version the build starts from, even the mods that
-        /// pin another Horizon commit (they may not apply or compile there)
-        #[arg(long)]
-        ignore_pins: bool,
         /// The build profile: performance (the default: incremental, quick to rebuild), dev (quickest
         /// to rebuild a mod, slow game) or release (thin LTO: slowest to build, slightly faster
         /// game). Default: the native-profile setting
@@ -1284,8 +1277,6 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             version,
             update,
             trust_native_code,
-            allow_version_mismatch,
-            ignore_pins,
             profile,
         } => {
             if !trust_native_code {
@@ -1315,8 +1306,6 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                     &base,
                     &folder,
                     &output,
-                    allow_version_mismatch,
-                    ignore_pins,
                     profile,
                     allow_jar_downloads,
                     steps,
@@ -1352,21 +1341,15 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 Some(folder) => folder,
                 None => native_mods::installed_mods(&target.home)?,
             };
-            let built = native_mods::build(
-                &base,
-                &folder,
-                &target,
-                allow_version_mismatch,
-                ignore_pins,
-                profile,
-                steps,
-            )
-            .map_err(|e| match e.starts_with(native_mods::MISMATCH) {
-                true => {
-                    format!("{e} They often still build: pass --allow-version-mismatch to try.")
-                }
-                false => e,
-            })?;
+            let built =
+                native_mods::build(&base, &folder, &target, profile, steps).map_err(|e| match e
+                    .starts_with(native_mods::MISMATCH)
+                {
+                    true => {
+                        format!("{e} They often still build: pass --allow-version-mismatch to try.")
+                    }
+                    false => e,
+                })?;
             println!(
                 "{built} built and selected for its instance ({:.0} s).",
                 started.elapsed().as_secs_f64()
@@ -1389,9 +1372,13 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             if as_json {
                 json(serde_json::json!({ "imported": tag, "prepared": prepared }));
             } else if prepared {
-                println!("Imported {tag} and selected it. It is prepared already, from another installed version.");
+                println!(
+                    "Imported {tag} and selected it. It is prepared already, from another installed version."
+                );
             } else {
-                println!("Imported {tag} and selected it. Prepare it next: horizon-launcher prepare --version {tag}");
+                println!(
+                    "Imported {tag} and selected it. Prepare it next: horizon-launcher prepare --version {tag}"
+                );
             }
         }
         Cmd::Prepare {
@@ -2337,7 +2324,7 @@ fn github_native(
 }
 
 fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
-    use horizon_launcher::browser::{horizon, installed, java_instance, Kind, Query, SourceId};
+    use horizon_launcher::browser::{Kind, Query, SourceId, horizon, installed, java_instance};
     use horizon_launcher::modpacks;
     // What the browser installs goes into an instance's game folder; Java mods' checks are kept
     // in the default one, shared by all.
@@ -3170,13 +3157,13 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                     return Err(format!(
                         "No other launcher has an instance called {name}: \
                          horizon-launcher instance others"
-                    ))
+                    ));
                 }
                 _ => {
                     return Err(format!(
                         "More than one launcher has an instance called {name}: say which \
                          with --folder."
-                    ))
+                    ));
                 }
             };
             let made = other_launchers::import(
@@ -3234,7 +3221,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                         "{} is a data pack: put it into a world with horizon-launcher worlds \
                          datapack-add <world> <file>",
                         file.display()
-                    ))
+                    ));
                 }
             }
         }
@@ -3922,15 +3909,17 @@ mod tests {
             _ => panic!("expected native-build"),
         }
         // A version refuses --update, as in the game mode.
-        assert!(parse(&[
-            "mods",
-            "--server-output",
-            "engine-out",
-            "--version",
-            "v2026.10.13",
-            "--update"
-        ])
-        .is_err());
+        assert!(
+            parse(&[
+                "mods",
+                "--server-output",
+                "engine-out",
+                "--version",
+                "v2026.10.13",
+                "--update"
+            ])
+            .is_err()
+        );
         assert!(parse(&["mods", "--allow-version-mismatch"]).is_err());
         // The game mode is unchanged: an instance build without --server-output.
         assert!(matches!(

@@ -13,7 +13,7 @@ use super::*;
 use crate::glass_ui as ui;
 use gpui::RenderImage;
 use horizon_cosmetics::prefs::{self, Others, Prefs};
-use horizon_cosmetics::{preview, Item, Texture};
+use horizon_cosmetics::{Item, Texture, preview};
 use horizon_launcher::wardrobe::{Catalogue, Change, ClaimState, Error, Saved, Service, Session};
 use horizon_theme::glass::{fill, ink, radius};
 use std::collections::HashMap;
@@ -289,37 +289,39 @@ impl Launcher {
     /// (`GET /v1/shop`, no session, nothing about the player), and read the selected account's
     /// own last answer from disk. Offline, the last answer stands.
     pub(super) fn watch_shop(&self, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| loop {
-            let Ok(uuid) = this.update(cx, |this, _| this.wardrobe_account().map(|a| a.uuid))
-            else {
-                return;
-            };
-            let (public, kept) = cx
-                .background_executor()
-                .spawn(async move {
-                    let kept = uuid
-                        .and_then(|u| Saved::load(&dir(), &u).me)
-                        .map(|m| m.claim);
-                    (Service::live().shop().ok(), kept)
-                })
-                .await;
-            let gone = this.update(cx, |this, cx| {
-                if public.is_some() {
-                    this.shop_status = public;
+        cx.spawn(async move |this, cx| {
+            loop {
+                let Ok(uuid) = this.update(cx, |this, _| this.wardrobe_account().map(|a| a.uuid))
+                else {
+                    return;
+                };
+                let (public, kept) = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let kept = uuid
+                            .and_then(|u| Saved::load(&dir(), &u).me)
+                            .map(|m| m.claim);
+                        (Service::live().shop().ok(), kept)
+                    })
+                    .await;
+                let gone = this.update(cx, |this, cx| {
+                    if public.is_some() {
+                        this.shop_status = public;
+                    }
+                    this.shop_kept = kept;
+                    // Taken away while shown (the window unset again): back Home.
+                    if this.page == Page::Wardrobe && !this.wardrobe_shown() {
+                        this.go(Page::Play);
+                    }
+                    cx.notify();
+                });
+                if gone.is_err() {
+                    return;
                 }
-                this.shop_kept = kept;
-                // Taken away while shown (the window unset again): back Home.
-                if this.page == Page::Wardrobe && !this.wardrobe_shown() {
-                    this.go(Page::Play);
-                }
-                cx.notify();
-            });
-            if gone.is_err() {
-                return;
+                cx.background_executor()
+                    .timer(Duration::from_secs(30 * 60))
+                    .await;
             }
-            cx.background_executor()
-                .timer(Duration::from_secs(30 * 60))
-                .await;
         })
         .detach();
     }

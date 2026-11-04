@@ -9,9 +9,9 @@
 //! cache at the row's size), else the package's icon or the one its jar names, else a generic glyph.
 use super::*;
 use crate::plate::alpha;
-use crate::shell::{c, Action};
+use crate::shell::{Action, c};
 use horizon_launcher::browser::{
-    horizon, images, installed, java, modrinth, Kind as PackKind, SourceId,
+    Kind as PackKind, SourceId, horizon, images, installed, java, modrinth,
 };
 use servers_page::Field;
 use std::collections::{HashMap, HashSet};
@@ -635,7 +635,9 @@ mod tests {
         ] {
             let folder = if code { native_mods::INSTALLED } else { "mods" };
             let file = format!("{folder}/{id}.hmod");
-            let mut manifest = format!("id = '{id}'\nname = '{id}'\nversion = '1'\napi = '0.2'\ncapabilities = ['registries']\n");
+            let mut manifest = format!(
+                "id = '{id}'\nname = '{id}'\nversion = '1'\napi = '0.2'\ncapabilities = ['registries']\n"
+            );
             if code {
                 manifest +=
                     &format!("[native]\ngame = '26.3'\nhorizon = '{pin}'\nmixins = '{pin}'\n");
