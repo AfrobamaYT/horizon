@@ -276,13 +276,15 @@ mod tests {
             game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
             let cow = game.native_living(game.native_entity(12).unwrap()).unwrap();
             let item = |id| ItemStack::new(id, 1);
-            let mut expected = game.world.random.clone();
+            let mut expected = game.mobs[0].random.clone();
+            let mut level_random = game.world.random.clone();
             expected.next_float();
             assert_eq!(
                 game.native_living_apply_consume_effect(cow, &item("minecraft:pufferfish"), 0),
                 Some(true)
             );
-            assert_eq!(game.world.random.next_float(), expected.next_float());
+            assert_eq!(game.mobs[0].random.next_float(), expected.next_float());
+            assert_eq!(game.world.random.next_float(), level_random.next_float());
             assert!(game.native_living_potion_affected(cow, "minecraft:poison"));
             assert_eq!(
                 game.native_living_apply_consume_effect(cow, &item("minecraft:honey_bottle"), 0),

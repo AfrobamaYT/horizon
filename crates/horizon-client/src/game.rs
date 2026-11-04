@@ -7442,8 +7442,22 @@ impl Game<'_> {
                 effects,
                 probability,
             } => {
-                // ApplyStatusEffectsConsumeEffect draws even at probability 1.
-                if self.world.random.next_float() >= *probability {
+                // ApplyStatusEffectsConsumeEffect draws from the user's random,
+                // even at probability 1. The level random stands in for a player's.
+                let draw = match mob {
+                    Some(living) => {
+                        let commands::Target::Mob(id) = self.native_living_target(living)? else {
+                            return None;
+                        };
+                        self.mobs
+                            .iter_mut()
+                            .find(|m| m.id == id)?
+                            .random
+                            .next_float()
+                    }
+                    None => self.world.random.next_float(),
+                };
+                if draw >= *probability {
                     return Some(false);
                 }
                 let mut changed = false;
