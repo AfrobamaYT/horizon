@@ -243,8 +243,17 @@ fn finish(children: &mut Value) {
 }
 
 /// Add the already validated native report tree to the server's dispatcher.
-fn register_dispatcher(dispatcher: &mut Dispatcher, tree: &Value) {
-    fn add(dispatcher: &mut Dispatcher, parent: usize, children: &Map<String, Value>) {
+pub(super) fn register_dispatcher(
+    dispatcher: &mut Dispatcher,
+    tree: &Value,
+    handler: &'static str,
+) {
+    fn add(
+        dispatcher: &mut Dispatcher,
+        parent: usize,
+        children: &Map<String, Value>,
+        handler: &'static str,
+    ) {
         for (name, node) in children {
             let id = if node["type"] == "literal" {
                 dispatcher.literal(parent, name)
@@ -264,15 +273,15 @@ fn register_dispatcher(dispatcher: &mut Dispatcher, tree: &Value) {
                 .unwrap_or(0) as u8;
             dispatcher.requires(id, level);
             if node["executable"] == true {
-                dispatcher.executes(id, "native_mod_command");
+                dispatcher.executes(id, handler);
             }
             if let Some(children) = node["children"].as_object() {
-                add(dispatcher, id, children);
+                add(dispatcher, id, children, handler);
             }
         }
     }
     if let Some(children) = tree["children"].as_object() {
-        add(dispatcher, 0, children);
+        add(dispatcher, 0, children, handler);
     }
 }
 
@@ -1209,7 +1218,7 @@ impl Game<'_> {
             log::warn!("Horizon: a native mod's command was left out: {p}");
         }
         let mut dispatcher = Dispatcher::new();
-        register_dispatcher(&mut dispatcher, &tree);
+        register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
         let dispatcher = Arc::new(dispatcher);
         let Some(host) = self.lan.as_mut() else {
             return;
@@ -1560,7 +1569,7 @@ mod tests {
             assert_eq!(problems.len(), 1, "{first} then {second}: {problems:?}");
             assert!(problems[0].starts_with(&format!("`{second}`")));
             let mut dispatcher = Dispatcher::new();
-            register_dispatcher(&mut dispatcher, &tree);
+            register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
             let registries = horizon_client::command::Registries::default();
             assert!(dispatcher.parse(line, &registries).executable().is_ok());
             // The kept kind decides: `word` stops at the space, `text` takes it all.
@@ -1587,7 +1596,7 @@ mod tests {
         ]);
         assert!(problems.is_empty(), "{problems:?}");
         let mut dispatcher = Dispatcher::new();
-        register_dispatcher(&mut dispatcher, &tree);
+        register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
         let mut registries = horizon_client::command::Registries::default();
         assert!(dispatcher.parse("warp", &registries).executable().is_ok());
         assert!(

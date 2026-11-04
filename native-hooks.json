@@ -489,9 +489,10 @@
       }
     },
     {
-      "name": "commands", "doc": "The commands `native_command` runs, by name and without their slash:\npush the ones that are yours. Asked when a connection starts and\nagain when the server sends its own tree, so the chat box colours,\ncompletes and lists them as the game's own; a name the game already\nhas keeps that command's behaviour.", "side": "client",
+      "name": "register_client_commands", "doc": "The client's own commands (NeoForge's `RegisterClientCommandsEvent`), which\n`command` runs: push a `NativeCommand` per usage (`x <mode:word>`).\nAsked when a connection starts and again when the server sends its\nown tree, so the chat box colours, completes and lists them as the\ngame's own; a name the game already has keeps that command's\nbehaviour. A client command has no operator level: one with a nonzero\n`level` is left out.", "side": "client",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_commands",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_register_client_commands",
+      "neoforge": "RegisterClientCommandsEvent",
       "mod_api": {
         "contract": "collect",
         "out": "commands"

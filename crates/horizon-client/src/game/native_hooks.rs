@@ -2335,13 +2335,14 @@ impl Game<'_> {
     pub(super) fn native_command(&mut self, command: &str, ran: &mut bool) {
         mod_api::dispatch_command(super::execution_role::host_side(self), command, ran);
     }
-    /// The commands `native_command` runs, by name and without their slash:
-    /// push the ones that are yours. Asked when a connection starts and
-    /// again when the server sends its own tree, so the chat box colours,
-    /// completes and lists them as the game's own; a name the game already
-    /// has keeps that command's behaviour.
-    pub(super) fn native_commands(&mut self, commands: &mut Vec<&'static str>) {
-        mod_api::dispatch_commands(self, commands);
+    /// The client's own commands (`RegisterClientCommandsEvent`), which
+    /// `native_command` runs: push a `NativeCommand` per usage. Asked when a
+    /// connection starts and again when the server sends its own tree, so the
+    /// chat box colours, completes and lists them as the game's own; a name
+    /// the game already has keeps that command's behaviour. A client command
+    /// has no operator level: one with a nonzero level is left out.
+    pub(super) fn native_register_client_commands(&mut self, commands: &mut Vec<NativeCommand>) {
+        mod_api::dispatch_register_client_commands(self, commands);
     }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base.
