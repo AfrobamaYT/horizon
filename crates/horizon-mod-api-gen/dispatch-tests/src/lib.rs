@@ -249,11 +249,6 @@ mod tests {
     impl Host for TestHost {}
     impl ServerHost for TestHost {}
     impl ClientHost for TestHost {}
-    mod winit {
-        pub mod event {
-            pub struct KeyEvent;
-        }
-    }
     #[allow(dead_code)]
     mod generated {
         mod horizon_mods {
@@ -268,6 +263,8 @@ mod tests {
                 pub struct FovPlayer;
             }
             pub struct NativeClientInfo;
+            #[derive(Clone, Copy)]
+            pub enum KeyAction {}
             pub struct NativeArmorHurt;
             pub mod menu {
                 pub struct MenuButtonContext {

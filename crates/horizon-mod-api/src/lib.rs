@@ -192,8 +192,13 @@ impl std::ops::DerefMut for ModBlockEntityView<'_> {
 
 use serde_json::{Map, Value};
 use std::time::Duration;
-/// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
-pub use winit;
+/// What a key did in an `input_key` event (GLFW's `action`: release 0, press 1, repeat 2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyAction {
+    Release,
+    Press,
+    Repeat,
+}
 
 /// One armor slot of an `ArmorHurtEvent`: the piece in `slot`, the durability
 /// damage vanilla works out for it (`damage`, `max(1, hit / 4)`) and the damage it

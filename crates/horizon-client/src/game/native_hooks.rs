@@ -1876,11 +1876,17 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_health_hud(self, inputs, wi, hi, draws);
     }
-    /// A real window key event after handling, including repeats and consumed shortcuts.
-    /// Receives the original physical/logical key, text, location, state and repeat flag.
-    /// Modifier bits use the screen hooks' GLFW encoding. Not cancellable.
-    pub(super) fn native_input_key(&mut self, event: &winit::event::KeyEvent, modifiers: u32) {
-        mod_api::dispatch_input_key(self, event, modifiers);
+    /// A real window key event after handling, including repeats and consumed shortcuts
+    /// (`InputEvent.Key`). `key` is vanilla's name for the physical key (`key.keyboard.a`,
+    /// `key.keyboard.unknown` for one it doesn't name), `action` what it did, and the
+    /// modifier bits the screen hooks' GLFW encoding. Not cancellable.
+    pub(super) fn native_input_key(
+        &mut self,
+        key: &str,
+        action: mod_api::KeyAction,
+        modifiers: u32,
+    ) {
+        mod_api::dispatch_input_key(self, key, action, modifiers);
     }
     /// Raw mouse button input on any screen, before dispatch; cancel skips dispatch and Post.
     /// Button/modifiers use the same GLFW encoding as screen hooks. Synthetic clicks skip it.

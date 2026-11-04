@@ -17739,7 +17739,16 @@ impl ApplicationHandler for Game<'_> {
         };
         self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
         if let Some((event, modifiers)) = key {
-            self.native_input_key(&event, modifiers);
+            let name = match event.physical_key {
+                PhysicalKey::Code(code) => horizon_client::keybinds::key_name(code),
+                PhysicalKey::Unidentified(_) => None,
+            };
+            let action = match (event.state, event.repeat) {
+                (winit::event::ElementState::Released, _) => mod_api::KeyAction::Release,
+                (_, false) => mod_api::KeyAction::Press,
+                (_, true) => mod_api::KeyAction::Repeat,
+            };
+            self.native_input_key(name.unwrap_or("key.keyboard.unknown"), action, modifiers);
         }
     }
     fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
