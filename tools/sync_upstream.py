@@ -7,13 +7,11 @@ Run from a clean fork checkout. On a conflict, resolve it by hand, then run
     python3 tools/sync_upstream.py --continue
 Review converted declarations and duplicate moments, and run rustfmt --edition
 2024 on the generated Rust files before committing the sync.
-The duplicate scan reports same-crate public native names early and clearly;
-Rust also rejects conflicting definitions at compile time (E0428/E0592).
 The script does not decide which upstream CI run is eligible.
 """
 import argparse
 import importlib.util
-from collections import Counter
+from collections import defaultdict
 from pathlib import Path
 import re
 import subprocess
@@ -36,16 +34,14 @@ def git(*args, capture=False):
 
 
 def check_duplicates(root=ROOT):
-    errors = []
-    for manifest in sorted((root / 'crates').glob('*/Cargo.toml')):
-        crate = manifest.parent
-        names = Counter(name for path in (crate / 'src').rglob('*.rs')
-                        for name in DECL.findall(path.read_text()))
-        duplicates = sorted(name for name, count in names.items() if count > 1)
-        if duplicates:
-            errors.append(f'{crate.relative_to(root)}: {", ".join(duplicates)}')
-    if errors:
-        raise ValueError('duplicate public native functions in crate: ' + '; '.join(errors))
+    names = defaultdict(list)
+    for path in (root / 'crates').rglob('*.rs'):
+        for match in DECL.finditer(path.read_text()):
+            names[match.group(1)].append(str(path.relative_to(root)))
+    duplicates = {name: paths for name, paths in names.items() if len(paths) > 1}
+    if duplicates:
+        raise ValueError('duplicate public native functions: ' + '; '.join(
+            f'{name}: {", ".join(paths)}' for name, paths in sorted(duplicates.items())))
 
 
 def finish():
@@ -80,7 +76,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('sha', nargs='?', help='full upstream commit SHA with passing ci.yml')
     parser.add_argument('--continue', dest='continuing', action='store_true')
-    parser.add_argument('--check', action='store_true', help='check duplicate public native functions per crate')
+    parser.add_argument('--check', action='store_true', help='check duplicate public native functions')
     args = parser.parse_args()
     if args.check:
         check_duplicates()

@@ -23,10 +23,6 @@ class SyncTests(unittest.TestCase):
         (self.hooks / 'mod.rs').write_text('mod base;\nmod zebra;\n')
         (self.hooks / 'base.rs').write_text('')
         (self.hooks / 'zebra.rs').write_text('')
-        self.game = self.root / 'crates/horizon-client'
-        (self.game / 'src').mkdir(parents=True)
-        (self.game / 'Cargo.toml').write_text('')
-        (self.root / 'crates/horizon-mod-api/Cargo.toml').write_text('')
         self.fragments = self.root / sync.FRAGMENTS
         self.fragments.mkdir(parents=True)
         self.patch = patch.object(sync, 'ROOT', self.root)
@@ -58,15 +54,10 @@ class SyncTests(unittest.TestCase):
         self.assertFalse((self.hooks / 'invalid.rs').exists())
 
     def test_duplicate_names_are_reported(self):
-        (self.game / 'src/a.rs').write_text('pub fn native_example() {}\n')
-        (self.game / 'src/b.rs').write_text('pub fn native_example() {}\n')
-        with self.assertRaisesRegex(ValueError, 'horizon-client: native_example'):
+        for name in ('a', 'b'):
+            (self.hooks / f'{name}.rs').write_text('pub fn native_example() {}\n')
+        with self.assertRaisesRegex(ValueError, 'native_example'):
             sync.check_duplicates(self.root)
-
-    def test_same_name_in_another_crate_is_allowed(self):
-        (self.game / 'src/a.rs').write_text('pub fn native_world_drawn() {}\n')
-        (self.hooks / 'other.rs').write_text('pub fn native_world_drawn() {}\n')
-        sync.check_duplicates(self.root)
 
 
 if __name__ == '__main__':
