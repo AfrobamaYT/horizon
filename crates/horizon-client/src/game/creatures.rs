@@ -549,7 +549,7 @@ impl Game<'_> {
         };
         let slot = m.sun_protection_slot();
         let body = slot == EquipmentSlot::Body;
-        let Some(mut stack) = m.item_by_slot(slot) else {
+        let Some(stack) = m.item_by_slot(slot) else {
             return;
         };
         if !horizon_client::stations::is_damageable(self.res.items(), &stack) {
@@ -563,33 +563,15 @@ impl Game<'_> {
         if amount == 0 {
             return;
         }
-        let loss = self.durability_loss(&stack, amount);
-        if loss == 0 {
-            return;
-        }
-        let max = self
-            .res
-            .items()
-            .get(&stack.item)
-            .map_or(0, |i| i.max_damage);
-        stack.damage += loss;
-        let broke = stack.damage >= max;
+        let (updated, broken) = self.damage_stack(&stack, amount as i32, false);
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return;
         };
-        match (body, broke) {
-            (true, false) => m.extra.set_body_damage(stack.damage as i32),
-            (true, true) => {
-                m.extra.set_body_stack(None);
-            }
-            (false, false) => m
-                .extra
-                .set_slot_stack(horizon_items::equipment::HEAD, Some(stack)),
-            (false, true) => {
-                m.extra.set_slot_stack(horizon_items::equipment::HEAD, None);
-            }
+        if m.item_by_slot(slot).as_ref() != Some(&stack) {
+            return;
         }
-        if broke {
+        m.set_equipment_stack(slot as usize, updated);
+        if broken.is_some() {
             // LivingEntity.entityEventForEquipmentBreak: head 49, body 65.
             self.lan_entity_event(id as i32, if body { 65 } else { 49 }, at);
         }
@@ -646,9 +628,9 @@ impl Game<'_> {
         else {
             return;
         };
-        let Some(max) = wearable(self, &body, fire, name) else {
+        if wearable(self, &body, fire, name).is_none() {
             return;
-        };
+        }
         // ArmorHurtEvent for a mob's body armor.
         let mut amount = amount;
         if mod_api::__private::listened(mod_api::HookId::ArmorHurt) {
@@ -690,24 +672,15 @@ impl Game<'_> {
                 return;
             }
         }
-        let loss = self.durability_loss(&body, amount);
-        if loss == 0 {
+        let (updated, broken) = self.damage_stack(&body, amount.min(i32::MAX as u32) as i32, false);
+        let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
+            return;
+        };
+        if m.item_by_slot(EquipmentSlot::Body).as_ref() != Some(&body) {
             return;
         }
-        let lost = body.damage + loss;
-        let broke = {
-            let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
-                return;
-            };
-            if lost >= max {
-                m.extra.set_body_stack(None);
-                true
-            } else {
-                m.extra.set_body_damage(lost as i32);
-                false
-            }
-        };
-        if broke {
+        m.set_equipment_stack(EquipmentSlot::Body as usize, updated);
+        if broken.is_some() {
             // LivingEntity.onEquippedItemBroken through the level's broadcast.
             let event =
                 horizon_client::mobs::item_break::equipment_break_event(EquipmentSlot::Body);
@@ -9017,6 +8990,64 @@ mod living_drops_tests {
 #[cfg(test)]
 mod armor_destroy_tests {
     use super::MobEvent;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn body_armor_guards_and_break_event_are_preserved() {
+        use horizon_client::mobs::{DamageKind, Mob};
+        use horizon_core::geometry::Vec3;
+        use horizon_world::player_inventory::EquipmentSlot;
+        with_game(|game| {
+            let kind = game.res.mob_types().get("minecraft:horse").unwrap().clone();
+            game.mobs.push(Mob::new(21, kind, Vec3::ZERO, 0.0));
+            game.audio.capture = Some(Vec::new());
+            let sword = ItemStack::new("minecraft:diamond_sword", 1);
+            game.mobs[0].set_equipment_stack(EquipmentSlot::Body as usize, Some(sword.clone()));
+            game.hurt_mob_armor(21, 4.0, DamageKind::Generic);
+            assert_eq!(game.mobs[0].item_by_slot(EquipmentSlot::Body), Some(sword));
+            let resistant = ItemStack::new("minecraft:netherite_chestplate", 1);
+            assert!(game.items().resists_fire(&resistant, "minecraft:lava"));
+            game.mobs[0].set_equipment_stack(EquipmentSlot::Body as usize, Some(resistant.clone()));
+            game.hurt_mob_armor(21, 4.0, DamageKind::Lava);
+            assert_eq!(
+                game.mobs[0].item_by_slot(EquipmentSlot::Body),
+                Some(resistant)
+            );
+            let mut armor = ItemStack::new("minecraft:wolf_armor", 1);
+            armor.damage = game.items().get(&armor.item).unwrap().max_damage - 1;
+            game.mobs[0].set_equipment_stack(EquipmentSlot::Body as usize, Some(armor));
+            game.hurt_mob_armor(21, 4.0, DamageKind::Generic);
+            assert!(game.mobs[0].item_by_slot(EquipmentSlot::Body).is_none());
+            assert_eq!(game.lan_entity_events.last().map(|event| event.1), Some(65));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn sun_protection_uses_mob_draw_and_broadcasts_break() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::{geometry::Vec3, random::RandomSource};
+        use horizon_world::player_inventory::EquipmentSlot;
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(21, kind, Vec3::ZERO, 0.0));
+            let mut helmet = ItemStack::new("minecraft:diamond_helmet", 1);
+            helmet.damage = game.items().get(&helmet.item).unwrap().max_damage - 1;
+            game.mobs[0].set_equipment_stack(EquipmentSlot::Head as usize, Some(helmet));
+            game.audio.capture = Some(Vec::new());
+            while game.mobs[0].random.clone().next_int_bound(2) != Ok(1) {
+                let _ = game.mobs[0].random.next_int_bound(2);
+            }
+            game.wear_sun_protection(21);
+            assert!(game.mobs[0].item_by_slot(EquipmentSlot::Head).is_none());
+            assert_eq!(game.lan_entity_events.last().map(|event| event.1), Some(49));
+        });
+    }
     use crate::game::{answered_wear, durability_damage, native_entity_refs::tests::with_game};
     use mod_api::{EquipmentSlot, ItemStack, NativeArmorHurt};
 

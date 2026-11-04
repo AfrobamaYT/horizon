@@ -13265,8 +13265,8 @@ impl Game<'_> {
             .in_tag(source, "minecraft:is_fire");
         let mut broke = false;
         let mut broken_items = Vec::new();
-        // The pieces that may wear, with their maximum (`doHurtEquipment`'s checks).
-        let eligible: [Option<(ItemStack, u32)>; 4] = std::array::from_fn(|i| {
+        // The pieces that may wear (`doHurtEquipment`'s checks).
+        let mut eligible: [Option<ItemStack>; 4] = std::array::from_fn(|i| {
             let stack = self.armor[i].clone()?;
             let info = world_items!(self).get(&stack.item)?;
             let component = |id| stack.data().and_then(|data| data.other(id));
@@ -13288,7 +13288,7 @@ impl Game<'_> {
             if max == 0 {
                 return None;
             }
-            Some((stack, max))
+            Some(stack)
         });
         // ArmorHurtEvent: once for the pieces that would wear, a server player's only.
         let mut amounts = [amount; 4];
@@ -13301,7 +13301,7 @@ impl Game<'_> {
                 .filter_map(|(i, e)| {
                     Some(mod_api::NativeArmorHurt {
                         slot: armor_slot(i),
-                        stack: e.as_ref()?.0.clone(),
+                        stack: e.as_ref()?.clone(),
                         damage: durability_damage(damage),
                         new_damage: durability_damage(damage),
                     })
@@ -13329,22 +13329,25 @@ impl Game<'_> {
                 *amount = answered_wear(&entries, armor_slot(i), *amount);
             }
         }
-        let losses: [Option<(u32, u32)>; 4] = std::array::from_fn(|i| {
-            let (stack, max) = eligible[i].clone()?;
+        let updates = std::array::from_fn::<_, 4, _>(|i| {
+            let stack = eligible[i].take()?;
             // A mod may have put another stack in the slot: it is not worn by
             // the piece that was decided on.
             if amounts[i] == 0 || self.armor[i].as_ref() != Some(&stack) {
                 return None;
             }
-            let loss = self.wear(&stack, amounts[i]);
-            (loss > 0).then_some((loss, max))
+            let (updated, broken) =
+                self.damage_stack(&stack, amounts[i].min(i32::MAX as u32) as i32, true);
+            Some((stack, updated, broken))
         });
-        for (index, (slot, loss)) in self.armor.iter_mut().zip(losses).enumerate() {
-            if let (Some(stack), Some((amount, max))) = (slot.as_mut(), loss) {
-                stack.damage = stack.damage.saturating_add(amount).min(max);
-                if stack.damage >= max {
-                    broken_items.push((stack.clone(), index));
-                    *slot = None;
+        for (index, update) in updates.into_iter().enumerate() {
+            if let Some((before, updated, broken)) = update
+                && updated.as_ref() != Some(&before)
+                && self.armor[index].as_ref() == Some(&before)
+            {
+                self.armor[index] = updated;
+                if let Some(stack) = broken {
+                    broken_items.push((stack, index));
                     broke = true;
                 }
             }
@@ -13353,6 +13356,7 @@ impl Game<'_> {
             // LivingEntity.onEquippedItemBroken for each armour piece that broke.
             for (stack, index) in &broken_items {
                 self.player_equipment_broke(armor_slot(*index), stack);
+                self.award_stat("broken", &stack.item, 1);
             }
             self.apply_equipment();
         }
@@ -13787,8 +13791,7 @@ impl Game<'_> {
         let Some(stack) = self.held().cloned() else {
             return;
         };
-        let (updated, broken) =
-            self.damage_equipment_stack(&stack, amount.min(i32::MAX as u32) as i32, true);
+        let (updated, broken) = self.damage_stack(&stack, amount.min(i32::MAX as u32) as i32, true);
         if self.held() != Some(&stack) {
             return;
         }
