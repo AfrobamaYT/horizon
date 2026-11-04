@@ -443,7 +443,9 @@ mod tests {
                     .block_entity_type("crate")
                     .blocks(&[CRATE])
                     .build();
-                registrar.block_entity_part(&kind, Crate);
+                registrar
+                    .block_entity_part(&kind, Crate)
+                    .expect("native type");
             }
             fn blocks(
                 &self,
