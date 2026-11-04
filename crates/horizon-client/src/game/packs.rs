@@ -16,7 +16,6 @@ use horizon_client::{
     text::{Style, Text},
 };
 use std::{
-    collections::BTreeSet,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -63,13 +62,12 @@ pub fn startup_root(
     vanilla: &Path,
     selected: &[String],
     server: &[Pack],
-    mods_enabled: &BTreeSet<String>,
-    dev_mods: &[PathBuf],
+    mods: &[horizon_mods::selection::SelectedPackage],
 ) -> horizon_client::Result<PathBuf> {
     let all = packs::discover(vanilla, &packs_dir());
     let mut enabled = packs::enabled(&all, selected);
     enabled.extend_from_slice(server);
-    let base = super::mods::content_root(vanilla, mods_enabled, dev_mods)?;
+    let base = super::mods::content_root(vanilla, mods)?;
     Ok(packs::resource_root(&base, &enabled, &cache_dir())?)
 }
 fn info(p: &Pack) -> PackInfo {
@@ -284,11 +282,9 @@ impl Game<'_> {
         if self.ui.vanilla_root.as_os_str().is_empty() {
             self.ui.vanilla_root = vanilla.clone();
         }
-        let (selected, server, mods, dev_mods) = (
+        let (selected, server) = (
             self.settings.resource_packs.clone(),
             self.server_packs.active.clone(),
-            self.settings.mods.enabled.clone(),
-            self.options.dev_mods.clone(),
         );
         let (assets, res, context) = (
             self.pack.assets.clone(),
@@ -305,8 +301,7 @@ impl Game<'_> {
                 &vanilla,
                 &selected,
                 &server,
-                &mods,
-                &dev_mods,
+                super::mods::startup_packages(),
                 client_listeners,
                 &assets,
                 &res,
@@ -505,8 +500,7 @@ pub(super) fn stage_pack(
     vanilla_root: &Path,
     selected: &[String],
     server: &[Pack],
-    mods_enabled: &BTreeSet<String>,
-    dev_mods: &[PathBuf],
+    mods: &[horizon_mods::selection::SelectedPackage],
     client_listeners: ClientReloadListeners,
     assets: &Arc<Assets>,
     res: &Resources,
@@ -515,7 +509,7 @@ pub(super) fn stage_pack(
     japanese: bool,
     progress: &super::Progress,
 ) -> horizon_client::Result<StagedPack> {
-    let root = startup_root(vanilla_root, selected, server, mods_enabled, dev_mods)?;
+    let root = startup_root(vanilla_root, selected, server, mods)?;
     progress.set(1);
     // The mod listeners prepare against the merged root before the heavy
     // staging builds run: a listener that fails aborts the reload without the
@@ -715,12 +709,18 @@ mod tests {
         )
         .unwrap();
         let dev = [mod_dir];
-        let enabled = BTreeSet::new();
-        let without_pack = startup_root(&vanilla, &[], &[], &enabled, &dev).unwrap();
+        let selected: Vec<_> = horizon_mods::selection::packages(
+            &std::env::current_dir().unwrap(),
+            &Default::default(),
+            &Default::default(),
+            &dev,
+        )
+        .collect();
+        let without_pack = startup_root(&vanilla, &[], &[], &selected).unwrap();
         assert_eq!(fs::read(without_pack.join(asset)).unwrap(), b"mod");
         let pack = packs::folder(&dir.join("packs"), packs::RESOURCE_FORMAT);
         assert_eq!(pack.len(), 1);
-        let with_pack = startup_root(&vanilla, &[], &pack, &enabled, &dev).unwrap();
+        let with_pack = startup_root(&vanilla, &[], &pack, &selected).unwrap();
         assert_eq!(fs::read(with_pack.join(asset)).unwrap(), b"pack");
         fs::remove_dir_all(dir).unwrap();
     }

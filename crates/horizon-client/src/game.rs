@@ -22147,9 +22147,17 @@ pub fn run_with(launch: LaunchArguments) -> Result<()> {
             log::warn!("could not add the official server to servers.dat: {e}");
         }
     }
+    let mut early_settings = Settings::load(&Game::options_path());
+    mods::initialize_packages(
+        &std::env::current_dir()?,
+        &early_settings.mods.enabled,
+        &options.dev_mods,
+    );
+    if let Err(refused) = crate::mod_api::install_parts(crate::mod_api::mods()) {
+        panic!("Mod parts refused:\n{}", refused.join("\n"));
+    }
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models(options.execution_role);
-    let mut early_settings = Settings::load(&Game::options_path());
     // Minecraft.<init>: read the last start's flag, then mark this one as not
     // finished until onGameLoadFinished. A dedicated server has no options.txt.
     if options.execution_role.is_client() {
@@ -22187,17 +22195,12 @@ pub fn run_with(launch: LaunchArguments) -> Result<()> {
         &vanilla_root,
         &early_settings.resource_packs,
         &[],
-        &early_settings.mods.enabled,
-        &options.dev_mods,
+        mods::startup_packages(),
     )
     .or_else(|e| {
         log::warn!("Horizon: resource packs not applied: {e}");
         pack_error = Some(e.to_string());
-        mods::content_root(
-            &vanilla_root,
-            &early_settings.mods.enabled,
-            &options.dev_mods,
-        )
+        mods::content_root(&vanilla_root, mods::startup_packages())
     })?;
     let mut loaded = load_resources(
         options.resources.clone(),

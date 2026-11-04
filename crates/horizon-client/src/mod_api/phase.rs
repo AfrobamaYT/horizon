@@ -9,14 +9,6 @@ pub enum PackageKind {
     Content,
 }
 
-/// The package's declared side.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum PackageSide {
-    Client,
-    Both,
-}
-
 /// Read-only package metadata available during registration.
 #[non_exhaustive]
 pub struct PackageInfo {
@@ -39,11 +31,8 @@ impl PackageInfo {
         self.kind
     }
     /// Manifest side, if the manifest is available.
-    pub fn side(&self) -> Option<PackageSide> {
-        self.manifest.as_ref().map(|m| match m.side {
-            horizon_mods::Side::Client => PackageSide::Client,
-            horizon_mods::Side::Both => PackageSide::Both,
-        })
+    pub fn side(&self) -> Option<horizon_mods::Side> {
+        self.manifest.as_ref().map(|m| m.side)
     }
     /// The package's own namespace followed by any additional namespaces.
     pub fn namespaces(&self) -> impl Iterator<Item = &str> {
@@ -146,7 +135,7 @@ impl LoadedMods<'_> {
         self.entries.iter()
     }
 
-    /// Find an installed package by ID.
+    /// Find a package by ID. This linear lookup is intended for registration, not hot paths.
     pub fn get(&self, id: &str) -> Option<&PackageInfo> {
         self.entries.iter().find(|entry| entry.id == id)
     }
@@ -219,7 +208,7 @@ mod tests {
         let plain = view.get("plain").unwrap();
         assert_eq!(plain.kind(), PackageKind::Content);
         assert_eq!(plain.version(), Some("1"));
-        assert_eq!(plain.side(), Some(PackageSide::Client));
+        assert_eq!(plain.side(), Some(horizon_mods::Side::Client));
         assert_eq!(plain.namespaces().collect::<Vec<_>>(), ["plain"]);
         assert!(!plain.depends_on("runtime"));
         assert!(view.get("missing").is_none());

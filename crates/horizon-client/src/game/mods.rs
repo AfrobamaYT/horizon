@@ -5,28 +5,25 @@ use super::{Game, execution_role::ExecutionRole};
 use crate::mod_api::RegistrationContext;
 use horizon_client::mod_list::{self, Installed};
 use horizon_mods::selection::{BUILD_INFO, built_ids};
-use std::{
-    path::PathBuf,
-    sync::{Mutex, OnceLock},
-};
+use std::{path::PathBuf, sync::OnceLock};
 
-static STARTUP_PACKAGES: OnceLock<Mutex<Option<Vec<horizon_mods::selection::SelectedPackage>>>> =
-    OnceLock::new();
+static STARTUP_PACKAGES: OnceLock<Vec<horizon_mods::selection::SelectedPackage>> = OnceLock::new();
 
-pub(crate) fn initialize_packages(game_dir: &std::path::Path, dev: &[PathBuf]) {
-    let settings = horizon_client::settings::Settings::load(
-        &horizon_client::logging::player_dir().join("options.txt"),
-    );
+pub(super) fn initialize_packages(
+    game_dir: &std::path::Path,
+    enabled: &std::collections::BTreeSet<String>,
+    dev: &[PathBuf],
+) {
     let built = std::env::current_exe()
         .ok()
         .and_then(|exe| std::fs::read_to_string(exe.with_file_name(BUILD_INFO)).ok())
         .map(|info| built_ids(&info))
         .unwrap_or_default();
     let selected: Vec<_> =
-        horizon_mods::selection::packages(game_dir, &settings.mods.enabled, &built, dev).collect();
+        horizon_mods::selection::packages(game_dir, enabled, &built, dev).collect();
     crate::mod_api::install_packages(crate::mod_api::mods(), &selected);
     assert!(
-        STARTUP_PACKAGES.set(Mutex::new(Some(selected))).is_ok(),
+        STARTUP_PACKAGES.set(selected).is_ok(),
         "startup packages already installed"
     );
 }
@@ -109,32 +106,24 @@ pub(super) struct ContentOverlay {
     pub(super) announce: bool,
 }
 
+pub(super) fn startup_packages() -> &'static [horizon_mods::selection::SelectedPackage] {
+    STARTUP_PACKAGES.get().expect("startup packages not installed")
+}
+
 /// Builds the content overlay: every enabled or dev content mod's files
 /// merged over `root`. Registration of what the mods declare is
 /// [`content_root`]'s step.
 pub(super) fn content_overlay(
     root: &std::path::Path,
-    enabled: &std::collections::BTreeSet<String>,
-    dev: &[std::path::PathBuf],
+    selected: &[horizon_mods::selection::SelectedPackage],
 ) -> horizon_client::Result<ContentOverlay> {
     use horizon_client::mod_content::{self, ContentMod};
     use horizon_mods::Content;
     let here = std::env::current_dir().unwrap_or_default();
-    let built = std::env::current_exe()
-        .ok()
-        .and_then(|exe| std::fs::read_to_string(exe.with_file_name(BUILD_INFO)).ok())
-        .map(|info| built_ids(&info))
-        .unwrap_or_default();
     let mut known = None;
     let mut mods: Vec<ContentMod> = Vec::new();
     let announce = !horizon_protocol::mod_list::is_set();
     let mut announced = Vec::new();
-    let selected = STARTUP_PACKAGES
-        .get()
-        .and_then(|packages| packages.lock().unwrap().take())
-        .unwrap_or_else(|| {
-            horizon_mods::selection::packages(&here, enabled, &built, dev).collect()
-        });
     for selected in selected {
         let path = &selected.path;
         let m = &selected.package.manifest;
@@ -209,10 +198,9 @@ pub(super) fn content_overlay(
 /// and the protocol's local mod list, each set once.
 pub(super) fn content_root(
     root: &std::path::Path,
-    enabled: &std::collections::BTreeSet<String>,
-    dev: &[std::path::PathBuf],
+    selected: &[horizon_mods::selection::SelectedPackage],
 ) -> horizon_client::Result<std::path::PathBuf> {
-    let overlay = content_overlay(root, enabled, dev)?;
+    let overlay = content_overlay(root, selected)?;
     register_block_entity_types(&overlay.root, &overlay.mods)?;
     if overlay.announce {
         horizon_protocol::mod_list::set_local(overlay.announced);

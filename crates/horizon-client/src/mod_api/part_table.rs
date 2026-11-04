@@ -1157,7 +1157,7 @@ pub(crate) mod tests {
         struct Invalid;
         #[mod_api::__subscriptions]
         impl Hooks for Invalid {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 for id in ["press", "minecraft:", "Upper:chest", "test:has space"] {
                     r.block_entity_type_key(id);
                 }
