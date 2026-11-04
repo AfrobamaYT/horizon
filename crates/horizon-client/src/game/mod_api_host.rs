@@ -397,6 +397,10 @@ impl<'a: 'b, 'b> mod_api::LevelWriteHost for LevelTicks<'b, &mut super::GameLeve
             .native_set_block(self.ticks, pos, state, flags.bits())
     }
 
+    fn remove_block(&mut self, pos: [i32; 3], moved: bool) -> bool {
+        self.level.native_remove_block(self.ticks, pos, moved)
+    }
+
     fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str, flags: i32) -> bool {
         self.level
             .native_set_block_property(self.ticks, pos, key, value, flags)

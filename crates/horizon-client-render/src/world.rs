@@ -313,6 +313,17 @@ impl World {
     /// section borders) for remeshing and the surrounding chunks for relighting.
     /// Neighbour updates, drops and block entities belong to the gameplay layer.
     pub fn set(&mut self, x: i32, y: i32, z: i32, state: BlockStateId) -> crate::Result<()> {
+        self.set_with_notification(x, y, z, state, true)
+    }
+    /// Store a state while controlling whether the change enters the client block log.
+    pub fn set_with_notification(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        state: BlockStateId,
+        notify: bool,
+    ) -> crate::Result<()> {
         let Some(chunk) = self.chunks.get_mut(&(x >> 4, z >> 4)) else {
             return Err("write outside resident chunks".into());
         };
@@ -329,7 +340,7 @@ impl World {
                 self.watched_writes.push(((x, y, z), previous, state.0));
             }
             self.revision = self.revision.wrapping_add(1);
-            if let Some(log) = &mut self.block_log {
+            if notify && let Some(log) = &mut self.block_log {
                 log.push((x, y, z));
             }
             if let Some(writes) = &mut self.path_writes {
