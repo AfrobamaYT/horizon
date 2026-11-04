@@ -12,6 +12,8 @@ pub use config_files::{
     CONFIG_FILE_MAX, CONFIG_LIST_MAX, ConfigEntry, ConfigEntryKind, ConfigFileError, ConfigFiles,
     ConfigPath, ConfigStat,
 };
+mod tooltip_element;
+pub use tooltip_element::{TooltipElement, TooltipImage};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod client_reload;
