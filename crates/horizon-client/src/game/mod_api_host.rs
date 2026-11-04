@@ -457,3 +457,45 @@ impl<'a: 'b, 'b> horizon_client::mod_api::LevelWriteHost
         self.level.native_level_event(id, pos, data)
     }
 }
+
+impl horizon_client::mod_api::LevelHost for super::native_hooks::LandingLevel<'_> {
+    fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
+        self.0.block(BlockPos::new(pos[0], pos[1], pos[2]))
+    }
+    fn state_block(&self, state: BlockStateId) -> Option<&str> {
+        self.0.registry().state(state).map(|s| &*s.name)
+    }
+    fn state_string(&self, state: BlockStateId) -> Option<String> {
+        self.0
+            .registry()
+            .state(state)
+            .map(super::native_block_states::serialize)
+    }
+    fn min_y(&self) -> i32 {
+        self.0.min_y()
+    }
+    fn height(&self) -> i32 {
+        self.0.height()
+    }
+    fn state_with_property(
+        &self,
+        state: BlockStateId,
+        key: &str,
+        value: &str,
+    ) -> Option<BlockStateId> {
+        super::native_hooks::with_property(self.0.registry(), state, key, value)
+    }
+}
+
+impl horizon_client::mod_api::LevelRandomHost for super::native_hooks::LandingLevel<'_> {
+    fn attachments(
+        &mut self,
+        _: horizon_client::mod_api::Holder,
+    ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
+    {
+        Err(horizon_client::mod_api::AttachmentError::MissingHolder)
+    }
+    fn random(&mut self) -> Option<&mut horizon_client::mod_api::LegacyRandom> {
+        None
+    }
+}

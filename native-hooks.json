@@ -1214,16 +1214,6 @@
       }
     },
     {
-      "name": "block_fall_on",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_fall_on",
-      "side": "server",
-      "mod_api": {
-        "contract": "collect",
-        "out": "damage"
-      }
-    },
-    {
       "name": "consume_effect", "side": "server",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_consume_effect",

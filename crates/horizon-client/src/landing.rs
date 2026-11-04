@@ -282,17 +282,11 @@ impl MotionWorld<'_, '_, '_> {
         distance: f64,
         damage: f32,
     ) -> f32 {
-        let block = self
-            .assets
-            .registry
-            .state(state)
-            .map(|s| s.name.as_str())
-            .unwrap_or("minecraft:air");
         crate::block_contact::fall(
+            self,
             crate::block_contact::Contact {
                 entity: self.player.entity_id,
                 kind: "minecraft:player",
-                block,
                 state,
                 position,
             },
@@ -386,14 +380,8 @@ impl FallDamageWorld for MotionWorld<'_, '_, '_> {
         self.player.fall_distance = value;
     }
     fn fall_on(&mut self, state: BlockStateId, position: BlockPos, distance: f64) -> Result<()> {
-        let block = self
-            .assets
-            .registry
-            .state(state)
-            .map(|s| s.name.as_str())
-            .unwrap_or("minecraft:air");
         let previous = self.player.block_landing.take();
-        if !block.starts_with("minecraft:") {
+        if crate::block_contact::fall_listens(state) {
             self.player.block_landing = Some((state, position, distance));
         }
         // Keep template landing rules (hay, honey, slime, etc.) in control.

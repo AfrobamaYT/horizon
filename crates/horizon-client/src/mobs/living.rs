@@ -1095,10 +1095,10 @@ impl Mob {
     ) -> f32 {
         contact.map_or(damage, |(w, p)| {
             crate::block_contact::fall(
+                w,
                 crate::block_contact::Contact {
                     entity: self.id as i32,
                     kind: &self.kind.id,
-                    block: w.block_name(p[0], p[1], p[2]),
                     state: w.world.block(p[0], p[1], p[2]),
                     position: horizon_core::position::BlockPos::new(p[0], p[1], p[2]),
                 },
@@ -1889,8 +1889,24 @@ impl RestitutionWorld for MobRestitution<'_, '_> {
     /// `BlockLandingRegistry.bounce_on`'s only case is the shelf mushroom's
     /// bounce sound, which no path plays yet (`landing.rs` binds it for the
     /// player too and the game's sound code resolves neither).
-    fn bounce_on(&mut self, _: BlockStateId, _: BlockPos, _: f64) -> Result<(), ()> {
-        Ok(())
+    fn bounce_on(
+        &mut self,
+        state: BlockStateId,
+        position: BlockPos,
+        fall_distance: f64,
+        movement: Vec3,
+    ) -> Result<Vec3, ()> {
+        Ok(crate::block_contact::bounce(
+            self.world,
+            crate::block_contact::Contact {
+                entity: self.mob.id as i32,
+                kind: &self.mob.kind.id,
+                state,
+                position,
+            },
+            fall_distance,
+            movement,
+        ))
     }
     fn bounce_event(&mut self) -> Result<(), ()> {
         Ok(())
