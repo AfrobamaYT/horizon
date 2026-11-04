@@ -490,6 +490,9 @@ pub struct Modifier {
 pub struct Attributes {
     pub bases: Vec<(Attr, f64)>,
     pub modifiers: Vec<Modifier>,
+    /// The transient modifiers mods added: in the value and synced, never
+    /// saved.
+    pub transient: Vec<Modifier>,
 }
 /// The attribute `/attribute` names (`follow_range`, not
 /// `minecraft:follow_range`) when gameplay reads it from this store. Armor
@@ -571,6 +574,14 @@ fn compute(m: &Mob, a: Attr, with_transient: bool, extra: &[(f64, Op)]) -> f64 {
         .filter(|x| x.attr == a)
         .map(|x| (x.amount, x.op))
         .collect();
+    if let Some(s) = m.extra.attributes.as_deref() {
+        ops.extend(
+            s.transient
+                .iter()
+                .filter(|x| x.attr == a)
+                .map(|x| (x.amount, x.op)),
+        );
+    }
     if with_transient {
         ops.extend(transient(m, a));
         ops.extend(effect_modifiers(m, a));
@@ -667,11 +678,44 @@ pub fn add_modifier(
     m.extra.live.invalidate();
     refresh(m, a);
 }
-/// `AttributeInstance.removeModifier`.
+/// Whether a mod's transient modifier with id `id` is on `a`.
+pub fn has_transient_modifier(m: &Mob, a: Attr, id: &str) -> bool {
+    m.extra
+        .attributes
+        .as_ref()
+        .is_some_and(|s| s.transient.iter().any(|x| x.attr == a && x.id == id))
+}
+/// `addOrUpdateTransientModifier` for a mod: the modifier counts in the value
+/// and is synced, but is not saved.
+pub fn add_transient_modifier(m: &mut Mob, a: Attr, id: &str, amount: f64, op: Op) {
+    let s = m.extra.attributes.get_or_insert_with(Box::default);
+    s.transient.retain(|x| x.attr != a || x.id != id);
+    s.transient.push(Modifier {
+        attr: a,
+        id: id.to_owned().into(),
+        amount,
+        op,
+    });
+    // The live map is built from the saved record, so it keeps the modifier
+    // itself for the next build.
+    let operation = match op {
+        Op::AddValue => horizon_world::attributes::Operation::AddValue,
+        Op::AddMultipliedBase => horizon_world::attributes::Operation::AddMultipliedBase,
+        Op::AddMultipliedTotal => horizon_world::attributes::Operation::AddMultipliedTotal,
+    };
+    let modifier = horizon_world::attributes::Modifier::new(id, amount, operation).ok();
+    m.extra.live.keep_transient(a.id(), id, modifier);
+    m.extra.live.invalidate();
+    refresh(m, a);
+}
+/// `AttributeInstance.removeModifier`: the permanent modifier or a mod's
+/// transient one with that id.
 pub fn remove_modifier(m: &mut Mob, a: Attr, id: &str) {
     if let Some(s) = m.extra.attributes.as_mut() {
         s.modifiers.retain(|x| x.attr != a || x.id != id);
+        s.transient.retain(|x| x.attr != a || x.id != id);
     }
+    m.extra.live.keep_transient(a.id(), id, None);
     m.extra.live.invalidate();
     refresh(m, a);
 }

@@ -160,7 +160,7 @@ impl Game<'_> {
                     instance(out, a, *v).base = *v;
                 }
             }
-            for x in &s.modifiers {
+            for x in s.modifiers.iter().chain(&s.transient) {
                 if let Some(a) = self.synced_attribute(kind, x.attr.id()) {
                     add_modifier(
                         out,

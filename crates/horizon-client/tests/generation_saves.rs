@@ -210,6 +210,7 @@ fn worker_context(root: &Path) -> Arc<WorkerContext> {
         biomes: Arc::new(Biomes::load(root).unwrap()),
         assets,
         render: render.clone(),
+        hidden_states: Arc::from([]),
     })
 }
 
@@ -312,6 +313,7 @@ fn proto_chunks_are_viewed_once_per_state() {
         biomes: Arc::new(Biomes::load(&root).unwrap()),
         assets,
         render: render.clone(),
+        hidden_states: Arc::from([]),
     });
     let generator = Arc::new(Recorder::default());
     let mut session = Session::new(generator.clone(), context);

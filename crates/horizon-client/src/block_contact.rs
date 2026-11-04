@@ -2,11 +2,8 @@
 use horizon_core::position::BlockPos;
 use horizon_world::registry::BlockStateId;
 use std::{
-    cell::Cell,
-    sync::{
-        OnceLock,
-        atomic::{AtomicBool, Ordering},
-    },
+    cell::{Cell, RefCell},
+    sync::OnceLock,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -21,23 +18,29 @@ pub struct Contact<'a> {
 #[derive(Clone, Copy, Debug)]
 pub enum Event<'a> {
     StepOn(Contact<'a>),
-    Inside(Contact<'a>),
     FallOn(Contact<'a>, f64),
 }
 
-pub static HOOK: OnceLock<fn(&str, Event<'_>, &mut f32)> = OnceLock::new();
-/// Whether the loaded blocks hold one outside `minecraft:` (a content mod's).
-/// Without one no contact can dispatch, so the item and projectile sweeps
-/// skip their per-tick work: every item and thrown thing on a server would
-/// otherwise sweep its blocks each tick for nothing.
-static MOD_BLOCKS: AtomicBool = AtomicBool::new(false);
-
-/// Called when the block tables load.
-pub fn set_mod_blocks(any: bool) {
-    MOD_BLOCKS.store(any, Ordering::Relaxed);
+/// An entity inside a block whose Part listens to `entity_inside`
+/// (`Block.entityInside`), kept until the entity's batch ends.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Inside {
+    pub entity: i32,
+    pub state: BlockStateId,
+    pub position: BlockPos,
+    /// `Entity.checkInsideBlocks`' `isPrecise`: the entity moved far, or its box
+    /// at the target intersects the block.
+    pub precise: bool,
 }
+
+pub static HOOK: OnceLock<fn(&str, Event<'_>, &mut f32)> = OnceLock::new();
+/// Whether any part listens to `entity_inside`, and whether one does for a block
+/// state; the game sets them from the part table.
+pub static ANY_INSIDE: OnceLock<fn() -> bool> = OnceLock::new();
+pub static INSIDE_LISTENS: OnceLock<fn(BlockStateId) -> bool> = OnceLock::new();
 thread_local! {
     static LEVEL: Cell<Option<&'static str>> = const { Cell::new(None) };
+    static PENDING: RefCell<Vec<Inside>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Scope authority to this thread and restore it even on an error or panic.
@@ -63,9 +66,42 @@ pub fn fall(contact: Contact<'_>, distance: f64, mut damage: f32) -> f32 {
     damage
 }
 
+/// Note an entity inside a block, if a part there listens; nothing is kept
+/// otherwise, so a world without such a part pays one test per block.
+pub fn inside(entity: i32, state: BlockStateId, position: BlockPos, precise: bool) {
+    if LEVEL.get().is_some() && INSIDE_LISTENS.get().is_some_and(|listens| listens(state)) {
+        PENDING.with_borrow_mut(|pending| {
+            pending.push(Inside {
+                entity,
+                state,
+                position,
+                precise,
+            });
+        });
+    }
+}
+
+/// The contacts noted since the last call, in the order they happened.
+pub fn take_inside() -> Vec<Inside> {
+    PENDING.with_borrow_mut(std::mem::take)
+}
+
+/// `Entity.checkInsideBlocks`' `isPrecise` for the block at `position`: the
+/// move from `from` to `to` was long, or the box at `to` touches the block.
+pub fn is_precise(
+    from: horizon_core::geometry::Vec3,
+    to: horizon_core::geometry::Vec3,
+    at_target: horizon_core::geometry::Aabb,
+    position: BlockPos,
+) -> bool {
+    let far = 0.999_990_000_000_252_6_f64;
+    from.distance_squared(to) > far * far
+        || at_target.intersects(horizon_core::geometry::Aabb::block(position))
+}
+
 fn dispatch(event: Event<'_>, damage: &mut f32) {
     let contact = match event {
-        Event::StepOn(c) | Event::Inside(c) | Event::FallOn(c, _) => c,
+        Event::StepOn(c) | Event::FallOn(c, _) => c,
     };
     if contact.block.starts_with("minecraft:") {
         return;
@@ -83,15 +119,14 @@ fn dispatch(event: Event<'_>, damage: &mut f32) {
 }
 
 /// Reuse the entity block sweep for item and projectile ticks without an effect collector.
-pub fn swept_inside<'a>(
+pub fn swept_inside(
     entity: i32,
-    kind: &str,
     from: horizon_core::geometry::Vec3,
     to: horizon_core::geometry::Vec3,
     bounds: horizon_core::geometry::Aabb,
-    mut block: impl FnMut(BlockPos) -> (BlockStateId, &'a str),
+    mut block: impl FnMut(BlockPos) -> BlockStateId,
 ) {
-    if !MOD_BLOCKS.load(Ordering::Relaxed) || LEVEL.get().is_none() || HOOK.get().is_none() {
+    if LEVEL.get().is_none() || !ANY_INSIDE.get().is_some_and(|any| any()) {
         return;
     }
     let bounds = bounds.deflate(horizon_core::geometry::Vec3::new(1e-5, 1e-5, 1e-5));
@@ -102,14 +137,7 @@ pub fn swept_inside<'a>(
                 return false;
             }
             if visited.insert(p) {
-                let (state, name) = block(p);
-                emit(Event::Inside(Contact {
-                    entity,
-                    kind,
-                    block: name,
-                    state,
-                    position: p,
-                }));
+                inside(entity, block(p), p, is_precise(from, to, bounds, p));
             }
             true
         });
@@ -133,7 +161,7 @@ mod tests {
                 };
                 c
             }
-            Event::Inside(c) | Event::StepOn(c) => c,
+            Event::StepOn(c) => c,
         };
         assert_eq!(
             (c.entity, c.kind, c.state, c.position),
@@ -159,43 +187,40 @@ mod tests {
         assert_eq!(fall(c, 12.0, 10.0), 10.0);
         in_level(Some("minecraft:the_nether"), || {
             emit(Event::StepOn(c));
-            emit(Event::Inside(c));
             assert_eq!(fall(c, 12.0, 10.0), 2.0);
             in_level(None, || assert_eq!(fall(c, 12.0, 10.0), 10.0));
             assert_eq!(fall(c, 12.0, 0.0), 0.0);
-            emit(Event::Inside(Contact {
+            emit(Event::StepOn(Contact {
                 block: "minecraft:hay_block",
                 ..c
             }));
         });
         assert_eq!(fall(c, 12.0, 10.0), 10.0);
-        assert_eq!(SEEN.get(), 4);
+        assert_eq!(SEEN.get(), 3);
         in_level(Some("minecraft:the_nether"), || {
             assert_eq!(fall(c, 12.0, 99.0), 99.0);
             assert_eq!(fall(c, 12.0, 98.0), 0.0);
-            use horizon_core::geometry::{Aabb, Vec3};
-            let to = Vec3::new(2.5, 2.0, 3.5);
-            let bounds = Aabb::new(Vec3::new(2.25, 2.0, 3.25), Vec3::new(2.75, 2.5, 3.75));
-            let block = |p| {
-                (
-                    BlockStateId(9),
-                    if p == c.position {
-                        "test:hay"
-                    } else {
-                        "minecraft:air"
-                    },
-                )
-            };
-            set_mod_blocks(true);
-            swept_inside(17, c.kind, Vec3::new(0.5, 2.0, 3.5), to, bounds, block);
-            assert_eq!(SEEN.get(), 7, "a block crossed mid-move is notified once");
-            let at = Vec3::new(1.5, 2.0, 3.5);
-            let bounds = bounds.move_by(Vec3::new(-1.0, 0.0, 0.0));
-            swept_inside(17, c.kind, at, at, bounds, block);
-            assert_eq!(SEEN.get(), 8, "stationary overlap still notifies");
         });
         let _ =
             std::panic::catch_unwind(|| in_level(Some("minecraft:the_nether"), || panic!("test")));
         assert_eq!(fall(c, 12.0, 10.0), 10.0);
+    }
+
+    /// `checkInsideBlocks`' `isPrecise`: a long move, or the box at the target
+    /// touching the block.
+    #[test]
+    fn precision_follows_the_move_length_and_the_box() {
+        use horizon_core::geometry::{Aabb, Vec3};
+        let at = Aabb::new(Vec3::new(2.25, 2.0, 3.25), Vec3::new(2.75, 2.5, 3.75));
+        let block = BlockPos::new(2, 2, 3);
+        let from = Vec3::new(2.5, 2.0, 3.5);
+        assert!(is_precise(from, from, at, block));
+        assert!(!is_precise(from, from, at, BlockPos::new(1, 2, 3)));
+        assert!(is_precise(
+            Vec3::new(0.5, 2.0, 3.5),
+            from,
+            at,
+            BlockPos::new(1, 2, 3)
+        ));
     }
 }

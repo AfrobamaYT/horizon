@@ -1677,15 +1677,8 @@ impl MotionWorld<'_, '_, '_> {
                     }
             };
             if inside && visited.insert(p.pack()) {
-                crate::block_contact::emit(crate::block_contact::Event::Inside(
-                    crate::block_contact::Contact {
-                        entity: self.player.entity_id,
-                        kind: "minecraft:player",
-                        block: name,
-                        state,
-                        position: p,
-                    },
-                ));
+                let precise = moved_far || deflated.intersects(Aabb::block(p));
+                crate::block_contact::inside(self.player.entity_id, state, p, precise);
                 // CactusBlock, CampfireBlock and the cauldrons' entityInside
                 // (`entity.hurt`, the fire and the fill level), and
                 // WitherRoseBlock's server-side effect.
@@ -1739,10 +1732,7 @@ impl MotionWorld<'_, '_, '_> {
                     }
                     "minecraft:cobweb" => self.web_inside(),
                     "minecraft:sweet_berry_bush" => self.sweet_berry_bush_inside(state)?,
-                    "minecraft:bubble_column" => {
-                        let precise = moved_far || deflated.intersects(Aabb::block(p));
-                        self.bubble_column_inside(state, p, precise)?
-                    }
+                    "minecraft:bubble_column" => self.bubble_column_inside(state, p, precise)?,
                     "minecraft:nether_portal" => self
                         .player
                         .events
