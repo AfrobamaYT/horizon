@@ -142,6 +142,9 @@ pub struct ItemEntity {
     pub previous: Vec3,
     pub velocity: Vec3,
     pub on_ground: bool,
+    /// `Entity.fallDistance`: grown by each move down outside water, handed to the block's
+    /// `fallOn` on landing ([`ItemStep::landed`]), then reset.
+    pub fall_distance: f64,
     pub age: i32,
     /// Signed NBT counter; widened to retain the legacy internal u32::MAX sentinel.
     pub pickup_delay: i64,
@@ -295,6 +298,15 @@ impl crate::entity_rules::EntityRules for ArmorStand {
 pub struct ItemStep {
     old_velocity: Vec3,
     moved: bool,
+    landed: Option<(BlockPos, f64)>,
+}
+impl ItemStep {
+    /// `Entity.checkFallDamage`'s landing: the block the item came down on
+    /// (`getOnPosLegacy`) and how far it fell, for its `Block.fallOn`. None when the move
+    /// didn't end a fall.
+    pub fn landed(&self) -> Option<(BlockPos, f64)> {
+        self.landed
+    }
 }
 #[cfg(test)]
 impl ItemEntity {
@@ -495,6 +507,10 @@ impl ItemEntity {
             self.pickup_delay -= 1;
         }
         let old_velocity = self.velocity;
+        // Entity.updateInWaterStateAndDoFluidPushing: touching water resets the fall.
+        if water_height > 0.0 {
+            self.fall_distance = 0.0;
+        }
         let in_water = water_height > f64::from(0.1f32);
         if in_water {
             // ItemEntity.setUnderwaterMovement
@@ -556,8 +572,22 @@ impl ItemEntity {
                     self.position.z + moved.z,
                 );
             }
+            let mut landed = None;
             if !no_physics {
                 self.on_ground = wanted.y < 0.0 && moved.y != wanted.y;
+                // Entity.checkFallDamage: the move's drop counts out of water, and a landing
+                // hands the whole fall to the block below (`getOnPosLegacy`).
+                if water_height <= 0.0 && moved.y < 0.0 {
+                    self.fall_distance -= f64::from(moved.y as f32);
+                }
+                if self.on_ground {
+                    if self.fall_distance > 0.0 {
+                        let below = Vec3::new(0.0, -f64::from(0.2_f32), 0.0);
+                        let on = BlockPos::containing(self.position.add_vector(below));
+                        landed = Some((on, self.fall_distance));
+                    }
+                    self.fall_distance = 0.0;
+                }
             }
             // Entity.move: what the move was stopped on. They outlive the
             // tick, as vanilla's fields do, for the tracker that sends the
@@ -592,6 +622,7 @@ impl ItemEntity {
             return ItemStep {
                 old_velocity,
                 moved: true,
+                landed,
             };
         }
         // applyEffectsFromBlocksForLastMovements: still lift/drag while idle.
@@ -601,6 +632,7 @@ impl ItemEntity {
         ItemStep {
             old_velocity,
             moved: false,
+            landed: None,
         }
     }
     /// The rest of `ItemEntity.tick`, after the bubble column's push: slime,
@@ -2095,6 +2127,7 @@ mod fire_environment_tests {
             )
             .unwrap();
         let make = |id: &str| ItemEntity {
+            fall_distance: 0.0,
             join: Default::default(),
             no_gravity: false,
             id: 1,
@@ -2255,6 +2288,7 @@ mod destroyed_bundle_environment_tests {
             ItemStack::new("minecraft:diamond", 1),
         ];
         let mut bundle = ItemEntity {
+            fall_distance: 0.0,
             join: Default::default(),
             no_gravity: false,
             id: 1,
@@ -2353,6 +2387,7 @@ mod merge_tests {
     fn item(id: &str, count: u32, x: f64, age: i32) -> ItemEntity {
         let at = Vec3::new(x, 64.0, 0.5);
         ItemEntity {
+            fall_distance: 0.0,
             join: Default::default(),
             no_gravity: false,
             id: 0,
@@ -2778,6 +2813,7 @@ mod honey_slide_tests {
     pub(super) fn falling_item(x: f64, y: f64, z: f64, vx: f64, vy: f64, vz: f64) -> ItemEntity {
         let at = Vec3::new(x, y, z);
         ItemEntity {
+            fall_distance: 0.0,
             join: Default::default(),
             no_gravity: false,
             id: 1,
@@ -2928,6 +2964,7 @@ mod slime_bounce_tests {
     fn grounded_item() -> ItemEntity {
         let at = Vec3::new(0.5, 2.0, 0.5);
         ItemEntity {
+            fall_distance: 0.0,
             join: Default::default(),
             no_gravity: false,
             id: 1,
@@ -3635,6 +3672,7 @@ mod item_destroyed_tests {
             .map(|(id, count)| ItemStack::new(id, *count))
             .collect();
         ItemEntity {
+            fall_distance: 0.0,
             join: Default::default(),
             no_gravity: false,
             id: 1,

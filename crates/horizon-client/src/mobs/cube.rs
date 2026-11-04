@@ -185,7 +185,7 @@ pub fn jump(m: &mut Mob, w: &MobWorld) {
     } else {
         0.0
     };
-    m.velocity.y = f64::from(m.jump_power(w.loop_context) + boost);
+    m.velocity.y = f64::from(m.jump_power(w.loop_context, w.world, w.movement) + boost);
 }
 /// `AbstractCubeMob.tick`'s landing splash: crumbs of goo (or flames) around
 /// the cube's feet, drawn by the side that ticks the mob.

@@ -134,6 +134,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut bound = RegistryMovementWorld {
             properties: &bindings[f["tags"].as_u64().unwrap() as usize],
             world: &mut world,
+            edits: &horizon_world::movement_properties::NoFactorEdits,
         };
         let mode = f["mode"].as_u64().unwrap();
         if mode < 4 {

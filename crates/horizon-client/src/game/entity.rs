@@ -304,7 +304,8 @@ macro_rules! stored_motion {
 
 /// One `ItemEntity.tick`, with the fluid push and the bubble column decided by
 /// the `Entity` defaults every kind shares: fluids, move, column, settle,
-/// fluids again. Returns false when the item should be removed.
+/// fluids again. Returns false when the item should be removed. A server's tick
+/// runs the halves itself, with the landing's `Block.fallOn` between them.
 pub(super) fn tick_item(
     item: &mut ItemEntity,
     world: &horizon_client::world::World,
@@ -317,6 +318,36 @@ pub(super) fn tick_item(
     border: Option<&horizon_core::geometry::border::BorderGeometry>,
     splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
 ) -> bool {
+    let step = tick_item_move(
+        item,
+        world,
+        registry,
+        facts,
+        collision,
+        fluids,
+        no_physics,
+        entity_boxes,
+        border,
+        splash,
+    );
+    tick_item_settle(item, world, facts, fluids, no_physics, step, splash)
+}
+
+/// `ItemEntity.tick` through the move and the bubble column's push: the fluid push, the
+/// splash on entering water, the move (`Entity.move`, whose `checkFallDamage` the step's
+/// [`landed`](horizon_client::entities::ItemStep::landed) reports), then the column.
+pub(super) fn tick_item_move(
+    item: &mut ItemEntity,
+    world: &horizon_client::world::World,
+    registry: &horizon_world::registry::BlockRegistry,
+    facts: &horizon_client::blocks::BlockFacts,
+    collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
+    fluids: &horizon_client::motion::FluidResources,
+    no_physics: bool,
+    entity_boxes: &[Aabb],
+    border: Option<&horizon_core::geometry::border::BorderGeometry>,
+    splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
+) -> horizon_client::entities::ItemStep {
     let (water, _lava) = item.push_by_fluid(world, fluids);
     // `Entity.baseTick` splashes before the item moves. The first tick does not.
     item.water_entry(water > 0.0, item.ticks == 0, splash);
@@ -330,6 +361,20 @@ pub(super) fn tick_item(
         border,
     );
     item.push_by_bubble_column(world, registry, facts, collision);
+    step
+}
+
+/// The rest of `ItemEntity.tick` after [`tick_item_move`]: the blocks' contact, drag and
+/// age, then the fluid push again. Returns false when the item should be removed.
+pub(super) fn tick_item_settle(
+    item: &mut ItemEntity,
+    world: &horizon_client::world::World,
+    facts: &horizon_client::blocks::BlockFacts,
+    fluids: &horizon_client::motion::FluidResources,
+    no_physics: bool,
+    step: horizon_client::entities::ItemStep,
+    splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
+) -> bool {
     let alive = item.tick_settle(world, facts, no_physics, step);
     // `ItemEntity.tick` refreshes immersion after moving and splashes if that
     // move is what entered the water.
@@ -845,7 +890,7 @@ impl Entity for Mob {
 
 impl Entity for ItemEntity {
     fn reset_fall_distance(&mut self) {
-        // An item keeps no fall distance here.
+        self.fall_distance = 0.0;
     }
     fn fluid_eye_y(&self) -> f64 {
         ItemEntity::fluid_eye_y(self)

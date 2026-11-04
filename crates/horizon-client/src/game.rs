@@ -4399,6 +4399,7 @@ impl Game<'_> {
         // ItemEntity.bobOffs comes from the entity's own random, not the level's.
         let bob = self.particles.random().next_float() * std::f32::consts::PI * 2.0;
         self.dropped.push(ItemEntity {
+            fall_distance: 0.0,
             join: Default::default(),
             no_gravity: false,
             health: 5,
@@ -4642,6 +4643,33 @@ impl Game<'_> {
         self.drain_entity_inside();
         self.native_tick_post_batch(round);
     }
+    /// `Block.fallOn` for item `id`, which fell `distance` onto the block at `on`
+    /// (`Entity.checkFallDamage`): a mod block's `fall_on` Part hears it, through the same
+    /// `block_contact::fall` as a player's and a mob's landing. An item takes no fall damage.
+    /// Nothing is lent or built unless a Part of that block listens.
+    fn item_fall_on(&mut self, id: u32, on: horizon_core::position::BlockPos, distance: f64) {
+        let state = self.world.block(on.x, on.y, on.z);
+        if !horizon_client::block_contact::fall_listens(state) {
+            return;
+        }
+        let mut lent = horizon_client::health::LentLevel::take(&mut self.world);
+        let mut level = horizon_client::health::DamageLevel::lent(
+            &self.world,
+            self.pack.assets.registry,
+            &mut lent,
+            Some(world_items!(self)),
+            Some(&self.pack.block_registries),
+            &self.damage_hooks,
+        );
+        let contact = horizon_client::block_contact::Contact {
+            entity: id as i32,
+            kind: "minecraft:item",
+            state,
+            position: on,
+        };
+        let _ = horizon_client::block_contact::fall(&mut level, contact, distance, 0.0);
+        lent.give_back(&mut self.world);
+    }
     fn tick_dropped_items(&mut self, round: &mut native_ticks::TickRound) {
         let mut items = std::mem::take(&mut self.dropped);
         // ServerLevel.tick: only entities in entity-ticking chunks tick.
@@ -4692,7 +4720,7 @@ impl Game<'_> {
             );
             obstacles.near(item.bounds().inflate(reach), &mut nearby);
             let mut entered = Vec::new();
-            let alive = entity::tick_item(
+            let step = entity::tick_item_move(
                 item,
                 &self.world,
                 self.pack.assets.registry,
@@ -4702,6 +4730,18 @@ impl Game<'_> {
                 no_physics,
                 &nearby,
                 Some(self.border.geometry()),
+                &mut |splash| entered.push(splash),
+            );
+            if let Some((on, distance)) = step.landed() {
+                self.item_fall_on(item.id, on, distance);
+            }
+            let alive = entity::tick_item_settle(
+                item,
+                &self.world,
+                self.res.facts(),
+                &self.res.motion().fluids,
+                no_physics,
+                step,
                 &mut |splash| entered.push(splash),
             );
             // Entity.doWaterSplashEffect: the server plays the sound (broadcast

@@ -2,6 +2,7 @@
 use crate::items::ItemStack;
 use horizon_core::position::BlockPos;
 use horizon_world::native_load_context::LoopContext;
+use horizon_world::registry::BlockStateId;
 use std::sync::OnceLock;
 
 /// Client-library hooks, installed before any menu, entity or recipe is used.
@@ -20,6 +21,8 @@ pub struct NativeClientHooks {
     pub living_jump_power: fn(&LoopContext, u32, &str, &mut f32),
     pub living_speed: fn(&LoopContext, u32, &str, &mut f32),
     pub living_flying_speed: fn(&LoopContext, u32, &str, &mut f32),
+    pub block_jump_factor: fn(&LoopContext, BlockStateId, &mut f32),
+    pub block_speed_factor: fn(&LoopContext, BlockStateId, &mut f32),
     pub player_stays_on_ground_surface: fn(u32, &mut bool),
     pub ender_entity_teleport: fn(&LoopContext, u32, &str, [f64; 3], &mut [f64; 3], &mut bool),
     pub fluid_flow: fn(&str, BlockPos, &mut [f64; 3]),
@@ -168,6 +171,18 @@ pub(crate) fn living_speed(context: &LoopContext, entity: u32, kind: &str, speed
 pub(crate) fn living_flying_speed(context: &LoopContext, entity: u32, kind: &str, speed: &mut f32) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.living_flying_speed)(context, entity, kind, speed);
+    }
+}
+
+pub(crate) fn block_jump_factor(context: &LoopContext, state: BlockStateId, factor: &mut f32) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.block_jump_factor)(context, state, factor);
+    }
+}
+
+pub(crate) fn block_speed_factor(context: &LoopContext, state: BlockStateId, factor: &mut f32) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.block_speed_factor)(context, state, factor);
     }
 }
 

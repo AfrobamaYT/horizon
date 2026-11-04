@@ -23,6 +23,7 @@ pub struct MovementCoefficients {
 }
 #[derive(Clone, Copy, Debug)]
 pub struct MovementBlock {
+    pub state: BlockStateId,
     pub coefficients: MovementCoefficients,
     pub fence: bool,
     pub wall: bool,
@@ -119,6 +120,7 @@ impl<'r> MovementProperties<'r> {
             .map(|id| {
                 let name = &self.registry.state(BlockStateId(id as u32)).unwrap().name;
                 MovementBlock {
+                    state: BlockStateId(id as u32),
                     coefficients: self.definitions[name],
                     fence: tags.fences.contains(name),
                     wall: tags.walls.contains(name),
@@ -167,9 +169,27 @@ impl<E: std::error::Error + 'static> std::error::Error for MovementBlockError<E>
         })
     }
 }
+/// Edits to the factors a block gives the entities on it (`Block.getJumpFactor` and
+/// `getSpeedFactor`), made where the game reads them, before the entity combines the block at
+/// its feet with the one below.
+pub trait BlockFactorEdits {
+    fn jump(&self, state: BlockStateId, factor: f32) -> f32;
+    fn speed(&self, state: BlockStateId, factor: f32) -> f32;
+}
+/// No edits: every block gives its own factor.
+pub struct NoFactorEdits;
+impl BlockFactorEdits for NoFactorEdits {
+    fn jump(&self, _: BlockStateId, factor: f32) -> f32 {
+        factor
+    }
+    fn speed(&self, _: BlockStateId, factor: f32) -> f32 {
+        factor
+    }
+}
 pub struct RegistryMovementWorld<'a, W> {
     pub properties: &'a BoundMovementProperties,
     pub world: &'a mut W,
+    pub edits: &'a dyn BlockFactorEdits,
 }
 impl<W: MovementBlockProvider> MovementBlockWorld for RegistryMovementWorld<'_, W> {
     type Error = MovementBlockError<W::Error>;
@@ -197,9 +217,9 @@ impl<W: MovementBlockProvider> MovementBlockWorld for RegistryMovementWorld<'_, 
         Ok(s.bubble_column)
     }
     fn jump_factor(&mut self, s: MovementBlock) -> Result<f32, Self::Error> {
-        Ok(s.coefficients.jump_factor)
+        Ok(self.edits.jump(s.state, s.coefficients.jump_factor))
     }
     fn speed_factor(&mut self, s: MovementBlock) -> Result<f32, Self::Error> {
-        Ok(s.coefficients.speed_factor)
+        Ok(self.edits.speed(s.state, s.coefficients.speed_factor))
     }
 }

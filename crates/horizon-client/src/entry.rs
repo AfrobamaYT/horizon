@@ -199,6 +199,14 @@ pub fn main_with(
             let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_flying_speed(&context, entity, kind, speed);
         },
+        block_jump_factor: |context, state, factor| {
+            let context = mod_api::OwningLoop::new(context);
+            mod_api::dispatch_block_jump_factor(&context, state, factor);
+        },
+        block_speed_factor: |context, state, factor| {
+            let context = mod_api::OwningLoop::new(context);
+            mod_api::dispatch_block_speed_factor(&context, state, factor);
+        },
         player_stays_on_ground_surface: |entity, staying| {
             mod_api::dispatch_player_stays_on_ground_surface(entity, staying);
         },

@@ -4374,6 +4374,12 @@ pub(crate) mod tests {
                 living_flying_speed: |context, _, _, speed| {
                     *speed += context.setting("rules_mod", "stack").map_or(0.0, |_| 3.0);
                 },
+                block_jump_factor: |context, _, factor| {
+                    *factor += context.setting("rules_mod", "stack").map_or(0.0, |_| 4.0);
+                },
+                block_speed_factor: |context, _, factor| {
+                    *factor += context.setting("rules_mod", "stack").map_or(0.0, |_| 5.0);
+                },
                 player_stays_on_ground_surface: |_, _| {},
                 ender_entity_teleport: |context, _, _, _, target, cancel| {
                     if context.setting("rules_mod", "stack").is_some() {
@@ -4473,6 +4479,15 @@ pub(crate) mod tests {
         };
         assert_eq!(values(&before), (0.5, 0.1, 0.02));
         assert_eq!(values(&after), (1.5, 2.1, 3.02));
+        // The block factors a part edits read it too, and are as the block's own without it.
+        let factors = |context: &LoopContext| {
+            use horizon_world::movement_properties::BlockFactorEdits;
+            let edits = crate::motion::ModBlockFactors(context);
+            let state = horizon_world::registry::BlockStateId(0);
+            (edits.jump(state, 0.5), edits.speed(state, 0.4))
+        };
+        assert_eq!(factors(&before), (0.5, 0.4));
+        assert_eq!(factors(&after), (4.5, 5.4));
         // Fall, trample, jump and the ender teleport read it as well.
         let landing = |context: &LoopContext| {
             let (mut distance, mut multiplier, mut cancel) = (3.0, 1.0, false);

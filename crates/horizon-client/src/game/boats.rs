@@ -766,6 +766,7 @@ impl Game<'_> {
         let factor = crate::motion::block_speed_factor_at(
             &self.world,
             &self.motion.blocks,
+            &self.loop_context,
             b.position,
             None,
         );
