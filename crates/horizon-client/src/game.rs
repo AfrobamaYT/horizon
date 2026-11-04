@@ -13512,6 +13512,7 @@ impl Game<'_> {
         // GameRenderer.resetData (Minecraft.clearClientLevel).
         self.item_activation.reset();
         self.kept_block_entities.get_mut().clear();
+        self.mod_view_distances.take();
         self.bosses = Default::default();
         self.streaming.paused = true;
         self.world = World::new(self.res.facts().air, 0);
