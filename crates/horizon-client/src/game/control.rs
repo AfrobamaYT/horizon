@@ -625,6 +625,17 @@ impl Game<'_> {
                     self.screen,
                     Screen::Chat | Screen::Options | Screen::CommandBlock | Screen::BlockEditor
                 );
+                // ScreenEvent.KeyPressed.Post: no screen arm took the press; a
+                // cancel keeps it from the key bindings.
+                if !typing
+                    && arg(2)? != "up"
+                    && self.screen_key_post(physical, true, arg(2)? == "repeat")
+                {
+                    if arg(2)? == "tap" {
+                        self.physical_keys.remove(&physical);
+                    }
+                    return ok();
+                }
                 let key = if typing && arg(2)? != "up" {
                     key
                 } else {
