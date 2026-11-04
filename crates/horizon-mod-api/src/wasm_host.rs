@@ -53,14 +53,20 @@ impl std::fmt::Display for LoadError {
 
 impl std::error::Error for LoadError {}
 
-/// Run budgets, in wasmtime fuel units (about one per instruction).
+/// How long a call into a group may run, and what it may hold. A call past its limit traps,
+/// which stops its group.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct Budgets {
-    /// What one hook or part call may spend.
-    pub call: u64,
-    /// What a group's start-up (its constructors and `register`) may spend.
-    pub init: u64,
+    /// One hook or part call, by wall clock (epoch interruption). The limit is time, so a slow
+    /// machine reaches it sooner: it is far above what a call should take.
+    pub call: Duration,
+    /// A group's start-up (its constructors and `register`) and a call carrying a load-phase
+    /// context (registration, a data load, a resource reload), which read and parse data.
+    pub load: Duration,
+    /// Count instructions instead of time, for deterministic and debug runs: a mod then stops
+    /// at the same place on every machine. Costs about 15–25% per call; off by default.
+    pub fuel: Option<Fuel>,
     /// The most memory one group may grow to, in bytes.
     pub memory: usize,
     /// The most bytes of new names (a `&'static str` the game keeps for good) one group may
@@ -68,11 +74,51 @@ pub struct Budgets {
     pub names: usize,
 }
 
-impl Default for Budgets {
+/// Instruction budgets, in wasmtime fuel units (about one per instruction), for
+/// [`Budgets::fuel`].
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct Fuel {
+    /// One hook or part call.
+    pub call: u64,
+    /// A start-up or a load-phase call.
+    pub load: u64,
+}
+
+impl Default for Fuel {
     fn default() -> Self {
         Self {
             call: 50_000_000,
-            init: 4_000_000_000,
+            load: 4_000_000_000,
+        }
+    }
+}
+
+/// How often the engine's epoch advances: the resolution of [`Budgets`]' time limits.
+pub const EPOCH: Duration = Duration::from_millis(1);
+
+impl Budgets {
+    /// Arm `store` for one call, a load-phase one when `load`: its fuel, or its deadline in
+    /// epochs from now.
+    fn arm(&self, store: &mut Store<State>, load: bool) {
+        match self.fuel {
+            Some(fuel) => {
+                let _ = store.set_fuel(if load { fuel.load } else { fuel.call });
+            }
+            None => {
+                let limit = if load { self.load } else { self.call };
+                store.set_epoch_deadline((limit.as_nanos() / EPOCH.as_nanos()).max(1) as u64);
+            }
+        }
+    }
+}
+
+impl Default for Budgets {
+    fn default() -> Self {
+        Self {
+            call: Duration::from_millis(100),
+            load: Duration::from_secs(30),
+            fuel: None,
             memory: 256 << 20,
             names: 1 << 20,
         }
@@ -382,11 +428,12 @@ impl NoAnswer for crate::Flow {
 }
 
 impl Running {
-    /// Runs one call with `frame`'s hosts, charging its fuel to this mod. A refused call or a
-    /// trap answers `no_answer()`; a trap stops the whole group.
+    /// Runs one call with `frame`'s hosts, within its group's limit for a call, or for a load
+    /// when `load`. A refused call or a trap answers `no_answer()`; a trap stops the whole group.
     fn call_or<T>(
         self: &Arc<Self>,
         mut frame: Frame,
+        load: bool,
         no_answer: impl FnOnce() -> T,
         f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
     ) -> T {
@@ -398,8 +445,7 @@ impl Running {
             }
         };
         let store = &mut *entered.store;
-        let budget = self.group.budgets.call;
-        let _ = store.set_fuel(budget);
+        self.group.budgets.arm(store, load);
         let previous = CURRENT.replace(&mut frame);
         let caller = CALLER.replace(Some(self.clone()));
         let released =
@@ -443,10 +489,11 @@ impl WasmMod {
     fn call_or<T>(
         &self,
         frame: Frame,
+        load: bool,
         no_answer: impl FnOnce() -> T,
         f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
     ) -> T {
-        self.module.call_or(frame, no_answer, f)
+        self.module.call_or(frame, load, no_answer, f)
     }
 }
 
@@ -454,10 +501,11 @@ impl WasmHandler {
     fn call_or<T>(
         &self,
         frame: Frame,
+        load: bool,
         no_answer: impl FnOnce() -> T,
         f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
     ) -> T {
-        self.module.call_or(frame, no_answer, f)
+        self.module.call_or(frame, load, no_answer, f)
     }
 }
 
@@ -707,7 +755,7 @@ pub fn instantiate(
         .build();
     let mut store = Store::new(engine, State { limits });
     store.limiter(|state| &mut state.limits);
-    let _ = store.set_fuel(budgets.init);
+    budgets.arm(&mut store, true);
     let instance: Instance = linker
         .instantiate(&mut store, component)
         .map_err(refused_import)?;
@@ -725,7 +773,7 @@ pub fn instantiate(
             id,
             released: Mutex::new(Vec::new()),
         });
-        let names = module.call_or(Frame::default(), Vec::new, |m, store| {
+        let names = module.call_or(Frame::default(), true, Vec::new, |m, store| {
             m.horizon_mod_api_hooks().call_subscribed(store)
         });
         let hooks = WasmMod {
