@@ -18,7 +18,7 @@ use horizon_world::{
     block_landing::LandingEntityKind,
     entity_fluid::{CurrentAccumulator, CurrentTarget},
     fluid::{FluidKind, FluidState},
-    fluid_flow::{FluidFlowWorld, flow_at},
+    fluid_flow::FluidFlowWorld,
     movement_restitution::{RestitutionInput, RestitutionWorld, restitute_movement},
     registry::BlockStateId,
 };
@@ -247,7 +247,8 @@ impl MobWorld<'_> {
                         continue;
                     }
                     current.height = current.height.max(surface - base_y);
-                    let mut flow = flow_at(&mut scene, state, p).unwrap_or(Vec3::ZERO);
+                    let mut flow =
+                        crate::motion::pushing_flow(&mut scene, state, p).unwrap_or(Vec3::ZERO);
                     if current.height < 0.4 {
                         flow = flow.scale(current.height);
                     }

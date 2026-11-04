@@ -538,6 +538,7 @@ impl Game<'_> {
             attacker: None,
             from: Some(b.at),
         };
+        let bolt = b.id;
         let mut struck = Vec::new();
         let mut powered = Vec::new();
         let peaceful = self.ui.difficulty == 0;
@@ -560,6 +561,9 @@ impl Game<'_> {
                 _ => None,
             };
             b.hit.push(self.mobs[i].id);
+            if !self.lightning_may_strike(self.mobs[i].id, bolt) {
+                continue;
+            }
             if let Some(outcome) = outcome {
                 let old = self.mobs[i].clone();
                 let params = horizon_client::mobs::conversion::Params {
@@ -627,7 +631,8 @@ impl Game<'_> {
             if strike.intersects(Aabb::new(
                 Vec3::new(lo[0], lo[1], lo[2]),
                 Vec3::new(hi[0], hi[1], hi[2]),
-            )) {
+            )) && self.lightning_may_strike(self.cushions[i].id, bolt)
+            {
                 let before = self.dropped.len();
                 self.break_cushion(i, false);
                 b.spared.extend(self.dropped[before..].iter().map(|e| e.id));
@@ -649,6 +654,9 @@ impl Game<'_> {
                 continue;
             }
             left -= 1;
+            if !self.lightning_may_strike(with_entity!(self, h, e => e.id()), bolt) {
+                continue;
+            }
             match h {
                 EntityHandle::Boat(i) => {
                     self.hurt_boat(i, 5.0, false);
@@ -665,6 +673,7 @@ impl Game<'_> {
         let strike_players = move |g: &mut Self| {
             if let Some(p) = g.player.as_ref().map(|p| p.position)
                 && meets([p.x, p.y, p.z], 0.3, 1.8)
+                && g.lightning_may_strike(g.own_entity_id() as u32, bolt)
             {
                 if let Some(p) = g.player.as_mut() {
                     p.fire_ticks += 1;
@@ -692,6 +701,10 @@ impl Game<'_> {
             left -= 1;
             let e = &self.dropped[i];
             b.hit_items.push(e.id);
+            if !self.lightning_may_strike(e.id, bolt) {
+                continue;
+            }
+            let e = &self.dropped[i];
             if !(e.stack.item.contains("netherite") || (e.age < 20 && b.spared.contains(&e.id))) {
                 self.dropped.remove(i);
             }
@@ -719,6 +732,29 @@ impl Game<'_> {
                 seed: b.seed,
             })
             .collect()
+    }
+}
+
+impl Game<'_> {
+    /// `EntityStruckByLightningEvent`, before `thunderHit` on entity `entity`
+    /// from bolt `bolt`: false when a mod cancelled the hit. The entity still
+    /// counts as struck (`hitEntities`), as in NeoForge.
+    fn lightning_may_strike(&mut self, entity: u32, bolt: u32) -> bool {
+        if !self.native_authoritative()
+            || !mod_api::__private::listened(mod_api::HookId::EntityStruckByLightning)
+        {
+            return true;
+        }
+        let Some(epoch) = self.native_lifecycle.epoch() else {
+            return true;
+        };
+        let mut cancel = false;
+        self.native_entity_struck_by_lightning(
+            mod_api::EntityRef::new(epoch, entity),
+            mod_api::EntityRef::new(epoch, bolt),
+            &mut cancel,
+        );
+        !cancel
     }
 }
 
@@ -1046,5 +1082,83 @@ mod tests {
             assert_eq!(zombified.is_baby(), baby);
             assert_eq!(zombified.yaw, 45.0);
         }
+    }
+
+    /// Spares the entity whose id it holds, and logs each (entity, bolt) asked.
+    struct Spare(u32, Arc<std::sync::Mutex<Vec<(u32, u32)>>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Spare {
+        fn entity_struck_by_lightning(
+            &self,
+            _: &mut dyn ServerHost,
+            e: &mut mod_api::EntityStruckByLightningEvent,
+        ) -> mod_api::Flow {
+            self.1.lock().unwrap().push((e.entity.id(), e.bolt.id()));
+            if e.entity.id() == self.0 {
+                mod_api::Flow::Cancel
+            } else {
+                mod_api::Flow::Continue
+            }
+        }
+    }
+
+    /// `EntityStruckByLightningEvent`: each struck pig is asked with the bolt;
+    /// the spared one stays a pig, the other becomes a zombified piglin, and
+    /// both still count as hit.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_mod_spares_one_pig_from_the_bolt() {
+        let heard = Arc::default();
+        let (spared, struck) = (900, 901);
+        let mods = vec![mod_api::ModEntry::new(
+            "spare",
+            Box::new(Spare(spared, Arc::clone(&heard))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.ui.difficulty = 2;
+                let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                for (id, x) in [(spared, 0.0), (struck, 1.0)] {
+                    game.mobs
+                        .push(Mob::new(id, pig.clone(), Vec3::new(x, 64.0, 0.0), 0.0));
+                }
+                let mut bolt = Bolt {
+                    id: 77,
+                    at: [0.5, 64.0, 0.5],
+                    life: 0,
+                    flashes: 0,
+                    seed: 0,
+                    visual_only: false,
+                    converted: Vec::new(),
+                    hit: Vec::new(),
+                    hit_items: Vec::new(),
+                    spared: Vec::new(),
+                    fires: 0,
+                    cause: None,
+                };
+                game.thunder_hit(&mut bolt);
+                let kind = |game: &Game<'_>, id| {
+                    game.mobs
+                        .iter()
+                        .find(|m| m.id == id && !m.removed)
+                        .map(|m| m.species())
+                };
+                assert_eq!(kind(game, spared), Some(Species::Pig));
+                assert_eq!(kind(game, struck), None, "converted");
+                let spared_pig = game
+                    .mobs
+                    .iter()
+                    .find(|m| m.id == spared && !m.removed)
+                    .unwrap();
+                assert!(spared_pig.fire_ticks <= 0, "no fire");
+                let mut heard = heard.lock().unwrap().clone();
+                heard.sort();
+                assert_eq!(heard, [(spared, 77), (struck, 77)]);
+                bolt.hit.sort();
+                assert_eq!(bolt.hit, [spared, struck]);
+            });
+        });
     }
 }
