@@ -946,8 +946,13 @@ impl Game<'_> {
                 None
             },
             mob_hooks: (self.native_authoritative()
-                && (mod_api::__private::listened(mod_api::HookId::EndermanAnger)
-                    || mod_api::__private::listened(mod_api::HookId::EntityMobGriefing)))
+                && [
+                    mod_api::HookId::EndermanAnger,
+                    mod_api::HookId::EntityMobGriefing,
+                    mod_api::HookId::LivingVisibility,
+                ]
+                .into_iter()
+                .any(mod_api::__private::listened))
             .then_some(self as &dyn horizon_client::mobs::MobHooks),
             asks_animal_tame: self.remote.is_none()
                 && mod_api::__private::listened(mod_api::HookId::AnimalTame),
@@ -8025,6 +8030,29 @@ impl horizon_client::mobs::MobHooks for Game<'_> {
     fn can_grief(&self, mob: u32, rule: bool) -> bool {
         self.entity_grief(mob, rule)
     }
+    fn grief_hooked(&self) -> bool {
+        Game::grief_hooked(self)
+    }
+    fn living_visibility(&self, player: &PlayerView, looking: u32, visibility: f64) -> f64 {
+        if !mod_api::__private::listened(mod_api::HookId::LivingVisibility) {
+            return visibility;
+        }
+        let Some(epoch) = self.native_lifecycle.epoch() else {
+            return visibility;
+        };
+        let uuid = horizon_client::lan::playerdata::ints_uuid(player.uuid);
+        let Some(player) = self.native_player_ref(uuid) else {
+            return visibility;
+        };
+        let mut visibility = visibility;
+        self.native_living_visibility(
+            mod_api::LivingRef::new(player.entity()),
+            Some(mod_api::EntityRef::new(epoch, looking)),
+            &mut visibility,
+        );
+        // CommonHooks.getEntityVisibilityMultiplier: never below 0.
+        visibility.max(0.0)
+    }
 }
 
 impl Game<'_> {
@@ -8108,6 +8136,57 @@ mod mob_griefing_tests {
                     asked,
                     [(denied, true), (other, true), (denied, true), (other, true)]
                 );
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod living_visibility_tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use super::super::native_item_places::tests::{guest, open_to_lan};
+    use std::sync::{Arc, Mutex};
+
+    /// Halves the player's visibility, and logs what it was asked.
+    struct Halve(Arc<Mutex<Vec<(u32, Option<u32>, f64)>>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Halve {
+        fn living_visibility(
+            &self,
+            _: &dyn mod_api::Host,
+            event: &mut mod_api::LivingVisibilityEvent,
+        ) {
+            let looking = event.looking.map(|e| e.id());
+            self.0
+                .lock()
+                .unwrap()
+                .push((event.entity.entity().id(), looking, event.visibility));
+            event.visibility *= 0.5;
+        }
+    }
+
+    /// `LivingVisibilityEvent` for a guest a mob targets: the mod gets the
+    /// guest, the mob and vanilla's percent, and its answer is the percent.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_mod_halves_a_guests_visibility() {
+        let heard = Arc::default();
+        let mods = vec![mod_api::ModEntry::new(
+            "halve",
+            Box::new(Halve(Arc::clone(&heard))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                open_to_lan(game);
+                let mut seen = guest(5);
+                seen.loaded = true;
+                game.lan.as_mut().unwrap().hub.guests.push(seen);
+                let view = game.lan_guest_views()[0].1.clone();
+                let world = game.mob_world_base(&[]);
+                assert!(world.mob_hooks.is_some(), "asked only while a mod listens");
+                assert_eq!(world.player_visibility(&view, 900, 0.8), 0.4);
+                assert_eq!(*heard.lock().unwrap(), [(24, Some(900), 0.8)]);
             });
         });
     }
