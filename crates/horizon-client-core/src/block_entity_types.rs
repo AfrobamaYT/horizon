@@ -30,8 +30,9 @@ impl BlockEntityTypes {
     }
 
     /// Whether a mod declared the block entity type `id`.
+    /// Wire keys include vanilla types; native declarations cannot use `minecraft:`.
     pub fn declares(&self, id: &str) -> bool {
-        self.blocks.values().any(|declared| declared == id)
+        !id.starts_with("minecraft:") && self.keys.contains(id)
     }
 }
 
@@ -68,6 +69,35 @@ fn freeze(slot: &OnceLock<BlockEntityTypes>, types: BlockEntityTypes) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn declaration_lookup_keeps_vanilla_types_and_block_ids_out() {
+        let types = BlockEntityTypes::new(
+            [
+                ("test:press".into(), "test:machine".into()),
+                ("test:mill".into(), "test:machine".into()),
+                ("test:casing".into(), "test:single".into()),
+            ]
+            .into(),
+            vec![
+                "minecraft:chest".into(),
+                "test:machine".into(),
+                "test:single".into(),
+            ],
+        );
+        for (id, declared) in [
+            ("test:machine", true),
+            ("test:single", true),
+            ("minecraft:chest", false),
+            ("test:press", false),
+            ("test:mill", false),
+            ("test:casing", false),
+            ("other:machine", false),
+            ("", false),
+        ] {
+            assert_eq!(types.declares(id), declared, "{id}");
+        }
+    }
 
     #[test]
     fn shared_membership_and_wire_ids_are_frozen_together() {
