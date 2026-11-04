@@ -6682,13 +6682,13 @@ impl Game<'_> {
     /// `canceled` to keep the block: nothing is destroyed or dropped, and a
     /// guest sees it back. Server-side, for every player of the world (the
     /// helpers read the acting one).
-    pub(super) fn native_destroy_block(
+    pub(super) fn native_break_block(
         &mut self,
         pos: [i32; 3],
         state: BlockStateId,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_destroy_block(self, pos, state, canceled);
+        mod_api::dispatch_break_block(self, pos, state, canceled);
     }
     /// `BlockEvent.EntityPlaceEvent` (and `EntityMultiPlaceEvent`, which
     /// extends it): `placer` is about to set the block `state` at `pos`
