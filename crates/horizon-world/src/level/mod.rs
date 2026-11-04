@@ -236,6 +236,10 @@ pub enum EntityQuery {
     Arrows,
 }
 
+/// The UUID of a player excluded from a level event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LevelEventPlayer(pub u128);
+
 /// Side effects reported to the caller, in vanilla call order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum LevelEvent {
