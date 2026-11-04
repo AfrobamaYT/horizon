@@ -417,9 +417,6 @@ The installed list has a **Native build of {instance}** row for the instance pic
   `native-mods.json` differ from those turned on, by id and version) or **Up to date**, with **Build** for the first
   two;
 - For a native build, "Plays native-…, built on Horizon {version}" (the `base` of its `native-mods.json`);
-- **Rebuild on Horizon {version}** when a newer release or Nightly is installed (`native_mods::update_for`). Build
-  stays on the Horizon the instance plays; only that button moves it, and its warning says the build starts from scratch
-  and takes longer.
 
 The instance list on the left shows such an instance as "Native build · Nightly 10-28" (its base). The launcher names
 the mods, warns in red, and builds only from "I trust these mods: build"; the row shows each step and the error if

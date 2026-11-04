@@ -168,9 +168,11 @@ impl Game<'_> {
     }
 
     /// A mod's chat line or command (`/` first), sent as `send_chat` sends
-    /// it: no `client_chat` event (vanilla's `ClientChatEvent` comes only
-    /// from ChatScreen) and no chat history. An error when the player isn't
-    /// in a server's play state or the Chat option blocks the message.
+    /// it (ClientPacketListener.sendChat / sendCommand), to any server: no
+    /// chat history, and no client chat event (vanilla's `ClientChatEvent`
+    /// comes only from ChatScreen). An error when the player isn't in a
+    /// server's play state or the Chat option blocks the message. API
+    /// @API:send_chat@.
     pub(super) fn native_send_chat(&mut self, message: &str) -> Result<(), String> {
         let Some(remote) = self.remote.as_ref() else {
             return Err("not connected to a server".into());
