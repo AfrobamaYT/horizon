@@ -429,7 +429,7 @@ mod tests {
         impl BlockEntityPart for Crate {
             fn block_entity(
                 &self,
-                _: HostSide<'_>,
+                _: LevelSide<'_>,
                 _: &mut BlockEntityEvent<'_>,
             ) -> Option<Compound> {
                 Some(Compound::from([("Amount".into(), Tag::Int(0))]))
