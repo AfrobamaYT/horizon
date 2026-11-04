@@ -132,7 +132,7 @@ pub use crate::biome::{BiomeColors, SpawnEntry};
 pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
-pub use crate::crafting::{Ingredient, Recipe, RecipePropertyAddition};
+pub use crate::crafting::{CraftResult, Ingredient, Recipe, RecipePropertyAddition};
 pub use crate::extras::Corner;
 pub use crate::extras_hud::Corners;
 pub use crate::first_person::Hand;
@@ -149,7 +149,7 @@ pub use crate::health::DamageContainer;
 pub use crate::health::{HurtSource, Reduction, ShieldBlock, Victim};
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::item_tooltip::TooltipDisplay;
-pub use crate::menu::{LogicalSide, StackedOnOther};
+pub use crate::menu::{DragKind, LogicalSide, MenuClick, MouseButton, StackedOnOther, SwapWith};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
 pub use crate::mobs::PathComputationType;
@@ -213,7 +213,8 @@ pub use horizon_world::{
         AttachmentType, AttachmentValue, AttachmentWrite, Holder,
     },
     level::{
-        BlockId, Dimension as LevelDimension, LandingWrite, NeighbourUpdate, PlacementContext,
+        BlockId, ConnectionKind, Dimension as LevelDimension, LandingWrite, NeighbourUpdate,
+        PlacementContext,
     },
     loot::{LootStack, NativeLootContext},
     registry::BlockStateId,
@@ -1019,6 +1020,10 @@ pub struct NativeServerPlayer {
     /// (`living_incoming_damage`, `living_knockback`) give for the player; 0 when not known.
     /// API @API:server_player_entity_id@.
     pub entity_id: i32,
+    /// The IP address the player connects from, without the port (behind
+    /// a Velocity proxy, the address the proxy forwards; empty when not
+    /// known).
+    pub address: String,
 }
 
 /// A command a native mod adds, as one usage: words, then arguments
@@ -2604,6 +2609,19 @@ pub enum NativeSpawnCheck {
     Fail,
 }
 
+/// What a mod answers a despawn check (`MobDespawnEvent.Result`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeDespawn {
+    /// `ALLOW`: the mob despawns now.
+    Allow,
+    /// `DEFAULT`: vanilla's `Mob.checkDespawn` decides.
+    #[default]
+    Default,
+    /// `DENY`: the mob does not despawn.
+    Deny,
+}
+
 /// Block shape used by an empty-context level ray.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2855,6 +2873,20 @@ impl BossBarOverlay {
 
 /// One player's open menu, invalidated on close, replacement or reconnect.
 /// Client menu handles are also invalidated on respawn.
+///
+/// Clicks require a mutable client host, not a server or a read-only hook:
+/// ```compile_fail
+/// use mod_api::{MenuRef, ServerHost};
+/// fn wrong(menu: MenuRef, host: &mut dyn ServerHost) {
+///     menu.click(host, &[]);
+/// }
+/// ```
+/// ```compile_fail
+/// use mod_api::{MenuRef, ClientHost};
+/// fn wrong(menu: MenuRef, host: &dyn ClientHost) {
+///     menu.click(host, &[]);
+/// }
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MenuRef {
@@ -3402,6 +3434,21 @@ pub enum PlayerAction {
         /// The hand whose item is used.
         hand: Hand,
     },
+    /// Attack `target` with the main hand (`ServerGamePacketListenerImpl.handleInteract`'s
+    /// ATTACK, then `Player.attack`): a player, a mob or another entity, or a fireball, a wind
+    /// charge or a shulker bullet turned back. Mobs don't take the fake as the player to answer.
+    Attack {
+        /// What is hit, in the fake's level.
+        target: EntityRef,
+    },
+    /// Break the block at `pos` at once (`ServerPlayerGameMode.destroyBlock`), with the game
+    /// mode's and the held tool's rules, the tool's wear and the drops, and no digging time:
+    /// a mod that digs over time counts the progress itself. Outside creative, a block no
+    /// digging breaks (destroy time -1, such as bedrock) stays.
+    BreakBlock {
+        /// The block broken.
+        pos: [i32; 3],
+    },
 }
 
 /// Why a fake player's `perform_action` did nothing at all: it was refused before any of the
@@ -3415,12 +3462,16 @@ pub enum ActionRefused {
     Stale,
     /// Another player's turn, an open transaction, or another `perform_action` is running.
     Busy,
-    /// The block is out of the player's reach, or the hit isn't on it
-    /// (`ServerGamePacketListenerImpl.handleUseItemOn`'s checks).
+    /// The block or entity is out of the player's reach, or the hit isn't on the block
+    /// (`ServerGamePacketListenerImpl`'s `handleUseItemOn`, `handleInteract` and
+    /// `handleBlockBreakAction` checks).
     OutOfReach,
-    /// The block is above or below the world, under spawn protection or outside the world
-    /// border (`ServerLevel.mayInteract`): nothing is used there.
+    /// The block or entity is above or below the world, under spawn protection or outside the
+    /// world border (`ServerLevel.mayInteract`): nothing is done there.
     Protected,
+    /// The attack's target isn't an entity in the fake's level, or is the fake itself
+    /// (`handleInteract`'s "Attempting to attack an invalid entity").
+    InvalidTarget,
 }
 
 /// An error a handle method answers when its host has no game behind it (a mod's test double):
@@ -3487,6 +3538,36 @@ impl BlockHit {
     }
 }
 
+/// A vector of doubles, as vanilla's `Vec3`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+// exhaustive: a vector is its three components, as vanilla's `Vec3`
+pub struct Vec3 {
+    /// East (+) and west (-).
+    pub x: f64,
+    /// Up (+) and down (-).
+    pub y: f64,
+    /// South (+) and north (-).
+    pub z: f64,
+}
+impl Vec3 {
+    /// The zero vector (`Vec3.ZERO`).
+    pub const ZERO: Self = Self::new(0.0, 0.0, 0.0);
+    /// New.
+    pub const fn new(x: f64, y: f64, z: f64) -> Self {
+        Self { x, y, z }
+    }
+}
+impl From<glam::DVec3> for Vec3 {
+    fn from(v: glam::DVec3) -> Self {
+        Self::new(v.x, v.y, v.z)
+    }
+}
+impl From<Vec3> for glam::DVec3 {
+    fn from(v: Vec3) -> Self {
+        Self::new(v.x, v.y, v.z)
+    }
+}
+
 /// The game's read-only native backend, as [`Host::backend`] hands it out.
 ///
 /// The backend is reached only through [`Host::backend`] and
@@ -3529,6 +3610,26 @@ pub struct BackendRef<'a> {
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BackendMutRef<'a> {
     inner: &'a mut dyn BackendMut,
+}
+
+/// The opaque client-write backend, with no access to server writes.
+///
+/// Only the API can construct or open this value.
+// hidden: a game-side type, not part of the mod surface
+#[doc(hidden)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct ClientBackendMutRef<'a> {
+    inner: &'a mut dyn ClientBackendMut,
+}
+
+impl<'a> ClientBackendMutRef<'a> {
+    pub(crate) fn of(inner: &'a mut dyn ClientBackendMut) -> Self {
+        Self { inner }
+    }
+
+    fn open(self) -> &'a mut dyn ClientBackendMut {
+        self.inner
+    }
 }
 
 impl<'a> BackendRef<'a> {
@@ -3635,6 +3736,12 @@ impl LevelSide<'_> {
 /// caller answers its typed refusal instead of running on.
 pub(crate) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&mut dyn BackendMut> {
     host.backend_mut().map(|wrapper| wrapper.open())
+}
+
+pub(crate) fn client_backend_mut_of(
+    host: &mut dyn ClientHost,
+) -> Option<&mut dyn ClientBackendMut> {
+    host.client_backend_mut().map(|wrapper| wrapper.open())
 }
 
 /// What used bone meal on a block (`BonemealSource`), for `bonemeal`.
@@ -3804,7 +3911,7 @@ mod generated_host {
 }
 // hidden: a game-side re-export, not part of the mod surface
 #[doc(hidden)]
-pub use generated_host::{Backend, BackendMut};
+pub use generated_host::{Backend, BackendMut, ClientBackendMut};
 pub use generated_host::{
     BlockEntityDrawContext, ClientHost, DrawContext, Host, HostSide, LevelSide, ServerHost,
 };
@@ -4106,7 +4213,9 @@ pub use block_states::{BlockStates, HostBlockStates};
 mod energy_capability;
 pub use energy_capability::{ENERGY, EnergyHandler, ITEM_ENERGY, move_energy};
 mod fluid_capability;
-pub use fluid_capability::{FLUIDS, FluidResource, FluidStack, ITEM_FLUIDS};
+pub use fluid_capability::{
+    FLUIDS, FluidIngredient, FluidResource, FluidStack, ITEM_FLUIDS, SizedFluidIngredient,
+};
 mod item_place;
 mod menu_slot;
 pub use menu_slot::MenuSlotBacking;
@@ -4118,6 +4227,8 @@ pub use resource::{
     ResourceHandler, move_resources,
 };
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
+mod custom_spawners;
+pub use custom_spawners::{CustomSpawners, SpawnerEntry, SpawnerError, SpawnerKey, SpawnerKind};
 mod block_entity_type;
 pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;
@@ -4207,6 +4318,22 @@ mod tests {
     use std::sync::Mutex;
 
     #[test]
+    fn client_menu_click_refuses_a_host_without_its_backend() {
+        struct Empty;
+        impl Host for Empty {}
+        impl ClientHost for Empty {}
+        let player = __private::game::player_ref(EntityRef::new(NativeWorldEpoch::new(1), 7), 42);
+        let menu = __private::game::menu_ref(player, 0, 1);
+        assert!(!menu.click(
+            &mut Empty,
+            &[MenuClick::Pickup {
+                slot: Some(0),
+                button: MouseButton::Left,
+            }]
+        ));
+    }
+
+    #[test]
     fn level_family_accepts_empty_doubles() {
         struct Empty;
         impl LevelHost for Empty {}
@@ -4289,6 +4416,7 @@ mod tests {
                 yaw: 0.0,
                 pitch: 0.0,
                 entity_id: 0,
+                address: String::new(),
             })
         }
         fn action_bar(&mut self, _uuid: u128, line: Text) -> bool {
@@ -5381,6 +5509,7 @@ pub(crate) mod built {
         pub yaw: f32,
         pub pitch: f32,
         pub entity_id: i32,
+        pub address: String,
     }
     impl From<NativeServerPlayer> for super::NativeServerPlayer {
         fn from(v: NativeServerPlayer) -> Self {
@@ -5395,6 +5524,7 @@ pub(crate) mod built {
                 yaw,
                 pitch,
                 entity_id,
+                address,
             } = v;
             Self {
                 uuid,
@@ -5407,6 +5537,7 @@ pub(crate) mod built {
                 yaw,
                 pitch,
                 entity_id,
+                address,
             }
         }
     }

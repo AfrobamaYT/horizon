@@ -3,6 +3,7 @@
 //! recheck, turning into statues, and the hand-over, waxing, scraping and
 //! shearing interactions.
 use super::Game;
+use super::level_sounds::LevelSound;
 use horizon_client::{
     items::ItemStack,
     mobs::{
@@ -12,6 +13,7 @@ use horizon_client::{
 };
 use horizon_core::random::RandomSource;
 use horizon_world::chunk::BlockState;
+use mod_api::SoundSource;
 
 /// `ContainerOpenersCounter.CHECK_TICK_DELAY`.
 const RECHECK_TICKS: i64 = 5;
@@ -319,8 +321,10 @@ impl Game<'_> {
         if name == "minecraft:shears" && self.golem_shearable(index) {
             // CopperGolem.shear: the sound, the antenna slot emptied (an
             // unequip) and the flower dropped 1.5 up.
-            self.audio
-                .play("minecraft:entity.copper_golem.shear", Some(at), 1.0, 1.0);
+            // level.playSound(null, this, COPPER_GOLEM_SHEAR, PLAYERS, 1, 1).
+            let shear = LevelSound::new("minecraft:entity.copper_golem.shear", at, 1.0, 1.0)
+                .in_source(SoundSource::Players);
+            self.play_bound_sound(shear, self.mobs[index].id, None);
             let antenna = self.mobs[index].saddle_item();
             self.mobs[index].set_saddle(None);
             let id = self.mobs[index].id;
@@ -347,8 +351,10 @@ impl Game<'_> {
         }
         if is_axe && waxed {
             self.mobs[index].extra.vector[0] = -1.0;
-            self.audio
-                .play("minecraft:item.axe.scrape", Some(at), 1.0, 1.0);
+            // level.playSound(null, this, AXE_SCRAPE, getSoundSource(), 1, 1).
+            let scrape = LevelSound::new("minecraft:item.axe.scrape", at, 1.0, 1.0)
+                .in_source(SoundSource::Neutral);
+            self.play_bound_sound(scrape, self.mobs[index].id, None);
             self.level_event_at(3004, block, 0);
             self.damage_held_tool();
             return true;
@@ -357,9 +363,11 @@ impl Game<'_> {
             let m = &mut self.mobs[index];
             m.extra.vector[0] = -1.0;
             m.extra.variant = horizon_client::mobs::copper_golem::weather_previous(m.extra.variant);
-            self.persist.force_meta(m.id, 16);
-            self.audio
-                .play("minecraft:item.axe.scrape", Some(at), 1.0, 1.0);
+            let id = m.id;
+            self.persist.force_meta(id, 16);
+            let scrape = LevelSound::new("minecraft:item.axe.scrape", at, 1.0, 1.0)
+                .in_source(SoundSource::Neutral);
+            self.play_bound_sound(scrape, id, None);
             self.level_event_at(3005, block, 0);
             self.damage_held_tool();
             return true;

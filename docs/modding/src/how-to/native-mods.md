@@ -133,7 +133,7 @@ contract is never changed, its `mod_api` entry (the trait method's contract) inc
 a version. New parameters before the out-parameter, with the old ones kept in name and order, keep the version: a
 binding names a parameter, and a trait mod's event gains fields; a test that calls the `dispatch_*` function passes them. Helpers (`native_text`, `native_player`…) have no hook entry; the catalog's `helpers` list names the ones
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
-catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
+catalog and the hook points' sources (`native_hooks.rs`, `horizon-mod-api`'s `render.rs`, `horizon-world`'s `loot.rs`) in step.
 
 ### The build's warnings
 
@@ -356,6 +356,22 @@ the start cache, the cross-chunk placement, the beardifier and `/locate structur
 piece like a fortress piece's. `StructureRegistry` reads the registered types before it falls to
 `Unsupported`, so a data pack structure whose `"type"` no installed mod registers places nothing,
 exactly as before.
+### Fluid ingredients
+
+A mod's own recipe type that drinks from a tank reads its fluid inputs as a `FluidIngredient`, the
+fluid analogue of an item ingredient: `FluidIngredient::from_json(json, context)` parses a fluid
+(`"minecraft:water"`), a `#tag` (the fluid tags the load's `DataLoadContext` holds), a list of
+them, or NeoForge's `compound`, `intersection` and `difference` shapes, with the same walk the item
+ingredient parses its own JSON with — call it where a data load hook hands you the context, as the
+`ingredient` hook does while the game resolves recipes. `test(&FluidStack)` asks whether a tank's
+fluid answers, and `fluids()` lists the fluids it accepts, in tag order, for a recipe book. A kind
+outside the standard shapes fails the parse: fluids have no custom ingredient hook, and components
+are not checked — any stack of a named fluid answers.
+
+`SizedFluidIngredient` adds the amount, as NeoForge's `SizedFluidIngredient`:
+`{"ingredient": <fluid ingredient>, "amount": 500}` in millibuckets, `"amount"` defaulting to a
+bucket (1000) and always positive. Its `test(&FluidStack)` asks that the stack matches the
+ingredient *and* carries at least that much.
 
 ### Data files
 
@@ -401,9 +417,6 @@ The installed list has a **Native build of {instance}** row for the instance pic
   `native-mods.json` differ from those turned on, by id and version) or **Up to date**, with **Build** for the first
   two;
 - For a native build, "Plays native-…, built on Horizon {version}" (the `base` of its `native-mods.json`);
-- **Rebuild on Horizon {version}** when a newer release or Nightly is installed (`native_mods::update_for`). Build
-  stays on the Horizon the instance plays; only that button moves it, and its warning says the build starts from scratch
-  and takes longer.
 
 The instance list on the left shows such an instance as "Native build · Nightly 10-28" (its base). The launcher names
 the mods, warns in red, and builds only from "I trust these mods: build"; the row shows each step and the error if

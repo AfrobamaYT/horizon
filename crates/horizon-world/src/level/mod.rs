@@ -168,6 +168,19 @@ pub enum LandingWrite {
         drop: bool,
     },
 }
+/// Which vanilla rule a connection query comes from: the block asking is a fence,
+/// a wall, or iron bars or a pane, and vanilla's own answer is that rule's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ConnectionKind {
+    /// `FenceBlock.connectsTo`: an arm of a fence.
+    Fence,
+    /// `WallBlock.connectsTo`: a side of a wall, low or tall from the block above.
+    Wall,
+    /// `IronBarsBlock.attachsTo`: an arm of iron bars or a glass pane, which are
+    /// the same block class.
+    Bars,
+}
 pub use interact::{InteractionResult, PlayerContext, PlayerEffect, UseBranch, hit_slot};
 pub use pistons::{BlockEventData, MovingPiston};
 pub use place::{PlaceContext, PlaceOutcome, PlacementContext, PlacementPreview};
@@ -814,18 +827,19 @@ pub trait LevelAccess {
     ) -> bool {
         vanilla
     }
-    /// Whether fence connection queries need the level hook.
-    fn has_fence_connection_hook(&self) -> bool {
+    /// Whether connection queries (fences, walls, bars and panes) need the level hook.
+    fn has_connection_hook(&self) -> bool {
         false
     }
-    /// `FenceBlock.connectsTo` once the library answered `vanilla` for the fence
-    /// `fence` at `pos` and the `neighbour` state beside it, `direction`
-    /// pointing from the fence toward it and `face_solid` its face's
-    /// sturdiness: whether the fence connects an arm. The default keeps it.
-    fn adjust_fence_connects_to(
+    /// The `kind` rule's connection once the library answered `vanilla` for
+    /// the block `state` at `pos` and the `neighbour` state beside it,
+    /// `direction` pointing from the block toward it and `face_solid` its
+    /// face's sturdiness: whether the block connects that side. The default keeps it.
+    fn adjust_connects_to(
         &self,
+        _kind: ConnectionKind,
         _pos: BlockPos,
-        _fence: BlockStateId,
+        _state: BlockStateId,
         _neighbour: BlockStateId,
         _direction: Direction,
         _face_solid: bool,

@@ -12,6 +12,7 @@ use horizon_core::{
 use mod_api::mod_chunk_tickets::ModTicket;
 use mod_api::{
     BlockStateId, ChunkRef, ChunkStatus, LevelRef, LightLayer, NativeTicketOwner, TicketController,
+    Vec3,
 };
 
 fn block_pos([x, y, z]: [i32; 3]) -> BlockPos {
@@ -260,15 +261,31 @@ impl Game<'_> {
         let [x, y, z] = pos;
         world.is_loaded_at(x, y, z).then(|| world.block(x, y, z))
     }
+    /// `FluidState.getFlow` at `pos`: the current that pushes an entity there, after the
+    /// `fluid_flow` hook, as entities feel it. Zero where no fluid flows. None as for
+    /// `block_state`.
+    pub(super) fn native_level_fluid_flow(&self, level: LevelRef, pos: [i32; 3]) -> Option<Vec3> {
+        let world = self.native_level_read_world(level)?;
+        let [x, y, z] = pos;
+        world.is_loaded_at(x, y, z).then(|| {
+            let flow = horizon_client::entities::fluid_flow(
+                world,
+                &self.res.motion().fluids,
+                &self.loop_context,
+                block_pos(pos),
+            );
+            Vec3::new(flow.x, flow.y, flow.z)
+        })
+    }
     /// The block at `pos` without its properties: `minecraft:oak_stairs`.
-    /// None as for `block_state`.
+    /// None as for `block_state`. API 381.
     pub(super) fn native_level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
         self.native_level_state(level, pos)
             .map(|state| self.res.facts().get(state).name.to_string())
     }
     /// Property `key` of the block state at `pos` (`BlockState.getValue`):
     /// `east` for `facing`. None for a block without it, or as for
-    /// `block_state`.
+    /// `block_state`. API 381.
     pub(super) fn native_level_block_property(
         &self,
         level: LevelRef,
@@ -364,7 +381,7 @@ impl Game<'_> {
     /// (`Level.isLoaded`, which is false outside `isInValidBounds`): a block
     /// read or write there finds the world. False on a client or for a stale
     /// handle: the position is not loaded here. On a client, a chunk it holds is loaded
-    /// (`ClientLevel.hasChunkAt`).
+    /// (`ClientLevel.hasChunkAt`). API 381.
     pub(super) fn native_level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         self.native_level_read_world(level)
             .is_some_and(|w| w.is_loaded_at(pos[0], pos[1], pos[2]))
@@ -383,19 +400,19 @@ impl Game<'_> {
             .then(|| world_brightness(world, layer, pos))
     }
     /// The lowest block `y` and the height of the level
-    /// (`LevelHeightAccessor.getMinY`, `getHeight`).
+    /// (`LevelHeightAccessor.getMinY`, `getHeight`). API 381.
     pub(super) fn native_level_height(&self, level: LevelRef) -> Option<(i32, i32)> {
         self.native_level_world(level)
             .map(|w| (w.shape.min_y, w.shape.height))
     }
     /// The ticks the server has run (`Level.getGameTime`), shared by every
-    /// level as in vanilla.
+    /// level as in vanilla. API 381.
     pub(super) fn native_level_game_time(&self, level: LevelRef) -> Option<i64> {
         self.native_level_world(level)?;
         Some(self.world.game_time)
     }
     /// The time of day in ticks (`Level.getOverworldClockTime`), shared by
-    /// every level; it keeps counting past 24000.
+    /// every level; it keeps counting past 24000. API 381.
     pub(super) fn native_level_day_time(&self, level: LevelRef) -> Option<i64> {
         self.native_level_world(level)?;
         Some(self.world.day_time)
@@ -433,6 +450,45 @@ mod tests {
             assert_eq!(level.block_state(game, [16, bottom, 0]), None);
             assert_eq!(level.block_state(game, [0, bottom - 1, 0]), None);
             assert_eq!(level.block_state(game, [0, top, 0]), None);
+        });
+    }
+
+    /// `FlowingFluid.getFlow`: water one level below a source beside it flows away from the
+    /// source, normalized; so does the source, toward it; a source with only air on stone
+    /// around it, and air, have none.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn fluid_flow_reads_the_current_that_pushes_entities() {
+        use horizon_client::chunk::Chunk;
+        use mod_api::Vec3;
+        use std::sync::Arc;
+
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level(game.dim.id()).unwrap();
+            let registry = &game.pack.assets.registry;
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let water = registry.default_state("minecraft:water").unwrap();
+            let mut state = registry.state(water).unwrap().clone();
+            state.properties.insert("level".into(), "1".into());
+            let flowing = registry.resolve(&state).unwrap();
+            let y = game.world.bottom_y() + 1;
+            for x in 0..16 {
+                for z in 0..16 {
+                    game.world.set(x, y - 1, z, stone).unwrap();
+                }
+            }
+            game.world.set(1, y, 1, water).unwrap();
+            game.world.set(2, y, 1, flowing).unwrap();
+            game.world.set(8, y, 8, water).unwrap();
+            let east = Some(Vec3::new(1.0, 0.0, 0.0));
+            assert_eq!(level.fluid_flow(game, [2, y, 1]), east);
+            assert_eq!(level.fluid_flow(game, [1, y, 1]), east);
+            assert_eq!(level.fluid_flow(game, [8, y, 8]), Some(Vec3::ZERO));
+            assert_eq!(level.fluid_flow(game, [5, y, 5]), Some(Vec3::ZERO));
+            assert_eq!(level.fluid_flow(game, [16, y, 0]), None);
         });
     }
 

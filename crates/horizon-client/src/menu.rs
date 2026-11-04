@@ -4374,14 +4374,24 @@ pub(crate) mod tests {
                 living_flying_speed: |context, _, _, speed| {
                     *speed += context.setting("rules_mod", "stack").map_or(0.0, |_| 3.0);
                 },
-                player_stays_on_ground_surface: |_, _| {},
+                block_jump_factor: |context, _, factor| {
+                    *factor += context.setting("rules_mod", "stack").map_or(0.0, |_| 4.0);
+                },
+                block_speed_factor: |context, _, factor| {
+                    *factor += context.setting("rules_mod", "stack").map_or(0.0, |_| 5.0);
+                },
+                player_stays_on_ground_surface: |context, _, staying| {
+                    *staying |= context.setting("rules_mod", "stack").is_some();
+                },
                 ender_entity_teleport: |context, _, _, _, target, cancel| {
                     if context.setting("rules_mod", "stack").is_some() {
                         target[1] += 1.0;
                         *cancel = true;
                     }
                 },
-                fluid_flow: |_, _, _| {},
+                fluid_flow: |context, _, _, flow| {
+                    flow[0] += context.setting("rules_mod", "stack").map_or(0.0, |_| 1.0);
+                },
             });
         assert!(installed);
         let kind = Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {
@@ -4473,6 +4483,29 @@ pub(crate) mod tests {
         };
         assert_eq!(values(&before), (0.5, 0.1, 0.02));
         assert_eq!(values(&after), (1.5, 2.1, 3.02));
+        // The block factors a part edits read it too, and are as the block's own without it.
+        let factors = |context: &LoopContext| {
+            use horizon_world::movement_properties::BlockFactorEdits;
+            let edits = crate::motion::ModBlockFactors(context);
+            let state = horizon_world::registry::BlockStateId(0);
+            (edits.jump(state, 0.5), edits.speed(state, 0.4))
+        };
+        assert_eq!(factors(&before), (0.5, 0.4));
+        assert_eq!(factors(&after), (4.5, 5.4));
+        // The edge backoff and the fluid current read it too.
+        let movement = |context: &LoopContext| {
+            let (mut staying, mut flow) = (false, [0.25, 0.0, 0.0]);
+            crate::motion::native_player_stays_on_ground_surface(context, 1, &mut staying);
+            crate::motion::native_fluid_flow(
+                context,
+                "minecraft:water",
+                horizon_core::position::BlockPos::new(0, 0, 0),
+                &mut flow,
+            );
+            (staying, flow[0])
+        };
+        assert_eq!(movement(&before), (false, 0.25));
+        assert_eq!(movement(&after), (true, 1.25));
         // Fall, trample, jump and the ender teleport read it as well.
         let landing = |context: &LoopContext| {
             let (mut distance, mut multiplier, mut cancel) = (3.0, 1.0, false);

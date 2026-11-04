@@ -409,22 +409,18 @@ fn handle_method<'a>(
     let mutable = matches!(inputs.next(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
     if mutable {
         match side {
-            Side::Server => {}
+            Side::Server | Side::Client => {}
             Side::Both => {
                 return Err(format!("{name}: a both-side handle write is not allowed"));
-            }
-            Side::Client => {
-                return Err(format!(
-                    "{name}: client handle writes need a client backend accessor; add it with the first one"
-                ));
             }
         }
     }
     let mut inputs = sig.inputs.iter();
     let host: FnArg = match inputs.next() {
-        Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_some() => {
-            syn::parse_quote!(host: &mut dyn ServerHost)
-        }
+        Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_some() => match side {
+            Side::Client => syn::parse_quote!(host: &mut dyn ClientHost),
+            Side::Server | Side::Both => syn::parse_quote!(host: &mut dyn ServerHost),
+        },
         Some(FnArg::Receiver(r)) if r.reference.is_some() => match side {
             Side::Client => syn::parse_quote!(host: &dyn ClientHost),
             Side::Server | Side::Both => syn::parse_quote!(host: &dyn Host),
@@ -457,7 +453,11 @@ fn handle_method<'a>(
     sig.inputs = rest.into_iter().collect();
     let docs = doc_comments(&method.attrs, name, true)?;
     let backend = if mutable {
-        "backend_mut_of"
+        if side == Side::Client {
+            "client_backend_mut_of"
+        } else {
+            "backend_mut_of"
+        }
     } else {
         "backend_of"
     };
@@ -1143,22 +1143,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(handle, "LevelRef");
-        for (side, error) in [
-            (
+        assert_eq!(
+            super::handle_method(
+                &write,
+                "level_set",
+                "level",
                 super::Side::Both,
-                "level_set: a both-side handle write is not allowed",
-            ),
-            (
-                super::Side::Client,
-                "level_set: client handle writes need a client backend accessor; add it with the first one",
-            ),
-        ] {
-            assert_eq!(
-                super::handle_method(&write, "level_set", "level", side, &types.handles)
-                    .unwrap_err(),
-                error
-            );
-        }
+                &types.handles
+            )
+            .unwrap_err(),
+            "level_set: a both-side handle write is not allowed"
+        );
+        let (_, client_write) = super::handle_method(
+            &write,
+            "level_set",
+            "level",
+            super::Side::Client,
+            &types.handles,
+        )
+        .unwrap();
+        assert!(client_write.contains("host : & mut dyn ClientHost"));
+        assert!(client_write.contains("client_backend_mut_of(host)"));
+        assert!(!client_write.contains("dyn ServerHost"));
         assert!(code.contains("host : & mut dyn ServerHost"));
         assert!(code.contains(
             "backend_mut_of(host).map(|backend| backend.level_set(self)).unwrap_or(false)"

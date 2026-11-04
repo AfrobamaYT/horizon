@@ -18,6 +18,7 @@ use horizon_client::{
     recipe_book::{Category, Display},
     stations::Smithing,
 };
+use mod_api::{CraftResult, LevelRef};
 use std::{collections::HashMap, sync::Arc};
 
 /// The tables, made once, and the recipe book's known displays with the
@@ -99,6 +100,40 @@ fn recipe(id: String, kind: RecipeKind) -> Recipe {
 }
 
 impl Game<'_> {
+    /// `RecipeManager.getRecipeFor(CRAFTING, CraftingInput.of(width, height, items), level)`,
+    /// then the recipe's `assemble` and `getRemainingItems`: what a `width` by `height` grid
+    /// (each 1 to 3, `items` row by row) makes, through the crafting table's matcher, with the
+    /// world's data packs' recipes and the special recipes. None when no recipe matches or it
+    /// makes nothing, for a grid of another size, and off the server.
+    pub(super) fn native_level_craft(
+        &self,
+        level: LevelRef,
+        width: u32,
+        height: u32,
+        items: &[Option<ItemStack>],
+    ) -> Option<CraftResult> {
+        self.native_level_world(level)?;
+        let (w, h) = (width as usize, height as usize);
+        if !(1..=3).contains(&w) || !(1..=3).contains(&h) || items.len() != w * h {
+            return None;
+        }
+        // The matcher reads a square grid and trims it to what is filled, as `CraftingInput`
+        // does, so the grid sits in the top-left corner of one.
+        let size = w.max(h);
+        let at = |i: usize| (i / w) * size + i % w;
+        let mut grid = vec![None; size * size];
+        for (i, stack) in items.iter().enumerate() {
+            grid[at(i)] = stack.clone().filter(|s| s.count > 0);
+        }
+        let scale = |id: i32| self.maps.data.get(&id).map(|m| m.scale);
+        let recipes = self.recipes();
+        let (recipe, output) = recipes
+            .find_with(&self.loop_context, &grid, size, &scale)
+            .filter(|(_, output)| output.count > 0)?;
+        let mut placed = recipes.remainders(recipe, &grid, size);
+        let remainders = (0..w * h).map(|i| placed[at(i)].take()).collect();
+        Some(CraftResult::new(output, remainders))
+    }
     pub(super) fn registered_recipe_book_category(
         &mut self,
         kind: &str,
@@ -456,5 +491,111 @@ impl Game<'_> {
             }
             Err(e) => log::warn!("Horizon: the server's recipes were not taken: {e}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use horizon_client::items::ItemStack;
+
+    fn stack(item: &str) -> Option<ItemStack> {
+        Some(ItemStack::new(&format!("minecraft:{item}"), 1))
+    }
+
+    /// `level.craft` against vanilla's own recipes: a shaped recipe that hands back buckets, the
+    /// same shaped recipe from a smaller grid and from a corner of a larger one, a special
+    /// recipe, and grids that make nothing.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn craft_matches_the_grid_and_returns_what_each_slot_keeps() {
+        with_game(|game| {
+            let level = game.native_level(game.dim.id()).unwrap();
+            let cake = [
+                stack("milk_bucket"),
+                stack("milk_bucket"),
+                stack("milk_bucket"),
+                stack("sugar"),
+                stack("egg"),
+                stack("sugar"),
+                stack("wheat"),
+                stack("wheat"),
+                stack("wheat"),
+            ];
+            let made = level.craft(game, 3, 3, &cake).unwrap();
+            assert_eq!(
+                (&*made.output.item, made.output.count),
+                ("minecraft:cake", 1)
+            );
+            let bucket = stack("bucket");
+            let mut kept = vec![bucket.clone(), bucket.clone(), bucket];
+            kept.extend([None, None, None, None, None, None]);
+            assert_eq!(made.remainders, kept);
+
+            let planks = [stack("oak_planks"), stack("oak_planks")];
+            let made = level.craft(game, 1, 2, &planks).unwrap();
+            assert_eq!(
+                (&*made.output.item, made.output.count),
+                ("minecraft:stick", 4)
+            );
+            assert_eq!(made.remainders, [None, None]);
+            let mut corner = vec![None; 9];
+            corner[5] = stack("birch_planks");
+            corner[8] = stack("birch_planks");
+            let made = level.craft(game, 3, 3, &corner).unwrap();
+            assert_eq!(
+                (&*made.output.item, made.output.count),
+                ("minecraft:stick", 4)
+            );
+            assert_eq!(made.remainders, vec![None; 9]);
+
+            let rocket = [stack("paper"), stack("gunpowder")];
+            let made = level.craft(game, 2, 1, &rocket).unwrap();
+            assert_eq!(
+                (&*made.output.item, made.output.count),
+                ("minecraft:firework_rocket", 3)
+            );
+
+            assert!(level.craft(game, 1, 1, &[stack("dirt")]).is_none());
+            assert!(level.craft(game, 1, 1, &[None]).is_none());
+            assert!(level.craft(game, 4, 1, &[None, None, None, None]).is_none());
+            assert!(level.craft(game, 1, 2, &planks[..1]).is_none());
+        });
+    }
+
+    /// What one `level.craft` costs, for benchmarks/craft-match-2026-11-04: a grid that matches
+    /// early, one that matches late, a special recipe and a grid no recipe takes (the whole list).
+    #[test]
+    #[ignore = "a benchmark: run it in release with HORIZON_TEST_RESOURCES"]
+    fn craft_cost() {
+        with_game(|game| {
+            let level = game.native_level(game.dim.id()).unwrap();
+            let mut cake = vec![stack("milk_bucket"); 3];
+            cake.extend([stack("sugar"), stack("egg"), stack("sugar")]);
+            cake.extend(vec![stack("wheat"); 3]);
+            let grids: [(&str, u32, u32, Vec<Option<ItemStack>>); 4] = [
+                ("cake (3x3)", 3, 3, cake),
+                ("sticks (1x2)", 1, 2, vec![stack("oak_planks"); 2]),
+                (
+                    "firework rocket (2x1, special)",
+                    2,
+                    1,
+                    vec![stack("paper"), stack("gunpowder")],
+                ),
+                ("dirt (1x1, no match)", 1, 1, vec![stack("dirt")]),
+            ];
+            println!("{} crafting recipes", game.recipes().crafting.len());
+            const CALLS: u32 = 10_000;
+            for (name, width, height, grid) in grids {
+                let start = std::time::Instant::now();
+                for _ in 0..CALLS {
+                    std::hint::black_box(level.craft(game, width, height, &grid));
+                }
+                println!(
+                    "{name}: {:.1} µs a call",
+                    start.elapsed().as_secs_f64() * 1e6 / f64::from(CALLS)
+                );
+            }
+        });
     }
 }

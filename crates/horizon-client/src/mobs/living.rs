@@ -4,6 +4,7 @@
 //! damage, fire and the walk animation.
 use super::{Mob, MobEvent, MobWorld};
 use crate::health::DamageLevel;
+use crate::world::World;
 use crate::{
     blocks::Fluid,
     collisions::{PowderSnowSubject, SceneCollisions},
@@ -19,6 +20,7 @@ use horizon_world::{
     entity_fluid::{CurrentAccumulator, CurrentTarget},
     fluid::{FluidKind, FluidState},
     fluid_flow::FluidFlowWorld,
+    movement_properties::BoundMovementProperties,
     movement_restitution::{RestitutionInput, RestitutionWorld, restitute_movement},
     registry::BlockStateId,
 };
@@ -248,7 +250,8 @@ impl MobWorld<'_> {
                     }
                     current.height = current.height.max(surface - base_y);
                     let mut flow =
-                        crate::motion::pushing_flow(&mut scene, state, p).unwrap_or(Vec3::ZERO);
+                        crate::motion::pushing_flow(self.loop_context, &mut scene, state, p)
+                            .unwrap_or(Vec3::ZERO);
                     if current.height < 0.4 {
                         flow = flow.scale(current.height);
                     }
@@ -743,6 +746,7 @@ impl Mob {
         crate::motion::block_speed_factor_at(
             w.world,
             w.movement,
+            w.loop_context,
             self.position,
             self.supporting.map(|[x, y, z]| BlockPos::new(x, y, z)),
         )
@@ -1642,7 +1646,7 @@ impl Mob {
             crate::motion::native_living_jump(w.loop_context, self.id, &self.kind.id);
             return;
         }
-        let power = self.jump_power(w.loop_context);
+        let power = self.jump_power(w.loop_context, w.world, w.movement);
         if power > 1.0e-5 {
             self.velocity.y = f64::from(power).max(self.velocity.y);
             // A sprint jump (a dashing cat or ocelot) adds 0.2 along its yaw.
@@ -1662,9 +1666,23 @@ impl Mob {
         }
         crate::motion::native_living_jump(w.loop_context, self.id, &self.kind.id);
     }
-    /// `LivingEntity.getJumpPower`, through the `living_jump_power` hook.
-    pub fn jump_power(&self, context: &horizon_world::native_load_context::LoopContext) -> f32 {
-        let mut power = self.kind.jump_strength as f32;
+    /// `LivingEntity.getJumpPower`: the jump strength times the block jump factor under the mob
+    /// (honey, or a `block_jump_factor` part), through the `living_jump_power` hook.
+    pub fn jump_power(
+        &self,
+        context: &horizon_world::native_load_context::LoopContext,
+        world: &World,
+        movement: &BoundMovementProperties,
+    ) -> f32 {
+        let supporting = self.supporting.map(|[x, y, z]| BlockPos::new(x, y, z));
+        let factor = crate::motion::block_jump_factor_at(
+            world,
+            movement,
+            context,
+            self.position,
+            supporting,
+        );
+        let mut power = self.kind.jump_strength as f32 * factor;
         crate::motion::native_living_jump_power(context, self.id, &self.kind.id, &mut power);
         power
     }
@@ -1971,6 +1989,45 @@ impl RestitutionWorld for MobRestitution<'_, '_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `LivingEntity.getJumpPower` multiplies the jump strength by the block jump factor of the
+    /// block the mob stands on: honey halves a pig's jump, stone leaves it exactly its strength.
+    #[test]
+    fn a_mob_jumps_by_the_jump_factor_of_the_block_under_it() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-types.json").exists()
+            || !root.join("movement-properties.nbt").exists()
+        {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let registry = assets.registry;
+        let motion = crate::motion::MotionResources::load(&root, &assets).unwrap();
+        let types = super::super::MobTypes::load(&root).unwrap();
+        let kind = std::sync::Arc::new(types.types["minecraft:pig"].clone());
+        let strength = kind.jump_strength as f32;
+        let m = Mob::new(1, kind, Vec3::new(0.5, 1.0, 0.5), 0.0);
+        let air = registry.default_state("minecraft:air").unwrap();
+        let power = |ground: &str| {
+            let mut world = crate::world::World::new(air, 0);
+            world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(crate::chunk::Chunk::empty(0, 0)),
+            );
+            world
+                .set(0, 0, 0, registry.default_state(ground).unwrap())
+                .unwrap();
+            m.jump_power(
+                crate::test_resources::server_loop_context(),
+                &world,
+                &motion.blocks,
+            )
+        };
+        assert_eq!(power("minecraft:stone").to_bits(), strength.to_bits());
+        assert_eq!(power("minecraft:honey_block"), strength * 0.5);
+    }
     /// A pig dropped hard onto a block bounces by that block's restitution
     /// (`Entity.getBlockBounciness`): landing on a slime block sends it back
     /// up, landing on stone stops it dead. The same 8-block fall then costs the
@@ -2004,7 +2061,9 @@ mod tests {
             &defaults,
         )
         .unwrap();
-        let collision = crate::collisions::load(&root, registry).unwrap();
+        let collision = std::sync::Arc::new(crate::collisions::load(&root, registry).unwrap());
+        let suffocation =
+            crate::mobs::suffocation::bind(collision.clone(), &motion.causes_suffocation).unwrap();
         let lid_openers = std::collections::HashMap::new();
         for (ground, bounces, health) in [
             ("minecraft:slime_block", true, 10.0),
@@ -2035,6 +2094,7 @@ mod tests {
                 fluid_tables: &motion.fluids,
                 movement: &motion.blocks,
                 collision: &collision,
+                suffocation: &suffocation,
                 data: &data,
                 player: None,
                 controlling_player_movement: None,
@@ -2133,7 +2193,9 @@ mod tests {
             &defaults,
         )
         .unwrap();
-        let collision = crate::collisions::load(&root, registry).unwrap();
+        let collision = std::sync::Arc::new(crate::collisions::load(&root, registry).unwrap());
+        let suffocation =
+            crate::mobs::suffocation::bind(collision.clone(), &motion.causes_suffocation).unwrap();
         let lid_openers = std::collections::HashMap::new();
         let air = registry.default_state("minecraft:air").unwrap();
         let water = registry.default_state("minecraft:water").unwrap();
@@ -2158,6 +2220,7 @@ mod tests {
             fluid_tables: &motion.fluids,
             movement: &motion.blocks,
             collision: &collision,
+            suffocation: &suffocation,
             data: &data,
             player: None,
             controlling_player_movement: None,

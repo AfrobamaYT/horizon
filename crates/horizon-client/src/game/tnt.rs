@@ -31,8 +31,21 @@ pub(super) struct PrimedTnt {
     /// `PrimedTnt.explosionPower`: 4 by default, saved as `explosion_power`
     /// and clamped to 0..128 when read back.
     pub power: f32,
+    /// PrimedTnt.DATA_BLOCK_STATE_ID; None is the default TNT state.
+    pub block_state: Option<horizon_world::registry::BlockStateId>,
 }
 impl PrimedTnt {
+    /// The live state encoded for each existing save view.
+    pub(super) fn block_state_nbt(
+        &self,
+        registry: &horizon_world::registry::BlockRegistry,
+    ) -> horizon_world::nbt::Tag {
+        self.block_state.map_or_else(
+            || horizon_world::nbt::Tag::String("minecraft:tnt".into()),
+            |state| horizon_client::entity_nbt::state_to_nbt(registry, state),
+        )
+    }
+
     pub(super) const SIZE: f64 = 0.98;
     pub(super) fn bounds(&self) -> Aabb {
         let h = Self::SIZE / 2.0;
@@ -52,6 +65,7 @@ impl PrimedTnt {
         assets: &horizon_client::assets::Assets,
         facts: &horizon_client::blocks::BlockFacts,
         fluids: &horizon_client::motion::FluidResources,
+        context: &horizon_world::native_load_context::LoopContext,
         border: Option<&horizon_core::geometry::border::BorderGeometry>,
     ) -> Result<Vec<BlockPos>> {
         self.previous = self.position;
@@ -131,7 +145,7 @@ impl PrimedTnt {
         self.fuse -= 1;
         if self.fuse > 0 {
             // PrimedTnt updates immersion after moving and decrementing its fuse.
-            self.push_by_fluid(world, fluids);
+            self.push_by_fluid(world, fluids, context);
         }
         Ok(tops)
     }
@@ -224,6 +238,7 @@ impl Game<'_> {
             guest,
             // PrimedTnt's constructor: 4 when nothing sets it.
             power: 4.0,
+            block_state: None,
         });
     }
     /// One primed TNT's `tick`: it moves, and explodes when its fuse is out.
@@ -236,6 +251,7 @@ impl Game<'_> {
             &self.pack.assets,
             self.res.facts(),
             &self.res.motion().fluids,
+            &self.loop_context,
             Some(self.border.geometry()),
         )?;
         let snow = (t.previous, t.position, t.bounds(), t.velocity);
@@ -484,6 +500,73 @@ mod tests {
     use super::*;
 
     #[test]
+    fn saved_block_state_follows_the_model_instead_of_raw_input() {
+        use horizon_world::{
+            nbt::Tag,
+            registry::{BlockRegistry, BlockStateId},
+        };
+        let unstable = Tag::compound([
+            ("id", Tag::String("minecraft:tnt".into())),
+            (
+                "properties",
+                Tag::compound([("unstable", Tag::String("true".into()))]),
+            ),
+        ]);
+        let registry = BlockRegistry::from_nbt(&Tag::compound([
+            ("DataVersion", Tag::Int(horizon_world::DATA_VERSION)),
+            (
+                "states",
+                Tag::List(vec![
+                    Tag::String("minecraft:tnt".into()),
+                    Tag::String("minecraft:stone".into()),
+                    unstable.clone(),
+                ]),
+            ),
+            (
+                "defaults",
+                Tag::compound([
+                    ("minecraft:tnt", Tag::Int(0)),
+                    ("minecraft:stone", Tag::Int(1)),
+                ]),
+            ),
+        ]))
+        .unwrap();
+        let mut tnt = PrimedTnt {
+            join: Default::default(),
+            id: 1,
+            position: Vec3::ZERO,
+            previous: Vec3::ZERO,
+            velocity: Vec3::ZERO,
+            fuse: 400,
+            on_ground: false,
+            owner: None,
+            guest: None,
+            no_gravity: true,
+            power: 4.0,
+            block_state: Some(BlockStateId(1)),
+        };
+        let raw = Tag::compound([("block_state", Tag::String("audit_missing:block".into()))]);
+        for (state, expected) in [
+            (Some(BlockStateId(1)), Tag::String("minecraft:stone".into())),
+            (Some(BlockStateId(2)), unstable),
+            (None, Tag::String("minecraft:tnt".into())),
+        ] {
+            tnt.block_state = state;
+            let saved = horizon_client::entity_nbt::tnt_to_nbt(
+                tnt.position,
+                tnt.velocity,
+                tnt.on_ground,
+                tnt.fuse,
+                tnt.power,
+                tnt.block_state_nbt(&registry),
+                [221, 0, 0, 1],
+                Some(&raw),
+            );
+            assert_eq!(saved.get("block_state"), Some(&expected));
+        }
+    }
+
+    #[test]
     fn a_tnt_lit_by_a_skeletons_arrow_names_the_skeleton_as_its_cause() {
         let name = || Text::translate("entity.minecraft.skeleton", &[]);
         let by_mob = tnt_blast_owner(Some(Who::Mob(7)), || None, |id| (id == 7).then(name));
@@ -520,6 +603,7 @@ mod tests {
             owner: None,
             guest: None,
             power: 4.0,
+            block_state: None,
         };
         tnt.velocity = bounce_velocity(Direction::Up, tnt.velocity);
         tnt.on_ground = false;
@@ -561,10 +645,20 @@ mod tests {
                 owner: None,
                 guest: None,
                 power: 4.0,
+                block_state: None,
             };
             let border = bordered.then_some(&border);
-            tnt.tick(&world, &collision, &assets, &facts, &fluids, border)
-                .unwrap();
+            tnt.tick(
+                &world,
+                &collision,
+                &assets,
+                &facts,
+                &fluids,
+                &crate::game::test_server_load()
+                    .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+                border,
+            )
+            .unwrap();
             let east = tnt.bounds().max_position().x;
             if bordered {
                 assert!(
@@ -616,9 +710,19 @@ mod tests {
             owner: None,
             guest: None,
             power: 4.0,
+            block_state: None,
         };
-        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
-            .unwrap();
+        tnt.tick(
+            &world,
+            &collision,
+            &assets,
+            &facts,
+            &fluids,
+            &crate::game::test_server_load()
+                .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+            None,
+        )
+        .unwrap();
         assert_eq!(
             tnt.position.x, at.x,
             "current is applied after motion, not before"
@@ -629,15 +733,33 @@ mod tests {
             tnt.velocity
         );
         assert_eq!(tnt.fuse, 79);
-        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
-            .unwrap();
+        tnt.tick(
+            &world,
+            &collision,
+            &assets,
+            &facts,
+            &fluids,
+            &crate::game::test_server_load()
+                .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+            None,
+        )
+        .unwrap();
         assert!((tnt.position.x - at.x - 0.014).abs() < 1e-12);
         assert!(tnt.on_ground);
         tnt.position = at;
         tnt.velocity = Vec3::ZERO;
         tnt.fuse = 1;
-        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
-            .unwrap();
+        tnt.tick(
+            &world,
+            &collision,
+            &assets,
+            &facts,
+            &fluids,
+            &crate::game::test_server_load()
+                .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+            None,
+        )
+        .unwrap();
         assert_eq!(tnt.fuse, 0);
         assert_eq!(
             tnt.velocity.x, 0.0,
@@ -647,8 +769,17 @@ mod tests {
         tnt.position = at;
         tnt.velocity = Vec3::ZERO;
         tnt.fuse = 80;
-        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
-            .unwrap();
+        tnt.tick(
+            &world,
+            &collision,
+            &assets,
+            &facts,
+            &fluids,
+            &crate::game::test_server_load()
+                .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+            None,
+        )
+        .unwrap();
         assert_eq!(
             tnt.velocity.x, 0.0,
             "still water must not add horizontal motion"
@@ -663,8 +794,17 @@ mod tests {
             .unwrap();
         tnt.on_ground = false;
         tnt.velocity = Vec3::ZERO;
-        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
-            .unwrap();
+        tnt.tick(
+            &world,
+            &collision,
+            &assets,
+            &facts,
+            &fluids,
+            &crate::game::test_server_load()
+                .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+            None,
+        )
+        .unwrap();
         assert!(
             tnt.position.y < at.y && tnt.velocity.y < 0.0,
             "TNT sinks; water does not add buoyancy"
@@ -719,10 +859,20 @@ mod tests {
             owner: None,
             guest: None,
             power: 4.0,
+            block_state: None,
         };
         for _ in 0..10 {
-            tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
-                .unwrap();
+            tnt.tick(
+                &world,
+                &collision,
+                &assets,
+                &facts,
+                &fluids,
+                &crate::game::test_server_load()
+                    .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+                None,
+            )
+            .unwrap();
         }
         assert!(
             tnt.velocity.y > 0.0,
@@ -742,8 +892,17 @@ mod tests {
         tnt.velocity = Vec3::ZERO;
         tnt.on_ground = false;
         for _ in 0..4 {
-            tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
-                .unwrap();
+            tnt.tick(
+                &world,
+                &collision,
+                &assets,
+                &facts,
+                &fluids,
+                &crate::game::test_server_load()
+                    .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+                None,
+            )
+            .unwrap();
         }
         assert!(
             tnt.position.y < at.y,
@@ -798,13 +957,23 @@ mod tests {
             owner: None,
             guest: None,
             power: 4.0,
+            block_state: None,
         };
         let mut tops = Vec::new();
         let mut tnt = primed();
         for _ in 0..30 {
             tops.extend(
-                tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
-                    .unwrap(),
+                tnt.tick(
+                    &world,
+                    &collision,
+                    &assets,
+                    &facts,
+                    &fluids,
+                    &crate::game::test_server_load()
+                        .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+                    None,
+                )
+                .unwrap(),
             );
         }
         assert!(!tops.is_empty(), "it reaches the top of the column");
@@ -817,9 +986,18 @@ mod tests {
         let mut tnt = primed();
         for _ in 0..10 {
             assert!(
-                tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
-                    .unwrap()
-                    .is_empty()
+                tnt.tick(
+                    &world,
+                    &collision,
+                    &assets,
+                    &facts,
+                    &fluids,
+                    &crate::game::test_server_load()
+                        .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+                    None
+                )
+                .unwrap()
+                .is_empty()
             );
         }
     }

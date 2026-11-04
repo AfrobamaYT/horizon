@@ -30,8 +30,8 @@ use horizon_world::{
         self as emission, MovementDistances, MovementEmission, MovementEmissionWorld, MovementEvent,
     },
     movement_properties::{
-        BoundMovementProperties, MovementBlockProvider, MovementProperties, MovementTags,
-        RegistryMovementWorld,
+        BlockFactorEdits, BoundMovementProperties, MovementBlockError, MovementBlockProvider,
+        MovementProperties, MovementTags, NoFactorEdits, RegistryMovementWorld,
     },
     movement_restitution::{self, RestitutionInput, RestitutionWorld},
     movement_statistics::{self, MovementStat, MovementStatisticsWorld},
@@ -76,31 +76,66 @@ pub fn native_living_flying_speed(context: &LoopContext, entity: u32, kind: &str
     crate::native_client_hooks::living_flying_speed(context, entity, kind, speed);
 }
 
+/// A block state's jump factor (`Block.getJumpFactor`) is being read (beyond NeoForge: no event).
+/// Its parts may change it. Fires on replayed ticks too, so a listener must be a pure function of
+/// its inputs.
+#[inline(never)]
+pub fn native_block_jump_factor(context: &LoopContext, state: BlockStateId, factor: &mut f32) {
+    crate::native_client_hooks::block_jump_factor(context, state, factor);
+}
+
+/// A block state's speed factor (`Block.getSpeedFactor`) is being read (beyond NeoForge: no
+/// event). Its parts may change it. Fires on replayed ticks too, so a listener must be a pure
+/// function of its inputs.
+#[inline(never)]
+pub fn native_block_speed_factor(context: &LoopContext, state: BlockStateId, factor: &mut f32) {
+    crate::native_client_hooks::block_speed_factor(context, state, factor);
+}
+
+/// The factors the `block_jump_factor` and `block_speed_factor` parts give the blocks an entity
+/// reads, for the loop of the side that ticks it.
+pub(crate) struct ModBlockFactors<'a>(pub &'a LoopContext);
+impl BlockFactorEdits for ModBlockFactors<'_> {
+    fn jump(&self, state: BlockStateId, mut factor: f32) -> f32 {
+        native_block_jump_factor(self.0, state, &mut factor);
+        factor
+    }
+    fn speed(&self, state: BlockStateId, mut factor: f32) -> f32 {
+        native_block_speed_factor(self.0, state, &mut factor);
+        factor
+    }
+}
+
 /// The player's crouch edge backoff asks whether it is staying on the ground surface
 /// (`Player.isStayingOnGroundSurface`; beyond NeoForge: there is no counterpart). Mods may change it.
 /// Fires on replayed ticks too, so a listener must be a pure function of its inputs.
 #[inline(never)]
-pub fn native_player_stays_on_ground_surface(entity: u32, staying: &mut bool) {
-    crate::native_client_hooks::player_stays_on_ground_surface(entity, staying);
+pub fn native_player_stays_on_ground_surface(
+    context: &LoopContext,
+    entity: u32,
+    staying: &mut bool,
+) {
+    crate::native_client_hooks::player_stays_on_ground_surface(context, entity, staying);
 }
 
 /// The current a fluid block pushes with (`FlowingFluid.getFlow`) is about to push an entity
 /// (beyond NeoForge: there is no counterpart). Mods may change it. Fires on replayed ticks too, so a
 /// listener must be a pure function of its inputs.
 #[inline(never)]
-pub fn native_fluid_flow(fluid: &str, pos: BlockPos, flow: &mut [f64; 3]) {
-    crate::native_client_hooks::fluid_flow(fluid, pos, flow);
+pub fn native_fluid_flow(context: &LoopContext, fluid: &str, pos: BlockPos, flow: &mut [f64; 3]) {
+    crate::native_client_hooks::fluid_flow(context, fluid, pos, flow);
 }
 
 /// `FlowingFluid.getFlow` as it pushes an entity: the vanilla vector, then `fluid_flow`.
 pub(crate) fn pushing_flow<W: horizon_world::fluid_flow::FluidFlowWorld>(
+    context: &LoopContext,
     world: &mut W,
     state: horizon_world::fluid::FluidState,
     pos: BlockPos,
 ) -> std::result::Result<Vec3, W::Error> {
     let flow = horizon_world::fluid_flow::flow_at(world, state, pos)?;
     let mut edited = [flow.x, flow.y, flow.z];
-    native_fluid_flow(state.kind().name(), pos, &mut edited);
+    native_fluid_flow(context, state.kind().name(), pos, &mut edited);
     Ok(Vec3::new(edited[0], edited[1], edited[2]))
 }
 
@@ -115,6 +150,8 @@ pub struct MotionResources {
     pub attributes: Arc<Catalog>,
     pub blocks: BoundMovementProperties,
     pub climbable: BTreeSet<String>,
+    /// The bound BlockTags.CAUSES_SUFFOCATION predicate input.
+    pub causes_suffocation: BTreeSet<String>,
     /// `BlockTags.SOUL_SPEED_BLOCKS`: what Soul Speed's effects look for.
     pub soul_speed_blocks: BTreeSet<String>,
     /// `LivingEntity.onClimbable` tags plus open trapdoors above a ladder.
@@ -189,6 +226,7 @@ impl MotionResources {
                 suppresses_bounce: tag("minecraft:suppresses_bounce")?,
             })?,
             climbable: tag("minecraft:climbable")?,
+            causes_suffocation: tag("minecraft:causes_suffocation")?,
             soul_speed_blocks: tag("minecraft:soul_speed_blocks")?,
             climbing,
             fall_reset: tag("minecraft:fall_damage_resetting")?,
@@ -1039,6 +1077,7 @@ impl MotionWorld<'_, '_, '_> {
             &mut RegistryMovementWorld {
                 properties: &self.resources.blocks,
                 world: self,
+                edits: &NoFactorEdits,
             },
             position,
             support,
@@ -1668,6 +1707,26 @@ impl MotionWorld<'_, '_, '_> {
                     (self.player.ticks_frozen + 1).min(PlayerMotion::TICKS_REQUIRED_TO_FREEZE);
             }
         }
+        Ok(())
+    }
+    /// The block effects and the frost of a window's own player while a vehicle carries it. Its
+    /// client does not travel (`passenger_pose_tick` is all it runs), but `LivingEntity.aiStep`
+    /// still applies the effects of the blocks a passenger is in (`applyEffectsFromBlocks`: powder
+    /// snow's FREEZE adds a tick of frost) and thaws it when it is out of powder snow. The
+    /// frostbite overlay reads these ticks. The server's copy does this in `server_block_damage`.
+    pub fn passenger_block_effects_tick(&mut self) -> Result<()> {
+        // Entity.baseTick
+        self.player.was_in_powder_snow = self.player.in_powder_snow;
+        self.player.in_powder_snow = false;
+        if self.player.block_effects {
+            self.apply_effects_from_blocks()?;
+        }
+        // LivingEntity.aiStep "freezing" (server), as the client predicts it on foot.
+        if !self.player.in_powder_snow || !self.player.can_freeze() {
+            self.player.ticks_frozen = (self.player.ticks_frozen - 2).max(0);
+        }
+        // The vehicle moves the passenger between ticks: the next sweep starts here.
+        self.player.old_position = self.player.position;
         Ok(())
     }
     /// `Entity.checkInsideBlocks(from, to, ...)`: the blocks the box at `to`
@@ -2303,7 +2362,11 @@ impl EdgeBackoffWorld for MotionWorld<'_, '_, '_> {
     }
     fn staying_on_ground_surface(&mut self) -> Result<bool> {
         let mut staying = self.player.shift_key_down;
-        native_player_stays_on_ground_surface(self.player.entity_id as u32, &mut staying);
+        native_player_stays_on_ground_surface(
+            self.loop_context,
+            self.player.entity_id as u32,
+            &mut staying,
+        );
         Ok(staying)
     }
     fn on_ground(&mut self) -> Result<bool> {
@@ -2535,10 +2598,12 @@ impl EntityMoveWorld for MotionWorld<'_, '_, '_> {
     fn block_speed_factor(&mut self) -> Result<f32> {
         let efficiency = self.player.attribute("minecraft:movement_efficiency")? as f32;
         let location = self.location();
+        let context = self.loop_context;
         let block = movement_support::block_speed_factor(
             &mut RegistryMovementWorld {
                 properties: &self.resources.blocks,
                 world: self,
+                edits: &ModBlockFactors(context),
             },
             location,
         )?;
@@ -2951,10 +3016,12 @@ impl LivingMotionWorld for MotionWorld<'_, '_, '_> {
     }
     fn block_jump_factor(&mut self) -> Result<f32> {
         let location = self.location();
+        let context = self.loop_context;
         Ok(movement_support::block_jump_factor(
             &mut RegistryMovementWorld {
                 properties: &self.resources.blocks,
                 world: self,
+                edits: &ModBlockFactors(context),
             },
             location,
         )?)
@@ -3023,22 +3090,28 @@ fn fly_into_wall_damage(before: f64, after: f64) -> f32 {
     ((before - after) * 10.0 - 3.0) as f32
 }
 
-/// `Entity.getBlockSpeedFactor` for a kind that keeps no motion world of its
-/// own (mobs, boats): the factor of the block at `position`, else of the one
-/// below it, through the same port the player's move uses.
-pub fn block_speed_factor_at(
+/// The block factors an entity reads for a kind that keeps no motion world of its own (mobs,
+/// boats, minecarts): the block at `position`, else the one below it, through the same port the
+/// player's move uses, with the `block_jump_factor` and `block_speed_factor` parts applied.
+struct WorldBlocks<'a>(&'a World);
+impl MovementBlockProvider for WorldBlocks<'_> {
+    type Error = ();
+    fn movement_block_state(&mut self, p: BlockPos) -> std::result::Result<BlockStateId, ()> {
+        Ok(self.0.block(p.x, p.y, p.z))
+    }
+}
+
+fn block_factor_at(
     world: &World,
     properties: &BoundMovementProperties,
+    context: &LoopContext,
     position: Vec3,
     supporting_block: Option<BlockPos>,
+    read: impl FnOnce(
+        &mut RegistryMovementWorld<'_, WorldBlocks<'_>>,
+        movement_support::MovementLocation,
+    ) -> std::result::Result<f32, MovementBlockError<()>>,
 ) -> f32 {
-    struct Blocks<'a>(&'a World);
-    impl MovementBlockProvider for Blocks<'_> {
-        type Error = ();
-        fn movement_block_state(&mut self, p: BlockPos) -> std::result::Result<BlockStateId, ()> {
-            Ok(self.0.block(p.x, p.y, p.z))
-        }
-    }
     let location = movement_support::MovementLocation {
         position,
         block_position: BlockPos::new(
@@ -3048,15 +3121,52 @@ pub fn block_speed_factor_at(
         ),
         supporting_block,
     };
-    let mut view = Blocks(world);
-    movement_support::block_speed_factor(
+    let mut view = WorldBlocks(world);
+    read(
         &mut RegistryMovementWorld {
             properties,
             world: &mut view,
+            edits: &ModBlockFactors(context),
         },
         location,
     )
     .unwrap_or(1.0)
+}
+
+/// `Entity.getBlockSpeedFactor` for a kind that keeps no motion world of its own.
+pub fn block_speed_factor_at(
+    world: &World,
+    properties: &BoundMovementProperties,
+    context: &LoopContext,
+    position: Vec3,
+    supporting_block: Option<BlockPos>,
+) -> f32 {
+    block_factor_at(
+        world,
+        properties,
+        context,
+        position,
+        supporting_block,
+        |blocks, location| movement_support::block_speed_factor(blocks, location),
+    )
+}
+
+/// `Entity.getBlockJumpFactor` for a kind that keeps no motion world of its own.
+pub fn block_jump_factor_at(
+    world: &World,
+    properties: &BoundMovementProperties,
+    context: &LoopContext,
+    position: Vec3,
+    supporting_block: Option<BlockPos>,
+) -> f32 {
+    block_factor_at(
+        world,
+        properties,
+        context,
+        position,
+        supporting_block,
+        |blocks, location| movement_support::block_jump_factor(blocks, location),
+    )
 }
 
 #[cfg(test)]
@@ -3624,6 +3734,86 @@ mod tests {
         .controlled_simulation_tick(Default::default())
         .unwrap();
         assert_eq!(roses(&away), 0);
+    }
+
+    /// #8156: a window's own player carried by a boat does not travel, but it still freezes
+    /// in powder snow and thaws out of it (`LivingEntity.aiStep`), or the frostbite overlay,
+    /// which reads `ticks_frozen`, never shows.
+    #[test]
+    fn a_passenger_in_powder_snow_freezes_and_thaws() {
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client")
+                    .join(horizon_core::VANILLA_VERSION)
+            });
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        let mut scene = World::test_scene(&assets, &render, 1).unwrap();
+        let snow = assets
+            .registry
+            .default_state("minecraft:powder_snow")
+            .unwrap();
+        scene.set(20, 4, 20, snow).unwrap();
+        let in_snow = Vec3::new(20.5, 4.0, 20.5);
+        let clear = Vec3::new(30.5, 4.0, 30.5);
+        let mut player = PlayerMotion::new(&resources, in_snow).unwrap();
+        player.client_side = true;
+        let tick = |player: &mut PlayerMotion, scene: &mut World| {
+            MotionWorld {
+                tag_items: None,
+                block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
+                damage_hooks: &crate::health::DamageHooks::NONE,
+                entities: &[],
+                player,
+                scene,
+                assets: &assets,
+                collision_binding: &binding,
+                resources: &resources,
+            }
+            .passenger_block_effects_tick()
+            .unwrap();
+        };
+        // One tick of frost for each tick in powder snow, up to the 140 that freeze fully.
+        for expected in 1..=5 {
+            tick(&mut player, &mut scene);
+            assert!(player.in_powder_snow);
+            assert_eq!(player.ticks_frozen, expected);
+        }
+        for _ in 0..200 {
+            tick(&mut player, &mut scene);
+        }
+        assert_eq!(player.ticks_frozen, PlayerMotion::TICKS_REQUIRED_TO_FREEZE);
+        assert!(player.is_fully_frozen());
+        // Carried out of it: two ticks of frost thaw each tick.
+        player.position = clear;
+        player.old_position = clear;
+        player.ticks_frozen = 5;
+        for expected in [3, 1, 0, 0] {
+            tick(&mut player, &mut scene);
+            assert!(!player.in_powder_snow);
+            assert_eq!(player.ticks_frozen, expected);
+        }
+        // What cannot freeze (a freeze-immune player) takes no frost in it.
+        player.position = in_snow;
+        player.old_position = in_snow;
+        player.freeze_immune = true;
+        tick(&mut player, &mut scene);
+        assert_eq!(player.ticks_frozen, 0);
+        // Block effects off (a mod's switch): nothing is sampled, the frost thaws.
+        player.freeze_immune = false;
+        player.block_effects = false;
+        player.ticks_frozen = 10;
+        tick(&mut player, &mut scene);
+        assert!(!player.in_powder_snow);
+        assert_eq!(player.ticks_frozen, 8);
     }
 
     #[test]

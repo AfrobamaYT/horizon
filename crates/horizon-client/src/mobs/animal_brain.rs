@@ -72,6 +72,10 @@ impl<T> Slot<T> {
     pub fn present(&self) -> bool {
         self.v.is_some()
     }
+    /// `MemorySlot.timeToLive`: `i64::MAX` denotes a permanent memory.
+    pub fn ttl(&self) -> i64 {
+        self.ttl
+    }
 }
 impl<T: Clone> Slot<T> {
     pub fn value(&self) -> Option<T> {
@@ -645,7 +649,8 @@ fn targetable(m: &mut Mob, w: &MobWorld, who: Who) -> bool {
             if !p.alive || p.spectator {
                 return false;
             }
-            let r = (range * w.player_visibility(p, m.id, p.visibility_percent())).max(2.0);
+            let r =
+                (range * w.player_visibility(p, m.id, p.visibility_percent(m.species()))).max(2.0);
             m.distance_sqr(p.position) <= r * r && m.sees(w, who)
         }
         Who::Mob(id) => {

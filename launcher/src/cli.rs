@@ -1341,7 +1341,17 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 Some(folder) => folder,
                 None => native_mods::installed_mods(&target.home)?,
             };
-            let built = native_mods::build(&base, &folder, &target, profile, steps)?;
+            let built =
+                native_mods::build(&base, &folder, &target, profile, steps).map_err(|e| match e
+                    .starts_with(native_mods::MISMATCH)
+                {
+                    true => trf(
+                        "{error} Run `cargo horizon-mod update --horizon {commit}` in each mod's \
+                        folder to pin it to this game, then build again.",
+                        &[("error", &e), ("commit", &base)],
+                    ),
+                    false => e,
+                })?;
             println!(
                 "{built} built and selected for its instance ({:.0} s).",
                 started.elapsed().as_secs_f64()
@@ -1364,9 +1374,13 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             if as_json {
                 json(serde_json::json!({ "imported": tag, "prepared": prepared }));
             } else if prepared {
-                println!("Imported {tag} and selected it. It is prepared already, from another installed version.");
+                println!(
+                    "Imported {tag} and selected it. It is prepared already, from another installed version."
+                );
             } else {
-                println!("Imported {tag} and selected it. Prepare it next: horizon-launcher prepare --version {tag}");
+                println!(
+                    "Imported {tag} and selected it. Prepare it next: horizon-launcher prepare --version {tag}"
+                );
             }
         }
         Cmd::Prepare {
@@ -3145,13 +3159,13 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                     return Err(format!(
                         "No other launcher has an instance called {name}: \
                          horizon-launcher instance others"
-                    ))
+                    ));
                 }
                 _ => {
                     return Err(format!(
                         "More than one launcher has an instance called {name}: say which \
                          with --folder."
-                    ))
+                    ));
                 }
             };
             let made = other_launchers::import(
@@ -3209,7 +3223,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                         "{} is a data pack: put it into a world with horizon-launcher worlds \
                          datapack-add <world> <file>",
                         file.display()
-                    ))
+                    ));
                 }
             }
         }

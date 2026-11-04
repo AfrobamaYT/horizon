@@ -175,7 +175,7 @@ pub(super) fn reload_sync_data(
         &server_sources(item_data, overlay),
     )
     .map(|mut sync| {
-        sync.keep_registries(root, kept);
+        sync.keep_registries(root, kept, overlay);
         sync.features.clone_from(&kept.features);
         Arc::new(sync)
     });
@@ -1519,6 +1519,7 @@ impl Game<'_> {
         self.world.block_log = None;
         self.world.light_log = None;
         self.audio.capture = None;
+        self.bound_sounds.clear();
         self.lan_events.clear();
         self.lan_songs.clear();
         self.lan_critical_hits.clear();
@@ -1879,6 +1880,13 @@ impl Game<'_> {
         }
     }
 
+    /// Update the live entity tracking range percentage.
+    pub(super) fn set_entity_broadcast_range_percentage(&mut self, percentage: i32) {
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.entity_range_percent = percentage;
+        }
+    }
+
     /// Update the live movement check's flight policy.
     pub(super) fn set_allow_flight(&mut self, allow: bool) {
         if let Some(host) = self.lan.as_mut() {
@@ -2042,7 +2050,11 @@ impl Game<'_> {
                 note_event(host, previous.take());
             }
             if timed {
-                previous = Some((Instant::now(), event_kind(&event)));
+                let detail = self
+                    .lan
+                    .as_ref()
+                    .and_then(|host| self.event_detail(host, &event));
+                previous = Some((Instant::now(), event_kind(&event), detail));
             }
             match event {
                 event @ (HostEvent::Chat { .. } | HostEvent::Warn(_) | HostEvent::Error(_)) => {
@@ -2085,15 +2097,15 @@ impl Game<'_> {
                     let mut text = original.clone();
                     let mut cancel = false;
                     let mut replies = Vec::new();
-                    self.native_server_chat(
-                        id,
-                        sender,
-                        &name,
-                        &raw,
-                        &mut text,
-                        &mut replies,
-                        &mut cancel,
-                    );
+                    self.native_server_chat(mod_api::__private::ServerChatCall {
+                        player_id: id,
+                        player: sender,
+                        username: &name,
+                        raw_text: &raw,
+                        message: &mut text,
+                        replies: &mut replies,
+                        cancel: &mut cancel,
+                    });
                     // The mods' replies reach the sender alone, as a
                     // command's do, before the message (if any) goes out.
                     if !replies.is_empty() {
@@ -3425,18 +3437,23 @@ fn event_kind(event: &HostEvent) -> EventKind {
     }
 }
 
-/// Notes how long the event that started at `started` took (`spans::note`).
-fn note_event(host: &LanHost, started: Option<(Instant, EventKind)>) {
-    let Some((started, (kind, conn, name))) = started else {
+/// Notes how long the event that started at `started` took (`spans::note`), with what it
+/// was about when [`Game::event_detail`] said.
+fn note_event(host: &LanHost, started: Option<(Instant, EventKind, Option<UseDetail>)>) {
+    let Some((started, (kind, conn, name), detail)) = started else {
         return;
     };
     horizon_client::spans::note(started.elapsed().as_secs_f32() * 1000.0, || {
         let who = name
             .or_else(|| conn.and_then(|c| host.hub.guest(c)).map(|g| g.name.clone()))
             .or_else(|| conn.map(|c| format!("connection {c}")));
-        match who {
+        let line = match who {
             Some(who) => format!("{kind} of {who}"),
             None => kind.to_owned(),
+        };
+        match detail {
+            Some(d) => format!("{line} ({d})"),
+            None => line,
         }
     });
 }
@@ -3467,6 +3484,52 @@ fn client_info(
             1 => mod_api::NativeParticleStatus::Decreased,
             _ => mod_api::NativeParticleStatus::Minimal,
         },
+    }
+}
+
+/// What a use packet was about, taken before it ran (the use may consume the item or change
+/// the block): the item in the hand it names and, on a block, that block, where, and the face.
+struct UseDetail {
+    item: Option<Arc<str>>,
+    block: Option<(Arc<str>, [i32; 3], i32)>,
+}
+
+impl std::fmt::Display for UseDetail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.item.as_deref().unwrap_or("empty hand"))?;
+        if let Some((block, [x, y, z], face)) = &self.block {
+            let face = ["down", "up", "north", "south", "west", "east"]
+                .get(*face as usize)
+                .copied()
+                .unwrap_or("?");
+            write!(f, " on {block} at {x} {y} {z} {face}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Game<'_> {
+    /// For a slow tick's note (#8669): the item a `UseItemOn` or `UseItem` uses and the block
+    /// it aims at. None for other events.
+    fn event_detail(&self, host: &LanHost, event: &HostEvent) -> Option<UseDetail> {
+        let HostEvent::Packet(conn, packet) = event else {
+            return None;
+        };
+        let (hand, block) = match &**packet {
+            play::Serverbound::UseItemOn(p) => (p.hand, Some((p.pos, p.face))),
+            play::Serverbound::UseItem(p) => (p.hand, None),
+            _ => return None,
+        };
+        let guest = host.hub.guest(*conn)?;
+        let held = if hand == 1 {
+            guest.offhand.as_ref()
+        } else {
+            guest.inventory.get(guest.selected).and_then(Option::as_ref)
+        };
+        Some(UseDetail {
+            item: held.map(|s| Arc::clone(&s.item)),
+            block: block.map(|(pos, face)| (self.block_name(pos), pos, face)),
+        })
     }
 }
 
