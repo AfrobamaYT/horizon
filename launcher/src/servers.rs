@@ -370,14 +370,19 @@ pub fn run_managed(
     permission: crate::jars::Permission<'_>,
 ) -> Result<(), Problem> {
     let supervisor = command(dir, args).map_err(Problem::plain)?;
-    let mut engine = horizon_server_launch::engine_command(Path::new(supervisor.get_program()), dir)
-        .map_err(|error| {
-            let mut problem = Problem::plain(error.to_string());
-            if matches!(error, horizon_server_launch::EngineCommandError::Resources(_)) {
-                problem.fix = Some(Fix::Prepare);
-            }
-            problem
-        })?;
+    let mut engine =
+        horizon_server_launch::engine_command(Path::new(supervisor.get_program()), dir).map_err(
+            |error| {
+                let mut problem = Problem::plain(error.to_string());
+                if matches!(
+                    error,
+                    horizon_server_launch::EngineCommandError::Resources(_)
+                ) {
+                    problem.fix = Some(Fix::Prepare);
+                }
+                problem
+            },
+        )?;
     crate::jars::prepare_launch(&mut engine, &crate::launch::Launch::default(), permission)
         .map_err(|error| Problem::plain(error.to_string()))?;
     stream(dir, supervisor, line)

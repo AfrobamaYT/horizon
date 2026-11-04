@@ -182,7 +182,10 @@ fn one_unresolved_hash_refuses_the_whole_batch_before_any_download() {
         Permission::Allow,
         |missing| {
             assert_eq!(missing.len(), 2);
-            Ok(BTreeMap::from([(first.sha512().into(), "exact.jar".into())]))
+            Ok(BTreeMap::from([(
+                first.sha512().into(),
+                "exact.jar".into(),
+            )]))
         },
         |_, _, _| panic!("an incomplete lookup must not download any file"),
     )

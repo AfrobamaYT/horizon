@@ -205,11 +205,12 @@ fn prepare_with(
     let urls: Vec<_> = missing
         .iter()
         .map(|jar| {
-            urls.get(jar.sha512()).ok_or_else(|| PrepareError::Download {
-                jar: Box::new((*jar).clone()),
-                path: cache.join(format!("{}.jar", jar.sha512())),
-                reason: tr("no exact file on Modrinth").into(),
-            })
+            urls.get(jar.sha512())
+                .ok_or_else(|| PrepareError::Download {
+                    jar: Box::new((*jar).clone()),
+                    path: cache.join(format!("{}.jar", jar.sha512())),
+                    reason: tr("no exact file on Modrinth").into(),
+                })
         })
         .collect::<Result<_, _>>()?;
     fs::create_dir_all(&cache).map_err(|source| PrepareError::Io {
