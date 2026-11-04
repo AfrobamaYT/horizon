@@ -67,10 +67,10 @@ pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProbl
 use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EnchantmentInfo,
     EntityRef, EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera,
-    NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
-    NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
-    PathComputationType, Placement, PlayerRef, RecipeBookCategory, ScreenOpening,
-    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop, NativeKeyMapping,
+    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
+    NativeServerPlayer, PathComputationType, Placement, PlayerRef, RecipeBookCategory,
+    ScreenOpening, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
@@ -1656,7 +1656,6 @@ pub(crate) struct NativeRecipes {
 
 /// The mappings `native_mapping` answers for, with the key their default
 /// binding is (none: a mouse button, attack or use).
-#[allow(dead_code)]
 const MAPPINGS: [(&str, Option<KeyCode>); 9] = [
     ("key.forward", Some(KeyCode::KeyW)),
     ("key.left", Some(KeyCode::KeyA)),
@@ -1912,11 +1911,13 @@ impl Game<'_> {
             new_game_type,
         );
     }
-    /// Once a tick, in every `Game`: the window's (in single player, on LAN
-    /// and on servers), and the server's own (`native_window` is false
-    /// there: the single player server thread, a dedicated server).
-    pub(super) fn native_tick(&mut self) {
-        mod_api::dispatch_tick(super::execution_role::host_side(self));
+    /// Once a client tick, before the window's tick runs (`ClientTickEvent.Pre`).
+    pub(super) fn native_client_tick_pre(&mut self) {
+        mod_api::dispatch_client_tick_pre(self);
+    }
+    /// Once a client tick, after the window's tick ran (`ClientTickEvent.Post`).
+    pub(super) fn native_client_tick_post(&mut self) {
+        mod_api::dispatch_client_tick_post(self);
     }
     /// Before an eligible targeted block's selection outline is built.
     /// Cancel skips only the default block highlight, after normal HUD and game-mode gates.
@@ -6066,6 +6067,23 @@ impl Game<'_> {
         mod_api::dispatch_creeper_ignite(self, entity, player, item);
     }
 
+    /// A lightning bolt is about to hit `entity` (NeoForge's
+    /// `EntityStruckByLightningEvent`, before `Entity.thunderHit`): once per
+    /// bolt strike for each entity whose box meets the strike box (3 blocks
+    /// around, 9 up), players included. `bolt` is the lightning bolt. Set
+    /// `cancel` to spare the entity: no fire or damage, and no conversion
+    /// (pig, villager, mooshroom, creeper, copper golem). It still counts
+    /// as struck for Channeling's advancement. Not asked for a visual-only
+    /// bolt, which hits nothing. Server-side.
+    pub(super) fn native_entity_struck_by_lightning(
+        &mut self,
+        entity: EntityRef,
+        bolt: EntityRef,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_entity_struck_by_lightning(self, entity, bolt, cancel);
+    }
+
     /// Lightning charged a creeper.
     pub(super) fn native_creeper_power(&mut self, entity: u32, lightning: [f64; 3]) {
         mod_api::dispatch_creeper_power(self, entity, lightning);
@@ -9687,18 +9705,21 @@ impl Game<'_> {
     }
     /// Attack and use clicks in the last second.
     pub(super) fn native_clicks(&mut self) -> (u32, u32) {
-        self.mouse_reading().0
+        self.click_reading()
     }
     /// A vanilla mapping (`key.forward`, `key.jump`, `key.attack`…): whether
-    /// it is held, and its key's label as Controls shows it.
-    pub(super) fn native_mapping(&mut self, name: &str) -> Option<(bool, String)> {
+    /// it is held (`KeyMapping.isDown`), and its key's name as Controls shows
+    /// it. None for a mapping it doesn't answer for.
+    pub(super) fn native_mapping(&self, name: &str) -> Option<NativeKeyMapping> {
         let &(_, key) = MAPPINGS.iter().find(|m| m.0 == name)?;
-        let label = keybinds::display_name(self.settings.keys.get(name)).plain();
         let down = match key {
             Some(k) => self.keys.contains(&k),
-            None => self.mouse_reading().1[usize::from(name == "key.use")],
+            None => self.mouse_held()[usize::from(name == "key.use")],
         };
-        Some((down, label))
+        Some(NativeKeyMapping {
+            down,
+            label: keybinds::display_name(self.settings.keys.get(name)),
+        })
     }
     /// The key the player chose for a mod's key `name`, else `default`
     /// (`key.keyboard.z`), as the WebAssembly mods' keys were kept
@@ -11518,6 +11539,36 @@ mod tests {
             assert!(!ClientHost::is_paused(game));
             game.pause = true;
             assert!(ClientHost::is_paused(game));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_host_reads_playing_and_key_mappings() {
+        use super::super::Screen;
+        use super::super::execution_role::ExecutionRole;
+        use super::super::native_entity_refs::tests::with_game;
+        use mod_api::ClientHost;
+        use winit::keyboard::KeyCode;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            game.screen = Screen::Playing;
+            assert!(ClientHost::playing(game));
+            game.screen = Screen::Chat;
+            assert!(!ClientHost::playing(game));
+
+            // Vanilla's default bindings: forward is W, attack the left mouse button.
+            let forward = ClientHost::mapping(game, "key.forward").unwrap();
+            assert_eq!(
+                (forward.down, forward.label.plain()),
+                (false, "W".to_owned())
+            );
+            game.keys.insert(KeyCode::KeyW);
+            assert!(ClientHost::mapping(game, "key.forward").unwrap().down);
+            let attack = ClientHost::mapping(game, "key.attack").unwrap();
+            assert_eq!(attack.label.plain(), "Left Button");
+            assert!(ClientHost::mapping(game, "key.mymod.boost").is_none());
         });
     }
 
