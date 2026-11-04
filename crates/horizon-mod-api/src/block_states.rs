@@ -4,6 +4,7 @@
 use super::{Backend, BackendRef, BlockSoundType, BlockStateId, BlockStateRange, Host};
 
 /// The block-state facts service: `host.block_states()`.
+// exhaustive: its field is private; only `host.block_states()` builds one
 pub struct BlockStates<'a> {
     backend: Option<&'a dyn Backend>,
 }
