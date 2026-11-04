@@ -11040,6 +11040,182 @@ mod tests {
         });
     }
 
+    /// The `both` handle reads answer on a client from its own copy: the local
+    /// player's health, effects, equipment and last death, the blocks of the
+    /// level it shows and the entities it tracks.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_handle_reads_answer_from_the_clients_copy() {
+        use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
+        use horizon_client::{
+            chunk::Chunk,
+            first_person::Hand,
+            level_loading::Reason,
+            mod_api::{EntityRef, EquipmentSlot, GlobalPos},
+            motion::PlayerMotion,
+        };
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::{
+            connection::Pipe,
+            packets::play::{self, Clientbound as C, SpawnInfo},
+        };
+        use std::sync::Arc;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "HandleReadTest").unwrap();
+            let spawn = SpawnInfo {
+                dimension_type: 0,
+                dimension: "minecraft:overworld".into(),
+                seed: 0,
+                game_type: 1,
+                previous_game_type: None,
+                debug: false,
+                flat: true,
+                last_death: Some(play::GlobalPos {
+                    dimension: "minecraft:the_nether".into(),
+                    pos: [4, 70, -9],
+                }),
+                portal_cooldown: 0,
+                sea_level: 63,
+            };
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(1.5, 65.0, -2.5)).unwrap());
+            game.yaw = 90.0;
+            game.pitch = 10.0;
+
+            // The local player and the level it shows.
+            let player = game.native_local_player().unwrap();
+            let me = player.entity();
+            let living = game.native_living(me).unwrap();
+            let level = game.native_level("minecraft:overworld").unwrap();
+            assert!(game.native_level("minecraft:the_nether").is_none());
+            assert_eq!(me.position(game), Some([1.5, 65.0, -2.5]));
+            assert_eq!(me.rotation(game), Some([90.0, 10.0]));
+            game.player.as_mut().unwrap().velocity = Vec3::new(0.0, -0.5, 0.25);
+            assert_eq!(me.velocity(game), Some([0.0, -0.5, 0.25]));
+
+            // Last death: the login/respawn packet's, as a GlobalPos.
+            let died = player.last_death_location(game).unwrap();
+            assert_eq!(died.dimension().to_string(), "minecraft:the_nether");
+            let pos = died.pos();
+            assert_eq!([pos.x, pos.y, pos.z], [4, 70, -9]);
+            let _: GlobalPos = died;
+
+            // Health, maximum health, effects and equipment come from the packets.
+            game.handle_packet(C::SetHealth(play::SetHealth {
+                health: 14.0,
+                food: 20,
+                saturation: 5.0,
+            }))
+            .unwrap();
+            assert_eq!(living.health(game), Some(14.0));
+            assert_eq!(living.max_health(game), Some(20.0));
+            let speed = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:mob_effect")
+                .unwrap()
+                .id("minecraft:speed")
+                .unwrap();
+            assert_eq!(living.effects(game), Some(Vec::new()));
+            assert!(living.effect(game, "minecraft:speed").is_none());
+            game.handle_packet(C::UpdateMobEffect(play::UpdateMobEffect {
+                id: 7,
+                effect: speed,
+                amplifier: 1,
+                duration: 600,
+                flags: 2,
+            }))
+            .unwrap();
+            let effect = living.effect(game, "minecraft:speed").unwrap();
+            assert_eq!((effect.duration, effect.amplifier), (600, 1));
+            assert_eq!(living.effects(game).unwrap().len(), 1);
+            let stone = Some(horizon_protocol::item::Stack::new(
+                game.item_id("minecraft:stone"),
+                3,
+            ));
+            game.handle_packet(C::SetPlayerInventory(play::SetPlayerInventory {
+                slot: 0,
+                item: stone,
+            }))
+            .unwrap();
+            let held = living.hand_item(game, Hand::Main).unwrap();
+            assert_eq!((&*held.item, held.count), ("minecraft:stone", 3));
+            assert_eq!(living.equipment(game, EquipmentSlot::Head), None);
+            assert_eq!(living.hand_item(game, Hand::Off), None);
+
+            // Blocks of the chunks the client holds; nothing loads another.
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let chunks = game.world.chunks.len();
+            let at = [3, 64, 5];
+            assert!(level.is_loaded(game, at));
+            assert!(!level.is_loaded(game, [160, 64, 0]));
+            game.handle_packet(C::BlockUpdate(play::BlockUpdate { pos: at, state: 1 }))
+                .unwrap();
+            assert_eq!(level.block(game, at).as_deref(), Some("minecraft:stone"));
+            assert!(level.block_state(game, at).is_some());
+            assert_eq!(level.block(game, [160, 64, 0]), None);
+            assert_eq!(level.block_property(game, [160, 64, 0], "facing"), None);
+            assert_eq!(game.world.chunks.len(), chunks);
+
+            // An entity the server told the client of; others read None.
+            let pig = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:entity_type")
+                .unwrap()
+                .id("minecraft:pig")
+                .unwrap();
+            game.handle_packet(C::AddEntity(play::AddEntity {
+                id: 31,
+                uuid: 9,
+                kind: pig,
+                position: [10.0, 64.0, 12.0],
+                velocity: [0.0; 3],
+                pitch: 0,
+                yaw: 64,
+                head_yaw: 64,
+                data: 0,
+            }))
+            .unwrap();
+            let other = game.native_entity(31).unwrap();
+            assert_eq!(other.position(game), Some([10.0, 64.0, 12.0]));
+            assert!(other.velocity(game).is_some());
+            assert!(other.rotation(game).is_some());
+            assert!(game.native_living(other).is_none(), "only the local player");
+            assert!(game.native_entity(99).is_none());
+            let untracked = EntityRef::new(me.epoch(), 99);
+            assert_eq!(untracked.position(game), None);
+            assert_eq!(untracked.velocity(game), None);
+
+            // A replaced level retires the handles.
+            let mut other_level = spawn.clone();
+            other_level.dimension = "test:other_overworld".into();
+            game.enter_remote_dimension(&other_level, true, Reason::Other);
+            assert_eq!(me.position(game), None);
+            assert_eq!(living.health(game), None);
+            assert_eq!(level.block(game, at), None);
+            assert!(!level.is_loaded(game, at));
+            assert_eq!(player.last_death_location(game), None);
+
+            // The server's role keeps its own reads: a client handle names nothing there.
+            game.options.execution_role = ExecutionRole::IntegratedServer;
+            assert_eq!(game.native_entity_target(untracked), None);
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_epochs_follow_level_replacement_and_logout() {
