@@ -104,7 +104,12 @@ fn state(sprite: &str, foil: FoilType, display: DisplayContext) -> ItemRenderSta
 #[test]
 fn gui_glint_matches_pinned_vanilla_atlas_input() {
     let root = fixture("gui");
-    let renderer = ItemRenderer::load(&root).unwrap();
+    let data = crate::test_resources::item_data(
+        &root,
+        horizon_world::native_load_context::DataLoadOrigin::ClientPreload,
+    )
+    .unwrap();
+    let renderer = ItemRenderer::load(&root, &data).unwrap();
     renderer.prepare_glint_atlas(16384, (0, 2)).unwrap();
     // The real vanilla oracle also checks a rectangular texture, an animation frame,
     // an unstitch source and an equal-sized sprite in a second namespace.
@@ -438,6 +443,11 @@ fn prepared_item_atlas_matches_pinned_vanilla() {
 #[ignore = "requires an independently generated pinned vanilla atlas JSON and matching resources"]
 fn external_item_atlas_oracle() {
     let root = PathBuf::from(std::env::var_os("HORIZON_GLINT_ROOT").expect("resource root"));
+    let data = crate::test_resources::item_data(
+        &root,
+        horizon_world::native_load_context::DataLoadOrigin::ClientPreload,
+    )
+    .unwrap();
     let expected: Value = serde_json::from_str(
         &fs::read_to_string(
             std::env::var_os("HORIZON_GLINT_EXPECTED").expect("vanilla atlas JSON"),
@@ -477,7 +487,7 @@ fn external_item_atlas_oracle() {
                 [missing.u0, missing.v0, missing.u1, missing.v1]
             );
         }
-        let renderer = ItemRenderer::load(&root).unwrap();
+        let renderer = ItemRenderer::load(&root, &data).unwrap();
         renderer
             .prepare_glint_atlas(32768, (if bit == 0 { 0 } else { 2 }, bit))
             .unwrap();

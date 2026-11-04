@@ -466,6 +466,7 @@ mod tests {
                 a,
                 Slots::Double(a, b),
                 vec![None; 5],
+                None,
             );
             let menu = game.native_menu_ref(player).unwrap();
             assert_eq!(
@@ -488,6 +489,7 @@ mod tests {
                 vehicle,
                 Slots::Block(vehicle),
                 vec![None],
+                None,
             );
             let menu = game.native_menu_ref(player).unwrap();
             assert_eq!(
@@ -516,6 +518,7 @@ mod tests {
                 a,
                 Slots::Block(a),
                 vec![Some(gold.clone())],
+                None,
             );
             let overworld_menu = game.native_menu_ref(player).unwrap();
             let overworld = game.native_level("minecraft:overworld").unwrap();
@@ -539,6 +542,7 @@ mod tests {
                 a,
                 Slots::Block(a),
                 vec![Some(emerald.clone())],
+                None,
             );
             let other_player = game.native_player_ref(456).unwrap();
             let nether_menu = game.native_menu_ref(other_player).unwrap();

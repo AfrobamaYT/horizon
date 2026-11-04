@@ -5748,15 +5748,17 @@ mod named_damage_tests {
     }
     #[test]
     fn named_fire_uses_normal_immunity_and_protection_without_becoming_on_fire() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut resistant = pig();
         resistant.add_effect("minecraft:fire_resistance", -1, 0);
-        assert!(!resistant.damage(2.0, fire(0)));
+        assert!(!resistant.damage(level, 2.0, fire(0)));
         assert_eq!((resistant.health, resistant.invulnerable), (10.0, 0));
         let mut immune = pig();
         Arc::make_mut(&mut immune.kind).flags.fire_immune = true;
-        assert!(!immune.damage(2.0, fire(0)));
+        assert!(!immune.damage(level, 2.0, fire(0)));
         let mut bare = pig();
-        assert!(bare.damage(2.0, fire(0)));
+        assert!(bare.damage(level, 2.0, fire(0)));
         assert_eq!(bare.health, 8.0); // bypasses the 20 armor points
         assert!(bare.velocity.x != 0.0 || bare.velocity.z != 0.0);
         assert_eq!(bare.last_damage.unwrap().0.kind, fire(0).kind);
@@ -5766,21 +5768,23 @@ mod named_damage_tests {
             gear::CHEST,
             vec![("minecraft:fire_protection".into(), 4)],
         );
-        assert!(protected.damage(2.0, fire(0)));
+        assert!(protected.damage(level, 2.0, fire(0)));
         assert!((protected.health - 8.64).abs() < 0.00001);
         let mut still = pig();
-        assert!(still.damage(2.0, fire(NamedDamage::NO_KNOCKBACK)));
+        assert!(still.damage(level, 2.0, fire(NamedDamage::NO_KNOCKBACK)));
         assert_eq!(still.velocity, Vec3::ZERO);
     }
     #[test]
     fn named_tags_control_resistance_and_specialist_enchantments() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut mob = pig();
         mob.add_effect("minecraft:resistance", -1, 0);
-        assert!(mob.damage(2.0, fire(0)));
+        assert!(mob.damage(level, 2.0, fire(0)));
         assert!((mob.health - 8.4).abs() < 0.00001);
         let mut bypass = pig();
         bypass.add_effect("minecraft:resistance", -1, 0);
-        assert!(bypass.damage(2.0, fire(NamedDamage::BYPASSES_RESISTANCE)));
+        assert!(bypass.damage(level, 2.0, fire(NamedDamage::BYPASSES_RESISTANCE)));
         assert_eq!(bypass.health, 8.0);
         let mut no_effects = pig();
         no_effects.add_effect("minecraft:resistance", -1, 0);
@@ -5789,7 +5793,7 @@ mod named_damage_tests {
             gear::CHEST,
             vec![("minecraft:fire_protection".into(), 4)],
         );
-        assert!(no_effects.damage(2.0, fire(NamedDamage::BYPASSES_EFFECTS)));
+        assert!(no_effects.damage(level, 2.0, fire(NamedDamage::BYPASSES_EFFECTS)));
         assert_eq!(no_effects.health, 8.0);
         let mut armor = gear::Gear::default();
         armor.slots[gear::FEET] = vec![("minecraft:feather_falling".into(), 4)];

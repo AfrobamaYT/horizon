@@ -1741,6 +1741,11 @@ fn a_decorated_superflat_world_without_structures_grows_its_features() {
     };
     let assets = Assets::load(&base).unwrap();
     let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let item_data = crate::test_resources::item_data(
+        &base,
+        horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
+    )
+    .unwrap();
     // Blocks above the grass (the top layer is at the level's minimum Y + 63) in the
     // chunk at 4, 4 once its 3×3 region is decorated.
     let above_ground = |features| {
@@ -1757,10 +1762,13 @@ fn a_decorated_superflat_world_without_structures_grows_its_features() {
             lakes: false,
         };
         let terrain = crate::vanillagen::VanillaTerrain::for_flat(
-            &base.join("worldgen"),
+            crate::vanillagen::TerrainResources {
+                dir: &base.join("worldgen"),
+                registry: assets.registry,
+                biomes: &biomes,
+                item_data: &item_data,
+            },
             &Default::default(),
-            assets.registry,
-            &biomes,
             1234,
             &flat,
             false,

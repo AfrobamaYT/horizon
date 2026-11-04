@@ -3947,6 +3947,8 @@ mod warden_push_tests {
 
     #[test]
     fn a_warden_in_the_ground_does_not_take_collision_pushes() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         with_test_world(&[], |world, types| {
             let mob = |id, kind: &str, x| {
                 Mob::new(
@@ -3969,7 +3971,7 @@ mod warden_push_tests {
                 let mut w = world.clone();
                 w.others = &others;
                 let mut events = Vec::new();
-                push_entities(&mut warden, &w, &mut events);
+                push_entities(&mut warden, &w, level, &mut events);
                 assert_eq!(warden.velocity.x != 0.0, standing, "mob: {pose:?}");
                 // Non-pushable is not an early return: it still pushes others.
                 assert!(events.iter().any(|e| matches!(
@@ -3984,7 +3986,7 @@ mod warden_push_tests {
                 let others = [warden.seen(None)];
                 w.others = &others;
                 events.clear();
-                push_entities(&mut cow, &w, &mut events);
+                push_entities(&mut cow, &w, level, &mut events);
                 let pushes_warden = events.iter().any(|e| {
                     matches!(
                         e,
@@ -4001,7 +4003,7 @@ mod warden_push_tests {
                 w.player = Some(test_player(Vec3::new(1.0, 64.0, 0.5)));
                 warden.velocity = Vec3::ZERO;
                 events.clear();
-                push_entities(&mut warden, &w, &mut events);
+                push_entities(&mut warden, &w, level, &mut events);
                 assert_eq!(warden.velocity.x != 0.0, standing, "player: {pose:?}");
             }
         });

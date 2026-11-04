@@ -275,6 +275,8 @@ mod knockback_sync_tests {
     /// does, so a guest sees a cube with a block knocked about at once.
     #[test]
     fn a_knocked_cube_with_a_block_syncs_at_once() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         test_archetype_items();
         let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
         kind.species = Species::SulfurCube;
@@ -1156,6 +1158,8 @@ mod tnt_rule_tests {
 
     #[test]
     fn mob_tick_counts_the_fuse_but_keeps_noai_cooldowns_still() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         crate::mobs::world::with_test_world(&[], |w, _| {
             for no_ai in [true, false] {
                 let mut m = tnt_cube();
@@ -1165,15 +1169,14 @@ mod tnt_rule_tests {
                 m.extra.counter2 = 4; // loaded fuse 3
                 m.extra.ints[3] = 100;
                 m.extra.scratch[2] = 10;
-                let mut random = horizon_core::random::LegacyRandom::new(0);
                 let mut events = Vec::new();
                 for remaining in [2, 1] {
-                    assert!(m.tick(w, &mut random, &mut events));
+                    assert!(m.tick(w, level, &mut events));
                     assert_eq!(fuse(&m), remaining);
                     assert_eq!(m.extra.ints[3], if no_ai { 100 } else { 97 + remaining });
                     assert_eq!(m.extra.scratch[2], if no_ai { 10 } else { 7 + remaining });
                 }
-                assert!(!m.tick(w, &mut random, &mut events));
+                assert!(!m.tick(w, level, &mut events));
                 assert!(m.removed);
                 assert_eq!(
                     events
@@ -1182,7 +1185,7 @@ mod tnt_rule_tests {
                         .count(),
                     1
                 );
-                assert!(!m.tick(w, &mut random, &mut events));
+                assert!(!m.tick(w, level, &mut events));
                 assert_eq!(
                     events
                         .iter()
@@ -1488,6 +1491,8 @@ mod mob_contact_tests {
 
     #[test]
     fn mob_tick_contacts_only_overlapping_pushable_mobs_with_a_hot_body() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         test_archetype_items();
         let victim = |id: u32, at: Vec3, alive: bool| {
             let mut m = Mob::new(id, crate::mobs::sensor_scan_tests::kind(), at, 0.0);
@@ -1517,10 +1522,9 @@ mod mob_contact_tests {
                     m.no_ai = no_ai;
                     m.no_gravity = true;
                     m.persistent = true;
-                    m.extra.body = body.map(Into::into);
-                    let mut random = horizon_core::random::LegacyRandom::new(0);
+                    m.extra.set_body(body.map(Into::into));
                     let mut events = Vec::new();
-                    assert!(m.tick(w, &mut random, &mut events));
+                    assert!(m.tick(w, level, &mut events));
                     let hits: Vec<_> = events
                         .iter()
                         .filter_map(|event| match event {

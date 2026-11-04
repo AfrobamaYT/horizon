@@ -7,6 +7,8 @@ use horizon_client::held::Source;
 use winit::keyboard::KeyCode;
 
 /// A game at play with no world: input reaches the mappings, as in `Screen::Playing`.
+use crate::game::execution_role::ExecutionRole;
+
 fn playing(test: impl FnOnce(&mut Game)) {
     let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let settings = Settings::default();
@@ -17,7 +19,7 @@ fn playing(test: impl FnOnce(&mut Game)) {
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!("no menu handoff"),
     )
