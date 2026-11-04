@@ -196,11 +196,11 @@ use std::time::Duration;
 /// What a key did in an `input_key` event (GLFW's `action`: release 0, press 1, repeat 2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyAction {
-    /// Release.
+    /// The key was let go.
     Release,
-    /// Press.
+    /// The key went down.
     Press,
-    /// Repeat.
+    /// The key is held and the operating system repeats it.
     Repeat,
 }
 
@@ -210,40 +210,40 @@ pub enum KeyAction {
 /// game casts it to a whole number as vanilla does).
 #[derive(Clone, Debug)]
 pub struct NativeArmorHurt {
-    /// The slot.
+    /// The equipment slot the armor piece sits in.
     pub slot: EquipmentSlot,
-    /// The stack.
+    /// The armor piece being damaged.
     pub stack: ItemStack,
-    /// The damage.
+    /// The durability damage vanilla computed.
     pub damage: f32,
-    /// The new damage.
+    /// The durability damage to apply instead; starts equal to `damage`.
     pub new_damage: f32,
 }
 
 /// Camera values from the most recently extracted world frame.
 #[derive(Clone, Debug)]
 pub struct NativeCamera {
-    /// The position.
+    /// The camera position in blocks (x, y, z).
     pub position: [f64; 3],
-    /// The eye height.
+    /// The eye height above the position, in blocks.
     pub eye_height: f32,
-    /// The partial tick.
+    /// The fraction of the current tick elapsed, 0 to 1.
     pub partial_tick: f32,
-    /// The yaw.
+    /// The horizontal rotation in degrees.
     pub yaw: f32,
-    /// The pitch.
+    /// The vertical rotation in degrees; negative looks up.
     pub pitch: f32,
-    /// The fov degrees.
+    /// The vertical field of view in degrees.
     pub fov_degrees: f32,
-    /// The near.
+    /// The near clip distance in blocks.
     pub near: f32,
-    /// The far.
+    /// The far clip distance in blocks.
     pub far: f32,
     /// Camera-relative view matrix in column-major order.
     pub view: [f32; 16],
     /// Reversed-Z projection matrix in column-major order.
     pub projection: [f32; 16],
-    /// The dimension.
+    /// The id of the dimension drawn, such as `minecraft:overworld`.
     pub dimension: String,
 }
 
@@ -252,29 +252,29 @@ pub struct NativeCamera {
 /// Translation is in blocks and rotation is in degrees (pitch, yaw, roll).
 /// The renderer applies the transform before the ordinary hand and item poses.
 pub struct NativeHandRender<'a> {
-    /// The player.
+    /// The UUID of the player whose hand is drawn.
     pub player: u128,
-    /// The player entity id.
+    /// The network id of that player.
     pub player_entity_id: i32,
-    /// The hand.
+    /// Which hand is drawn.
     pub hand: Hand,
-    /// The stack.
+    /// The stack shown in the hand; `None` for the empty main-hand arm.
     pub stack: Option<&'a ItemStack>,
-    /// The partial.
+    /// The fraction of the current tick elapsed, 0 to 1.
     pub partial: f32,
-    /// The interpolated pitch.
+    /// The player pitch interpolated for this frame, in degrees.
     pub interpolated_pitch: f32,
-    /// The swing.
+    /// The swing progress, 0 to 1.
     pub swing: f32,
-    /// The equip.
+    /// The inverse equip height, including the swap animation scale.
     pub equip: f32,
     /// Vanilla packed light at the eyes (`LightCoordsUtil.pack`: block << 4 | sky << 20).
     pub packed_light: u32,
-    /// The translation.
+    /// A mod-set offset in blocks; applied before the hand is drawn.
     pub translation: [f32; 3],
-    /// The rotation.
+    /// A mod-set rotation as pitch, yaw and roll in degrees.
     pub rotation: [f32; 3],
-    /// The scale.
+    /// A mod-set uniform scale; 1 leaves the size alone.
     pub scale: f32,
 }
 
@@ -285,9 +285,9 @@ pub type NativeDispensed = (Option<ItemStack>, i32);
 /// Context for a player tuning a note block.
 #[derive(Clone, Copy, Debug)]
 pub struct NativeNoteBlockChange {
-    /// The dimension.
+    /// The level the note block is in.
     pub dimension: LevelDimension,
-    /// The pos.
+    /// The note block's position.
     pub pos: BlockPos,
     /// The block's instrument before tuning.
     pub instrument: NativeNoteInstrument,
@@ -338,9 +338,9 @@ pub struct NativeLootDrops<'a> {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct NativeItemDrop {
-    /// The stack.
+    /// The dropped stack.
     pub stack: ItemStack,
-    /// Where the item entity appears.
+    /// Where the item entity appears, in blocks.
     pub position: [f64; 3],
     /// Its motion in blocks per tick, as vanilla's constructor drew it.
     pub velocity: [f64; 3],
@@ -518,9 +518,9 @@ pub struct NativePortalShape {
     pub x_axis: bool,
     /// Its bottom-left inside block.
     pub bottom_left: [i32; 3],
-    /// The width.
+    /// The portal frame's inner width in blocks.
     pub width: i32,
-    /// The height.
+    /// The portal frame's inner height in blocks.
     pub height: i32,
 }
 
@@ -531,13 +531,13 @@ pub struct NativePortalShape {
 pub struct NativeExplosionStart<'a> {
     /// The level it happens in (`minecraft:overworld`).
     pub dimension: &'a str,
-    /// The center.
+    /// The explosion's center in blocks.
     pub center: [f64; 3],
-    /// The radius.
+    /// The explosion's radius in blocks.
     pub radius: f32,
     /// It sets fires (`createFire`).
     pub fire: bool,
-    /// The interaction.
+    /// What the explosion does to blocks.
     pub interaction: NativeBlockInteraction,
     /// The damage type of its damage source (`minecraft:explosion`,
     /// `minecraft:player_explosion`, `minecraft:bad_respawn_point`).
@@ -555,11 +555,11 @@ pub struct NativeExplosionStart<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeBlockInteraction {
-    /// Keep.
+    /// Blocks are left alone.
     Keep,
-    /// Destroy.
+    /// Blocks are destroyed and drop everything.
     Destroy,
-    /// Destroy with decay.
+    /// Blocks are destroyed and their drops may decay.
     DestroyWithDecay,
     /// A wind burst: it pushes, and triggers doors, buttons, bells and the like.
     TriggerBlock,
@@ -652,24 +652,24 @@ pub struct NativeScreenView<'a> {
 /// A depth-tested outline of the client's block selection shape.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeBlockRim {
-    /// The pos.
+    /// The block whose outline is drawn.
     pub pos: [i32; 3],
-    /// The argb.
+    /// The outline colour as `0xAARRGGBB`.
     pub argb: u32,
-    /// The width.
+    /// The line width in pixels.
     pub width: f32,
 }
 
 /// A camera-local visual light, with no gameplay light or shadow writes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeColoredLight {
-    /// The at.
+    /// The light's position in blocks.
     pub at: [f64; 3],
-    /// The rgb.
+    /// The colour as `0xRRGGBB`.
     pub rgb: u32,
-    /// The radius.
+    /// How far it reaches, in blocks.
     pub radius: f32,
-    /// The intensity.
+    /// The light's strength.
     pub intensity: f32,
 }
 
@@ -732,11 +732,11 @@ pub struct NativeMod {
 /// the item's own, in vanilla's item syntax, or "".
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NativeStack {
-    /// The item.
+    /// The item id, such as `minecraft:stick`.
     pub item: String,
-    /// The count.
+    /// How many are in the stack.
     pub count: u32,
-    /// The components.
+    /// The stack's data components, as the game's JSON form.
     pub components: String,
 }
 
@@ -791,11 +791,11 @@ pub enum NativePanelEvent {
 /// field of view like the spyglass when `smooth`, and the scale of mouse turning.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeZoom {
-    /// The factor.
+    /// The zoom as a multiple of the normal view; 1 is no zoom.
     pub factor: f32,
-    /// The smooth.
+    /// Whether the camera eases into the zoom.
     pub smooth: bool,
-    /// The turn.
+    /// Scale applied to mouse turning while zoomed.
     pub turn: f32,
 }
 
@@ -803,16 +803,16 @@ pub struct NativeZoom {
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct NativeServerPlayer {
-    /// The uuid.
+    /// The player's UUID.
     pub uuid: u128,
-    /// The name.
+    /// The player's name.
     pub name: String,
     /// The operator level, 0 to 4 (`ops.json`; single player's owner with
     /// cheats on is 4).
     pub permission: u8,
     /// `minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`.
     pub dimension: String,
-    /// The position.
+    /// The player's position in blocks.
     pub position: [f64; 3],
     /// 0 survival, 1 creative, 2 adventure, 3 spectator.
     pub game_mode: i32,
@@ -821,7 +821,7 @@ pub struct NativeServerPlayer {
     /// Where they look, in degrees (`yRot`, `xRot`), as their last move told
     /// the server.
     pub yaw: f32,
-    /// The pitch.
+    /// The player's pitch in degrees.
     pub pitch: f32,
     /// The network entity id the player has this session, the one hooks that only know entity ids
     /// (`living_incoming_damage`, `living_knockback`) give for the player; 0 when not known.
@@ -1807,27 +1807,27 @@ pub enum NativeExplosionInteraction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeSoundSource {
-    /// Master.
+    /// The master volume category.
     Master,
     /// Music.
     Music,
     /// Jukeboxes and note blocks (`RECORDS`).
     Records,
-    /// Weather.
+    /// Rain and thunder.
     Weather,
     /// Blocks (`BLOCKS`).
     Blocks,
-    /// Hostile.
+    /// Hostile mobs.
     Hostile,
-    /// Neutral.
+    /// Friendly and neutral mobs.
     Neutral,
     /// Players (`PLAYERS`).
     Players,
-    /// Ambient.
+    /// Ambient and block sounds.
     Ambient,
     /// Voice.
     Voice,
-    /// Ui.
+    /// Interface sounds.
     Ui,
 }
 
@@ -1852,11 +1852,11 @@ pub enum NativeBlockShapeKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeChatVisibility {
-    /// Full.
+    /// All chat.
     Full,
-    /// System.
+    /// Only system messages and commands.
     System,
-    /// Hidden.
+    /// No chat.
     Hidden,
 }
 
@@ -1898,9 +1898,9 @@ impl NativePermissionLevel {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeMainHand {
-    /// Left.
+    /// The left hand.
     Left,
-    /// Right.
+    /// The right hand.
     Right,
 }
 
@@ -1908,11 +1908,11 @@ pub enum NativeMainHand {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeParticleStatus {
-    /// All.
+    /// All particles.
     All,
-    /// Decreased.
+    /// Fewer particles.
     Decreased,
-    /// Minimal.
+    /// Only the essential particles.
     Minimal,
 }
 
@@ -1922,23 +1922,23 @@ pub enum NativeParticleStatus {
 /// unknown id as left.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeClientInfo {
-    /// The language.
+    /// The client's language code, such as `en_us`.
     pub language: String,
-    /// The view distance.
+    /// The client's view distance in chunks.
     pub view_distance: i8,
-    /// The chat visibility.
+    /// Which chat the client shows.
     pub chat_visibility: NativeChatVisibility,
-    /// The chat colors.
+    /// Whether the client shows chat colours.
     pub chat_colors: bool,
     /// Skin layer bits (`PlayerModelPart`).
     pub model_customisation: u8,
-    /// The main hand.
+    /// The player's main hand.
     pub main_hand: NativeMainHand,
-    /// The text filtering.
+    /// Whether the client asked for filtered text.
     pub text_filtering: bool,
-    /// The allows listing.
+    /// Whether the player shows in the server list sample.
     pub allows_listing: bool,
-    /// The particle status.
+    /// How many particles the client draws.
     pub particle_status: NativeParticleStatus,
 }
 
@@ -1946,17 +1946,17 @@ pub struct NativeClientInfo {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeBlockFace {
-    /// Down.
+    /// Facing down (-y).
     Down,
-    /// Up.
+    /// Facing up (+y).
     Up,
-    /// North.
+    /// Facing north (-z).
     North,
-    /// South.
+    /// Facing south (+z).
     South,
-    /// West.
+    /// Facing west (-x).
     West,
-    /// East.
+    /// Facing east (+x).
     East,
 }
 
@@ -2083,13 +2083,13 @@ impl From<PlayerRef> for EntityRef {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GameMode {
-    /// Survival.
+    /// Survival mode.
     Survival,
-    /// Creative.
+    /// Creative mode.
     Creative,
-    /// Adventure.
+    /// Adventure mode.
     Adventure,
-    /// Spectator.
+    /// Spectator mode.
     Spectator,
 }
 
@@ -2242,11 +2242,11 @@ pub struct MenuRef {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct NativePlayerFood {
-    /// Food level.
+    /// The food level, 0 to 20.
     pub level: i32,
-    /// Food saturation.
+    /// The saturation, up to the food level.
     pub saturation: f32,
-    /// Food exhaustion.
+    /// The exhaustion; the game takes a saturation or food point at 4.
     pub exhaustion: f32,
 }
 
@@ -2255,11 +2255,11 @@ pub struct NativePlayerFood {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct NativePlayerExperience {
-    /// Experience level.
+    /// The experience level.
     pub level: i32,
     /// Progress toward the next level, from 0 to 1.
     pub progress: f32,
-    /// Points gained in all.
+    /// The total experience points.
     pub total: i32,
 }
 
@@ -2311,17 +2311,17 @@ impl ApplyEffectTickEvent<'_> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct NativePlayerAbilities {
-    /// Whether ordinary damage is ignored.
+    /// Takes no damage.
     pub invulnerable: bool,
-    /// Whether the player is flying.
+    /// Is flying now.
     pub flying: bool,
-    /// Whether the player may fly.
+    /// May start flying.
     pub may_fly: bool,
-    /// Whether items are used without consumption.
+    /// Breaks blocks at once and uses no items (creative).
     pub instabuild: bool,
-    /// Whether the player may build.
+    /// May break and place blocks.
     pub may_build: bool,
-    /// Flying speed.
+    /// The flying speed.
     pub fly_speed: f32,
     /// Walking speed (`Abilities.walkingSpeed`, vanilla's 0.1).
     pub walk_speed: f32,
@@ -2689,9 +2689,9 @@ impl<'a> Iterator for Entered<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Flow {
-    /// Later mods and the game continue.
+    /// Go on to the next listener and then the game's own behaviour.
     Continue,
-    /// Set the hook flag and skip later mods.
+    /// Stop here; the game's own behaviour does not run.
     Cancel,
 }
 
@@ -2963,12 +2963,12 @@ impl NativeInteractionResult {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeTriState {
-    /// False.
+    /// Deny.
     False,
     #[default]
-    /// Default.
+    /// Leave the game's own answer.
     Default,
-    /// True.
+    /// Allow.
     True,
 }
 impl NativeTriState {
