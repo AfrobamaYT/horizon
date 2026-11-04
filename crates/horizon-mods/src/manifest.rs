@@ -3,7 +3,7 @@
 //! Raw injection schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
 mod jar;
-pub use jar::JarRef;
+pub use jar::{JarConflict, JarRef, JarRequirement, MissingJar, collect_jar_requirements};
 
 use serde::{Deserialize, Serialize};
 use std::{

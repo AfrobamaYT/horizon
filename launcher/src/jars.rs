@@ -1,9 +1,9 @@
 //! Resolve a mod set's passive Java jars before a launcher-managed launch.
 mod launch;
 use crate::i18n::{tr, trf};
-use horizon_mods::manifest::JarRef;
+use horizon_mods::manifest::{JarRef, JarRequirement, MissingJar};
 use horizon_port_pack::{fetch, modrinth};
-pub use launch::{prepare_launch, LaunchError};
+pub use launch::{LaunchError, prepare_launch};
 use std::{
     collections::BTreeMap,
     fmt, fs, io,
@@ -27,48 +27,6 @@ impl Permission<'static> {
             Self::Refuse
         }
     }
-}
-
-/// The same file cannot claim two different Java mod identities.
-#[derive(Debug)]
-pub struct JarConflict {
-    pub first: Box<JarRef>,
-    pub second: Box<JarRef>,
-}
-
-impl fmt::Display for JarConflict {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&trf("SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.", &[
-            ("hash", self.first.sha512()), ("first_id", self.first.id()), ("first_version", self.first.version()),
-            ("second_id", self.second.id()), ("second_version", self.second.version()),
-        ]))
-    }
-}
-impl std::error::Error for JarConflict {}
-
-/// Collect once from the staged mod set, including content-only packages.
-/// This order is only for fetching; pack layering remains per mod in the game.
-pub fn collect<'a>(
-    manifests: impl IntoIterator<Item = &'a horizon_mods::manifest::Manifest>,
-) -> Result<Vec<JarRef>, JarConflict> {
-    let mut hashes = BTreeMap::new();
-    for jar in manifests.into_iter().flat_map(|m| &m.jar) {
-        if let Some(first) = hashes.insert(jar.sha512(), jar) {
-            if first != jar {
-                return Err(JarConflict {
-                    first: Box::new(first.clone()),
-                    second: Box::new(jar.clone()),
-                });
-            }
-        }
-    }
-    Ok(hashes.into_values().cloned().collect())
-}
-
-#[derive(Debug)]
-pub struct MissingJar {
-    pub jar: JarRef,
-    pub path: PathBuf,
 }
 
 /// Preparation failures retain their kind; callers never inspect error text.
@@ -151,7 +109,7 @@ impl std::error::Error for PrepareError {
 /// downloaded only after one consent decision for the complete mod set.
 pub fn prepare(
     home: &Path,
-    jars: &[JarRef],
+    jars: &[JarRequirement],
     permission: Permission<'_>,
 ) -> Result<(), PrepareError> {
     prepare_with(
@@ -165,15 +123,16 @@ pub fn prepare(
 
 fn prepare_with(
     home: &Path,
-    jars: &[JarRef],
+    jars: &[JarRequirement],
     permission: Permission<'_>,
     mut lookup: impl FnMut(&[&JarRef]) -> Result<BTreeMap<String, String>, String>,
     mut download: impl FnMut(&str, &JarRef, &Path) -> Result<(), String>,
 ) -> Result<(), PrepareError> {
     let cache = home.join("jars");
     let mut missing = Vec::new();
-    for jar in jars {
-        let path = cache.join(format!("{}.jar", jar.sha512()));
+    for requirement in jars {
+        let jar = &requirement.jar;
+        let path = jar.cache_path(&cache);
         match fs::File::open(&path) {
             Ok(file) => {
                 let hash =
@@ -192,7 +151,7 @@ fn prepare_with(
                     });
                 }
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => missing.push(jar),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => missing.push(requirement),
             Err(source) => return Err(PrepareError::Io { path, source }),
         }
     }
@@ -202,9 +161,10 @@ fn prepare_with(
     let missing_entries = || {
         missing
             .iter()
-            .map(|jar| MissingJar {
-                jar: (*jar).clone(),
-                path: cache.join(format!("{}.jar", jar.sha512())),
+            .map(|requirement| MissingJar {
+                owners: requirement.owners.clone(),
+                jar: requirement.jar.clone(),
+                path: requirement.jar.cache_path(&cache),
             })
             .collect()
     };
@@ -213,24 +173,25 @@ fn prepare_with(
             missing: missing_entries(),
         });
     }
+    let missing_refs: Vec<_> = missing.iter().map(|requirement| &requirement.jar).collect();
     if let Permission::Ask(ask) = permission {
-        if !ask(&missing) {
+        if !ask(&missing_refs) {
             return Err(PrepareError::Refused {
                 missing: missing_entries(),
             });
         }
     }
-    let urls = lookup(&missing).map_err(|reason| PrepareError::Lookup {
+    let urls = lookup(&missing_refs).map_err(|reason| PrepareError::Lookup {
         missing: missing_entries(),
         reason,
     })?;
-    let urls: Vec<_> = missing
+    let urls: Vec<_> = missing_refs
         .iter()
         .map(|jar| {
             urls.get(jar.sha512())
                 .ok_or_else(|| PrepareError::Download {
                     jar: Box::new((*jar).clone()),
-                    path: cache.join(format!("{}.jar", jar.sha512())),
+                    path: jar.cache_path(&cache),
                     reason: tr("no exact file on Modrinth").into(),
                 })
         })
@@ -239,8 +200,8 @@ fn prepare_with(
         path: cache.clone(),
         source,
     })?;
-    for (jar, url) in missing.into_iter().zip(urls) {
-        let path = cache.join(format!("{}.jar", jar.sha512()));
+    for (jar, url) in missing_refs.into_iter().zip(urls) {
+        let path = jar.cache_path(&cache);
         download(url, jar, &path).map_err(|reason| PrepareError::Download {
             jar: Box::new(jar.clone()),
             path,

@@ -1,4 +1,5 @@
 use super::*;
+use horizon_mods::manifest::collect_jar_requirements;
 use sha2::Digest;
 use std::{cell::Cell, io::Write, path::PathBuf};
 
@@ -39,13 +40,8 @@ fn source(seed: &[u8]) -> (JarRef, Vec<u8>) {
     (jar, bytes)
 }
 
-fn manifest(jars: Vec<JarRef>) -> horizon_mods::manifest::Manifest {
-    let mut manifest = horizon_mods::manifest::Manifest::parse(
-        "id='example'\nname='Example'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n",
-    )
-    .unwrap();
-    manifest.jar = jars;
-    manifest
+fn requirements(jars: &[JarRef]) -> Vec<JarRequirement> {
+    collect_jar_requirements([("example", jars)]).unwrap()
 }
 
 fn package(root: &Path, id: &str, jars: Vec<JarRef>, native: bool) -> PathBuf {
@@ -84,9 +80,9 @@ fn conflicting_metadata_for_one_exact_hash_is_refused_across_mods() {
     let (jar, _) = source(b"shared");
     for (id, version) in [("other", "1"), ("example", "2")] {
         let conflicting = JarRef::new(id.into(), version.into(), jar.sha512().into()).unwrap();
-        let error = collect([
-            &manifest(vec![jar.clone()]),
-            &manifest(vec![conflicting.clone()]),
+        let error = collect_jar_requirements([
+            ("alpha", std::slice::from_ref(&jar)),
+            ("beta", std::slice::from_ref(&conflicting)),
         ])
         .unwrap_err();
         assert_eq!(*error.first, jar);
@@ -104,7 +100,7 @@ fn cache_hits_are_offline_and_corrupt_files_are_not_silently_replaced() {
     fs::write(&path, bytes).unwrap();
     prepare_with(
         &home.0,
-        std::slice::from_ref(&jar),
+        &requirements(std::slice::from_ref(&jar)),
         Permission::Refuse,
         |_| panic!("cache hit must not use the network"),
         |_, _, _| panic!("download"),
@@ -113,7 +109,7 @@ fn cache_hits_are_offline_and_corrupt_files_are_not_silently_replaced() {
     fs::write(&path, b"corrupt").unwrap();
     let error = prepare_with(
         &home.0,
-        &[jar],
+        &requirements(&[jar]),
         Permission::Allow,
         |_| panic!("corrupt cache must fail"),
         |_, _, _| panic!("download"),
@@ -136,7 +132,15 @@ fn all_missing_hashes_share_one_consent_and_each_download_once() {
     };
     let lookups = Cell::new(0);
     let mut downloads = 0;
-    let jars = collect([&manifest(vec![a.clone()]), &manifest(vec![b, a.clone()])]).unwrap();
+    let jars = collect_jar_requirements([
+        ("alpha", [a.clone()].as_slice()),
+        ("beta", [b, a.clone()].as_slice()),
+    ])
+    .unwrap();
+    assert_eq!(
+        jars.iter().find(|r| r.jar == a).unwrap().owners,
+        ["alpha", "beta"]
+    );
     prepare_with(
         &home.0,
         &jars,
@@ -178,7 +182,7 @@ fn one_unresolved_hash_refuses_the_whole_batch_before_any_download() {
     let (second, _) = source(b"unavailable");
     let error = prepare_with(
         &home.0,
-        &[first.clone(), second.clone()],
+        &requirements(&[first.clone(), second.clone()]),
         Permission::Allow,
         |missing| {
             assert_eq!(missing.len(), 2);
@@ -208,7 +212,7 @@ fn headless_refusal_is_actionable_and_never_contacts_modrinth() {
     let expected = format!("{}.jar", jar.sha512());
     let error = prepare_with(
         &home.0,
-        &[jar],
+        &requirements(&[jar]),
         Permission::Refuse,
         |_| panic!("headless refusal must be offline"),
         |_, _, _| panic!("download"),
@@ -227,7 +231,7 @@ fn declined_consent_and_missing_or_failed_lookup_never_download() {
     let ask = |_: &[&JarRef]| false;
     let error = prepare_with(
         &home.0,
-        std::slice::from_ref(&jar),
+        &requirements(std::slice::from_ref(&jar)),
         Permission::Ask(&ask),
         |_| panic!("declined consent must not contact Modrinth"),
         |_, _, _| panic!("declined"),
@@ -247,7 +251,7 @@ fn declined_consent_and_missing_or_failed_lookup_never_download() {
         };
         let error = prepare_with(
             &home.0,
-            std::slice::from_ref(&jar),
+            &requirements(std::slice::from_ref(&jar)),
             Permission::Ask(&ask),
             |_| {
                 assert!(consented.get());
@@ -281,6 +285,7 @@ fn failed_metadata_lookup_names_every_missing_jar_but_not_cache_hits() {
             fs::write(&cached_path, &bytes).unwrap();
             jars.insert(0, cached);
         }
+        let jars = requirements(&jars);
         let prompts = Cell::new(0);
         let ask = |missing: &[&JarRef]| {
             prompts.set(prompts.get() + 1);
@@ -313,6 +318,7 @@ fn failed_metadata_lookup_names_every_missing_jar_but_not_cache_hits() {
         for (entry, jar) in missing.iter().zip([&first, &second]) {
             let path = cache.join(format!("{}.jar", jar.sha512()));
             assert_eq!(&entry.jar, jar);
+            assert_eq!(entry.owners, ["example"]);
             assert_eq!(entry.path, path);
             let line = format!("{} {}: {}", jar.id(), jar.version(), path.display());
             assert!(display.lines().any(|actual| actual == line));

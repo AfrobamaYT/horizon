@@ -1,4 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    path::{Path, PathBuf},
+};
 
 /// An original Java jar used as a passive asset/data layer, in manifest order.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -25,7 +30,95 @@ impl TryFrom<Fields> for JarRef {
     }
 }
 
+/// One exact file and every Horizon mod requiring it, in load order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JarRequirement {
+    pub owners: Vec<String>,
+    pub jar: JarRef,
+}
+
+/// One missing original file, shared by launcher preparation and game refusals.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MissingJar {
+    pub owners: Vec<String>,
+    pub jar: JarRef,
+    pub path: PathBuf,
+}
+
+impl fmt::Display for MissingJar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}: {} {}: {}",
+            self.owners.join(", "),
+            self.jar.id(),
+            self.jar.version(),
+            self.path.display()
+        )
+    }
+}
+impl std::error::Error for MissingJar {}
+
+/// A hash cannot name two different original Java mod identities.
+#[derive(Debug)]
+pub struct JarConflict {
+    pub first: Box<JarRef>,
+    pub second: Box<JarRef>,
+}
+
+impl fmt::Display for JarConflict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}: {} {} != {} {}",
+            self.first.sha512(),
+            self.first.id(),
+            self.first.version(),
+            self.second.id(),
+            self.second.version()
+        )
+    }
+}
+impl std::error::Error for JarConflict {}
+
+/// Collect exact files once, preserving all owning mod ids in input load order.
+/// The returned hash order is for preparation only; pack layers stay per mod.
+pub fn collect_jar_requirements<'a>(
+    mods: impl IntoIterator<Item = (&'a str, &'a [JarRef])>,
+) -> Result<Vec<JarRequirement>, JarConflict> {
+    let mut hashes: BTreeMap<&str, JarRequirement> = BTreeMap::new();
+    for (owner, jars) in mods {
+        for jar in jars {
+            if let Some(first) = hashes.get_mut(jar.sha512()) {
+                if first.jar != *jar {
+                    return Err(JarConflict {
+                        first: Box::new(first.jar.clone()),
+                        second: Box::new(jar.clone()),
+                    });
+                }
+                if !first.owners.iter().any(|id| id == owner) {
+                    first.owners.push(owner.to_owned());
+                }
+            } else {
+                hashes.insert(
+                    jar.sha512(),
+                    JarRequirement {
+                        owners: vec![owner.to_owned()],
+                        jar: jar.clone(),
+                    },
+                );
+            }
+        }
+    }
+    Ok(hashes.into_values().collect())
+}
+
 impl JarRef {
+    /// The exact file's path in the supplied jar-cache directory.
+    pub fn cache_path(&self, store: &Path) -> PathBuf {
+        store.join(format!("{}.jar", self.sha512))
+    }
+
     /// Validate the supported loader ID syntax and the exact file's SHA-512.
     /// The metadata reader, not this loader-independent manifest, checks the
     /// original loader's more specific ID rule. IDs are never normalized.
@@ -74,6 +167,20 @@ impl JarRef {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_jar_requirements_keep_all_owners_in_load_order() {
+        let jar = JarRef::new("original".into(), "1".into(), "a".repeat(128)).unwrap();
+        let requirements = collect_jar_requirements([
+            ("zeta", std::slice::from_ref(&jar)),
+            ("alpha", [jar.clone(), jar.clone()].as_slice()),
+            ("beta", std::slice::from_ref(&jar)),
+        ])
+        .unwrap();
+        assert_eq!(requirements.len(), 1);
+        assert_eq!(requirements[0].jar, jar);
+        assert_eq!(requirements[0].owners, ["zeta", "alpha", "beta"]);
+    }
 
     #[test]
     fn manifest_jar_list_defaults_empty_and_survives_package_roundtrip_in_order() {
