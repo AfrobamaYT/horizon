@@ -940,8 +940,8 @@ enum FillMode {
 
 mod build;
 mod dispatch;
-mod points;
 mod host_param;
+mod points;
 mod wasm;
 pub use build::{generate, inject};
 pub use wasm::{Wasm, generate as generate_wasm};

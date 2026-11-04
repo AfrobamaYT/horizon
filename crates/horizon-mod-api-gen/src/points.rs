@@ -33,7 +33,10 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
     let mut points = BTreeMap::<String, GamePoint>::new();
     for (module, method) in methods {
         let Some(attribute) = method.attrs.iter().find(|attr| {
-            attr.path().segments.last().is_some_and(|segment| segment.ident == "point")
+            attr.path()
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident == "point")
         }) else {
             continue;
         };
@@ -42,7 +45,8 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
             _ => Default::default(),
         };
         let target = format!("{module}::Game<'_>::{}", method.sig.ident);
-        let shape = point_shape::shape(tokens, &method.sig).map_err(|e| format!("{target}: {e}"))?;
+        let shape =
+            point_shape::shape(tokens, &method.sig).map_err(|e| format!("{target}: {e}"))?;
         let point = GamePoint {
             target,
             side: shape.side.name(),
@@ -54,7 +58,12 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
             args: shape
                 .args
                 .iter()
-                .map(|arg| (arg.name.to_string(), arg.ty.to_token_stream().to_string().replace("& ", "&")))
+                .map(|arg| {
+                    (
+                        arg.name.to_string(),
+                        arg.ty.to_token_stream().to_string().replace("& ", "&"),
+                    )
+                })
                 .collect(),
             listener: shape.listener().to_string(),
             name: shape.name,
@@ -75,7 +84,8 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
 pub fn slots(points: &[GamePoint]) -> String {
     let statics = points.iter().map(|point| {
         let slot = syn::Ident::new(&point.name.to_uppercase(), proc_macro2::Span::call_site());
-        let listener: proc_macro2::TokenStream = point.listener.parse().expect("generated listener type");
+        let listener: proc_macro2::TokenStream =
+            point.listener.parse().expect("generated listener type");
         let target = &point.target;
         quote!(pub(crate) static #slot: Point<#listener> = Point::new(#target);)
     });
@@ -113,9 +123,19 @@ mod tests {
             shape.listener().to_string(),
             quote!(fn(&mut dyn ::mod_api::ClientHost, &mut (f64, &str,))).to_string()
         );
-        let read = point(r#"side = "server", name = "reach_of""#, "fn reach(&self) -> f64 { 0.0 }").unwrap();
-        assert_eq!((read.name.as_str(), read.slot().to_string()), ("reach_of", "REACH_OF".into()));
-        assert_eq!(read.listener().to_string(), quote!(fn(&dyn ::mod_api::Host, &mut ())).to_string());
+        let read = point(
+            r#"side = "server", name = "reach_of""#,
+            "fn reach(&self) -> f64 { 0.0 }",
+        )
+        .unwrap();
+        assert_eq!(
+            (read.name.as_str(), read.slot().to_string()),
+            ("reach_of", "REACH_OF".into())
+        );
+        assert_eq!(
+            read.listener().to_string(),
+            quote!(fn(&dyn ::mod_api::Host, &mut ())).to_string()
+        );
     }
 
     #[test]
@@ -123,7 +143,9 @@ mod tests {
         let refused = |attribute, method| point(attribute, method).err().expect("refused");
         assert!(refused("", "fn tick(&mut self) {}").contains("side"));
         assert!(refused(r#"side = "both""#, "fn free(x: u8) {}").contains("method"));
-        assert!(refused(r#"side = "up""#, "fn tick(&mut self) {}").contains("server, client or both"));
+        assert!(
+            refused(r#"side = "up""#, "fn tick(&mut self) {}").contains("server, client or both")
+        );
     }
 
     #[test]
@@ -142,19 +164,31 @@ mod tests {
         )
         .unwrap();
         let error = game_points(&root).unwrap_err();
-        assert!(error.contains("horizon_client::game::Game<'_>::tick"), "{error}");
-        assert!(error.contains("horizon_client::game::remote::Game<'_>::tick"), "{error}");
+        assert!(
+            error.contains("horizon_client::game::Game<'_>::tick"),
+            "{error}"
+        );
+        assert!(
+            error.contains("horizon_client::game::remote::Game<'_>::tick"),
+            "{error}"
+        );
         std::fs::write(
             src.join("game/remote.rs"),
             "impl Game<'_> { #[point(side = \"client\", name = \"remote_tick\")] fn tick(&mut self, input: u8) {} }",
         )
         .unwrap();
         let points = game_points(&root).unwrap();
-        let targets: Vec<_> = points.iter().map(|p| (p.name.as_str(), p.target.as_str())).collect();
+        let targets: Vec<_> = points
+            .iter()
+            .map(|p| (p.name.as_str(), p.target.as_str()))
+            .collect();
         assert_eq!(
             targets,
             [
-                ("remote_tick", "horizon_client::game::remote::Game<'_>::tick"),
+                (
+                    "remote_tick",
+                    "horizon_client::game::remote::Game<'_>::tick"
+                ),
                 ("tick", "horizon_client::game::Game<'_>::tick"),
             ]
         );

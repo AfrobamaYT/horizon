@@ -59,7 +59,12 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
                 "server" => Side::Server,
                 "client" => Side::Client,
                 "both" => Side::Both,
-                _ => return Err(syn::Error::new(value.span(), "side is server, client or both")),
+                _ => {
+                    return Err(syn::Error::new(
+                        value.span(),
+                        "side is server, client or both",
+                    ));
+                }
             });
         } else {
             return Err(meta.error("a point takes side = \"…\", name = \"…\" and hot"));
@@ -67,11 +72,21 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
         Ok(())
     });
     syn::parse::Parser::parse2(parser, attribute)?;
-    let side = side.ok_or_else(|| syn::Error::new(sig.ident.span(), "a point needs side = \"server\", \"client\" or \"both\""))?;
+    let side = side.ok_or_else(|| {
+        syn::Error::new(
+            sig.ident.span(),
+            "a point needs side = \"server\", \"client\" or \"both\"",
+        )
+    })?;
     let mutable = match sig.inputs.first() {
-        Some(FnArg::Receiver(receiver)) if receiver.reference.is_some() => receiver.mutability.is_some(),
+        Some(FnArg::Receiver(receiver)) if receiver.reference.is_some() => {
+            receiver.mutability.is_some()
+        }
         _ => {
-            return Err(syn::Error::new(sig.ident.span(), "a point is a `&self` or `&mut self` method of `Game`"));
+            return Err(syn::Error::new(
+                sig.ident.span(),
+                "a point is a `&self` or `&mut self` method of `Game`",
+            ));
         }
     };
     let args = sig
@@ -79,26 +94,41 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
         .iter()
         .filter_map(|input| match input {
             FnArg::Typed(typed) => match &*typed.pat {
-                Pat::Ident(pat) if pat.by_ref.is_none() && pat.subpat.is_none() && api_typed(&typed.ty) => {
-                    Some(Arg { name: pat.ident.clone(), ty: (*typed.ty).clone() })
+                Pat::Ident(pat)
+                    if pat.by_ref.is_none() && pat.subpat.is_none() && api_typed(&typed.ty) =>
+                {
+                    Some(Arg {
+                        name: pat.ident.clone(),
+                        ty: (*typed.ty).clone(),
+                    })
                 }
                 _ => None,
             },
             FnArg::Receiver(_) => None,
         })
         .collect();
-    Ok(Shape { name, side, mutable, hot, args })
+    Ok(Shape {
+        name,
+        side,
+        mutable,
+        hot,
+        args,
+    })
 }
 
 /// Whether the API can carry `ty` to a listener: a scalar, or `&str`.
 fn api_typed(ty: &Type) -> bool {
     const SCALARS: [&str; 15] = [
-        "bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "usize",
+        "bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16",
+        "u32", "u64", "usize",
     ];
     match ty {
-        Type::Path(path) => path.qself.is_none() && SCALARS.iter().any(|scalar| path.path.is_ident(scalar)),
+        Type::Path(path) => {
+            path.qself.is_none() && SCALARS.iter().any(|scalar| path.path.is_ident(scalar))
+        }
         Type::Reference(reference) => {
-            reference.mutability.is_none() && matches!(&*reference.elem, Type::Path(path) if path.path.is_ident("str"))
+            reference.mutability.is_none()
+                && matches!(&*reference.elem, Type::Path(path) if path.path.is_ident("str"))
         }
         _ => false,
     }

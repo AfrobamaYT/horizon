@@ -151,11 +151,16 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     let mut function = parse_macro_input!(input as ImplItemFn);
     if let Some(inline) = function.attrs.iter().find(|attr| {
         attr.path().is_ident("inline")
-            && attr.parse_args::<syn::Ident>().is_ok_and(|arg| arg == "always")
+            && attr
+                .parse_args::<syn::Ident>()
+                .is_ok_and(|arg| arg == "always")
     }) {
-        return syn::Error::new_spanned(inline, "a point keeps its function out of line: drop #[inline(always)]")
-            .to_compile_error()
-            .into();
+        return syn::Error::new_spanned(
+            inline,
+            "a point keeps its function out of line: drop #[inline(always)]",
+        )
+        .to_compile_error()
+        .into();
     }
     let shape = match point_shape::shape(attribute.into(), &function.sig) {
         Ok(shape) => shape,
