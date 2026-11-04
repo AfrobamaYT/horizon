@@ -2,10 +2,10 @@ use super::*;
 
 pub(super) fn generate(
     root: &Path,
-    catalog: &serde_json::Value,
-    contexts: &[DrawContext],
+    catalog: &Catalog,
     code: &str,
 ) -> Result<(String, String), String> {
+    let contexts = catalog.draw_contexts.as_slice();
     let api_source = fs::read_to_string(root.join("crates/horizon-mod-api/src/lib.rs"))
         .map_err(|e| e.to_string())?;
     let types = api_types(&api_source, code)?;
@@ -25,60 +25,24 @@ pub(super) fn generate(
     let mut backend_writes = String::new();
     let mut backend_read_impl = String::new();
     let mut backend_write_impl = String::new();
-    let mut names = HashSet::new();
     // Each draw context's trait methods and their forwarding by its game struct.
     let mut drawing: Vec<(String, String)> = contexts.iter().map(|_| Default::default()).collect();
     let mut handles = std::collections::BTreeMap::<&str, String>::new();
-    let mut helpers = catalog["helpers"]
-        .as_array()
-        .ok_or("catalog helpers must be an array")?
-        .clone();
-    let mut fragments = fs::read_dir(root.join("tools/native-hook-fragments"))
-        .map_err(|e| e.to_string())?
-        .map(|entry| entry.map(|entry| entry.path()).map_err(|e| e.to_string()))
-        .collect::<Result<Vec<_>, _>>()?;
-    fragments.sort();
-    for path in fragments
-        .into_iter()
-        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
-    {
-        let fragment: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&path).map_err(|e| e.to_string())?)
-                .map_err(|e| format!("{}: {e}", path.display()))?;
-        if let Some(pending) = fragment.get("helpers") {
-            helpers.extend(
-                pending
-                    .as_array()
-                    .ok_or("fragment helpers must be an array")?
-                    .iter()
-                    .cloned(),
-            );
-        }
-    }
-    for helper in &helpers {
-        let name = helper["name"].as_str().ok_or("helper name missing")?;
-        let side =
-            HelperSide::parse(helper)?.ok_or_else(|| format!("helper {name}: side missing"))?;
-        if !names.insert(name) {
-            return Err(format!("duplicate helper {name}"));
-        }
-        let target = helper["target"].as_str().ok_or("helper target missing")?;
+    for helper in &catalog.helpers {
+        let (name, side, target) = (helper.name.as_str(), helper.side, helper.target.as_str());
         let method = helper_target(&game, name, target)?;
         if let Some((index, declaration, implementation)) =
             draw_method(method, name, contexts, &types.exports)?
         {
-            if side != HelperSide::Client {
+            if side != Side::Client {
                 return Err(format!("{name}: drawing is client-side"));
             }
             drawing[index].0.push_str(&declaration);
             drawing[index].1.push_str(&implementation);
             continue;
         }
-        let receiver = helper.get("receiver");
-        let is_backend = match helper.get("backend") {
-            None => false,
-            Some(value) => value.as_bool().ok_or("helper backend must be a boolean")?,
-        };
+        let receiver = helper.receiver.as_deref();
+        let is_backend = helper.backend;
         let trait_name = if receiver.is_some() || is_backend {
             if matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some())
             {
@@ -88,24 +52,21 @@ pub(super) fn generate(
             }
         } else {
             match side {
-                HelperSide::Both => "Host",
-                HelperSide::Server => "ServerHost",
-                HelperSide::Client => "ClientHost",
+                Side::Both => "Host",
+                Side::Server => "ServerHost",
+                Side::Client => "ClientHost",
             }
         };
         let (declaration, implementation) = host_method(method, name, trait_name, &types.exports)?;
-        if let Some(client_target) = helper.get("client_target") {
-            let client_target = client_target
-                .as_str()
-                .ok_or("client_target must be a string")?;
+        if let Some(client_target) = &helper.client_target {
             let client = helper_target(&game, name, client_target)?;
             let (_, client_implementation) = host_method(client, name, trait_name, &types.exports)?;
             matching_helper_signatures(&implementation, &client_implementation, name)?;
         }
         let side_doc = match side {
-            HelperSide::Server => "/// Side: server.\n",
-            HelperSide::Client => "/// Side: client.\n",
-            HelperSide::Both => "/// Side: both.\n",
+            Side::Server => "/// Side: server.\n",
+            Side::Client => "/// Side: client.\n",
+            Side::Both => "/// Side: both.\n",
         };
         if receiver.is_some() || is_backend {
             let mutable = matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
@@ -118,9 +79,6 @@ pub(super) fn generate(
             trait_methods.push_str(&declaration);
             impl_methods.push_str(&implementation);
             if let Some(receiver) = receiver {
-                let receiver = receiver
-                    .as_str()
-                    .ok_or("helper receiver must be a string")?;
                 let (handle, code) = handle_method(method, name, receiver, side, &types.handles)?;
                 let methods = handles.entry(handle).or_default();
                 methods.push_str(side_doc);
@@ -128,9 +86,9 @@ pub(super) fn generate(
             }
         } else {
             let (traits, implementation_out) = match side {
-                HelperSide::Both => (&mut host_traits, &mut host_impl),
-                HelperSide::Server => (&mut server_traits, &mut server_impl),
-                HelperSide::Client => (&mut client_traits, &mut client_impl),
+                Side::Both => (&mut host_traits, &mut host_impl),
+                Side::Server => (&mut server_traits, &mut server_impl),
+                Side::Client => (&mut client_traits, &mut client_impl),
             };
             traits.push_str(side_doc);
             traits.push_str(&declaration);
