@@ -3178,7 +3178,10 @@ mod tests {
             }
             fn item_tooltip(&self, _: &dyn ClientHost, event: &mut ItemTooltipEvent<'_>) {
                 let plain: Vec<String> = event.lines.iter().map(|(t, _)| t.plain()).collect();
-                assert_eq!(plain, ["Stick", "part", "minecraft:stick", "14 component(s)"]);
+                assert_eq!(
+                    plain,
+                    ["Stick", "part", "minecraft:stick", "14 component(s)"]
+                );
                 assert!(event.advanced && !event.creative);
                 assert!(event.display.shows("minecraft:lore"));
                 // Every line is the mod's to change: drop the count, add one at the end.
