@@ -98,37 +98,97 @@ fn hooks() -> &'static dyn Hooks {
     &**HOOKS.get_or_init(__horizon_mod_hooks)
 }
 
-/// The parts and handlers the mod registered, by the index the game holds for each: every
-/// trait the game may call it through (a block entity part is a block part too).
-static HANDLERS: Mutex<Vec<Vec<Box<dyn Any + Send>>>> = Mutex::new(Vec::new());
+/// The parts and handlers the mod handed the game, by the index the game holds each by: every
+/// trait the game may call it through (a block entity part is a block part too); none once the
+/// game let it go.
+static HANDLERS: Mutex<Handlers> = Mutex::new(Handlers {
+    views: Vec::new(),
+    free: Vec::new(),
+});
+
+struct Handlers {
+    views: Vec<Vec<Box<dyn Any + Send>>>,
+    free: Vec<u32>,
+}
 
 /// Keeps a part or handler the mod hands the game, by its views, for the game's calls; gives
 /// its index.
 fn add_handler(views: Vec<Box<dyn Any + Send>>) -> u32 {
     let mut handlers = HANDLERS.lock().unwrap_or_else(|e| e.into_inner());
-    handlers.push(views);
-    (handlers.len() - 1) as u32
+    match handlers.free.pop() {
+        Some(index) => {
+            handlers.views[index as usize] = views;
+            index
+        }
+        None => {
+            handlers.views.push(views);
+            (handlers.views.len() - 1) as u32
+        }
+    }
 }
 
-/// One view of a handler: it as the trait `T`. Handlers live as long as the mod.
-struct Handler<T: ?Sized + 'static>(&'static T);
+/// Drops the handlers the game let go of.
+fn release_handlers(released: Vec<u32>) {
+    let mut handlers = HANDLERS.lock().unwrap_or_else(|e| e.into_inner());
+    for index in released {
+        if let Some(views) = handlers.views.get_mut(index as usize) {
+            let views = std::mem::take(views);
+            handlers.free.push(index);
+            // A handler's drop may call the game; not under the lock.
+            drop(handlers);
+            drop(views);
+            handlers = HANDLERS.lock().unwrap_or_else(|e| e.into_inner());
+        }
+    }
+}
+
+/// One view of a handler: it as the trait `T`.
+struct Handler<T: ?Sized + 'static>(Arc<T>);
 // SAFETY: wasm32 mods run on one thread.
 unsafe impl<T: ?Sized> Send for Handler<T> {}
 
 fn view<T: ?Sized + 'static>(handler: Arc<T>) -> Box<dyn Any + Send> {
-    Box::new(Handler::<T>(&**Box::leak(Box::new(handler))))
+    Box::new(Handler::<T>(handler))
 }
 
-fn handler<T: ?Sized + 'static>(index: u32) -> &'static T {
+fn handler<T: ?Sized + 'static>(index: u32) -> Arc<T> {
     let handlers = HANDLERS.lock().unwrap_or_else(|e| e.into_inner());
     match handlers
+        .views
         .get(index as usize)
         .and_then(|views| views.iter().find_map(|v| v.downcast_ref::<Handler<T>>()))
     {
-        Some(handler) => handler.0,
+        Some(handler) => handler.0.clone(),
         None => panic!("the game called a handler the mod didn't register"),
     }
 }
+
+/// One of the game's objects the mod holds (a capability's handler, another mod's provider),
+/// by the index the game keeps it under; each call goes to the game.
+struct Held(u32);
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        glue::horizon::mod_api::held_handles::release(self.0);
+    }
+}
+
+/// An erased provider (`dyn Any`), handed to the game by its address, where any mod of the
+/// group (sharing this memory and its table) reads it back. It lives as long as the mod.
+fn erased(provider: Arc<dyn Any + Send + Sync>) -> u32 {
+    Box::into_raw(Box::new(provider)) as usize as u32
+}
+
+/// The erased provider at `address`, handed over by a mod of this group.
+fn erased_at(address: u32) -> Arc<dyn Any + Send + Sync> {
+    // SAFETY: the game hands a mod only an address `erased` gave in its own group, and those
+    // boxes are never freed. Its mods are linked with one memory and one table, so the
+    // pointer and its vtable are this module's too.
+    unsafe { (*(address as usize as *const Arc<dyn Any + Send + Sync>)).clone() }
+}
+
+/// One of the mod's own handlers the game handed back, boxed again.
+struct Shared<T: ?Sized>(Arc<T>);
 
 #[allow(
     clippy::all,

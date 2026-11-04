@@ -69,9 +69,16 @@ pub(super) fn borrowed_record(types: &Types<'_>, ty: &Ty) -> bool {
 /// An expression lowering the value `e` names, owned: a returned handler moves into the mod's
 /// table; anything else is lowered by reference.
 pub(super) fn lower_owned(types: &Types<'_>, ty: &Ty, e: &str) -> String {
+    let path = |name: &str| super::sides::trait_path(name);
     match ty {
-        Ty::Handler(..) if !types.guest.get() => lower(types, ty, e),
+        Ty::Handler(name, true) if !types.guest.get() => {
+            format!("super::hand_over_box::<dyn {}>({e})", path(name))
+        }
+        Ty::Handler(name, false) if !types.guest.get() => {
+            format!("super::hand_over::<dyn {}>({e})", path(name))
+        }
         Ty::Handler(name, true) => keep_handler(types, name, &format!("std::sync::Arc::from({e})")),
+        Ty::Handler(name, false) => keep_handler(types, name, e),
         Ty::Option(item) if matches!(**item, Ty::Handler(..)) => {
             format!("{e}.map(|x| {})", lower_owned(types, item, "x"))
         }
@@ -83,6 +90,11 @@ pub(super) fn lower_owned(types: &Types<'_>, ty: &Ty, e: &str) -> String {
 /// record the game gets: its index and the hooks it listens to as any of them.
 fn keep_handler(types: &Types<'_>, name: &str, arc: &str) -> String {
     let path = super::sides::trait_path(name);
+    if name == super::ERASED {
+        return format!(
+            "{W}::Handler {{ index: super::erased({arc}), subscribed: Vec::new(), held: false }}"
+        );
+    }
     let views = types
         .views
         .iter()
@@ -112,7 +124,7 @@ fn keep_handler(types: &Types<'_>, name: &str, arc: &str) -> String {
         ),
     };
     format!(
-        "{{ let h: std::sync::Arc<dyn {path}> = {arc}; {W}::Handler {{ subscribed: {subscribed}, index: super::add_handler(vec![{}]) }} }}",
+        "{{ let h: std::sync::Arc<dyn {path}> = {arc}; {W}::Handler {{ subscribed: {subscribed}, index: super::add_handler(vec![{}]), held: false }} }}",
         kept.join(", ")
     )
 }
@@ -130,9 +142,13 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         Ty::Prim(_, wire) => format!("(*{e} as {})", wire_prim(wire)),
         Ty::Wide(_) => format!("{{ let v = *{e} as u128; ((v >> 64) as u64, v as u64) }}"),
         Ty::Duration => format!("u64::try_from({e}.as_nanos()).unwrap_or(u64::MAX)"),
-        // Only a mod hands one over: the guest keeps it under its views and sends its index.
-        Ty::Handler(..) if !types.guest.get() => {
-            "unreachable!(\"only a mod hands a handler over\")".into()
+        // The game hands its own over to be held, or a mod's back by the mod's index.
+        Ty::Handler(name, false) if !types.guest.get() => format!(
+            "super::hand_over::<dyn {}>({e}.clone())",
+            super::sides::trait_path(name)
+        ),
+        Ty::Handler(_, true) if !types.guest.get() => {
+            unreachable!("a boxed handler is lowered owned (`lower_owned`)")
         }
         Ty::Handler(name, false) => keep_handler(types, name, &format!("{e}.clone()")),
         Ty::Handler(_, true) => unreachable!("a boxed handler is lowered owned (`lower_owned`)"),
@@ -205,18 +221,33 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
             format!("{{ let (h, l) = {e}; ((h as u128) << 64 | l as u128) as {rust} }}")
         }
         Ty::Duration => format!("std::time::Duration::from_nanos({e})"),
-        // Only the game takes one: its proxy, calling back into the mod that handed it over.
-        // Only the game takes one: its proxy, calling back into the mod that handed it over.
-        Ty::Handler(..) if types.guest.get() => {
-            "unreachable!(\"only the game takes a handler\")".into()
+        // The mod's own back by its index, or the game's, called through the game.
+        Ty::Handler(name, false) if types.guest.get() && name == super::ERASED => format!(
+            "{{ let h = {e}; if h.held {{ std::sync::Arc::new(super::Held(h.index)) as std::sync::Arc<dyn std::any::Any + Send + Sync> }} else {{ super::erased_at(h.index) }} }}"
+        ),
+        Ty::Handler(name, boxed) if types.guest.get() => {
+            let path = super::sides::trait_path(name);
+            if *boxed {
+                format!(
+                    "{{ let h = {e}; if h.held {{ Box::new(super::Held(h.index)) as Box<dyn {path}> }} else {{ Box::new(super::Shared(super::handler::<dyn {path}>(h.index))) as Box<dyn {path}> }} }}"
+                )
+            } else {
+                format!(
+                    "{{ let h = {e}; if h.held {{ std::sync::Arc::new(super::Held(h.index)) as std::sync::Arc<dyn {path}> }} else {{ super::handler::<dyn {path}>(h.index) }} }}"
+                )
+            }
         }
+        Ty::Handler(name, false) if name == super::ERASED => format!(
+            "(super::owned(std::sync::Arc::new(super::erased_of({e})?)) as std::sync::Arc<dyn std::any::Any + Send + Sync>)"
+        ),
+        // The game's proxy, calling back into the mod that handed it over.
         Ty::Handler(name, boxed) => {
             let path = super::sides::trait_path(name);
             if *boxed {
-                format!("(Box::new(super::handler_of({e})?) as Box<dyn {path}>)")
+                format!("(super::owned(Box::new(super::handler_of({e})?)) as Box<dyn {path}>)")
             } else {
                 format!(
-                    "(std::sync::Arc::new(super::handler_of({e})?) as std::sync::Arc<dyn {path}>)"
+                    "(super::owned(std::sync::Arc::new(super::handler_of({e})?)) as std::sync::Arc<dyn {path}>)"
                 )
             }
         }

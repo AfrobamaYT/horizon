@@ -3405,13 +3405,11 @@ pub(crate) use part_table::install_parts;
 pub(crate) use part_table::mark_game_thread;
 pub use part_table::{
     Attached, BlockCapabilityProvider, BlockEntityProviders, BlockProvider, BlockProviderOf,
-    EntityCapabilityProvider, EntityProvider, EntityProviderOf, EntityProviders,
-    ItemCapabilityProvider, ItemProvider, ItemProviderOf, OwnErased, OwnProvider, Parts, Registrar,
-    block_entity_providers, entity_providers, has_entity_providers,
+    CapabilityProviders, EntityCapabilityProvider, EntityProvider, EntityProviderOf,
+    EntityProviders, ItemCapabilityProvider, ItemProvider, ItemProviderOf, OwnProvider, Parts,
+    ProvidedBy, Registrar, block_entity_providers, entity_providers, has_entity_providers,
 };
-pub(crate) use part_table::{
-    ProvidedBy, answered, ask_providers, has_part_hook, parts, place_provider, providers,
-};
+pub(crate) use part_table::{InstalledProviders, answered, ask_providers, has_part_hook, parts};
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;

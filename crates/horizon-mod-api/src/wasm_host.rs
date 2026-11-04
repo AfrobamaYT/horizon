@@ -4,10 +4,12 @@
 //! checking packages is `horizon-mod-wasm`'s; this module runs what it instantiated.
 use crate::HookId;
 use glue::Frame;
+use std::any::Any;
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
 use wasmtime::Store;
 use wasmtime::component::{Component, Instance, Linker};
@@ -255,6 +257,9 @@ struct Running {
     group: Arc<Group>,
     exports: glue::ModExports,
     id: &'static str,
+    /// The indexes of its handlers the game no longer holds, for the mod to drop at its next
+    /// call.
+    released: Mutex<Vec<u32>>,
 }
 
 /// One wasm mod of a group: the [`Hooks`](crate::Hooks) the game dispatches to.
@@ -270,6 +275,9 @@ pub struct WasmHandler {
     module: Arc<Running>,
     index: u32,
     subscribed: &'static [Option<HookId>],
+    /// An erased provider (`dyn Any`): `index` is its address in the group's memory, which
+    /// the mod never frees.
+    erased: bool,
 }
 
 /// What a call answers when the mod gives no answer (its call refused, or a trap): what a
@@ -310,7 +318,16 @@ impl Running {
         let _ = store.set_fuel(budget);
         let previous = CURRENT.replace(&mut frame);
         let caller = CALLER.replace(Some(self.clone()));
-        let result = f(&self.exports, store);
+        let released =
+            std::mem::take(&mut *self.released.lock().unwrap_or_else(|e| e.into_inner()));
+        let result = match released.is_empty() {
+            true => Ok(()),
+            false => self
+                .exports
+                .horizon_mod_api_hooks()
+                .call_release_handlers(store, released),
+        }
+        .and_then(|()| f(&self.exports, store));
         CALLER.set(caller);
         CURRENT.set(previous);
         drop(entered);
@@ -345,6 +362,167 @@ impl WasmHandler {
     }
 }
 
+impl Drop for WasmHandler {
+    fn drop(&mut self) {
+        OWNED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&(self as *const Self as usize));
+        if self.erased {
+            return;
+        }
+        self.module
+            .released
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(self.index);
+    }
+}
+
+/// Where each proxy the game holds of a wasm mod's handler lives, with its mod and that mod's
+/// index, so one handed back to its own mod goes by that index (`hand_over`).
+static OWNED: LazyLock<Mutex<HashMap<usize, Owned>>> = LazyLock::new(Default::default);
+
+#[derive(Clone, Copy)]
+struct Owned {
+    module: usize,
+    group: usize,
+    index: u32,
+    erased: bool,
+}
+
+thread_local! {
+    /// The game's objects each group holds (a capability's handler, another group's or a
+    /// native mod's provider), by group, at the index the group calls them by. A group's
+    /// calls run on the thread holding it, so they stay on this one.
+    static HELD: RefCell<HashMap<usize, Held>> = RefCell::default();
+}
+
+/// One group's held objects: each an `Arc` of its trait object, and the free indexes.
+#[derive(Default)]
+struct Held {
+    objects: Vec<Option<Box<dyn Any>>>,
+    free: Vec<u32>,
+}
+
+fn group_of(module: &Running) -> usize {
+    Arc::as_ptr(&module.group) as usize
+}
+
+/// The calling mod, and its group, if a call runs.
+fn caller() -> (usize, usize) {
+    let module = CALLER.take();
+    let ids = module
+        .as_ref()
+        .map_or((0, 0), |m| (Arc::as_ptr(m) as usize, group_of(m)));
+    CALLER.set(module);
+    ids
+}
+
+fn caller_group() -> usize {
+    caller().1
+}
+
+/// `proxy`, registered by where it lives.
+fn owned<P: Deref<Target = WasmHandler>>(proxy: P) -> P {
+    let at = &*proxy as *const WasmHandler as usize;
+    OWNED.lock().unwrap_or_else(|e| e.into_inner()).insert(
+        at,
+        Owned {
+            module: Arc::as_ptr(&proxy.module) as usize,
+            group: group_of(&proxy.module),
+            index: proxy.index,
+            erased: proxy.erased,
+        },
+    );
+    proxy
+}
+
+/// The handler record for `object` as the calling mod gets it: its own handler by its own
+/// index (an erased provider, by its address, to any mod of its group, which shares its
+/// memory), else the game's object, held for it.
+fn hand_over<T: ?Sized + 'static>(object: Arc<T>) -> glue::horizon::mod_api::types::Handler {
+    let (module, group) = caller();
+    let at = Arc::as_ptr(&object) as *const () as usize;
+    let own = OWNED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&at)
+        .copied();
+    if let Some(Owned { index, .. }) = own.filter(|own| match own.erased {
+        true => own.group == group,
+        false => own.module == module,
+    }) {
+        return glue::horizon::mod_api::types::Handler {
+            index,
+            subscribed: Vec::new(),
+            held: false,
+        };
+    }
+    let index = HELD.with(|held| {
+        let mut held = held.borrow_mut();
+        let held = held.entry(group).or_default();
+        let object: Box<dyn Any> = Box::new(object);
+        match held.free.pop() {
+            Some(index) => {
+                held.objects[index as usize] = Some(object);
+                index
+            }
+            None => {
+                held.objects.push(Some(object));
+                (held.objects.len() - 1) as u32
+            }
+        }
+    });
+    glue::horizon::mod_api::types::Handler {
+        index,
+        subscribed: Vec::new(),
+        held: true,
+    }
+}
+
+/// [`hand_over`] for a boxed object: a proxy moving into an `Arc` is registered where it lands.
+fn hand_over_box<T: ?Sized + 'static>(object: Box<T>) -> glue::horizon::mod_api::types::Handler {
+    let at = &*object as *const T as *const () as usize;
+    let own = OWNED.lock().unwrap_or_else(|e| e.into_inner()).remove(&at);
+    let object: Arc<T> = Arc::from(object);
+    if let Some(own) = own {
+        OWNED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(Arc::as_ptr(&object) as *const () as usize, own);
+    }
+    hand_over(object)
+}
+
+/// The calling mod's held object at `index`, as the trait it is called through.
+fn held<T: ?Sized + 'static>(index: u32) -> wasmtime::Result<Arc<T>> {
+    let group = caller_group();
+    HELD.with(|held| {
+        held.borrow()
+            .get(&group)
+            .and_then(|held| held.objects.get(index as usize)?.as_ref())
+            .and_then(|object| object.downcast_ref::<Arc<T>>())
+            .cloned()
+    })
+    .ok_or_else(|| wasmtime::Error::msg("a mod called an object the game doesn't hold for it"))
+}
+
+impl glue::horizon::mod_api::held_handles::Host for State {
+    fn release(&mut self, handle: u32) -> wasmtime::Result<()> {
+        let group = caller_group();
+        HELD.with(|held| {
+            if let Some(held) = held.borrow_mut().get_mut(&group)
+                && let Some(slot) = held.objects.get_mut(handle as usize)
+                && slot.take().is_some()
+            {
+                held.free.push(handle);
+            }
+        });
+        Ok(())
+    }
+}
+
 /// The hooks a subscribed-hooks export named.
 fn hook_ids(names: Vec<String>) -> &'static [Option<HookId>] {
     Box::leak(
@@ -365,7 +543,16 @@ fn handler_of(handler: glue::horizon::mod_api::types::Handler) -> Result<WasmHan
         module,
         index: handler.index,
         subscribed: hook_ids(handler.subscribed),
+        erased: false,
     })
+}
+
+/// The game's proxy of an erased provider the calling mod handed over, at `handler.index` in
+/// its group's memory. No call goes through it: only mods of that group take it back.
+fn erased_of(handler: glue::horizon::mod_api::types::Handler) -> Result<WasmHandler, Refused> {
+    let mut proxy = handler_of(handler)?;
+    proxy.erased = true;
+    Ok(proxy)
 }
 
 /// A member of a group: its mod id, and the prefix of its exports, `<prefix>-<interface>`.
@@ -408,6 +595,7 @@ pub fn instantiate(
             group: group.clone(),
             exports,
             id,
+            released: Mutex::new(Vec::new()),
         });
         let names = module.call(Frame::default(), |m, store| {
             m.horizon_mod_api_hooks().call_subscribed(store)

@@ -170,13 +170,16 @@ impl LevelRef {
             side,
         };
         let mut game = None;
-        let parts = super::providers(super::ProvidedBy::BlockEntity, key.name, host, |host| {
-            at.kind(host)
-        });
+        let table = host.capability_providers();
+        let kind = table
+            .provided(super::ProvidedBy::BlockEntity, key.name)
+            .then(|| at.kind(host))
+            .flatten();
         super::answered(
-            super::ask_providers::<super::BlockProvider<T>, T>(
-                parts,
+            super::ask_providers(
                 host,
+                |index| table.block_entity_provider(key.name, kind.as_ref()?.id(), index),
+                super::BlockProviderOf::get::<T>,
                 |provider, host| provider.provide(host, at),
                 |host| {
                     game = key.default.and_then(|default| default(host, at));

@@ -50,8 +50,8 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         }
     };
     for (name, code) in outputs {
-        syn::parse_file(&code).map_err(|e| format!("generated Rust: {e}"))?;
-        fs::write(out_dir.join(name), code).map_err(|e| e.to_string())?;
+        fs::write(out_dir.join(name), &code).map_err(|e| e.to_string())?;
+        syn::parse_file(&code).map_err(|e| format!("generated Rust: {name}: {e}"))?;
     }
     Ok(())
 }

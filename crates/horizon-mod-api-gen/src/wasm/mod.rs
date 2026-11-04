@@ -28,11 +28,17 @@ pub(super) const IMPORTS: &[&str] = &[
     "ConfigFiles",
     "menu::SlotView",
     "Registrar",
+    "CapabilityProviders",
 ];
 
 /// Imported traits a call never hands over, each reached through another's method instead.
 pub(super) const REACHED: &[(&str, &str, &str)] = &[
     ("ConfigFiles", "host", "Ok(h.config_files())"),
+    (
+        "CapabilityProviders",
+        "host",
+        "Ok(h.capability_providers())",
+    ),
     (
         "Backend",
         "host",
@@ -64,6 +70,17 @@ const EXPORTS: &[&str] = &[
 pub(super) fn exports() -> &'static [&'static str] {
     EXPORTED.get().map_or(EXPORTS, Vec::as_slice)
 }
+
+/// Whether the game also hands a mod objects of exported trait `owner` (a capability's handler,
+/// another mod's provider): the mod calls one through the `held-<interface>` imports, by the
+/// index the game keeps it under.
+pub(super) fn held(owner: &str) -> bool {
+    owner == "PlaceProvider" || (exports().contains(&owner) && !EXPORTS.contains(&owner))
+}
+
+/// A trait object that crosses without methods: a provider of a mod's own handler type,
+/// erased (`Arc<dyn Any + Send + Sync>`), which only mods of its group take back.
+pub(super) const ERASED: &str = "Any";
 
 static EXPORTED: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
 
@@ -177,15 +194,19 @@ fn providers_code(shapes: &[KeyShape]) -> String {
                 )
             })
             .collect();
-        let erased: String = mine
+        let names: String = mine
             .iter()
             .map(|s| {
                 format!(
-                    "Self::{}(p) => (Arc::new(p), std::any::type_name::<dyn {}>()),\n",
+                    "Self::{}(_) => std::any::type_name::<dyn {}>(),\n",
                     s.case(),
                     s.handler
                 )
             })
+            .collect();
+        let gets: String = mine
+            .iter()
+            .map(|s| format!("Self::{}(p) => (p as &dyn Any).downcast_ref(),\n", s.case()))
             .collect();
         let (params, provider) = match by {
             "Entity" => (
@@ -201,7 +222,7 @@ fn providers_code(shapes: &[KeyShape]) -> String {
         };
         let _ = ctx;
         code.push_str(&format!(
-            "/// A {by} capability's provider, by its handler type.\n#[doc(hidden)]\npub enum {by}ProviderOf {{\n{cases}/// A handler type of a mod's own.\nOwn(OwnProvider),\n}}\nimpl {by}ProviderOf {{\n/// `provider`, by its handler type.\npub(crate) fn of{params}(provider: Arc<dyn {provider}>) -> Self {{\nlet any: Box<dyn Any + Send + Sync> = Box::new(provider);\n{tries}Self::Own(OwnProvider {{ provider: OwnErased::Here(Arc::from(any)), handler: std::any::type_name::<T>() }})\n}}\n/// The provider as the registrar keeps it, and its handler type's name.\npub(crate) fn erase(self) -> (Arc<dyn Any + Send + Sync>, &'static str) {{\nmatch self {{\n{erased}Self::Own(OwnProvider {{ provider: OwnErased::Here(p), handler }}) => (p, handler),\nSelf::Own(own) => (Arc::new(own.provider), own.handler),\n}}\n}}\n}}\n"
+            "/// A {by} capability's provider, by its handler type.\n#[doc(hidden)]\n#[derive(Clone)]\npub enum {by}ProviderOf {{\n{cases}/// A handler type of a mod's own.\nOwn(OwnProvider),\n}}\nimpl {by}ProviderOf {{\n/// `provider`, by its handler type.\npub(crate) fn of{params}(provider: Arc<dyn {provider}>) -> Self {{\nlet any: Box<dyn Any + Send + Sync> = Box::new(provider);\n{tries}Self::Own(OwnProvider {{ provider: Arc::from(any), handler: std::any::type_name::<T>() }})\n}}\n/// Its handler type's name.\npub(crate) fn handler(&self) -> &'static str {{\nmatch self {{\n{names}Self::Own(own) => own.handler,\n}}\n}}\n/// The provider, if it answers with handler type `T`.\npub(crate) fn get{params}(&self) -> Option<&Arc<dyn {provider}>> {{\nmatch self {{\n{gets}Self::Own(own) => (*own.provider).downcast_ref(),\n}}\n}}\n}}\n"
         ));
     }
     code
@@ -489,6 +510,7 @@ fn views(types: &mut Types<'_>) -> Result<Vec<(String, Vec<String>)>, String> {
         }));
         out.push((owner.to_string(), list));
     }
+    out.push((ERASED.to_string(), vec![ERASED.to_string()]));
     Ok(out)
 }
 

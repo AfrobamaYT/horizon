@@ -60,6 +60,9 @@ pub(super) fn rust_ty(types: &Types<'_>, ty: &Ty, ret: bool) -> String {
 }
 
 pub(super) fn trait_path(owner: &str) -> String {
+    if owner == super::ERASED {
+        return "std::any::Any + Send + Sync".into();
+    }
     // Every name in it is `mod_api`'s, but the prelude's (`ResourceHandler<ItemResource>`,
     // `EntityCapabilityProvider<dyn EnergyHandler, Option<Direction>>`).
     struct Qualify;
@@ -160,64 +163,46 @@ pub(super) fn guest(
     for owner in owners.iter().filter(|o| !exports().contains(o)) {
         writeln!(code, "impl {} for Guest {{", trait_path(owner)).unwrap();
         match *owner {
-            "Host" => code.push_str("fn backend(&self) -> Option<crate::BackendRef<'_>> { Some(crate::BackendRef::of(self)) }\n"),
+            "Host" => code.push_str("fn backend(&self) -> Option<crate::BackendRef<'_>> { Some(crate::BackendRef::of(self)) }\nfn capability_providers(&self) -> &'static dyn crate::CapabilityProviders { &Guest }\n"),
             "ServerHost" => code.push_str("fn backend_mut(&mut self) -> Option<crate::BackendMutRef<'_>> { Some(crate::BackendMutRef::of(self)) }\n"),
             _ => {}
         }
         for method in methods.iter().filter(|m| m.owner == *owner) {
-            let sig = signature(types, method)?;
-            let mut prep = String::new();
-            let mut args = Vec::new();
-            for (i, (_, ty)) in method.params.iter().enumerate() {
-                if wit::wit(types, ty)?.is_some() {
-                    writeln!(
-                        prep,
-                        "let a{i} = {};",
-                        lower(types, ty, &format!("(&p{i})"))
-                    )
-                    .unwrap();
-                    args.push(arg(types, ty, &format!("a{i}")));
-                }
-            }
-            let (pattern, names) = unpack(&sig);
-            let mut back = String::new();
-            let mut next = usize::from(wit::wit(types, &method.ret)?.is_some());
-            for (i, (_, ty)) in method.params.iter().enumerate() {
-                if let Ty::Ref(inner, true) = ty {
-                    match &**inner {
-                        Ty::Named(def)
-                            if sig.results.contains(&wit::out_name(&types.defs[*def])) =>
-                        {
-                            writeln!(back, "write_back_{def}(p{i}, {})?;", names[next]).unwrap();
-                            next += 1;
-                        }
-                        Ty::Named(_) => {}
-                        inner => {
-                            writeln!(back, "*p{i} = {};", lift(types, inner, &names[next]))
-                                .unwrap();
-                            next += 1;
-                        }
-                    }
-                }
-            }
-            let value = if wit::wit(types, &method.ret)?.is_some() {
-                guest_ret(types, &method.ret, &names[0])
-            } else if let Ty::Dyn(..) = method.ret {
-                format!("&Guest as {}", rust_ty(types, &method.ret, true))
-            } else {
-                "()".to_string()
-            };
-            writeln!(
-                code,
-                "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ super::expect((|| -> Result<_, Refused> {{ {prep} let {pattern} = api::{}::{}({}); {back} Ok({value}) }})()) }}",
-                rust_sig(types, method),
+            let callee = format!(
+                "api::{}::{}",
                 bound_ident(&interface(owner)),
-                bound_ident(&wit_ident(&method.name)),
+                bound_ident(&wit_ident(&method.name))
+            );
+            code.push_str(&guest_call(types, method, &callee, None)?);
+        }
+        code.push_str("}\n");
+    }
+    // The game's objects the mod holds, each method calling its `held-` import; and the mod's
+    // own, boxed again.
+    for owner in super::exports().iter().filter(|o| super::held(o)) {
+        let path = trait_path(owner);
+        let held = bound_ident(&format!("held-{}", interface(owner)));
+        let mut forward = String::new();
+        writeln!(code, "impl {path} for super::Held {{").unwrap();
+        for method in methods.iter().filter(|m| m.owner == *owner) {
+            let callee = format!("api::{held}::{}", bound_ident(&wit_ident(&method.name)));
+            code.push_str(&guest_call(types, method, &callee, Some("self.0"))?);
+            let args: Vec<String> = (0..method.params.len()).map(|i| format!("p{i}")).collect();
+            writeln!(
+                forward,
+                "{} {{ self.0.{}({}) }}",
+                rust_sig(types, method),
+                method.name,
                 args.join(", ")
             )
             .unwrap();
         }
         code.push_str("}\n");
+        writeln!(
+            code,
+            "impl {path} for super::Shared<dyn {path}> {{\n{forward}}}"
+        )
+        .unwrap();
     }
     let arms: Vec<String> = hooks
         .iter()
@@ -247,6 +232,11 @@ pub(super) fn guest(
                 ),
             };
             writeln!(code, "fn subscribed({param}) -> Vec<String> {{ {receiver}.{list}().iter().flatten().map(|id| hook_name(*id).to_string()).collect() }}").unwrap();
+        }
+        if super::mod_receiver(owner).is_some() {
+            code.push_str(
+                "fn release_handlers(handlers: Vec<u32>) { super::release_handlers(handlers) }\n",
+            );
         }
         for method in methods.iter().filter(|m| m.owner == *owner) {
             let sig = signature(types, method)?;
@@ -298,6 +288,62 @@ pub(super) fn guest(
         code.push_str("}\n");
     }
     Ok(code)
+}
+
+/// A guest method calling import `callee` (with `lead`, the held object's index, first).
+fn guest_call(
+    types: &Types<'_>,
+    method: &Method,
+    callee: &str,
+    lead: Option<&str>,
+) -> Result<String, String> {
+    let sig = signature(types, method)?;
+    let mut prep = String::new();
+    let mut args = Vec::new();
+    for (i, (_, ty)) in method.params.iter().enumerate() {
+        if wit::wit(types, ty)?.is_some() {
+            writeln!(
+                prep,
+                "let a{i} = {};",
+                lower(types, ty, &format!("(&p{i})"))
+            )
+            .unwrap();
+            args.push(arg(types, ty, &format!("a{i}")));
+        }
+    }
+    let (pattern, names) = unpack(&sig);
+    let mut back = String::new();
+    let mut next = usize::from(wit::wit(types, &method.ret)?.is_some());
+    for (i, (_, ty)) in method.params.iter().enumerate() {
+        if let Ty::Ref(inner, true) = ty {
+            match &**inner {
+                Ty::Named(def) if sig.results.contains(&wit::out_name(&types.defs[*def])) => {
+                    writeln!(back, "write_back_{def}(p{i}, {})?;", names[next]).unwrap();
+                    next += 1;
+                }
+                Ty::Named(_) | Ty::Dyn(..) => {}
+                inner => {
+                    writeln!(back, "*p{i} = {};", lift(types, inner, &names[next])).unwrap();
+                    next += 1;
+                }
+            }
+        }
+    }
+    let value = if wit::wit(types, &method.ret)?.is_some() {
+        guest_ret(types, &method.ret, &names[0])
+    } else if let Ty::Dyn(..) = method.ret {
+        format!("&Guest as {}", rust_ty(types, &method.ret, true))
+    } else {
+        "()".to_string()
+    };
+    if let Some(lead) = lead {
+        args.insert(0, lead.to_string());
+    }
+    Ok(format!(
+        "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ super::expect((|| -> Result<_, Refused> {{ {prep} let {pattern} = {callee}({}); {back} Ok({value}) }})()) }}\n",
+        rust_sig(types, method),
+        args.join(", ")
+    ))
 }
 
 /// The Rust type wit-bindgen gives the WIT type `wire`.
@@ -476,40 +522,6 @@ pub(super) fn host(
         let iface = bound_ident(&interface(owner));
         writeln!(code, "impl api::{iface}::Host for super::State {{").unwrap();
         for method in methods.iter().filter(|m| m.owner == *owner) {
-            let sig = signature(types, method)?;
-            let object = |name: &str, mutable: bool| {
-                format!(
-                    "frame::{}{}()?",
-                    name.rsplit("::").next().unwrap().to_snake_case(),
-                    if mutable { "_mut" } else { "" }
-                )
-            };
-            let place = InPlace::new(types, &object);
-            let mut out = String::from("let keep = super::Keep::default();");
-            let mut call_args = Vec::new();
-            let mut mut_locals = Vec::new();
-            let mut params = Vec::new();
-            for (name, ty) in &method.params {
-                let wire = wit::wit(types, ty)?;
-                let source = if wire.is_some() {
-                    bound_ident(&wit_ident(name))
-                } else {
-                    "()".into()
-                };
-                if wire.is_some() {
-                    params.push(format!("{source}: {}", wire_type(types, ty)));
-                }
-                match ty {
-                    Ty::Ref(inner, true) if !matches!(**inner, Ty::Dyn(..)) => {
-                        let value = place.value(inner, &source)?;
-                        let local = format!("m{}", mut_locals.len());
-                        writeln!(out, "let mut {local} = {value};").unwrap();
-                        call_args.push(format!("&mut {local}"));
-                        mut_locals.push((0, local, (**inner).clone()));
-                    }
-                    ty => call_args.push(place.value(ty, &source)?),
-                }
-            }
             let receiver = format!(
                 "frame::{}{}()?",
                 owner.rsplit("::").next().unwrap().to_snake_case(),
@@ -519,19 +531,17 @@ pub(super) fn host(
                     ""
                 }
             );
-            let result = results(types, method, &sig, "r", &mut_locals);
-            writeln!(
-                code,
-                "#[allow(unused_variables, unused_mut, clippy::all)] fn {}(&mut self, {}) -> wasmtime::Result<{}> {{ {} let r = {}::{}({receiver}, {}); Ok({result}) }}",
-                bound_ident(&wit_ident(&method.name)),
-                params.join(", "),
-                results_type(types, method, &sig, &mut_locals),
-                out,
-                trait_path(owner),
-                method.name,
-                call_args.join(", ")
-            )
-            .unwrap();
+            code.push_str(&host_import(types, method, &receiver, false)?);
+        }
+        code.push_str("}\n");
+    }
+    // The game's objects a mod holds, called by their index.
+    for owner in exports().iter().filter(|o| super::held(o)) {
+        let iface = bound_ident(&format!("held-{}", interface(owner)));
+        writeln!(code, "impl api::{iface}::Host for super::State {{").unwrap();
+        for method in methods.iter().filter(|m| m.owner == *owner) {
+            let receiver = format!("&*super::held::<dyn {}>(handler)?", trait_path(owner));
+            code.push_str(&host_import(types, method, &receiver, true)?);
         }
         code.push_str("}\n");
     }
@@ -642,6 +652,9 @@ pub(super) fn host(
             };
             entries.push(("subscribed".into(), params, vec!["Vec<String>".into()]));
         }
+        if super::mod_receiver(owner).is_some() {
+            entries.push(("release-handlers".into(), vec!["Vec<u32>".into()], vec![]));
+        }
         for (wit_name, params, results) in entries {
             let name = bound_ident(&wit_name);
             // A function's name in the component, without the `%` a WIT keyword is escaped with.
@@ -714,6 +727,68 @@ pub(super) fn host(
         "/// One mod's exports, typed once at load.\npub(super) struct ModExports {{ {fields} }}\nimpl ModExports {{\npub(super) fn find(store: &mut wasmtime::Store<super::State>, instance: &wasmtime::component::Instance, prefix: &str) -> Result<Self, super::LoadError> {{ Ok(Self {{ {inits} }}) }}\n{getters}}}"
     )
     .unwrap();
+    Ok(code)
+}
+
+/// The game's side of an import: `method` called on `receiver` (taking the held object's index
+/// first when `held`).
+fn host_import(
+    types: &Types<'_>,
+    method: &Method,
+    receiver: &str,
+    held: bool,
+) -> Result<String, String> {
+    let sig = signature(types, method)?;
+    let object = |name: &str, mutable: bool| {
+        format!(
+            "frame::{}{}()?",
+            name.rsplit("::").next().unwrap().to_snake_case(),
+            if mutable { "_mut" } else { "" }
+        )
+    };
+    let place = InPlace::new(types, &object);
+    let mut out = String::from("let keep = super::Keep::default();");
+    let mut call_args = Vec::new();
+    let mut mut_locals = Vec::new();
+    let mut params = Vec::new();
+    if held {
+        params.push("handler: u32".to_string());
+    }
+    for (name, ty) in &method.params {
+        let wire = wit::wit(types, ty)?;
+        let source = if wire.is_some() {
+            bound_ident(&wit_ident(name))
+        } else {
+            "()".into()
+        };
+        if wire.is_some() {
+            params.push(format!("{source}: {}", wire_type(types, ty)));
+        }
+        match ty {
+            Ty::Ref(inner, true) if !matches!(**inner, Ty::Dyn(..)) => {
+                let value = place.value(inner, &source)?;
+                let local = format!("m{}", mut_locals.len());
+                writeln!(out, "let mut {local} = {value};").unwrap();
+                call_args.push(format!("&mut {local}"));
+                mut_locals.push((0, local, (**inner).clone()));
+            }
+            ty => call_args.push(place.value(ty, &source)?),
+        }
+    }
+    let result = results(types, method, &sig, "r", &mut_locals);
+    let mut code = String::new();
+    writeln!(
+                code,
+                "#[allow(unused_variables, unused_mut, clippy::all)] fn {}(&mut self, {}) -> wasmtime::Result<{}> {{ {} let r = <_ as {}>::{}({receiver}, {}); Ok({result}) }}",
+                bound_ident(&wit_ident(&method.name)),
+                params.join(", "),
+                results_type(types, method, &sig, &mut_locals),
+                out,
+                trait_path(method.owner),
+                method.name,
+                call_args.join(", ")
+            )
+            .unwrap();
     Ok(code)
 }
 
