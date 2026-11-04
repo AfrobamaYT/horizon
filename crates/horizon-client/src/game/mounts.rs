@@ -129,7 +129,7 @@ impl Game<'_> {
             return false;
         }
         if let Some(stack) = self.inventory[self.selected].clone() {
-            let (updated, broken) = self.damage_stack(&stack, wear as i32, true);
+            let (updated, broken) = self.damage_stack(&stack, wear, true);
             if self.inventory[self.selected].as_ref() == Some(&stack) {
                 self.inventory[self.selected] = updated;
                 if let Some(broken) = broken {

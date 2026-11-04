@@ -145,7 +145,7 @@ impl Game<'_> {
         // the event left blocked), then hurtAndBreak.
         let item_damage = outcome.shield_damage;
         if item_damage > 0 && !self.creative {
-            let (updated, broken) = self.damage_stack(&stack, item_damage as i32, true);
+            let (updated, broken) = self.damage_stack(&stack, item_damage, true);
             if self.stack_in(slot) == Some(&stack) {
                 *self.stack_in_mut(slot) = updated;
                 if let Some(broken) = broken {
