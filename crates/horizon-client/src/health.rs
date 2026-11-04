@@ -79,6 +79,7 @@ pub static DAMAGE_POST: OnceLock<fn(DamageLevel<'_>, Hurting<'_>, &DamageContain
 /// Built from the level's world, or, in the mob tick, which reads the world while mobs
 /// draw, from a [`LentLevel`] taken out of it for the tick.
 pub struct DamageLevel<'a> {
+    shape: crate::chunk::LevelShape,
     chunks: &'a crate::chunk_map::ChunkMap,
     air: horizon_world::registry::BlockStateId,
     registry: &'a horizon_world::registry::BlockRegistry,
@@ -96,6 +97,7 @@ impl<'a> DamageLevel<'a> {
     ) -> Self {
         let crate::world::World {
             chunks,
+            shape,
             air,
             random,
             attachments,
@@ -103,6 +105,7 @@ impl<'a> DamageLevel<'a> {
             ..
         } = world;
         Self {
+            shape: *shape,
             chunks,
             air: *air,
             registry,
@@ -119,6 +122,7 @@ impl<'a> DamageLevel<'a> {
         lent: &'a mut LentLevel,
     ) -> Self {
         Self {
+            shape: world.shape,
             chunks: &world.chunks,
             air: world.air,
             registry,
@@ -138,6 +142,7 @@ impl<'a> DamageLevel<'a> {
     /// The same level, for a shorter borrow.
     pub fn reborrow(&mut self) -> DamageLevel<'_> {
         DamageLevel {
+            shape: self.shape,
             chunks: self.chunks,
             air: self.air,
             registry: self.registry,
@@ -146,6 +151,10 @@ impl<'a> DamageLevel<'a> {
             attachment_syncs: self.attachment_syncs,
             hooks: self.hooks,
         }
+    }
+    /// The build range of the level whose damage hook is running.
+    pub fn shape(&self) -> crate::chunk::LevelShape {
+        self.shape
     }
     /// The level's random (`level.getRandom()`).
     pub fn random(&mut self) -> &mut horizon_core::random::LegacyRandom {
@@ -269,7 +278,8 @@ pub struct Knock {
 /// the game: `LivingEntity.knockback`, at its start (`LivingKnockBackEvent`), on the raw strength
 /// and before the knockback resistance and the motion change. It may change the [`Knock`]; true
 /// cancels it.
-pub static KNOCKBACK: OnceLock<fn(Hurting<'_>, &mut Knock) -> bool> = OnceLock::new();
+pub static KNOCKBACK: OnceLock<fn(DamageLevel<'_>, Hurting<'_>, &mut Knock) -> bool> =
+    OnceLock::new();
 /// The game's native totem hook (`native_living_use_totem`), set once by the game: a
 /// `death_protection` item in the hand (true: the off hand) is about to save the entity from
 /// a killing blow (`LivingUseTotemEvent`). True cancels it: the entity dies.
@@ -340,6 +350,12 @@ pub fn knockback_held() -> [Option<crate::items::ItemStack>; 2] {
     KNOCKBACK_HELD.with(|held| held.borrow().clone())
 }
 
+/// `f` of what the attacker of the enclosing attack scope holds (main hand, off hand), or none
+/// when it is not known. Borrowed, not cloned.
+pub fn with_held<R>(f: impl FnOnce(&[Option<crate::items::ItemStack>; 2]) -> R) -> R {
+    KNOCKBACK_HELD.with_borrow(f)
+}
+
 /// `f` of the main-hand stack of `direct`, a hit's direct entity, when it is the attacker
 /// the enclosing attack scope recorded (`DamageSource.getWeaponItem`: the direct entity's
 /// weapon), else of none. Borrowed, not cloned.
@@ -370,12 +386,12 @@ pub fn knockback_from_holding(
 }
 /// Whether [`KNOCKBACK`] canceled the knockback (never while it is unset). A
 /// value it leaves that is not a finite number is put back as it was.
-pub fn knockback_canceled(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
+pub fn knockback_canceled(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
     let Some(hook) = KNOCKBACK.get() else {
         return false;
     };
     let before = *knock;
-    let canceled = hook(pushed, knock);
+    let canceled = hook(level, pushed, knock);
     for (now, was) in [
         (&mut knock.strength, before.strength),
         (&mut knock.x, before.x),
@@ -1686,8 +1702,8 @@ mod tests {
     /// 9103 non-finite numbers, and gives 9105 (whose resistance leaves
     /// nothing) a strength of 0.4.
     fn set_knockback_hook() -> fn(i32) -> Vec<(String, super::Knock)> {
-        use super::{Hurting, Knock};
-        fn hook(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
+        use super::{DamageLevel, Hurting, Knock};
+        fn hook(_: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
             let Hurting::Mob(mob, source) = pushed else {
                 return false;
             };
@@ -1713,11 +1729,9 @@ mod tests {
             }
             false
         }
+        type Hook = fn(DamageLevel<'_>, Hurting<'_>, &mut Knock) -> bool;
         let installed = *super::KNOCKBACK.get_or_init(|| hook);
-        assert!(std::ptr::fn_addr_eq(
-            installed,
-            hook as fn(Hurting<'_>, &mut Knock) -> bool
-        ));
+        assert!(std::ptr::fn_addr_eq(installed, hook as Hook));
         |entity| {
             let seen = PUSHES.lock().unwrap();
             let pushes = seen.iter().filter(|p| p.0 == entity);
@@ -1731,8 +1745,10 @@ mod tests {
     #[test]
     fn a_mobs_gear_resists_knockback() {
         use crate::mobs::{Damage, Mob};
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let hit = Damage::player([3.0, 0.0, 0.0]);
-        let pushed = |gear: Option<f64>, own: f64| {
+        let mut pushed = |gear: Option<f64>, own: f64| {
             let mut m = Mob::new(
                 9200,
                 crate::mobs::sensor_scan_tests::kind(),
@@ -1742,7 +1758,7 @@ mod tests {
             m.on_ground = true;
             m.attrs.knockback_resistance = own;
             m.gear_knockback_resistance = gear;
-            m.knockback(0.4, 3.0, 0.0, &hit);
+            m.knockback(level, 0.4, 3.0, 0.0, &hit);
             m.velocity.x
         };
         assert_eq!(pushed(None, 0.0), -0.4);
@@ -1777,9 +1793,9 @@ mod tests {
         };
         let velocity = |m: &Mob| (m.velocity.x, m.velocity.y, m.velocity.z);
         let hit = Damage::player([3.0, 0.0, 0.0]);
-        let push = |id, resistance| {
+        let mut push = |id, resistance| {
             let mut m = mob(id, resistance);
-            m.knockback(0.4, 3.0, 0.0, &hit);
+            m.knockback(level, 0.4, 3.0, 0.0, &hit);
             m
         };
         // No mod in the way (the hook leaves 9100 alone): vanilla's push, away from x = 3.

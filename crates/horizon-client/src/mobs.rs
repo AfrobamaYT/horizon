@@ -2766,6 +2766,10 @@ pub struct MobWorld<'a> {
     pub others_grid: Option<&'a seen_grid::SeenGrid>,
     /// Where each id stands in `others`, when the caller keeps one.
     pub others_index: Option<&'a crate::fast_hash::FxHashMap<u32, u32>>,
+    /// The slots of `others` holding a villager, in order, when the caller
+    /// keeps them (the mob ticks: a slot keeps its mob, and its species, all
+    /// tick). Each zombie looking for a village read every slot.
+    pub others_villagers: Option<&'a [u32]>,
     pub daylight: bool,
     /// The `gameplay/monsters_burn` attribute: the overworld day timeline's
     /// step track, false in every other dimension.
@@ -2976,12 +2980,15 @@ impl Mob {
     }
     /// `Entity.makeBoundingBox(position)`.
     pub fn bounds_at(&self, position: Vec3) -> Aabb {
-        let w = f64::from(self.width()) / 2.0;
+        // `width()` and `height()` in one `dims()`: every box asked for (each
+        // collision, push and cart test) read the whole size twice.
+        let (width, height, _) = self.dims();
+        let w = f64::from(width as f32) / 2.0;
         Aabb::new(
             Vec3::new(position.x - w, position.y, position.z - w),
             Vec3::new(
                 position.x + w,
-                position.y + f64::from(self.height()),
+                position.y + f64::from(height as f32),
                 position.z + w,
             ),
         )
@@ -3096,7 +3103,7 @@ impl Mob {
         // come before LivingEntity's checks, so a primed (invulnerable) cube
         // is still knocked about.
         if self.species() == Species::SulfurCube
-            && !sulfur_cube::accepts_damage(self, &source, amount)
+            && !sulfur_cube::accepts_damage(self, level, &source, amount)
         {
             // `SulfurCube.hurtServer` returns true for the blows it shrugs off and only knocks
             // about, so `Player.attack` goes on with its extra knockback and its aftermath.
@@ -3333,7 +3340,7 @@ impl Mob {
                     (f[0] - self.position.x, f[2] - self.position.z)
                 }),
             };
-            self.knockback(f64::from(0.4f32), dx, dz, &source);
+            self.knockback(level, f64::from(0.4f32), dx, dz, &source);
         }
         ai::after_hurt(self, &source);
         if self.health <= 0.0 {
@@ -3457,21 +3464,44 @@ impl Mob {
     /// shoved. The native knockback hook runs once the knockback resistance
     /// took its share, before the motion changes and the draws of a random
     /// direction.
-    pub fn knockback(&mut self, power: f64, xd: f64, zd: f64, source: &Damage) {
-        self.knockback_by(power, xd, zd, source, None);
+    pub fn knockback(
+        &mut self,
+        level: &mut DamageLevel<'_>,
+        power: f64,
+        xd: f64,
+        zd: f64,
+        source: &Damage,
+    ) {
+        self.knockback_by(level, power, xd, zd, source, None);
     }
     /// `LivingEntity.knockback(power, xd, zd, source, damage, comesFromEffect = true)`: an extra
     /// push of a blow (sprint, the Knockback enchantment). A sulfur cube with a block turns it
     /// into its own launch (`SulfurCube.knockback`), scaled by `power * 0.25` and `sqrt(damage)`.
-    pub fn knockback_effect(&mut self, power: f64, xd: f64, zd: f64, source: &Damage, damage: f32) {
-        self.knockback_by(power, xd, zd, source, Some(damage));
+    pub fn knockback_effect(
+        &mut self,
+        level: &mut DamageLevel<'_>,
+        power: f64,
+        xd: f64,
+        zd: f64,
+        source: &Damage,
+        damage: f32,
+    ) {
+        self.knockback_by(level, power, xd, zd, source, Some(damage));
     }
     /// `getAttributeValue(KNOCKBACK_RESISTANCE)`: the mob's own, and what its gear adds.
     pub fn knockback_resistance(&self) -> f64 {
         self.gear_knockback_resistance
             .unwrap_or(self.attrs.knockback_resistance)
     }
-    fn knockback_by(&mut self, power: f64, xd: f64, zd: f64, source: &Damage, effect: Option<f32>) {
+    fn knockback_by(
+        &mut self,
+        level: &mut DamageLevel<'_>,
+        power: f64,
+        xd: f64,
+        zd: f64,
+        source: &Damage,
+        effect: Option<f32>,
+    ) {
         if let Some(damage) = effect
             && self.species() == Species::SulfurCube
             && sulfur_cube::has_body(self)
@@ -3490,8 +3520,8 @@ impl Mob {
             x: xd,
             z: zd,
         };
-        if crate::health::knockback_canceled(crate::health::Hurting::Mob(self, source), &mut knock)
-        {
+        let pushed = crate::health::Hurting::Mob(self, source);
+        if crate::health::knockback_canceled(level.reborrow(), pushed, &mut knock) {
             return;
         }
         let crate::health::Knock {

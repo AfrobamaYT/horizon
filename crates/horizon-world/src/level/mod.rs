@@ -141,6 +141,19 @@ pub use bonemeal::TemplateSettings;
 pub use buckets::BucketContent;
 pub use data::{BlockData, ItemBinding, ItemKind, Named, Props, PushReaction, StateFacts, Tags};
 pub use falling::Landing;
+
+/// A neighbour update a block asks for when it is removed, each the one vanilla's own removal
+/// uses (`Level.updateNeighborsAt`, `updateNeighborsAtExceptFromFacing`,
+/// `updateNeighbourForOutputSignal`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NeighbourUpdate {
+    /// `Level.updateNeighbourForOutputSignal`: comparators beside the position re-read.
+    OutputSignal,
+    /// `Level.updateNeighborsAt`: all six neighbours hear the block changed.
+    Neighbours,
+    /// `Level.updateNeighborsAtExceptFromFacing`: all neighbours but the one in the direction.
+    NeighboursExcept(Direction),
+}
 pub use interact::{InteractionResult, PlayerContext, PlayerEffect, UseBranch, hit_slot};
 pub use pistons::{BlockEventData, MovingPiston};
 pub use place::{PlaceContext, PlaceOutcome, PlacementContext};
@@ -501,6 +514,18 @@ pub trait LevelAccess {
     /// the growth schedules, as `before_update_shape` hands them. The default
     /// does nothing.
     fn perform_bonemeal(&mut self, _ticks: &mut Ticks, _pos: BlockPos, _state: BlockStateId) {}
+    /// `Block.affectNeighborsAfterRemoval` of a mod's part for the block `state` that stood
+    /// at `pos` (`moved`: pushed by a piston), after the block's own class ran: the updates it
+    /// asks for go in `updates` in order, and the level runs them. It is inside the level's
+    /// write, so it cannot write. The default asks for nothing.
+    fn affect_neighbors_after_removal(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _moved: bool,
+        _updates: &mut Vec<NeighbourUpdate>,
+    ) {
+    }
     /// `BlockState.updateShape` for `state` at `pos` after its neighbour in
     /// `direction` became `neighbour`, before the block computes it. `state`
     /// may not be in the level yet (a piston landing it). A state put in

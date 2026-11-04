@@ -9,6 +9,7 @@ use super::{
     control::MoveKind,
     goals::{Cx, Goal, JUMP, LOOK, MOVE, goal_clone},
 };
+use crate::health::DamageLevel;
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
@@ -590,7 +591,12 @@ pub fn immune_to(source: &Damage) -> bool {
 /// `hurtServer`: fire or `#is_explosion` (a firework rocket's burst too)
 /// light an explosive cube; with a block it shrugs off blows, falls and
 /// explosions and is only knocked about.
-pub fn accepts_damage(m: &mut Mob, source: &Damage, amount: f32) -> bool {
+pub fn accepts_damage(
+    m: &mut Mob,
+    level: &mut DamageLevel<'_>,
+    source: &Damage,
+    amount: f32,
+) -> bool {
     if !has_body(m) {
         return true;
     }
@@ -604,7 +610,7 @@ pub fn accepts_damage(m: &mut Mob, source: &Damage, amount: f32) -> bool {
     if immune_to(source) {
         // `dealDefaultKnockback`, unless the damage type is tagged no_knockback.
         if !source.no_knockback() {
-            deal_default_knockback(m, source, amount);
+            deal_default_knockback(m, level, source, amount);
         }
         return false;
     }
@@ -747,7 +753,7 @@ fn launch(
 /// `LivingEntity.dealDefaultKnockback` for a cube with a block: from where the blow came
 /// (`source.getSourcePosition()`) with `knockback(0.4, ...)`. A source with a causing entity goes
 /// through `SulfurCube.knockback`; one with none (a cactus, a fall) through `super.knockback`.
-fn deal_default_knockback(m: &mut Mob, source: &Damage, damage: f32) {
+fn deal_default_knockback(m: &mut Mob, level: &mut DamageLevel<'_>, source: &Damage, damage: f32) {
     // A projectile knocks the way it travelled (`calculateHorizontalHurtKnockbackDirection`),
     // else from the source's position.
     let (xd, zd) = match m.projectile_motion.take() {
@@ -759,7 +765,7 @@ fn deal_default_knockback(m: &mut Mob, source: &Damage, damage: f32) {
     if source.attacker.is_some() {
         knockback(m, (xd, zd), source.from, damage, None);
     } else {
-        m.knockback(f64::from(0.4_f32), xd, zd, source);
+        m.knockback(level, f64::from(0.4_f32), xd, zd, source);
     }
 }
 /// `SulfurCube.knockback` with a block and a causing entity: the archetype's powers, turned by

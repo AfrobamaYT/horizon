@@ -40,7 +40,7 @@ pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::command::Suggestion;
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
-pub use crate::crafting::{CustomRecipe, Ingredient};
+pub use crate::crafting::{Ingredient, RecipeFile};
 pub use crate::extras::Corner;
 pub use crate::extras_hud::Corners;
 pub use crate::first_person::Hand;
@@ -78,6 +78,7 @@ pub use horizon_core::{
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
+pub use horizon_items::items::TagRegistry;
 pub use horizon_world::consumable::UseAnimation;
 pub use horizon_world::player_inventory::EquipmentSlot;
 pub use horizon_world::{
@@ -85,7 +86,7 @@ pub use horizon_world::{
         AttachmentCodec, AttachmentError, AttachmentHost, AttachmentType, Attachments, Holder,
     },
     fluid::FluidState,
-    level::{BlockId, Dimension as LevelDimension, PlacementContext},
+    level::{BlockId, Dimension as LevelDimension, NeighbourUpdate, PlacementContext},
     loot::{LootStack, NativeLootContext},
     nbt::{Compound, Tag},
     registry::BlockStateId,
@@ -2155,6 +2156,13 @@ impl ModEntry {
         assert!(!id.is_empty(), "native mod id must not be empty");
         Self { id, hooks }
     }
+
+    /// Marks the thread as inside this mod's `hook` until the guard drops, so a panic in it
+    /// names both. A trait injection's generated dispatch calls it.
+    #[doc(hidden)]
+    pub fn enter(&self, hook: &'static str) -> crate::crash::NativeModGuard {
+        mark_mod(self.id, hook)
+    }
 }
 
 /// The ordered list of named mods shared by the client and server.
@@ -2701,6 +2709,18 @@ pub trait LevelHost {
     /// unknown state.
     fn state_block(&self, _state: BlockStateId) -> Option<&str> {
         unimplemented!("LevelHost::state_block")
+    }
+    /// The full block state name and properties, as `BlockStateParser.serialize`; None for an unknown id.
+    fn state_string(&self, _state: BlockStateId) -> Option<String> {
+        unimplemented!("LevelHost::state_string")
+    }
+    /// Lowest build Y (`LevelHeightAccessor.getMinY`).
+    fn min_y(&self) -> i32 {
+        unimplemented!("LevelHost::min_y")
+    }
+    /// Build height (`LevelHeightAccessor.getHeight`).
+    fn height(&self) -> i32 {
+        unimplemented!("LevelHost::height")
     }
     /// `BlockState.is(TagKey)`: the block of `state` is in the block tag `tag` (`minecraft:logs`
     /// or `logs`, no `#`), over the world's merged tags, its data packs and content mods
@@ -3308,6 +3328,16 @@ mod tests {
             errors[0]
         );
         assert!(!errors[1].contains("in native mod"), "{}", errors[1]);
+    }
+
+    #[test]
+    fn entering_a_mod_names_it_until_the_guard_drops() {
+        let entry = ModEntry::new("injector", Box::new(Quiet));
+        assert_eq!(crate::crash::current_native_mod(), None);
+        let guard = entry.enter("inject_injector_stop");
+        assert_eq!(crate::crash::current_native_mod(), Some("injector"));
+        drop(guard);
+        assert_eq!(crate::crash::current_native_mod(), None);
     }
 
     #[test]

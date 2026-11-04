@@ -33,6 +33,13 @@ use horizon_protocol::{
 use horizon_world::entity_move::EntityMoveWorld;
 use winit::keyboard::KeyCode;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum MenuOpen {
+    Opened,
+    Cancelled,
+    Refused,
+}
+
 /// Per-guest state of the gameplay code that lives outside `Guest`.
 #[derive(Default)]
 pub(super) struct GuestPlay {
@@ -1292,12 +1299,13 @@ impl Game<'_> {
     /// Hand a container the guest opened over (ServerPlayer.openMenu);
     /// false when it is not one a guest can open.
     fn lan_open_container(&mut self, conn: u32, pos: (i32, i32, i32)) -> bool {
-        // A chest minecart, hopper minecart or chest boat keeps its slots
-        // under a placeholder key (`ContainerEntity`): the menu is the
-        // vehicle's own, not a block's.
         if pos.1 == super::minecarts::CART_KEY_Y {
             return self.lan_open_vehicle_container(conn, pos);
         }
+        !matches!(self.open_block_menu(conn, pos), MenuOpen::Refused)
+    }
+
+    pub(super) fn open_block_menu(&mut self, conn: u32, pos: (i32, i32, i32)) -> MenuOpen {
         let name = &self
             .res
             .facts()
@@ -1332,13 +1340,13 @@ impl Game<'_> {
             (menu, Slots::Block(pos))
         } else {
             let Some(BlockEntity::Chest(items)) = self.world.block_entities.get(&pos) else {
-                return false;
+                return MenuOpen::Refused;
             };
             let menu = match items.len() {
                 27 => "minecraft:generic_9x3",
                 9 => "minecraft:generic_3x3",
                 5 => "minecraft:hopper",
-                _ => return false,
+                _ => return MenuOpen::Refused,
             };
             (menu, Slots::Block(pos))
         };
@@ -1358,22 +1366,22 @@ impl Game<'_> {
                     None if self.mod_menu_at(k).is_some() => {
                         format!("block.{}", name.replace(':', "."))
                     }
-                    None => return false,
+                    None => return MenuOpen::Refused,
                 };
                 horizon_client::containers::display_name(custom(k), &key)
             }
             // Opened by a mod (`native_open_menu`), never here.
-            Slots::Native => return false,
+            Slots::Native => return MenuOpen::Refused,
         };
         let Some(host) = self.lan.as_ref() else {
-            return false;
+            return MenuOpen::Refused;
         };
         let Some(items) = host
             .hub
             .guest(conn)
             .and_then(|g| slots.read(&self.world, g))
         else {
-            return false;
+            return MenuOpen::Refused;
         };
         // The block entity's createMenu: a shulker box opens a ShulkerBoxMenu
         // (not a 9x3 ChestMenu), whose slots refuse shulker boxes.
@@ -1397,7 +1405,7 @@ impl Game<'_> {
             _ => [None, None],
         };
         let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
-            return false;
+            return MenuOpen::Refused;
         };
         let mut locked = false;
         for key in halves.iter().flatten().copied() {
@@ -1407,7 +1415,7 @@ impl Game<'_> {
         }
         if locked {
             let Some(host) = self.lan.as_mut() else {
-                return false;
+                return MenuOpen::Refused;
             };
             host.hub.send_to(
                 conn,
@@ -1440,25 +1448,25 @@ impl Game<'_> {
                 source as i32,
                 None,
             );
-            return false;
+            return MenuOpen::Refused;
         }
         // A mod menu type only for a client that has it: as
         // `ServerPlayer.openMenu` with no menu, nothing opens.
         let Some(host) = self.lan.as_ref() else {
-            return false;
+            return MenuOpen::Refused;
         };
         let brand = host.hub.guest(conn).map_or("", |g| g.brand.as_str());
         if !horizon_client::containers::menu_reaches(brand, menu) {
-            return false;
+            return MenuOpen::Refused;
         }
         // The mods may stop the menu; the click is spent.
         if !self.guest_may_open(conn, menu, Some([pos.0, pos.1, pos.2])) {
-            return true;
+            return MenuOpen::Cancelled;
         }
         let mut cancel = false;
         self.native_inventory_block_start(uuid, &name, [pos.0, pos.1, pos.2], &mut cancel);
         if cancel {
-            return false;
+            return MenuOpen::Refused;
         }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(conn);
@@ -1467,7 +1475,7 @@ impl Game<'_> {
         let counts_openers = matches!(slots, Slots::Block(_) | Slots::Double(_, _));
         let hidden = self.native_hidden_slots(pos, items.len());
         let Some(host) = self.lan.as_mut() else {
-            return false;
+            return MenuOpen::Refused;
         };
         host.hub
             .open_container(conn, menu, title, pos, slots, items);
@@ -1487,7 +1495,7 @@ impl Game<'_> {
         if counts_openers && !spectator && self.container_openers_changed(pos, true) {
             self.container_edge_sound(pos, true);
         }
-        true
+        MenuOpen::Opened
     }
 
     /// `ContainerEntity.interactWithContainerVehicle` for a guest: the menu
@@ -6206,6 +6214,41 @@ fn copied_respawn_point(has_config: bool, spawn: Option<[f64; 3]>) -> Option<Opt
 mod tests {
     use super::{copied_respawn_point, eye_columns};
     use horizon_client::pose::Pose;
+
+    #[test]
+    #[ignore = "requires prepared game resources"]
+    fn block_menu_click_keeps_spent_action_on_cancellation() {
+        use horizon_client::{
+            chunk::Chunk, lan::guest::GuestKind, mod_api::NativeBlockUpdateFlags,
+        };
+        use std::sync::Arc;
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let chest = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:chest")
+                .unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [0, 64, 0],
+                chest,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            assert!(!game.lan_open_container(12, (2, 64, 0)));
+            game.lan.as_mut().unwrap().hub.guests[0].kind = GuestKind::Fake;
+            assert!(game.lan_open_container(12, (0, 64, 0)));
+            assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_none());
+            game.lan.as_mut().unwrap().hub.guests[0].kind = GuestKind::Network;
+            assert!(game.lan_open_container(12, (0, 64, 0)));
+            assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_some());
+        });
+    }
 
     #[test]
     #[ignore = "requires prepared game resources"]

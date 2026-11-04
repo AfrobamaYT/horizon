@@ -581,6 +581,13 @@ impl Game<'_> {
             ((batch.height - HEIGHT) / 2.0).floor(),
         )
     }
+    /// The open book's panel, `[x, y, width, height]` in GUI pixels; none
+    /// while the screen has no book or it is closed.
+    pub(super) fn recipe_book_rect(&self, batch: &HudBatch) -> Option<[f32; 4]> {
+        self.active_book().filter(|b| self.book_open(*b))?;
+        let (x, y) = self.book_origin(batch);
+        Some([x, y, WIDTH, HEIGHT])
+    }
     /// The green book button's top-left corner.
     fn book_button_pos(&self, book: BookType, ox: f32, batch: &HudBatch) -> (f32, f32) {
         let mid = (batch.height / 2.0).floor();

@@ -310,10 +310,7 @@ validates identity against its embedded inventory.
   colours, completes and lists them like the game's own, and `native_command` runs them. A name the game already has
   keeps that command.
 
-- Recipes of a mod's own types, for a machine's crusher or altar. A recipe file whose `type` is outside `minecraft`
-  (`mymod:crusher`) in `data/<namespace>/recipe/`, in a content mod (`.hmod`) or a world's data pack (not in a native mod's own bundle), stays loaded as it is: `native_recipes_of_type`
-  gives each one's id and JSON, for the mod to read as it likes, and `native_recipe_ingredient` and `native_recipe_result` read the
-  usual fields, tags included (a bare id is read as `minecraft:`; items the game doesn't know are left out, and the helper gives nothing if none is left). The recipes are the server's table: on the server thread, a dedicated server or a LAN host; a client, the single-player window included, sees only the content mods' recipes, not the world's data packs'. All three give nothing outside a world. The game doesn't craft them or show them in the recipe book; `/reload` reads a data pack's again.
+- Recipes of any type (`RecipeManager.getAllRecipesFor`), vanilla's (`minecraft:smelting`, `minecraft:campfire_cooking`) and a mod's own (`mymod:crusher`, for a machine or an altar) through one read: `host.recipes_of_type("minecraft:smelting")` gives each recipe in force, in file order, as its id and its file's JSON, for the mod to read as it likes. The recipes are those of `data/<namespace>/recipe/` in vanilla, content mods (`.hmod`) and the world's data packs, with data packs merged and load conditions held, so a pack's override or removal shows; a type nobody uses gives nothing. `native_recipe_ingredient` and `native_recipe_result` read the usual fields, tags included (a bare id is read as `minecraft:`; items the game doesn't know are left out, and the helper gives nothing if none is left). The recipes are the server's table: on the server thread, a dedicated server or a LAN host; a client, the single-player window included, sees vanilla's and the content mods' recipes, not the world's data packs', unless a mod had the server send it the type (`native_datapack_sync`). All three give nothing outside a world. The game crafts the recipes of its own types itself, and shows none of a mod's own in the recipe book; `/reload` reads a data pack's again, so look them up again when you need them. The lookup borrows the table, with no copy.
 
 - [mobs](#mobs) for server mods: spawn one, read the mobs of a level in place, and move, hurt or remove one by its id.
 
@@ -359,6 +356,15 @@ validates identity against its embedded inventory.
   alone): it is asked when a chunk holding it is sent and when its block changes, and the client merges it into the
   copy's `nbt`. A saved chunk sent past the view distance asks it on its own thread, so read only `entity`. Keep it to what clients show (a machine running, its facing, a tank's level), not a menu's progress:
   menus have their own data slots.
+
+- `native_affect_neighbors_after_removal` is a mod block's `Block.affectNeighborsAfterRemoval`: the block was
+  removed from `pos` (`moved`: a piston pushed it) with `UPDATE_NEIGHBORS` or the piston flag. There is no bus
+  event for it, so it is a `BlockPart` method only. The block's own class has already run its updates, as an
+  override's `super` call; the part then pushes onto `updates` what it wants, in order: `NeighbourUpdate::OutputSignal`
+  (`updateNeighbourForOutputSignal`), `Neighbours` (`updateNeighborsAt`) and `NeighboursExcept(direction)`
+  (`updateNeighborsAtExceptFromFacing`), and the level runs each at once with vanilla's own functions. It runs
+  inside the level's write with the level host, so it reads but cannot write blocks or spawn entities; a mod that
+  needs either reports the gap on #44. The cost with no part on the block is one `has_part_hook` read.
 
 - `native_pre_remove_side_effects` is a mod block entity's `BlockEntity.preRemoveSideEffects`: its block is being
   replaced or broken with side effects (not under flag 256). Its part puts the stacks it held in `drops`, and they
@@ -476,10 +482,18 @@ And a `cancellable = true` `HEAD` on a hook point:
 warning: alpha's `stop` can cancel at hook `frame` HEAD: a Break skips the later injections and the function's body.
 ```
 
-A raw `target` is not matched against the catalog — whether it names a hook point's function only the source knows —
-so the third warning names a `hook`, and `hook = "frame"` and `target = "…::native_frame"` are not told apart. Only
+The third warning names a `hook`: it does not know whether a raw `target` is a hook point's function. Only
 `HEAD` is named: the interior kinds may carry `cancellable` too, but what a `Break` skips there is less than the body.
 A mod's `priority` defaults to 0, as horizon-mixins defaults it. Neither warning stops the build.
+
+A raw `target` that is the function a catalog hook is called from gets a hint, once the build has the game's
+source (it holds the catalog), whichever kind it has:
+
+```
+warning: alpha's `raw` targets hook point `frame`: use `hook = "frame"`, `hook_version = 1`, or implement `Hooks::frame` with no injection.
+```
+
+A scoped hook says "the `<name>` Part method" instead of `Hooks::<name>`.
 
 ### A mod's own ingredient kinds, matching at craft time
 
@@ -781,7 +795,7 @@ one, where vanilla gives the `by` one.
 
 - Nicknames for server mods: `native_set_nickname(uuid, Option<&str>)` shows a name in place of a player's in chat (their messages, `/me`, `/msg`) and the Tab list, the real name on hover and everywhere else; `native_text_allowed(text)` asks the server's chat filter. Both outside a player's hook.
 
-- Tag and fluid reads from any hook that has a `Host`: `host.block_state_in_tag(state, "minecraft:logs")` (`BlockState.is(TagKey)`), `host.item_stack_in_tag(&stack, tag)` (`ItemStack.is(TagKey)`), `host.state_fluid_state(state)` (`BlockState.getFluidState`: water for a waterlogged state, `None` for an id no state has) and `host.fluid_in_tag(fluid, "minecraft:water")` (`FluidState.is(TagKey)`). The tag may be written with or without `minecraft:`, with no `#`. They read the world's merged tags, data packs and content mods included; an unknown tag is false and an empty stack tests `minecraft:air`. The tag reads are `None` on a client and before the world loads its tags. `host.state_outline(state)` (`BlockState.getShape` with an empty getter at the origin) gives a state's outline boxes in the block's own space, with no random offset and no world context; empty for air, `None` for an id no state has. `level.fluid_state(host, pos)` (`BlockGetter.getFluidState`) reads the fluid at a position, `None` where the block read is (an unloaded chunk or a `y` outside the world).
+- Tag and fluid reads from any hook that has a `Host`: `host.block_state_in_tag(state, "minecraft:logs")` (`BlockState.is(TagKey)`), `host.item_stack_in_tag(&stack, tag)` (`ItemStack.is(TagKey)`), `host.state_fluid_state(state)` (`BlockState.getFluidState`: water for a waterlogged state, `None` for an id no state has) and `host.fluid_in_tag(fluid, "minecraft:water")` (`FluidState.is(TagKey)`). The tag may be written with or without `minecraft:`, with no `#`. They read the world's merged tags, data packs and content mods included; an unknown tag is false and an empty stack tests `minecraft:air`. The tag reads are `None` on a client and before the world loads its tags. `host.state_outline(state)` (`BlockState.getShape` with an empty getter at the origin) gives a state's outline boxes in the block's own space, with no random offset and no world context; empty for air, `None` for an id no state has. `host.tag_members(TagRegistry::Block, tag)` (also `Item` and `Fluid`; `HolderSet.Named` iteration) lists a tag's members in vanilla's order, the file's order with nested tags in place and the first occurrence kept: an unknown tag lists nothing, and it is `None` where the tag reads are. `level.fluid_state(host, pos)` (`BlockGetter.getFluidState`) reads the fluid at a position, `None` where the block read is (an unloaded chunk or a `y` outside the world).
 
 - A block part's `should_check_weak_power` adjusts whether a signal query reads indirect power through that block, for its position and input direction.
 
@@ -876,6 +890,8 @@ or transactions. Declarations still go on each event or registrar.
   [A mod's own enchantment effect kinds](#a-mods-own-enchantment-effect-kinds)).
 
 - `native_screen_render_post`, the point of `ScreenEvent.Render.Post`: a native mod draws over the open screen after it and its tooltips, given its id, the server-opened menu's vanilla type (`menu`) and title, its container panel, its slot count, the mouse in GUI pixels and the partial tick (`NativeScreenView`). Every container, station and mod window draws on the inventory screen and so reports `inventory`: tell them apart by `menu` and `title` (None on a window the client opened) and by `slots`. It does not fire on the title screen, nor for the prompts, books and sign editors drawn over gameplay after it.
+
+- `native_screen_exclusion()` answers the rectangles (`[x, y, width, height]`, GUI pixels) the open screen keeps clear for the things drawn beside its window: the recipe book's panel, the creative tab rows above and below the window, and the active effects right of the inventory, then every rectangle a mod added in `native_screen_exclusion_areas(screen, areas)` (a side panel, a button column; a mod that draws over a screen reports where). Compute it once per screen layout and cache it, not per frame: the rectangles move only when the window, the recipe book or the effects change. A mod that lays out panels of its own, as a recipe viewer does, shrinks its rows and columns around them. Empty and non-finite rectangles are dropped. Empty with no screen up. Vanilla has no counterpart; NeoForge recipe viewers take the same from their own API (EMI's `EmiExclusionArea`, JEI's `IGuiContainerHandler.getGuiExtraAreas`). Client-side.
 
 - `native_modify_default_components(item, components)`, in `horizon-world`'s `item_defaults.rs`: an item's default
   components in `items.json`'s form, for any item, vanilla's included (NeoForge's `ModifyDefaultComponentsEvent`). Insert
@@ -1226,24 +1242,26 @@ registration path.
 - `native_mod_container_viewers(dimension, pos, viewers, previous)` is heard once each time the number of players with the mod container at `pos` open changes (vanilla's `ContainerOpenersCounter`, as a barrel keeps it): `previous` 0 is `onOpen`, `viewers` 0 is `onClose`, so a block can show itself open while `viewers` is not 0. It is counted every tick from the players' open menus, so a player who leaves without closing (a lost connection, death, another dimension, out of reach, the block gone) is heard too. On a server, with no player's state swapped in.
 
 - Knockback a mod can change or cancel through `native_living_knockback` (NeoForge's
-  `LivingKnockBackEvent`): at the start of `LivingEntity.knockback`, on the raw strength, before the entity's knockback resistance takes its
-  share and its motion changes, with the pushed entity's id and type (`minecraft:player` for a player), the `strength`, the direction
-  (`x`, `z`; vanilla points it at the source of a hit, the attacker's side, and the entity is pushed the other way) and a
-  `canceled` flag. A mod may change the three numbers or set `canceled`, and the push follows: canceled, the entity's motion is
-  left alone. A `strength` of 0 or less after the hook is no push, and a direction too short to tell draws a random one
-  after it, as in vanilla; the resistance scales the strength the hook leaves, so a full knockback resistance still stops the push. A value a mod
-  leaves that is not a finite number is put back as it was. `damage_type` (`minecraft:player_attack`), `causing`
-  (`DamageSource.getEntity`) and `direct` (`getDirectEntity`) are the push's damage source, named as
-  `native_living_incoming_damage` names a hit's, with the same entity ids left at 0 (a goat's ram pushes with
-  `minecraft:mob_attack` and hurts with `minecraft:mob_attack_no_aggro`, as in vanilla). It fires for the players and mobs the
-  game knocks back: a hit's own push, a sprinting or Knockback hit, a sweep, a spear, a shield's push on its holder and a
-  goat's ram. It does not fire for a sulfur cube with a block that a hit with a causing entity knocks back
-  (`SulfurCube.knockback` does not call `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the
-  ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a hoglin's throw), nor yet for the ones
-  Horizon makes another way: a mob's melee push from its attack knockback or a Knockback weapon, an armor stand's and the
-  ender dragon's. It has no `self`: the game is in the middle of the hit. It runs on the thread that ticks the world (the
-  server thread), so state a mod shares with its render thread hooks needs
-  synchronising.
+  `LivingKnockBackEvent`): at the start of `LivingEntity.knockback`, on the raw strength, before the entity's knockback
+  resistance takes its share and its motion changes, with the hit's level host (its blocks, random and own attachments),
+  the pushed entity's id and type (`minecraft:player` for a player), the push's `source` (`HurtSource`, named as
+  `native_living_incoming_damage` names a hit's, with the same entity ids left at 0; a goat's ram pushes with
+  `minecraft:mob_attack` and hurts with `minecraft:mob_attack_no_aggro`, as in vanilla), the `attacker` (the attacking
+  entity's network id, falling back to a known last hurt-by mob, or 0 when unknown) and what it holds (`attacker_main`
+  and `attacker_off`: a player's selected and off-hand stacks, a mob's main hand; none when unknown, recorded only
+  while a native mod is loaded), the `strength`, the direction (`x`, `z`; vanilla points it at the source of a hit, the
+  attacker's side, and the entity is pushed the other way) and a `canceled` flag. A mod may change the three numbers or
+  set `canceled`, and the push follows: canceled, the entity's motion is left alone. A `strength` of 0 or less after the
+  hook is no push, and a direction too short to tell draws a random one after it, as in vanilla; the resistance scales
+  the strength the hook leaves, so a full knockback resistance still stops the push. A value a mod leaves that is not
+  a finite number is put back as it was. It fires for the players, mobs and armor stands the game knocks back: a hit's
+  own push, a sprinting or Knockback hit, a sweep, a spear, a shield's push on its holder and a goat's ram. It does not
+  fire for a sulfur cube with a block that a hit with a causing entity knocks back (`SulfurCube.knockback` does not
+  call `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the ender dragon's wings,
+  Punch arrows, explosions, wind charges, a mace smash's area, a hoglin's throw), nor yet for the ones Horizon makes
+  another way: the ender dragon's. The hit is in the middle of its work: the level host reads and draws random but
+  can't write the entity or the world. It runs on the thread that ticks the world (the server thread), so state a
+  mod shares with its render thread hooks needs synchronising.
 
 
 - `native_edit_blocks(dimension, edit)` for server mods: runs up columns, from a height or a heightmap's, of block states and filters written as commands write them, made at once straight into the chunks of the level being ticked with what `fill ... strict` does for block entities; the chunks changed go to the players whole.
@@ -2057,18 +2075,6 @@ Keep an existing contract or add a new version when it changes incompatibly.
 The catalog does not cover helper methods or arbitrary private game code.
 Injections name them with `hook` and `hook_version` ("Named hook points" above).
 
-### Knockback hook versions
-
-`living_knockback` and `living_knockback_v2` receive the raw strength before knockback resistance.
-V2 also supplies the attacker's network entity id (falling back to a known
-last hurt-by mob, or 0 when unknown), what the attacker holds (`attacker_main` and
-`attacker_off`: a player's selected and off-hand stacks, a mob's main hand; none when unknown,
-recorded only while a native mod is loaded), and armor-stand sweeps. V2 runs after v1 on
-their shared paths; cancellation from either prevents motion, so a trait mod that listens to
-both sees each hit twice and should pick one. Mob melee, player hits, sweeps and spears use the
-shared knockback path; direct velocity pushes (explosions, Punch arrows, hoglin throws) are not
-`LivingEntity.knockback` and do not fire it.
-
 ### Reading server blocks (draft)
 
 A native server tick hook can call `native_server_block` with its context, a dimension id and a block position. It returns the block name and state properties from a loaded chunk. It does not load a chunk or open a dimension. Reads outside that hook, from a stale context, from unavailable dimensions or outside the world bounds return an error.
@@ -2819,6 +2825,9 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `host.block_entity(level, pos)` finds a block entity in a loaded chunk, including in parked levels;
   `kind`, `position`, `level` and `data` read it. A removed or temporarily taken-out entity reads `None`;
   a replacement at the same position resolves to the new entity, unlike vanilla's object identity.
+- `player.open_menu(host, block_entity)` opens its menu on the server and returns true only when opened. It returns
+  false for stale or wrong-level handles, non-providers, cancelled opens, and players without a connection (including
+  fake players), since no connection can receive the menu.
 - `level.block_shape(host, pos, kind)` reads block-local outline or collision boxes with an empty context. It returns
   `None` for a client, a stale handle, or a closed level; parked levels can be read.
 - `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered.
@@ -3262,8 +3271,8 @@ and in the server thread's log line, with the `horizon-mod.toml` id. Each entry 
 `entry::main_with` must bind its id and hooks together: `ModEntry::new("example", example::hooks())`.
 The ordered list is `Mods = Arc<[ModEntry]>`; there is no separate naming step or unnamed entry.
 Before installation, `mod_api::mods()` still returns an empty list. Parts retain their registering mod's
-id for startup errors and hook panics. The game stops. Render hooks and trait injections
-are not named yet.
+id for startup errors and hook panics. The game stops. A trait injection's panic names its mod and
+the generated method (`inject_<mod>_<method>`); render hooks are not named yet.
 
 A code mod may declare its own injection in the trait as a rare escape hatch:
 
@@ -3358,7 +3367,8 @@ hooks can run on any loading thread; item default changes must be identical on e
 The trait has every hook in `native-hooks.json` and the pending fragments ([Adding a hook](#adding-a-hook)).
 Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `block_state` through `LevelAccess::block_state`, client-side detection and
-`state_with_property`. It also reads light and loaded state, through the game's own queries:
+`state_with_property`. `state_string(state)` serializes the full name and properties, or returns `None`
+for an unknown state; `min_y()` and `height()` read the level's build range. It also reads light and loaded state, through the game's own queries:
 `brightness(LightLayer::Block | Sky, pos)` (`getBrightness`, the stored 0 to 15),
 `raw_brightness(pos, sky_darken)` (`getRawBrightness`, which `CropBlock.randomTick` asks with 0)
 and `is_loaded(pos)` (`Level.isLoaded`: inside the build height and in a loaded chunk),
