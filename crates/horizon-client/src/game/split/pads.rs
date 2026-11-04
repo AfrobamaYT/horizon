@@ -325,7 +325,7 @@ impl Split<'_> {
         g.pad = None;
         let Some(name) = g.name.clone() else {
             // Still picking a profile: as if it pressed Cancel (`pick_profiles`).
-            g.game.screen = crate::game::Screen::Playing;
+            g.game.set_screen(crate::game::Screen::Playing);
             return;
         };
         self.lost.push(Lost {

@@ -590,8 +590,7 @@ impl Game<'_> {
                 }
                 let level = crate::game::entity::damage_level_of!(self);
                 self.mobs[i].knockback(level, 0.4, xd, zd, &source);
-                self.last_hurt_by_player
-                    .insert(self.mobs[i].id, self.lan_acting);
+                self.remember_mob_player_credit(self.mobs[i].id);
                 self.post_attack(i);
             }
         }

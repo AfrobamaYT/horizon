@@ -78,14 +78,14 @@ impl Game<'_> {
         self.social.search.set_value("");
         self.social.scroll = 0.0;
         self.social.from_pause = from_pause;
-        self.screen = Screen::Social;
+        self.set_screen(Screen::Social);
         self.capture(false);
     }
     pub(super) fn close_social(&mut self) {
         if self.social.from_pause {
-            self.screen = Screen::Paused;
+            self.set_screen(Screen::Paused);
         } else {
-            self.screen = Screen::Playing;
+            self.set_screen(Screen::Playing);
             self.capture(true);
         }
     }

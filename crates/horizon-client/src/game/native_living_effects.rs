@@ -5,7 +5,8 @@
 //! a mod gives lands as a potion's or `/effect`'s does, through
 //! `canBeAffected` and the added-effect hooks. Reads return `None`, writes
 //! false, for a stale handle or on a client; armor stands and the dragon
-//! keep no effects, as `/effect` skips them.
+//! keep no effects, as `/effect` skips them. `effect` and `effects` also read
+//! on a client, for the local player, from the effects the server sent it.
 use super::Game;
 use super::commands::Target;
 use super::potions::mob_can_be_affected;
@@ -121,7 +122,7 @@ impl Game<'_> {
         effect: &str,
     ) -> Option<NativeActiveEffect> {
         let def = brewing::effect(effect)?;
-        match self.native_living_target(living)? {
+        match self.native_living_read_target(living)? {
             t @ (Target::Player | Target::Guest(_)) => self
                 .native_living_player_effects(t)?
                 .get(def.id)
@@ -143,7 +144,7 @@ impl Game<'_> {
         &self,
         living: LivingRef,
     ) -> Option<Vec<NativeActiveEffect>> {
-        match self.native_living_target(living)? {
+        match self.native_living_read_target(living)? {
             t @ (Target::Player | Target::Guest(_)) => self
                 .native_living_player_effects(t)
                 .map(|effects| effects.list.iter().map(active_effect).collect()),

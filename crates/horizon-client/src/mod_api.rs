@@ -6,12 +6,18 @@
 use std::sync::{Arc, OnceLock};
 
 mod phase;
-pub use phase::{LoadedMods, RegistrationContext, RegistrationPhase};
+pub use horizon_mods::Side;
+pub(crate) use phase::install_packages;
+#[cfg(test)]
+pub(crate) use phase::with_test_packages;
+pub use phase::{LoadedMods, PackageInfo, PackageKind, RegistrationContext};
 mod config_files;
 pub use config_files::{
     CONFIG_FILE_MAX, CONFIG_LIST_MAX, ConfigEntry, ConfigEntryKind, ConfigFileError, ConfigFiles,
     ConfigPath, ConfigStat,
 };
+mod tooltip_element;
+pub use tooltip_element::{TooltipElement, TooltipImage};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod client_reload;
@@ -446,6 +452,19 @@ pub struct NativeItemFished<'a> {
     /// The items the fishing loot table rolled, which the player receives
     /// (`getDrops`: they can't be changed here; loot tables change them).
     pub drops: &'a [ItemStack],
+}
+
+/// What a mod answers to `screen_opening` (`ScreenEvent.Opening`): the screen
+/// that was about to open does not. The first mod to answer wins.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScreenOpening {
+    /// `Opening.setCanceled(true)`: the current screen stays open.
+    Cancel,
+    /// `Opening.setNewScreen(..)`: the mod's own screen
+    /// (`Host::mod_screen_open`) opens instead, if it can open there (not over
+    /// the title screen, a book, a prompt or while a world loads; the
+    /// screen that was about to open does then).
+    ModScreen(String),
 }
 
 /// The open screen, for the screen hooks (`native_screen_render_post`, the
@@ -3088,7 +3107,7 @@ mod tests {
         struct StickMod<P>(P);
         #[mod_api::__subscriptions]
         impl<P: ItemPart + Clone> Hooks for StickMod<P> {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 r.item_part("minecraft:stick", self.0.clone());
             }
         }
@@ -3246,10 +3265,7 @@ mod tests {
     #[test]
     fn dispatch_before_installation_is_empty() {
         let mut components = Vec::new();
-        dispatch_component_types(
-            &RegistrationContext::new(RegistrationPhase::Components),
-            &mut components,
-        );
+        dispatch_component_types(&RegistrationContext::new(), &mut components);
         assert!(mods().is_empty());
         assert!(components.is_empty());
     }
@@ -3277,10 +3293,7 @@ mod tests {
             }
         }));
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            dispatch_component_types(
-                &RegistrationContext::new(RegistrationPhase::Components),
-                &mut Vec::new(),
-            )
+            dispatch_component_types(&RegistrationContext::new(), &mut Vec::new())
         }));
         // Once the dispatch has unwound, the thread is in no mod.
         let _ = std::panic::catch_unwind(|| panic!("a broken mod's caller"));
@@ -3462,7 +3475,7 @@ mod tests {
 
     #[mod_api::__subscriptions]
     impl Hooks for OffHandTop {
-        fn register(&self, r: &mut Registrar) {
+        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
             r.item_part("minecraft:stick", HeardStick);
         }
 

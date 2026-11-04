@@ -10,7 +10,7 @@ use horizon_client::{
 impl Game<'_> {
     pub(super) fn open_gamemode_switcher(&mut self) {
         self.gamemode_switcher = Some(GameModeSwitcher::new(self.mode, self.previous_mode));
-        self.screen = Screen::GameModeSwitcher;
+        self.set_screen(Screen::GameModeSwitcher);
         self.keys.clear();
         self.left = false;
         self.right = false;
@@ -20,7 +20,7 @@ impl Game<'_> {
 
     pub(super) fn close_gamemode_switcher(&mut self, apply: bool) {
         let selected = self.gamemode_switcher.take().map(|s| s.selected);
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         self.capture(true);
         if apply
             && self.player.is_some()

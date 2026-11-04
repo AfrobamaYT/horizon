@@ -135,6 +135,16 @@ pub(super) fn remote_text(tag: &Tag) -> horizon_client::text::Text {
     comp_text(&tag_to_json(tag))
 }
 
+/// `Player.getVoicePitch`: a constant 1.0
+/// (`javap -p -c -constants net.minecraft.world.entity.player.Player`:
+/// `0: fconst_1  1: freturn`), so a player's own hurt and death sounds are
+/// neither raised for a baby nor jittered - `LivingEntity.getVoicePitch`, which
+/// the mobs port, does both. It takes no random, so it draws nothing from the
+/// level random either.
+pub(super) fn player_voice_pitch() -> f32 {
+    1.0
+}
+
 /// The hurt sound of a `ClientboundDamageEventPacket`'s damage type, by its
 /// synchronized registry id: `Player.getHurtSound` picks the type's effects.
 fn hurt_sound_for(
@@ -766,15 +776,6 @@ impl Game<'_> {
             None => horizon_client::health::hurt_sound("hurt"),
         }
     }
-    /// Offline local profiles never borrow the account that started P1's game.
-    pub(super) fn auth(&self) -> Option<std::sync::Arc<horizon_client::auth::AuthSession>> {
-        if self.options.split_guest {
-            None
-        } else {
-            horizon_client::auth::current()
-        }
-    }
-
     /// Leave the title for a server (ConnectScreen): an empty world fed by the connection.
     pub(super) fn connect_server(&mut self, address: &str, name: &str) -> Result<()> {
         self.connect_server_with_cookies(address, name, None)
@@ -867,7 +868,8 @@ impl Game<'_> {
                 horizon_client::net::shown_address(address),
             );
         }
-        // A signed-in account always plays under its own name.
+        // A signed-in account always plays under its own name; a splitscreen player signs in
+        // with its own account when it picked one.
         let auth = self.auth();
         let name = auth.as_ref().map_or(name, |a| a.name.as_str());
         let user = auth.as_ref().map_or_else(
@@ -965,7 +967,7 @@ impl Game<'_> {
         self.build_registries();
         self.ui.registries.permission = 0;
         self.ui.chat.clear();
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         self.title = None;
         self.dim = Dim::Overworld;
         self.clear_lod();
@@ -1225,7 +1227,7 @@ impl Game<'_> {
         self.score.board = Default::default();
         self.tab_list = Default::default();
         self.border = Default::default();
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         self.container = None;
         self.clear_lod();
         self.pending_uploads.clear();
@@ -1736,6 +1738,13 @@ impl Game<'_> {
         )
     }
 
+    /// This player's account: a splitscreen player's own, else the game's (P1's).
+    pub(super) fn auth(&self) -> Option<std::sync::Arc<horizon_client::auth::AuthSession>> {
+        match self.options.split_guest {
+            true => self.split_auth.clone(),
+            false => horizon_client::auth::current(),
+        }
+    }
     /// Connected to a server in online mode (its Login): each player needs its own account.
     pub(super) fn online_server(&self) -> bool {
         self.remote.as_ref().is_some_and(|r| r.online_mode)
@@ -1932,7 +1941,7 @@ impl Game<'_> {
                         remote.session.reset_far_terrain();
                     }
                     self.player = None;
-                    self.screen = Screen::Playing;
+                    self.set_screen(Screen::Playing);
                     self.capture(false);
                     // clearClientLevel drops the client level now, so its
                     // unload comes before the configuration screen, not
@@ -2144,7 +2153,7 @@ impl Game<'_> {
         // The replacement player starts with its inventory menu, even if the
         // server switched levels without closing the previous container.
         self.remote_close_local();
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         let Some(r) = self.remote.as_ref() else {
             return;
         };
@@ -3249,7 +3258,7 @@ impl Game<'_> {
                     let (music, _) = self.situational_music();
                     self.music.stop_playing(music.as_ref(), &mut self.audio);
                 }
-                self.screen = Screen::Playing;
+                self.set_screen(Screen::Playing);
                 if let Some(r) = self.remote.as_mut() {
                     r.death_message = None;
                     r.health = (20.0, 20, 5.0);
@@ -4001,9 +4010,10 @@ impl Game<'_> {
             // ClientPacketListener.handleDamageEvent: LivingEntity.handleDamageEvent
             // jolts the walk animation and restarts the hurt flash, and the
             // hurt player's own client plays its hurt sound (`Player.getHurtSound`:
-            // the damage type's effects) at `getSoundVolume` with a pitch that
-            // walks 1.0 ± 0.2 on the level random. The server's sound packet
-            // reaches every other player around, never this one (#4149).
+            // the damage type's effects) at `getSoundVolume` and
+            // `Player.getVoicePitch`, which is 1.0 for every player. The
+            // server's sound packet reaches every other player around, never
+            // this one (#4149), and that copy is played at 1.0.
             // This player's own hurt tilt and flash come from the server too
             // (sent to the player itself): its own moves never hurt it.
             C::DamageEvent(p) => {
@@ -4017,9 +4027,7 @@ impl Game<'_> {
                     }
                     if let Some(at) = at {
                         let sound = self.remote_hurt_sound(p.source_type);
-                        let pitch = 1.0
-                            + (self.world.random.next_float() - self.world.random.next_float())
-                                * 0.2;
+                        let pitch = player_voice_pitch();
                         self.audio.play_on(
                             horizon_client::settings::sound_source(sound),
                             sound,
@@ -4133,8 +4141,7 @@ impl Game<'_> {
                 {
                     let at = [pl.position.x, pl.position.y, pl.position.z];
                     let sound = "minecraft:entity.player.death";
-                    let pitch = 1.0
-                        + (self.world.random.next_float() - self.world.random.next_float()) * 0.2;
+                    let pitch = player_voice_pitch();
                     self.audio.play_on(
                         horizon_client::settings::sound_source(sound),
                         sound,
@@ -4270,7 +4277,7 @@ impl Game<'_> {
                 if p.health <= 0.0 && shown && self.screen != Screen::Dead && self.player.is_some()
                 {
                     self.close_dialogs();
-                    self.screen = Screen::Dead;
+                    self.set_screen(Screen::Dead);
                     self.ui.death_time = 0;
                     self.ui.death_confirm = None;
                     self.capture(false);
@@ -4291,7 +4298,7 @@ impl Game<'_> {
                 if me && self.screen != Screen::Dead && self.player.is_some() {
                     if self.remote.as_ref().is_none_or(|r| r.show_death_screen) {
                         self.close_dialogs();
-                        self.screen = Screen::Dead;
+                        self.set_screen(Screen::Dead);
                         self.ui.death_time = 0;
                         self.ui.death_confirm = None;
                         self.capture(false);
@@ -4566,7 +4573,7 @@ impl Game<'_> {
                 }
                 if !self.remote_lectern_closed() && (self.screen == Screen::Inventory || dialog) {
                     self.remote_close_local();
-                    self.screen = Screen::Playing;
+                    self.set_screen(Screen::Playing);
                     self.capture(true);
                 }
             }
@@ -5191,15 +5198,13 @@ impl Game<'_> {
         }
     }
     fn poll_own_profile(&mut self) {
+        let auth = self.auth();
         let Some(r) = self.remote.as_mut() else {
             return;
         };
         match &mut r.own_profile {
             OwnProfile::Idle => {
-                let Some(auth) = (!self.options.split_guest)
-                    .then(horizon_client::auth::current)
-                    .flatten()
-                else {
+                let Some(auth) = auth else {
                     r.own_profile = OwnProfile::Done(None);
                     return;
                 };
@@ -9155,7 +9160,7 @@ impl Game<'_> {
             if (key == KeyCode::KeyE || key == KeyCode::Escape) && self.screen == Screen::Inventory
             {
                 self.remote_close_container();
-                self.screen = Screen::Playing;
+                self.set_screen(Screen::Playing);
                 self.capture(true);
                 return Ok(true);
             }
@@ -9197,12 +9202,12 @@ impl Game<'_> {
                 }
                 self.recipe_ui.reset_screen();
                 if self.creative {
-                    self.screen = Screen::Creative;
+                    self.set_screen(Screen::Creative);
                     self.refresh_creative_tabs();
                     self.creative_screen.reopen();
                     self.refresh_saved_hotbars();
                 } else {
-                    self.screen = Screen::Inventory;
+                    self.set_screen(Screen::Inventory);
                 }
                 self.craft_size = 2;
                 self.capture(false);
@@ -9582,7 +9587,7 @@ impl Game<'_> {
     fn remote_reject_container(&mut self, container: i32) {
         self.remote_close_local();
         if self.screen == Screen::Inventory {
-            self.screen = Screen::Playing;
+            self.set_screen(Screen::Playing);
             self.capture(true);
         }
         self.send(S::ContainerClose(play::ContainerClose { container }));
@@ -9816,7 +9821,7 @@ impl Game<'_> {
                 return;
             }
         }
-        self.screen = Screen::Inventory;
+        self.set_screen(Screen::Inventory);
         self.capture(false);
     }
     /// `ClientPacketListener.handleMountScreenOpen`: a horse's or llama's
@@ -10935,6 +10940,33 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_chat_needs_a_joined_player_and_what_the_chat_option_allows() {
+        use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
+        use horizon_client::mod_api::ClientHost;
+        use horizon_protocol::connection::Pipe;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            assert!(ClientHost::send_chat(game, "/warp spawn").is_err());
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "ChatTest").unwrap();
+            assert!(ClientHost::send_chat(game, "/warp spawn").is_err());
+            game.remote.as_mut().unwrap().joined = true;
+            assert!(ClientHost::send_chat(game, "  ").is_err());
+            // Full, then Commands Only, then Hidden.
+            game.settings.chat_visibility = 0;
+            assert!(ClientHost::send_chat(game, "hello").is_ok());
+            assert!(ClientHost::send_chat(game, "/warp spawn").is_ok());
+            game.settings.chat_visibility = 1;
+            assert!(ClientHost::send_chat(game, "hello").is_err());
+            assert!(ClientHost::send_chat(game, "/warp spawn").is_ok());
+            game.settings.chat_visibility = 2;
+            assert!(ClientHost::send_chat(game, "/warp spawn").is_err());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn rejected_menu_packets_retire_the_previous_client_menu() {
         use super::super::{
             Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
@@ -10965,7 +10997,7 @@ mod tests {
                 let remote = game.remote.as_mut().unwrap();
                 remote.menu.set(Some((7, "minecraft:generic_9x3".into())));
                 let generation = remote.menu.generation;
-                game.screen = Screen::Inventory;
+                game.set_screen(Screen::Inventory);
                 game.carried = Some(ItemStack::new("minecraft:stone", 1));
                 game.handle_packet(packet).unwrap();
                 let remote = game.remote.as_ref().unwrap();
@@ -11237,6 +11269,182 @@ mod tests {
                     .and_then(|player| game.native_menu_ref(player))
                     .is_none()
             );
+        });
+    }
+
+    /// The `both` handle reads answer on a client from its own copy: the local
+    /// player's health, effects, equipment and last death, the blocks of the
+    /// level it shows and the entities it tracks.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_handle_reads_answer_from_the_clients_copy() {
+        use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
+        use horizon_client::{
+            chunk::Chunk,
+            first_person::Hand,
+            level_loading::Reason,
+            mod_api::{EntityRef, EquipmentSlot, GlobalPos},
+            motion::PlayerMotion,
+        };
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::{
+            connection::Pipe,
+            packets::play::{self, Clientbound as C, SpawnInfo},
+        };
+        use std::sync::Arc;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "HandleReadTest").unwrap();
+            let spawn = SpawnInfo {
+                dimension_type: 0,
+                dimension: "minecraft:overworld".into(),
+                seed: 0,
+                game_type: 1,
+                previous_game_type: None,
+                debug: false,
+                flat: true,
+                last_death: Some(play::GlobalPos {
+                    dimension: "minecraft:the_nether".into(),
+                    pos: [4, 70, -9],
+                }),
+                portal_cooldown: 0,
+                sea_level: 63,
+            };
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(1.5, 65.0, -2.5)).unwrap());
+            game.yaw = 90.0;
+            game.pitch = 10.0;
+
+            // The local player and the level it shows.
+            let player = game.native_local_player().unwrap();
+            let me = player.entity();
+            let living = game.native_living(me).unwrap();
+            let level = game.native_level("minecraft:overworld").unwrap();
+            assert!(game.native_level("minecraft:the_nether").is_none());
+            assert_eq!(me.position(game), Some([1.5, 65.0, -2.5]));
+            assert_eq!(me.rotation(game), Some([90.0, 10.0]));
+            game.player.as_mut().unwrap().velocity = Vec3::new(0.0, -0.5, 0.25);
+            assert_eq!(me.velocity(game), Some([0.0, -0.5, 0.25]));
+
+            // Last death: the login/respawn packet's, as a GlobalPos.
+            let died = player.last_death_location(game).unwrap();
+            assert_eq!(died.dimension().to_string(), "minecraft:the_nether");
+            let pos = died.pos();
+            assert_eq!([pos.x, pos.y, pos.z], [4, 70, -9]);
+            let _: GlobalPos = died;
+
+            // Health, maximum health, effects and equipment come from the packets.
+            game.handle_packet(C::SetHealth(play::SetHealth {
+                health: 14.0,
+                food: 20,
+                saturation: 5.0,
+            }))
+            .unwrap();
+            assert_eq!(living.health(game), Some(14.0));
+            assert_eq!(living.max_health(game), Some(20.0));
+            let speed = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:mob_effect")
+                .unwrap()
+                .id("minecraft:speed")
+                .unwrap();
+            assert_eq!(living.effects(game), Some(Vec::new()));
+            assert!(living.effect(game, "minecraft:speed").is_none());
+            game.handle_packet(C::UpdateMobEffect(play::UpdateMobEffect {
+                id: 7,
+                effect: speed,
+                amplifier: 1,
+                duration: 600,
+                flags: 2,
+            }))
+            .unwrap();
+            let effect = living.effect(game, "minecraft:speed").unwrap();
+            assert_eq!((effect.duration, effect.amplifier), (600, 1));
+            assert_eq!(living.effects(game).unwrap().len(), 1);
+            let stone = Some(horizon_protocol::item::Stack::new(
+                game.item_id("minecraft:stone"),
+                3,
+            ));
+            game.handle_packet(C::SetPlayerInventory(play::SetPlayerInventory {
+                slot: 0,
+                item: stone,
+            }))
+            .unwrap();
+            let held = living.hand_item(game, Hand::Main).unwrap();
+            assert_eq!((&*held.item, held.count), ("minecraft:stone", 3));
+            assert_eq!(living.equipment(game, EquipmentSlot::Head), None);
+            assert_eq!(living.hand_item(game, Hand::Off), None);
+
+            // Blocks of the chunks the client holds; nothing loads another.
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let chunks = game.world.chunks.len();
+            let at = [3, 64, 5];
+            assert!(level.is_loaded(game, at));
+            assert!(!level.is_loaded(game, [160, 64, 0]));
+            game.handle_packet(C::BlockUpdate(play::BlockUpdate { pos: at, state: 1 }))
+                .unwrap();
+            assert_eq!(level.block(game, at).as_deref(), Some("minecraft:stone"));
+            assert!(level.block_state(game, at).is_some());
+            assert_eq!(level.block(game, [160, 64, 0]), None);
+            assert_eq!(level.block_property(game, [160, 64, 0], "facing"), None);
+            assert_eq!(game.world.chunks.len(), chunks);
+
+            // An entity the server told the client of; others read None.
+            let pig = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:entity_type")
+                .unwrap()
+                .id("minecraft:pig")
+                .unwrap();
+            game.handle_packet(C::AddEntity(play::AddEntity {
+                id: 31,
+                uuid: 9,
+                kind: pig,
+                position: [10.0, 64.0, 12.0],
+                velocity: [0.0; 3],
+                pitch: 0,
+                yaw: 64,
+                head_yaw: 64,
+                data: 0,
+            }))
+            .unwrap();
+            let other = game.native_entity(31).unwrap();
+            assert_eq!(other.position(game), Some([10.0, 64.0, 12.0]));
+            assert!(other.velocity(game).is_some());
+            assert!(other.rotation(game).is_some());
+            assert!(game.native_living(other).is_none(), "only the local player");
+            assert!(game.native_entity(99).is_none());
+            let untracked = EntityRef::new(me.epoch(), 99);
+            assert_eq!(untracked.position(game), None);
+            assert_eq!(untracked.velocity(game), None);
+
+            // A replaced level retires the handles.
+            let mut other_level = spawn.clone();
+            other_level.dimension = "test:other_overworld".into();
+            game.enter_remote_dimension(&other_level, true, Reason::Other);
+            assert_eq!(me.position(game), None);
+            assert_eq!(living.health(game), None);
+            assert_eq!(level.block(game, at), None);
+            assert!(!level.is_loaded(game, at));
+            assert_eq!(player.last_death_location(game), None);
+
+            // The server's role keeps its own reads: a client handle names nothing there.
+            game.options.execution_role = ExecutionRole::IntegratedServer;
+            assert_eq!(game.native_entity_target(untracked), None);
         });
     }
 

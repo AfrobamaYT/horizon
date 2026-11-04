@@ -2,7 +2,9 @@
 //! (docs/native-mods.md, "Entity and level handles", #7387): the equipment
 //! of mobs, players and armor stands, throwing a stack, and whether a mob
 //! is tamed. Reads return `None`, writes false, for a stale handle or on a
-//! client.
+//! client; the exception is the reads marked side `both` (`living`, `equipment`,
+//! `hand_item`, `health`, `max_health`, and `effect`/`effects`), which on a
+//! client answer for the local player from the client's own copy.
 use super::Game;
 use super::commands::{Target, items::Owner};
 use crate::mobs::Who;
@@ -78,9 +80,24 @@ impl Game<'_> {
     /// The entity as a living entity (vanilla's `LivingEntity`: a mob, a
     /// player, an armor stand or the dragon), or None for another kind or a
     /// stale handle.
+    ///
+    /// On a client, only the local player is one: the client keeps the others'
+    /// equipment, effects and health only as far as it draws them.
     pub(super) fn native_living(&self, entity: EntityRef) -> Option<LivingRef> {
         let living = LivingRef::new(entity);
-        self.native_living_target(living).map(|_| living)
+        self.native_living_read_target(living).map(|_| living)
+    }
+    /// What a living handle names for a read that works on both sides: the
+    /// server's entity, or on a client the local player (`Minecraft.player`),
+    /// whose state is the client's copy of what the server sent.
+    pub(super) fn native_living_read_target(&self, living: LivingRef) -> Option<Target> {
+        if self.is_logical_server() {
+            return self.native_living_target(living);
+        }
+        match self.native_client_entity_target(living.entity())? {
+            Target::Player => Some(Target::Player),
+            _ => None,
+        }
     }
     /// The effective value of an attribute on a living entity. None for an
     /// unknown or absent attribute, an unavailable entity, or on a client.
@@ -106,7 +123,16 @@ impl Game<'_> {
         name: &str,
         kind: horizon_world::attribute_map::ValueKind,
     ) -> Option<f64> {
-        let player = match self.native_living_target(living)? {
+        self.native_target_attribute(self.native_living_target(living)?, name, kind)
+    }
+
+    fn native_target_attribute(
+        &self,
+        target: Target,
+        name: &str,
+        kind: horizon_world::attribute_map::ValueKind,
+    ) -> Option<f64> {
+        let player = match target {
             Target::Player => self.player.as_ref()?,
             Target::Guest(conn) => self.command_guest(conn)?.motion.as_deref()?,
             _ => return None,
@@ -120,7 +146,7 @@ impl Game<'_> {
     /// resolves: the hub is out for their action, and other players'
     /// handles read `None` until it is back.
     pub(super) fn native_living_health(&self, living: LivingRef) -> Option<f32> {
-        match self.native_living_target(living)? {
+        match self.native_living_read_target(living)? {
             Target::Player => Some(self.player.as_ref()?.health.health()),
             Target::Guest(conn) => Some(self.command_guest(conn)?.health),
             Target::Mob(id) => self
@@ -149,10 +175,11 @@ impl Game<'_> {
     /// armor stand the fixed 20 the game seeds it with, the dragon its
     /// 200) until live attribute maps cover them.
     pub(super) fn native_living_max_health(&self, living: LivingRef) -> Option<f32> {
-        match self.native_living_target(living)? {
+        let target = self.native_living_read_target(living)?;
+        match target {
             Target::Player | Target::Guest(_) => self
-                .native_living_attribute(
-                    living,
+                .native_target_attribute(
+                    target,
                     "minecraft:max_health",
                     horizon_world::attribute_map::ValueKind::Computed,
                 )
@@ -232,6 +259,27 @@ impl Game<'_> {
         }
     }
 
+    /// `LivingEntity.getKillCredit`: the remembered player takes precedence,
+    /// even if the player cannot be resolved; otherwise the last hurting mob.
+    /// Unlike vanilla, a mob that changed dimension cannot be resolved.
+    pub(super) fn native_living_kill_credit(&self, living: LivingRef) -> Option<EntityRef> {
+        let credit = match self.native_living_target(living)? {
+            Target::Player => self.combat.player_credit(self.world.game_time),
+            Target::Guest(conn) => self
+                .guest_combat
+                .get(&conn)
+                .and_then(|combat| combat.player_credit(self.world.game_time)),
+            Target::Mob(id) => self.last_hurt_by_player.get(&id).copied(),
+            _ => None,
+        };
+        if let Some(credit) = credit {
+            let conn = self.resolve_player_credit(credit)?;
+            let id = self.player_entity_id_by_connection(conn)?;
+            return self.native_entity(u32::try_from(id).ok()?);
+        }
+        self.native_living_last_attacker(living)
+    }
+
     /// `LivingEntity.getLastHurtByMob`: the entity that last hurt this one,
     /// within a hundred ticks of the hurt (the window of
     /// `CombatTracker.getKiller`'s credit and a mob's hurt-by memory, as
@@ -265,7 +313,8 @@ impl Game<'_> {
                     // is out of reach (the same None the other players'
                     // handles read while the hub is out).
                     Who::Player => {
-                        let conn = *self.last_hurt_by_player.get(&id)?;
+                        let conn =
+                            self.resolve_player_credit(*self.last_hurt_by_player.get(&id)?)?;
                         match conn {
                             None if self.lan_acting.is_some() => None,
                             None => Some(self.player.as_ref()?.entity_id as u32),
@@ -297,7 +346,7 @@ impl Game<'_> {
         living: LivingRef,
         slot: EquipmentSlot,
     ) -> Option<ItemStack> {
-        match self.native_living_target(living)? {
+        match self.native_living_read_target(living)? {
             Target::Player => player_slot(
                 &self.inventory,
                 self.selected,
@@ -715,6 +764,51 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn kill_credit_prefers_the_player_reference_and_never_falls_back_when_unresolved() {
+        use horizon_client::mobs::{Damage, Mob};
+        use horizon_core::geometry::Vec3;
+
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            let wolf = game.res.mob_types().get("minecraft:wolf").unwrap().clone();
+            game.mobs.push(Mob::new(100, pig, Vec3::ZERO, 0.0));
+            let mut wolf = Mob::new(101, wolf, Vec3::ZERO, 0.0);
+            wolf.extra.tame = true;
+            wolf.extra.owner = Some(horizon_client::lan::playerdata::uuid_ints(12));
+            game.mobs.push(wolf);
+            game.mobs[0].ai.last_hurt_by = Some(Who::Mob(101));
+            game.mobs[0].ai.last_hurt_by_time = game.mobs[0].age as i32;
+            let living = game
+                .native_living(game.native_entity(100).unwrap())
+                .unwrap();
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(101));
+
+            // A player hit followed by a mob hit keeps the player credit.
+            game.as_guest(12, |game| game.remember_mob_player_credit(100))
+                .unwrap();
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
+            // A tame wolf's hit also records its owner's reference.
+            game.resolve_player_responsible(100, Damage::mob(101, [0.0; 3]));
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
+            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
+            game.lan.as_mut().unwrap().hub.guests[0].placed = false;
+            assert_eq!(living.kill_credit(game), None);
+
+            // Once the player reference expires, the mob can be credited.
+            game.last_hurt_by_player.remove(&100);
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(101));
+            // A mob that has left this level is no longer resolvable by its old ID.
+            game.mobs[1].removed = true;
+            assert_eq!(living.kill_credit(game), None);
+            game.mobs[1].removed = false;
+            game.mobs[0].age += 101;
+            assert_eq!(living.kill_credit(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mobs_last_attacker_names_a_mob_the_host_and_none_when_displaced() {
         use horizon_client::mobs::Mob;
         use horizon_client::motion::PlayerMotion;
@@ -741,11 +835,13 @@ mod tests {
             assert_eq!(pig_living.last_attacker(game).map(|a| a.id()), Some(15));
             // The host's hit, read in the host's own turn: the host's handle.
             game.mobs[0].ai.last_hurt_by = Some(Who::Player);
-            game.last_hurt_by_player.insert(12, None);
+            game.last_hurt_by_player
+                .insert(12, super::super::combat::PlayerCredit(123));
             assert_eq!(pig_living.last_attacker(game).map(|a| a.id()), Some(20));
             // The same record inside a guest's turn: the host's displaced
             // body is out of reach, so the attacker reads None.
             game.lan_acting = Some(7);
+            game.lan_acting_uuid = Some(456);
             assert_eq!(pig_living.last_attacker(game), None);
         });
     }

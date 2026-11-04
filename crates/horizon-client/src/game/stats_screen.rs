@@ -181,7 +181,7 @@ impl Game<'_> {
             ));
         }
         self.stats_ui = StatsUi::default();
-        self.screen = Screen::Stats;
+        self.set_screen(Screen::Stats);
     }
     /// The list's scrollbar column (right of the 280 pixel list) and the
     /// pixels it scrolls.
@@ -597,7 +597,7 @@ impl Game<'_> {
         ) {
             self.audio
                 .play("minecraft:ui.button.click", None, 0.25, 1.0);
-            self.screen = Screen::Paused;
+            self.set_screen(Screen::Paused);
             return;
         }
         if self.stats_ui.tab == 1 {

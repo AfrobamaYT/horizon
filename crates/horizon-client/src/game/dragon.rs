@@ -4839,9 +4839,7 @@ mod tests {
     /// 9003's -5 and 9004's NaN. `HURT_SERVER` is global, so it stays set for
     /// every test of the process; the other tests' dragons are entity 0.
     fn set_hook() {
-        use horizon_client::health::{
-            DamageContainer, DamageLevel, HURT_SERVER, Hurting, Victim,
-        };
+        use horizon_client::health::{DamageContainer, DamageLevel, HURT_SERVER, Hurting, Victim};
         fn hook(
             _: DamageLevel<'_>,
             hurting: Hurting<'_>,

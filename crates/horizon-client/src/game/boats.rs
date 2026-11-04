@@ -1313,7 +1313,7 @@ impl Game<'_> {
             .block_entities
             .insert(key, horizon_client::containers::BlockEntity::Chest(items));
         self.container = Some(key);
-        self.screen = super::Screen::Inventory;
+        self.set_screen(super::Screen::Inventory);
         self.capture(false);
         self.right = false;
         let ctx = self.player_context(None);

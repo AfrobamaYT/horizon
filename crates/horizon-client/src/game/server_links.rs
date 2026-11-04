@@ -267,13 +267,13 @@ impl Game<'_> {
         let (wx, wy) = warning_button(w, h, tw);
         if ui::hovered(self.cursor, wx, wy, WARNING_BUTTON, WARNING_BUTTON) {
             self.audio.play_button_click();
-            self.screen = Screen::DialogWarning;
+            self.set_screen(Screen::DialogWarning);
             return Ok(());
         }
         let (bx, by) = back_button(w, h);
         if ui::hovered(self.cursor, bx, by, 200.0, 20.0) {
             self.audio.play_button_click();
-            self.screen = Screen::Paused;
+            self.set_screen(Screen::Paused);
         }
         Ok(())
     }
@@ -287,7 +287,7 @@ impl Game<'_> {
             self.links_ui.confirm = Some(url.to_owned());
             self.links_ui.trusted = false;
             self.links_ui.back = None;
-            self.screen = Screen::ConfirmLink;
+            self.set_screen(Screen::ConfirmLink);
         } else {
             open_uri(url);
         }
@@ -298,7 +298,7 @@ impl Game<'_> {
         self.links_ui.confirm = Some(url.to_owned());
         self.links_ui.trusted = true;
         self.links_ui.back = Some(parent);
-        self.screen = Screen::ConfirmLink;
+        self.set_screen(Screen::ConfirmLink);
     }
     /// The screen `ConfirmLinkScreen`'s callback returns to (`setScreen(parent)`).
     pub(super) fn confirm_link_back(&self) -> Screen {
@@ -369,7 +369,7 @@ impl Game<'_> {
                 }
                 _ => {}
             }
-            self.screen = self.confirm_link_back();
+            self.set_screen(self.confirm_link_back());
             return;
         }
     }
@@ -428,7 +428,7 @@ impl Game<'_> {
                 );
                 self.leave_server(Some(reason))?;
             } else {
-                self.screen = Screen::ServerLinks;
+                self.set_screen(Screen::ServerLinks);
             }
             return Ok(());
         }

@@ -1047,13 +1047,6 @@
     "{mod}: {error}": "{mod}: {error}",
     "{online} of {max}": "{online}/{max}",
     "{mode} · stopped": "{mode} · durduruldu",
-    "These mods were made for different Horizon versions": "Bu modlar farklı Horizon sürümleri için yapılmış",
-    "They often still work together. If the build fails, install versions made for the same Nightly.": "Genellikle yine de birlikte çalışırlar. Derleme başarısız olursa, aynı Nightly sürümü için yapılmış sürümleri yükleyin.",
-    "Build anyway": "Yine de derle",
-    "The source of {source}. Its release ships {file}, a content mod: installing those from GitHub is not supported yet.": "{source} kaynağı. Sürümü {file} (bir içerik modu) barındırıyor: Bunları GitHub'dan yüklemek henüz desteklenmiyor.",
-    "Building {name}'s post-build step": "{name} derleme sonrası adımı derleniyor",
-    "Running {name}'s post-build step": "{name} derleme sonrası adımı çalıştırılıyor",
-    "{error} They often still build: pass --allow-version-mismatch to try.": "{error} Bazen yine de derlenebilir: denemek için --allow-version-mismatch geçirin.",
     "Accent colour, glass, blur, language and the options above go back to how Horizon ships.": "Vurgu rengi, cam, bulanıklık, dil ve yukarıdaki seçenekler Horizon'un varsayılanlarına döner.",
     "Reset the launcher's look": "Başlatıcının görünümünü sıfırla",
     "Reset to defaults": "Varsayılanlara sıfırla",
@@ -1108,6 +1101,5 @@
     "Save changes switches it. Nothing in its folder is deleted.": "Değişiklikleri kaydet onu değiştirir. Klasöründen hiçbir şey silinmez.",
     "Its mods made for {loader} stay in its folder but won't load.": "{loader} için yapılmış modları klasöründe kalır ama yüklenmez.",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Minecraft {from} için yapılmış modları klasöründe kalır; bazıları {to} sürümünde yüklenmeyebilir.",
-    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Dünyaları Minecraft {from} ile kaydedildi: {to} onları kalıcı olarak yükseltir, daha eskiyse açamaz.",
-    "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "Bu oyun kaynağında okunabilir bir yerel giriş şablonu yok. Horizon'ı güncelleyin ve modları bu oyun için yeniden derleyin."
+    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Dünyaları Minecraft {from} ile kaydedildi: {to} onları kalıcı olarak yükseltir, daha eskiyse açamaz."
 }

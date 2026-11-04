@@ -2,17 +2,17 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "level_block_state", "side": "server",
+      "name": "level_block_state", "side": "both",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_state",
       "receiver": "level"
     },
     {
-      "name": "level_block", "side": "server",
+      "name": "level_block", "side": "both",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_block",
       "receiver": "level"
     },
     {
-      "name": "level_block_property", "side": "server",
+      "name": "level_block_property", "side": "both",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_block_property",
       "receiver": "level"
     },
@@ -23,7 +23,7 @@
       "side": "server"
     },
     {
-      "name": "level_is_loaded", "side": "server",
+      "name": "level_is_loaded", "side": "both",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_is_loaded",
       "receiver": "level"
     },

@@ -2,9 +2,12 @@
 //! "Entity and level handles", #7387): `native_entity(id)` turns an event's
 //! entity id into an `EntityRef`, and each `native_entity_*` helper reads the
 //! entity a handle names. They read where the world is simulated: on a client,
-//! with no world open, or for a handle of an earlier open, they return `None`.
-//! The entities are those of the level in place (the one a hook runs in) and
-//! the server's players, whatever their level.
+//! with no world open, or for a handle of an earlier open, they return `None`,
+//! except the reads marked side `both` (`entity`, `level`, `entity_position`,
+//! `entity_rotation`, `entity_velocity`), which on a client answer from its own
+//! copy: the local player and the entities the server told it of, in the level
+//! it shows. The entities are those of the level in place (the one a hook runs
+//! in) and the server's players, whatever their level.
 use super::{
     Dim, Game,
     commands::Target,
@@ -69,20 +72,49 @@ impl Game<'_> {
             t => Some(t),
         }
     }
+    /// What a handle names on a client: the local player, or an entity the
+    /// server told this client of (`ClientLevel.getEntity`, whose entities are
+    /// the ones the server tracks to it). None for a stale handle, with no
+    /// login, or for an entity the client doesn't have.
+    pub(super) fn native_client_entity_target(&self, entity: EntityRef) -> Option<Target> {
+        let remote = self.remote.as_ref().filter(|r| r.logged_in)?;
+        (self.native_lifecycle.epoch() == Some(entity.epoch())).then_some(())?;
+        let id = i32::try_from(entity.id()).ok()?;
+        if id == remote.entity_id {
+            return self.player.as_ref().map(|_| Target::Player);
+        }
+        remote.tracked(id)?;
+        match self.level_entity(id)? {
+            Target::Mob(mob) if !self.mobs.iter().any(|m| m.id == mob && !m.removed) => None,
+            target => Some(target),
+        }
+    }
+    /// What a handle names for a read that works on both sides: the server's
+    /// entity (`native_entity_target`) or, on a client, its own copy of it.
+    pub(super) fn native_entity_read_target(&self, entity: EntityRef) -> Option<Target> {
+        if self.is_logical_server() {
+            self.native_entity_target(entity)
+        } else {
+            self.native_client_entity_target(entity)
+        }
+    }
     /// The entity `id` (the id events carry) as a handle for the `entity_*`
-    /// methods: None on a client, with no world open, or for no such entity
-    /// in the level in place or among the server's players. During a nested
-    /// player swap, an outer player's displaced record is unavailable.
+    /// methods: None with no world open, or for no such entity in the level
+    /// in place or among the server's players. During a nested player swap,
+    /// an outer player's displaced record is unavailable. On a client, the
+    /// entity is the local player or one the client tracks.
     pub(super) fn native_entity(&self, id: u32) -> Option<EntityRef> {
         let entity = EntityRef::new(self.native_lifecycle.epoch()?, id);
-        self.native_entity_target(entity).map(|_| entity)
+        self.native_entity_read_target(entity).map(|_| entity)
     }
-    /// The level `dimension` (`minecraft:the_nether`) as a handle: None on a
-    /// client, with no world open, or for a dimension the server hasn't
-    /// loaded.
+    /// The level `dimension` (`minecraft:the_nether`) as a handle: None with
+    /// no world open, or for a dimension the server hasn't loaded. On a
+    /// client, only the level it shows (`Minecraft.level`) has one.
     pub(super) fn native_level(&self, dimension: &str) -> Option<LevelRef> {
         if !self.is_logical_server() {
-            return None;
+            let epoch = self.native_lifecycle.epoch()?;
+            self.remote.as_ref().filter(|r| r.logged_in)?;
+            return (self.dim.id() == dimension).then(|| LevelRef::new(epoch, self.dim.id()));
         }
         let epoch = self.native_lifecycle.epoch()?;
         let dim = std::iter::once(self.dim)
@@ -335,7 +367,7 @@ impl Game<'_> {
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame.
     pub(super) fn native_entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        self.target_position(self.native_entity_target(entity)?)
+        self.target_position(self.native_entity_read_target(entity)?)
     }
     /// The block the entity's position is in (`Entity.blockPosition`).
     pub(super) fn native_entity_block_position(&self, entity: EntityRef) -> Option<[i32; 3]> {
@@ -345,7 +377,7 @@ impl Game<'_> {
     /// The entity's yaw and pitch in degrees (`Entity.getYRot`, `getXRot`); 0
     /// for the kinds that don't turn.
     pub(super) fn native_entity_rotation(&self, entity: EntityRef) -> Option<[f32; 2]> {
-        Some(self.target_rotation(self.native_entity_target(entity)?))
+        Some(self.target_rotation(self.native_entity_read_target(entity)?))
     }
     /// The entity's type (`Entity.getType`): `minecraft:zombie`.
     pub(super) fn native_entity_kind(&self, entity: EntityRef) -> Option<String> {
@@ -440,10 +472,7 @@ pub(super) mod tests {
         }
         let _mods = horizon_client::mod_api::part_tests::game_thread();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        Some(
-            super::super::mods::content_root(&base, &Default::default(), &Default::default())
-                .unwrap(),
-        )
+        Some(super::super::mods::content_root(&base, &Default::default()).unwrap())
     }
 
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
