@@ -899,9 +899,7 @@ pub fn main() -> horizon_client::Result<()> {
     let defaults = horizon_world::item_defaults::read(root)?;
     let items = Items::load(root, registry, &facts, &PackOverlay::NONE, &defaults)?;
     let tables = LightTables::load(root, registry, &facts)?;
-    let collision = std::sync::Arc::new(collisions::load(root, registry)?);
-    let suffocation =
-        horizon_client::mobs::suffocation::bind(collision.clone(), &motion.causes_suffocation)?;
+    let collision = collisions::load(root, registry)?;
     let air = registry.default_state("minecraft:air").ok_or("no air")?;
     let layers = [
         state(registry, "minecraft:bedrock"),
@@ -1178,7 +1176,6 @@ pub fn main() -> horizon_client::Result<()> {
                     fluid_tables: &motion.fluids,
                     movement: &motion.blocks,
                     collision: &collision,
-                    suffocation: &suffocation,
                     data: &data,
                     player: player.clone(),
                     controlling_player_movement: None,

@@ -694,12 +694,7 @@ impl Game<'_> {
         }
         match target {
             None => {
-                // HopperBlockEntity.setItem limits the accepted stack, then
-                // tryMoveInItem consumes the input even when it exceeded that limit.
-                *target = Some(ItemStack {
-                    count: stack.count.min(max),
-                    ..stack.clone()
-                });
+                *target = Some(stack.clone());
                 stack.count = 0;
                 success = true;
             }

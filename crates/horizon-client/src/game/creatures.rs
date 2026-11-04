@@ -380,7 +380,7 @@ impl Game<'_> {
             swimming: p.swimming,
             look: view_vector(self.yaw, self.pitch),
             main_hand: self.held().map(|s| s.item.clone()),
-            off_hand: self.offhand.as_ref().map(|s| s.item.clone()),
+            off_hand: None,
             head: self.armor[0].as_ref().map(|s| s.item.clone()),
             armor_cover: self.armor.iter().filter(|a| a.is_some()).count() as f32 / 4.0,
             invisible: self.potions.effects.get("invisibility").is_some(),
@@ -932,7 +932,6 @@ impl Game<'_> {
             fluid_tables: &self.motion.fluids,
             movement: &self.motion.blocks,
             collision: self.collision,
-            suffocation: self.mob_suffocation(),
             data: self.res.mob_data(),
             controlling_player_movement: None,
             nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
@@ -1273,6 +1272,27 @@ impl Game<'_> {
                     keep.push(!m.hostile() || m.persistent);
                     continue;
                 }
+                // `MobDespawnEvent`, before `checkDespawn`'s own draws; one branch
+                // with no listener. Cleared below: the tick may not reach the check.
+                // The wither overrides `checkDespawn` without `super`, so the
+                // event, patched into `Mob.checkDespawn`, never fires for it;
+                // a mannequin is no `Mob` and never checks despawning.
+                if mod_api::__private::listened(mod_api::HookId::MobDespawn)
+                    && !matches!(
+                        m.species(),
+                        horizon_client::mobs::Species::Wither
+                            | horizon_client::mobs::Species::Mannequin
+                    )
+                    && let Some(epoch) = self.native_lifecycle.epoch()
+                {
+                    self.native_mob_despawn(
+                        self.dim.id(),
+                        mod_api::MobRef::new(mod_api::EntityRef::new(epoch, m.id)),
+                        &m.kind.id,
+                        [m.position.x, m.position.y, m.position.z],
+                        &mut m.despawn,
+                    );
+                }
                 // ServerLevel.tick: every loaded entity checks despawning, but
                 // only those in entity-ticking chunks (within the simulation
                 // distance) tick.
@@ -1287,6 +1307,7 @@ impl Game<'_> {
                 }
                 // A mod canceled its tick: it stays as it is.
                 if round.canceled(m.id) {
+                    m.despawn = mod_api::NativeDespawn::default();
                     keep.push(true);
                     continue;
                 }
@@ -1295,6 +1316,7 @@ impl Game<'_> {
                 let from = events.len();
                 let credit_expiring = m.ai.last_hurt_by_player == 1;
                 let kept = m.tick(&w, &mut level, &mut events);
+                m.despawn = mod_api::NativeDespawn::default();
                 if credit_expiring && m.ai.last_hurt_by_player == 0 {
                     player_credit.remove(&m.id);
                 }
@@ -2369,13 +2391,6 @@ impl Game<'_> {
                         m.id == source && matches!(m.species(), Species::Chicken | Species::Parrot)
                     }) =>
                 {
-                    let ctx = self.who_context(Some(Who::Mob(source)), None);
-                    self.post_game_event(event, at, ctx);
-                }
-                // Armadillo.rollUp/rollOut: `gameEvent(ENTITY_ACTION)`.
-                MobEvent::GameEvent {
-                    event, at, source, ..
-                } if event == "minecraft:entity_action" => {
                     let ctx = self.who_context(Some(Who::Mob(source)), None);
                     self.post_game_event(event, at, ctx);
                 }
@@ -5645,10 +5660,7 @@ impl Game<'_> {
                 // The blast's source names the owner, so a dragon it kills
                 // remembers the player who shot it.
                 self.set_blast_by_player(p.owner == Some(Who::Player));
-                // LargeFireball.onHit: both fire and MOB block destruction
-                // follow mob_griefing; other mob explosions keep their default.
-                let fire = self.ui.rules.bool("mob_griefing");
-                let result = self.explode_mob(atp, *power as f32, fire);
+                let result = self.explode(Some(p.id), atp, *power as f32);
                 self.set_blast_by_player(false);
                 self.combat.explosion_owner = None;
                 self.combat.explosion_in_water = false;
@@ -6055,12 +6067,6 @@ impl Game<'_> {
         if self.interact_shear_mob(index, &item) {
             self.swing_arm();
             return Ok(true);
-        }
-        if let Some(sheared) = self.shear_pig_saddle(index, &item) {
-            if sheared {
-                self.swing_arm();
-            }
-            return Ok(sheared);
         }
         // AbstractHorse.mobInteract: feed, equip or ride.
         if self.interact_mount(index, &item) {
@@ -7919,7 +7925,6 @@ pub(super) fn melee(kind: horizon_client::mobs::DamageKind) -> bool {
 pub(super) fn damage_type(kind: horizon_client::mobs::DamageKind, caused: bool) -> &'static str {
     use horizon_client::mobs::DamageKind as K;
     match kind {
-        K::Named(named) => named.name,
         K::PlayerAttack => "minecraft:player_attack",
         K::MaceSmash => "minecraft:mace_smash",
         K::Spear => "minecraft:spear",
@@ -8996,24 +9001,6 @@ mod breeze_random_tests {
 mod damage_type_tests {
     use super::*;
 
-    #[test]
-    fn named_damage_keeps_its_registry_id_with_or_without_an_attacker() {
-        let named = horizon_client::mobs::NamedDamage::new(
-            "example:fan_fire",
-            horizon_client::mobs::NamedDamage::IS_FIRE,
-        );
-        for attacker in [None, Some(Who::Mob(7)), Some(Who::Player)] {
-            assert_eq!(
-                source_damage_type(Damage {
-                    kind: DamageKind::Named(named),
-                    attacker,
-                    from: None,
-                }),
-                "example:fan_fire"
-            );
-        }
-    }
-
     /// `DamageSources.explosion`: a blast with a causing entity is
     /// `player_explosion` whoever caused it, so an exploding creeper's too.
     #[test]
@@ -9071,11 +9058,7 @@ mod pearl_tests {
             &defaults,
         )
         .unwrap();
-        let collision =
-            std::sync::Arc::new(horizon_client::collisions::load(&root, registry).unwrap());
-        let suffocation =
-            horizon_client::mobs::suffocation::bind(collision.clone(), &motion.causes_suffocation)
-                .unwrap();
+        let collision = horizon_client::collisions::load(&root, registry).unwrap();
         let mut world = horizon_client::world::World::test_scene(&assets, &render, 3).unwrap();
         // A pool of still water one block deep at y = 4, from x = 20 on (clear of the
         // scene's pyramid): its
@@ -9097,7 +9080,6 @@ mod pearl_tests {
             fluid_tables: &motion.fluids,
             movement: &motion.blocks,
             collision: &collision,
-            suffocation: &suffocation,
             data: &data,
             player: None,
             controlling_player_movement: None,

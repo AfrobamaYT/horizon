@@ -380,8 +380,9 @@ impl Game<'_> {
         if facts.hardness == -1.0 {
             return 0.0;
         }
-        let held = self.held();
-        let mut harvest = !facts.requires_tool || self.items().correct_for_drops(held, &facts.name);
+        let mut harvest =
+            !facts.requires_tool || self.items().correct_for_drops(self.held(), &facts.name);
+        let hardness = facts.hardness;
         if mod_api::__private::listened(mod_api::HookId::PlayerHarvestCheck) {
             self.native_player_harvest_check(
                 self.own_entity_id() as u32,
@@ -390,8 +391,9 @@ impl Game<'_> {
                 &mut harvest,
             );
         }
-        let hardness = facts.hardness;
-        let mut speed = self.items().mining_speed(held, &facts.name);
+        let block_break_speed = self.block_break_speed();
+        let facts = self.res.facts().get(state);
+        let mut speed = self.items().mining_speed(self.held(), &facts.name);
         speed = self.modify_destroy_speed(speed);
         speed *= block_break_speed;
         if let Some(eye) = self.eye_position()

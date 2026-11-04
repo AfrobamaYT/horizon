@@ -880,25 +880,6 @@ pub struct About {
     pub horizon: String,
     /// What it compiles: the game or the headless engine a server runs.
     pub target: Target,
-    /// The commit of `base` itself, when the build knew it (not for builds made before it was
-    /// recorded): `horizon` differs from it when mods pin another.
-    pub base_horizon: Option<String>,
-    /// The mods whose pin made the build use `horizon` instead of `base_horizon` (empty when the
-    /// build is on `base`'s own commit).
-    pub pinned_by: Vec<String>,
-    /// The player chose to build on `base`'s own commit even where mods pin another: a rebuild
-    /// from this build keeps doing so.
-    pub on_base: bool,
-}
-
-impl About {
-    /// A build from before `base_horizon` was recorded that compiled another commit than its
-    /// Nightly's (the last word of its name): mods pinned it.
-    pub fn off_its_nightly(&self) -> bool {
-        let nightly = self.base.strip_prefix("nightly-").and_then(|r| r.get(11..));
-        self.base_horizon.is_none()
-            && nightly.is_some_and(|commit| !commit.is_empty() && !self.horizon.starts_with(commit))
-    }
 }
 
 /// What installed native build `version` was made from; None for any other version.
@@ -922,37 +903,7 @@ fn about_in(dir: &Path) -> Option<About> {
             Some("client") => Target::Client,
             _ => return None,
         },
-        base_horizon: field("base_horizon").filter(|r| is_revision(r)),
-        pinned_by: json["pinned_by"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|m| m.as_str().map(str::to_owned))
-            .collect(),
-        on_base: json["on_base"].as_bool().unwrap_or(false),
     })
-}
-
-/// The Horizon commit the mods that pin one (`pins`: those naming no hook points' version) give a
-/// build, and which of them pin it. With `on_base`, the player chose the commit of the version the
-/// build starts from (`base`) whatever the pins say; with no pin, it is `base`'s too. Mods
-/// pinning different commits give the newest of them ([`newest`]).
-fn pinned_revision(
-    pins: &[Bundle],
-    on_base: bool,
-    base: impl FnOnce() -> Result<String, String>,
-    date: impl Fn(&str) -> Result<String, String>,
-) -> Result<(String, Vec<String>), String> {
-    if on_base {
-        return Ok((base()?, Vec::new()));
-    }
-    let revision = newest(pins, "Horizon", |b| b.horizon.as_ref(), base, None, date)?;
-    let by = pins
-        .iter()
-        .filter(|b| b.horizon.as_ref() == Some(&revision))
-        .map(|b| b.id.clone())
-        .collect();
-    Ok((revision, by))
 }
 
 /// The newest installed release or Nightly in `installed` (newest first).
@@ -1479,22 +1430,13 @@ struct Built {
     secs: u64,
 }
 
-/// The pipeline both targets build with ([`build`], [`build_server`]): `folder`'s mods on the
-/// Horizon revision they pin (else `base`'s, the installed version whose game files the build
-/// reuses: a native build's own revision when it is one, [`base_for`]), compiled as `target`
-/// (the game, or the headless engine) and installed as its own version,
-/// `native-<revision>-<key>` (the key hashes the revision, the mods' files, the tool's commit,
-/// the profile and the target). A build already made is used again. Mods pinning different
-/// revisions build on the newest one, with the newest horizon-mixins they name, only when the
-/// player agreed to try (`anyway`): else the error starts with [`MISMATCH`] and says which.
-/// With `on_base`, every mod builds on `base`'s own commit, pinned or not (the player's choice).
+/// Both targets build mods against the installed game's source revision and cache the result
+/// by revision, mod files, tool, profile and target. Mismatched source pins are refused.
 /// Nothing of the player's outside the launcher's data is touched: no instance is edited and
 /// no version selected here.
 fn pipeline(
     base: &str,
     folder: &Path,
-    anyway: bool,
-    on_base: bool,
     profile: Profile,
     target: Target,
     allow_jar_downloads: bool,
@@ -1556,39 +1498,7 @@ fn pipeline(
         .collect();
     let resolution = dependencies::resolve(&inputs).map_err(|e| e.to_string())?;
     let ordered: Vec<Bundle> = resolution.order.iter().map(|&i| mods[i].clone()).collect();
-    // A mod naming a hook points' version doesn't pin: it follows the others, else the game.
-    let pins: Vec<Bundle> = mods.iter().filter(|b| b.hooks.is_none()).cloned().collect();
-    let free = pins.iter().all(|b| b.horizon.is_none());
-    let on_base = on_base || built_on.as_ref().is_some_and(|a| a.on_base);
-    // The commit of the release or Nightly the build starts from. A native build's own is that
-    // of the version it started from when it recorded it; else, outside `on_base`, the commit it
-    // compiled, so a rebuild stays on the Horizon it plays.
-    let base_revision = || match &built_on {
-        Some(about) => match &about.base_horizon {
-            Some(r) => Ok(r.clone()),
-            None if !on_base && !about.off_its_nightly() => Ok(about.horizon.clone()),
-            None => revision_of(origin),
-        },
-        None => revision_of(base),
-    };
-    let date = |r: &str| committed(backend::REPO, r);
-    let (pinned, mut pinned_by) = pinned_revision(&pins, on_base, base_revision, date)?;
-    // Known without asking GitHub again unless a pin chose the commit.
-    let base_horizon = match pinned_by.is_empty() {
-        true => Some(pinned.clone()),
-        false => base_revision().ok(),
-    };
-    let game = || revision_of(origin).ok();
-    let revision = with_hooks(&mods, pinned.clone(), free, game, hooks_at)?;
-    // Nothing to say when the pin is the base's own commit, or the hook points moved the build.
-    if base_horizon.as_ref() == Some(&revision) || revision != pinned {
-        pinned_by.clear();
-    }
-    let other = mismatch(&mods, &revision);
-    if let (Some(list), false) = (&other, anyway || on_base) {
-        return Err(format!("{MISMATCH}{list}."));
-    }
-    for b in mods
+    let projects: Vec<_> = mods
         .iter()
         .map(api::Project::read)
         .collect::<Result<_, _>>()
@@ -1786,9 +1696,6 @@ fn pipeline(
         let about = serde_json::json!({
             "base": origin,
             "horizon": revision,
-            "base_horizon": base_horizon,
-            "pinned_by": pinned_by,
-            "on_base": on_base,
             "horizon_mixins": mixins,
             "rust": rust_toolchain::VERSION,
             "profile": compiled.name(),
@@ -1809,32 +1716,17 @@ fn pipeline(
     Ok(built)
 }
 
-/// Builds `folder`'s mods on the Horizon revision they pin (else `base`'s, the installed version
-/// whose game files the build reuses: a native build's own revision when it is one, [`base_for`])
-/// and points `instance` at the build, the default one included. Returns the build's version; a
-/// build already made is used again. Mods pinning different revisions build on the newest one,
-/// with the newest horizon-mixins they name, only when the player agreed to try (`anyway`): else
-/// the error starts with [`MISMATCH`] and says which. With `on_base`, every mod builds on `base`'s
-/// own commit, pinned or not: the player's Rebuild on Horizon.
+/// Builds `folder`'s mods on the installed game revision and points `instance` at the build.
+/// A build already made is used again; mismatched source pins are refused.
 pub fn build(
     base: &str,
     folder: &Path,
     instance: &Instance,
-    anyway: bool,
-    on_base: bool,
     profile: Profile,
     progress: impl Fn(Step),
 ) -> Result<String, String> {
     logged(|| {
-        let built = pipeline(
-            base,
-            folder,
-            anyway,
-            on_base,
-            profile,
-            Target::Client,
-            &progress,
-        )?;
+        let built = pipeline(base, folder, profile, Target::Client, false, &progress)?;
         instances::edit(&instance.id, |meta| {
             meta.version = Some(built.version.clone())
         })?;
@@ -1864,8 +1756,6 @@ pub fn build_server(
     base: &str,
     folder: &Path,
     output: &Path,
-    anyway: bool,
-    on_base: bool,
     profile: Profile,
     allow_jar_downloads: bool,
     progress: impl Fn(Step),
@@ -1898,10 +1788,9 @@ pub fn build_server(
         let built = pipeline(
             base,
             folder,
-            anyway,
-            on_base,
             profile,
             Target::Server,
+            allow_jar_downloads,
             &progress,
         )?;
         export(&Target::Server.directory(&built.version), &output)?;
@@ -2783,46 +2672,6 @@ mod tests {
         assert!(agreed(&bad, "Horizon", get, never).is_err());
     }
 
-    /// A player's report (11-04): Right-Click Crops 1.0.0 pins Nightly 2026-10-31's commit, so
-    /// every build of their instance compiled that commit, whatever Nightly or profile they
-    /// picked. The pin still chooses by default, and the build now says which mod chose it;
-    /// Rebuild on Horizon (`on_base`) compiles the picked version's own commit.
-    #[test]
-    fn a_pin_chooses_the_commit_unless_the_player_builds_on_the_picked_version() {
-        let pinned = |id: &str, horizon: Option<&str>| Bundle {
-            id: id.into(),
-            version: "1".into(),
-            dir: PathBuf::new(),
-            horizon: horizon.map(str::to_owned),
-            mixins: None,
-            hooks: None,
-            injections: Vec::new(),
-            api: None,
-            mixins_content: false,
-        };
-        // A: the pin (an older Nightly); B: the Nightly the player picked.
-        let picked = || -> Result<String, String> { Ok(B.into()) };
-        let no_date = |_: &str| -> Result<String, String> { panic!("one pin: no date needed") };
-        let mods = [pinned("right_click_crops", Some(A)), pinned("zoom", None)];
-        assert_eq!(
-            pinned_revision(&mods, false, picked, no_date).unwrap(),
-            (A.to_owned(), vec!["right_click_crops".to_owned()]),
-            "the pin wins over the picked Nightly, and the build knows whose it is"
-        );
-        assert_eq!(
-            pinned_revision(&mods, true, picked, no_date).unwrap(),
-            (B.to_owned(), Vec::new()),
-            "Rebuild on Horizon builds on the picked Nightly"
-        );
-        assert_eq!(
-            pinned_revision(&mods[1..], false, picked, no_date).unwrap(),
-            (B.to_owned(), Vec::new()),
-            "no pin: the picked Nightly"
-        );
-        let offline = || -> Result<String, String> { Err("offline".into()) };
-        assert!(pinned_revision(&mods, true, offline, no_date).is_err());
-    }
-
     #[test]
     fn mods_made_for_different_revisions_build_on_the_newest() {
         let pinned = |id: &str, horizon: &str, mixins: &str| Bundle {
@@ -3163,31 +3012,11 @@ mod tests {
             fs::write(d.join("native-mods.json"), json).unwrap();
             about_in(&d)
         };
-        assert_eq!(
-            record(None).target,
-            Target::Client,
-            "a build from before targets"
-        );
-        assert_eq!(record(Some("client")).target, Target::Client);
-        assert_eq!(record(Some("server")).target, Target::Server);
-        assert_eq!(record(Some("anything-else")).target, Target::Client);
-        assert_eq!(record(None).horizon, A);
-        let old = record(None);
-        assert_eq!(
-            (old.base_horizon, old.pinned_by, old.on_base),
-            (None, Vec::new(), false),
-            "a build from before pins were recorded"
-        );
-        fs::write(
-            d.join("native-mods.json"),
-            format!(
-                r#"{{"base":"nightly-2026-11-04-bbbbbbb","horizon":"{A}","base_horizon":"{B}","pinned_by":["right_click_crops"],"on_base":false}}"#
-            ),
-        )
-        .unwrap();
-        let pinned = about_in(&d).unwrap();
-        assert_eq!(pinned.base_horizon.as_deref(), Some(B));
-        assert_eq!(pinned.pinned_by, ["right_click_crops"]);
+        assert_eq!(record(None), None);
+        assert_eq!(record(Some("client")).unwrap().target, Target::Client);
+        assert_eq!(record(Some("server")).unwrap().target, Target::Server);
+        assert_eq!(record(Some("anything-else")), None);
+        assert_eq!(record(Some("client")).unwrap().horizon, A);
     }
 
     /// The export ([`build_server`]): a standalone runtime folder with the engine, resources
@@ -3339,8 +3168,6 @@ mod tests {
             "v0.0.0-not-installed",
             &folder,
             &output,
-            true,
-            false,
             Profile::Performance,
             false,
             |_| {},
@@ -3353,8 +3180,6 @@ mod tests {
             "v0.0.0-not-installed",
             &folder,
             &managed,
-            true,
-            false,
             Profile::Performance,
             false,
             |_| {},
@@ -3408,8 +3233,6 @@ mod tests {
             "v0.0.0-not-installed",
             &folder,
             &out.join("server"),
-            true,
-            false,
             Profile::Performance,
             false,
             |_| {},
