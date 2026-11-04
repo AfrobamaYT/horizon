@@ -161,6 +161,15 @@ jobs:
           HORIZON_WASM_SAMPLE: ${{ github.workspace }}/docs/modding/examples/wasm-hello/target/horizon-mod/hello_wasm.hmod
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
         run: cargo +stable test -p horizon-mod-wasm --test sample -- --ignored
+      - name: Mods sharing a library, linked in one group, and a mod of another group
+        env:
+          HORIZON_WASM_GROUPS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/groups
+          HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
+        run: |
+          for mod in counter_lib alpha beta gamma; do
+            (cd "$HORIZON_WASM_GROUPS/$mod" && "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod build --wasm)
+          done
+          cargo +stable test -p horizon-mod-wasm --test groups -- --ignored
       - name: The mod API's WIT, and what this change does to it
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
