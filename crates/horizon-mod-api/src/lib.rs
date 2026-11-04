@@ -3424,7 +3424,8 @@ pub enum PlayerAction {
     },
     /// Break the block at `pos` at once (`ServerPlayerGameMode.destroyBlock`), with the game
     /// mode's and the held tool's rules, the tool's wear and the drops, and no digging time:
-    /// a mod that digs over time counts the progress itself.
+    /// a mod that digs over time counts the progress itself. Outside creative, a block no
+    /// digging breaks (destroy time -1, such as bedrock) stays.
     BreakBlock {
         /// The block broken.
         pos: [i32; 3],

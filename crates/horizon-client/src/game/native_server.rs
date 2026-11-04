@@ -2150,10 +2150,23 @@ mod fake_action_tests {
                 Ok(ActionOutcome::Consumed)
             );
             assert_eq!(level_block(game, pos).as_deref(), Some("minecraft:air"));
-            // Air breaks nothing; ten blocks off is out of reach.
+            // Air breaks nothing; bedrock, which no digging breaks (destroy time -1), stays;
+            // ten blocks off is out of reach.
             assert_eq!(
                 game.native_player_perform_action(player, PlayerAction::BreakBlock { pos }),
                 Ok(ActionOutcome::Passed)
+            );
+            place(game, [-1, 63, 0], "minecraft:bedrock");
+            assert_eq!(
+                game.native_player_perform_action(
+                    player,
+                    PlayerAction::BreakBlock { pos: [-1, 63, 0] }
+                ),
+                Ok(ActionOutcome::Passed)
+            );
+            assert_eq!(
+                level_block(game, [-1, 63, 0]).as_deref(),
+                Some("minecraft:bedrock")
             );
             place(game, [3, 64, 3], "minecraft:stone");
             game.lan
@@ -2171,6 +2184,22 @@ mod fake_action_tests {
                     PlayerAction::BreakBlock { pos: [3, 64, 3] }
                 ),
                 Err(ActionRefused::OutOfReach)
+            );
+        });
+        // Creative breaks what survival can't dig.
+        with_game(|game| {
+            let (player, ..) = fake(game, None, 1);
+            place(game, [1, 63, 0], "minecraft:bedrock");
+            assert_eq!(
+                game.native_player_perform_action(
+                    player,
+                    PlayerAction::BreakBlock { pos: [1, 63, 0] }
+                ),
+                Ok(ActionOutcome::Consumed)
+            );
+            assert_eq!(
+                level_block(game, [1, 63, 0]).as_deref(),
+                Some("minecraft:air")
             );
         });
         // Adventure mode can't break a block (blockActionRestricted), and a sword in creative

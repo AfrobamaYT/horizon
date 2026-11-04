@@ -5777,8 +5777,8 @@ impl Game<'_> {
     /// Guest `conn` (at `gi`) breaks the block at `pos` at once, as a fake player's `BreakBlock`
     /// does: `handleBlockBreakAction`'s reach, build height, spawn protection and border, then
     /// `ServerPlayerGameMode.destroyBlock`, with its game-mode and tool rules, the native mods'
-    /// `break_block`, the tool's wear and the drops, and no digging time. True when the block
-    /// broke.
+    /// `break_block`, the tool's wear and the drops, and no digging time. Outside creative, a
+    /// block no digging breaks (destroy time -1) stays. True when the block broke.
     pub(super) fn guest_break_block(
         &mut self,
         conn: u32,
@@ -5800,6 +5800,16 @@ impl Game<'_> {
         }
         let before = self.world.block(pos[0], pos[1], pos[2]);
         if self.res.facts().is_air(before) {
+            return Ok(false);
+        }
+        // A survival player reaches `destroyBlock` only through its digging, which makes no
+        // progress on a block of destroy time -1 (bedrock, barriers, command blocks): only a
+        // creative one breaks those.
+        let creative = self
+            .lan
+            .as_ref()
+            .is_some_and(|host| host.hub.guests[gi].creative());
+        if !creative && self.res.facts().get(before).hardness < 0.0 {
             return Ok(false);
         }
         self.guest_destroy_at(gi, conn, pos)
