@@ -1125,6 +1125,7 @@ impl Game<'_> {
             _ => Vec::new(),
         };
         let mut guest_events = Vec::new();
+        let mut player_credit = std::mem::take(&mut self.last_hurt_by_player);
         // The block writes since the last tick: mobs re-path around them.
         let path_writes = self
             .world
@@ -1232,7 +1233,11 @@ impl Game<'_> {
                 horizon_client::mobs::apply_mob_pushes(m, &mut pushes);
                 horizon_client::mobs::blocks_changed(m, &path_changes);
                 let from = events.len();
+                let credit_expiring = m.ai.last_hurt_by_player == 1;
                 let kept = m.tick(&w, &mut level, &mut events);
+                if credit_expiring && m.ai.last_hurt_by_player == 0 {
+                    player_credit.remove(&m.id);
+                }
                 // A killed mob's body is removed: its effects that act on
                 // death run (`LivingEntity.remove` with KILLED).
                 if !kept && !m.alive() && !m.removed && !m.extra.effects.is_empty() {
@@ -1289,6 +1294,7 @@ impl Game<'_> {
             }
         }
         lent.give_back(&mut self.world);
+        self.last_hurt_by_player = player_credit;
         if let Some(host) = self.lan.as_mut()
             && !guests.is_empty()
         {
@@ -1384,7 +1390,11 @@ impl Game<'_> {
         let attacker = match attacker {
             Some(Who::Mob(id)) => id,
             Some(Who::Player) => {
-                let conn = self.last_hurt_by_player.get(&m.id).copied().flatten();
+                let conn = self
+                    .last_hurt_by_player
+                    .get(&m.id)
+                    .and_then(|credit| self.resolve_player_credit(*credit))
+                    .flatten();
                 let guests = self.lan.as_ref().map(|host| host.hub.guests.as_slice());
                 let guest = guests.and_then(|all| all.iter().find(|g| Some(g.conn) == conn));
                 guest.map_or(0, |g| g.entity_id as u32)
@@ -1426,11 +1436,15 @@ impl Game<'_> {
         // The killing blow for the drop hooks, before the player's hit is forgotten.
         let source =
             (!horizon_client::mod_api::mods().is_empty()).then(|| self.mob_damage_source(m));
-        let killer = self.last_hurt_by_player.remove(&m.id);
+        let killer = self
+            .last_hurt_by_player
+            .remove(&m.id)
+            .filter(|_| m.ai.last_hurt_by_player > 0)
+            .and_then(|credit| self.resolve_player_credit(credit));
         // TamableAnimal.die, before the rest of LivingEntity.die.
         self.tell_owner_pet_died(m, killer);
         self.love_cause.remove(&m.id);
-        let by_player = killer.is_some() || m.ai.last_hurt_by_player > 0;
+        let by_player = m.ai.last_hurt_by_player > 0;
         let mut dying = m.clone();
         // LivingEntity.die: the death is heard, and a sculk catalyst nearby
         // takes the experience (before the loot is dropped). It takes what
@@ -1451,6 +1465,9 @@ impl Game<'_> {
         // the mob gets KILL_MOB_NEAR_SCULK_CATALYST.
         if consumed && catalyst_xp > 0 {
             let who = match killer {
+                Some(Some(conn)) if self.lan_acting == Some(conn) => {
+                    Some(super::commands::Target::Player)
+                }
                 Some(Some(conn)) => Some(super::commands::Target::Guest(conn)),
                 Some(None) if self.lan_acting.is_none() => Some(super::commands::Target::Player),
                 _ => None,
@@ -1468,14 +1485,13 @@ impl Game<'_> {
                 });
             }
         }
-        if by_player {
-            // A guest's kill is theirs: their statistics, scores and
-            // advancements (LivingEntity.die credits lastHurtByPlayer).
-            let guest = killer.flatten().filter(|_| self.lan_acting.is_none());
-            let credited =
-                guest.is_some_and(|conn| self.as_guest(conn, |g| g.credit_kill(m)).is_some());
-            if !credited {
-                self.credit_kill(m);
+        if let Some(killer) = killer {
+            // Only the resolved player receives statistics and advancements.
+            match killer {
+                Some(conn) if self.lan_acting != Some(conn) => {
+                    self.as_guest(conn, |g| g.credit_kill(m));
+                }
+                _ => self.credit_kill(m),
             }
         }
         self.score_entity_removed(m.id);
@@ -1976,20 +1992,35 @@ impl Game<'_> {
         else {
             return;
         };
-        let player = owner.and_then(|uuid| self.player_with_uuid(uuid));
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == victim) else {
             return;
         };
         m.ai.last_hurt_by_player = if owner.is_some() { 100 } else { 0 };
-        match player {
-            Some(who) => self.last_hurt_by_player.insert(victim, who),
+        match owner {
+            Some(uuid) => self.last_hurt_by_player.insert(
+                victim,
+                super::combat::PlayerCredit(horizon_client::lan::playerdata::ints_uuid(uuid)),
+            ),
             None => self.last_hurt_by_player.remove(&victim),
         };
     }
-    /// The player in the world with `uuid` (`EntityReference.getPlayer`), as
-    /// `last_hurt_by_player` keeps them: None for the player in place, else the
-    /// guest's connection.
-    fn player_with_uuid(&self, uuid: [i32; 4]) -> Option<Option<u32>> {
+    /// Remember the acting player for a mob's `lastHurtByPlayer`.
+    pub(super) fn remember_mob_player_credit(&mut self, victim: u32) {
+        if let Some(uuid) = self.player_uuid_of(self.lan_acting) {
+            self.last_hurt_by_player.insert(
+                victim,
+                super::combat::PlayerCredit(horizon_client::lan::playerdata::ints_uuid(uuid)),
+            );
+        }
+    }
+
+    /// Resolve `EntityReference.getEntity` across levels. None inside means
+    /// the player in place; Some is a guest connection.
+    pub(super) fn resolve_player_credit(
+        &self,
+        credit: super::combat::PlayerCredit,
+    ) -> Option<Option<u32>> {
+        let uuid = horizon_client::lan::playerdata::uuid_ints(credit.0);
         if self.player.is_some()
             && horizon_client::mobs::tame::owned_by(Some(uuid), self.acting_uuid())
         {
@@ -4435,7 +4466,7 @@ impl Game<'_> {
     /// and `player_killed_entity`, as the arrow's hit does.
     fn player_hurt_mob(&mut self, p: &Projectile, id: u32) {
         if p.owner == Some(Who::Player) {
-            self.last_hurt_by_player.insert(id, self.lan_acting);
+            self.remember_mob_player_credit(id);
         }
     }
     /// `projectile_hit` for a projectile the guest `conn` shot, run as them;
@@ -5031,7 +5062,7 @@ impl Game<'_> {
                                     && horizon_client::mobs::enderman::dodges(m, &source)
                             });
                         if p.owner == Some(Who::Player) {
-                            self.last_hurt_by_player.insert(id, self.lan_acting);
+                            self.remember_mob_player_credit(id);
                             if hurt && let Some(m) = self.mobs.iter().find(|m| m.id == id) {
                                 // LivingEntity.hurtServer: PLAYER_HURT_ENTITY.
                                 let victim = self.mob_entity(m);
@@ -6310,7 +6341,7 @@ impl Game<'_> {
                 );
                 // The feeder gets the kill, as for a normal player attack.
                 if hurt {
-                    self.last_hurt_by_player.insert(id, self.lan_acting);
+                    self.remember_mob_player_credit(id);
                 }
             }
             // Parrot.mobInteract: parrot food may tame a wild one (one time in
@@ -7911,6 +7942,98 @@ mod tests {
     use super::thrown_item_axes;
     use super::thrown_item_quad;
     use super::{ProjectileKind, is_item_billboard};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn wolf_owner_rejoining_receives_the_kill_statistic() {
+        use horizon_client::advancements::{Advancement, Criterion, Rewards, Tree};
+        use horizon_client::mobs::{Damage, Mob};
+        use horizon_core::{geometry::Vec3, position::BlockPos};
+        use std::sync::Arc;
+
+        for dedicated in [false, true] {
+            super::super::native_guest_turn_tests::with_guests(|game| {
+                if dedicated {
+                    game.options.dedicated = Some(Vec::new());
+                }
+                let mut tree = Tree::default();
+                tree.list.push(Advancement {
+                    id: "test:catalyst".into(),
+                    parent: None,
+                    display: None,
+                    criteria: vec![Criterion {
+                        name: "kill".into(),
+                        trigger: "minecraft:kill_mob_near_sculk_catalyst".into(),
+                        conditions: serde_json::json!({}).into(),
+                    }],
+                    requirements: vec![vec!["kill".into()]],
+                    rewards: Rewards::default(),
+                });
+                tree.by_id.insert("test:catalyst".into(), 0);
+                tree.by_trigger.insert(
+                    "minecraft:kill_mob_near_sculk_catalyst".into(),
+                    vec![(0, 0)],
+                );
+                game.adv.tree = Arc::new(tree);
+                game.adv.loaded = true;
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+                let catalyst = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:sculk_catalyst")
+                    .unwrap();
+                game.with_level(|b, level, ticks| {
+                    b.set_block(level, ticks, BlockPos::new(1, 0, 0), catalyst, 2 | 16);
+                });
+                game.sculk_prepare();
+                game.sculk_sync_index();
+                assert!(game.world.block_entities.contains_key(&(1, 0, 0)));
+                let wolf_type = game.res.mob_types().get("minecraft:wolf").unwrap().clone();
+                let pig_type = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                let mut wolf = Mob::new(100, wolf_type, Vec3::ZERO, 0.0);
+                wolf.extra.tame = true;
+                wolf.extra.owner = Some(horizon_client::lan::playerdata::uuid_ints(12));
+                game.mobs.push(wolf);
+                game.mobs.push(Mob::new(101, pig_type, Vec3::ZERO, 0.0));
+                game.lan.as_mut().unwrap().hub.guests[0].placed = false;
+                game.resolve_player_responsible(101, Damage::mob(100, [0.0; 3]));
+                let credit = *game.last_hurt_by_player.get(&101).unwrap();
+                assert!(game.resolve_player_credit(credit).is_none());
+                game.lan.as_mut().unwrap().hub.guests[0].placed = true;
+                assert_eq!(game.resolve_player_credit(credit), Some(Some(12)));
+                let victim = game.mobs[1].clone();
+                game.mob_died(&victim);
+                let stats = &game.lan.as_ref().unwrap().play.get(&12).unwrap().stats;
+                assert_eq!(stats.get("custom", "minecraft:mob_kills"), 1);
+                let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
+                assert!(guest.advancements.has("test:catalyst", "kill"));
+                guest.advancements = Default::default();
+                let mut second = victim.clone();
+                second.id = 102;
+                game.last_hurt_by_player
+                    .insert(102, super::super::combat::PlayerCredit(12));
+                game.as_guest(12, |game| game.mob_died(&second)).unwrap();
+                let host = game.lan.as_ref().unwrap();
+                assert_eq!(host.play[&12].stats.get("custom", "minecraft:mob_kills"), 2);
+                assert!(host.hub.guests[0].advancements.has("test:catalyst", "kill"));
+                game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+                let mut third = victim.clone();
+                third.id = 103;
+                game.resolve_player_responsible(101, Damage::mob(100, [0.0; 3]));
+                let credit = game.last_hurt_by_player.remove(&101).unwrap();
+                game.last_hurt_by_player.insert(103, credit);
+                game.mob_died(&third);
+                let host = game.lan.as_ref().unwrap();
+                assert_eq!(host.play[&12].stats.get("custom", "minecraft:mob_kills"), 3);
+                game.mobs[0].extra.owner = None;
+                game.resolve_player_responsible(101, Damage::mob(100, [0.0; 3]));
+                assert!(!game.last_hurt_by_player.contains_key(&101));
+            });
+        }
+    }
 
     /// The component-wise lowest and highest corner of the quad.
     fn bounds(corners: &[glam::Vec3; 4]) -> (glam::Vec3, glam::Vec3) {
