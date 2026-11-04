@@ -5,6 +5,7 @@ use crate::*;
 /// elsewhere ([`crate::block_sprites`]): the biome's grass, foliage, dry foliage or water colour
 /// where the block is, or a fixed colour (0xRRGGBB).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TintSource {
     Grass,
     Foliage,
