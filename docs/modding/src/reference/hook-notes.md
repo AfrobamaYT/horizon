@@ -2085,6 +2085,15 @@ handle, an entity the client doesn't track and a level it doesn't show:
   `has_enough_food` and `can_eat`; `abilities` (what the game mode gives, then `ClientboundPlayerAbilities`' flags and
   speeds); `selected_slot` (the hotbar slot held); `experience` (`ClientboundSetExperience`) and
   `xp_needed_for_next_level`. Another player reads `None` there: the client is not sent their state.
+- The local player's open menu: `host.local_player()` then `player.container_menu(host)` makes a `MenuRef` for the menu
+  the client has open (the player's own inventory when none is), and `menu.slot_count(host)`, `slot(host, index)` and
+  `carried(host)` read it as the server's `ClientboundContainerSetSlot` and `SetCursorItem` packets left it. Indexes are
+  the menu's own slot order (the same `slot_backing` names), not network slot ids. Another player's menu is `None`, and
+  so are `container_id` and `kind` on a client (server reads). A slot reads `Some(None)` when empty and the outer `None`
+  when it doesn't exist or the menu is unavailable; a menu type the client has no slot map for reads `None` throughout
+  rather than guessed contents. A handle goes stale, and reads `None`, when its menu is closed or replaced (a reused
+  window id included), on a respawn, a dimension change or a logout, and after a reconnect. Nothing here sends a packet
+  or changes the menu.
 
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
