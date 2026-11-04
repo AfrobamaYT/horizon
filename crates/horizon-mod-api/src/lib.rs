@@ -3032,6 +3032,7 @@ pub struct BlockPlacement {
 
 impl BlockPlacement {
     /// Create a placement for the game.
+    // hidden: the game builds the list `entity_place` hands to mods
     #[doc(hidden)]
     pub fn new(pos: BlockPos, state: BlockStateId) -> Self {
         Self { pos, state }
