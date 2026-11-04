@@ -217,9 +217,9 @@ mod tests {
             game.carts[2].in_water = true;
             assert_eq!(furnace.max_speed(game), Some(0.2 * 0.75));
             game.carts[2].in_water = false;
-            game.level
-                .enabled_features
-                .push("minecraft:minecart_improvements".into());
+            let mut features = game.level.enabled_features.to_vec();
+            features.push("minecraft:minecart_improvements".into());
+            game.level.enabled_features = features.into();
             game.ui.rules =
                 horizon_client::gamerules::GameRules::with_features(&game.level.enabled_features);
             assert_eq!(rideable.max_speed(game), Some(8.0 / 20.0));

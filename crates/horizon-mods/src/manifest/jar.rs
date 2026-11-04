@@ -238,13 +238,7 @@ impl JarRef {
         if version.is_empty() {
             return Err(format!("jar {id}: version is empty"));
         }
-        if sha512.len() != 128
-            || !sha512
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        {
-            return Err(format!("jar {id}: sha512 must be 128 lowercase hex digits"));
-        }
+        super::wasm::sha512_hex(&sha512).map_err(|e| format!("jar {id}: sha512 {e}"))?;
         Ok(Self {
             id,
             version,

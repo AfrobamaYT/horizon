@@ -18,7 +18,10 @@ struct HatListener {
     applied: Arc<std::sync::Mutex<Vec<String>>>,
 }
 impl ClientReloadListener for HatListener {
-    fn prepare(&self, context: &ClientReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+    fn prepare(
+        &self,
+        context: &ClientReloadContext,
+    ) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
         let seen: Vec<String> = context
             .list()
             .filter_map(|id| {
@@ -29,7 +32,7 @@ impl ClientReloadListener for HatListener {
             .collect();
         self.seen.lock().unwrap().extend(seen);
         let applied = self.applied.clone();
-        Ok(ReloadApply::new(move || {
+        Ok(<dyn ReloadApply>::new(move || {
             applied.lock().unwrap().push("hats".into());
         }))
     }
@@ -57,7 +60,7 @@ fn stage_reads_the_merged_assets_and_apply_publishes_after_all_prepares() {
         seen: std::sync::Mutex::new(Vec::new()),
         applied: applied.clone(),
     });
-    let mut listeners = ClientReloadListeners::new();
+    let mut listeners = <mod_api::ClientListenerRegistry as mod_api::__private::game::ClientReloadListenersOrder>::new();
     listeners
         .add_listener(id("test_mod:hats"), hats(), listener.clone())
         .unwrap();
@@ -84,12 +87,15 @@ fn a_listener_error_keeps_every_previous_state() {
     }
     impl std::error::Error for NotAHat {}
     impl ClientReloadListener for Failing {
-        fn prepare(&self, _: &ClientReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+        fn prepare(
+            &self,
+            _: &ClientReloadContext,
+        ) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
             Err(ReloadResourceError::new(id("test_mod:broken"), NotAHat))
         }
     }
     let root = root_with_asset("failing", b"{}");
-    let mut listeners = ClientReloadListeners::new();
+    let mut listeners = <mod_api::ClientListenerRegistry as mod_api::__private::game::ClientReloadListenersOrder>::new();
     listeners
         .add_listener(id("test_mod:failing"), hats(), Arc::new(Failing))
         .unwrap();
@@ -110,7 +116,7 @@ fn a_converted_file_outside_the_pack_is_absent_not_empty() {
         seen: std::sync::Mutex::new(Vec::new()),
         applied: Arc::new(std::sync::Mutex::new(Vec::new())),
     });
-    let mut listeners = ClientReloadListeners::new();
+    let mut listeners = <mod_api::ClientListenerRegistry as mod_api::__private::game::ClientReloadListenersOrder>::new();
     listeners
         .add_listener(id("test_mod:hats"), hats(), listener.clone())
         .unwrap();
@@ -147,14 +153,14 @@ fn initial_load_stages_and_applies_client_reload_listeners() {
         fn prepare(
             &self,
             context: &ClientReloadContext,
-        ) -> Result<ReloadApply, ReloadResourceError> {
+        ) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
             let seen = context
                 .list()
                 .filter(|id| id.namespace() == "minecraft")
                 .count();
             let applied = self.applied.clone();
             let count = self.count.clone();
-            Ok(ReloadApply::new(move || {
+            Ok(<dyn ReloadApply>::new(move || {
                 count.fetch_max(seen, Ordering::SeqCst);
                 applied.store(true, Ordering::SeqCst);
             }))
@@ -280,7 +286,7 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
         fn prepare(
             &self,
             context: &ClientReloadContext,
-        ) -> Result<ReloadApply, ReloadResourceError> {
+        ) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
             if self.reject.load(Ordering::Relaxed) {
                 return Err(ReloadResourceError::new(
                     id("client_test:top"),
@@ -293,7 +299,9 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
                 .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
                 .unwrap_or_default();
             let live = self.live.clone();
-            Ok(ReloadApply::new(move || live.lock().unwrap().push(value)))
+            Ok(<dyn ReloadApply>::new(move || {
+                live.lock().unwrap().push(value)
+            }))
         }
     }
     #[mod_api::__subscriptions]
@@ -333,13 +341,13 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
         fn prepare(
             &self,
             context: &ClientReloadContext,
-        ) -> Result<ReloadApply, ReloadResourceError> {
+        ) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
             let count = context
                 .list()
                 .filter(|id| id.namespace() == "minecraft")
                 .count();
             let seen = self.0.clone();
-            Ok(ReloadApply::new(move || {
+            Ok(<dyn ReloadApply>::new(move || {
                 seen.fetch_max(count, Ordering::SeqCst);
             }))
         }

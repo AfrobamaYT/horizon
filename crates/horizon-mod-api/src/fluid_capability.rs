@@ -58,7 +58,7 @@ impl FluidStack {
 /// holds. An empty tank holds none.
 #[derive(Clone)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct FluidResource(FluidStack);
+pub struct FluidResource(pub(crate) FluidStack);
 
 impl FluidResource {
     /// What `stack` is, whatever its amount.

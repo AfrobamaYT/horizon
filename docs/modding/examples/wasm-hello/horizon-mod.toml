@@ -1,0 +1,7 @@
+id = "hello_wasm"
+name = "Hello Wasm"
+version = "0.1.0"
+description = "Signs every chat message, to show a mod.wasm running in the game."
+api = "0.2"
+side = "both"
+capabilities = ["registries"]

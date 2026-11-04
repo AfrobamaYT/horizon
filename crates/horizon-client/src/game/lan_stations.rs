@@ -79,7 +79,7 @@ impl Game<'_> {
         };
         let mut menu = Box::new(Menu::new(kind));
         // Without a mod the take runs AnvilMenu.onTake's order in the click itself.
-        let hooked = !mod_api::mods().is_empty();
+        let hooked = !mod_api::__private::mods().is_empty();
         menu.anvil_hook = kind == Kind::Anvil && hooked;
         // Likewise GrindstoneMenu's result onTake.
         menu.grind_hook = kind == Kind::Grindstone && hooked;
@@ -494,7 +494,7 @@ impl Game<'_> {
             })
             .unwrap_or((0, 0, 0, String::new()));
         let bookcases = self.count_bookshelves(gs.pos);
-        let offers = if mod_api::mods().is_empty() {
+        let offers = if mod_api::__private::mods().is_empty() {
             horizon_client::stations::enchant_offers(
                 &self.stations().enchantments,
                 self.items(),

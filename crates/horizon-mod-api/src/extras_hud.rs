@@ -6,10 +6,10 @@ const MARGIN: f32 = 2.0;
 /// Where the next overlay goes in each corner.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct Corners {
-    width: f32,
-    height: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
     /// Distance from the corner's top or bottom edge, per `Corner::ALL`.
-    used: [f32; 4],
+    pub(crate) used: [f32; 4],
 }
 impl Corners {
     /// `top_right` reserves the status effect icons' rows.

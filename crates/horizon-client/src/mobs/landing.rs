@@ -91,7 +91,7 @@ impl BlockLandingWorld for MobLanding<'_, '_, '_> {
         Ok(false)
     }
     fn mob_griefing(&mut self) -> Result<bool, String> {
-        Ok(self.w.mob_griefing)
+        Ok(self.w.can_grief(self.mob.id))
     }
     fn entity_dimensions(&self) -> (f32, f32) {
         (self.mob.width(), self.mob.height())

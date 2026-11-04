@@ -10,9 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// identity is fixed at construction and is not part of the mutable fields.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ModBlockEntity {
-    id: String,
-    fields: ModBlockEntityFields,
-    revision: ModRevision,
+    pub(crate) id: String,
+    pub(crate) fields: ModBlockEntityFields,
+    pub(crate) revision: ModRevision,
 }
 /// What a `ModBlockEntity` can change: its saved compound without `id`,
 /// `x`, `y`, `z` and `Items`, its item slots
@@ -32,8 +32,8 @@ pub struct ModBlockEntityFields {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ModRevision {
-    born: u64,
-    changes: u64,
+    pub(crate) born: u64,
+    pub(crate) changes: u64,
 }
 static MOD_BLOCK_ENTITIES_MADE: AtomicU64 = AtomicU64::new(0);
 impl ModBlockEntity {

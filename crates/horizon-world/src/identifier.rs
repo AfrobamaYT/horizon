@@ -101,3 +101,16 @@ impl JavaKey for Identifier {
         self.cmp(other)
     }
 }
+
+impl From<&Identifier> for String {
+    fn from(id: &Identifier) -> Self {
+        id.to_string()
+    }
+}
+
+impl TryFrom<String> for Identifier {
+    type Error = IdentifierError;
+    fn try_from(text: String) -> Result<Self, IdentifierError> {
+        Self::parse(&text)
+    }
+}

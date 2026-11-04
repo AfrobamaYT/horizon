@@ -2881,6 +2881,20 @@ pub trait MobHooks {
     /// `EnderManAngerEvent`: whether a mod keeps enderman `enderman` calm
     /// though `player` stares at it.
     fn enderman_anger_suppressed(&self, enderman: u32, player: &PlayerView) -> bool;
+    /// `EntityMobGriefingEvent`: whether mob `mob` may grief, `rule` (the
+    /// `mob_griefing` game rule) unless a mod says otherwise.
+    fn can_grief(&self, mob: u32, rule: bool) -> bool;
+}
+impl MobWorld<'_> {
+    /// `EventHooks.canEntityGrief(level, mob)`: the `mob_griefing` rule, or
+    /// what a mod answers for this mob. Asked where NeoForge asks it; the
+    /// places vanilla reads the rule with no entity still read `mob_griefing`.
+    pub fn can_grief(&self, mob: u32) -> bool {
+        match self.mob_hooks {
+            Some(hooks) => hooks.can_grief(mob, self.mob_griefing),
+            None => self.mob_griefing,
+        }
+    }
 }
 /// `Entity.getTeam` of the player and of the mobs on a team.
 #[derive(Clone, Debug, Default)]

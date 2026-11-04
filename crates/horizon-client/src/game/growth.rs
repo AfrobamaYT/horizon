@@ -1,7 +1,7 @@
 //! Client glue for sapling growth and bone meal: installs the live feature
 //! registry, routes `BoneMealItem.useOn` through the behaviour library, and
 //! crops a growing plant's head with shears (`ShearsItem.useOn`).
-use super::Game;
+use super::{Game, native_hooks::BonemealAsk};
 use horizon_client::{Result, items::ItemStack, vanillagen};
 use horizon_core::{geometry::Direction, position::BlockPos};
 use horizon_world::{level::classes::Class, worldgen::live::LiveFeatures};
@@ -20,16 +20,16 @@ impl Game<'_> {
         &mut self,
         pos: BlockPos,
         stack: &ItemStack,
-    ) -> (Option<bool>, ItemStack) {
+    ) -> (BonemealAsk, ItemStack) {
         let mut held = stack.clone();
-        let crop = self.bonemeal(pos, true, &mut held);
+        let ask = self.bonemeal(pos, true, &mut held);
         if held != *stack {
             if self.creative {
                 held.count = stack.count;
             }
             *self.held_mut() = (held.count > 0).then(|| held.clone());
         }
-        (crop, held)
+        (ask, held)
     }
     /// `BoneMealItem.useOn` for the targeted block.
     pub(super) fn use_bone_meal(&mut self, stack: &ItemStack) -> Result<bool> {
@@ -48,11 +48,12 @@ impl Game<'_> {
             _ => Direction::East,
         };
         let pos = BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
-        let (crop, held) = self.held_bonemeal(pos, stack);
-        let used =
-            self.with_level(|b, level, ticks| b.use_bone_meal(level, ticks, pos, face, crop));
+        let (ask, held) = self.held_bonemeal(pos, stack);
+        let used = self.with_level(|b, level, ticks| {
+            b.use_bone_meal(level, ticks, pos, face, ask.crop, ask.check)
+        });
         // A canceled `BonemealEvent` that succeeded uses none of the meal.
-        let consumed = used && crop != Some(true);
+        let consumed = used && ask.crop != Some(true);
         // ItemStack.causeUseVibration at the player, after the meal is used
         // up (shrunk even in creative): an emptied stack has no use effects.
         if used
@@ -289,12 +290,12 @@ mod tests {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let stack = ItemStack::new("minecraft:bone_meal", 3);
                 *game.held_mut() = Some(stack.clone());
-                assert_eq!(game.held_bonemeal(CROP, &stack).0, Some(true));
+                assert_eq!(game.held_bonemeal(CROP, &stack).0.crop, Some(true));
                 assert_eq!(game.held().map(|s| s.count), Some(1));
                 game.creative = true;
                 *game.held_mut() = Some(stack.clone());
-                let (crop, held) = game.held_bonemeal(CROP, &stack);
-                assert_eq!((crop, held.count), (Some(true), 3));
+                let (ask, held) = game.held_bonemeal(CROP, &stack);
+                assert_eq!((ask.crop, held.count), (Some(true), 3));
                 assert_eq!(game.held().map(|s| s.count), Some(3));
             });
         });

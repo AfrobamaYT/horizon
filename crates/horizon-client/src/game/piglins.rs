@@ -185,12 +185,17 @@ impl Game<'_> {
     /// gold and other loved items, nuggets, food, gear), walk to them and
     /// take them (`GoToWantedItem`, `Piglin.pickUpItem`).
     pub(super) fn piglin_pickups(&mut self) {
-        if !self.ui.rules.bool("mob_griefing") {
+        let griefing = self.ui.rules.bool("mob_griefing");
+        if !griefing && !self.grief_hooked() {
             return;
         }
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
             if m.species() != Species::Piglin || !m.alive() || m.extra.using_item > 0 {
+                continue;
+            }
+            // `Piglin.wantsToPickUp`: NeoForge's `canEntityGrief` for the piglin.
+            if !self.entity_grief(m.id, griefing) {
                 continue;
             }
             let pos = m.position;

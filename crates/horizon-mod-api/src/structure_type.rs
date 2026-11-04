@@ -37,8 +37,9 @@ impl std::error::Error for StructureError {}
 pub struct FoundStructure {
     /// Where the start sits, in world blocks.
     pub position: [i32; 3],
-    /// The pieces the start places, at least one.
-    pub pieces: Vec<Box<dyn StructurePiece>>,
+    /// The pieces the start places, at least one, shared with the game, which keeps them in
+    /// its start.
+    pub pieces: Vec<Arc<dyn StructurePiece>>,
 }
 
 /// A mod's structure type: vanilla's `StructureType`, whose code answers for a
@@ -50,11 +51,11 @@ pub trait StructureType: Send + Sync + 'static {
     /// "no start in this chunk". The height and biome queries the context
     /// answers are the ones vanilla's own types ask of a
     /// `GenerationContext`; the structure's JSON config is `context.config`.
-    fn find_generation_point(&self, context: &mut GenerationContext<'_>) -> Option<FoundStructure>;
+    fn find_generation_point(&self, context: &mut dyn GenerationContext) -> Option<FoundStructure>;
     /// The `StructurePieceType` loader: rebuild a saved piece from its tag
     /// (`StructurePieceType.load`), exactly as it was saved. Required: every
     /// piece type has its loader, and a saved piece is never regenerated.
-    fn load_piece(&self, tag: &Compound) -> Option<Box<dyn StructurePiece>>;
+    fn load_piece(&self, tag: &Compound) -> Option<Arc<dyn StructurePiece>>;
 }
 
 /// One piece of a mod's structure: vanilla's `StructurePiece`. Its `save` is
@@ -66,7 +67,7 @@ pub trait StructurePiece: std::fmt::Debug + Send + Sync {
     /// `StructurePiece.postProcess`: place the piece's blocks and entities
     /// that fall in the chunk `context` clips to. Writes outside it are
     /// dropped silently, as vanilla's `placeBlock` skips them.
-    fn post_process(&self, context: &mut PieceContext<'_>) -> Result<(), StructureError>;
+    fn post_process(&self, context: &mut dyn PieceContext) -> Result<(), StructureError>;
     /// `StructurePiece.addAdditionalSaveData`: the piece's own fields, saved
     /// beside `BB`/`O`/`GD` and read back by the type's `load_piece`.
     fn add_additional_save_data(&self, tag: &mut Compound);
@@ -75,176 +76,275 @@ pub trait StructurePiece: std::fmt::Debug + Send + Sync {
     /// pieces place nothing here.
     fn after_place(
         &self,
-        _context: &mut PieceContext<'_>,
+        _context: &mut dyn PieceContext,
         _pieces: &[BoundingBox],
     ) -> Result<(), StructureError> {
         Ok(())
     }
 }
 
+/// The random a structure type or piece draws from, in vanilla's order: the
+/// chunk's `WorldgenRandom` for a start, the piece's `RandomSource` for a piece.
+pub trait StructureRandom {
+    /// `nextInt(bound)`; 0 for a bound below 1.
+    fn next_int_bound(&mut self, bound: i32) -> i32;
+    /// `nextLong`.
+    fn next_long(&mut self) -> i64;
+    /// `nextFloat`.
+    fn next_float(&mut self) -> f32;
+    /// `nextDouble`.
+    fn next_double(&mut self) -> f64;
+    /// `nextBoolean`.
+    fn next_boolean(&mut self) -> bool;
+}
+
+/// The engine's piece random, as a [`StructureRandom`].
+struct Draws<'a>(&'a mut dyn PieceRandom);
+impl StructureRandom for Draws<'_> {
+    fn next_int_bound(&mut self, bound: i32) -> i32 {
+        self.0.int(bound)
+    }
+    fn next_long(&mut self) -> i64 {
+        self.0.long()
+    }
+    fn next_float(&mut self) -> f32 {
+        self.0.float()
+    }
+    fn next_double(&mut self) -> f64 {
+        self.0.double()
+    }
+    fn next_boolean(&mut self) -> bool {
+        self.0.boolean()
+    }
+}
+
 /// The start context a type's
 /// [`find_generation_point`](StructureType::find_generation_point) sees:
-/// vanilla's `GenerationContext` over one chunk, on the worker thread. A
-/// handle with private fields; deterministic for the seed.
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct GenerationContext<'a> {
+/// vanilla's `GenerationContext` over one chunk, on the worker thread;
+/// deterministic for the seed.
+pub trait GenerationContext {
+    /// The chunk the start would be in.
+    fn chunk(&self) -> ChunkPos;
+    /// The world's seed.
+    fn seed(&self) -> i64;
+    /// The level's sea level.
+    fn sea_level(&self) -> i32;
+    /// The level's minimum block Y.
+    fn min_y(&self) -> i32;
+    /// The level's maximum block Y.
+    fn max_y(&self) -> i32;
+    /// The random vanilla's types draw from, seeded for this chunk
+    /// (`WorldgenRandom.setLargeFeatureSeed` of the seed, chunk X and Z).
+    fn random(&mut self) -> &mut dyn StructureRandom;
+    /// `ChunkGenerator.getBaseHeight`: the first free height at (x, z) by the
+    /// heightmap kind.
+    fn base_height(&mut self, x: i32, z: i32, kind: HeightmapType) -> i32;
+    /// `ChunkGenerator.getBaseColumn` as heightmap opacity, from `min_y` up,
+    /// for several kinds from one noise-column pass.
+    fn base_columns(&mut self, x: i32, z: i32, kinds: &[HeightmapType]) -> Vec<Vec<bool>>;
+    /// `ChunkGenerator.getBaseColumn`'s blocks: the noise column at (x, z).
+    fn noise_column(&mut self, x: i32, z: i32) -> NoiseColumn;
+    /// Noise biome at a quart position (the resolver's, no zoom).
+    fn noise_biome(&mut self, quart: [i32; 3]) -> BiomeId;
+    /// `GenerationContext.validBiome` over inclusive block Y bounds of the
+    /// column at (x, z): whether any biome the structure names occurs there.
+    fn column_has_valid_biome(&mut self, x: i32, z: i32, min_y: i32, max_y: i32) -> bool;
+    /// The structure's own JSON config, as the data pack has it.
+    fn config(&self) -> Arc<serde_json::Value>;
+}
+
+/// The engine's start, as a [`GenerationContext`].
+struct Start<'a> {
     inner: &'a mut dyn horizon_world::worldgen::structure::start::StartContext,
     random: &'a mut WorldgenRandom<LegacyRandom>,
     chunk: ChunkPos,
-    config: &'a serde_json::Value,
+    config: &'a Arc<serde_json::Value>,
 }
 
-impl GenerationContext<'_> {
-    /// The chunk the start would be in.
-    pub fn chunk(&self) -> ChunkPos {
+impl GenerationContext for Start<'_> {
+    fn chunk(&self) -> ChunkPos {
         self.chunk
     }
-    /// The world's seed.
-    pub fn seed(&self) -> i64 {
+    fn seed(&self) -> i64 {
         self.inner.seed()
     }
-    /// The level's sea level.
-    pub fn sea_level(&self) -> i32 {
+    fn sea_level(&self) -> i32 {
         self.inner.sea_level()
     }
-    /// The level's minimum and maximum block Y.
-    pub fn min_y(&self) -> i32 {
+    fn min_y(&self) -> i32 {
         self.inner.min_y()
     }
-    /// The level's maximum block Y.
-    pub fn max_y(&self) -> i32 {
+    fn max_y(&self) -> i32 {
         self.inner.max_y()
     }
-    /// The random vanilla's types draw from, seeded for this chunk
-    /// (`WorldgenRandom.setLargeFeatureSeed` of the seed, chunk X and Z).
-    pub fn random(&mut self) -> &mut WorldgenRandom<LegacyRandom> {
+    fn random(&mut self) -> &mut dyn StructureRandom {
         self.random
     }
-    /// `ChunkGenerator.getBaseHeight`: the first free height at (x, z) by the
-    /// heightmap kind.
-    pub fn base_height(&mut self, x: i32, z: i32, kind: HeightmapType) -> i32 {
+    fn base_height(&mut self, x: i32, z: i32, kind: HeightmapType) -> i32 {
         self.inner.base_height(x, z, kind)
     }
-    /// `ChunkGenerator.getBaseColumn` as heightmap opacity, from `min_y` up,
-    /// for several kinds from one noise-column pass.
-    pub fn base_columns(&mut self, x: i32, z: i32, kinds: &[HeightmapType]) -> Vec<Vec<bool>> {
+    fn base_columns(&mut self, x: i32, z: i32, kinds: &[HeightmapType]) -> Vec<Vec<bool>> {
         self.inner.base_columns(x, z, kinds)
     }
-    /// `ChunkGenerator.getBaseColumn`'s blocks: the noise column at (x, z).
-    pub fn noise_column(&mut self, x: i32, z: i32) -> NoiseColumn {
+    fn noise_column(&mut self, x: i32, z: i32) -> NoiseColumn {
         self.inner.noise_column(x, z)
     }
-    /// Noise biome at a quart position (the resolver's, no zoom).
-    pub fn noise_biome(&mut self, quart: [i32; 3]) -> BiomeId {
+    fn noise_biome(&mut self, quart: [i32; 3]) -> BiomeId {
         self.inner.noise_biome(quart)
     }
-    /// `GenerationContext.validBiome` over inclusive block Y bounds of the
-    /// column at (x, z): whether any biome the structure names occurs there.
-    pub fn column_has_valid_biome(&mut self, x: i32, z: i32, min_y: i32, max_y: i32) -> bool {
+    fn column_has_valid_biome(&mut self, x: i32, z: i32, min_y: i32, max_y: i32) -> bool {
         self.inner.column_has_valid_biome(x, z, min_y, max_y)
     }
-    /// The structure's own JSON config, as the data pack has it.
-    pub fn config(&self) -> &serde_json::Value {
-        self.config
+    fn config(&self) -> Arc<serde_json::Value> {
+        self.config.clone()
+    }
+}
+
+/// The chunk's random a start draws from.
+impl StructureRandom for WorldgenRandom<LegacyRandom> {
+    fn next_int_bound(&mut self, bound: i32) -> i32 {
+        ProcessorRandom::int(self, bound)
+    }
+    fn next_long(&mut self) -> i64 {
+        RandomSource::next_long(self)
+    }
+    fn next_float(&mut self) -> f32 {
+        RandomSource::next_float(self)
+    }
+    fn next_double(&mut self) -> f64 {
+        RandomSource::next_double(self)
+    }
+    fn next_boolean(&mut self) -> bool {
+        RandomSource::next_boolean(self)
     }
 }
 
 /// The types the contexts' own signatures answer, re-exported so a mod's
 /// code names them through the API, never the engine's crates.
-pub use horizon_core::{position::ChunkPos, random::WorldgenRandom};
+pub use horizon_core::position::ChunkPos;
+use horizon_core::random::{RandomSource, WorldgenRandom};
 /// The noise column a [`GenerationContext`](GenerationContext) reads:
 /// `ChunkGenerator.getBaseColumn`'s blocks, `Air` past its ends.
 pub use horizon_world::worldgen::structure::start::{NoiseBlock, NoiseColumn};
-/// The heightmap kinds a [`GenerationContext`](GenerationContext) queries,
-/// the noise biome a chunk's column holds and the piece's own random.
-pub use horizon_world::{
-    heightmap::HeightmapType,
-    worldgen::{biome::BiomeId, structure::legacy::PieceRandom},
-};
+use horizon_world::worldgen::structure::{legacy::PieceRandom, processor::ProcessorRandom};
+/// The heightmap kinds a [`GenerationContext`](GenerationContext) queries and
+/// the noise biome a chunk's column holds.
+pub use horizon_world::{heightmap::HeightmapType, worldgen::biome::BiomeId};
 
 /// The placement context a piece's
 /// [`post_process`](StructurePiece::post_process) and
 /// [`after_place`](StructurePiece::after_place) see: the blocks and entities of
-/// one chunk, the piece's random and what the blocks around it are made of. A
-/// handle with private fields.
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct PieceContext<'a> {
+/// one chunk, the piece's random and what the blocks around it are made of.
+pub trait PieceContext {
+    /// The chunk being placed.
+    fn chunk(&self) -> ChunkPos;
+    /// The writable box: a `set_block` outside it is dropped silently.
+    fn chunk_box(&self) -> BoundingBox;
+    /// The piece's random (`RandomSource` of `postProcess`).
+    fn random(&mut self) -> &mut dyn StructureRandom;
+    /// A block state by block name (`stone`, `minecraft:oak_log`), with its
+    /// default properties.
+    fn state(&self, name: &str) -> horizon_world::registry::BlockStateId;
+    /// A block state by block name with properties (`oak_log` with
+    /// `axis=y`); missing properties keep defaults.
+    fn state_with(
+        &self,
+        name: &str,
+        properties: &[(&str, &str)],
+    ) -> horizon_world::registry::BlockStateId;
+    /// The block's name (`minecraft:stone`), or "" for an unknown state.
+    fn name(&self, state: horizon_world::registry::BlockStateId) -> String;
+    /// `BlockState.isAir`.
+    fn is_air(&self, state: horizon_world::registry::BlockStateId) -> bool;
+    /// The block at `pos`, or `None` outside the region.
+    fn block(&mut self, pos: [i32; 3]) -> Option<horizon_world::registry::BlockStateId>;
+    /// `StructurePiece.placeBlock`: write `state` at `pos`, answering whether
+    /// it was written. A position outside `chunk_box` is skipped silently, as
+    /// vanilla's `placeBlock` skips it.
+    fn set_block(&mut self, pos: [i32; 3], state: horizon_world::registry::BlockStateId) -> bool;
+    /// `WorldGenLevel.getHeight` of the heightmap kind at (x, z).
+    fn height(&mut self, kind: HeightmapType, x: i32, z: i32) -> Option<i32>;
+    /// `BlockState.isSolidRender` of a state: whether the block draws as a
+    /// solid block, the way `StructurePiece.reorient` asks of its neighbours.
+    fn solid_render(&self, state: horizon_world::registry::BlockStateId) -> bool;
+    /// `WorldGenLevel.addFreshEntity`: an entity from its saved NBT — its
+    /// `id`, `Pos` and fields — which the generating chunk holds and the game
+    /// finishes as it does a structure mob's when the chunk joins the world
+    /// (`Mob.finalizeSpawn` with `STRUCTURE`; keep the
+    /// `"horizon:finalize"` byte a structure template's entities carry to ask
+    /// for it).
+    fn entity(&mut self, nbt: Compound);
+    /// `WorldGenLevel.setBlockEntity` at `pos`: the block entity's saved NBT
+    /// (its `id` and fields).
+    fn block_entity(&mut self, pos: [i32; 3], nbt: Compound);
+}
+
+/// The engine's piece context, as a [`PieceContext`].
+struct Placing<'a> {
     world: &'a mut dyn horizon_world::worldgen::structure::legacy::PieceWorld,
     resources: &'a horizon_world::worldgen::structure::StructureResources,
     blocks: &'a dyn horizon_world::worldgen::structure::legacy::SolidRender,
-    random: &'a mut dyn PieceRandom,
+    random: Draws<'a>,
     chunk_box: BoundingBox,
     chunk: ChunkPos,
 }
 
-impl<'a> PieceContext<'a> {
-    /// The engine's piece context, as the adapter hands it to a piece.
-    pub(crate) fn new<'b>(
+impl<'a> Placing<'a> {
+    fn new<'b>(
         inner: &'a mut horizon_world::worldgen::structure::legacy::PieceContext<'b>,
     ) -> Self {
         Self {
             world: inner.world,
             resources: inner.resources,
             blocks: inner.blocks,
-            random: inner.random,
+            random: Draws(inner.random),
             chunk_box: inner.chunk_box,
             chunk: inner.chunk,
         }
     }
-    /// The chunk being placed, and the writable box the piece clips to.
-    pub fn chunk(&self) -> ChunkPos {
-        self.chunk
-    }
-    /// The writable box: a `set_block` outside it is dropped silently.
-    pub fn chunk_box(&self) -> BoundingBox {
-        self.chunk_box
-    }
-    /// The piece's random (`RandomSource` of `postProcess`).
-    pub fn random(&mut self) -> &mut dyn PieceRandom {
-        self.random
-    }
-    /// A block state by block name and properties (missing properties keep
-    /// defaults): `stone`, `oak_log` with `axis=y`.
-    pub fn state(&self, name: &str) -> horizon_world::registry::BlockStateId {
-        horizon_world::worldgen::structure::legacy::state(self.resources, name, &[])
-    }
-    /// A block state by block name with properties (`oak_log` with
-    /// `axis=y`); missing properties keep defaults.
-    pub fn state_with(
-        &self,
-        name: &str,
-        properties: &[(&str, &str)],
-    ) -> horizon_world::registry::BlockStateId {
-        horizon_world::worldgen::structure::legacy::state(self.resources, name, properties)
-    }
-    /// The block's name (`minecraft:stone`), or "" for an unknown state.
-    pub fn name(&self, state: horizon_world::registry::BlockStateId) -> &str {
+    fn block_name(&self, state: horizon_world::registry::BlockStateId) -> &str {
         self.resources
             .registry
             .state(state)
             .map(|s| s.name.as_str())
             .unwrap_or("")
     }
-    /// `BlockState.isAir`.
-    pub fn is_air(&self, state: horizon_world::registry::BlockStateId) -> bool {
+}
+
+impl PieceContext for Placing<'_> {
+    fn chunk(&self) -> ChunkPos {
+        self.chunk
+    }
+    fn chunk_box(&self) -> BoundingBox {
+        self.chunk_box
+    }
+    fn random(&mut self) -> &mut dyn StructureRandom {
+        &mut self.random
+    }
+    fn state(&self, name: &str) -> horizon_world::registry::BlockStateId {
+        horizon_world::worldgen::structure::legacy::state(self.resources, name, &[])
+    }
+    fn state_with(
+        &self,
+        name: &str,
+        properties: &[(&str, &str)],
+    ) -> horizon_world::registry::BlockStateId {
+        horizon_world::worldgen::structure::legacy::state(self.resources, name, properties)
+    }
+    fn name(&self, state: horizon_world::registry::BlockStateId) -> String {
+        self.block_name(state).to_owned()
+    }
+    fn is_air(&self, state: horizon_world::registry::BlockStateId) -> bool {
         matches!(
-            self.name(state),
+            self.block_name(state),
             "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
         )
     }
-    /// The block at `pos`, or `None` outside the region.
-    pub fn block(&mut self, pos: [i32; 3]) -> Option<horizon_world::registry::BlockStateId> {
+    fn block(&mut self, pos: [i32; 3]) -> Option<horizon_world::registry::BlockStateId> {
         self.world.block(pos).ok()
     }
-    /// `StructurePiece.placeBlock`: write `state` at `pos`, answering whether
-    /// it was written. A position outside `chunk_box` is skipped silently, as
-    /// vanilla's `placeBlock` skips it (a debug build logs the drop).
     #[cfg_attr(not(debug_assertions), allow(unused_variables))]
-    pub fn set_block(
-        &mut self,
-        pos: [i32; 3],
-        state: horizon_world::registry::BlockStateId,
-    ) -> bool {
+    fn set_block(&mut self, pos: [i32; 3], state: horizon_world::registry::BlockStateId) -> bool {
         if !self.chunk_box.is_inside(pos) {
             #[cfg(debug_assertions)]
             log::debug!(
@@ -261,29 +361,18 @@ impl<'a> PieceContext<'a> {
         )
         .unwrap_or(false)
     }
-    /// `WorldGenLevel.getHeight` of the heightmap kind at (x, z).
-    pub fn height(&mut self, kind: HeightmapType, x: i32, z: i32) -> Option<i32> {
+    fn height(&mut self, kind: HeightmapType, x: i32, z: i32) -> Option<i32> {
         self.world.height(kind, x, z).ok()
     }
-    /// `BlockState.isSolidRender` of a state: whether the block draws as a
-    /// solid block, the way `StructurePiece.reorient` asks of its neighbours.
-    pub fn solid_render(&self, state: horizon_world::registry::BlockStateId) -> bool {
+    fn solid_render(&self, state: horizon_world::registry::BlockStateId) -> bool {
         self.blocks.solid_render(state)
     }
-    /// `WorldGenLevel.addFreshEntity`: an entity from its saved NBT — its
-    /// `id`, `Pos` and fields — which the generating chunk holds and the game
-    /// finishes as it does a structure mob's when the chunk joins the world
-    /// (`Mob.finalizeSpawn` with `STRUCTURE`; keep the
-    /// `"horizon:finalize"` byte a structure template's entities carry to ask
-    /// for it).
-    pub fn entity(&mut self, nbt: Compound) {
+    fn entity(&mut self, nbt: Compound) {
         if self.world.entity(nbt).is_err() {
             log::error!("Horizon: a mod structure piece's entity was refused");
         }
     }
-    /// `WorldGenLevel.setBlockEntity` at `pos`: the block entity's saved NBT
-    /// (its `id` and fields).
-    pub fn block_entity(&mut self, pos: [i32; 3], nbt: Compound) {
+    fn block_entity(&mut self, pos: [i32; 3], nbt: Compound) {
         if self.world.block_entity(pos, nbt).is_err() {
             log::error!("Horizon: a mod structure piece's block entity was refused");
         }
@@ -295,25 +384,25 @@ impl<'a> PieceContext<'a> {
 /// second mechanism: the pieces a type returns become the engine's legacy
 /// pieces, so the start cache, the saving, the cross-chunk placement and the
 /// beardifier treat them like a fortress piece's.
-pub(crate) struct Adapter<T> {
-    inner: Arc<T>,
+pub(crate) struct Adapter {
+    inner: Arc<dyn StructureType>,
     /// The type's namespaced id (`modid:tower`), leaked once at registration
     /// for the piece tags' `"id"`.
     id: &'static str,
 }
 
-impl<T: StructureType> ModStructureType for Adapter<T> {
+impl ModStructureType for Adapter {
     fn find_generation_point(
         &self,
         context: &mut dyn horizon_world::worldgen::structure::start::StartContext,
         chunk: ChunkPos,
-        config: &serde_json::Value,
+        config: &Arc<serde_json::Value>,
         random: &mut WorldgenRandom<LegacyRandom>,
     ) -> Option<(
         [i32; 3],
         Vec<Box<dyn horizon_world::worldgen::structure::legacy::LegacyPiece>>,
     )> {
-        let mut context = GenerationContext {
+        let mut context = Start {
             inner: context,
             random,
             chunk,
@@ -342,7 +431,7 @@ impl<T: StructureType> ModStructureType for Adapter<T> {
 /// The engine's legacy piece around a mod's piece: `createTag` of the type id
 /// and the piece's box around the piece's own save data.
 struct ModPiece {
-    piece: Box<dyn StructurePiece>,
+    piece: Arc<dyn StructurePiece>,
     id: &'static str,
 }
 impl horizon_world::worldgen::structure::legacy::LegacyPiece for ModPiece {
@@ -366,7 +455,7 @@ impl horizon_world::worldgen::structure::legacy::LegacyPiece for ModPiece {
         &self,
         context: &mut horizon_world::worldgen::structure::legacy::PieceContext<'_>,
     ) -> std::result::Result<(), PlacementQueryError> {
-        let mut context = PieceContext::new(context);
+        let mut context = Placing::new(context);
         self.piece
             .post_process(&mut context)
             .map_err(|e| PlacementQueryError::Failed(e.0))
@@ -376,7 +465,7 @@ impl horizon_world::worldgen::structure::legacy::LegacyPiece for ModPiece {
         context: &mut horizon_world::worldgen::structure::legacy::PieceContext<'_>,
         pieces: &[BoundingBox],
     ) -> std::result::Result<(), PlacementQueryError> {
-        let mut context = PieceContext::new(context);
+        let mut context = Placing::new(context);
         self.piece
             .after_place(&mut context, pieces)
             .map_err(|e| PlacementQueryError::Failed(e.0))
@@ -391,11 +480,11 @@ impl std::fmt::Debug for ModPiece {
     }
 }
 
-impl<T: StructureType> Adapter<T> {
+impl Adapter {
     /// Wrap `ty` as the engine's type, under the namespaced `id`.
-    pub(crate) fn new(id: &str, ty: T) -> self::Adapter<T> {
+    pub(crate) fn new(id: &str, ty: Arc<dyn StructureType>) -> Self {
         Self {
-            inner: Arc::new(ty),
+            inner: ty,
             id: Box::leak(id.to_owned().into_boxed_str()),
         }
     }
@@ -441,7 +530,7 @@ mod tests {
         fn bounding_box(&self) -> BoundingBox {
             BoundingBox::new(self.min, self.max)
         }
-        fn post_process(&self, _: &mut PieceContext<'_>) -> Result<(), StructureError> {
+        fn post_process(&self, _: &mut dyn PieceContext) -> Result<(), StructureError> {
             Ok(())
         }
         fn add_additional_save_data(&self, tag: &mut Compound) {
@@ -452,7 +541,7 @@ mod tests {
     impl StructureType for Boxes {
         fn find_generation_point(
             &self,
-            context: &mut GenerationContext<'_>,
+            context: &mut dyn GenerationContext,
         ) -> Option<FoundStructure> {
             let chunk = context.chunk();
             let height = context.base_height(
@@ -463,18 +552,18 @@ mod tests {
             let min = [chunk.x * 16, height - 1, chunk.z * 16];
             Some(FoundStructure {
                 position: min,
-                pieces: vec![Box::new(BoxPiece {
+                pieces: vec![Arc::new(BoxPiece {
                     min,
                     max: [min[0] + 8, min[1] + 5, min[2] + 8],
                 })],
             })
         }
-        fn load_piece(&self, tag: &Compound) -> Option<Box<dyn StructurePiece>> {
+        fn load_piece(&self, tag: &Compound) -> Option<Arc<dyn StructurePiece>> {
             let ints = |key: &str| match tag.get(&key.into()) {
                 Some(Tag::IntArray(a)) if a.len() == 3 => Some([a[0], a[1], a[2]]),
                 _ => None,
             };
-            Some(Box::new(BoxPiece {
+            Some(Arc::new(BoxPiece {
                 min: ints("Min")?,
                 max: ints("Max")?,
             }))
@@ -485,7 +574,7 @@ mod tests {
     /// nothing but its context, so two worlds of one seed see one structure.
     #[test]
     fn the_same_context_gives_the_same_pieces() {
-        let adapter = Adapter::new("testmod:boxes", Boxes);
+        let adapter = Adapter::new("testmod:boxes", Arc::new(Boxes));
         let run = || {
             let mut random = WorldgenRandom::new(LegacyRandom::new(0));
             random.set_large_feature_seed(12345, 3, 7);
@@ -495,7 +584,7 @@ mod tests {
                 .find_generation_point(
                     &mut StubContext,
                     ChunkPos::new(3, 7),
-                    &serde_json::json!({"type": "testmod:boxes"}),
+                    &Arc::new(serde_json::json!({"type": "testmod:boxes"})),
                     &mut random,
                 )
                 .unwrap();
@@ -508,14 +597,14 @@ mod tests {
     /// saved tower comes back the same tower, not a rebuilt one.
     #[test]
     fn a_saved_piece_loads_back_the_same() {
-        let adapter = Adapter::new("testmod:boxes", Boxes);
+        let adapter = Adapter::new("testmod:boxes", Arc::new(Boxes));
         let mut random = WorldgenRandom::new(LegacyRandom::new(0));
         random.set_large_feature_seed(1, 0, 0);
         let (_, pieces) = adapter
             .find_generation_point(
                 &mut StubContext,
                 ChunkPos::new(0, 0),
-                &serde_json::json!({}),
+                &Arc::new(serde_json::json!({})),
                 &mut random,
             )
             .unwrap();
@@ -731,7 +820,7 @@ mod tests {
                 chunk: ChunkPos::new(0, 0),
                 reference: [8, 64, 8],
             };
-            let mut context = PieceContext::new(&mut engine);
+            let mut context = Placing::new(&mut engine);
             let stone = context.state("stone");
             // Outside on every axis: dropped, silently, nothing recorded.
             for outside in [[16, 64, 0], [0, 64, 16], [-1, 64, 0], [0, 64, -1]] {

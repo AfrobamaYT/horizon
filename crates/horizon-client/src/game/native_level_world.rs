@@ -10,6 +10,7 @@ use horizon_core::random::LegacyRandom;
 use horizon_world::level::{Dimension as LevelDimension, LevelAccess};
 use horizon_world::registry::BlockStateId;
 use mod_api::{FeatureFlags, GameRuleValue, LevelRef};
+use std::sync::Arc;
 
 fn weather_for_level(
     shape: horizon_client::chunk::LevelShape,
@@ -83,7 +84,7 @@ impl LevelAccess for RainView<'_> {
 impl Game<'_> {
     /// The enabled feature flags as this side knows them: a client's are the server's, sent at
     /// join; a server's are its world's `enabled_features`.
-    pub(super) fn enabled_feature_ids(&self) -> &[String] {
+    pub(super) fn enabled_feature_ids(&self) -> &Arc<[String]> {
         self.remote
             .as_ref()
             .map_or(&self.level.enabled_features, |remote| &remote.features)
@@ -154,12 +155,9 @@ impl Game<'_> {
     }
     /// `LevelReader.enabledFeatures` of the level a handle names. Every level of a world shares
     /// the world's flags. None for a stale handle and on a client.
-    pub(super) fn native_level_enabled_features(
-        &self,
-        level: LevelRef,
-    ) -> Option<FeatureFlags<'_>> {
+    pub(super) fn native_level_enabled_features(&self, level: LevelRef) -> Option<FeatureFlags> {
         self.native_level_world(level)?;
-        Some(FeatureFlags::new(self.enabled_feature_ids()))
+        Some(FeatureFlags::new(self.enabled_feature_ids().clone()))
     }
     /// Whether it thunders (`Level.isThundering`: a thunder level above 0.9).
     pub(super) fn native_level_is_thundering(&self, level: LevelRef) -> Option<bool> {
@@ -253,15 +251,16 @@ mod tests {
             assert!(flags.contains("minecraft:vanilla"));
             assert!(flags.contains("vanilla"));
             assert!(!flags.contains("minecraft:redstone_experiments"));
-            game.level.enabled_features = vec![
-                "minecraft:vanilla".into(),
-                "minecraft:redstone_experiments".into(),
-            ];
+            game.level.enabled_features = [
+                "minecraft:vanilla".to_string(),
+                "minecraft:redstone_experiments".to_string(),
+            ]
+            .into();
             let flags = game.native_level_enabled_features(level).unwrap();
             assert!(flags.contains("minecraft:redstone_experiments"));
             assert_eq!(flags.iter().count(), 2);
             assert_eq!(
-                FeatureFlags::new(&[]).iter().collect::<Vec<_>>(),
+                FeatureFlags::new(Arc::default()).iter().collect::<Vec<_>>(),
                 ["minecraft:vanilla"]
             );
             let ids: Vec<String> = flags.iter().map(str::to_owned).collect();

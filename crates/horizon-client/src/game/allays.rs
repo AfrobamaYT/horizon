@@ -52,7 +52,9 @@ impl Game<'_> {
                 .map_or(64, |i| i.max_stack as i32);
             // `Mob.aiStep`'s looting loop asks for no AI: `canPickUpLoot`, the
             // inventory room in `wantsToPickUp` and mob_griefing are its gates.
-            let wants = self.mobs[i].can_pick_up_loot() && griefing && carried < max;
+            let wants = self.mobs[i].can_pick_up_loot()
+                && self.entity_grief(self.mobs[i].id, griefing)
+                && carried < max;
             let reach = allay::pickup_reach(self.mobs[i].bounds());
             // GoToWantedItem: a stack it considers equal within 32 that the
             // allay sees (NearestItemSensor's hasLineOfSight, eye to eye). The

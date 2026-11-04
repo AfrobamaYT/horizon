@@ -4,7 +4,8 @@
 //! - `new <path> [--name "Name"]`: a content mod from the template; with
 //!   `--template native [--horizon <commit>]`, a native trait mod's bundle.
 //! - `build`: the `.hmod` in `target/horizon-mod/`, with the mod's `assets/`
-//!   and `data/`.
+//!   and `data/`; with `--wasm`, a Rust mod built to `mod.wasm` first (`wasm.rs`).
+//! - `wasm-std <out.wasm>`: the standard library member the game ships for wasm mods.
 //! - `run [--game <horizon-client>] [-- <game args>]`: build, then play with
 //!   the mod.
 //! - `check <file> [--json]`: what the registry checks of a submission
@@ -15,6 +16,7 @@ use horizon_mods::{Content, Manifest, Package, manifest::MANIFEST};
 mod check;
 mod jar;
 mod registry;
+mod wasm;
 
 use std::{
     path::{Path, PathBuf},
@@ -24,11 +26,25 @@ use std::{
 fn main() -> ExitCode {
     // Cargo runs `cargo-horizon-mod horizon-mod <args>`.
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // Cargo runs this tool as the linker of a `build --wasm`.
+    if let Ok(role) = std::env::var(wasm::LINK_ENV) {
+        return match wasm::link(&role, args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     if args.first().is_some_and(|a| a == "horizon-mod") {
         args.remove(0);
     }
     let result = match args.first().map(String::as_str) {
         Some("new") => new(&args[1..]),
+        Some("build") if args.get(1).is_some_and(|a| a == "--wasm") => wasm::build(Path::new("."))
+            .and_then(|()| build())
+            .map(|p| println!("Built {}", p.display())),
+        Some("wasm-std") => wasm::wasm_std(&args[1..]),
         Some("build") => build().map(|p| {
             println!("Built {}", p.display());
         }),
@@ -36,7 +52,7 @@ fn main() -> ExitCode {
         Some("check") => check(&args[1..]),
         Some("registry") => registry::main(&args[1..]),
         Some("use-jar") => jar::run(&args[1..]),
-        _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native [--horizon <commit>]] | build | run [--game <horizon-client>] [-- <game args>] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | registry build|review|check|list | use-jar <path>".into()),
+        _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native [--horizon <commit>]] | build [--wasm] | wasm-std <out.wasm> | run [--game <horizon-client>] [-- <game args>] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | registry build|review|check|list | use-jar <path>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

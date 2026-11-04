@@ -56,7 +56,7 @@ use horizon_core::{
     position::BlockPos,
     ticks::{ScheduleResult, TickPriority},
 };
-use horizon_world::level::PlaceContext;
+use horizon_world::level::{BonemealCheck, PlaceContext};
 use horizon_world::{
     consumable::UseAnimation,
     fluid::{FluidKind, FluidState},
@@ -74,8 +74,8 @@ use mod_api::{
     ScreenOpening, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
-    AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
-    LandingWrite, LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeBlockUpdateFlags,
+    AttachmentStore, BlockHit, BonemealSource, FluidStack, GameRuleValue, LandingWrite,
+    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeBlockUpdateFlags,
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, UsePhase,
 };
@@ -493,7 +493,7 @@ impl Game<'_> {
     pub(super) fn observe_screen(&mut self) {
         self.settle_title_mode();
         // Free with no native mod: the snapshot clones the title and menu.
-        if mod_api::mods().is_empty() {
+        if mod_api::__private::mods().is_empty() {
             return;
         }
         let current = self.observed_now();
@@ -566,18 +566,27 @@ impl GameLevel<'_> {
     ) {
         mod_api::dispatch_hopper_pickup_item(self, dimension, pos, item, count, cancel);
     }
-    /// A broken block is about to drop `experience` points at `pos`. The
-    /// vanilla block drop rule has been checked; change the amount before its
-    /// orbs are awarded. Server-side.
+    /// `Block.dropResources` built the item entities `drops` for the block
+    /// `state` broken at `pos` by `breaker` (a player's UUID, none for a
+    /// level-side break) with `tool`, and `spawnAfterBreak` would award
+    /// `experience` points: NeoForge's `BlockDropsEvent`. Edit the list or the
+    /// amount, or set `cancel` for no drops, no experience and no
+    /// `spawnAfterBreak` effects. Server-side, authoritative levels only.
     #[inline(always)]
-    pub(super) fn native_block_exp(
+    pub(super) fn native_block_drops(
         &self,
         dimension: LevelDimension,
         pos: BlockPos,
-        block: &str,
+        state: BlockStateId,
+        breaker: Option<u128>,
+        tool: Option<&ItemStack>,
+        drops: &mut Vec<NativeItemDrop>,
         experience: &mut u32,
+        cancel: &mut bool,
     ) {
-        mod_api::dispatch_block_exp(self, dimension, pos, block, experience);
+        mod_api::dispatch_block_drops(
+            self, dimension, pos, state, breaker, tool, drops, experience, cancel,
+        );
     }
 
     /// An authoritative server committed a changed state through `Level.setBlock`.
@@ -2019,7 +2028,10 @@ impl Game<'_> {
     /// Register server data reload listeners after packs are selected. The
     /// host gives registry access at registration, as
     /// `AddServerReloadListenersEvent.getRegistryAccess` does.
-    pub(super) fn native_add_server_reload_listeners(&self, listeners: &mut ServerReloadListeners) {
+    pub(super) fn native_add_server_reload_listeners(
+        &self,
+        listeners: &mut dyn ServerReloadListeners,
+    ) {
         mod_api::dispatch_add_server_reload_listeners(self, listeners);
     }
     /// Register client asset reload listeners before a reload stages its
@@ -2033,7 +2045,10 @@ impl Game<'_> {
     /// `native_client_resources_reloaded`. A listener that returns an error
     /// aborts the reload and keeps every listener's previous assets.
     /// Client-side.
-    pub(super) fn native_add_client_reload_listeners(&self, listeners: &mut ClientReloadListeners) {
+    pub(super) fn native_add_client_reload_listeners(
+        &self,
+        listeners: &mut dyn ClientReloadListeners,
+    ) {
         mod_api::dispatch_add_client_reload_listeners(self, listeners);
     }
     /// The server is assembling its data tables, as for
@@ -2528,7 +2543,7 @@ impl Game<'_> {
     }
     /// Register namespaced NBT component types before content loads.
     pub(super) fn native_component_types(
-        context: &mod_api::RegistrationContext<'_>,
+        context: &mod_api::RegistrationContext,
         types: &mut Vec<String>,
     ) {
         mod_api::dispatch_component_types(context, types);
@@ -2549,7 +2564,7 @@ impl Game<'_> {
     /// nothing but your code. Declarations that don't pass the files' checks
     /// are logged and that namespace's are left out.
     pub(super) fn native_blocks(
-        context: &mod_api::RegistrationContext<'_>,
+        context: &mod_api::RegistrationContext,
         blocks: &mut Vec<horizon_mods::content::Block>,
     ) {
         mod_api::dispatch_blocks(context, blocks);
@@ -2562,7 +2577,7 @@ impl Game<'_> {
     /// block's item comes with its block (`item: true`), not from here.
     /// Asked once at start, on every side.
     pub(super) fn native_items(
-        context: &mod_api::RegistrationContext<'_>,
+        context: &mod_api::RegistrationContext,
         items: &mut Vec<horizon_mods::content::Item>,
     ) {
         mod_api::dispatch_items(context, items);
@@ -2578,7 +2593,7 @@ impl Game<'_> {
     /// out; an id without a namespace is dropped. Only the client asks it,
     /// as NeoForge's ModelEvent.RegisterStandalone is a client mod-bus event.
     pub(super) fn native_standalone_models(
-        context: &mod_api::RegistrationContext<'_>,
+        context: &mod_api::RegistrationContext,
         models: &mut Vec<String>,
     ) {
         mod_api::dispatch_standalone_models(context, models);
@@ -7136,7 +7151,7 @@ impl Game<'_> {
         &mut self,
         dimension: &str,
         controller: TicketController,
-        validation: &mut mod_api::mod_chunk_tickets::TicketValidation,
+        validation: &mut dyn mod_api::TicketValidation,
     ) {
         mod_api::dispatch_validate_tickets(self, dimension, controller, validation);
     }
@@ -7858,6 +7873,11 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_enderman_anger(self, enderman, player, cancel);
     }
+    /// `EntityMobGriefingEvent` (`EventHooks.canEntityGrief`): may `entity`
+    /// change the world? `can_grief` starts as the `mob_griefing` rule.
+    pub(super) fn native_entity_mob_griefing(&self, entity: EntityRef, can_grief: &mut bool) {
+        mod_api::dispatch_entity_mob_griefing(self, entity, can_grief);
+    }
     /// `MobEffect.shouldApplyEffectTickThisTick` for a content mod's effect
     /// `effect` (`ruby:bleeding`), each tick a player or a mob has it, in
     /// `MobEffectInstance.tickServer` before it counts down: `tick_count` is
@@ -8378,7 +8398,7 @@ impl Game<'_> {
     /// `living_knockback`. A nested scope for the same attacker keeps what the outer recorded.
     pub(super) fn knockback_scope(&self, attacker: i32) -> impl Drop + use<> {
         use horizon_client::health::{knockback_attacker, knockback_from_holding, knockback_held};
-        if mod_api::mods().is_empty() {
+        if mod_api::__private::mods().is_empty() {
             return knockback_from_holding(attacker, [None, None]);
         }
         let held = if attacker != 0 && attacker == knockback_attacker() {
@@ -8979,13 +8999,11 @@ impl Game<'_> {
         let slot = self.slot_at(&batch, self.cursor.0, self.cursor.1)?;
         Some(self.slot_view(slot)?.item.to_string())
     }
-    /// Access a server-owned holder's attachment map. On a client it is the
-    /// copy of what the server synced: `set` and `remove` change only the copy.
-    pub(super) fn native_attachments(
-        &mut self,
-        holder: Holder,
-    ) -> AttachmentResult<&mut Attachments> {
-        self.attachment_map(holder)
+    /// The server-owned holders' attachments; `TYPE.get(host, holder)` reads
+    /// one. On a client it is the copy of what the server synced: `set` and
+    /// `remove` change only the copy.
+    pub(super) fn native_attachments(&mut self) -> &mut dyn AttachmentStore {
+        self
     }
     /// Read a loaded, light-emitting block. No implicit chunk loading.
     pub(super) fn native_lit_block_name(&self, pos: [i32; 3]) -> Option<&str> {
@@ -9077,21 +9095,41 @@ impl Game<'_> {
     /// (`level.getRandom()`), the one its explosions, block drops and other
     /// level draws use, so a mod's draws move vanilla's later ones as a Java
     /// mod's do. A parked level (the Nether while the server ticks the
-    /// Overworld) answers with its own stream. Draw with
-    /// `horizon_core::random::RandomSource` (`next_int_bound`, `next_float`...),
-    /// at the call site: the stream is the level's, not a copy. `None` on a
-    /// client of a server, for a stale handle and for a level not open: the
-    /// Nether and the End open when someone first goes there and close after
-    /// 300 ticks with nobody in them (`close_idle_levels`).
-    pub(super) fn native_level_random(&mut self, level: LevelRef) -> Option<&mut LegacyRandom> {
+    /// Overworld) answers with its own stream. This is a copy of it as it
+    /// stands: draw with `LevelRef::with_random`, which stores the stream
+    /// back, so the draws move the level's own. `None` on a client of a
+    /// server, for a stale handle and for a level not open: the Nether and
+    /// the End open when someone first goes there and close after 300 ticks
+    /// with nobody in them (`close_idle_levels`).
+    pub(super) fn native_level_random(&self, level: LevelRef) -> Option<LegacyRandom> {
         self.native_level_world(level)?;
         if level.dimension() == self.dim.id() {
+            Some(self.world.random.clone())
+        } else {
+            self.levels
+                .parked_world_of(level.dimension())
+                .map(|world| world.random.clone())
+        }
+    }
+    /// Replace the random of the server level `level` names with `random`,
+    /// a stream `native_level_random` gave and the mod drew from. False where
+    /// that gives `None`.
+    pub(super) fn native_level_set_random(
+        &mut self,
+        level: LevelRef,
+        random: LegacyRandom,
+    ) -> bool {
+        if self.native_level_world(level).is_none() {
+            return false;
+        }
+        let target = if level.dimension() == self.dim.id() {
             Some(&mut self.world.random)
         } else {
             self.levels
                 .parked_world_mut_of(level.dimension())
                 .map(|world| &mut world.random)
-        }
+        };
+        target.map(|target| *target = random).is_some()
     }
     /// The item entities of the server level `dimension` whose box meets
     /// the box `min`..`max`, in the level's order: vanilla's
@@ -9790,6 +9828,9 @@ impl Game<'_> {
     /// `datapacks/` is in that world's folder (`saves/<world>/datapacks`).
     /// The folder the game runs in (`--player-dir` moves a player's options
     /// and servers only, not the instance). Nothing is created.
+    ///
+    /// Not on wasm: a path in the game's file system, which a wasm mod has none of; a wasm mod
+    /// reads its own data and assets through reload listeners.
     pub(super) fn native_instance_dir(&self) -> PathBuf {
         Self::game_dir()
     }
@@ -9857,11 +9898,15 @@ impl Game<'_> {
     /// single-player window included, sees vanilla's and the content mods' recipes,
     /// not the world's data packs', unless a mod had the server send it the type
     /// (`native_datapack_sync`).
-    pub(super) fn native_recipes_of_type(&self, kind: &str) -> &[Recipe] {
+    pub(super) fn native_recipes_of_type(&self, kind: &str) -> Arc<[Recipe]> {
         if self.outside_world() {
-            return &[];
+            return Default::default();
         }
-        self.recipes().by_type.get(kind).map_or(&[], Vec::as_slice)
+        self.recipes()
+            .by_type
+            .get(kind)
+            .cloned()
+            .unwrap_or_default()
     }
     /// The validated category and icon of a custom recipe type, or None for
     /// an undeclared/invalid type, before resources load, or outside a world.
@@ -10014,6 +10059,15 @@ pub(super) enum BlockClickAnswer {
     },
 }
 
+/// What `BonemealEvent` settled for one use of bone meal.
+pub(super) struct BonemealAsk {
+    /// `Some(successful)` when a mod canceled the event: `growCrop`'s answer.
+    pub crop: Option<bool>,
+    /// `isValidBonemealTarget` as the event asked it, when a mod listens:
+    /// `growCrop` takes it instead of asking again.
+    pub check: Option<BonemealCheck>,
+}
+
 /// Where the game calls the hook points.
 impl Game<'_> {
     /// `BonemealEvent` for bone meal from `stack` on `pos`, used by the
@@ -10026,12 +10080,16 @@ impl Game<'_> {
         pos: BlockPos,
         by_player: bool,
         stack: &mut ItemStack,
-    ) -> Option<bool> {
+    ) -> BonemealAsk {
         if !mod_api::__private::listened(mod_api::HookId::Bonemeal) {
-            return None;
+            return BonemealAsk {
+                crop: None,
+                check: None,
+            };
         }
         let client = self.remote.is_some();
-        let valid = self.with_level(|b, level, _| b.is_valid_bonemeal_target(level, pos, client));
+        let check = self.with_level(|b, level, _| b.is_valid_bonemeal_target(level, pos, client));
+        let valid = check.is_valid();
         let state = self.world.block(pos.x, pos.y, pos.z);
         let (player, player_entity_id) = if by_player {
             let (uuid, entity) = self.native_clicker();
@@ -10052,7 +10110,10 @@ impl Game<'_> {
             &mut successful,
             &mut canceled,
         );
-        canceled.then_some(successful)
+        BonemealAsk {
+            crop: canceled.then_some(successful),
+            check: Some(check),
+        }
     }
     /// Whether a mod canceled `placer` writing `state` at `pos` (`entity_place`):
     /// `placer` is an entity id, `placed_against` the block it goes against and
@@ -10356,7 +10417,7 @@ impl Game<'_> {
         horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid())
     }
     /// The mods' say on a broken block's drops (`native_loot_drops`).
-    pub(super) fn native_block_drops(
+    pub(super) fn native_block_loot(
         &mut self,
         pos: [i32; 3],
         state: BlockStateId,
@@ -11396,7 +11457,7 @@ mod tests {
         }
         #[mod_api::__subscriptions]
         impl Hooks for User {
-            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+            fn register(&self, registrar: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
                 let kind = registrar.block_entity_type_key("be_test:shared");
                 registrar
                     .block_entity_part(&kind, Press)
@@ -11419,7 +11480,7 @@ mod tests {
         }
         #[mod_api::__subscriptions]
         impl Hooks for TestMod {
-            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+            fn register(&self, registrar: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
                 let kind = registrar
                     .block_entity_type("shared")
                     .blocks(if self.invalid {
@@ -11434,11 +11495,7 @@ mod tests {
                     .blocks(&[EMPTY])
                     .build();
             }
-            fn blocks(
-                &self,
-                _context: &mod_api::RegistrationContext<'_>,
-                event: &mut BlocksEvent<'_>,
-            ) {
+            fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
                 event.blocks.extend([FIRST, SECOND, EMPTY, PLAIN].map(|id| {
                     horizon_mods::content::Block {
                         id: id.into(),
@@ -13042,7 +13099,7 @@ mod entity_inside_tests {
     struct Mod(Stone);
     #[mod_api::__subscriptions]
     impl Hooks for Mod {
-        fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
             r.block_part("minecraft:stone", self.0.clone());
         }
     }

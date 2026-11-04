@@ -102,7 +102,13 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     implementation.items.push(subscribed);
     let export = if export && !render && part.is_none() {
         let ty = &implementation.self_ty;
-        quote!(pub fn hooks() -> Box<dyn mod_api::Hooks> { Box::new(<#ty as Default>::default()) })
+        quote! {
+            pub fn hooks() -> Box<dyn mod_api::Hooks> { Box::new(<#ty as Default>::default()) }
+            /// The mod's hooks for the guest glue in `mod_api::wasm`, when built to `mod.wasm`.
+            #[cfg(target_arch = "wasm32")]
+            #[unsafe(no_mangle)]
+            fn __horizon_mod_hooks() -> Box<dyn mod_api::Hooks> { hooks() }
+        }
     } else {
         quote!()
     };
@@ -137,6 +143,116 @@ pub fn horizon_part(_attribute: TokenStream, input: TokenStream) -> TokenStream 
 #[proc_macro_attribute]
 pub fn __subscriptions(_attribute: TokenStream, input: TokenStream) -> TokenStream {
     expand(parse_macro_input!(input as ItemImpl), false)
+}
+
+/// `if_installed!(host, other_mod, { other_mod::call(); })`: runs the block only where the optional
+/// dependency `other_mod` is installed. A native mod is built with the Cargo feature `other_mod`
+/// only when it is; a wasm mod is built with it and asks the game at the call, since an absent
+/// library's functions trap. One guard for both builds.
+#[proc_macro]
+pub fn if_installed(input: TokenStream) -> TokenStream {
+    let IfInstalled { host, id, block } = parse_macro_input!(input as IfInstalled);
+    let name = id.to_string();
+    quote! {
+        {
+            // A `let` takes the attribute where an expression statement can't.
+            #[cfg(feature = #name)]
+            let () = if ::mod_api::Host::is_loaded(&*#host, #name) #block;
+            #[cfg(not(feature = #name))]
+            let _ = &#host;
+        }
+    }
+    .into()
+}
+
+struct IfInstalled {
+    host: syn::Expr,
+    id: syn::Ident,
+    block: syn::Block,
+}
+
+impl syn::parse::Parse for IfInstalled {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let host = input.parse()?;
+        input.parse::<syn::Token![,]>()?;
+        let id = input.parse()?;
+        input.parse::<syn::Token![,]>()?;
+        Ok(Self {
+            host,
+            id,
+            block: input.parse()?,
+        })
+    }
+}
+
+/// `#[wasm(via = Form)]` on a `mod_api` type, or on the `pub use` that exports another crate's:
+/// the type crosses to wasm mods as `Form`, through `From<&Type> for Form` and
+/// `TryFrom<Form> for Type`, which live with the type. The bindings generator reads the
+/// attribute; this checks the two conversions exist.
+#[proc_macro_attribute]
+pub fn wasm(attribute: TokenStream, input: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(input as syn::Item);
+    let via = match syn::parse::<WasmVia>(attribute) {
+        Ok(via) => via.form,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let ty = match &item {
+        syn::Item::Struct(item) => item.ident.clone(),
+        syn::Item::Enum(item) => item.ident.clone(),
+        syn::Item::Use(item) => match last_use_name(&item.tree) {
+            Some(name) => name,
+            None => {
+                return syn::Error::new_spanned(item, "#[wasm] exports one type")
+                    .to_compile_error()
+                    .into();
+            }
+        },
+        item => {
+            return syn::Error::new_spanned(item, "#[wasm] goes on a type or its `pub use`")
+                .to_compile_error()
+                .into();
+        }
+    };
+    quote! {
+        #item
+        const _: () = {
+            fn crosses_as_its_form()
+            where
+                #via: for<'a> ::core::convert::From<&'a #ty>,
+                #ty: ::core::convert::TryFrom<#via>,
+            {
+            }
+        };
+    }
+    .into()
+}
+
+/// `via = Form`.
+struct WasmVia {
+    form: syn::Type,
+}
+
+impl syn::parse::Parse for WasmVia {
+    fn parse(input: syn::parse::ParseStream<'_>) -> syn::Result<Self> {
+        let key: syn::Ident = input.parse()?;
+        if key != "via" {
+            return Err(syn::Error::new(key.span(), "expected `via = Form`"));
+        }
+        input.parse::<syn::Token![=]>()?;
+        Ok(Self {
+            form: input.parse()?,
+        })
+    }
+}
+
+/// The name a `use` tree of one path brings in.
+fn last_use_name(tree: &syn::UseTree) -> Option<syn::Ident> {
+    match tree {
+        syn::UseTree::Path(path) => last_use_name(&path.tree),
+        syn::UseTree::Name(name) => Some(name.ident.clone()),
+        syn::UseTree::Rename(rename) => Some(rename.rename.clone()),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

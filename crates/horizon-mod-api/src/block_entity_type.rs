@@ -102,7 +102,7 @@ pub fn validate_block_entity_type_keys(
 /// Builds one native block entity type during mod registration.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityTypeBuilder<'a> {
-    pub(super) registrar: &'a mut super::Registrar,
+    pub(super) registrar: &'a mut dyn super::Registrar,
     pub(super) id: String,
     pub(super) blocks: Vec<String>,
 }
@@ -117,6 +117,6 @@ impl BlockEntityTypeBuilder<'_> {
     /// Register the type and return its typed key.
     pub fn build(self) -> BlockEntityTypeKey {
         self.registrar
-            .register_block_entity_type(self.id, self.blocks)
+            .declare_block_entity_type(&self.id, self.blocks)
     }
 }

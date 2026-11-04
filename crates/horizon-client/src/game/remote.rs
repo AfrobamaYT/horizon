@@ -467,7 +467,7 @@ pub(super) struct Remote {
     pub session: Session,
     pub brand: String,
     /// This connection's configured feature flags, carried through reconfiguration.
-    pub(super) features: Vec<String>,
+    pub(super) features: std::sync::Arc<[String]>,
     /// The server announced it runs mods' quiet commands.
     pub quiet_commands: bool,
     /// The server announced it carries mod messages.
@@ -1007,7 +1007,7 @@ impl Game<'_> {
         self.remote = Some(Remote {
             session,
             brand: "unknown".into(),
-            features: vec!["minecraft:vanilla".into()],
+            features: ["minecraft:vanilla".to_string()].into(),
             quiet_commands: false,
             mod_net: false,
             logged_out: false,
@@ -1907,7 +1907,7 @@ impl Game<'_> {
                 }
                 Event::Features(features) => {
                     if let Some(remote) = &mut self.remote {
-                        remote.features = features;
+                        remote.features = features.into();
                     }
                 }
                 Event::Brand(brand) => {
@@ -8019,9 +8019,15 @@ impl Game<'_> {
     fn remote_bone_meal_succeeds(&mut self, hit: &super::Hit, stack: &ItemStack) -> bool {
         let pos = horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
         let face = horizon_core::geometry::Direction::ALL[face_direction(hit.face) as usize];
-        let (crop, _) = self.held_bonemeal(pos, stack);
+        let (ask, _) = self.held_bonemeal(pos, stack);
         self.with_level(|b, level, _| {
-            b.bone_meal_succeeds_on_client(&mut DryLevel::new(level), pos, face, crop)
+            b.bone_meal_succeeds_on_client(
+                &mut DryLevel::new(level),
+                pos,
+                face,
+                ask.crop,
+                ask.check,
+            )
         })
     }
 
@@ -9071,7 +9077,7 @@ impl Game<'_> {
     /// `LivingEntity`, which may be hit critically), heard by native mods on
     /// both sides. Only the server sweeps.
     fn remote_sweep_event(&mut self, target: &str, living: bool) {
-        if mod_api::mods().is_empty() {
+        if mod_api::__private::mods().is_empty() {
             return;
         }
         let speed = self
@@ -11347,6 +11353,20 @@ mod tests {
                     .and_then(|player| game.native_menu_ref(player))
                     .is_none()
             );
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "MenuReadTest").unwrap();
+            game.enter_remote_dimension(&other, false, Reason::Other);
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            let reconnected = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            assert_eq!(game.native_menu_slot_count(before_logout), None);
+            assert_eq!(game.native_menu_slot_count(reconnected), Some(46));
+            assert_ne!(reconnected, before_logout);
         });
     }
 

@@ -15,9 +15,7 @@ use horizon_client::{
     text::{Style, Text},
 };
 use mod_api::__private::game::*;
-use mod_api::{
-    __private::reload::ReloadFiles, ClientReloadListeners, FileToIdConverter, Identifier,
-};
+use mod_api::{__private::reload::ReloadFiles, FileToIdConverter, Identifier};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -507,7 +505,7 @@ pub(super) fn stage_pack(
     selected: &[String],
     server: &[Pack],
     mod_sources: &super::mods::ModsState,
-    client_listeners: ClientReloadListeners,
+    client_listeners: mod_api::ClientListenerRegistry,
     assets: &Arc<Assets>,
     res: &Resources,
     context: &WorkerContext,

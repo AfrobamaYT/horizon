@@ -91,8 +91,8 @@ pub mod __private;
 mod phase;
 pub use horizon_mods::Side;
 pub use phase::{
-    DataLoadContext, DataLoadOrigin, LoadedMods, LoopContext, LoopSide, PackageInfo, PackageKind,
-    RegistrationContext,
+    DataLoadContext, DataLoadOrigin, LoadedMods, LoopContext, LoopSide, OwningLoad, OwningLoop,
+    PackageInfo, PackageKind, RegistrationContext,
 };
 mod config_files;
 pub use config_files::{
@@ -110,6 +110,7 @@ pub(crate) mod server_reload;
 pub use client_reload::{
     ClientReloadContext, ClientReloadListener, ClientReloadListeners, VanillaClientListeners,
 };
+#[horizon_mod_api_macros::wasm(via = String)]
 pub use horizon_world::identifier::Identifier;
 pub use reload::{ReloadApply, ReloadResourceError};
 pub use reload_order::ReloadOrderError;
@@ -117,6 +118,12 @@ pub use server_reload::{
     ListenerKey, ServerReloadContext, ServerReloadListener, ServerReloadListeners,
     ServerReloadResources, VanillaServerListeners,
 };
+// hidden: the game's registries and store, not part of the mod surface
+#[doc(hidden)]
+pub use server_reload::{RetainedListeners, ServerListenerRegistry};
+// hidden: the game's registry, not part of the mod surface
+#[doc(hidden)]
+pub use client_reload::ClientListenerRegistry;
 
 pub use crate::biome::{BiomeColors, SpawnEntry};
 pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
@@ -134,7 +141,9 @@ pub use crate::game::{
     NativeMobRender, NativeModEvent, NativePlayerRender, NativeShake, PhantomSpawnResult,
     SleepProblem,
 };
-pub use crate::health::{DamageContainer, HurtSource, Reduction, ShieldBlock, Victim};
+#[horizon_mod_api_macros::wasm(via = horizon_world::living_damage::DamageValues)]
+pub use crate::health::DamageContainer;
+pub use crate::health::{HurtSource, Reduction, ShieldBlock, Victim};
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::item_tooltip::TooltipDisplay;
 pub use crate::menu::{LogicalSide, StackedOnOther};
@@ -152,14 +161,14 @@ pub use crate::render::{
 };
 pub use horizon_assets::item_model::{DisplayContext, StackView};
 pub use horizon_client_core::gamerules::Value as GameRuleValue;
+#[horizon_mod_api_macros::wasm(via = String)]
 pub use horizon_client_core::particle_type::ParticleType;
 pub use horizon_client_core::suggestion::Suggestion;
+#[horizon_mod_api_macros::wasm(via = serde_json::Value)]
 pub use horizon_client_core::text::Text;
-pub use horizon_core::{
-    geometry::Direction,
-    position::BlockPos,
-    random::{LegacyRandom, RandomSource},
-};
+#[horizon_mod_api_macros::wasm(via = (u64, Option<f64>))]
+pub use horizon_core::random::LegacyRandom;
+pub use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
 /// The registry facts a recipe viewer needs for an enchantment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -182,20 +191,28 @@ impl EnchantmentInfo {
     }
 }
 
+#[horizon_mod_api_macros::wasm(via = horizon_world::nbt::Tag)]
+pub use horizon_items::item_data::StackData;
+#[horizon_mod_api_macros::wasm(via = horizon_world::nbt::Tag)]
 pub use horizon_items::items::ItemStack;
 pub use horizon_items::items::TagRegistry;
 pub use horizon_world::consumable::UseAnimation;
+#[horizon_mod_api_macros::wasm(via = (horizon_world::fluid::FluidKind, u8, bool))]
+pub use horizon_world::fluid::FluidState;
+#[horizon_mod_api_macros::wasm(via = Tag)]
+pub use horizon_world::nbt::Compound;
+#[horizon_mod_api_macros::wasm(via = Vec<u8>)]
+pub use horizon_world::nbt::Tag;
 pub use horizon_world::player_inventory::EquipmentSlot;
 pub use horizon_world::{
     attachments::{
-        AttachmentCodec, AttachmentError, AttachmentHost, AttachmentType, Attachments, Holder,
+        AttachmentCodec, AttachmentError, AttachmentForm, AttachmentPolicy, AttachmentStore,
+        AttachmentType, AttachmentValue, AttachmentWrite, Holder,
     },
-    fluid::FluidState,
     level::{
         BlockId, Dimension as LevelDimension, LandingWrite, NeighbourUpdate, PlacementContext,
     },
     loot::{LootStack, NativeLootContext},
-    nbt::{Compound, Tag},
     registry::BlockStateId,
 };
 pub use serde_json;
@@ -2139,6 +2156,18 @@ impl LevelRef {
     pub fn dimension(self) -> &'static str {
         self.dimension
     }
+    /// Draw from the level's own random stream (vanilla's `Level.random`), in vanilla's order:
+    /// `draw` gets the stream and the level keeps it after. None where `random` is None.
+    pub fn with_random<T>(
+        self,
+        host: &mut dyn ServerHost,
+        draw: impl FnOnce(&mut LegacyRandom) -> T,
+    ) -> Option<T> {
+        let mut random = self.random(host)?;
+        let drawn = draw(&mut random);
+        self.set_random(host, random);
+        Some(drawn)
+    }
     /// The open of the world the handle belongs to.
     pub fn epoch(self) -> NativeWorldEpoch {
         self.epoch
@@ -2234,16 +2263,17 @@ pub enum LightLayer {
 }
 
 /// The feature flags a world enables (`FeatureFlagSet`, `LevelReader.enabledFeatures`), each
-/// as its id (`minecraft:vanilla`, `minecraft:redstone_experiments`), borrowed from the world.
+/// as its id (`minecraft:vanilla`, `minecraft:redstone_experiments`), shared with the world.
 /// A world that names none enables `minecraft:vanilla` alone, as vanilla's default does.
-/// Reading it allocates nothing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Getting and reading it allocates nothing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[horizon_mod_api_macros::wasm(via = Vec<String>)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct FeatureFlags<'a>(&'a [String]);
+pub struct FeatureFlags(Arc<[String]>);
 
-impl<'a> FeatureFlags<'a> {
+impl FeatureFlags {
     /// The flags of a world's `enabled_features` list; an empty list is vanilla's default.
-    pub fn new(ids: &'a [String]) -> Self {
+    pub fn new(ids: Arc<[String]>) -> Self {
         Self(ids)
     }
     /// `FeatureFlagSet.contains`: whether the flag `flag` (`minecraft:redstone_experiments`, or
@@ -2254,11 +2284,24 @@ impl<'a> FeatureFlags<'a> {
             .any(|id| id == flag || (bare && id.strip_prefix("minecraft:") == Some(flag)))
     }
     /// The enabled flag ids.
-    pub fn iter(&self) -> impl Iterator<Item = &'a str> + use<'a> {
-        let ids = self.0;
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        let ids = &self.0;
         ids.iter()
             .map(String::as_str)
             .chain(ids.is_empty().then_some("minecraft:vanilla"))
+    }
+}
+
+/// The flags as their ids, the form they cross into a wasm mod as.
+impl From<&FeatureFlags> for Vec<String> {
+    fn from(flags: &FeatureFlags) -> Self {
+        flags.0.to_vec()
+    }
+}
+
+impl From<Vec<String>> for FeatureFlags {
+    fn from(ids: Vec<String>) -> Self {
+        Self(ids.into())
     }
 }
 
@@ -3066,13 +3109,8 @@ pub(crate) fn install(mods: Mods) -> &'static Installed {
 }
 
 /// The process-wide list in dispatch order, or an empty list before installation.
-pub fn mods() -> &'static [ModEntry] {
+pub(crate) fn mods() -> &'static [ModEntry] {
     installed().map_or(&[], |installed| &installed.mods)
-}
-
-/// Whether a mod with this `[mod] id` is installed.
-pub fn is_loaded(id: &str) -> bool {
-    mods().iter().any(|entry| entry.id == id)
 }
 
 pub(crate) fn listened(hook: generated::HookId) -> bool {
@@ -3532,16 +3570,42 @@ pub use generated_host::{
 /// Result of accessing or decoding an attachment.
 pub type AttachmentResult<T> = std::result::Result<T, AttachmentError>;
 
-macro_rules! host_attachment_host {
+// hidden: the game's maps behind the store, not part of the mod surface
+#[doc(hidden)]
+pub use horizon_world::attachments::{AttachmentHost, Attachments};
+
+/// A host is the store of its holders' attachments, so `TYPE.get(host, holder)` reads one.
+macro_rules! host_attachment_store {
     ($($host:ident),+) => { $(
-        impl AttachmentHost for dyn $host + '_ {
-            fn attachments(&mut self, holder: Holder) -> Result<&mut Attachments, AttachmentError> {
-                Host::attachments(self, holder)
+        impl AttachmentStore for dyn $host + '_ {
+            fn holds(&mut self, holder: Holder, namespace: &str, name: &str) -> AttachmentResult<bool> {
+                self.attachments().holds(holder, namespace, name)
+            }
+            fn decoded(&mut self, holder: Holder, namespace: &str, name: &str) -> AttachmentResult<Option<AttachmentValue>> {
+                self.attachments().decoded(holder, namespace, name)
+            }
+            fn saved(&mut self, holder: Holder, namespace: &str, name: &str) -> AttachmentResult<Option<Compound>> {
+                self.attachments().saved(holder, namespace, name)
+            }
+            fn store(&mut self, holder: Holder, namespace: &str, name: &str, value: AttachmentValue, form: AttachmentForm) -> AttachmentResult<()> {
+                self.attachments().store(holder, namespace, name, value, form)
+            }
+            fn discard(&mut self, holder: Holder, namespace: &str, name: &str, sync: bool) -> AttachmentResult<()> {
+                self.attachments().discard(holder, namespace, name, sync)
+            }
+            fn queue_sync(&mut self, holder: Holder, namespace: &str, name: &str) -> AttachmentResult<()> {
+                self.attachments().queue_sync(holder, namespace, name)
             }
         }
     )+ };
 }
-host_attachment_host!(Host, ServerHost, ClientHost);
+host_attachment_store!(
+    Host,
+    ServerHost,
+    ClientHost,
+    LevelRandomHost,
+    LevelWriteHost
+);
 
 /// Read-only level services, like vanilla's `LevelReader`.
 ///
@@ -3650,22 +3714,44 @@ pub trait LevelHost {
         unimplemented!("LevelHost::is_raining_at")
     }
     /// `LevelReader.enabledFeatures`: the feature flags the world enables.
-    fn enabled_features(&self) -> FeatureFlags<'_> {
+    fn enabled_features(&self) -> FeatureFlags {
         unimplemented!("LevelHost::enabled_features")
     }
 }
 
 /// Access vanilla's `Level.random`, so draws come in vanilla's order.
 pub trait LevelRandomHost: LevelHost {
-    /// Access a holder's server-owned attachment map.
-    fn attachments(&mut self, _holder: Holder) -> Result<&mut Attachments, AttachmentError> {
+    /// The holders' server-owned attachments; `TYPE.get(host, holder)` reads one through it.
+    fn attachments(&mut self) -> &mut dyn AttachmentStore {
         unimplemented!("LevelRandomHost::attachments")
     }
-    /// The level's random stream through `native_level_random`, or None on a non-authoritative level.
-    fn random(&mut self) -> Option<&mut LegacyRandom> {
+    /// A copy of the level's random stream through `native_level_random`, or None on a
+    /// non-authoritative level. Draw with `with_random`, which stores it back.
+    fn random(&mut self) -> Option<LegacyRandom> {
         unimplemented!("LevelRandomHost::random")
     }
+    /// Replace the level's random stream with `random`, one `random` gave and the mod drew from.
+    /// False on a non-authoritative level.
+    fn set_random(&mut self, _random: LegacyRandom) -> bool {
+        unimplemented!("LevelRandomHost::set_random")
+    }
 }
+
+macro_rules! level_random_draws {
+    ($($host:ident),+) => { $(
+        impl dyn $host + '_ {
+            /// Draw from the level's own random stream, in vanilla's order: `draw` gets the
+            /// stream and the level keeps it after. None on a non-authoritative level.
+            pub fn with_random<T>(&mut self, draw: impl FnOnce(&mut LegacyRandom) -> T) -> Option<T> {
+                let mut random = self.random()?;
+                let drawn = draw(&mut random);
+                self.set_random(random);
+                Some(drawn)
+            }
+        }
+    )+ };
+}
+level_random_draws!(LevelRandomHost, LevelWriteHost);
 
 /// A `LevelReader` with vanilla's `ScheduledTickAccess`. Shape updates cannot write blocks.
 pub trait LevelTicksHost: LevelHost {
@@ -3741,17 +3827,6 @@ pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
     }
 }
 
-macro_rules! level_attachment_host {
-    ($($host:ident),+) => { $(
-        impl AttachmentHost for dyn $host + '_ {
-            fn attachments(&mut self, holder: Holder) -> Result<&mut Attachments, AttachmentError> {
-                LevelRandomHost::attachments(self, holder)
-            }
-        }
-    )+ };
-}
-level_attachment_host!(LevelRandomHost, LevelWriteHost);
-
 mod capability;
 pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS};
 mod entity_capability;
@@ -3782,7 +3857,7 @@ mod structure_type;
 pub use horizon_world::worldgen::structure::BoundingBox;
 pub use structure_type::{
     BiomeId, ChunkPos, FoundStructure, GenerationContext, HeightmapType, NoiseBlock, NoiseColumn,
-    PieceContext, PieceRandom, StructureError, StructurePiece, StructureType, WorldgenRandom,
+    PieceContext, StructureError, StructurePiece, StructureRandom, StructureType,
 };
 mod part_table;
 #[cfg(any(test, feature = "testing"))]
@@ -3790,12 +3865,17 @@ pub(crate) use part_table::install_parts;
 #[cfg(test)]
 pub(crate) use part_table::mark_game_thread;
 pub use part_table::{
-    Attached, BlockEntityProviders, BlockProvider, EntityProvider, EntityProviders, ItemProvider,
-    Parts, Registrar, block_entity_providers, entity_providers, has_entity_providers,
+    Attached, BlockCapabilityProvider, BlockEntityProviders, BlockProvider, BlockProviderOf,
+    CapabilityProviders, EntityCapabilityProvider, EntityProvider, EntityProviderOf,
+    EntityProviders, ItemCapabilityProvider, ItemProvider, ItemProviderOf, OwnProvider, Parts,
+    ProvidedBy, Registrar, block_entity_providers, entity_providers, has_entity_providers,
 };
-pub(crate) use part_table::{
-    ProvidedBy, answered, ask_providers, has_part_hook, parts, place_provider, providers,
-};
+pub(crate) use part_table::{InstalledProviders, answered, ask_providers, has_part_hook, parts};
+
+#[cfg(target_arch = "wasm32")]
+mod wasm;
+#[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
+mod wasm_host;
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
@@ -3844,7 +3924,7 @@ pub use horizon_mod_api_macros::__subscriptions;
 /// #[mod_api::horizon_mod] impl Hooks for A {}
 /// #[mod_api::horizon_mod] impl Hooks for B {}
 /// ```
-pub use horizon_mod_api_macros::{horizon_mod, horizon_part};
+pub use horizon_mod_api_macros::{horizon_mod, horizon_part, if_installed};
 
 #[cfg(test)]
 mod hooks_tests;
@@ -3866,6 +3946,26 @@ mod tests {
         let _: &mut dyn LevelRandomHost = &mut Empty;
         let _: &mut dyn LevelTicksHost = &mut Empty;
         let _: &mut dyn LevelWriteHost = &mut Empty;
+    }
+
+    #[test]
+    fn an_optional_dependency_runs_only_when_built_with_and_installed() {
+        struct Installed(&'static str);
+        impl Host for Installed {
+            fn is_loaded(&self, id: &str) -> bool {
+                id == self.0
+            }
+        }
+        // The `testing` feature stands for a dependency's: without it the block isn't compiled,
+        // with it the game is asked.
+        let ran = std::cell::Cell::new(0);
+        for host in [Installed("testing"), Installed("other")] {
+            let host: &dyn Host = &host;
+            if_installed!(host, testing, {
+                ran.set(ran.get() + 1);
+            });
+        }
+        assert_eq!(ran.get(), usize::from(cfg!(feature = "testing")));
     }
 
     #[test]
@@ -4000,7 +4100,7 @@ mod tests {
         struct StickMod<P>(P);
         #[mod_api::__subscriptions]
         impl<P: ItemPart + Clone> Hooks for StickMod<P> {
-            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 r.item_part("minecraft:stick", self.0.clone());
             }
         }
@@ -4334,7 +4434,7 @@ mod tests {
 
     #[mod_api::__subscriptions]
     impl Hooks for OffHandTop {
-        fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
             r.item_part("minecraft:stick", HeardStick);
         }
 

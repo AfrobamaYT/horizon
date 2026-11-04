@@ -9,7 +9,7 @@ static HEARD: Mutex<Vec<(i32, i32, i32, Option<Direction>)>> = Mutex::new(Vec::n
 struct Hush;
 #[mod_api::__subscriptions]
 impl Hooks for Hush {
-    fn register(&self, _: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {}
+    fn register(&self, _: &mut dyn Registrar, _: &mod_api::RegistrationContext) {}
     fn neighbor_notify(&self, _: &dyn LevelHost, event: &mut NeighborNotifyEvent) -> Flow {
         let BlockPos { x, y, z } = event.pos;
         HEARD.lock().unwrap().push((x, y, z, event.skipped_side));

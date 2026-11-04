@@ -105,7 +105,7 @@ impl BlockPart for Observed {
 
 #[mod_api::__subscriptions]
 impl Hooks for Observed {
-    fn register(&self, r: &mut Registrar, _: &RegistrationContext<'_>) {
+    fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
         // An unbacked vehicle coordinate would select air if it were dispatched as a block.
         for block in ["minecraft:air", "minecraft:chest", "minecraft:crafter"] {
             r.block_part(block, self.clone());
@@ -114,7 +114,7 @@ impl Hooks for Observed {
         r.block_entity_part(&kind, self.changes.clone()).unwrap();
     }
 
-    fn blocks(&self, _: &RegistrationContext<'_>, event: &mut BlocksEvent<'_>) {
+    fn blocks(&self, _: &RegistrationContext, event: &mut BlocksEvent<'_>) {
         event.blocks.push(horizon_mods::content::Block {
             id: DEPOT.into(),
             template: "minecraft:white_banner".into(),

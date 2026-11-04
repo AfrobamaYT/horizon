@@ -403,7 +403,7 @@ mod content_tests {
     impl mod_api::Hooks for AspectListener {
         fn ingredient(
             &self,
-            context: &mod_api::DataLoadContext<'_>,
+            context: &dyn mod_api::DataLoadContext,
             event: &mut mod_api::IngredientEvent<'_>,
         ) {
             self.0
@@ -500,7 +500,7 @@ mod content_tests {
     impl mod_api::Hooks for PropertyListener {
         fn recipe_property_sets(
             &self,
-            context: &mod_api::DataLoadContext<'_>,
+            context: &dyn mod_api::DataLoadContext,
             event: &mut mod_api::RecipePropertySetsEvent<'_>,
         ) {
             self.0.lock().unwrap().push(context.origin());

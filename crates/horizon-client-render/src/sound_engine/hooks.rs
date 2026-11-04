@@ -1,9 +1,9 @@
 //! The sound engine's hook points for native mods. They fire from the engine itself,
-//! where vanilla's `SoundEngine` does, with the client's [`LoopContext`]: no game is
+//! where vanilla's `SoundEngine` does, with the client's [`LoopContext`](mod_api::LoopContext): no game is
 //! at hand there, and a sound is played from inside the engine's own loops.
 use super::{Attenuation, ChannelId, SoundEngine, SoundInstance};
-use mod_api::__private::{built, game::LoopContextNew};
-use mod_api::{ChannelRef, HookId, LoopContext, SoundAttenuation, SoundPlay, SoundSource};
+use mod_api::__private::built;
+use mod_api::{ChannelRef, HookId, OwningLoop, SoundAttenuation, SoundPlay, SoundSource};
 
 /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`
 /// with the game's): a sound is about to play (`PlaySoundEvent`, vanilla's `SoundEngine.play`).
@@ -12,11 +12,11 @@ use mod_api::{ChannelRef, HookId, LoopContext, SoundAttenuation, SoundPlay, Soun
 /// sound resolved, volume, channel pool), for every sound the client plays, so answer fast.
 #[inline(never)]
 pub fn native_play_sound(
-    context: &LoopContext<'_>,
+    context: &horizon_world::native_load_context::LoopContext,
     original: &SoundPlay,
     sound: &mut Option<SoundPlay>,
 ) {
-    mod_api::dispatch_play_sound(context, original, sound);
+    mod_api::dispatch_play_sound(&OwningLoop::new(context), original, sound);
 }
 
 /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`
@@ -24,11 +24,11 @@ pub fn native_play_sound(
 /// (`PlaySoundSourceEvent`), after the engine set its pitch, volume and position.
 #[inline(never)]
 pub fn native_play_sound_source(
-    context: &LoopContext<'_>,
+    context: &horizon_world::native_load_context::LoopContext,
     sound: &SoundPlay,
     channel: &ChannelRef,
 ) {
-    mod_api::dispatch_play_sound_source(context, sound, channel);
+    mod_api::dispatch_play_sound_source(&OwningLoop::new(context), sound, channel);
 }
 
 /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`
@@ -36,19 +36,19 @@ pub fn native_play_sound_source(
 /// (`PlayStreamingSourceEvent`).
 #[inline(never)]
 pub fn native_play_streaming_source(
-    context: &LoopContext<'_>,
+    context: &horizon_world::native_load_context::LoopContext,
     sound: &SoundPlay,
     channel: &ChannelRef,
 ) {
-    mod_api::dispatch_play_streaming_source(context, sound, channel);
+    mod_api::dispatch_play_streaming_source(&OwningLoop::new(context), sound, channel);
 }
 
 /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`
 /// with the game's): the sound engine opened its output, at window start, after a resource
 /// reload and when the output device changes (`SoundEngineLoadEvent`).
 #[inline(never)]
-pub fn native_sound_engine_load(context: &LoopContext<'_>) {
-    mod_api::dispatch_sound_engine_load(context);
+pub fn native_sound_engine_load(context: &horizon_world::native_load_context::LoopContext) {
+    mod_api::dispatch_sound_engine_load(&OwningLoop::new(context));
 }
 
 impl SoundInstance {
@@ -117,7 +117,7 @@ impl SoundEngine {
         };
         let original = instance.play_settings();
         let mut sound = Some(original.clone());
-        native_play_sound(&LoopContext::new(source), &original, &mut sound);
+        native_play_sound(source, &original, &mut sound);
         match sound {
             None => false,
             Some(edited) => {
@@ -152,11 +152,10 @@ impl SoundEngine {
         };
         let sound = instance.play_settings();
         let channel = built::ChannelRef { id: channel }.into();
-        let context = LoopContext::new(source);
         if streaming {
-            native_play_streaming_source(&context, &sound, &channel);
+            native_play_streaming_source(source, &sound, &channel);
         } else {
-            native_play_sound_source(&context, &sound, &channel);
+            native_play_sound_source(source, &sound, &channel);
         }
     }
 
@@ -166,7 +165,7 @@ impl SoundEngine {
             return;
         };
         if self.loaded && mod_api::__private::listened(HookId::SoundEngineLoad) {
-            native_sound_engine_load(&LoopContext::new(source));
+            native_sound_engine_load(source);
         }
     }
 }
@@ -189,7 +188,11 @@ mod tests {
 
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for Tuner {
-        fn play_sound(&self, _context: &LoopContext<'_>, event: &mut mod_api::PlaySoundEvent<'_>) {
+        fn play_sound(
+            &self,
+            _context: &dyn mod_api::LoopContext,
+            event: &mut mod_api::PlaySoundEvent<'_>,
+        ) {
             self.0.lock().unwrap().push(format!(
                 "play {} {}",
                 event.original.identifier, event.original.volume
@@ -207,7 +210,7 @@ mod tests {
         }
         fn play_sound_source(
             &self,
-            _context: &LoopContext<'_>,
+            _context: &dyn mod_api::LoopContext,
             event: &mut mod_api::PlaySoundSourceEvent<'_>,
         ) {
             self.0.lock().unwrap().push(format!(
@@ -217,7 +220,7 @@ mod tests {
         }
         fn play_streaming_source(
             &self,
-            _context: &LoopContext<'_>,
+            _context: &dyn mod_api::LoopContext,
             event: &mut mod_api::PlayStreamingSourceEvent<'_>,
         ) {
             self.0
@@ -227,7 +230,7 @@ mod tests {
         }
         fn sound_engine_load(
             &self,
-            context: &LoopContext<'_>,
+            context: &dyn mod_api::LoopContext,
             _event: &mut mod_api::SoundEngineLoadEvent,
         ) {
             self.0

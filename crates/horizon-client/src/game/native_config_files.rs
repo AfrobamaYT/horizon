@@ -28,12 +28,18 @@ impl Game<'_> {
     pub(super) fn native_config_files() -> &'static dyn ConfigFiles {
         &CONFIG_FILES
     }
+    /// Whether a mod with the `horizon-mod.toml` id `id` is installed: a
+    /// native, wasm or content package (Fabric's `FabricLoader.isModLoaded`,
+    /// NeoForge's `ModList.isLoaded`). The list is fixed at startup.
+    pub(super) fn native_is_loaded(id: &str) -> bool {
+        mod_api::__private::loaded_mods().get(id).is_some()
+    }
 }
 
 fn io(error: std::io::Error) -> ConfigFileError {
     match error.kind() {
         ErrorKind::NotFound => ConfigFileError::NotFound,
-        kind => ConfigFileError::Io(kind),
+        _ => ConfigFileError::Io(error.to_string()),
     }
 }
 

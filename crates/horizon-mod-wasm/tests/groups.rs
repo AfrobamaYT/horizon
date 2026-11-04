@@ -1,0 +1,85 @@
+//! A capability of a library mod's own handler type across wasm groups: two mods depending on
+//! the library share one group, so the one answering it is reached by the other; a mod of
+//! another group asking a capability of the same name gets none. CI builds the mods in
+//! `tests/groups/` first and points `HORIZON_WASM_GROUPS` at that folder and `HORIZON_WASM_STD`
+//! at the std member; the test is ignored elsewhere.
+use mod_api::__private::game::BackendRefOf;
+use mod_api::__private::game::Fields;
+use mod_api::{
+    Backend, BackendRef, BlockEntityRef, BlockEntityTypeKey, Host, LevelRef, NativeWorldEpoch,
+    ServerChatEvent, ServerHost, Text,
+};
+
+/// One level with a `test:counter_box` block entity at its origin column.
+struct World;
+
+fn overworld() -> LevelRef {
+    LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld")
+}
+
+impl Backend for World {
+    fn level_in_place(&self, level: LevelRef) -> bool {
+        level == overworld()
+    }
+    fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {
+        (entity.fields().position == [0, 64, 0])
+            .then(|| mod_api::__private::game::block_entity_type_key("test:counter_box"))
+    }
+}
+
+impl Host for World {
+    fn backend(&self) -> Option<BackendRef<'_>> {
+        Some(BackendRef::of(self))
+    }
+    fn level(&self, dimension: &str) -> Option<LevelRef> {
+        (dimension == "minecraft:overworld").then(overworld)
+    }
+    fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
+        Some(mod_api::__private::game::block_entity_ref(level, position))
+    }
+}
+
+impl ServerHost for World {}
+
+#[test]
+#[ignore = "needs the group mods built to mod.wasm (CI's wasm-mods job)"]
+fn a_library_capability_is_answered_in_its_group_and_nowhere_else() {
+    let path = |var: &str| std::path::PathBuf::from(std::env::var(var).expect(var));
+    let folder = path("HORIZON_WASM_GROUPS");
+    let std_member = std::fs::read(path("HORIZON_WASM_STD")).unwrap();
+    let packages = ["counter_lib", "alpha", "beta", "gamma"].map(|id| {
+        let package = folder.join(format!("{id}/target/horizon-mod/{id}.hmod"));
+        horizon_mod_wasm::WasmPackage {
+            manifest: horizon_mods::Package::read(&package).unwrap().manifest,
+            module: horizon_mods::Package::read_wasm(&package).unwrap(),
+        }
+    });
+    let loaded = horizon_mod_wasm::load(
+        &horizon_mod_wasm::RuntimeConfig::default(),
+        &std_member,
+        packages.into(),
+    );
+    assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
+    mod_api::__private::install_parts(&loaded.mods).unwrap();
+    let mut answers: Vec<String> = loaded
+        .mods
+        .iter()
+        .map(|entry| {
+            let mut message = Text::literal("");
+            let mut replies = Vec::new();
+            let mut event = ServerChatEvent {
+                player_id: 1,
+                player: 1,
+                username: "tester",
+                raw_text: "",
+                message: &mut message,
+                replies: &mut replies,
+            };
+            entry.fields().hooks.server_chat(&mut World, &mut event);
+            message.plain()
+        })
+        .filter(|answer| !answer.is_empty())
+        .collect();
+    answers.sort();
+    assert_eq!(answers, ["alpha: 7", "beta: 7", "gamma: none"]);
+}
