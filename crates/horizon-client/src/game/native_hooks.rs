@@ -6055,6 +6055,23 @@ impl Game<'_> {
         mod_api::dispatch_creeper_ignite(self, entity, player, item);
     }
 
+    /// A lightning bolt is about to hit `entity` (NeoForge's
+    /// `EntityStruckByLightningEvent`, before `Entity.thunderHit`): once per
+    /// bolt strike for each entity whose box meets the strike box (3 blocks
+    /// around, 9 up), players included. `bolt` is the lightning bolt. Set
+    /// `cancel` to spare the entity: no fire or damage, and no conversion
+    /// (pig, villager, mooshroom, creeper, copper golem). It still counts
+    /// as struck for Channeling's advancement. Not asked for a visual-only
+    /// bolt, which hits nothing. Server-side.
+    pub(super) fn native_entity_struck_by_lightning(
+        &mut self,
+        entity: EntityRef,
+        bolt: EntityRef,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_entity_struck_by_lightning(self, entity, bolt, cancel);
+    }
+
     /// Lightning charged a creeper.
     pub(super) fn native_creeper_power(&mut self, entity: u32, lightning: [f64; 3]) {
         mod_api::dispatch_creeper_power(self, entity, lightning);

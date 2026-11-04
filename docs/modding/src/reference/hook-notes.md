@@ -1754,6 +1754,11 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   thunder. Set `cancel` to keep the previous thunder state and timer.
 - **`native_lightning_strike(player, pos, cause, cancel)`**: a weather, Channeling-trident, or `/summon` lightning bolt
   is about to be created. Set `cancel` to prevent the bolt and its effects; `cause` names the creation path.
+- **`native_entity_struck_by_lightning(entity, bolt, cancel)`**: a lightning bolt is about to hit `entity`
+  (NeoForge's `EntityStruckByLightningEvent`, before `Entity.thunderHit`), once per strike for each mob, player,
+  item, vehicle or other entity whose box meets the strike box. Set `cancel` to spare it: no fire, damage or
+  conversion, and `native_creeper_power` is not called. It still counts as struck for Channeling's advancement, as
+  in NeoForge. A visual-only bolt asks nothing. With no listener the cost is one `listened` check per struck entity.
 - **`native_time_skip(dimension, from, to, cause, cancel)`**: the server clock is about to jump after enough players
   sleep or through `/time set`, `/time add`, or `/time set <marker>`. Set `cancel` to keep the old time.
 - **`native_sleep_finished_time(dimension, current, new_time)`**: enough players slept through the night and the
