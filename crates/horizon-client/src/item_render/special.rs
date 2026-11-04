@@ -753,7 +753,12 @@ mod tests {
         )
         .unwrap();
         let library = crate::model_library::ParsedModels::default().into_item_library();
-        let renderer = ItemRenderer::load_with_library(&root, library).unwrap();
+        let data = crate::test_resources::item_data(
+            &root,
+            horizon_world::native_load_context::DataLoadOrigin::ClientPreload,
+        )
+        .unwrap();
+        let renderer = ItemRenderer::load_with_library(&root, library, &data).unwrap();
         let _ = std::fs::remove_dir_all(&root);
         let textures = [
             "entity/shield/shield_base",
@@ -843,7 +848,12 @@ mod tests {
         if !root.join("entity-models.json").exists() {
             return;
         }
-        let renderer = ItemRenderer::load(&root).unwrap();
+        let data = crate::test_resources::item_data(
+            &root,
+            horizon_world::native_load_context::DataLoadOrigin::ClientPreload,
+        )
+        .unwrap();
+        let renderer = ItemRenderer::load(&root, &data).unwrap();
         let sprite = Rect {
             u0: 0.25,
             v0: 0.125,

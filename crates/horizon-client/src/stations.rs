@@ -25,13 +25,18 @@ pub struct StationData {
     pub recipe_index: crate::recipe_book::RecipeIndex,
 }
 impl StationData {
-    pub fn load(root: &Path, items: &Items, overlay: &PackOverlay) -> Self {
+    pub fn load(
+        root: &Path,
+        items: &Items,
+        overlay: &PackOverlay,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
+    ) -> Self {
         Self {
             enchantments: std::sync::Arc::clone(&items.enchantments),
             recipes: StationRecipes::load(root, items, overlay),
             brewing: crate::brewing::Brewing::load(root, items, overlay),
             trades: crate::merchant::Trades::load(root, overlay),
-            banners: crate::banner::Banners::load(root),
+            banners: crate::banner::Banners::load(root, defaults),
             recipe_index: crate::recipe_book::RecipeIndex::load(root, overlay),
         }
     }
@@ -999,8 +1004,9 @@ mod tests {
         if !root.join("items.json").exists() {
             return;
         }
-        let items = Items::tags_only(&root, &PackOverlay::NONE).unwrap();
-        let data = StationData::load(&root, &items, &PackOverlay::NONE);
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = Items::tags_only(&root, &PackOverlay::NONE, &defaults).unwrap();
+        let data = StationData::load(&root, &items, &PackOverlay::NONE, &defaults);
         let e = &data.enchantments;
         assert_eq!(e.list.len(), 43);
         assert_eq!(

@@ -21,16 +21,19 @@ use horizon_protocol::{
     entity_data::{Value, serializer},
     packets::play::{self, Clientbound as C},
 };
-use horizon_world::block_collision::BlockCollisionRegistry;
+use horizon_world::{block_collision::BlockCollisionRegistry, item_defaults::ItemData};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
     time::Instant,
 };
 
-/// What `sync_data` loaded: whether it was with data packs over the game's
-/// data, and the registries and tags.
-type Synced = (bool, std::result::Result<Arc<SyncData>, String>);
+/// What `sync_data` loaded from this resource generation.
+struct Synced {
+    with_packs: bool,
+    generation: u64,
+    result: std::result::Result<Arc<SyncData>, String>,
+}
 
 /// The registries and tags, loaded once per world (a world with packs open
 /// or a `/reload` forgets them, as `forget_sync_data` does).
@@ -42,20 +45,25 @@ static SYNC: Mutex<Option<Synced>> = Mutex::new(None);
 /// (their dialogs would stay); a world with packs forgets what was read
 /// before it at open (`finish_open_world`).
 pub(super) fn sync_data(
-    root: &std::path::Path,
+    item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
 ) -> std::result::Result<Arc<SyncData>, String> {
     let packs = !overlay.files.is_empty();
+    let generation = item_data.defaults().generation();
     let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
     if sync
         .as_ref()
-        .is_some_and(|(with_packs, _)| *with_packs != packs)
+        .is_some_and(|cached| cached.with_packs != packs || cached.generation != generation)
     {
         *sync = None;
     }
-    sync.get_or_insert_with(|| (packs, SyncData::load(root, overlay).map(Arc::new)))
-        .1
-        .clone()
+    sync.get_or_insert_with(|| Synced {
+        with_packs: packs,
+        generation,
+        result: SyncData::load(item_data.root(), overlay, item_data.defaults()).map(Arc::new),
+    })
+    .result
+    .clone()
 }
 
 /// Let go of what `sync_data` loaded: a preload no world used
@@ -70,19 +78,24 @@ pub(super) fn forget_sync_data() {
 /// synchronized registries `kept` (the hub's) as they were, and that becomes
 /// what `sync_data` gives.
 pub(super) fn reload_sync_data(
-    root: &std::path::Path,
+    item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
     kept: &SyncData,
 ) -> std::result::Result<Arc<SyncData>, String> {
+    let root = item_data.root();
     // Kept pack dialogs count as packs: a world opened without packs after
     // a `/reload` that dropped them must read its own registries again.
     let packs = !overlay.files.is_empty() || kept.has_pack_entries();
-    let sync = SyncData::load(root, overlay).map(|mut sync| {
+    let sync = SyncData::load(root, overlay, item_data.defaults()).map(|mut sync| {
         sync.keep_registries(root, kept);
         sync.features.clone_from(&kept.features);
         Arc::new(sync)
     });
-    *SYNC.lock().unwrap_or_else(|e| e.into_inner()) = Some((packs, sync.clone()));
+    *SYNC.lock().unwrap_or_else(|e| e.into_inner()) = Some(Synced {
+        with_packs: packs,
+        generation: item_data.defaults().generation(),
+        result: sync.clone(),
+    });
     sync
 }
 
@@ -107,19 +120,32 @@ impl Game<'_> {
 /// The registries and tags a server sends without data packs over them, read
 /// on a helper thread while a server's world prepares: most worlds have no
 /// packs, so it is what `sync_data` would load once the world is open.
-pub(super) struct SyncPreload(std::thread::JoinHandle<std::result::Result<SyncData, String>>);
+pub(super) struct SyncPreload {
+    generation: u64,
+    worker: std::thread::JoinHandle<std::result::Result<SyncData, String>>,
+}
 
 /// Start reading the server's data beside the world's preparation; `None`
 /// when it is read already, or being read (`preload_world_data`).
-pub(super) fn preload_sync_data(root: &std::path::Path) -> Option<SyncPreload> {
-    if !SYNC.try_lock().is_ok_and(|sync| sync.is_none()) {
+pub(super) fn preload_sync_data(item_data: &Arc<ItemData>) -> Option<SyncPreload> {
+    let generation = item_data.defaults().generation();
+    if !SYNC.try_lock().is_ok_and(|sync| {
+        sync.as_ref()
+            .is_none_or(|cached| cached.generation != generation)
+    }) {
         return None;
     }
-    let root = root.to_owned();
+    let item_data = Arc::clone(item_data);
     std::thread::Builder::new()
         .name("Server data preload".into())
-        .spawn(move || SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE))
-        .map(SyncPreload)
+        .spawn(move || {
+            SyncData::load(
+                item_data.root(),
+                &horizon_world::loot::PackOverlay::NONE,
+                item_data.defaults(),
+            )
+        })
+        .map(|worker| SyncPreload { generation, worker })
         .ok()
 }
 
@@ -130,10 +156,14 @@ impl SyncPreload {
         if !overlay.files.is_empty() {
             return;
         }
-        if let Ok(read) = self.0.join() {
+        if let Ok(read) = self.worker.join() {
             let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
-            if sync.as_ref().is_none_or(|(with_packs, _)| *with_packs) {
-                *sync = Some((false, read.map(Arc::new)));
+            if sync.as_ref().is_none_or(|cached| cached.with_packs) {
+                *sync = Some(Synced {
+                    with_packs: false,
+                    generation: self.generation,
+                    result: read.map(Arc::new),
+                });
             }
         }
     }
@@ -1256,7 +1286,7 @@ impl Game<'_> {
         net: NetConfig,
         config: HubConfig,
     ) -> Result<()> {
-        let mut sync = sync_data(&self.options.resources, &self.pack_files())?;
+        let mut sync = sync_data(&self.res.core.item_data, &self.pack_files())?;
         let features = if self.level.enabled_features.is_empty() {
             vec!["minecraft:vanilla".to_owned()]
         } else {
@@ -1275,6 +1305,7 @@ impl Game<'_> {
                 &self.options.resources,
                 &self.pack_files(),
                 packed.as_deref(),
+                self.res.item_defaults(),
             )?;
             world_sync.features = features;
             sync = Arc::new(world_sync);

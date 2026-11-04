@@ -526,11 +526,12 @@ pub fn main() -> horizon_client::Result<()> {
     let registry = assets.registry;
     let facts = BlockFacts::load(root, registry)?;
     let data = MobData::load(root, &facts);
-    let items = Items::tags_only(root, &PackOverlay::NONE)?;
+    let defaults = horizon_world::item_defaults::read(root)?;
+    let items = Items::tags_only(root, &PackOverlay::NONE, &defaults)?;
     // Trial spawner rewards: the loot tables and the configs.
     let loot = if input.contains("mode=trial") || input.contains("mode=vault") {
         horizon_client::mobs::trial_spawner::load_registry(root);
-        horizon_client::structure_blocks::loot_data(root, &PackOverlay::NONE)
+        horizon_client::structure_blocks::loot_data(root, &PackOverlay::NONE, &defaults)
     } else {
         None
     };

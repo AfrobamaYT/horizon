@@ -514,7 +514,12 @@ mod tests {
 
     fn renderer(root: &Path) -> ItemRenderer {
         let library = crate::model_library::ParsedModels::load(root).into_item_library();
-        ItemRenderer::load_with_library(root, library).unwrap()
+        let data = crate::test_resources::item_data(
+            root,
+            horizon_world::native_load_context::DataLoadOrigin::ClientPreload,
+        )
+        .unwrap();
+        ItemRenderer::load_with_library(root, library, &data).unwrap()
     }
 
     fn rule(r: &ItemRenderer, name: &str) -> usize {

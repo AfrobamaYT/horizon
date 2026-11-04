@@ -561,6 +561,7 @@ pub(super) fn stage_pack(
         res.facts(),
         context.biomes.clone(),
         context.light.clone(),
+        &res.core.item_data,
     )?;
     let textures = prepare_renderer_textures(&pack);
     let cem = Arc::new(horizon_client::mobs::cem::CemModels::load(

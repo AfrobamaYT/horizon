@@ -1288,6 +1288,7 @@
     },
     {
       "name": "modify_default_components", "side": "both",
+      "context": "data_load",
       "version": 1,
       "target": "horizon_world::item_defaults::native_modify_default_components",
       "mod_api": {

@@ -218,7 +218,8 @@ mod tests {
             r#"{"test:cell": "test:husk"}"#,
         )
         .unwrap();
-        let items = Items::catalog(&root, &PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = Items::catalog(&root, &PackOverlay::NONE, &defaults).unwrap();
         let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
         let providers = Providers::load(&root);
         let mut furnace = Furnace {

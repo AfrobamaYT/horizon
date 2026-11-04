@@ -195,6 +195,10 @@ name = "client_probe"
 path = "../horizon-client/examples/probe/main.rs"
 
 [[test]]
+name = "load_defaults"
+path = "../horizon-client/tests/load_defaults.rs"
+
+[[test]]
 name = "custom_component_api"
 path = "../horizon-client/tests/custom_component_api.rs"
 

@@ -1075,7 +1075,7 @@ pub struct ResolvedItem {
 #[derive(Default)]
 pub struct ItemModels {
     pub definitions: BTreeMap<String, ClientItem>,
-    pub prototypes: BTreeMap<String, Components>,
+    pub prototypes: Arc<BTreeMap<String, Components>>,
 }
 
 impl ItemModels {

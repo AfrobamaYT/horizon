@@ -4,7 +4,15 @@
 use super::{Game, execution_role::ExecutionRole};
 use crate::mod_api::RegistrationContext;
 use horizon_client::mod_list::{self, Installed};
-use std::path::PathBuf;
+use horizon_world::{
+    item_defaults::ItemData,
+    native_load_context::{LoadContext, LoadInputs},
+};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 #[derive(Clone, Default)]
 pub(super) struct ModsState {
@@ -32,6 +40,28 @@ impl ModsState {
     }
 }
 
+/// Capture load inputs at the resource-generation boundary, before workers share them.
+pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client::Result<ItemData> {
+    let mut registries: BTreeMap<_, _> = builtin_registries(root)?
+        .registries
+        .into_iter()
+        .map(|(name, ids)| (name, ids.names))
+        .collect();
+    if let Some(types) = registries.get_mut("minecraft:data_component_type") {
+        types.extend(horizon_protocol::item::custom::entries().map(|(_, name)| name.to_owned()));
+    }
+    let inputs = LoadInputs::new(registries, Game::mod_data_root());
+    let context = LoadContext::new(role.data_load_origin(), Arc::new(inputs));
+    Ok(ItemData::load(root, context)?)
+}
+
+fn builtin_registries(root: &Path) -> horizon_client::Result<horizon_protocol::registry::Builtin> {
+    let path = horizon_protocol::registry::Builtin::find(root).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "registries.json not found")
+    })?;
+    Ok(horizon_protocol::registry::Builtin::load(&path)?)
+}
+
 /// Freeze native component IDs before reading content or opening a connection.
 /// With no mod registering any, nothing is installed, which every reader
 /// treats as no custom components, and `registries.json` isn't read.
@@ -41,9 +71,7 @@ pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Res
     if names.is_empty() {
         return Ok(());
     }
-    let path =
-        horizon_protocol::registry::Builtin::find(root).ok_or("registries.json not found")?;
-    let builtin = horizon_protocol::registry::Builtin::load(&path)?;
+    let builtin = builtin_registries(root)?;
     let types = builtin
         .get("minecraft:data_component_type")
         .ok_or("missing data component registry")?;
@@ -77,12 +105,18 @@ fn native_declared() -> &'static NativeDeclared {
 /// The native mods' standalone models (`native_standalone_models`), set once
 /// before the resources first load.
 pub(super) fn register_standalone_models(role: ExecutionRole) {
+    if let Some(names) = collect_standalone_models(role) {
+        horizon_client::models::register_standalone(names);
+    }
+}
+
+fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
     if !role.is_client() {
-        return;
+        return None;
     }
     let mut names = Vec::new();
     Game::native_standalone_models(&RegistrationContext::new(), &mut names);
-    horizon_client::models::register_standalone(names);
+    Some(names)
 }
 
 /// `root` with the content mods that are on layered over it
@@ -486,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn standalone_models_register_only_on_the_client() {
+    fn standalone_models_collect_only_on_the_client() {
         use crate::mod_api::{self, Hooks, ModEntry, StandaloneModelsEvent, testing::with_mods};
         use std::sync::{
             Arc,
@@ -518,16 +552,18 @@ mod tests {
             .into(),
             || {
                 crate::mod_api::with_test_packages(&["registration_test"], || {
-                    register_standalone_models(ExecutionRole::IntegratedServer);
-                    register_standalone_models(ExecutionRole::DedicatedServer);
-                    assert_eq!(calls.load(Ordering::Relaxed), 0);
-                    register_standalone_models(ExecutionRole::Client);
-                    assert_eq!(calls.load(Ordering::Relaxed), 1);
-                    assert!(
-                        horizon_client::models::standalone()
-                            .iter()
-                            .any(|id| id == "registration_test:block/shaft")
+                    assert_eq!(
+                        collect_standalone_models(ExecutionRole::IntegratedServer),
+                        None
                     );
+                    assert_eq!(
+                        collect_standalone_models(ExecutionRole::DedicatedServer),
+                        None
+                    );
+                    assert_eq!(calls.load(Ordering::Relaxed), 0);
+                    let models = collect_standalone_models(ExecutionRole::Client).unwrap();
+                    assert_eq!(calls.load(Ordering::Relaxed), 1);
+                    assert_eq!(models, ["registration_test:block/shaft"]);
                 })
             },
         );

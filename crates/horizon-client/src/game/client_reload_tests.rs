@@ -211,7 +211,7 @@ fn initial_load_stages_and_applies_client_reload_listeners() {
                 &game.settings,
                 std::time::Instant::now(),
                 false,
-                false,
+                crate::game::execution_role::ExecutionRole::Client,
                 &Progress::new(),
                 &mut |_, _| {},
             )
