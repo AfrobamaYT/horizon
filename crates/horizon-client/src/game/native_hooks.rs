@@ -54,7 +54,7 @@ use horizon_core::{
     position::BlockPos,
     ticks::{ScheduleResult, TickPriority},
 };
-use horizon_world::level::PlaceContext;
+use horizon_world::level::{BonemealCheck, PlaceContext};
 use horizon_world::{
     consumable::UseAnimation,
     fluid::{FluidKind, FluidState},
@@ -10012,6 +10012,15 @@ pub(super) enum BlockClickAnswer {
     },
 }
 
+/// What `BonemealEvent` settled for one use of bone meal.
+pub(super) struct BonemealAsk {
+    /// `Some(successful)` when a mod canceled the event: `growCrop`'s answer.
+    pub crop: Option<bool>,
+    /// `isValidBonemealTarget` as the event asked it, when a mod listens:
+    /// `growCrop` takes it instead of asking again.
+    pub check: Option<BonemealCheck>,
+}
+
 /// Where the game calls the hook points.
 impl Game<'_> {
     /// `BonemealEvent` for bone meal from `stack` on `pos`, used by the
@@ -10024,12 +10033,16 @@ impl Game<'_> {
         pos: BlockPos,
         by_player: bool,
         stack: &mut ItemStack,
-    ) -> Option<bool> {
+    ) -> BonemealAsk {
         if !mod_api::__private::listened(mod_api::HookId::Bonemeal) {
-            return None;
+            return BonemealAsk {
+                crop: None,
+                check: None,
+            };
         }
         let client = self.remote.is_some();
-        let valid = self.with_level(|b, level, _| b.is_valid_bonemeal_target(level, pos, client));
+        let check = self.with_level(|b, level, _| b.is_valid_bonemeal_target(level, pos, client));
+        let valid = check.is_valid();
         let state = self.world.block(pos.x, pos.y, pos.z);
         let (player, player_entity_id) = if by_player {
             let (uuid, entity) = self.native_clicker();
@@ -10050,7 +10063,10 @@ impl Game<'_> {
             &mut successful,
             &mut canceled,
         );
-        canceled.then_some(successful)
+        BonemealAsk {
+            crop: canceled.then_some(successful),
+            check: Some(check),
+        }
     }
     /// Whether a mod canceled `placer` writing `state` at `pos` (`entity_place`):
     /// `placer` is an entity id, `placed_against` the block it goes against and

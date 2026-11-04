@@ -168,9 +168,14 @@ impl World {
         self.f.registry.state(state).unwrap().name.clone()
     }
     fn bone_meal(&mut self, pos: BlockPos) -> bool {
-        self.f
-            .behaviours
-            .use_bone_meal(&mut self.level, &mut self.ticks, pos, Direction::Up, None)
+        self.f.behaviours.use_bone_meal(
+            &mut self.level,
+            &mut self.ticks,
+            pos,
+            Direction::Up,
+            None,
+            None,
+        )
     }
     fn count(&self, suffix: &str) -> usize {
         self.level
@@ -305,7 +310,7 @@ fn bone_meal_on_a_client_succeeds_only_where_its_level_can_tell() {
     let before = w.level.blocks.clone();
     let mut client = |pos| {
         f.behaviours
-            .bone_meal_succeeds_on_client(&mut w.level, pos, Direction::Up, None)
+            .bone_meal_succeeds_on_client(&mut w.level, pos, Direction::Up, None, None)
     };
     // SaplingBlock.isValidBonemealTarget needs a ServerLevel: the client passes.
     assert!(!client(BlockPos::new(0, 64, 0)));
@@ -335,6 +340,8 @@ fn bone_meal_answers_a_mod_blocks_three_questions() {
         rolls: Vec<(BlockPos, BlockStateId)>,
         /// `performBonemeal` ran, and what it saw.
         performed: Vec<(BlockPos, BlockStateId)>,
+        /// How often `isValidBonemealTarget` was asked.
+        asks: std::cell::Cell<u32>,
     }
     impl LevelAccess for ModLevel<'_> {
         fn day_time(&self) -> i64 {
@@ -359,6 +366,7 @@ fn bone_meal_answers_a_mod_blocks_three_questions() {
             self.inner.emit(event);
         }
         fn is_valid_bonemeal_target(&self, _pos: BlockPos, _state: BlockStateId) -> Option<bool> {
+            self.asks.set(self.asks.get() + 1);
             self.valid
         }
         fn is_bonemeal_success(&mut self, pos: BlockPos, state: BlockStateId) -> bool {
@@ -385,8 +393,9 @@ fn bone_meal_answers_a_mod_blocks_three_questions() {
         success: true,
         rolls: Vec::new(),
         performed: Vec::new(),
+        asks: Default::default(),
     };
-    assert!(b.use_bone_meal(&mut level, &mut w.ticks, pos, Direction::Up, None));
+    assert!(b.use_bone_meal(&mut level, &mut w.ticks, pos, Direction::Up, None, None));
     assert_eq!(level.rolls, vec![(pos, stone)]);
     assert_eq!(level.performed, vec![(pos, stone)]);
     assert!(level.inner.events.iter().any(|e| matches!(
@@ -400,8 +409,9 @@ fn bone_meal_answers_a_mod_blocks_three_questions() {
         success: false,
         rolls: Vec::new(),
         performed: Vec::new(),
+        asks: Default::default(),
     };
-    assert!(b.use_bone_meal(&mut level, &mut w.ticks, pos, Direction::Up, None));
+    assert!(b.use_bone_meal(&mut level, &mut w.ticks, pos, Direction::Up, None, None));
     assert!(level.performed.is_empty());
     // Refused: not a target, no roll, no growth, no meal used.
     let mut level = ModLevel {
@@ -410,8 +420,9 @@ fn bone_meal_answers_a_mod_blocks_three_questions() {
         success: true,
         rolls: Vec::new(),
         performed: Vec::new(),
+        asks: Default::default(),
     };
-    assert!(!b.use_bone_meal(&mut level, &mut w.ticks, pos, Direction::Up, None));
+    assert!(!b.use_bone_meal(&mut level, &mut w.ticks, pos, Direction::Up, None, None));
     assert!(level.rolls.is_empty() && level.performed.is_empty());
     // A block whose template bonemeals (a crop) is the mod's instead: the
     // block's own growth doesn't run.
@@ -422,8 +433,9 @@ fn bone_meal_answers_a_mod_blocks_three_questions() {
         success: true,
         rolls: Vec::new(),
         performed: Vec::new(),
+        asks: Default::default(),
     };
-    assert!(b.grow_crop(&mut level, &mut w.ticks, pos));
+    assert!(b.grow_crop(&mut level, &mut w.ticks, pos, None));
     assert_eq!(level.performed, vec![(pos, crop)]);
     assert_eq!(level.inner.block_state(pos), crop);
     // Refused by the mod: vanilla's growCrop stops, the crop keeps its meal
@@ -434,8 +446,9 @@ fn bone_meal_answers_a_mod_blocks_three_questions() {
         success: true,
         rolls: Vec::new(),
         performed: Vec::new(),
+        asks: Default::default(),
     };
-    assert!(!b.grow_crop(&mut level, &mut w.ticks, pos));
+    assert!(!b.grow_crop(&mut level, &mut w.ticks, pos, None));
     assert_eq!(level.inner.block_state(pos), crop);
     // Answered nothing, the crop keeps its own bone meal and grows.
     let mut level = ModLevel {
@@ -444,8 +457,9 @@ fn bone_meal_answers_a_mod_blocks_three_questions() {
         success: true,
         rolls: Vec::new(),
         performed: Vec::new(),
+        asks: Default::default(),
     };
-    assert!(b.grow_crop(&mut level, &mut w.ticks, pos));
+    assert!(b.grow_crop(&mut level, &mut w.ticks, pos, None));
     assert!(level.rolls.is_empty() && level.performed.is_empty());
     assert_ne!(level.inner.block_state(pos), crop, "the crop grew");
     // A client predicts the use with the same answer, where the block itself
@@ -457,10 +471,31 @@ fn bone_meal_answers_a_mod_blocks_three_questions() {
         success: true,
         rolls: Vec::new(),
         performed: Vec::new(),
+        asks: Default::default(),
     };
-    assert!(b.bone_meal_succeeds_on_client(&mut level, pos, Direction::Up, None));
+    assert!(b.bone_meal_succeeds_on_client(&mut level, pos, Direction::Up, None, None));
     level.valid = Some(false);
-    assert!(!b.bone_meal_succeeds_on_client(&mut level, pos, Direction::Up, None));
+    assert!(!b.bone_meal_succeeds_on_client(&mut level, pos, Direction::Up, None, None));
+    // A target the event already asked about is not asked again: `growCrop`
+    // takes the check, a refusal included.
+    w.put(pos, crop);
+    let mut level = ModLevel {
+        inner: &mut w.level,
+        valid: Some(true),
+        success: true,
+        rolls: Vec::new(),
+        performed: Vec::new(),
+        asks: Default::default(),
+    };
+    let check = b.is_valid_bonemeal_target(&mut level, pos, false);
+    assert!(check.is_valid());
+    assert!(b.grow_crop(&mut level, &mut w.ticks, pos, Some(check)));
+    assert_eq!(level.asks.get(), 1);
+    assert_eq!(level.performed, vec![(pos, crop)]);
+    level.valid = Some(false);
+    let refused = b.is_valid_bonemeal_target(&mut level, pos, false);
+    assert!(!b.grow_crop(&mut level, &mut w.ticks, pos, Some(refused)));
+    assert_eq!(level.asks.get(), 2);
 }
 
 #[test]
@@ -588,28 +623,52 @@ fn a_settled_grow_crop_answer_skips_the_growth() {
     w.put(crop, wheat);
     let stone = BlockPos::new(3, 63, 0);
     w.put(BlockPos::new(3, 64, 0), w.id("water", &[("level", "0")]));
-    assert!(b.is_valid_bonemeal_target(&mut w.level, crop, false));
-    assert!(b.is_valid_bonemeal_target(&mut w.level, crop, true));
-    assert!(!b.is_valid_bonemeal_target(&mut w.level, stone, false));
+    assert!(
+        b.is_valid_bonemeal_target(&mut w.level, crop, false)
+            .is_valid()
+    );
+    assert!(
+        b.is_valid_bonemeal_target(&mut w.level, crop, true)
+            .is_valid()
+    );
+    assert!(
+        !b.is_valid_bonemeal_target(&mut w.level, stone, false)
+            .is_valid()
+    );
     let before = w.level.blocks.clone();
-    assert!(b.use_bone_meal(&mut w.level, &mut w.ticks, crop, Direction::Up, Some(true)));
+    assert!(b.use_bone_meal(
+        &mut w.level,
+        &mut w.ticks,
+        crop,
+        Direction::Up,
+        Some(true),
+        None
+    ));
     assert_eq!(w.level.blocks, before, "a successful cancel grows nothing");
     assert!(w.level.events.iter().any(|e| matches!(
         e,
         LevelEvent::LevelEvent { id: 1505, pos: at, data: 15, .. } if *at == crop
     )));
-    assert!(!b.use_bone_meal(&mut w.level, &mut w.ticks, crop, Direction::Up, Some(false)));
+    assert!(!b.use_bone_meal(
+        &mut w.level,
+        &mut w.ticks,
+        crop,
+        Direction::Up,
+        Some(false),
+        None
+    ));
     assert_eq!(w.level.block_state(crop), wheat);
-    assert!(b.bone_meal_succeeds_on_client(&mut w.level, stone, Direction::Up, Some(true)));
-    assert!(!b.bone_meal_succeeds_on_client(&mut w.level, crop, Direction::Up, Some(false)));
+    assert!(b.bone_meal_succeeds_on_client(&mut w.level, stone, Direction::Up, Some(true), None));
+    assert!(!b.bone_meal_succeeds_on_client(&mut w.level, crop, Direction::Up, Some(false), None));
     // The water beside the clicked face still takes the meal.
-    assert!(b.bone_meal_succeeds_on_client(&mut w.level, stone, Direction::Up, Some(false)));
+    assert!(b.bone_meal_succeeds_on_client(&mut w.level, stone, Direction::Up, Some(false), None));
     assert!(b.use_bone_meal(
         &mut w.level,
         &mut w.ticks,
         stone,
         Direction::Up,
-        Some(false)
+        Some(false),
+        None,
     ));
     assert!(w.name(BlockPos::new(3, 64, 0)).ends_with("seagrass"));
 }

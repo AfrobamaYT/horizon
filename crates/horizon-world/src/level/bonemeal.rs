@@ -12,9 +12,23 @@ use crate::{fluid::FluidState, registry::BlockStateId};
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
 
 /// Who answers a bone meal target: a mod, or the block's own `BonemealableBlock`.
+#[derive(Clone, Copy)]
 enum Target {
     Mod,
     Block(Kind),
+}
+
+/// `isValidBonemealTarget` asked once for a block (see
+/// [`Behaviours::is_valid_bonemeal_target`]): handing it back to `growCrop`
+/// keeps a mod's answer from being asked a second time.
+#[derive(Clone, Copy)]
+pub struct BonemealCheck(Option<Target>);
+
+impl BonemealCheck {
+    /// Whether the block is a valid target.
+    pub fn is_valid(self) -> bool {
+        self.0.is_some()
+    }
 }
 
 /// The `BonemealableBlock` implementation a block uses (most derived wins).
@@ -182,7 +196,8 @@ impl Behaviours {
     /// the player is in creative mode). Reports level event 1505 (growth
     /// particles and sound) at the grown position. `crop` is `growCrop`'s
     /// answer when it is already settled (a canceled `BonemealEvent`'s
-    /// `successful`), or None to run it.
+    /// `successful`), or None to run it; `check` is the target's validity when
+    /// the event already asked for it.
     pub fn use_bone_meal<L: LevelAccess + ?Sized>(
         &self,
         level: &mut L,
@@ -190,9 +205,10 @@ impl Behaviours {
         pos: BlockPos,
         face: Direction,
         crop: Option<bool>,
+        check: Option<BonemealCheck>,
     ) -> bool {
         let mut sim = self.sim(level, ticks);
-        if crop.unwrap_or_else(|| sim.grow_crop(pos)) {
+        if crop.unwrap_or_else(|| sim.grow_crop(pos, check)) {
             sim.level_event(1505, pos, 15);
             return true;
         }
@@ -216,11 +232,16 @@ impl Behaviours {
         pos: BlockPos,
         face: Direction,
         crop: Option<bool>,
+        check: Option<BonemealCheck>,
     ) -> bool {
         let mut ticks = Ticks::default();
         let mut sim = self.sim(level, &mut ticks);
         let state = sim.state(pos);
-        if crop.unwrap_or_else(|| sim.bonemeal_target(pos, state, true).is_some()) {
+        let valid = |sim: &mut Sim<'_, L>| match check {
+            Some(check) => check.is_valid(),
+            None => sim.bonemeal_target(pos, state, true).is_some(),
+        };
+        if crop.unwrap_or_else(|| valid(&mut sim)) {
             return true;
         }
         let water = sim.state(rel(pos, face));
@@ -236,20 +257,22 @@ impl Behaviours {
         level: &mut L,
         pos: BlockPos,
         client: bool,
-    ) -> bool {
+    ) -> BonemealCheck {
         let mut ticks = Ticks::default();
         let mut sim = self.sim(level, &mut ticks);
         let state = sim.state(pos);
-        sim.bonemeal_target(pos, state, client).is_some()
+        BonemealCheck(sim.bonemeal_target(pos, state, client))
     }
-    /// `BoneMealItem.growCrop` (dispensers call this directly).
+    /// `BoneMealItem.growCrop` (dispensers call this directly); `check` is
+    /// the target's validity when the event already asked for it.
     pub fn grow_crop<L: LevelAccess + ?Sized>(
         &self,
         level: &mut L,
         ticks: &mut Ticks,
         pos: BlockPos,
+        check: Option<BonemealCheck>,
     ) -> bool {
-        self.sim(level, ticks).grow_crop(pos)
+        self.sim(level, ticks).grow_crop(pos, check)
     }
     /// `BoneMealItem.growWaterPlant` (dispensers pass no clicked face).
     pub fn grow_water_plant<L: LevelAccess + ?Sized>(
@@ -294,9 +317,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 
     /// `BoneMealItem.growCrop`: true when the block is a valid target (bone
     /// meal is consumed even when `isBonemealSuccess` fails).
-    pub(crate) fn grow_crop(&mut self, pos: BlockPos) -> bool {
+    pub(crate) fn grow_crop(&mut self, pos: BlockPos, check: Option<BonemealCheck>) -> bool {
         let state = self.state(pos);
-        match self.bonemeal_target(pos, state, false) {
+        let target = match check {
+            Some(BonemealCheck(target)) => target,
+            None => self.bonemeal_target(pos, state, false),
+        };
+        match target {
             Some(Target::Mod) => {
                 if self.level.is_bonemeal_success(pos, state) {
                     self.level.perform_bonemeal(self.ticks, pos, state);
