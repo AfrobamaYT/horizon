@@ -568,6 +568,7 @@ pub fn hear_mob_events(mobs: &mut [Mob], events: &[MobEvent], from: usize, w: &M
         let name = &w.facts.get(state).name;
         let ctx = Context {
             source: Some(Who::Mob(source)),
+            affected_state: Some(state),
             dampening_state: w.has_tag("minecraft:dampens_vibrations", name),
             dampens: who.is_some_and(|m| m.species() == Species::Warden),
             targetable: who.is_some_and(|m| m.alive() && m.species() != Species::Warden),

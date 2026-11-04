@@ -4123,19 +4123,30 @@ impl Game<'_> {
     /// `VanillaGameEvent`, vanilla's `Level.gameEvent`): every event, in
     /// `dimension`. `event` is its id (`minecraft:step`), `pos` where it
     /// happened and `cause` the network id of the entity that caused it
-    /// (None for none). The context's affected block state is not tracked
-    /// here. Canceling keeps the sculk sensors, wardens and allays from
-    /// hearing it. The affected block state in NeoForge's context is not
-    /// currently exposed. Server-side.
+    /// (None for none). `affected_state` is the block state the event touched
+    /// (`GameEvent.Context.affectedState`, with `cause` its `sourceEntity`): the
+    /// block a player broke or placed, the block a mob stepped on; None where
+    /// vanilla passes none (`Context.of(entity)`).
+    /// Canceling keeps the sculk sensors, wardens and allays from hearing it.
+    /// Server-side.
     pub(super) fn native_vanilla_game_event(
         &mut self,
         dimension: &str,
         event: &str,
         pos: [f64; 3],
         cause: Option<u32>,
+        affected_state: Option<BlockStateId>,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_vanilla_game_event(self, dimension, event, pos, cause, cancel);
+        mod_api::dispatch_vanilla_game_event(
+            self,
+            dimension,
+            event,
+            pos,
+            cause,
+            affected_state,
+            cancel,
+        );
     }
     /// A server player a command teleported (NeoForge's
     /// `EntityTeleportEvent`, for a player): `/tp` and `/teleport`, inside
