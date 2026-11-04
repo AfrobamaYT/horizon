@@ -1,5 +1,5 @@
 """The mod API's boundary: mods see only the API, and the game reaches the rest through
-`mod_api::__private`. Written by tools/split_mod_api.py; rerunning it updates the numbers."""
+`mod_api::__private`."""
 from pathlib import Path
 import re
 import unittest

@@ -57,6 +57,31 @@ pub mod game {
         fn fields(&self) -> Self::Fields<'_>;
     }
 
+    /// A block entity handle the game names.
+    pub fn block_entity_ref(level: LevelRef, position: [i32; 3]) -> BlockEntityRef {
+        BlockEntityRef { level, position }
+    }
+    /// A boss bar handle the game names.
+    pub fn boss_bar_ref(epoch: NativeWorldEpoch, uuid: u128) -> BossBarRef {
+        BossBarRef { epoch, uuid }
+    }
+    /// A chunk handle the game names.
+    pub fn chunk_ref(level: LevelRef, pos: [i32; 2]) -> ChunkRef {
+        ChunkRef { level, pos }
+    }
+    /// An open menu's handle the game names.
+    pub fn menu_ref(player: PlayerRef, window: i32, generation: u64) -> MenuRef {
+        MenuRef {
+            player,
+            window,
+            generation,
+        }
+    }
+    /// A player handle the game names.
+    pub fn player_ref(entity: EntityRef, uuid: u128) -> PlayerRef {
+        PlayerRef { entity, uuid }
+    }
+
     pub struct BlockEntityRefFields {
         pub level: LevelRef,
         pub position: [i32; 3],

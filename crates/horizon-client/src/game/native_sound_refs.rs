@@ -117,7 +117,8 @@ mod tests {
     use horizon_client::mobs::Mob;
     use horizon_core::geometry::Vec3;
     use horizon_protocol::packets::{configuration::ClientInformation, play::Clientbound};
-    use mod_api::{NativeSoundSource, NativeWorldEpoch, PlayerRef};
+    use mod_api::__private::game::*;
+    use mod_api::{NativeSoundSource, NativeWorldEpoch};
     use std::sync::{
         Arc,
         atomic::{AtomicI32, AtomicUsize},
@@ -247,13 +248,13 @@ mod tests {
             assert_eq!(p.source, NativeSoundSource::Neutral.index() as i32);
 
             // A stale handle and an offline player fail.
-            let stale = PlayerRef {
-                entity: mod_api::EntityRef::new(
+            let stale = mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(
                     NativeWorldEpoch::new(pa.entity().epoch().get() + 1),
                     pa.entity().id(),
                 ),
-                ..pa
-            };
+                pa.fields().uuid,
+            );
             assert!(!game.native_player_stop_sound(stale, None, None));
             assert!(!game.native_player_play_sound(
                 stale,

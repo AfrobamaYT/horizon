@@ -80,21 +80,21 @@ impl Game<'_> {
                 .as_ref()
                 .map_or("inventory", |entry| entry.1.as_str());
             Self::menu_slot(name, 0)?;
-            return Some(MenuRef {
+            return Some(mod_api::__private::game::menu_ref(
                 player,
-                window: remote.menu.as_ref().map_or(0, |entry| entry.0),
-                generation: remote.menu.generation,
-            });
+                remote.menu.as_ref().map_or(0, |entry| entry.0),
+                remote.menu.generation,
+            ));
         }
         let super::native_server::PlayerRead::Guest(guest) = self.player_handle_read(player)?
         else {
             return None;
         };
-        let menu = MenuRef {
+        let menu = mod_api::__private::game::menu_ref(
             player,
-            window: guest.menu.as_ref().map_or(0, |m| m.window),
-            generation: guest.menu_generation,
-        };
+            guest.menu.as_ref().map_or(0, |m| m.window),
+            guest.menu_generation,
+        );
         self.native_menu_guest(menu)?;
         Some(menu)
     }

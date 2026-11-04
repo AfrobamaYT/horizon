@@ -22731,7 +22731,6 @@ fn debug_crosshair_drawn(
 
 #[cfg(test)]
 mod tests {
-    use mod_api::__private::game::*;
     use mod_api::ServerHost;
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

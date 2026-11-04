@@ -148,10 +148,12 @@ mod tests {
 
             // A player who is not online here, and a handle of another
             // player's id, read nothing.
-            let mut stale = player;
-            stale.fields().entity = mod_api::EntityRef::new(
-                player.fields().entity.epoch(),
-                player.fields().entity.id() + 1,
+            let stale = mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(
+                    player.fields().entity.epoch(),
+                    player.fields().entity.id() + 1,
+                ),
+                player.uuid(),
             );
             game.lan.as_mut().unwrap().hub.guests[0].last_death =
                 Some(("minecraft:overworld".into(), [1, 2, 3]));

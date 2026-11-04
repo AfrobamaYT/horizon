@@ -415,10 +415,10 @@ impl Game<'_> {
             .iter()
             .find(|g| g.uuid == uuid && g.dimension == level.dimension())
         {
-            return (g.name == name).then_some(PlayerRef {
-                entity: mod_api::EntityRef::new(epoch, g.entity_id as u32),
+            return (g.name == name).then_some(mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(epoch, g.entity_id as u32),
                 uuid,
-            });
+            ));
         }
         let id = self.next_entity.checked_add(1)?;
         let entity_id = i32::try_from(id).ok()?;
@@ -435,10 +435,10 @@ impl Game<'_> {
         host.play
             .insert(conn, super::lan_actions::GuestPlay::default());
         self.next_entity = id;
-        Some(PlayerRef {
-            entity: mod_api::EntityRef::new(epoch, id),
+        Some(mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(epoch, id),
             uuid,
-        })
+        ))
     }
 
     /// Discard state belonging to an already removed connectionless guest.
@@ -517,16 +517,16 @@ impl Game<'_> {
             .as_ref()
             .filter(|r| r.logged_in && r.profile == uuid)
         {
-            return Some(PlayerRef {
-                entity: mod_api::EntityRef::new(epoch, u32::try_from(remote.entity_id).ok()?),
+            return Some(mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(epoch, u32::try_from(remote.entity_id).ok()?),
                 uuid,
-            });
+            ));
         }
         let (_, id) = self.player_lookup(uuid)?;
-        Some(PlayerRef {
-            entity: mod_api::EntityRef::new(epoch, id),
+        Some(mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(epoch, id),
             uuid,
-        })
+        ))
     }
 
     fn player_lookup(&self, uuid: u128) -> Option<(PlayerRead<'_>, u32)> {

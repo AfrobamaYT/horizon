@@ -670,6 +670,45 @@ impl PackReload {
     }
 }
 
+/// Reads one converter's directory from `packs`, later packs winning, and
+/// collects the converted files: the shared read-and-log loop of both sides'
+/// reloads. `top` is `"data"` or `"assets"`.
+pub(super) fn reload_files(
+    top: &str,
+    packs: &[&DataPack],
+    listener: &Identifier,
+    converter: &FileToIdConverter,
+) -> ReloadFiles {
+    let mut selected = std::collections::BTreeMap::new();
+    for pack in packs {
+        for file in pack.list_under(top, &[converter.directory()]) {
+            if let Some(id) = file
+                .strip_prefix(&format!("{top}/"))
+                .and_then(|path| converter.file_to_id(path))
+            {
+                selected.insert(id, (*pack, file));
+            }
+        }
+    }
+    let mut files = std::collections::BTreeMap::new();
+    for (id, (pack, path)) in selected {
+        // A file that vanishes or fails to read between listing and reading is one bad
+        // entry, as vanilla's `scanDirectory` treats a parse failure: log it, skip it.
+        match pack.read(&path) {
+            Some(bytes) => {
+                files.insert(id, bytes);
+            }
+            None => log::error!(
+                "Couldn't read file '{id}' from '{}/{}' for listener {}",
+                pack.id,
+                path,
+                listener
+            ),
+        }
+    }
+    ReloadFiles::new(files)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -772,43 +811,4 @@ mod tests {
         assert!(reload_waits(false, true));
         assert!(reload_waits(true, true));
     }
-}
-
-/// Reads one converter's directory from `packs`, later packs winning, and
-/// collects the converted files: the shared read-and-log loop of both sides'
-/// reloads. `top` is `"data"` or `"assets"`.
-pub(super) fn reload_files(
-    top: &str,
-    packs: &[&DataPack],
-    listener: &Identifier,
-    converter: &FileToIdConverter,
-) -> ReloadFiles {
-    let mut selected = std::collections::BTreeMap::new();
-    for pack in packs {
-        for file in pack.list_under(top, &[converter.directory()]) {
-            if let Some(id) = file
-                .strip_prefix(&format!("{top}/"))
-                .and_then(|path| converter.file_to_id(path))
-            {
-                selected.insert(id, (*pack, file));
-            }
-        }
-    }
-    let mut files = std::collections::BTreeMap::new();
-    for (id, (pack, path)) in selected {
-        // A file that vanishes or fails to read between listing and reading is one bad
-        // entry, as vanilla's `scanDirectory` treats a parse failure: log it, skip it.
-        match pack.read(&path) {
-            Some(bytes) => {
-                files.insert(id, bytes);
-            }
-            None => log::error!(
-                "Couldn't read file '{id}' from '{}/{}' for listener {}",
-                pack.id,
-                path,
-                listener
-            ),
-        }
-    }
-    ReloadFiles::new(files)
 }

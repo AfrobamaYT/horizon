@@ -3292,6 +3292,35 @@ fn note_event(host: &LanHost, started: Option<(Instant, EventKind)>) {
     });
 }
 
+/// A client's settings as the mod API names them.
+fn client_info(
+    i: &horizon_protocol::packets::configuration::ClientInformation,
+) -> mod_api::NativeClientInfo {
+    mod_api::NativeClientInfo {
+        language: i.language.clone(),
+        view_distance: i.view_distance,
+        chat_visibility: match i.chat_visibility.rem_euclid(3) {
+            0 => mod_api::NativeChatVisibility::Full,
+            1 => mod_api::NativeChatVisibility::System,
+            _ => mod_api::NativeChatVisibility::Hidden,
+        },
+        chat_colors: i.chat_colors,
+        model_customisation: i.model_customisation,
+        main_hand: if i.main_hand == 1 {
+            mod_api::NativeMainHand::Right
+        } else {
+            mod_api::NativeMainHand::Left
+        },
+        text_filtering: i.text_filtering,
+        allows_listing: i.allows_listing,
+        particle_status: match i.particle_status.rem_euclid(3) {
+            0 => mod_api::NativeParticleStatus::All,
+            1 => mod_api::NativeParticleStatus::Decreased,
+            _ => mod_api::NativeParticleStatus::Minimal,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{OFFHAND_SLOT, equipment_slot_name, living_flags, mob_freeze_meta};
@@ -3365,34 +3394,5 @@ mod tests {
                 "mainhand", "offhand", "head", "chest", "legs", "feet", "body", "saddle"
             ]
         );
-    }
-}
-
-/// A client's settings as the mod API names them.
-fn client_info(
-    i: &horizon_protocol::packets::configuration::ClientInformation,
-) -> mod_api::NativeClientInfo {
-    mod_api::NativeClientInfo {
-        language: i.language.clone(),
-        view_distance: i.view_distance,
-        chat_visibility: match i.chat_visibility.rem_euclid(3) {
-            0 => mod_api::NativeChatVisibility::Full,
-            1 => mod_api::NativeChatVisibility::System,
-            _ => mod_api::NativeChatVisibility::Hidden,
-        },
-        chat_colors: i.chat_colors,
-        model_customisation: i.model_customisation,
-        main_hand: if i.main_hand == 1 {
-            mod_api::NativeMainHand::Right
-        } else {
-            mod_api::NativeMainHand::Left
-        },
-        text_filtering: i.text_filtering,
-        allows_listing: i.allows_listing,
-        particle_status: match i.particle_status.rem_euclid(3) {
-            0 => mod_api::NativeParticleStatus::All,
-            1 => mod_api::NativeParticleStatus::Decreased,
-            _ => mod_api::NativeParticleStatus::Minimal,
-        },
     }
 }

@@ -286,10 +286,10 @@ mod tests {
     fn a_stale_handle_gives_nothing() {
         with_game(|game| {
             let player = acting_player(game);
-            let stale = PlayerRef {
-                entity: EntityRef::new(NativeWorldEpoch::new(u64::MAX), 7),
-                uuid: player.uuid(),
-            };
+            let stale = mod_api::__private::game::player_ref(
+                EntityRef::new(NativeWorldEpoch::new(u64::MAX), 7),
+                player.uuid(),
+            );
             assert!(!game.native_player_give_experience_points(stale, 10));
             assert!(!game.native_player_give_levels(stale, 1));
             assert_eq!(game.experience.total, 0);

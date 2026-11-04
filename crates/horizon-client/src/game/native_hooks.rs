@@ -1780,7 +1780,7 @@ impl Game<'_> {
     /// says is taken.
     pub(super) fn native_hud(&self, draw: &mut HudBatch, corners: &mut Corners) {
         mod_api::dispatch_hud(
-            &*self,
+            self,
             &mut super::mod_api_host::generated::GameDrawContext {
                 game: self,
                 surface: draw,
@@ -1812,7 +1812,7 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_gui_layer_pre(
-            &*self,
+            self,
             layer,
             &mut super::mod_api_host::generated::GameDrawContext {
                 game: self,
@@ -1826,7 +1826,7 @@ impl Game<'_> {
     /// the layer (`RenderGuiLayerEvent.Post`).
     pub(super) fn native_gui_layer_post(&self, layer: &str, draw: &mut HudBatch) {
         mod_api::dispatch_gui_layer_post(
-            &*self,
+            self,
             layer,
             &mut super::mod_api_host::generated::GameDrawContext {
                 game: self,
@@ -2089,7 +2089,7 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_render_arm(
-            &*self,
+            self,
             player,
             player_entity_id,
             left,
@@ -2386,7 +2386,7 @@ impl Game<'_> {
         draw: &mut BlockEntityDraw,
     ) {
         mod_api::dispatch_block_entity_submit(
-            &*self,
+            self,
             pos,
             block,
             state,
@@ -2435,7 +2435,7 @@ impl Game<'_> {
         drawn: &mut bool,
     ) {
         mod_api::dispatch_mob_submit(
-            &*self,
+            self,
             mob,
             &mut super::mod_api_host::generated::GameBlockEntityDrawContext {
                 game: self,
@@ -2467,7 +2467,7 @@ impl Game<'_> {
         drawn: &mut bool,
     ) {
         mod_api::dispatch_player_submit(
-            &*self,
+            self,
             player,
             who,
             &mut super::mod_api_host::generated::GameBlockEntityDrawContext {
@@ -2492,7 +2492,7 @@ impl Game<'_> {
         draw: &mut BlockEntityDraw,
     ) {
         mod_api::dispatch_mob_layer(
-            &*self,
+            self,
             mob,
             who,
             &mut super::mod_api_host::generated::GameBlockEntityDrawContext {
@@ -2542,7 +2542,7 @@ impl Game<'_> {
         origin: [f32; 2],
     ) {
         mod_api::dispatch_screen_draw(
-            &*self,
+            self,
             block,
             data,
             &mut super::mod_api_host::generated::GameDrawContext {
@@ -2598,7 +2598,7 @@ impl Game<'_> {
         screen: &NativeScreenView<'_>,
     ) {
         mod_api::dispatch_screen_render_post(
-            &*self,
+            self,
             &mut super::mod_api_host::generated::GameDrawContext {
                 game: self,
                 surface: draw,
@@ -5664,7 +5664,7 @@ impl Game<'_> {
         size: [f32; 2],
     ) {
         mod_api::dispatch_tooltip_component_draw(
-            &*self,
+            self,
             stack,
             &mut super::mod_api_host::generated::GameDrawContext {
                 game: self,
@@ -5714,7 +5714,7 @@ impl Game<'_> {
         draw: &mut HudBatch,
     ) {
         mod_api::dispatch_item_decorations(
-            &*self,
+            self,
             stack,
             x,
             y,

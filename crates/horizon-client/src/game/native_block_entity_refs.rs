@@ -20,10 +20,7 @@ impl Game<'_> {
         level: LevelRef,
         pos: [i32; 3],
     ) -> Option<BlockEntityRef> {
-        let entity = BlockEntityRef {
-            level,
-            position: pos,
-        };
+        let entity = mod_api::__private::game::block_entity_ref(level, pos);
         self.native_block_entity_target(entity).map(|_| entity)
     }
 

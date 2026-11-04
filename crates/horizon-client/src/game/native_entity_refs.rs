@@ -1087,10 +1087,12 @@ pub(super) mod tests {
             assert!(abilities.may_build && abilities.instabuild && abilities.may_fly);
             assert_eq!((abilities.walk_speed, abilities.fly_speed), (0.2, 0.1));
             assert!(game.native_player_set_game_mode(player, GameMode::Survival));
-            let mut stale = player;
-            stale.fields().entity = mod_api::EntityRef::new(
-                mod_api::NativeWorldEpoch::new(0),
-                player.fields().entity.id(),
+            let stale = mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(
+                    mod_api::NativeWorldEpoch::new(0),
+                    player.fields().entity.id(),
+                ),
+                player.uuid(),
             );
             assert!(!game.native_player_set_game_mode(stale, GameMode::Creative));
             let other = game

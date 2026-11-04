@@ -61,7 +61,7 @@ impl Game<'_> {
         self.native_level_world(level)?
             .chunks
             .contains_key(&(pos[0], pos[1]))
-            .then_some(ChunkRef { level, pos })
+            .then_some(mod_api::__private::game::chunk_ref(level, pos))
     }
     /// Whether this chunk is loaded; false on a client or for a stale handle.
     pub(super) fn native_chunk_ref_loaded(&self, chunk: ChunkRef) -> bool {
