@@ -111,11 +111,9 @@ pub(super) fn named(types: &Types<'_>, ty: &Ty, out: &mut BTreeSet<usize>) {
             named(types, b, out);
         }
         Ty::Tuple(items) => items.iter().for_each(|item| named(types, item, out)),
-        Ty::Named(def) => {
-            if out.insert(*def) {
-                for ty in def_fields(&types.defs[*def]) {
-                    named(types, ty, out);
-                }
+        Ty::Named(def) if out.insert(*def) => {
+            for ty in def_fields(&types.defs[*def]) {
+                named(types, ty, out);
             }
         }
         _ => {}

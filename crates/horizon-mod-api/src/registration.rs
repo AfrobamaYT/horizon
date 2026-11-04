@@ -4,6 +4,7 @@
 //! into the mod by the index the mod keeps it under.
 
 /// Where a part is attached.
+#[non_exhaustive]
 pub enum PartAt {
     /// A block (`Registrar::block_part`).
     Block,
@@ -20,6 +21,7 @@ pub enum PartAt {
 }
 
 /// One part the mod attached, in its registration order.
+#[non_exhaustive]
 pub struct RegisteredPart {
     /// Where it is attached.
     pub at: PartAt,
@@ -32,6 +34,7 @@ pub struct RegisteredPart {
 }
 
 /// A block entity type the mod declared.
+#[non_exhaustive]
 pub struct RegisteredType {
     /// Its namespaced id.
     pub id: String,
@@ -40,6 +43,7 @@ pub struct RegisteredType {
 }
 
 /// A ticket controller the mod registered.
+#[non_exhaustive]
 pub struct RegisteredController {
     /// Its namespaced id.
     pub id: String,
@@ -49,6 +53,7 @@ pub struct RegisteredController {
 
 /// Everything one mod's `register` attached, declared and asked for.
 #[derive(Default)]
+#[non_exhaustive]
 pub struct Registered {
     /// Its parts, in registration order.
     pub parts: Vec<RegisteredPart>,

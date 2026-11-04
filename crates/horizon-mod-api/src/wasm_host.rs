@@ -28,6 +28,7 @@ impl std::error::Error for Refused {}
 
 /// Why a linked group can't run, named for the Mods page.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LoadError {
     /// The module doesn't export an interface or function this game calls.
     MissingExport(String),
@@ -53,6 +54,7 @@ impl std::error::Error for LoadError {}
 
 /// Run budgets, in wasmtime fuel units (about one per instruction).
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct Budgets {
     /// What one hook or part call may spend.
     pub call: u64,
@@ -360,6 +362,7 @@ impl Drop for Keep {
 const GROUP_WAIT: Duration = Duration::from_secs(5);
 
 /// One linked dependency group: one store, one memory, one copy of each member's code.
+// exhaustive: its fields are private
 pub struct Group {
     store: Mutex<Store<State>>,
     /// The thread running the group now, so a call back into it from that thread refuses
@@ -382,6 +385,7 @@ thread_local! {
 
 /// Why a call into a group didn't run.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CallRefused {
     /// A trap stopped the group earlier; it runs no more calls.
     Stopped,
@@ -456,12 +460,14 @@ struct Running {
 }
 
 /// One wasm mod of a group: the [`Hooks`](crate::Hooks) the game dispatches to.
+// exhaustive: its fields are private
 pub struct WasmMod {
     module: Arc<Running>,
     subscribed: &'static [Option<HookId>],
 }
 
 /// One of a wasm mod's registered parts or handlers, by the index the mod keeps it under.
+// exhaustive: its fields are private
 pub struct WasmHandler {
     module: Arc<Running>,
     index: u32,
@@ -585,6 +591,7 @@ fn register(module: &WasmMod, r: &mut crate::Registrar, _: &crate::RegistrationC
 }
 
 /// A member of a group: its mod id, and the prefix of its exports, `<prefix>-<interface>`.
+// exhaustive: the runtime names each member it links, and nothing else builds one
 pub struct Member {
     /// The mod's id.
     pub id: &'static str,
