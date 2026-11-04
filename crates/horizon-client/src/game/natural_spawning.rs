@@ -407,7 +407,7 @@ impl SpawnLevel for GameLevel<'_, '_> {
         self.game.native_mob_spawn_placement_check(
             self.game.dim.id(),
             entity,
-            reason.into(),
+            reason,
             BlockPos::new(at[0], at[1], at[2]),
             vanilla,
             &mut result,
@@ -482,7 +482,7 @@ impl NaturalLevel for GameLevel<'_, '_> {
             self.game.native_mob_spawn_position_check(
                 self.game.dim.id(),
                 entity,
-                reason.into(),
+                reason,
                 at,
                 &mut result,
             );
@@ -1426,7 +1426,7 @@ mod tests {
                 )
                 .unwrap();
                 let heard = heard.lock().unwrap();
-                let natural = mod_api::NativeSpawnReason::from(Reason::Natural);
+                let natural = Reason::Natural;
                 assert_eq!(
                     *heard,
                     [

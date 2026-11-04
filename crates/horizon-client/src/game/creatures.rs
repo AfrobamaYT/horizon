@@ -1017,7 +1017,7 @@ impl Game<'_> {
             self.native_finalize_spawn(
                 self.dim.id(),
                 &mob.kind.id,
-                reason.into(),
+                reason,
                 at,
                 spawner,
                 &mut heard,
