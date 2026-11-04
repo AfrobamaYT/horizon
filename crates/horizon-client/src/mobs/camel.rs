@@ -11,6 +11,7 @@ use super::{
 use horizon_core::geometry::trig::Mth;
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_core::random::RandomSource;
+use horizon_world::native_load_context::LoopContext;
 use std::collections::HashMap;
 
 // Camel state: `egg_time` the mob age of the last pose change (it may be
@@ -417,7 +418,7 @@ fn animation_states(m: &mut Mob, pose_time: i64, sitting: bool) {
 /// jump is used up: it is, by a dash or when the camel cannot dash at all (cooling down,
 /// refusing to move: `onPlayerJump` would not have taken it); it waits while the camel is off
 /// the ground (`AbstractHorse.tickRidden` runs a pending jump when it lands).
-pub fn dash(m: &mut Mob, amount: f32, events: &mut Vec<MobEvent>) -> bool {
+pub fn dash(m: &mut Mob, context: &LoopContext, amount: f32, events: &mut Vec<MobEvent>) -> bool {
     if m.extra.anim_ticks > 0 || refuse_to_move(m) {
         return true;
     }
@@ -433,7 +434,7 @@ pub fn dash(m: &mut Mob, amount: f32, events: &mut Vec<MobEvent>) -> bool {
     m.velocity.y += 1.4285 * a * 0.42;
     m.extra.anim_ticks = DASH_COOLDOWN;
     m.extra.flag2 = true;
-    crate::motion::native_living_jump(m.id, &m.kind.id);
+    crate::motion::native_living_jump(context, m.id, &m.kind.id);
     sound(m, voice(m, 3), events);
     true
 }

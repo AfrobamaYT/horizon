@@ -3,6 +3,7 @@
 //! fluid slowdown and falling adjustment), fluid immersion heights, fall
 //! damage, fire and the walk animation.
 use super::{Mob, MobEvent, MobWorld};
+use horizon_world::native_load_context::LoopContext;
 use crate::health::DamageLevel;
 use crate::{
     blocks::Fluid,
@@ -1079,6 +1080,7 @@ impl Mob {
         // A block outside the landing registry falls back to the plain fall.
         if result.is_err() {
             self.cause_fall_damage_at(
+                w.loop_context,
                 level,
                 distance,
                 1.0,
@@ -1116,12 +1118,14 @@ impl Mob {
     /// horse first and passes the fall on only when it was hurt.
     pub fn cause_fall_damage_from(
         &mut self,
+        context: &LoopContext,
         level: &mut DamageLevel<'_>,
         distance: f64,
         modifier: f32,
         events: &mut Vec<MobEvent>,
     ) {
         self.cause_fall_damage_at(
+            context,
             level,
             distance,
             modifier,
@@ -1133,6 +1137,7 @@ impl Mob {
     /// True when the fall hurt (`causeFallDamage`'s result).
     pub(super) fn cause_fall_damage_at(
         &mut self,
+        context: &LoopContext,
         level: &mut DamageLevel<'_>,
         distance: f64,
         modifier: f32,
@@ -1173,6 +1178,7 @@ impl Mob {
         if !horse {
             let mut cancel = false;
             crate::landing::native_living_fall(
+                context,
                 self.id,
                 &self.kind.id,
                 &mut distance,
@@ -1624,7 +1630,7 @@ impl Mob {
         self.needs_sync = true;
         if self.species() == super::Species::Rabbit {
             super::rabbit::jump(self, w);
-            crate::motion::native_living_jump(self.id, &self.kind.id);
+            crate::motion::native_living_jump(w.loop_context, self.id, &self.kind.id);
             return;
         }
         if matches!(
@@ -1632,7 +1638,7 @@ impl Mob {
             super::Species::Slime | super::Species::MagmaCube | super::Species::SulfurCube
         ) {
             super::cube::jump(self, w);
-            crate::motion::native_living_jump(self.id, &self.kind.id);
+            crate::motion::native_living_jump(w.loop_context, self.id, &self.kind.id);
             return;
         }
         let power = self.jump_power(w.loop_context);
@@ -1653,7 +1659,7 @@ impl Mob {
         {
             self.move_relative(0.1, Vec3::new(0.0, 0.0, 1.0));
         }
-        crate::motion::native_living_jump(self.id, &self.kind.id);
+        crate::motion::native_living_jump(w.loop_context, self.id, &self.kind.id);
     }
     /// `LivingEntity.getJumpPower`, through the `living_jump_power` hook.
     pub fn jump_power(&self, context: &horizon_world::native_load_context::LoopContext) -> f32 {

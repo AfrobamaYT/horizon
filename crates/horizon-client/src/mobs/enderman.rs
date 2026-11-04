@@ -1,6 +1,7 @@
 //! Endermen: anger from being stared at, teleporting (randomly in daylight,
 //! when hit by projectiles or water, and towards a distant target), freezing
 //! while looked at, and picking up / placing `enderman_holdable` blocks.
+use horizon_world::native_load_context::LoopContext;
 use super::{
     Damage, Mob, MobEvent, MobWorld, Species, Who,
     anim::{Poses, State},
@@ -75,13 +76,14 @@ pub fn stared_at(m: &Mob, w: &MobWorld) -> bool {
 /// (`EntityTeleportEvent.EnderEntity`). A mod may move `target` or cancel.
 #[inline(never)]
 pub fn native_ender_entity_teleport(
+    context: &LoopContext,
     entity: u32,
     kind: &str,
     from: [f64; 3],
     target: &mut [f64; 3],
     cancel: &mut bool,
 ) {
-    crate::native_client_hooks::ender_entity_teleport(entity, kind, from, target, cancel);
+    crate::native_client_hooks::ender_entity_teleport(context, entity, kind, from, target, cancel);
 }
 /// `LivingEntity.randomTeleport`'s target: `x` and `z` kept inside the
 /// world border (Mth.clamp, 1.0E-5F inside the far edges), then the block
@@ -130,6 +132,7 @@ pub fn teleport_to(
         let mut target = [x, y, z];
         let mut cancel = false;
         native_ender_entity_teleport(
+            w.loop_context,
             m.id,
             &m.kind.id,
             [m.position.x, m.position.y, m.position.z],

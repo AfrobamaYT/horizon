@@ -9,17 +9,17 @@ pub struct NativeClientHooks {
     pub item_stacked_on_other: fn(&LoopContext, &mut crate::menu::StackedOnOther<'_>, &mut bool),
     pub living_heal: fn(&LoopContext, u32, &mut f32, &mut bool),
     pub living_breathe: fn(&LoopContext, u32, &str, &mut bool, &mut i32, &mut i32),
-    pub farmland_trample: fn(u32, [i32; 3], u32, f64, &mut bool),
+    pub farmland_trample: fn(&LoopContext, u32, [i32; 3], u32, f64, &mut bool),
     pub has_mods: fn() -> bool,
     pub player_name_format: fn(&LoopContext, &crate::text::Text, &mut crate::text::Text),
     pub player_tab_list_name_format: fn(&LoopContext, u128, &str, &mut Option<crate::text::Text>),
     pub living_drown: fn(&LoopContext, u32, &str, &mut bool, &mut f32, i32, &mut bool),
-    pub living_fall: fn(u32, &str, &mut f64, &mut f32, &mut bool),
-    pub living_jump: fn(u32, &str),
+    pub living_fall: fn(&LoopContext, u32, &str, &mut f64, &mut f32, &mut bool),
+    pub living_jump: fn(&LoopContext, u32, &str),
     pub living_jump_power: fn(&LoopContext, u32, &str, &mut f32),
     pub living_speed: fn(&LoopContext, u32, &str, &mut f32),
     pub living_flying_speed: fn(&LoopContext, u32, &str, &mut f32),
-    pub ender_entity_teleport: fn(u32, &str, [f64; 3], &mut [f64; 3], &mut bool),
+    pub ender_entity_teleport: fn(&LoopContext, u32, &str, [f64; 3], &mut [f64; 3], &mut bool),
 }
 
 static HOOKS: OnceLock<NativeClientHooks> = OnceLock::new();
@@ -72,6 +72,7 @@ pub(crate) fn living_breathe(
 }
 
 pub(crate) fn farmland_trample(
+    context: &LoopContext,
     entity: u32,
     pos: [i32; 3],
     state: u32,
@@ -79,7 +80,7 @@ pub(crate) fn farmland_trample(
     cancel: &mut bool,
 ) {
     if let Some(hooks) = HOOKS.get() {
-        (hooks.farmland_trample)(entity, pos, state, distance, cancel);
+        (hooks.farmland_trample)(context, entity, pos, state, distance, cancel);
     }
 }
 
@@ -131,6 +132,7 @@ pub(crate) fn living_drown(
 }
 
 pub(crate) fn living_fall(
+    context: &LoopContext,
     entity: u32,
     kind: &str,
     distance: &mut f64,
@@ -138,13 +140,13 @@ pub(crate) fn living_fall(
     cancel: &mut bool,
 ) {
     if let Some(hooks) = HOOKS.get() {
-        (hooks.living_fall)(entity, kind, distance, multiplier, cancel);
+        (hooks.living_fall)(context, entity, kind, distance, multiplier, cancel);
     }
 }
 
-pub(crate) fn living_jump(entity: u32, kind: &str) {
+pub(crate) fn living_jump(context: &LoopContext, entity: u32, kind: &str) {
     if let Some(hooks) = HOOKS.get() {
-        (hooks.living_jump)(entity, kind);
+        (hooks.living_jump)(context, entity, kind);
     }
 }
 
@@ -167,6 +169,7 @@ pub(crate) fn living_flying_speed(context: &LoopContext, entity: u32, kind: &str
 }
 
 pub(crate) fn ender_entity_teleport(
+    context: &LoopContext,
     entity: u32,
     kind: &str,
     from: [f64; 3],
@@ -174,6 +177,6 @@ pub(crate) fn ender_entity_teleport(
     cancel: &mut bool,
 ) {
     if let Some(hooks) = HOOKS.get() {
-        (hooks.ender_entity_teleport)(entity, kind, from, target, cancel);
+        (hooks.ender_entity_teleport)(context, entity, kind, from, target, cancel);
     }
 }

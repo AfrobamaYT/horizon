@@ -49,8 +49,8 @@ use std::{
 
 /// A living entity jumped (`LivingEvent.LivingJumpEvent`).
 #[inline(never)]
-pub fn native_living_jump(entity: u32, kind: &str) {
-    crate::native_client_hooks::living_jump(entity, kind);
+pub fn native_living_jump(context: &LoopContext, entity: u32, kind: &str) {
+    crate::native_client_hooks::living_jump(context, entity, kind);
 }
 
 /// A living entity's jump power is about to be used (beyond NeoForge: there is no counterpart).
@@ -2002,7 +2002,11 @@ impl MotionWorld<'_, '_, '_> {
     pub fn jump_from_ground(&mut self) -> Result<()> {
         living_motion::jump_from_ground(self)?;
         if !self.player.replaying {
-            native_living_jump(self.player.entity_id as u32, "minecraft:player");
+            native_living_jump(
+                self.loop_context,
+                self.player.entity_id as u32,
+                "minecraft:player",
+            );
         }
         self.player
             .events

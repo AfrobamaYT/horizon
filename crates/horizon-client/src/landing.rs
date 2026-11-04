@@ -23,31 +23,34 @@ use horizon_world::{
     movement_properties::MovementProperties,
     registry::BlockStateId,
 };
+use horizon_world::native_load_context::LoopContext;
 use std::{collections::BTreeMap, fs, path::Path};
 
 /// Called on the server before a landing converts farmland to its base block.
 #[inline(never)]
 pub fn native_farmland_trample(
+    context: &LoopContext,
     entity: u32,
     pos: [i32; 3],
     state: u32,
     distance: f64,
     cancel: &mut bool,
 ) {
-    crate::native_client_hooks::farmland_trample(entity, pos, state, distance, cancel);
+    crate::native_client_hooks::farmland_trample(context, entity, pos, state, distance, cancel);
 }
 
 /// A living entity is about to handle a fall (`LivingFallEvent`). Mods may
 /// change the distance and damage multiplier, or cancel fall handling.
 #[inline(never)]
 pub fn native_living_fall(
+    context: &LoopContext,
     entity: u32,
     kind: &str,
     distance: &mut f64,
     multiplier: &mut f32,
     cancel: &mut bool,
 ) {
-    crate::native_client_hooks::living_fall(entity, kind, distance, multiplier, cancel);
+    crate::native_client_hooks::living_fall(context, entity, kind, distance, multiplier, cancel);
 }
 
 pub fn load(root: &Path, properties: &MovementProperties<'_>) -> Result<BlockLandingRegistry> {
@@ -341,6 +344,7 @@ impl MotionWorld<'_, '_, '_> {
         let mut cancel = false;
         if !self.player.replaying {
             native_living_fall(
+                self.loop_context,
                 self.player.entity_id as u32,
                 "minecraft:player",
                 &mut distance,
@@ -528,6 +532,7 @@ impl BlockLandingWorld for MotionWorld<'_, '_, '_> {
     ) -> bool {
         let mut cancel = false;
         native_farmland_trample(
+            self.loop_context,
             self.player.entity_id as u32,
             [position.x, position.y, position.z],
             state.0,
