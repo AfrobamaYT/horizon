@@ -14,9 +14,10 @@ cargo horizon-mod build             # only build: target/horizon-mod/my_mod.hmod
 cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks; --json for JSON
 ```
 
-- `new <path> [--name "Name"]` writes the content template. `--template native --horizon <commit>` writes
-  a flat trait mod instead: `horizon-mod.toml` with `[native]` pinned to that exact commit, root `Cargo.toml`
-  and `src/lib.rs`, and empty `assets/` and `data/` directories. Its root `impl Hooks` uses
+- `new <path> [--name "Name"]` writes the content template. `--template native` writes
+  a flat trait mod instead: `horizon-mod.toml` with `[native]` pinned to the newest prebuilt game's commit (or
+  `--horizon <commit>`'s) so the launcher downloads the game instead of building it, root `Cargo.toml`
+  and `src/lib.rs`, and empty `assets/` and `data/` directories. `update` repins it the same way. Its root `impl Hooks` uses
   `#[mod_api::horizon_mod]`. Compile it with `horizon-launcher native-build <path> --trust-native-code`
   ([trait mods](../concepts/trait-mods.md#trait-mods-draft)). Any other `--template` is refused.
 - `build` packs the checked project into `target/horizon-mod/<id>.hmod`: `horizon-mod.toml`, `assets/`,
@@ -117,6 +118,19 @@ A block names its template and what differs from it:
   "properties": { "hardness": 4.0, "light": 3, "sounds": "minecraft:amethyst_block" },
   "item": true }
 ```
+
+A fence gate needs no kind of its own: a block whose template is a vanilla `minecraft:*_fence_gate` is a
+`FenceGateBlock`, with the template wood's open and close sounds. `"open_sound"` and `"close_sound"` (sound event ids,
+such as `"minecraft:block.chain.break"` or a sound of the mod's own `sounds.json`) replace them, as a gate built with its
+own `WoodType` has, and they are what opening by hand, a redstone signal and a wind-charge or other explosion toggle all
+play. Either key needs a `*_fence_gate` template and a `namespace:path` id, or the load fails naming the file; leaving
+both out keeps the wood's sounds.
+
+A block gets a block item of its own id by default. `"item": false` gives it none: pick-block takes nothing and
+`Block.asItem` is air (what a block drops comes from its loot table). `"block_item": "<item id>"` (with `"item": false`) makes the block
+that other item instead, an item of the mod or a vanilla one, such as `"minecraft:diamond"`: pick-block and
+`Block.asItem` both read it, and the load fails naming the block when no such item exists. `"none"` is not an item id;
+write `"item": false`. A sign's wall form takes its sign's item through `wall_block`, not `block_item`.
 
 `push_reaction` sets vanilla's `BlockBehaviour.Properties.pushReaction` to `"PUSH_PULL"`, `"PUSH"`, `"POPPED"`, `"IMMOVEABLE"`, or `"IGNORE_ENTITY"`.
 

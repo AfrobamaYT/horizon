@@ -1011,6 +1011,7 @@ impl Game<'_> {
     /// 256 UTF-16 units the packet holds), into history, then as a command or
     /// a chat line. The Chat option's restrictions stop the message here too,
     /// so a control-socket `chat` cannot send what the player's setting hides.
+    #[horizon_mod_api_macros::point(side = "client")]
     pub(super) fn handle_chat_input(&mut self, message: &str) {
         let message = normalize_chat_message(message);
         if message.is_empty() || !self.chat_abilities().allows(&message) {
@@ -1534,6 +1535,7 @@ impl Game<'_> {
         }
     }
     /// F1 hides the HUD (see `hud`); the screenshot key still works.
+    #[horizon_mod_api_macros::point(side = "client")]
     pub(super) fn toggle_hide_gui(&mut self) {
         self.ui.hide_gui = !self.ui.hide_gui;
     }

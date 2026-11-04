@@ -4,7 +4,7 @@
 
 Behaviour that needs code (a new key, a HUD, a tool that changes how mining works) is a native mod.
 It is one flat Rust project with `horizon-mod.toml`, `Cargo.toml` and `src/`, beside its `assets/` and `data/`.
-Start with `cargo horizon-mod new my_mod --template native --horizon <commit>` and implement the typed hooks;
+Start with `cargo horizon-mod new my_mod --template native` and implement the typed hooks;
 raw injections are a rare escape hatch ([Injections](../injections.md)). How the launcher builds one, what it pins and why it is not sandboxed:
 [native mods](native-mods.md).
 The typed hook API is generated automatically at build time, in debug and release builds alike; its generated
@@ -26,7 +26,7 @@ keep its own server config in `serverconfig/` ([native mods](native-mods.md)). S
 The client hook `native_render_name_tag(entity_id, kind, vanilla_visible, visible, text)` runs at player and mob, armor stand, and item frame name decisions before shared geometry. Set `visible` to override vanilla and `text` to `Some` literal replacement text (NeoForge `RenderNameTagEvent`). Distance and entity availability still apply; the local player's tag is considered only when its own camera and settings gates allow it.
 
 Native mods are Rust projects that implement the game's typed hook API (`impl Hooks`). Start with
-`cargo horizon-mod new my_mod --template native --horizon <commit>` ([Trait mods](../concepts/trait-mods.md#trait-mods-draft)).
+`cargo horizon-mod new my_mod --template native` ([Trait mods](../concepts/trait-mods.md#trait-mods-draft)).
 Each project has one `horizon-mod.toml`, with exact build pins in `[native]`, and ships as one `.hmod`.
 For the rare case the API does not cover, raw injections change the game's Rust source before it is compiled,
 using [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) (MIT, by levzzz5154, made for Horizon).

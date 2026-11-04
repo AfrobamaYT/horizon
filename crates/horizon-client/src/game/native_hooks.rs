@@ -2775,6 +2775,11 @@ impl Game<'_> {
     pub(super) fn native_client_setup(&mut self) {
         mod_api::dispatch_client_setup(self);
     }
+    /// The client is closing: once per process, at the start of the game's shutdown,
+    /// after its world is left, while settings and resources are still held.
+    pub(super) fn native_client_stopping(&mut self) {
+        mod_api::dispatch_client_stopping(self);
+    }
     /// The client made a new level for `dimension` (NeoForge's
     /// `LevelEvent.Load` from the `ClientLevel` constructor): on joining a
     /// server, single player's own included, and on changing dimension.
@@ -3058,11 +3063,17 @@ impl Game<'_> {
     /// server begins loading anything"). Vanilla's `MinecraftServer.loadLevel`
     /// start. Server-side: the single player server thread once Play is
     /// pressed, a dedicated server once its settings are read. Each is
-    /// followed by `native_world_lifecycle`'s `WorldOpenReady` or
-    /// `WorldOpenFailed`. `dedicated` tells a dedicated server from the single
+    /// followed by `native_server_started` or
+    /// `native_world_lifecycle`'s `WorldOpenFailed`. `dedicated` tells a dedicated server from the single
     /// player one.
     pub(super) fn native_server_about_to_start(&mut self, dedicated: bool) {
         mod_api::dispatch_server_about_to_start(self, dedicated);
+    }
+    /// The server opened its worlds and is about to tick (NeoForge's
+    /// `ServerStartedEvent`): every level loaded, no player joined. Where
+    /// `WorldOpenReady` fired: the end of the open, before the tick loop.
+    pub(super) fn native_server_started(&mut self, dedicated: bool) {
+        mod_api::dispatch_server_started(self, dedicated);
     }
     /// The server begins an orderly stop (NeoForge's `ServerStoppingEvent`):
     /// the start of vanilla's `MinecraftServer.stopServer`, with the worlds
@@ -3778,7 +3789,8 @@ impl Game<'_> {
     }
     /// Draw the mod block entity at `pos`, of block `block`
     /// (`mymod:machine`), on this client: once a frame while it is in view
-    /// (vanilla's `BlockEntityRenderer.submit`: within 64 blocks, its chunk
+    /// (vanilla's `BlockEntityRenderer.submit`: within its view distance, 64 blocks unless
+    /// `block_entity_view_distance` says otherwise, its chunk
     /// faded in, and its bounds, `native_block_entity_render_bounding_box`,
     /// in the frustum), when its `id` is yours. `state` is the block's state
     /// (`blockEntity.getBlockState()`: read its `facing` with
@@ -3814,7 +3826,7 @@ impl Game<'_> {
     /// as the block with a block of margin around it; widen it when your
     /// `native_block_entity_submit` draws further (a tall shaft, a beam), or
     /// set an infinite value for one never culled. Asked once a frame for each
-    /// within 64 blocks whose chunk is drawn.
+    /// within its view distance (`block_entity_view_distance`) whose chunk is drawn.
     pub(super) fn native_block_entity_render_bounding_box(
         &self,
         pos: [i32; 3],
@@ -3824,6 +3836,12 @@ impl Game<'_> {
         bounds: &mut [f32; 6],
     ) {
         mod_api::dispatch_block_entity_render_bounding_box(self, pos, block, state, entity, bounds);
+    }
+    /// How far from the camera the mod block entity of block `block` draws, in blocks
+    /// (`BlockEntityRenderer.getViewDistance`): 64 unless a part answers. Asked once for
+    /// each mod block, the first time this client draws block entities, and kept.
+    pub(super) fn native_block_entity_view_distance(&self, block: &str, distance: &mut f64) {
+        mod_api::dispatch_block_entity_view_distance(self, block, distance);
     }
     /// Draw the mob `mob` (its id, kind, custom name and the frame's body
     /// and head turns and walk cycle, `LivingEntityRenderState`) on this

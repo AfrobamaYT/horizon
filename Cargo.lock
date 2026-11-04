@@ -412,6 +412,7 @@ dependencies = [
  "sha2",
  "toml",
  "toml_edit",
+ "ureq",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
  "wit-component 0.261.0",
@@ -1895,6 +1896,7 @@ name = "horizon-mod-api-gen"
 version = "0.1.0"
 dependencies = [
  "heck",
+ "proc-macro2",
  "quote",
  "serde",
  "serde_json",

@@ -1174,6 +1174,7 @@ impl Game<'_> {
         self.item_activation.reset();
         // Kept mod block entity geometry belongs to the world leaving.
         self.kept_block_entities.get_mut().clear();
+        self.mod_view_distances.take();
         self.clear_narrator();
         // A world is leaving either way: its icon attempt goes with it.
         self.world_icon = None;
@@ -5910,6 +5911,7 @@ impl Game<'_> {
     }
 
     /// One client tick while connected (Minecraft.tick with a ClientLevel).
+    #[horizon_mod_api_macros::point(side = "client")]
     pub(super) fn tick_remote(&mut self) -> Result<()> {
         self.tick_remote_level()?;
         // The rockets boosting this player tick after it, also while it waits
@@ -7140,6 +7142,7 @@ impl Game<'_> {
         }
     }
     /// LocalPlayer.sendPosition plus input, sprint and held-slot updates.
+    #[horizon_mod_api_macros::point(side = "client")]
     fn remote_send_state(&mut self, input: u8) {
         let Some(p) = self.player.as_ref() else {
             return;
@@ -8974,6 +8977,7 @@ impl Game<'_> {
         }
     }
 
+    #[horizon_mod_api_macros::point(side = "client")]
     fn remote_start_attack(&mut self) -> bool {
         if self.clicks.miss_time > 0 || self.hands_busy() {
             return false;

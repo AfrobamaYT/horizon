@@ -131,6 +131,16 @@ mod entity_culling;
 mod event_loop;
 mod events;
 mod execution_role;
+/// The injection points' slots (`#[point]`, #589), generated from the game's source.
+#[doc(hidden)]
+pub mod points {
+    include!(concat!(env!("OUT_DIR"), "/points_generated.rs"));
+
+    /// A `side = "both"` point's host.
+    pub(super) fn host_side<'a>(game: &'a mut super::Game<'_>) -> mod_api::HostSide<'a> {
+        super::execution_role::host_side(game)
+    }
+}
 mod explosion;
 mod extras;
 mod falling_damage;
@@ -2923,6 +2933,8 @@ struct Game<'a> {
     /// Mod block entities' geometry their mods kept
     /// (game/native_block_entity_draw.rs).
     kept_block_entities: std::cell::RefCell<native_block_entity_draw::KeptGeometry>,
+    /// The mod block entities' view distances, asked of the parts once (`native_block_entity_draw`).
+    mod_view_distances: std::cell::OnceCell<native_block_entity_draw::ViewDistances>,
     /// `item_level` for one frame, game time, day time and dimension.
     item_level_cache: std::cell::RefCell<
         Option<(
@@ -3811,6 +3823,7 @@ impl Game<'_> {
         Some((self.eye_position()?, view_vector(self.yaw, self.pitch)))
     }
     /// `Player.blockInteractionRange`: the block pick's and mining's reach.
+    #[horizon_mod_api_macros::point(side = "both")]
     fn reach(&self) -> f64 {
         self.block_reach
     }
@@ -4116,6 +4129,7 @@ impl Game<'_> {
     /// (PowderSnowBlock.canEntityWalkOnPowderSnow), freeze-immune wear
     /// (LivingEntity.canFreeze), the dimension's FAST_LAVA, the sleeping
     /// pose and blindness (Player.isMobilityRestricted, which stops a sprint).
+    #[horizon_mod_api_macros::point(side = "both")]
     pub(crate) fn sync_player_body(&mut self) {
         let glider = self.glider_worn();
         let sleeping = self.sleeping.is_some();
@@ -8189,6 +8203,7 @@ impl Game<'_> {
         }
         None
     }
+    #[horizon_mod_api_macros::point(side = "both")]
     fn spawn_player(&mut self) -> Result<()> {
         if self.player.is_some() || self.remote.is_some() {
             return Ok(());
@@ -8336,6 +8351,7 @@ impl Game<'_> {
         };
         self.with_level(|b, level, ticks| b.notify_written(level, ticks, position, flags));
     }
+    #[horizon_mod_api_macros::point(side = "both")]
     fn tick(&mut self) -> Result<()> {
         if self.agent.hold_server {
             return Ok(());
@@ -8785,6 +8801,7 @@ impl Game<'_> {
     /// `MouseHandler.handleAccumulatedMovement` and `Entity.turn`, once per frame.
     /// An agent moving the mouse (`mouse-move`) counts as a grabbed pointer in
     /// an active window, as it cannot grab the real one.
+    #[horizon_mod_api_macros::point(side = "client", hot)]
     fn apply_mouse_look(&mut self) {
         let mut look = self.look_options();
         let time = self.started.elapsed().as_secs_f64();
@@ -12699,6 +12716,7 @@ impl Game<'_> {
         scale > 0.9 && falling && !restricted
     }
     /// Player.attack with the attack-strength charge, crits and knockback.
+    #[horizon_mod_api_macros::point(side = "both")]
     fn attack(&mut self) -> bool {
         if self.spectator() {
             return false;
@@ -13574,6 +13592,7 @@ impl Game<'_> {
         // GameRenderer.resetData (Minecraft.clearClientLevel).
         self.item_activation.reset();
         self.kept_block_entities.get_mut().clear();
+        self.mod_view_distances.take();
         self.bosses = Default::default();
         self.streaming.paused = true;
         self.world = World::new(self.res.facts().air, 0);
@@ -16627,6 +16646,7 @@ impl Game<'_> {
             scaled: false,
         });
     }
+    #[horizon_mod_api_macros::point(side = "client", hot)]
     fn render(&mut self) -> Result<bool> {
         // The window's GPU holds the atlas: its copy in memory is kept
         // compressed (a no-op once it is).
@@ -19839,6 +19859,12 @@ impl Game<'_> {
         if let Err(e) = self.save_for_exit() {
             log::warn!("Horizon: failed to save the world on exit: {e}");
         }
+        // The client's last moment: its world is left and saved, its options and
+        // resources are still held. A dedicated server and a splitscreen guest skip
+        // it, as `client_setup` does.
+        if self.options.is_client_start() {
+            self.native_client_stopping();
+        }
         self.finish_perf();
     }
     /// winit's `about_to_wait`: what happens between frames (stop requests, the closing
@@ -20132,6 +20158,7 @@ impl<'a> Game<'a> {
             frames: 0,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
+            mod_view_distances: Default::default(),
             item_level_cache: Default::default(),
             world_frames: 0,
             fps: 0.0,

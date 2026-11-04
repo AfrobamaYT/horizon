@@ -6,6 +6,8 @@ use syn::{
     punctuated::Punctuated,
 };
 
+mod point_shape;
+
 /// Keep only attributes that can gate a method, including nested `cfg_attr`s.
 fn cfg_meta(meta: &Meta) -> Option<Meta> {
     if meta.path().is_ident("cfg") {
@@ -136,6 +138,111 @@ pub fn horizon_mod(_attribute: TokenStream, input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn horizon_part(_attribute: TokenStream, input: TokenStream) -> TokenStream {
     expand(parse_macro_input!(input as ItemImpl), false)
+}
+
+/// `#[point(side = "server" | "client" | "both", name = "…", hot)]` on a `Game` method: an
+/// injection point (#589), a slot the launcher fills at load with the listeners of the mods'
+/// `[[native.injection]]` entries that target this function, with no game rebuild. Its head checks
+/// the slot (one atomic load and a branch while it is empty) and hands each listener the side's
+/// host and the parameters with API types, which it may change. `name` is needed only where two
+/// pointed functions share a name; `hot` marks one that runs per block, entity or frame.
+#[proc_macro_attribute]
+pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
+    let mut function = parse_macro_input!(input as ImplItemFn);
+    if let Some(inline) = function.attrs.iter().find(|attr| {
+        attr.path().is_ident("inline")
+            && attr
+                .parse_args::<syn::Ident>()
+                .is_ok_and(|arg| arg == "always")
+    }) {
+        return syn::Error::new_spanned(
+            inline,
+            "a point keeps its function out of line: drop #[inline(always)]",
+        )
+        .to_compile_error()
+        .into();
+    }
+    let shape = match point_shape::shape(attribute.into(), &function.sig) {
+        Ok(shape) => shape,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    // The body moves to an inlined inner function, so the return listeners run however it
+    // returns; the outer function takes each parameter by a plain name.
+    let inner = syn::Ident::new(
+        &format!("__point_{}", function.sig.ident),
+        function.sig.ident.span(),
+    );
+    let mut outer = function.clone();
+    let mut call = Vec::new();
+    let mut passed = Vec::new();
+    for (i, input) in outer.sig.inputs.iter_mut().enumerate() {
+        let syn::FnArg::Typed(typed) = input else {
+            continue;
+        };
+        let original = match &*typed.pat {
+            syn::Pat::Ident(pat) => Some(pat.ident.clone()),
+            _ => None,
+        };
+        let plain = format_ident!("__p{i}");
+        *typed.pat = syn::parse_quote!(#plain);
+        match original.filter(|name| shape.args.iter().any(|arg| arg.name == *name)) {
+            Some(name) => {
+                passed.push(plain);
+                call.push(quote!(__args.#name));
+            }
+            None => call.push(quote!(#plain)),
+        }
+    }
+    // What the listeners get for `self`: the shape's host.
+    let host = match (shape.mutable, shape.side) {
+        (false, _) => quote!(self),
+        (true, point_shape::Side::Both) => quote!(crate::game::points::host_side(&mut *self)),
+        (true, _) => quote!(&mut *self),
+    };
+    let (slot, return_slot, record) = (shape.slot(), shape.return_slot(), shape.record());
+    let fire = quote!(::mod_api::__private::point::fire(__listeners, |__listener| __listener(#host, &mut __args)));
+    let (stop, returned) = match &shape.returns {
+        point_shape::Returns::Unit => (
+            quote!(if __args.cancel {
+                return;
+            }),
+            quote!(#fire;),
+        ),
+        point_shape::Returns::UnitResult => (
+            quote!(if __args.cancel {
+                return Ok(());
+            }),
+            quote!(#fire;),
+        ),
+        point_shape::Returns::Value(_) => (
+            quote!(if let Some(__result) = __args.result.take() {
+                return __result;
+            }),
+            quote! {
+                __args.result = Some(__result);
+                #fire;
+                return __args.result.unwrap_or(__result);
+            },
+        ),
+        point_shape::Returns::Opaque => (quote!(), quote!(#fire;)),
+    };
+    outer.block = syn::parse_quote!({
+        let mut __args = crate::game::points::#record::__new(#(#passed),*);
+        if let Some(__listeners) = crate::game::points::#slot.get() {
+            #fire;
+            #stop
+        }
+        let __result = self.#inner(#(#call),*);
+        if let Some(__listeners) = crate::game::points::#return_slot.get() {
+            #returned
+        }
+        __result
+    });
+    function.sig.ident = inner;
+    function.vis = syn::Visibility::Inherited;
+    function.attrs.retain(|attr| !attr.path().is_ident("doc"));
+    function.attrs.push(syn::parse_quote!(#[inline(always)]));
+    quote!(#outer #function).into()
 }
 
 /// Derive subscriptions for internal test fixtures that construct their own mods.

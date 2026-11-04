@@ -42,18 +42,28 @@ fn game_methods(
         if path.is_dir() {
             game_methods(&path, &inner, methods)?;
         } else if path.extension().is_some_and(|ext| ext == "rs") {
-            let source = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-            let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
-            for item in file.items {
-                if let Item::Impl(item) = item
-                    && item.trait_.is_none()
-                    && let Type::Path(ty) = &*item.self_ty
-                    && ty.path.segments.len() == 1
-                    && ty.path.segments[0].ident == "Game"
-                {
-                    methods.extend(impl_functions(item).map(|method| (inner.clone(), method)));
-                }
-            }
+            file_game_methods(&path, &inner, methods)?;
+        }
+    }
+    Ok(())
+}
+
+/// The inherent `Game` methods of the file `path`, the module `module`.
+fn file_game_methods(
+    path: &Path,
+    module: &str,
+    methods: &mut Vec<(String, syn::ItemFn)>,
+) -> Result<(), String> {
+    let source = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
+    for item in file.items {
+        if let Item::Impl(item) = item
+            && item.trait_.is_none()
+            && let Type::Path(ty) = &*item.self_ty
+            && ty.path.segments.len() == 1
+            && ty.path.segments[0].ident == "Game"
+        {
+            methods.extend(impl_functions(item).map(|method| (module.to_owned(), method)));
         }
     }
     Ok(())
@@ -944,6 +954,7 @@ enum FillMode {
 mod build;
 mod dispatch;
 mod host_param;
+mod points;
 mod wasm;
 pub use build::{generate, inject};
 pub use wasm::{Wasm, generate as generate_wasm};

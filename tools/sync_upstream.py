@@ -64,7 +64,7 @@ def finish():
     if readme.exists():
         readme.unlink()
         git('add', str(FRAGMENTS / 'README.md'))
-    check_duplicates()
+    check_duplicates(ROOT)
     tracked = git('ls-files', capture=True).splitlines()
     retired = [p for p in tracked if p == 'native-hooks.json' or p.startswith('tools/native-hook-fragments/')]
     if retired:
