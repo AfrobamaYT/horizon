@@ -1630,7 +1630,11 @@ mod tests {
         super::fill_hooks(&root).unwrap();
         // The generator writes LF; a Windows checkout (core.autocrlf) has CRLF.
         let lf = |s: &str| s.replace("\r\n", "\n");
-        assert_eq!(lf(&std::fs::read_to_string(&hooks).unwrap()), lf(&shipped));
+        let filled = shipped.replace(
+            call,
+            "self.fire_item_damaged(player, name, item, amount, cancel);",
+        );
+        assert_eq!(lf(&std::fs::read_to_string(&hooks).unwrap()), lf(&filled));
         assert_eq!(
             super::sources(&root, super::FillMode::Require)
                 .unwrap()
