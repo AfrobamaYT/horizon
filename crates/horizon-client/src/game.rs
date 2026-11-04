@@ -2548,6 +2548,14 @@ struct WorldIcon {
     last_attempt: Option<Instant>,
 }
 
+#[derive(Debug, PartialEq)]
+struct QueuedLevelEvent {
+    kind: i32,
+    pos: [i32; 3],
+    data: i32,
+    source: Option<horizon_world::level::LevelEventPlayer>,
+}
+
 struct Game<'a> {
     /// Shared with an integrated server; `collision` and `motion` borrow from it.
     res: Arc<Resources>,
@@ -3320,8 +3328,8 @@ struct Game<'a> {
     /// The last `use_hand` that ended the click did so with `FAIL`, which
     /// does not consume the action (handleUseItemOn's ANY_BLOCK_USE).
     use_failed: bool,
-    /// Level events of this tick for the guests, and the guest acting now.
-    lan_events: Vec<(i32, [i32; 3], i32, Option<u32>)>,
+    /// Level events of this tick for the guests, with their excluded source.
+    lan_events: Vec<QueuedLevelEvent>,
     /// Jukebox level events 1010 (song name) and 1011 (`None`) for the guests;
     /// the song's network id is only known once the hub is in hand.
     lan_songs: Vec<([i32; 3], Option<String>)>,
@@ -3363,10 +3371,6 @@ struct Game<'a> {
     /// records, so a hook in one guest's turn still reaches the others'.
     /// The acting guest's are in `player_attachments` for the turn.
     guest_attachments: HashMap<u32, horizon_world::attachments::Attachments>,
-    /// The block the acting player is breaking (`break_block`): its destroy
-    /// event, and the ones before it, are the player's own (`Level.levelEvent`
-    /// with the player excluded); the events after it are not.
-    lan_break_pos: Option<[i32; 3]>,
     /// The name of the guest `lan_acting` acts for (`Player.getName`).
     lan_acting_name: Option<String>,
     /// Their UUID (`Player.getUUID`).
@@ -5438,6 +5442,7 @@ impl Game<'_> {
                     id: 2001,
                     pos,
                     data,
+                    ..
                 } => {
                     // LevelEventHandler: destroy particles and the block's
                     // break sound (none for air).
@@ -5464,6 +5469,7 @@ impl Game<'_> {
                     id: 3006,
                     pos,
                     data,
+                    ..
                 } => self.sculk_charge_event(pos, data),
                 LevelEvent::LevelEvent { id: 3007, pos, .. } => self.shriek_event(pos),
                 // LevelEventHandler 1010 and 1011: a jukebox's song starts
@@ -5472,6 +5478,7 @@ impl Game<'_> {
                     id: 1010,
                     pos,
                     data,
+                    ..
                 } => self.jukebox_song_event([pos.x, pos.y, pos.z], data),
                 LevelEvent::LevelEvent { id: 1011, pos, .. } => {
                     self.jukebox_stop_event([pos.x, pos.y, pos.z])
@@ -5482,6 +5489,7 @@ impl Game<'_> {
                     id: id @ (2019 | 2020),
                     pos,
                     data,
+                    ..
                 } => {
                     let face = horizon_core::geometry::Direction::ALL[data.clamp(0, 5) as usize];
                     self.breaking_block_effects([pos.x, pos.y, pos.z], face.normal(), id == 2020);
@@ -5490,6 +5498,7 @@ impl Game<'_> {
                     id: 3008,
                     pos,
                     data,
+                    ..
                 } => self.brush_complete_event([pos.x, pos.y, pos.z], data),
                 LevelEvent::LevelEvent { id: 2004, pos, .. } => {
                     self.spawner_burst([pos.x, pos.y, pos.z])
@@ -5499,6 +5508,7 @@ impl Game<'_> {
                     id: 1505,
                     pos,
                     data,
+                    ..
                 } => {
                     self.growth_particles(pos, data);
                     let at = [pos.x, pos.y, pos.z].map(|v| f64::from(v) + 0.5);
@@ -5509,21 +5519,25 @@ impl Game<'_> {
                     id: 2015,
                     pos,
                     data,
+                    ..
                 } => self.dragon_egg_particles([pos.x, pos.y, pos.z], data),
                 LevelEvent::LevelEvent {
                     id: 2016,
                     pos,
                     data,
+                    ..
                 } => self.shulker_teleport_particles([pos.x, pos.y, pos.z], data),
                 LevelEvent::LevelEvent {
                     id: 2017,
                     pos,
                     data,
+                    ..
                 } => self.consume_teleport_particles([pos.x, pos.y, pos.z], data),
                 LevelEvent::LevelEvent {
                     id: 2018,
                     pos,
                     data,
+                    ..
                 } => self.enderman_teleport_particles([pos.x, pos.y, pos.z], data),
                 LevelEvent::LevelEvent { id: 2003, pos, .. } => {
                     self.eye_break_particles([pos.x, pos.y, pos.z]);
@@ -5532,27 +5546,32 @@ impl Game<'_> {
                     id: 2013,
                     pos,
                     data,
+                    ..
                 } => self.smash_dust(pos, data),
                 // LevelEventHandler 2002 and 2007: a potion's splash.
                 LevelEvent::LevelEvent {
                     id: 2002,
                     pos,
                     data,
+                    ..
                 } => self.potion_splash_particles(pos, data, false),
                 LevelEvent::LevelEvent {
                     id: 2007,
                     pos,
                     data,
+                    ..
                 } => self.potion_splash_particles(pos, data, true),
                 LevelEvent::LevelEvent {
                     id: id @ 3002..=3005,
                     pos,
                     data,
+                    ..
                 } => self.block_particle_event(id, pos, data),
                 LevelEvent::LevelEvent {
                     id: 1500,
                     pos,
                     data,
+                    ..
                 } => self.composter_fill_event(pos, data == 1),
                 // LevelEventHandler 1504: the stalactite's drip particle.
                 LevelEvent::LevelEvent { id: 1504, pos, .. } => self.dripstone_drip_particle(pos),
@@ -5561,6 +5580,7 @@ impl Game<'_> {
                     id: 2006,
                     pos,
                     data,
+                    ..
                 } => self.dragon_fireball_burst(pos, data),
                 // LevelEventHandler 2009: a wet sponge drying.
                 LevelEvent::LevelEvent { id: 2009, pos, .. } => {
@@ -5571,12 +5591,14 @@ impl Game<'_> {
                     id: 2012,
                     pos,
                     data,
+                    ..
                 } => self.turtle_egg_particles(pos, data),
                 // LevelEventHandler 2014: a straw bed destroyed, with no sound.
                 LevelEvent::LevelEvent {
                     id: 2014,
                     pos,
                     data,
+                    ..
                 } => self.destroy_particles([pos.x, pos.y, pos.z], BlockStateId(data as u32)),
                 // EnderDragonFight.spawnNewGateway: an always-visible burst
                 // and a sound at the gateway for every nearby player.
@@ -5612,6 +5634,7 @@ impl Game<'_> {
                     id: id @ 3011..=3021,
                     pos,
                     data,
+                    ..
                 } => self.trial_level_event(id, [pos.x, pos.y, pos.z], data),
                 LevelEvent::LevelEvent { id, pos, .. } => {
                     let c = Some([
@@ -6326,10 +6349,7 @@ impl Game<'_> {
         self.award_stat("used", &stack.item, 1);
     }
     fn break_block(&mut self, pos: [i32; 3]) -> Result<()> {
-        self.lan_break_pos = Some(pos);
-        let broken = self.with_player_actor(|game| game.break_block_as_player(pos));
-        self.lan_break_pos = None;
-        broken
+        self.with_player_actor(|game| game.break_block_as_player(pos))
     }
     fn break_block_as_player(&mut self, pos: [i32; 3]) -> Result<()> {
         // DebugStickItem.canDestroyBlock: a left click selects a property and
@@ -6428,6 +6448,9 @@ impl Game<'_> {
                 &mut correct_tool,
             );
         }
+        let source = self
+            .lan_acting_uuid
+            .map(horizon_world::level::LevelEventPlayer);
         let removed = self.with_level(|b, level, ticks| {
             b.player_destroy_block(
                 level,
@@ -6435,6 +6458,7 @@ impl Game<'_> {
                 BlockPos::new(pos[0], pos[1], pos[2]),
                 creative,
                 correct_tool,
+                source,
             )
         });
         if !creative {
@@ -13636,10 +13660,13 @@ impl Game<'_> {
     }
     /// `BlockTransformer.TransformParticle.send`: its level event.
     pub(super) fn transform_particle(&mut self, particle: &str, pos: [i32; 3]) {
+        let source = self
+            .lan_acting_uuid
+            .map(horizon_world::level::LevelEventPlayer);
         match particle {
-            "scrape" => self.level_event_at(3005, pos, 0),
-            "wax_on" => self.level_event_at(3003, pos, 0),
-            "wax_off" => self.level_event_at(3004, pos, 0),
+            "scrape" => self.level_event_from(source, 3005, pos, 0),
+            "wax_on" => self.level_event_from(source, 3003, pos, 0),
+            "wax_off" => self.level_event_from(source, 3004, pos, 0),
             _ => {}
         }
     }
@@ -13966,7 +13993,10 @@ impl Game<'_> {
                 // HoneycombItem.useOn: ITEM_USED_ON_BLOCK before the swap.
                 self.trigger_block("minecraft:item_used_on_block", hit.pos, stack);
                 self.level_set(hit.pos, state)?;
-                self.level_event_at(3003, hit.pos, 0);
+                let source = self
+                    .lan_acting_uuid
+                    .map(horizon_world::level::LevelEventPlayer);
+                self.level_event_from(source, 3003, hit.pos, 0);
                 self.audio.play(
                     "minecraft:item.honeycomb.wax_on",
                     Some(at(hit.pos)),
@@ -19928,7 +19958,6 @@ impl<'a> Game<'a> {
             lan_guest_swaps: Vec::new(),
             player_attachments: Default::default(),
             guest_attachments: HashMap::new(),
-            lan_break_pos: None,
             guest_packets: Vec::new(),
             guest_cooldowns: Vec::new(),
             guest_entity_events: Vec::new(),

@@ -2352,6 +2352,7 @@ fn breaking_a_moving_piston_removes_its_extended_base() {
         BlockPos::new(1, 1, 0),
         false,
         true,
+        None,
     );
     assert_eq!(
         w.get(BlockPos::new(0, 1, 0)),
@@ -2366,6 +2367,7 @@ fn breaking_a_moving_piston_removes_its_extended_base() {
         BlockPos::new(6, 1, 0),
         false,
         true,
+        None,
     );
     assert_eq!(
         w.get(BlockPos::new(5, 1, 0)),
@@ -2892,6 +2894,21 @@ fn creaking_heart_follows_its_logs_and_the_night() {
 }
 
 #[test]
+fn composter_fill_event_has_no_excluded_player() {
+    let mut w = world!();
+    let pos = BlockPos::new(0, 1, 0);
+    let composter = w.id("composter", &[("level", "0")]);
+    w.put(pos, composter);
+    w.level.events.clear();
+    w.f.behaviours
+        .composter_insert(&mut w.level, &mut w.ticks, pos, 1);
+    assert!(w.level.events.iter().any(|event| matches!(
+        event,
+        LevelEvent::LevelEvent { id: 1500, pos: at, data: 1, source: None } if *at == pos
+    )));
+}
+
+#[test]
 fn player_breaks_fire_with_extinguish_not_generic_break_event() {
     for name in ["fire", "soul_fire", "white_wool"] {
         let mut w = world!();
@@ -2901,11 +2918,22 @@ fn player_breaks_fire_with_extinguish_not_generic_break_event() {
         let state = w.id(name, &[]);
         w.put(pos, state);
         w.level.events.clear();
-        assert!(
-            w.f.behaviours
-                .player_destroy_block(&mut w.level, &mut w.ticks, pos, false, true)
-        );
+        let player = super::LevelEventPlayer(42);
+        assert!(w.f.behaviours.player_destroy_block(
+            &mut w.level,
+            &mut w.ticks,
+            pos,
+            false,
+            true,
+            Some(player)
+        ));
         let is_fire = name != "white_wool";
+        let expected_source = if is_fire { None } else { Some(player) };
+        assert!(w.level.events.iter().any(|event| matches!(
+            event,
+            LevelEvent::LevelEvent { id: 1009 | 2001, pos: at, source, .. }
+                if *at == pos && *source == expected_source
+        )));
         assert_eq!(
             w.level
                 .events
@@ -3023,7 +3051,7 @@ fn creative_breaking_piston_head_does_not_drop_piston() {
         // Breaking the head in creative mode. Destroying the base first makes the
         // head's shape update remove it, so its own removeBlock finds air.
         w.f.behaviours
-            .player_destroy_block(&mut w.level, &mut w.ticks, head_pos, true, true);
+            .player_destroy_block(&mut w.level, &mut w.ticks, head_pos, true, true, None);
 
         // Both head and base must be removed:
         assert_eq!(w.get(head_pos), w.b().air(), "head should become air");
@@ -3058,8 +3086,14 @@ fn survival_breaking_piston_head_drops_piston() {
 
         // Breaking the head in survival mode:
         assert!(
-            w.f.behaviours
-                .player_destroy_block(&mut w.level, &mut w.ticks, head_pos, false, true),
+            w.f.behaviours.player_destroy_block(
+                &mut w.level,
+                &mut w.ticks,
+                head_pos,
+                false,
+                true,
+                None
+            ),
             "head should be destroyed"
         );
 
