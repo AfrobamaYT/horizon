@@ -2503,6 +2503,64 @@ pub enum NativeRemovalReason {
     Discarded,
 }
 
+/// Why a mob spawns (`EntitySpawnReason`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeSpawnReason {
+    /// `NATURAL`: the level's own spawning each tick.
+    Natural,
+    /// `CHUNK_GENERATION`: a new chunk's creature packs.
+    ChunkGeneration,
+    /// `SPAWNER`: a mob spawner block.
+    Spawner,
+    /// `TRIAL_SPAWNER`: a trial spawner.
+    TrialSpawner,
+    /// `REINFORCEMENT`: a zombie calling for help.
+    Reinforcement,
+    /// `PATROL`: a pillager patrol.
+    Patrol,
+    /// `STRUCTURE`: a structure's own mobs.
+    Structure,
+    /// `EVENT`: a world event, such as a village siege.
+    Event,
+    /// `COMMAND`: `/summon`.
+    Command,
+    /// `SPAWN_ITEM_USE`: a spawn egg.
+    SpawnItemUse,
+    /// `MOB_SUMMONED`: a mob that summons another (an evoker's vexes).
+    MobSummoned,
+    /// `CONVERSION`: a mob that became another.
+    Conversion,
+    /// `BREEDING`: a baby.
+    Breeding,
+    /// `TRIGGERED`: a block or item set it off (a sculk shrieker's warden).
+    Triggered,
+    /// `JOCKEY`: a rider spawned on a mount.
+    Jockey,
+    /// `DISPENSER`: a dispenser fired a spawn egg.
+    Dispenser,
+    /// `BUCKET`: a bucketed mob released.
+    Bucket,
+    /// `LOAD`: loaded from saved data.
+    Load,
+    /// `DIMENSION_TRAVEL`: a mob that crossed a portal.
+    DimensionTravel,
+}
+
+/// What a mod answers a spawn check (`MobSpawnEvent.PositionCheck.Result` and
+/// `MobSpawnEvent.SpawnPlacementCheck.Result`, one type for both).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeSpawnCheck {
+    /// `SUCCEED`: the check passes.
+    Succeed,
+    /// `DEFAULT`: vanilla's own answer stands.
+    #[default]
+    Default,
+    /// `FAIL`: the check fails.
+    Fail,
+}
+
 /// Block shape used by an empty-context level ray.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
