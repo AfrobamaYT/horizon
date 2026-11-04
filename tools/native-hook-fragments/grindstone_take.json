@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "grindstone_take",
+      "doc": "The server player `player` (UUID) and `player_entity_id` took a\ngrindstone's result at `pos` (`GrindstoneEvent.OnTakeItem`, in its\nresult slot's `onTake`): `take` holds the inputs, the experience (-1\nfor vanilla's, or what `grindstone_place` set) and what the inputs\nhold afterwards (empty). Set `xp` (0 or more) to give that much\nexperience, `new_top` and `new_bottom` to leave items in the inputs.\nSet `cancel` to skip the rest of `onTake`: the result is still taken,\nbut no experience, no sound, and the inputs stay. Server-side.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_grindstone_take",
       "neoforge": "GrindstoneEvent.OnTakeItem",
       "side": "server",

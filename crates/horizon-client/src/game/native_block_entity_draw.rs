@@ -2,6 +2,7 @@
 //! (vanilla's `BlockEntityRenderer.submit`) gets a [`BlockEntityDraw`], whose
 //! pose stack (`PoseStack`) places what the helpers here add to the entity
 //! batch, as vanilla's block entity renderers draw.
+pub use mod_api::game::CubeFace;
 
 use super::{Dim, Game};
 use glam::{DVec3, Mat4, Quat, Vec3};
@@ -45,13 +46,13 @@ fn in_frustum(frustum: Option<&impl Cull>, origin: Vec3, bounds: [f32; 6]) -> bo
 // Native mods read and drive it; nothing in Horizon does.
 pub struct BlockEntityDraw {
     /// The frame's partial tick, 0 to 1 (`BlockEntityRenderState`).
-    pub partial: f32,
+    partial: f32,
     /// The level's game time, for animations.
-    pub game_time: i64,
+    game_time: i64,
     /// The light the helpers draw with: the block's own
     /// (`LevelRenderer.getLightCoords`), 16 times sky light in bits 0..8 and
     /// 16 times block light in bits 8..16; set it to light a part otherwise.
-    pub light: u32,
+    light: u32,
     /// The block drawn, for `native_draw_item`'s owner.
     block: [i32; 3],
     poses: Vec<Mat4>,
@@ -90,24 +91,24 @@ impl BlockEntityDraw {
         self.vertices
     }
     /// `PoseStack.pushPose`: `pop` comes back to the pose as it is now.
-    pub fn push(&mut self) {
+    fn push(&mut self) {
         let pose = self.pose();
         self.poses.push(pose);
     }
     /// `PoseStack.popPose`; the block's own pose is never popped.
-    pub fn pop(&mut self) {
+    fn pop(&mut self) {
         if self.poses.len() > 1 {
             self.poses.pop();
         }
     }
     /// Moves what is drawn next by `by`, in blocks.
-    pub fn translate(&mut self, by: [f32; 3]) {
+    fn translate(&mut self, by: [f32; 3]) {
         self.apply(Mat4::from_translation(Vec3::from_array(by)));
     }
     /// Turns what is drawn next by `degrees` about `axis` (counterclockwise
     /// seen from the axis' positive end, as `Axis.rotationDegrees`) through
     /// `pivot`, in blocks from the pose's origin: `[0.5; 3]` is the block's centre.
-    pub fn rotate_about(&mut self, axis: [f32; 3], degrees: f32, pivot: [f32; 3]) {
+    fn rotate_about(&mut self, axis: [f32; 3], degrees: f32, pivot: [f32; 3]) {
         let axis = Vec3::from_array(axis).normalize_or(Vec3::Y);
         let pivot = Vec3::from_array(pivot);
         self.apply(
@@ -117,7 +118,7 @@ impl BlockEntityDraw {
         );
     }
     /// Scales what is drawn next by `by` about the pose's origin.
-    pub fn scale(&mut self, by: [f32; 3]) {
+    fn scale(&mut self, by: [f32; 3]) {
         self.apply(Mat4::from_scale(Vec3::from_array(by)));
     }
     /// Keeps what this call drew: the block is drawn the same again, with
@@ -130,7 +131,7 @@ impl BlockEntityDraw {
     /// shaft. Kept geometry stands still: an enchanted item's glint, and an
     /// item drawn with `native_draw_item` whose model reads the time (a clock,
     /// a compass), stop where they were.
-    pub fn keep(&mut self) {
+    fn keep(&mut self) {
         self.kept = true;
     }
     fn apply(&mut self, m: Mat4) {
@@ -168,15 +169,6 @@ impl BlockEntityDraw {
             });
         }
     }
-}
-
-/// One face of a `native_draw_cube` box: its sprite (`mymod:entity/cog`,
-/// `mymod:block/casing`) and its UVs in texels of 16 per side, as a model
-/// face's `uv` (none takes the box's own, as a model's default).
-#[derive(Clone, Copy, Debug)]
-pub struct CubeFace<'a> {
-    pub sprite: &'a str,
-    pub uv: Option<[f32; 4]>,
 }
 
 /// 0xRRGGBB `tint` times `brightness`, as an opaque vertex colour.
@@ -384,10 +376,70 @@ impl Game<'_> {
     }
 }
 
-/// Helpers for drawing mod block entities, kept as stable as the hook points.
+/// Helpers for drawing mod block entities, kept as stable as the hook points: the
+/// methods of `BlockEntityDrawContext`.
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
 impl Game<'_> {
+    /// `PoseStack.pushPose`: `pop` comes back to the pose as it is now.
+    pub(super) fn native_draw_push(&self, draw: &mut BlockEntityDraw) {
+        draw.push();
+    }
+    /// `PoseStack.popPose`; the block's own pose is never popped.
+    pub(super) fn native_draw_pop(&self, draw: &mut BlockEntityDraw) {
+        draw.pop();
+    }
+    /// Moves what is drawn next by `by`, in blocks.
+    pub(super) fn native_draw_translate(&self, draw: &mut BlockEntityDraw, by: [f32; 3]) {
+        draw.translate(by);
+    }
+    /// Turns what is drawn next by `degrees` about `axis` (counterclockwise
+    /// seen from the axis' positive end, as `Axis.rotationDegrees`) through
+    /// `pivot`, in blocks from the pose's origin: `[0.5; 3]` is the block's centre.
+    pub(super) fn native_draw_rotate_about(
+        &self,
+        draw: &mut BlockEntityDraw,
+        axis: [f32; 3],
+        degrees: f32,
+        pivot: [f32; 3],
+    ) {
+        draw.rotate_about(axis, degrees, pivot);
+    }
+    /// Scales what is drawn next by `by` about the pose's origin.
+    pub(super) fn native_draw_scale(&self, draw: &mut BlockEntityDraw, by: [f32; 3]) {
+        draw.scale(by);
+    }
+    /// Keeps what this call drew: the block is drawn the same again, with
+    /// neither `native_block_entity_submit` nor
+    /// `native_block_entity_render_bounding_box` called, until its state,
+    /// its block entity (what the server sent), its light or the resource
+    /// packs change. Call it only when what you drew reads none of
+    /// `partial`, `game_time`, the blocks around it or anything else of
+    /// yours, and moves nothing by itself: an idle machine, not a turning
+    /// shaft. Kept geometry stands still: an enchanted item's glint, and an
+    /// item drawn with `native_draw_item` whose model reads the time (a clock,
+    /// a compass), stop where they were.
+    pub(super) fn native_draw_keep(&self, draw: &mut BlockEntityDraw) {
+        draw.keep();
+    }
+    /// The frame's partial tick, 0 to 1 (`BlockEntityRenderState`).
+    pub(super) fn native_draw_partial(&self, draw: &BlockEntityDraw) -> f32 {
+        draw.partial
+    }
+    /// The level's game time, for animations.
+    pub(super) fn native_draw_game_time(&self, draw: &BlockEntityDraw) -> i64 {
+        draw.game_time
+    }
+    /// The light the helpers draw with: the block's own
+    /// (`LevelRenderer.getLightCoords`), 16 times sky light in bits 0..8 and
+    /// 16 times block light in bits 8..16.
+    pub(super) fn native_draw_light(&self, draw: &BlockEntityDraw) -> u32 {
+        draw.light
+    }
+    /// Lights what is drawn next with `light` (as `native_draw_light` reads it).
+    pub(super) fn native_draw_set_light(&self, draw: &mut BlockEntityDraw, light: u32) {
+        draw.light = light;
+    }
     /// Draws a quad with `corners` in blocks under `draw`'s pose, in a model
     /// face's order (top left, bottom left, bottom right, top right as seen
     /// from its front), textured with the `uv` rectangle (u0, v0, u1, v1 in

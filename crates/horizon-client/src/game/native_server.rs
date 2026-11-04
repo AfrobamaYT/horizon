@@ -1,4 +1,4 @@
-//! Server commands and players for native mods (docs/native-mods.md,
+//! Server commands and players for native mods (docs/modding/src/how-to/native-mods.md,
 //! "Server commands and players"): the commands mods add to the
 //! server's command tree (`native_register_commands`), a player's command
 //! reaching them (`native_perform_command`), and the helpers a server mod
@@ -8,17 +8,19 @@
 //! players (the hub's: a dedicated server's, a LAN host's, single player's
 //! server thread's), never on a client's.
 use super::{Dim, Game, commands::execute, lan::LanHost};
+use mod_api::__private::game::*;
+pub use mod_api::game::NativeExperienceOrb;
 // Their old home, for mixin code that names them here.
-use horizon_client::mod_api::LevelRef;
-pub(crate) use horizon_client::mod_api::{NativeCommand, NativeServerPlayer};
 use horizon_client::{
     command::{ArgType, Dispatcher},
     lan::{abilities::PlayerAbilities, data::component_nbt, guest::Guest},
-    mod_api::{GameMode, NativePlayerAbilities, NativePlayerFood, PlayerRef},
     motion::PlayerMotion,
     text::Text,
 };
 use horizon_protocol::packets::play::{self, Clientbound as C};
+use mod_api::LevelRef;
+use mod_api::{GameMode, NativePlayerAbilities, NativePlayerFood, PlayerRef};
+pub(crate) use mod_api::{NativeCommand, NativeServerPlayer};
 use serde_json::{Map, Value, json};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
@@ -330,11 +332,13 @@ impl PlayerRead<'_> {
             Self::Acting { .. } => (food.food, food.saturation),
             Self::Guest(guest) => (guest.food, guest.saturation),
         };
-        Some(NativePlayerFood {
-            level,
-            saturation,
-            exhaustion: food.exhaustion,
-        })
+        Some(NativePlayerFood::from(
+            mod_api::__private::built::NativePlayerFood {
+                level,
+                saturation,
+                exhaustion: food.exhaustion,
+            },
+        ))
     }
 
     fn abilities(&self) -> Option<NativePlayerAbilities> {
@@ -356,15 +360,17 @@ impl PlayerRead<'_> {
             }
             Self::Guest(guest) => guest.abilities,
         };
-        Some(NativePlayerAbilities {
-            invulnerable: a.invulnerable,
-            flying: a.flying,
-            may_fly: a.may_fly,
-            instabuild: a.instabuild,
-            may_build: a.may_build,
-            fly_speed: a.flying_speed,
-            walk_speed: a.walking_speed,
-        })
+        Some(NativePlayerAbilities::from(
+            mod_api::__private::built::NativePlayerAbilities {
+                invulnerable: a.invulnerable,
+                flying: a.flying,
+                may_fly: a.may_fly,
+                instabuild: a.instabuild,
+                may_build: a.may_build,
+                fly_speed: a.flying_speed,
+                walk_speed: a.walking_speed,
+            },
+        ))
     }
 }
 
@@ -409,10 +415,10 @@ impl Game<'_> {
             .iter()
             .find(|g| g.uuid == uuid && g.dimension == level.dimension())
         {
-            return (g.name == name).then_some(PlayerRef {
-                entity: crate::mod_api::EntityRef::new(epoch, g.entity_id as u32),
+            return (g.name == name).then_some(mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(epoch, g.entity_id as u32),
                 uuid,
-            });
+            ));
         }
         let id = self.next_entity.checked_add(1)?;
         let entity_id = i32::try_from(id).ok()?;
@@ -429,10 +435,10 @@ impl Game<'_> {
         host.play
             .insert(conn, super::lan_actions::GuestPlay::default());
         self.next_entity = id;
-        Some(PlayerRef {
-            entity: crate::mod_api::EntityRef::new(epoch, id),
+        Some(mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(epoch, id),
             uuid,
-        })
+        ))
     }
 
     /// Discard state belonging to an already removed connectionless guest.
@@ -447,7 +453,7 @@ impl Game<'_> {
 
     /// Remove a fake without treating it as a disconnect or saving it.
     pub(super) fn native_player_remove_fake(&mut self, player: PlayerRef) -> bool {
-        if self.native_lifecycle.epoch() != Some(player.entity.epoch())
+        if self.native_lifecycle.epoch() != Some(player.fields().entity.epoch())
             || !self.lan_guest_swaps.is_empty()
         {
             return false;
@@ -457,8 +463,8 @@ impl Game<'_> {
         };
         let index = host.hub.guests.iter().position(|g| {
             !g.participates_online()
-                && g.uuid == player.uuid
-                && g.entity_id as u32 == player.entity.id()
+                && g.uuid == player.fields().uuid
+                && g.entity_id as u32 == player.fields().entity.id()
                 && host
                     .hub
                     .holder_guest(g.uuid, &g.dimension)
@@ -511,19 +517,16 @@ impl Game<'_> {
             .as_ref()
             .filter(|r| r.logged_in && r.profile == uuid)
         {
-            return Some(PlayerRef {
-                entity: crate::mod_api::EntityRef::new(
-                    epoch,
-                    u32::try_from(remote.entity_id).ok()?,
-                ),
+            return Some(mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(epoch, u32::try_from(remote.entity_id).ok()?),
                 uuid,
-            });
+            ));
         }
         let (_, id) = self.player_lookup(uuid)?;
-        Some(PlayerRef {
-            entity: crate::mod_api::EntityRef::new(epoch, id),
+        Some(mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(epoch, id),
             uuid,
-        })
+        ))
     }
 
     fn player_lookup(&self, uuid: u128) -> Option<(PlayerRead<'_>, u32)> {
@@ -585,11 +588,44 @@ impl Game<'_> {
         self.player_handle_read(player)?.last_death().cloned()
     }
 
+    /// `player_handle_read` for the reads that work on both sides. On a
+    /// client the local player (`Minecraft.player`) reads its own copy of
+    /// what the server sent (`LocalPlayer`): the game mode, food, abilities,
+    /// hotbar slot and experience. Any other player reads None there: the
+    /// client is not sent their state.
+    pub(super) fn player_read_both(&self, player: PlayerRef) -> Option<PlayerRead<'_>> {
+        if self.is_logical_server() {
+            return self.player_handle_read(player);
+        }
+        (self.native_local_player()? == player).then(|| PlayerRead::Acting {
+            mode: self.mode_id(),
+            body: self.player.as_ref(),
+            abilities: Some(self.client_abilities()),
+            last_death: self.level.last_death.as_ref(),
+        })
+    }
+    /// The local player's `Abilities` on a client: what its game mode gives
+    /// (`GameType.updatePlayerAbilities`, `mayBuild` among them), then the
+    /// flags and speeds `ClientPacketListener.handlePlayerAbilities` took.
+    fn client_abilities(&self) -> PlayerAbilities {
+        let mut a = PlayerAbilities::default();
+        a.update_for_mode(self.mode_id());
+        if let Some(p) = self.remote_abilities() {
+            a.invulnerable = p.flags & 1 != 0;
+            a.flying = p.flags & 2 != 0;
+            a.may_fly = p.flags & 4 != 0;
+            a.instabuild = p.flags & 8 != 0;
+            a.flying_speed = p.flying_speed;
+            a.walking_speed = p.walking_speed;
+        }
+        a
+    }
+
     pub(super) fn player_handle_read(&self, player: PlayerRef) -> Option<PlayerRead<'_>> {
-        (self.native_lifecycle.epoch()? == player.entity.epoch()).then_some(())?;
+        (self.native_lifecycle.epoch()? == player.fields().entity.epoch()).then_some(())?;
         if self.lan_acting_fake
-            && self.lan_acting_uuid == Some(player.uuid)
-            && self.lan_acting_entity == Some(player.entity.id())
+            && self.lan_acting_uuid == Some(player.fields().uuid)
+            && self.lan_acting_entity == Some(player.fields().entity.id())
         {
             return Some(PlayerRead::Acting {
                 mode: self.mode_id(),
@@ -598,16 +634,16 @@ impl Game<'_> {
                 last_death: self.level.last_death.as_ref(),
             });
         }
-        if let Some((read, id)) = self.player_lookup(player.uuid)
-            && id == player.entity.id()
+        if let Some((read, id)) = self.player_lookup(player.fields().uuid)
+            && id == player.fields().entity.id()
         {
             return Some(read);
         }
         let guest = self.lan.as_ref()?.hub.guests.iter().find(|guest| {
             guest.placed
                 && !guest.participates_online()
-                && guest.uuid == player.uuid
-                && guest.entity_id as u32 == player.entity.id()
+                && guest.uuid == player.fields().uuid
+                && guest.entity_id as u32 == player.fields().entity.id()
                 && !self.lan_guest_swaps.contains(&guest.conn)
         })?;
         Some(PlayerRead::Guest(guest))
@@ -616,7 +652,7 @@ impl Game<'_> {
     /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
     /// None for stale, offline or unavailable players (including displaced outer players).
     pub(super) fn native_player_game_mode(&self, player: PlayerRef) -> Option<GameMode> {
-        GameMode::from_id(self.player_handle_read(player)?.mode())
+        GameMode::from_id(self.player_read_both(player)?.mode())
     }
 
     /// Changes a player's game mode as `ServerPlayer.setGameMode` and
@@ -682,12 +718,12 @@ impl Game<'_> {
 
     /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
     pub(super) fn native_player_is_creative(&self, player: PlayerRef) -> Option<bool> {
-        Some(self.player_handle_read(player)?.creative())
+        Some(self.player_read_both(player)?.creative())
     }
 
     /// `Inventory.getSelectedSlot`: the hotbar slot the player holds, 0..9.
     pub(super) fn native_player_selected_slot(&self, player: PlayerRef) -> Option<usize> {
-        Some(match self.player_handle_read(player)? {
+        Some(match self.player_read_both(player)? {
             PlayerRead::Acting { .. } => self.selected,
             PlayerRead::Guest(guest) => guest.selected,
         })
@@ -695,19 +731,19 @@ impl Game<'_> {
 
     /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.
     pub(super) fn native_player_is_spectator(&self, player: PlayerRef) -> Option<bool> {
-        Some(self.player_handle_read(player)?.mode() == 3)
+        Some(self.player_read_both(player)?.mode() == 3)
     }
 
     /// `Player.mayBuild`; Paper `HumanEntity#getGameMode`.
     pub(super) fn native_player_may_build(&self, player: PlayerRef) -> Option<bool> {
-        Some(self.player_handle_read(player)?.may_build())
+        Some(self.player_read_both(player)?.may_build())
     }
 
     /// `FoodData.getFoodLevel/getSaturationLevel/getExhaustionLevel`; Paper
     /// `HumanEntity#getFoodLevel/getSaturation/getExhaustion`. None until the
     /// guest's body exists, as well as for stale or unavailable players.
     pub(super) fn native_player_food(&self, player: PlayerRef) -> Option<NativePlayerFood> {
-        self.player_handle_read(player)?.food()
+        self.player_read_both(player)?.food()
     }
 
     /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
@@ -715,7 +751,7 @@ impl Game<'_> {
         &self,
         player: PlayerRef,
     ) -> Option<NativePlayerAbilities> {
-        self.player_handle_read(player)?.abilities()
+        self.player_read_both(player)?.abilities()
     }
 
     /// The players on this server, in the order they joined. Empty on a
@@ -726,17 +762,19 @@ impl Game<'_> {
         };
         host.hub
             .online_players()
-            .map(|g| NativeServerPlayer {
-                uuid: g.uuid,
-                name: g.name.clone(),
-                permission: g.permission,
-                dimension: g.dimension.clone(),
-                position: g.position,
-                game_mode: g.game_mode,
-                health: g.health,
-                yaw: g.yaw,
-                pitch: g.pitch,
-                entity_id: g.entity_id,
+            .map(|g| {
+                NativeServerPlayer::from(mod_api::__private::built::NativeServerPlayer {
+                    uuid: g.uuid,
+                    name: g.name.clone(),
+                    permission: g.permission,
+                    dimension: g.dimension.clone(),
+                    position: g.position,
+                    game_mode: g.game_mode,
+                    health: g.health,
+                    yaw: g.yaw,
+                    pitch: g.pitch,
+                    entity_id: g.entity_id,
+                })
             })
             .collect()
     }
@@ -958,18 +996,20 @@ impl Game<'_> {
     /// hook.
     pub(super) fn native_acting_player(&self) -> Option<NativeServerPlayer> {
         let p = self.player.as_ref()?;
-        Some(NativeServerPlayer {
-            uuid: self.lan_acting_uuid?,
-            name: self.lan_acting_name.clone()?,
-            permission: self.lan_acting_permission?,
-            dimension: self.dim.id().to_owned(),
-            position: [p.position.x, p.position.y, p.position.z],
-            game_mode: self.mode_id(),
-            health: p.health.health(),
-            yaw: p.yaw,
-            pitch: p.pitch,
-            entity_id: self.native_acting_entity() as i32,
-        })
+        Some(NativeServerPlayer::from(
+            mod_api::__private::built::NativeServerPlayer {
+                uuid: self.lan_acting_uuid?,
+                name: self.lan_acting_name.clone()?,
+                permission: self.lan_acting_permission?,
+                dimension: self.dim.id().to_owned(),
+                position: [p.position.x, p.position.y, p.position.z],
+                game_mode: self.mode_id(),
+                health: p.health.health(),
+                yaw: p.yaw,
+                pitch: p.pitch,
+                entity_id: self.native_acting_entity() as i32,
+            },
+        ))
     }
     /// Runs `line` (no slash) as the server's console does: permission
     /// level 4, from the overworld's spawn, with no output. A teleport to
@@ -999,19 +1039,6 @@ impl Game<'_> {
     pub(super) fn native_world_dir(&self) -> Option<PathBuf> {
         (!self.world_root.as_os_str().is_empty()).then(|| self.world_root.clone())
     }
-}
-
-/// An experience orb as a server mod reads it (`native_experience_orbs`).
-/// Read by mods only.
-#[derive(Clone, Debug)]
-pub struct NativeExperienceOrb {
-    /// The entity's ID, as `native_entity_join_level` names it.
-    pub id: u32,
-    pub position: [f64; 3],
-    /// `ExperienceOrb.value`: the points one pickup gives.
-    pub value: u32,
-    /// `ExperienceOrb.count`: orbs merged into this one, each worth `value`.
-    pub count: u32,
 }
 
 /// Whether an orb at `position` (its box: 0.5 wide and high, standing on
@@ -1277,7 +1304,7 @@ impl Game<'_> {
         let Some(g) = host.hub.guest(conn) else {
             return false;
         };
-        let player = NativeServerPlayer {
+        let player = NativeServerPlayer::from(mod_api::__private::built::NativeServerPlayer {
             uuid: g.uuid,
             name: g.name.clone(),
             permission,
@@ -1288,7 +1315,7 @@ impl Game<'_> {
             yaw: g.yaw,
             pitch: g.pitch,
             entity_id: g.entity_id,
-        };
+        });
         if !self.native_command_valid(line, permission) {
             return true;
         }
@@ -1376,15 +1403,17 @@ mod tests {
         );
         assert_eq!(
             read.abilities(),
-            Some(NativePlayerAbilities {
-                invulnerable: false,
-                flying: false,
-                may_fly: false,
-                instabuild: false,
-                may_build: true,
-                fly_speed: 0.08,
-                walk_speed: 0.1,
-            })
+            Some(NativePlayerAbilities::from(
+                mod_api::__private::built::NativePlayerAbilities {
+                    invulnerable: false,
+                    flying: false,
+                    may_fly: false,
+                    instabuild: false,
+                    may_build: true,
+                    fly_speed: 0.08,
+                    walk_speed: 0.1,
+                }
+            ))
         );
         guest.game_mode = 1;
         guest.abilities.update_for_mode(1);
@@ -1393,15 +1422,17 @@ mod tests {
         assert_eq!(read.mode(), 1);
         assert_eq!(
             read.abilities(),
-            Some(NativePlayerAbilities {
-                invulnerable: true,
-                flying: true,
-                may_fly: true,
-                instabuild: true,
-                may_build: true,
-                fly_speed: 0.08,
-                walk_speed: 0.1,
-            })
+            Some(NativePlayerAbilities::from(
+                mod_api::__private::built::NativePlayerAbilities {
+                    invulnerable: true,
+                    flying: true,
+                    may_fly: true,
+                    instabuild: true,
+                    may_build: true,
+                    fly_speed: 0.08,
+                    walk_speed: 0.1,
+                }
+            ))
         );
         guest.game_mode = 3;
         guest.abilities.update_for_mode(3);

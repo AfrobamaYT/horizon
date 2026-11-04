@@ -3,18 +3,23 @@ use super::Game;
 use horizon_client::{
     bossbar::BossBar,
     lan::playerdata::{ints_uuid, uuid_ints},
-    mod_api::{BossBarColor, BossBarOverlay, BossBarRef, PlayerRef},
     scoreboard::comp_text,
     text::Text,
 };
 use horizon_world::identifier::Identifier;
+use mod_api::__private::game::*;
+use mod_api::{BossBarColor, BossBarOverlay, BossBarRef, PlayerRef};
 
 impl Game<'_> {
     fn boss_bar_state(&self, bar: BossBarRef) -> Option<&BossBar> {
-        if self.remote.is_some() || self.native_lifecycle.epoch() != Some(bar.epoch) {
+        if self.remote.is_some() || self.native_lifecycle.epoch() != Some(bar.fields().epoch) {
             return None;
         }
-        self.bosses.bars.bars.iter().find(|b| b.uuid == bar.uuid)
+        self.bosses
+            .bars
+            .bars
+            .iter()
+            .find(|b| b.uuid == bar.fields().uuid)
     }
 
     fn boss_bar_edit(&mut self, bar: BossBarRef, edit: impl FnOnce(&mut BossBar)) -> bool {
@@ -26,7 +31,7 @@ impl Game<'_> {
             .bars
             .bars
             .iter_mut()
-            .find(|b| b.uuid == bar.uuid)
+            .find(|b| b.uuid == bar.fields().uuid)
         {
             edit(state);
         }
@@ -35,10 +40,10 @@ impl Game<'_> {
     }
 
     fn boss_bar_handle(&self, bar: &BossBar) -> Option<BossBarRef> {
-        Some(BossBarRef {
-            epoch: self.native_lifecycle.epoch()?,
-            uuid: bar.uuid,
-        })
+        Some(mod_api::__private::game::boss_bar_ref(
+            self.native_lifecycle.epoch()?,
+            bar.uuid,
+        ))
     }
 
     /// An existing custom boss bar by id (`minecraft:` when no namespace), or
@@ -81,7 +86,7 @@ impl Game<'_> {
         }
         let uuid = self.add_custom_bossbar(&id, name.component())?;
         self.bossbars_changed();
-        Some(BossBarRef { epoch, uuid })
+        Some(mod_api::__private::game::boss_bar_ref(epoch, uuid))
     }
 
     /// The bar's id (`CustomBossEvent.customId`), or None for a stale handle.
@@ -419,19 +424,19 @@ mod tests {
             assert!(bar.set_visible(game, true));
             assert!(seen(game, 456).is_some());
             // A player handle from an earlier session cannot edit membership.
-            let stale = PlayerRef {
-                entity: horizon_client::mod_api::EntityRef::new(
-                    horizon_client::mod_api::NativeWorldEpoch::new(b.entity().epoch().get() + 1),
+            let stale = mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(
+                    mod_api::NativeWorldEpoch::new(b.entity().epoch().get() + 1),
                     b.entity().id(),
                 ),
-                uuid: 456,
-            };
+                456,
+            );
             assert!(!bar.remove_player(game, stale));
             assert!(!bar.add_player(game, stale));
             assert_eq!(bar.players(game), Some(vec![b]));
             assert!(bar.remove_player(game, b));
             assert_eq!(bar.players(game), Some(vec![]));
-            let offline = PlayerRef { uuid: 999, ..b };
+            let offline = mod_api::__private::game::player_ref(b.fields().entity, 999);
             assert!(bar.add_player(game, a));
             assert!(!bar.remove_player(game, offline));
             assert_eq!(bar.players(game), Some(vec![a]));

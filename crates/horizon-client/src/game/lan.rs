@@ -21,16 +21,19 @@ use horizon_protocol::{
     entity_data::{Value, serializer},
     packets::play::{self, Clientbound as C},
 };
-use horizon_world::block_collision::BlockCollisionRegistry;
+use horizon_world::{block_collision::BlockCollisionRegistry, item_defaults::ItemData};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
     time::Instant,
 };
 
-/// What `sync_data` loaded: whether it was with data packs over the game's
-/// data, and the registries and tags.
-type Synced = (bool, std::result::Result<Arc<SyncData>, String>);
+/// What `sync_data` loaded from this resource generation.
+struct Synced {
+    with_packs: bool,
+    generation: u64,
+    result: std::result::Result<Arc<SyncData>, String>,
+}
 
 /// The registries and tags, loaded once per world (a world with packs open
 /// or a `/reload` forgets them, as `forget_sync_data` does).
@@ -42,20 +45,25 @@ static SYNC: Mutex<Option<Synced>> = Mutex::new(None);
 /// (their dialogs would stay); a world with packs forgets what was read
 /// before it at open (`finish_open_world`).
 pub(super) fn sync_data(
-    root: &std::path::Path,
+    item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
 ) -> std::result::Result<Arc<SyncData>, String> {
     let packs = !overlay.files.is_empty();
+    let generation = item_data.defaults().generation();
     let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
     if sync
         .as_ref()
-        .is_some_and(|(with_packs, _)| *with_packs != packs)
+        .is_some_and(|cached| cached.with_packs != packs || cached.generation != generation)
     {
         *sync = None;
     }
-    sync.get_or_insert_with(|| (packs, SyncData::load(root, overlay).map(Arc::new)))
-        .1
-        .clone()
+    sync.get_or_insert_with(|| Synced {
+        with_packs: packs,
+        generation,
+        result: SyncData::load(item_data.root(), overlay, item_data.defaults()).map(Arc::new),
+    })
+    .result
+    .clone()
 }
 
 /// Let go of what `sync_data` loaded: a preload no world used
@@ -70,19 +78,24 @@ pub(super) fn forget_sync_data() {
 /// synchronized registries `kept` (the hub's) as they were, and that becomes
 /// what `sync_data` gives.
 pub(super) fn reload_sync_data(
-    root: &std::path::Path,
+    item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
     kept: &SyncData,
 ) -> std::result::Result<Arc<SyncData>, String> {
+    let root = item_data.root();
     // Kept pack dialogs count as packs: a world opened without packs after
     // a `/reload` that dropped them must read its own registries again.
     let packs = !overlay.files.is_empty() || kept.has_pack_entries();
-    let sync = SyncData::load(root, overlay).map(|mut sync| {
+    let sync = SyncData::load(root, overlay, item_data.defaults()).map(|mut sync| {
         sync.keep_registries(root, kept);
         sync.features.clone_from(&kept.features);
         Arc::new(sync)
     });
-    *SYNC.lock().unwrap_or_else(|e| e.into_inner()) = Some((packs, sync.clone()));
+    *SYNC.lock().unwrap_or_else(|e| e.into_inner()) = Some(Synced {
+        with_packs: packs,
+        generation: item_data.defaults().generation(),
+        result: sync.clone(),
+    });
     sync
 }
 
@@ -107,19 +120,32 @@ impl Game<'_> {
 /// The registries and tags a server sends without data packs over them, read
 /// on a helper thread while a server's world prepares: most worlds have no
 /// packs, so it is what `sync_data` would load once the world is open.
-pub(super) struct SyncPreload(std::thread::JoinHandle<std::result::Result<SyncData, String>>);
+pub(super) struct SyncPreload {
+    generation: u64,
+    worker: std::thread::JoinHandle<std::result::Result<SyncData, String>>,
+}
 
 /// Start reading the server's data beside the world's preparation; `None`
 /// when it is read already, or being read (`preload_world_data`).
-pub(super) fn preload_sync_data(root: &std::path::Path) -> Option<SyncPreload> {
-    if !SYNC.try_lock().is_ok_and(|sync| sync.is_none()) {
+pub(super) fn preload_sync_data(item_data: &Arc<ItemData>) -> Option<SyncPreload> {
+    let generation = item_data.defaults().generation();
+    if !SYNC.try_lock().is_ok_and(|sync| {
+        sync.as_ref()
+            .is_none_or(|cached| cached.generation != generation)
+    }) {
         return None;
     }
-    let root = root.to_owned();
+    let item_data = Arc::clone(item_data);
     std::thread::Builder::new()
         .name("Server data preload".into())
-        .spawn(move || SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE))
-        .map(SyncPreload)
+        .spawn(move || {
+            SyncData::load(
+                item_data.root(),
+                &horizon_world::loot::PackOverlay::NONE,
+                item_data.defaults(),
+            )
+        })
+        .map(|worker| SyncPreload { generation, worker })
         .ok()
 }
 
@@ -130,10 +156,14 @@ impl SyncPreload {
         if !overlay.files.is_empty() {
             return;
         }
-        if let Ok(read) = self.0.join() {
+        if let Ok(read) = self.worker.join() {
             let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
-            if sync.as_ref().is_none_or(|(with_packs, _)| *with_packs) {
-                *sync = Some((false, read.map(Arc::new)));
+            if sync.as_ref().is_none_or(|cached| cached.with_packs) {
+                *sync = Some(Synced {
+                    with_packs: false,
+                    generation: self.generation,
+                    result: read.map(Arc::new),
+                });
             }
         }
     }
@@ -1256,7 +1286,7 @@ impl Game<'_> {
         net: NetConfig,
         config: HubConfig,
     ) -> Result<()> {
-        let mut sync = sync_data(&self.options.resources, &self.pack_files())?;
+        let mut sync = sync_data(&self.res.core.item_data, &self.pack_files())?;
         let features = if self.level.enabled_features.is_empty() {
             vec!["minecraft:vanilla".to_owned()]
         } else {
@@ -1275,6 +1305,7 @@ impl Game<'_> {
                 &self.options.resources,
                 &self.pack_files(),
                 packed.as_deref(),
+                self.res.item_defaults(),
             )?;
             world_sync.features = features;
             sync = Arc::new(world_sync);
@@ -1321,7 +1352,7 @@ impl Game<'_> {
             .then(|| horizon_client::lod_net::Service::new(net.lod_distance, biome_names.clone()));
         let lan = Lan::start_with(sync.clone(), net)?;
         let mut hub = Hub::new(lan, sync, encoder, config);
-        hub.sync_attachments = !crate::mod_api::mods().is_empty();
+        hub.sync_attachments = !mod_api::mods().is_empty();
         hub.flat_world = self.world_flat;
         hub.debug_world = self.world_debug;
         let port = hub.lan.port;
@@ -1913,12 +1944,12 @@ impl Game<'_> {
                     name,
                 } => {
                     let host = self.lan.as_ref()?;
-                    let Some(id) = host
+                    let Some((id, conn)) = host
                         .hub
                         .guests
                         .iter()
                         .find(|g| g.placed && g.participates_online() && g.uuid == message.sender)
-                        .map(|g| g.entity_id)
+                        .map(|g| (g.entity_id, g.conn))
                     else {
                         continue;
                     };
@@ -1929,7 +1960,32 @@ impl Game<'_> {
                     let original = Text::literal(raw.clone());
                     let mut text = original.clone();
                     let mut cancel = false;
-                    self.native_server_chat(id, sender, &name, &raw, &mut text, &mut cancel);
+                    let mut replies = Vec::new();
+                    self.native_server_chat(
+                        id,
+                        sender,
+                        &name,
+                        &raw,
+                        &mut text,
+                        &mut replies,
+                        &mut cancel,
+                    );
+                    // The mods' replies reach the sender alone, as a
+                    // command's do, before the message (if any) goes out.
+                    if !replies.is_empty() {
+                        let host = self.lan.as_ref()?;
+                        for line in replies {
+                            host.hub.send_to(
+                                conn,
+                                &C::SystemChat(play::SystemChat {
+                                    content: horizon_client::lan::data::component_nbt(
+                                        &line.component(),
+                                    ),
+                                    overlay: false,
+                                }),
+                            );
+                        }
+                    }
                     // Canceled, NeoForge returns before `detectRateSpam`.
                     if cancel {
                         continue;
@@ -2107,7 +2163,7 @@ impl Game<'_> {
                     self.lan_flight_toggled(conn, flying);
                 }
                 HostEvent::Sneak { conn, sneaking } => {
-                    if !crate::mod_api::listened(crate::mod_api::HookId::PlayerToggleSneak) {
+                    if !mod_api::__private::listened(mod_api::HookId::PlayerToggleSneak) {
                         continue;
                     }
                     if let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) {
@@ -2123,7 +2179,7 @@ impl Game<'_> {
                     name,
                     reason,
                 } => {
-                    if !crate::mod_api::listened(crate::mod_api::HookId::PlayerKicked) {
+                    if !mod_api::__private::listened(mod_api::HookId::PlayerKicked) {
                         continue;
                     }
                     // The same poll can have removed the guest (their `Left`): the mods hear the
@@ -2141,7 +2197,7 @@ impl Game<'_> {
                     }
                 }
                 HostEvent::Input { conn, flags } => {
-                    if !crate::mod_api::listened(crate::mod_api::HookId::PlayerInput) {
+                    if !mod_api::__private::listened(mod_api::HookId::PlayerInput) {
                         continue;
                     }
                     if let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) {
@@ -2155,8 +2211,8 @@ impl Game<'_> {
                     if let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) {
                         let (uuid, entity_id, name) = (g.uuid, g.entity_id, g.name.clone());
                         // The packet's raw ids become the enums once, here.
-                        let old = horizon_client::mod_api::NativeClientInfo::from(&*old);
-                        let new = horizon_client::mod_api::NativeClientInfo::from(&*new);
+                        let old = client_info(&old);
+                        let new = client_info(&new);
                         self.native_client_information_updated(uuid, entity_id, &name, &old, &new);
                     }
                 }
@@ -2235,7 +2291,7 @@ impl Game<'_> {
                 self.ui.rules.bool("player_movement_check"),
                 self.ui.rules.bool("elytra_movement_check"),
             );
-            host.hub.mods_loaded = !horizon_client::mod_api::mods().is_empty();
+            host.hub.mods_loaded = !mod_api::mods().is_empty();
             let pass = self.level_pass;
             let mut events = if pass.first {
                 horizon_client::spans::time("lan_poll", || host.hub.poll(&mut ctx))
@@ -2529,7 +2585,7 @@ impl Game<'_> {
                 // (`tick_server`): the network is read once, before the first.
                 // Player packets may already have been drained before
                 // scheduled block ticks (`tick_lan_packets`).
-                host.hub.mods_loaded = !horizon_client::mod_api::mods().is_empty();
+                host.hub.mods_loaded = !mod_api::mods().is_empty();
                 let pass = self.level_pass;
                 let mut events = if pass.first && !pass.packets_drained {
                     host.hub.poll(&mut ctx)
@@ -2753,44 +2809,20 @@ impl Game<'_> {
         if self.audio.capture.is_none() {
             return;
         }
-        // The acting guest's own break: `Block.playerWillDestroy` excludes the
-        // player from the destroy events up to the broken block's. What a
-        // break sets off after that (a torch popping off, a stalk falling) is
-        // `destroyBlock` with no player, which the breaker hears and sees too.
-        let mut own_break = self.lan_break_pos.is_some();
         for e in events {
             match e {
-                horizon_world::level::LevelEvent::LevelEvent { id, pos, data } => {
-                    let own = *id == 2001 && own_break;
-                    if own && self.lan_break_pos == Some([pos.x, pos.y, pos.z]) {
-                        own_break = false;
-                    }
-                    // The acting guest does not predict the egg's teleport
-                    // particles, bone meal's growth, anvil result sounds, or a
-                    // finished brushing or an eye inserted in a portal frame (these calls name no
-                    // excluded player), nor the digger's own crack and hit
-                    // sound (2019, 2020).
-                    let except = if matches!(
-                        *id,
-                        2015 | 1501
-                            | 1503
-                            | 1505
-                            | 1029
-                            | 1030
-                            | 1045
-                            | 1052
-                            | 2019
-                            | 2020
-                            | 3000
-                            | 3008
-                    ) || (*id == 2001 && self.lan_break_pos.is_some() && !own)
-                    {
-                        None
-                    } else {
-                        self.lan_acting
-                    };
-                    self.lan_events
-                        .push((*id, [pos.x, pos.y, pos.z], *data, except));
+                horizon_world::level::LevelEvent::LevelEvent {
+                    id,
+                    pos,
+                    data,
+                    source,
+                } => {
+                    self.lan_events.push(super::QueuedLevelEvent {
+                        kind: *id,
+                        pos: [pos.x, pos.y, pos.z],
+                        data: *data,
+                        source: *source,
+                    });
                 }
                 // `ServerLevel.runBlockEvents` broadcasts a handled block
                 // event (`ClientboundBlockEventPacket`): the guest re-runs
@@ -2946,12 +2978,25 @@ impl Game<'_> {
                 );
             }
         }
-        for (kind, pos, data, acting) in std::mem::take(&mut self.lan_events) {
+        for super::QueuedLevelEvent {
+            kind,
+            pos,
+            data,
+            source,
+        } in std::mem::take(&mut self.lan_events)
+        {
             if kind == 2001 {
                 host.broken
                     .push([f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2])]);
             }
-            host.hub.level_event(kind, pos, data, acting);
+            let except = source.and_then(|player| {
+                host.hub
+                    .guests
+                    .iter()
+                    .find(|guest| guest.uuid == player.0)
+                    .map(|guest| guest.conn)
+            });
+            host.hub.level_event(kind, pos, data, except);
         }
         // Level events 1010 and 1011: the guests' parrots dance or stop.
         for (pos, song) in std::mem::take(&mut self.lan_songs) {
@@ -3117,7 +3162,7 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        if !crate::mod_api::listened(crate::mod_api::HookId::EntityPoseChange) {
+        if !mod_api::__private::listened(mod_api::HookId::EntityPoseChange) {
             host.poses.clear();
             return;
         }
@@ -3261,6 +3306,35 @@ fn note_event(host: &LanHost, started: Option<(Instant, EventKind)>) {
     });
 }
 
+/// A client's settings as the mod API names them.
+fn client_info(
+    i: &horizon_protocol::packets::configuration::ClientInformation,
+) -> mod_api::NativeClientInfo {
+    mod_api::NativeClientInfo {
+        language: i.language.clone(),
+        view_distance: i.view_distance,
+        chat_visibility: match i.chat_visibility.rem_euclid(3) {
+            0 => mod_api::NativeChatVisibility::Full,
+            1 => mod_api::NativeChatVisibility::System,
+            _ => mod_api::NativeChatVisibility::Hidden,
+        },
+        chat_colors: i.chat_colors,
+        model_customisation: i.model_customisation,
+        main_hand: if i.main_hand == 1 {
+            mod_api::NativeMainHand::Right
+        } else {
+            mod_api::NativeMainHand::Left
+        },
+        text_filtering: i.text_filtering,
+        allows_listing: i.allows_listing,
+        particle_status: match i.particle_status.rem_euclid(3) {
+            0 => mod_api::NativeParticleStatus::All,
+            1 => mod_api::NativeParticleStatus::Decreased,
+            _ => mod_api::NativeParticleStatus::Minimal,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{OFFHAND_SLOT, equipment_slot_name, living_flags, mob_freeze_meta};
@@ -3334,5 +3408,154 @@ mod tests {
                 "mainhand", "offhand", "head", "chest", "legs", "feet", "body", "saddle"
             ]
         );
+    }
+
+    /// `server_chat`'s replies reach the sender alone, as system chat, whether
+    /// or not the message goes out; a canceled message reaches nobody.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn server_chat_replies_reach_the_sender_alone() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::lan::hub::{HostEvent, HubConfig, chat::ChatMessage};
+        use horizon_client::lan::{Joined, NetConfig, Out, PlayerSender, guest::Guest};
+        use horizon_client::text::Text;
+        use horizon_protocol::packets::{configuration::ClientInformation, play};
+        use mod_api::{Flow, Hooks, ServerChatEvent, ServerHost};
+        use std::sync::{Arc, atomic::AtomicI32, mpsc};
+
+        struct Replier;
+        #[mod_api::__subscriptions]
+        impl Hooks for Replier {
+            fn server_chat(
+                &self,
+                _host: &mut dyn ServerHost,
+                event: &mut ServerChatEvent<'_>,
+            ) -> Flow {
+                event
+                    .replies
+                    .push(Text::literal(format!("heard {}", event.raw_text)));
+                if event.raw_text == "secret" {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+        }
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("replier", Box::new(Replier))].into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let settings = super::LanSettings {
+                    port: 0,
+                    guest_commands: false,
+                    force_game_mode: false,
+                };
+                let net = NetConfig {
+                    listen: false,
+                    announce: false,
+                    lod_distance: 0,
+                    ..NetConfig::lan(0, String::new(), 3)
+                };
+                let config = HubConfig {
+                    default_game_mode: 0,
+                    guest_commands: false,
+                    force_game_mode: false,
+                    hardcore: false,
+                    view_distance: 2,
+                    simulation_distance: 2,
+                    dimension: game.dim.id().to_owned(),
+                    allow_flight: true,
+                    seed: 0,
+                    max_players: 3,
+                    integrated: true,
+                    levels: game.level_shapes,
+                };
+                game.lan_host(settings, net, config).unwrap();
+                let mut join = |conn: u32| {
+                    let (tx, rx) = mpsc::channel();
+                    let mut guest = Guest::new(
+                        Joined {
+                            conn,
+                            uuid: conn as u128,
+                            name: format!("guest{conn}"),
+                            properties: Vec::new(),
+                            info: ClientInformation::new(8),
+                            brand: String::new(),
+                            sender: PlayerSender::new(tx, Arc::default()),
+                            latency: Arc::new(AtomicI32::new(0)),
+                            address: "127.0.0.1:1".parse().unwrap(),
+                        },
+                        conn as i32,
+                        [0.5, 64.0, 0.5],
+                        2,
+                    );
+                    guest.placed = true;
+                    game.lan.as_mut().unwrap().hub.guests.push(guest);
+                    rx
+                };
+                let (sender, other) = (join(12), join(13));
+                // The chat packets each guest got, in order.
+                let received = |rx: &mpsc::Receiver<Out>| {
+                    let mut seen = Vec::new();
+                    while let Ok(out) = rx.try_recv() {
+                        let bodies = match out {
+                            Out::Packet(body) => vec![body],
+                            Out::Packets(bodies) => bodies,
+                            Out::Disconnect(_) => continue,
+                        };
+                        for body in bodies {
+                            let mut reader = horizon_protocol::buf::Reader::new(&body);
+                            let id = reader.varint().unwrap();
+                            match play::Clientbound::decode(id, reader.rest()) {
+                                Ok(play::Clientbound::SystemChat(chat)) => seen.push(format!(
+                                    "system {}",
+                                    horizon_client::component::name_text(&chat.content).plain()
+                                )),
+                                Ok(play::Clientbound::PlayerChat(_)) => {
+                                    seen.push("player".to_owned())
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    seen
+                };
+                received(&sender);
+                received(&other);
+                let say = |game: &mut super::Game<'_>, content: &str| {
+                    let message = ChatMessage {
+                        sender: 12,
+                        index: 0,
+                        signature: None,
+                        content: content.to_owned(),
+                        timestamp: 0,
+                        salt: 0,
+                        last_seen: Vec::new(),
+                        unsigned_content: None,
+                    };
+                    let bound = play::ChatTypeBound {
+                        chat_type: 0,
+                        name: horizon_client::lan::data::component_nbt(
+                            &Text::literal("guest12").component(),
+                        ),
+                        target: None,
+                    };
+                    let event = HostEvent::ChatSubmitted {
+                        message: Box::new(message),
+                        bound: Box::new(bound),
+                        name: "guest12".into(),
+                    };
+                    let host = game.lan.take().unwrap();
+                    game.lan = game.lan_process_events(host, [event], &[], [0.5, 64.0, 0.5]);
+                };
+
+                say(game, "secret");
+                assert_eq!(received(&sender), ["system heard secret"]);
+                assert!(received(&other).is_empty());
+
+                say(game, "hello");
+                assert_eq!(received(&sender), ["system heard hello", "player"]);
+                assert_eq!(received(&other), ["player"]);
+            });
+        });
     }
 }

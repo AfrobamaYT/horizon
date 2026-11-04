@@ -736,7 +736,7 @@ impl Game<'_> {
         let Some((sprite, tint)) = self.particle_sprite(state, block) else {
             return;
         };
-        let options = horizon_client::particles::ParticleOptions::block(
+        let options = mod_api::particles::ParticleOptions::block(
             horizon_client::particles::ParticleType::Block,
             sprite,
             tint,
@@ -930,7 +930,7 @@ impl Game<'_> {
     /// that the stand broke (`native_living_drops`). The stand item and the
     /// equipment pop outside the list, as in vanilla.
     fn armor_stand_death_drops(&mut self, id: u32, damage_type: &str, causing: u32) {
-        let source = (!horizon_client::mod_api::mods().is_empty())
+        let source = (!mod_api::mods().is_empty())
             .then(|| super::creatures::death_hurt_source(damage_type, causing));
         let dying = super::creatures::DyingDrops {
             entity: id,

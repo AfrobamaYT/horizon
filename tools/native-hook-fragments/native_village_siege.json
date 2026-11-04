@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "village_siege",
+      "doc": "A village siege found a spawn position on the server. Set `canceled`\nto stop the siege. There is one siege per dimension.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_village_siege",
       "side": "server",
       "cancellable": true,

@@ -1,0 +1,347 @@
+//! The game's side of the mod API: the installed tables, the reload machinery, the structs the
+//! game fills for its hooks (`built`) and what it reads of handles and the API's own types
+//! (`game`). None of it is part of the API a mod is written against.
+use crate::*;
+
+/// Install the process-wide ordered list of mods.
+pub fn install(mods: Mods) {
+    crate::install(mods);
+}
+
+/// Whether an installed mod subscribes to `hook`.
+pub fn listened(hook: HookId) -> bool {
+    crate::listened(hook)
+}
+
+pub use crate::block_entity_type::validate_block_entity_type_keys;
+pub use crate::part_table::{
+    HookParts, KnownIds, PartsRef, block_entity_types, has_part_hook, has_scoped_hook,
+    install_parts, mark_game_thread, parts, resolve_parts,
+};
+pub use crate::phase::install_packages;
+#[cfg(any(test, feature = "testing"))]
+pub use crate::{part_table::tests as part_tests, phase::with_test_packages};
+
+/// The startup package inventory at an owning engine load boundary.
+pub fn loaded_mods() -> LoadedMods<'static> {
+    LoadedMods::new()
+}
+
+/// The data-pack and resource reloads the game runs.
+pub mod reload {
+    pub use crate::reload::{
+        PreparedStep, RegisteredListener, ReloadFiles, ReloadStageError, apply_listeners,
+        prepare_listeners,
+    };
+    pub use crate::server_reload::{OrderedServerReload, RetainedEntry};
+}
+
+/// The structs the game fills for its hooks, each turned into the API's own with `From`.
+pub mod built {
+    pub use crate::built::{
+        NativeActiveEffect, NativeBlockClick, NativeExplosionStart, NativeItemClick,
+        NativeItemFished, NativeLifecycleContext, NativeLootDrops, NativePlayerAbilities,
+        NativePlayerExperience, NativePlayerFood, NativePortalShape, NativeScreenView,
+        NativeServerPlayer, ToolUse,
+    };
+    pub use crate::config_files::built::{ConfigEntry, ConfigStat};
+    pub use crate::game::built::NativeConfigFile;
+    pub use crate::render::built::{BlockSpriteArrays, HandDrawn, WorldDrawn};
+}
+
+/// What the game reads of handles and calls on the API's own types.
+pub mod game {
+    use crate::*;
+    use std::fmt::Debug;
+
+    /// A type's fields the game reads, as `value.fields().name`.
+    pub trait Fields {
+        type Fields<'a>
+        where
+            Self: 'a;
+        fn fields(&self) -> Self::Fields<'_>;
+    }
+
+    /// A block entity handle the game names.
+    pub fn block_entity_ref(level: LevelRef, position: [i32; 3]) -> BlockEntityRef {
+        BlockEntityRef { level, position }
+    }
+    /// A boss bar handle the game names.
+    pub fn boss_bar_ref(epoch: NativeWorldEpoch, uuid: u128) -> BossBarRef {
+        BossBarRef { epoch, uuid }
+    }
+    /// A chunk handle the game names.
+    pub fn chunk_ref(level: LevelRef, pos: [i32; 2]) -> ChunkRef {
+        ChunkRef { level, pos }
+    }
+    /// An open menu's handle the game names.
+    pub fn menu_ref(player: PlayerRef, window: i32, generation: u64) -> MenuRef {
+        MenuRef {
+            player,
+            window,
+            generation,
+        }
+    }
+    /// A player handle the game names.
+    pub fn player_ref(entity: EntityRef, uuid: u128) -> PlayerRef {
+        PlayerRef { entity, uuid }
+    }
+
+    pub struct BlockEntityRefFields {
+        pub level: LevelRef,
+        pub position: [i32; 3],
+    }
+    impl Fields for BlockEntityRef {
+        type Fields<'a> = BlockEntityRefFields;
+        fn fields(&self) -> BlockEntityRefFields {
+            BlockEntityRefFields {
+                level: self.level,
+                position: self.position,
+            }
+        }
+    }
+
+    pub struct BossBarRefFields {
+        pub epoch: NativeWorldEpoch,
+        pub uuid: u128,
+    }
+    impl Fields for BossBarRef {
+        type Fields<'a> = BossBarRefFields;
+        fn fields(&self) -> BossBarRefFields {
+            BossBarRefFields {
+                epoch: self.epoch,
+                uuid: self.uuid,
+            }
+        }
+    }
+
+    pub struct MenuRefFields {
+        pub player: PlayerRef,
+        pub window: i32,
+        pub generation: u64,
+    }
+    impl Fields for MenuRef {
+        type Fields<'a> = MenuRefFields;
+        fn fields(&self) -> MenuRefFields {
+            MenuRefFields {
+                player: self.player,
+                window: self.window,
+                generation: self.generation,
+            }
+        }
+    }
+
+    pub struct PlayerRefFields {
+        pub entity: EntityRef,
+        pub uuid: u128,
+    }
+    impl Fields for PlayerRef {
+        type Fields<'a> = PlayerRefFields;
+        fn fields(&self) -> PlayerRefFields {
+            PlayerRefFields {
+                entity: self.entity,
+                uuid: self.uuid,
+            }
+        }
+    }
+
+    pub struct ModEntryFields<'a> {
+        pub hooks: &'a dyn Hooks,
+    }
+    impl Fields for ModEntry {
+        type Fields<'a> = ModEntryFields<'a>;
+        fn fields(&self) -> ModEntryFields<'_> {
+            ModEntryFields {
+                hooks: &*self.hooks,
+            }
+        }
+    }
+
+    pub trait PartsLookup {
+        fn for_hook(&self, hook: HookId) -> Option<&crate::part_table::HookParts>;
+    }
+    impl PartsLookup for Parts {
+        fn for_hook(&self, hook: HookId) -> Option<&crate::part_table::HookParts> {
+            Parts::for_hook(self, hook)
+        }
+    }
+
+    pub trait CapabilityChecked {
+        fn checked(&self, answer: u32, asked: u32, at: &dyn Debug) -> Option<u32>;
+    }
+    impl<T: ?Sized> CapabilityChecked for Capability<T> {
+        fn checked(&self, answer: u32, asked: u32, at: &dyn Debug) -> Option<u32> {
+            Capability::checked(self, answer, asked, at)
+        }
+    }
+
+    pub trait FileToIdConverterPaths {
+        fn directory(&self) -> &str;
+        fn file_to_id(&self, file: &str) -> Option<Identifier>;
+    }
+    impl FileToIdConverterPaths for FileToIdConverter {
+        fn directory(&self) -> &str {
+            FileToIdConverter::directory(self)
+        }
+        fn file_to_id(&self, file: &str) -> Option<Identifier> {
+            FileToIdConverter::file_to_id(self, file)
+        }
+    }
+
+    pub trait BlockEntityTypeKeyRegistered: Sized {
+        fn registered(id: &str) -> Option<Self>;
+    }
+    impl BlockEntityTypeKeyRegistered for BlockEntityTypeKey {
+        fn registered(id: &str) -> Option<Self> {
+            BlockEntityTypeKey::registered(id)
+        }
+    }
+
+    pub trait RegistrationContextNew {
+        fn new() -> Self;
+    }
+    impl RegistrationContextNew for RegistrationContext<'_> {
+        fn new() -> Self {
+            RegistrationContext::new()
+        }
+    }
+
+    pub trait ReloadContextNew {
+        fn new(files: crate::reload::ReloadFiles) -> Self;
+    }
+    impl ReloadContextNew for ServerReloadContext {
+        fn new(files: crate::reload::ReloadFiles) -> Self {
+            ServerReloadContext::new(files)
+        }
+    }
+    impl ReloadContextNew for ClientReloadContext {
+        fn new(files: crate::reload::ReloadFiles) -> Self {
+            ClientReloadContext::new(files)
+        }
+    }
+
+    pub trait ServerReloadListenersOrder {
+        fn new() -> Self;
+        fn finish(self) -> Result<crate::server_reload::OrderedServerReload, ReloadOrderError>;
+    }
+    impl ServerReloadListenersOrder for ServerReloadListeners {
+        fn new() -> Self {
+            ServerReloadListeners::new()
+        }
+        fn finish(self) -> Result<crate::server_reload::OrderedServerReload, ReloadOrderError> {
+            ServerReloadListeners::finish(self)
+        }
+    }
+
+    pub trait ClientReloadListenersOrder {
+        fn new() -> Self;
+        #[allow(clippy::type_complexity)]
+        fn finish(
+            self,
+        ) -> Result<
+            Vec<crate::reload::RegisteredListener<dyn ClientReloadListener>>,
+            ReloadOrderError,
+        >;
+    }
+    impl ClientReloadListenersOrder for ClientReloadListeners {
+        fn new() -> Self {
+            ClientReloadListeners::new()
+        }
+        fn finish(
+            self,
+        ) -> Result<
+            Vec<crate::reload::RegisteredListener<dyn ClientReloadListener>>,
+            ReloadOrderError,
+        > {
+            ClientReloadListeners::finish(self)
+        }
+    }
+
+    pub trait ServerReloadResourcesInstall {
+        fn install(&mut self, retained: Vec<crate::server_reload::RetainedEntry>);
+    }
+    impl ServerReloadResourcesInstall for ServerReloadResources {
+        fn install(&mut self, retained: Vec<crate::server_reload::RetainedEntry>) {
+            ServerReloadResources::install(self, retained)
+        }
+    }
+
+    pub trait BackendRefOf<'a> {
+        fn of(inner: &'a dyn Backend) -> Self;
+    }
+    impl<'a> BackendRefOf<'a> for BackendRef<'a> {
+        fn of(inner: &'a dyn Backend) -> Self {
+            BackendRef::of(inner)
+        }
+    }
+
+    pub trait BackendMutRefOf<'a> {
+        fn of(inner: &'a mut dyn BackendMut) -> Self;
+    }
+    impl<'a> BackendMutRefOf<'a> for BackendMutRef<'a> {
+        fn of(inner: &'a mut dyn BackendMut) -> Self {
+            BackendMutRef::of(inner)
+        }
+    }
+
+    pub use self::dataloadcontextnew::DataLoadContextNew;
+    mod dataloadcontextnew {
+        #[allow(unused_imports)]
+        use crate::phase::*;
+        #[allow(unused_imports)]
+        use crate::*;
+        #[allow(unused_imports)]
+        use std::sync::OnceLock;
+        pub trait DataLoadContextNew<'a>: Sized {
+            fn new(source: &'a horizon_world::native_load_context::LoadContext) -> Self;
+        }
+        impl<'a> DataLoadContextNew<'a> for DataLoadContext<'a> {
+            fn new(source: &'a horizon_world::native_load_context::LoadContext) -> Self {
+                DataLoadContext::new(source)
+            }
+        }
+    }
+
+    pub use self::modblockentityviewnew::ModBlockEntityViewNew;
+    mod modblockentityviewnew {
+        #[allow(unused_imports)]
+        use crate::*;
+        #[allow(unused_imports)]
+        use serde_json::{Map, Value};
+        #[allow(unused_imports)]
+        use std::sync::{Arc, OnceLock};
+        #[allow(unused_imports)]
+        use std::time::Duration;
+        pub trait ModBlockEntityViewNew<'a>: Sized {
+            fn new(entity: &'a mut ModBlockEntity) -> Self;
+        }
+        impl<'a> ModBlockEntityViewNew<'a> for ModBlockEntityView<'a> {
+            fn new(entity: &'a mut ModBlockEntity) -> Self {
+                ModBlockEntityView::new(entity)
+            }
+        }
+    }
+
+    pub use self::reloadfilesnew::ReloadFilesNew;
+    mod reloadfilesnew {
+        #[allow(unused_imports)]
+        use crate::reload::*;
+        #[allow(unused_imports)]
+        use crate::*;
+        #[allow(unused_imports)]
+        use crate::{
+            FileToIdConverter, Identifier,
+            reload_order::{ReloadOrder, ReloadOrderError},
+        };
+        #[allow(unused_imports)]
+        use std::{collections::BTreeMap, sync::Arc};
+        pub trait ReloadFilesNew: Sized {
+            fn new(files: BTreeMap<Identifier, Vec<u8>>) -> Self;
+        }
+        impl ReloadFilesNew for ReloadFiles {
+            fn new(files: BTreeMap<Identifier, Vec<u8>>) -> Self {
+                ReloadFiles::new(files)
+            }
+        }
+    }
+}

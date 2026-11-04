@@ -1,4 +1,4 @@
-//! Entities for native server mods (docs/native-mods.md, "Entities"): spawn
+//! Entities for native server mods (docs/modding/src/how-to/native-mods.md, "Entities"): spawn
 //! any entity from its compound as `/summon` does, and move, show or remove
 //! the entities Horizon keeps without simulating them (displays, markers,
 //! interactions); `native_display_refs.rs` poses displays. They act where
@@ -151,7 +151,7 @@ impl Game<'_> {
     /// entity it announces; nothing runs when no mod is loaded, on a client
     /// of a server (which tells nothing), or when nothing is new.
     pub(super) fn native_joins_flush(&mut self, loaded_from_disk: bool, watch: u32) -> bool {
-        if self.remote.is_some() || crate::mod_api::mods().is_empty() || !self.joins_pending() {
+        if self.remote.is_some() || mod_api::mods().is_empty() || !self.joins_pending() {
             return true;
         }
         let observed = horizon_client::join_seq::JoinSeq::latest();
@@ -298,7 +298,7 @@ impl Game<'_> {
     /// be told when it leaves.
     pub(super) fn native_joins_skip(&mut self) {
         let observed = horizon_client::join_seq::JoinSeq::latest();
-        if self.remote.is_none() && !crate::mod_api::mods().is_empty() {
+        if self.remote.is_none() && !mod_api::mods().is_empty() {
             self.assign_pending_join_ids();
             while let Some((slot, id, seq)) = self.next_unannounced() {
                 self.persist.joined_seq = seq;
@@ -367,14 +367,14 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mod_api::ServerHost;
+    use mod_api::ServerHost;
 
     #[test]
     #[ignore = "needs prepared resources and an isolated process for native mods"]
     fn joins_follow_insertion_order_and_canceled_entities_never_leave() {
-        use crate::mod_api::{self, EntityJoinLevelEvent, EntityLeaveLevelEvent, Flow, Hooks};
         use horizon_client::mobs::Mob;
         use horizon_core::geometry::Vec3;
+        use mod_api::{self, EntityJoinLevelEvent, EntityLeaveLevelEvent, Flow, Hooks};
         use std::sync::{Arc, Mutex};
 
         type Joins = Arc<Mutex<Vec<(u32, String, bool)>>>;

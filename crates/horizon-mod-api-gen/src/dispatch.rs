@@ -19,6 +19,7 @@ pub(super) fn emit(
     root: &Path,
     hooks: &[CatalogHook],
     methods: &[syn::ItemFn],
+    contexts: &[DrawContext],
 ) -> Result<HookSources, String> {
     let mut hook_ids = String::new();
     let mut hook_constants = String::new();
@@ -39,7 +40,7 @@ pub(super) fn emit(
             .ok_or_else(|| format!("hook {name} has no mod_api entry: add one"))?;
         let native = format!("native_{name}");
         let target = hook["target"].as_str().ok_or("target missing")?;
-        let is_render = target.starts_with("horizon_client_render::");
+        let is_render = target.starts_with("mod_api::render::");
         let external = free_function_source(target);
         let in_game = external.is_none();
         let (method, call) = if let Some((krate, path)) = external {
@@ -67,7 +68,9 @@ pub(super) fn emit(
                 .collect();
             (
                 one_function(functions.iter(), &native)?.clone(),
-                if is_render {
+                // A hook in the mod API crate calls its dispatch directly; one below it calls
+                // the callback the game installs.
+                if krate == "horizon-mod-api" {
                     format!("dispatch_{name}")
                 } else {
                     name.to_owned()
@@ -119,6 +122,11 @@ pub(super) fn emit(
         let replacement = fresh_name("replacement", &mut used);
         let contract = api["contract"].as_str().ok_or("contract missing")?;
         let out = api.get("out").and_then(|v| v.as_str());
+        // A replace hook that names which mod answered: its output holds `Answered<T>`.
+        let answered = api.get("answered_by").is_some_and(|v| v == "mod");
+        if answered && (contract != "replace" || api.get("scope").is_some()) {
+            return Err(format!("{name}: answered_by needs a global replace hook"));
+        }
         if !matches!(
             (contract, out),
             ("cancel" | "replace" | "collect", Some(_)) | ("listen", None)
@@ -144,6 +152,11 @@ pub(super) fn emit(
             match contract {
                 "cancel" if reference.elem.to_token_stream().to_string() == "bool" => {
                     " -> Flow".to_owned()
+                }
+                "replace" if answered => {
+                    let answer = answered_type(&reference.elem)
+                        .ok_or_else(|| format!("{name}: output must be Option<Answered<T>>"))?;
+                    format!(" -> Option<{}>", answer.to_token_stream())
                 }
                 "replace" => format!(" -> {}", reference.elem.to_token_stream()),
                 "collect" => String::new(),
@@ -256,13 +269,36 @@ pub(super) fn emit(
         let mut inits = Vec::new();
         let mut write_back = String::new();
         let collected = output.as_ref().filter(|_| contract == "collect");
+        // A draw surface reaches mods as its context's trait object, which the native call
+        // builds from `Game` and the surface.
+        let mut surface_calls = std::collections::HashMap::new();
         for (name, ty) in args.iter().chain(collected) {
+            let drawn = DrawContext::of(contexts, ty);
+            if let Some((context, mutable)) = drawn {
+                if !mutable || receiver_mut != Some(false) {
+                    return Err(format!(
+                        "{}: a drawing hook takes &self and its surface as &mut",
+                        hook["name"].as_str().unwrap_or_default()
+                    ));
+                }
+                surface_calls.insert(
+                    name.as_str(),
+                    format!(
+                        "&mut super::mod_api_host::generated::{} {{ game: self, surface: {name} }}",
+                        context.game_struct()
+                    ),
+                );
+            }
+            let drawn: Option<Type> = drawn.map(|(context, _)| {
+                syn::parse_str(&format!("&mut dyn {}", context.trait_name)).expect("a trait name")
+            });
+            let ty = drawn.as_ref().unwrap_or(ty);
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
             let mutable_entity = ty.to_token_stream().to_string() == "& mut ModBlockEntity";
             let field_ty = if mutable_entity {
                 syn::parse_quote!(ModBlockEntityView<'_>)
             } else {
-                (**ty).clone()
+                ty.clone()
             };
             let (field, scalar) = lifetimes.field(&field_ty);
             let visibility = if event_type == "ApplyEffectTickEvent" && name == "changes" {
@@ -305,10 +341,15 @@ pub(super) fn emit(
         if fill {
             // The dispatch's parameters in order: the host, the arguments,
             // and the output last.
-            let host = host.as_ref().map(|(_, param)| param.call);
+            let host = host.as_ref().map(|(_, param)| param.call.to_owned());
             let passed = host
                 .into_iter()
-                .chain(args.iter().chain(output.as_ref()).map(|(n, _)| n.as_str()))
+                .chain(args.iter().chain(output.as_ref()).map(|(n, _)| {
+                    surface_calls
+                        .get(n.as_str())
+                        .cloned()
+                        .unwrap_or_else(|| n.clone())
+                }))
                 .collect::<Vec<_>>()
                 .join(", ");
             fills.push(Fill {
@@ -330,7 +371,13 @@ pub(super) fn emit(
         } else {
             &mut dispatch
         };
-        let mut method_source = doc_comments(&method.attrs, name, false)?;
+        let mut method_source = String::new();
+        for line in hook["doc"].as_str().ok_or("doc missing")?.trim().lines() {
+            method_source.push_str(&format!(
+                "///{}{line}\n",
+                if line.is_empty() { "" } else { " " }
+            ));
+        }
         let side = match hook.side {
             HelperSide::Server => "server",
             HelperSide::Client => "client",
@@ -365,12 +412,14 @@ pub(super) fn emit(
             .as_ref()
             .map_or(trait_name, |(part_trait, _)| part_trait);
         dispatch.push_str(&format!(
-            "/// What [`{trait_name}::{name}`] is told. Fields may be added: the struct is `#[non_exhaustive]`.\n#[non_exhaustive]\npub struct {event_type}{generics} {{\n{fields}}}\n"
+            "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
         let build = format!("let mut {event} = {event_type} {{ {} }};", inits.join(", "));
         // A trait mod's call is marked with the mod for a panic to name; render hooks are called bare.
         let each = if is_render {
             format!("super::entered_render(RenderHookId::{hook_id})")
+        } else if answered {
+            format!("super::entered_with_id(HookId::{hook_id}, \"{name}\")")
         } else {
             format!("super::entered(HookId::{hook_id}, \"{name}\")")
         };
@@ -380,19 +429,25 @@ pub(super) fn emit(
                 "if matches!({callee}.{name}({invoke}), Flow::Cancel) {{ *{o} = true; {exit}; }}",
                 o = out.unwrap()
             ),
+            "replace" if answered => format!(
+                "if let Some({replacement}) = {callee}.{name}({invoke}) {{ *{o} = Some(Answered {{ answer: {replacement}, mod_id }}); {exit}; }}",
+                o = out.unwrap()
+            ),
             "replace" => format!(
                 "if let Some({replacement}) = {callee}.{name}({invoke}) {{ *{o} = Some({replacement}); {exit}; }}",
                 o = out.unwrap()
             ),
             _ => format!("{callee}.{name}({invoke});"),
         };
+        let binding = if answered {
+            format!("(mod_id, {mod_item})")
+        } else {
+            mod_item.clone()
+        };
         let (lookup, calls) = match &scoped {
             None => (
                 String::new(),
-                format!(
-                    "for {mod_item} in {each} {{ {} }}",
-                    call(&mod_item, "break")
-                ),
+                format!("for {binding} in {each} {{ {} }}", call(&mod_item, "break")),
             ),
             Some((_, lookup)) => (
                 // The parts are looked up first: the key may be moved into the event.
@@ -424,7 +479,7 @@ pub(super) fn emit(
             format!("if !super::listened(HookId::{hook_id}) {{ return; }}")
         };
         dispatch.push_str(&format!(
-            "pub fn dispatch_{name}({dispatch_params}) {{ {early_return}\n{body} }}\n"
+            "#[doc(hidden)] pub fn dispatch_{name}({dispatch_params}) {{ {early_return}\n{body} }}\n"
         ));
     }
     Ok(HookSources {
@@ -441,4 +496,22 @@ pub(super) fn emit(
         render_hook_constants,
         render_hook_count,
     })
+}
+
+/// `T` of an `Option<Answered<T>>` output, if that is its type.
+fn answered_type(ty: &Type) -> Option<&Type> {
+    generic_of(generic_of(ty, "Option")?, "Answered")
+}
+
+/// `T` of a `name<T>` type.
+fn generic_of<'a>(ty: &'a Type, name: &str) -> Option<&'a Type> {
+    let Type::Path(path) = ty else { return None };
+    let segment = path.path.segments.last().filter(|s| s.ident == name)?;
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    match args.args.first()? {
+        syn::GenericArgument::Type(ty) => Some(ty),
+        _ => None,
+    }
 }

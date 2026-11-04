@@ -10,6 +10,7 @@ use crate::{
 };
 use horizon_core::random::{LegacyRandom, RandomSource};
 use horizon_world::loot::PackOverlay;
+pub use mod_api::stations::{AnvilResult, EnchantmentRow};
 use serde_json::Value;
 use std::{fs, path::Path, sync::Arc};
 
@@ -25,13 +26,18 @@ pub struct StationData {
     pub recipe_index: crate::recipe_book::RecipeIndex,
 }
 impl StationData {
-    pub fn load(root: &Path, items: &Items, overlay: &PackOverlay) -> Self {
+    pub fn load(
+        root: &Path,
+        items: &Items,
+        overlay: &PackOverlay,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
+    ) -> Self {
         Self {
             enchantments: std::sync::Arc::clone(&items.enchantments),
             recipes: StationRecipes::load(root, items, overlay),
             brewing: crate::brewing::Brewing::load(root, items, overlay),
             trades: crate::merchant::Trades::load(root, overlay),
-            banners: crate::banner::Banners::load(root),
+            banners: crate::banner::Banners::load(root, defaults),
             recipe_index: crate::recipe_book::RecipeIndex::load(root, overlay),
         }
     }
@@ -52,18 +58,6 @@ pub fn bookshelf_offsets() -> Vec<[i32; 3]> {
         }
     }
     v
-}
-/// One offer row as `EnchantmentLevelSetEvent` reports it: the server player
-/// whose table it is (UUID and entity id), the row (0 to 2), the power (the
-/// bookshelves counted), the item and the level `getEnchantmentCost` drew.
-#[derive(Clone, Debug, PartialEq)]
-pub struct EnchantmentRow<'a> {
-    pub player: u128,
-    pub player_entity_id: i32,
-    pub row: i32,
-    pub power: i32,
-    pub item: &'a ItemStack,
-    pub original_level: i32,
 }
 /// The three offers of `EnchantmentMenu.slotsChanged`.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -184,15 +178,6 @@ pub fn apply_enchantment(
 
 // ---------------------------------------------------------------- anvil
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct AnvilResult {
-    pub result: Option<ItemStack>,
-    /// Level cost (the `cost` data slot).
-    pub cost: i32,
-    /// Material items consumed from the second slot on take.
-    pub repair_item_count_cost: u32,
-    pub only_renaming: bool,
-}
 /// `ItemStack.isDamageableItem`: durability, and not `minecraft:unbreakable`.
 pub fn is_damageable(items: &Items, stack: &ItemStack) -> bool {
     items.get(&stack.item).is_some_and(|i| i.max_damage > 0)
@@ -999,8 +984,9 @@ mod tests {
         if !root.join("items.json").exists() {
             return;
         }
-        let items = Items::tags_only(&root, &PackOverlay::NONE).unwrap();
-        let data = StationData::load(&root, &items, &PackOverlay::NONE);
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = Items::tags_only(&root, &PackOverlay::NONE, &defaults).unwrap();
+        let data = StationData::load(&root, &items, &PackOverlay::NONE, &defaults);
         let e = &data.enchantments;
         assert_eq!(e.list.len(), 43);
         assert_eq!(

@@ -1,14 +1,14 @@
 //! An entity's state flags for native server mods, through an `EntityRef`
-//! (docs/native-mods.md, "Entity and level handles", #7387): sneaking and
+//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): sneaking and
 //! sprinting, water and lava, fire and air, silence, invisibility and pose.
 //! Players and mobs have them all; the other kinds have the ones Horizon
 //! keeps for them (an armor stand's fire and invisibility, an item's fire),
 //! and `None` for the rest, as for a stale handle or on a client.
 use super::{Game, commands::Target};
 use horizon_client::mobs::{Mob, Species, sync};
-use horizon_client::mod_api::EntityRef;
 use horizon_client::motion::PlayerMotion;
 use horizon_client::pose::Pose;
+use mod_api::EntityRef;
 
 /// `Pose`'s serialized names by id (`Pose.STANDING` is 0).
 const POSES: [&str; 18] = [

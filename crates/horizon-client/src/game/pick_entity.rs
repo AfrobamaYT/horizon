@@ -2,8 +2,8 @@
 //! `ServerGamePacketListenerImpl.handlePickItemFromEntity`): the client aims,
 //! the server answers with `Entity.getPickResult`.
 use super::Game;
-use horizon_client::mod_api::{BlockPos, EntityRef, NativeCrosshairTarget};
 use horizon_client::{items::ItemStack, save::uuid_text};
+use mod_api::{BlockPos, EntityRef, NativeCrosshairTarget};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct CrosshairEntityHit {

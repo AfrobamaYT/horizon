@@ -1,4 +1,4 @@
-//! Entity and level handles for native server mods (docs/native-mods.md,
+//! Entity and level handles for native server mods (docs/modding/src/how-to/native-mods.md,
 //! "Entity and level handles", #7387): `native_entity(id)` turns an event's
 //! entity id into an `EntityRef`, and each `native_entity_*` helper reads the
 //! entity a handle names. They read where the world is simulated: on a client,
@@ -13,12 +13,12 @@ use super::{
     commands::Target,
     entity::{Entity as _, entity_lists_of, for_each_entity},
 };
-use horizon_client::mod_api::{
+use horizon_core::geometry::{Aabb, Vec3};
+use horizon_world::registry::BlockStateId;
+use mod_api::{
     EntityRef, LevelRef, NativeBlockFace, NativeBlockShapeKind, NativeBlockUpdateFlags,
     NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType,
 };
-use horizon_core::geometry::{Aabb, Vec3};
-use horizon_world::registry::BlockStateId;
 
 impl Game<'_> {
     /// Keep a held-out entity inaccessible until its copy has been stored back.
@@ -27,7 +27,7 @@ impl Game<'_> {
         id: u32,
         action: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        if horizon_client::mod_api::mods().is_empty() {
+        if mod_api::mods().is_empty() {
             return action(self);
         }
         self.held_out.push(id);
@@ -262,6 +262,7 @@ impl Game<'_> {
                 .map(|b| std::array::from_fn(|i| b[i] - f64::from(pos[i % 3])))
                 .collect(),
             NativeBlockShapeKind::Collision => self.native_block_collision_in(world, pos),
+            _ => unreachable!("NativeBlockShapeKind: unhandled variant"),
         })
     }
 
@@ -286,6 +287,7 @@ impl Game<'_> {
             NativeBlockFace::South => Direction::South,
             NativeBlockFace::West => Direction::West,
             NativeBlockFace::East => Direction::East,
+            _ => unreachable!("NativeBlockFace: unhandled variant"),
         };
         let b = self.res.behaviours();
         if !b.has_cached_support(state) {
@@ -295,6 +297,7 @@ impl Game<'_> {
             NativeSupportType::Full => b.is_face_sturdy(state, direction),
             NativeSupportType::Center => b.is_face_sturdy_center(state, direction),
             NativeSupportType::Rigid => b.is_face_sturdy_rigid(state, direction),
+            _ => unreachable!("NativeSupportType: unhandled variant"),
         })
     }
 
@@ -332,9 +335,11 @@ impl Game<'_> {
         let mode = match blocks {
             NativeClipBlock::Collider => RayBlockMode::Collider,
             NativeClipBlock::Outline => RayBlockMode::Outline,
+            _ => unreachable!("NativeClipBlock: unhandled variant"),
         };
         let fluid = match fluids {
             NativeClipFluid::None => RayFluidMode::None,
+            _ => unreachable!("NativeClipFluid: unhandled variant"),
         };
         let result = clip_world(
             &mut rays,
@@ -409,6 +414,7 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use mod_api::__private::game::*;
     /// Isolate declarations and frozen registries without changing another test's resources.
     pub(in crate::game) fn run_fresh_cases(name: &str, flag: &str, cases: &[&str]) -> bool {
         if std::env::var_os(flag).is_some() {
@@ -470,7 +476,7 @@ pub(super) mod tests {
         if run_fresh_cases(name, "HORIZON_DECLARED_PART_GAME_CHILD", &["valid"]) {
             return None;
         }
-        let _mods = horizon_client::mod_api::part_tests::game_thread();
+        let _mods = mod_api::__private::part_tests::game_thread();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         Some(super::super::mods::content_root(&base, &Default::default()).unwrap())
     }
@@ -487,7 +493,7 @@ pub(super) mod tests {
         use super::super::{
             Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
         };
-        use horizon_client::mod_api::NativeAuthority;
+        use mod_api::NativeAuthority;
 
         let settings = Settings::default();
         let loaded = load_resources(
@@ -497,7 +503,7 @@ pub(super) mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -542,7 +548,7 @@ pub(super) mod tests {
         use horizon_core::position::BlockPos;
         use std::sync::Arc;
 
-        horizon_client::mod_api::part_tests::weak_power_game_thread();
+        mod_api::__private::part_tests::weak_power_game_thread();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -571,12 +577,54 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn block_part_answers_is_pathfindable_once_per_state_and_type() {
+        use mod_api::mobs::PathComputationType::{self, Air, Land, Water};
+
+        // Before any part: every state answers as the vanilla export says.
+        with_game(|game| {
+            let data = &game.res.rest().mob_data;
+            for (i, vanilla) in data.states.iter().enumerate() {
+                for (kind, bit) in [(Land, 1), (Water, 2), (Air, 4)] {
+                    let state = horizon_world::registry::BlockStateId(i as u32);
+                    assert_eq!(data.pathfindable(state, kind), vanilla.flags & bit != 0);
+                }
+            }
+        });
+        mod_api::__private::part_tests::pathfindable_game_thread();
+        with_game(|game| {
+            let registry = game.pack.assets.registry;
+            let asks = |name: &str, kind: PathComputationType| {
+                let state = registry.default_state(name).unwrap();
+                game.res.rest().mob_data.pathfindable(state, kind)
+            };
+            // Glass: land and air answered, water left to the block (vanilla: none of them).
+            assert!(asks("minecraft:glass", Land));
+            assert!(asks("minecraft:glass", Air));
+            assert!(!asks("minecraft:glass", Water));
+            // Air: land refused, water allowed, air left to the block.
+            assert!(!asks("minecraft:air", Land));
+            assert!(asks("minecraft:air", Water));
+            assert!(asks("minecraft:air", Air));
+            // A block with no part answers as before.
+            assert!(!asks("minecraft:stone", Land));
+            // A reload without the mod's answers takes them back.
+            game.res
+                .rest()
+                .mob_data
+                .set_pathfindable(false, |_, _, vanilla| vanilla);
+            assert!(!asks("minecraft:glass", Land));
+            assert!(asks("minecraft:air", Land));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn block_part_asks_neighbours_to_update_when_its_block_is_removed() {
         use horizon_client::chunk::Chunk;
         use horizon_core::position::BlockPos;
         use std::sync::Arc;
 
-        horizon_client::mod_api::part_tests::removal_game_thread();
+        mod_api::__private::part_tests::removal_game_thread();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -630,7 +678,7 @@ pub(super) mod tests {
         use horizon_core::{geometry::Direction, position::BlockPos};
         use std::sync::Arc;
 
-        horizon_client::mod_api::part_tests::redstone_game_thread();
+        mod_api::__private::part_tests::redstone_game_thread();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -698,10 +746,8 @@ pub(super) mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn chunk_handles_resolve_loaded_parked_and_stale_levels() {
-        use horizon_client::{
-            chunk::Chunk,
-            mod_api::{ChunkStatus, Host, NativeAuthority},
-        };
+        use horizon_client::chunk::Chunk;
+        use mod_api::{ChunkStatus, Host, NativeAuthority};
         use std::sync::Arc;
         with_game(|game| {
             let level = game.native_level(game.dim.id()).unwrap();
@@ -741,10 +787,8 @@ pub(super) mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn level_reads_and_writes_use_dimension_build_height() {
-        use horizon_client::{
-            chunk::{Chunk, LevelShape},
-            mod_api::NativeBlockUpdateFlags,
-        };
+        use horizon_client::chunk::{Chunk, LevelShape};
+        use mod_api::NativeBlockUpdateFlags;
         use std::sync::Arc;
         with_game(|game| {
             game.world.shape = LevelShape::new(0, 128, 128, true, false).unwrap();
@@ -895,9 +939,9 @@ pub(super) mod tests {
         use horizon_client::{
             items::ItemStack,
             lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
-            mod_api::{EquipmentSlot, GameMode},
         };
         use horizon_protocol::packets::configuration::ClientInformation;
+        use mod_api::{EquipmentSlot, GameMode};
         use std::sync::{
             Arc,
             atomic::{AtomicI32, AtomicUsize},
@@ -969,8 +1013,8 @@ pub(super) mod tests {
             .unwrap();
             game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = Some(Box::new(motion));
             let player = game.native_player_ref(12).unwrap();
-            let guest_living = game.native_living(player.entity).unwrap();
-            let host: &dyn horizon_client::mod_api::Host = game;
+            let guest_living = game.native_living(player.fields().entity).unwrap();
+            let host: &dyn mod_api::Host = game;
             assert_eq!(
                 guest_living.attribute_base(host, "minecraft:max_health"),
                 Some(20.0)
@@ -982,7 +1026,7 @@ pub(super) mod tests {
             assert_eq!(guest_living.max_health(host), Some(20.0));
             game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = None;
             // Body and saddle are stored on a guest like on a mob.
-            let living = game.native_living(player.entity).unwrap();
+            let living = game.native_living(player.fields().entity).unwrap();
             let saddle = ItemStack::new("minecraft:saddle", 1);
             assert!(game.native_living_set_equipment(
                 living,
@@ -1043,21 +1087,23 @@ pub(super) mod tests {
             assert!(abilities.may_build && abilities.instabuild && abilities.may_fly);
             assert_eq!((abilities.walk_speed, abilities.fly_speed), (0.2, 0.1));
             assert!(game.native_player_set_game_mode(player, GameMode::Survival));
-            let mut stale = player;
-            stale.entity = horizon_client::mod_api::EntityRef::new(
-                horizon_client::mod_api::NativeWorldEpoch::new(0),
-                player.entity.id(),
+            let stale = mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(
+                    mod_api::NativeWorldEpoch::new(0),
+                    player.fields().entity.id(),
+                ),
+                player.uuid(),
             );
             assert!(!game.native_player_set_game_mode(stale, GameMode::Creative));
             let other = game
                 .native_lifecycle
                 .epoch()
-                .map(|epoch| horizon_client::mod_api::EntityRef::new(epoch, 13))
+                .map(|epoch| mod_api::EntityRef::new(epoch, 13))
                 .unwrap();
             game.as_guest(12, |game| {
                 let player = game.native_player_ref(12).unwrap();
                 let entity = game.native_entity(12).unwrap();
-                assert_eq!(player.entity, entity);
+                assert_eq!(player.fields().entity, entity);
                 assert_eq!(entity.position(game), Some([3.0, 64.0, 5.0]));
                 assert_eq!(entity.uuid(game), Some(12));
                 let living = game.native_living(entity).unwrap();
@@ -1125,7 +1171,7 @@ pub(super) mod tests {
                 "minecraft:stone"
             );
             let player = game.native_player_ref(13).unwrap();
-            assert_eq!(player.entity, other);
+            assert_eq!(player.fields().entity, other);
             assert_eq!(player.game_mode(game), Some(GameMode::Survival));
             assert!(game.native_player_set_game_mode(player, GameMode::Creative));
             assert_eq!(player.game_mode(game), Some(GameMode::Creative));
@@ -1142,7 +1188,7 @@ pub(super) mod tests {
             assert!(game.native_entity(12).is_none());
             assert!(game.native_player_ref(12).is_none());
             assert!(
-                game.native_living(horizon_client::mod_api::EntityRef::new(other.epoch(), 12))
+                game.native_living(mod_api::EntityRef::new(other.epoch(), 12))
                     .is_none()
             );
             assert!(game.native_entity(13).is_some());
@@ -1209,8 +1255,8 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn entities_in_returns_readable_handles_and_intersects_boxes() {
         use horizon_client::entities::ArmorStand;
-        use horizon_client::mod_api::{LevelRef, NativeWorldEpoch};
         use horizon_core::geometry::Vec3;
+        use mod_api::{LevelRef, NativeWorldEpoch};
         with_game(|game| {
             let level = game.native_level(game.dim.id()).unwrap();
             game.armor_stands
@@ -1255,7 +1301,6 @@ pub(super) mod tests {
                 guest::Guest,
                 hub::{Hub, HubConfig},
             },
-            mod_api::HostTransaction,
             motion::PlayerMotion,
         };
         use horizon_core::geometry::Vec3;
@@ -1263,6 +1308,7 @@ pub(super) mod tests {
             configuration::ClientInformation,
             play::{Clientbound, Distance},
         };
+        use mod_api::HostTransaction;
         use std::sync::{Arc, atomic::Ordering};
         with_game(|game| {
             let sync = Arc::new(SyncData::empty());
@@ -1465,7 +1511,7 @@ pub(super) mod tests {
                 8
             );
             assert_ne!(overworld_actor, nether_actor);
-            let host: &mut dyn crate::mod_api::ServerHost = game;
+            let host: &mut dyn mod_api::ServerHost = game;
             let aborted: Result<(), ()> = host.transaction(|host, _| {
                 attachment.set(host, holder, 99).unwrap();
                 Err(())
@@ -1478,15 +1524,15 @@ pub(super) mod tests {
                     .unwrap(),
                 8
             );
-            let place = crate::mod_api::ItemPlace::PlayerSlot {
+            let place = mod_api::ItemPlace::PlayerSlot {
                 player: 2345,
                 slot: 0,
             };
-            let sticks = crate::mod_api::ItemResource::of(&horizon_client::items::ItemStack::new(
+            let sticks = mod_api::ItemResource::of(&horizon_client::items::ItemStack::new(
                 "minecraft:stick",
                 1,
             ));
-            let host: &mut dyn crate::mod_api::ServerHost = game;
+            let host: &mut dyn mod_api::ServerHost = game;
             let rolled_back: Result<(), ()> = host.transaction(|host, tx| {
                 assert_eq!(place.insert(host, tx, &sticks, 1), 1);
                 Err(())
@@ -1505,7 +1551,7 @@ pub(super) mod tests {
                     .inventory[0],
                 None
             );
-            let host: &mut dyn crate::mod_api::ServerHost = game;
+            let host: &mut dyn mod_api::ServerHost = game;
             assert_eq!(
                 host.transaction(|host, tx| Ok::<_, ()>(place.insert(host, tx, &sticks, 1))),
                 Ok(1)
@@ -1806,25 +1852,25 @@ pub(super) mod tests {
                     address: ([127, 0, 0, 1], 1).into(),
                 })))
                 .unwrap();
-            use crate::mod_api;
+            use mod_api;
             struct Logout(std::sync::Arc<std::sync::atomic::AtomicUsize>);
             #[mod_api::__subscriptions]
-            impl crate::mod_api::Hooks for Logout {
+            impl mod_api::Hooks for Logout {
                 fn player_logged_out(
                     &self,
-                    _: &mut dyn crate::mod_api::ServerHost,
-                    _: &mut crate::mod_api::PlayerLoggedOutEvent<'_>,
+                    _: &mut dyn mod_api::ServerHost,
+                    _: &mut mod_api::PlayerLoggedOutEvent<'_>,
                 ) {
                     self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
             }
             let logouts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-            let mods: crate::mod_api::Mods = vec![crate::mod_api::ModEntry::new(
+            let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
                 "logout-test",
                 Box::new(Logout(logouts.clone())),
             )]
             .into();
-            crate::mod_api::testing::with_mods(mods, || {
+            mod_api::testing::with_mods(mods, || {
                 game.native_player_logged_out(0, "control");
                 assert_eq!(logouts.swap(0, std::sync::atomic::Ordering::Relaxed), 1);
                 game.tick_lan_packets();
@@ -1848,7 +1894,7 @@ pub(super) mod tests {
                 .collect();
             assert_eq!(matching.len(), 1);
             assert!(matching[0].participates_online());
-            let mods: crate::mod_api::Mods = vec![crate::mod_api::ModEntry::new(
+            let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
                 "logout-shutdown-test",
                 Box::new(Logout(logouts.clone())),
             )]
@@ -1862,7 +1908,7 @@ pub(super) mod tests {
                 .iter()
                 .filter(|g| g.placed && g.participates_online())
                 .count();
-            crate::mod_api::testing::with_mods(mods, || game.native_players_leaving());
+            mod_api::testing::with_mods(mods, || game.native_players_leaving());
             assert_eq!(logouts.load(Ordering::Relaxed), real_count);
             game.lan.as_mut().unwrap().play.entry(fake_id).or_default();
             game.award_leave_game_to_all();
@@ -1890,11 +1936,9 @@ pub(super) mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn level_sturdy_uses_gameplay_support() {
-        use horizon_client::{
-            chunk::Chunk,
-            mod_api::{
-                LevelRef, NativeBlockFace as Face, NativeSupportType as Support, NativeWorldEpoch,
-            },
+        use horizon_client::chunk::Chunk;
+        use mod_api::{
+            LevelRef, NativeBlockFace as Face, NativeSupportType as Support, NativeWorldEpoch,
         };
         use std::sync::Arc;
         with_game(|game| {
@@ -1973,11 +2017,9 @@ pub(super) mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn level_clip_reads_parked_world_and_refuses_unloaded() {
-        use horizon_client::{
-            chunk::Chunk,
-            mod_api::{
-                NativeBlockFace as Face, NativeClipBlock as Block, NativeClipFluid as Fluid,
-            },
+        use horizon_client::chunk::Chunk;
+        use mod_api::{
+            NativeBlockFace as Face, NativeClipBlock as Block, NativeClipFluid as Fluid,
         };
         use std::sync::Arc;
         with_game(|game| {
@@ -2044,8 +2086,8 @@ pub(super) mod tests {
                     )
                     .is_none()
             );
-            let stale = horizon_client::mod_api::LevelRef::new(
-                horizon_client::mod_api::NativeWorldEpoch::new(level.epoch().get() + 1),
+            let stale = mod_api::LevelRef::new(
+                mod_api::NativeWorldEpoch::new(level.epoch().get() + 1),
                 level.dimension(),
             );
             assert!(
@@ -2126,7 +2168,7 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn living_attributes_are_unavailable_for_nonplayers() {
+    fn living_attributes_answer_for_mobs_stands_and_the_dragon() {
         use horizon_client::{entities::ArmorStand, mobs::Mob};
         use horizon_core::geometry::Vec3;
         with_game(|game| {
@@ -2141,10 +2183,17 @@ pub(super) mod tests {
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 14;
             game.dragon = Some(dragon);
-            for id in [12, 13, 14] {
+            for (id, max) in [(12, 20.0), (13, 20.0), (14, 200.0)] {
                 let living = game.native_living(game.native_entity(id).unwrap()).unwrap();
-                assert_eq!(living.attribute_base(game, "minecraft:max_health"), None);
-                assert_eq!(living.attribute_value(game, "minecraft:max_health"), None);
+                assert_eq!(
+                    living.attribute_base(game, "minecraft:max_health"),
+                    Some(max)
+                );
+                assert_eq!(
+                    living.attribute_value(game, "minecraft:max_health"),
+                    Some(max)
+                );
+                assert_eq!(living.attribute_value(game, "missing:attribute"), None);
             }
         });
     }
@@ -2153,10 +2202,8 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn level_shapes_use_empty_context() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
-        use horizon_client::{
-            chunk::Chunk,
-            mod_api::{NativeAuthority, NativeBlockShapeKind},
-        };
+        use horizon_client::chunk::Chunk;
+        use mod_api::{NativeAuthority, NativeBlockShapeKind};
         use std::{sync::Arc, time::Instant};
 
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -2168,7 +2215,7 @@ pub(super) mod tests {
             &settings,
             Instant::now(),
             false,
-            true,
+            super::super::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -2314,10 +2361,8 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn level_block_writes_validate_and_change_world() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
-        use horizon_client::{
-            chunk::Chunk,
-            mod_api::{NativeAuthority, NativeBlockUpdateFlags},
-        };
+        use horizon_client::chunk::Chunk;
+        use mod_api::{NativeAuthority, NativeBlockUpdateFlags};
         use std::{sync::Arc, time::Instant};
 
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -2329,7 +2374,7 @@ pub(super) mod tests {
             &settings,
             Instant::now(),
             false,
-            true,
+            super::super::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -2377,8 +2422,8 @@ pub(super) mod tests {
         assert_eq!(game.world.block(0, 64, 0), stone);
         assert!(!game.native_level_set_block(level, [16, 64, 0], stone, flags));
         assert!(!game.native_level_set_block(level, [0, 10000, 0], stone, flags));
-        let stale = horizon_client::mod_api::LevelRef::new(
-            horizon_client::mod_api::NativeWorldEpoch::new(level.epoch().get() + 1),
+        let stale = mod_api::LevelRef::new(
+            mod_api::NativeWorldEpoch::new(level.epoch().get() + 1),
             level.dimension(),
         );
         assert!(!game.native_level_set_block(stale, [0, 64, 0], stone, flags));

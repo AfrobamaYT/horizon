@@ -1,5 +1,5 @@
 //! Sounds to one player and sounds that follow an entity, for native server
-//! mods, through a `PlayerRef` and an `EntityRef` (docs/native-mods.md):
+//! mods, through a `PlayerRef` and an `EntityRef` (docs/modding/src/how-to/native-mods.md):
 //! `StopSoundCommand`'s packet, a `ClientboundSoundPacket` for one player
 //! (`PlaySoundCommand`) and `Level.playSound(null, entity, ...)`, which
 //! sends a `ClientboundSoundEntityPacket` to the players in range. They
@@ -11,8 +11,8 @@ use super::{
     commands::Target,
     native_hooks::{mod_sound_ok, sound_id},
 };
-use horizon_client::mod_api::{EntityRef, NativeSoundSource, PlayerRef};
 use horizon_core::random::RandomSource;
+use mod_api::{EntityRef, NativeSoundSource, PlayerRef};
 
 impl Game<'_> {
     /// Where `player` is reached now: the window's own player or a guest.
@@ -115,9 +115,10 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::lan::{Joined, NetConfig, Out, PlayerSender, guest::Guest, hub::HubConfig};
     use horizon_client::mobs::Mob;
-    use horizon_client::mod_api::{NativeSoundSource, NativeWorldEpoch, PlayerRef};
     use horizon_core::geometry::Vec3;
     use horizon_protocol::packets::{configuration::ClientInformation, play::Clientbound};
+    use mod_api::__private::game::*;
+    use mod_api::{NativeSoundSource, NativeWorldEpoch};
     use std::sync::{
         Arc,
         atomic::{AtomicI32, AtomicUsize},
@@ -247,13 +248,13 @@ mod tests {
             assert_eq!(p.source, NativeSoundSource::Neutral.index() as i32);
 
             // A stale handle and an offline player fail.
-            let stale = PlayerRef {
-                entity: horizon_client::mod_api::EntityRef::new(
+            let stale = mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(
                     NativeWorldEpoch::new(pa.entity().epoch().get() + 1),
                     pa.entity().id(),
                 ),
-                ..pa
-            };
+                pa.fields().uuid,
+            );
             assert!(!game.native_player_stop_sound(stale, None, None));
             assert!(!game.native_player_play_sound(
                 stale,

@@ -1,5 +1,5 @@
 //! A player's food and experience for native server mods, through a
-//! `PlayerRef` (docs/native-mods.md): the `FoodData` and `Player` reads the
+//! `PlayerRef` (docs/modding/src/how-to/native-mods.md): the `FoodData` and `Player` reads the
 //! handle's `food()` doesn't give, the writes, and the experience give an
 //! orb hands over (Mending first). Reads return None for a
 //! stale handle or a player who isn't online here, as `food()` does. Writes
@@ -8,7 +8,7 @@
 //! change to their food or experience does.
 use super::Game;
 use horizon_client::entities::Experience;
-use horizon_client::mod_api::{NativePlayerExperience, PlayerRef};
+use mod_api::{NativePlayerExperience, PlayerRef};
 
 impl Game<'_> {
     /// Whether `player` still names the same player on this server.
@@ -105,17 +105,21 @@ impl Game<'_> {
         &self,
         player: PlayerRef,
     ) -> Option<NativePlayerExperience> {
-        Some(match self.player_handle_read(player)? {
-            super::native_server::PlayerRead::Guest(g) => NativePlayerExperience {
-                level: g.xp_level,
-                progress: g.xp_progress,
-                total: g.xp_total,
-            },
-            super::native_server::PlayerRead::Acting { .. } => NativePlayerExperience {
-                level: self.experience.level,
-                progress: self.experience.progress,
-                total: self.experience.total,
-            },
+        Some(match self.player_read_both(player)? {
+            super::native_server::PlayerRead::Guest(g) => {
+                NativePlayerExperience::from(mod_api::__private::built::NativePlayerExperience {
+                    level: g.xp_level,
+                    progress: g.xp_progress,
+                    total: g.xp_total,
+                })
+            }
+            super::native_server::PlayerRead::Acting { .. } => {
+                NativePlayerExperience::from(mod_api::__private::built::NativePlayerExperience {
+                    level: self.experience.level,
+                    progress: self.experience.progress,
+                    total: self.experience.total,
+                })
+            }
         })
     }
     /// `Player.getXpNeededForNextLevel`: the points the current level needs
@@ -193,12 +197,9 @@ impl Game<'_> {
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use super::*;
-    use horizon_client::{
-        items::ItemStack,
-        mod_api::{EntityRef, NativeWorldEpoch},
-        motion::PlayerMotion,
-    };
+    use horizon_client::{items::ItemStack, motion::PlayerMotion};
     use horizon_core::geometry::Vec3;
+    use mod_api::{EntityRef, NativeWorldEpoch};
 
     /// The acting player with a body, as a hook's turn finds them.
     fn acting_player(game: &mut super::Game<'_>) -> PlayerRef {
@@ -285,10 +286,10 @@ mod tests {
     fn a_stale_handle_gives_nothing() {
         with_game(|game| {
             let player = acting_player(game);
-            let stale = PlayerRef {
-                entity: EntityRef::new(NativeWorldEpoch::new(u64::MAX), 7),
-                uuid: player.uuid(),
-            };
+            let stale = mod_api::__private::game::player_ref(
+                EntityRef::new(NativeWorldEpoch::new(u64::MAX), 7),
+                player.uuid(),
+            );
             assert!(!game.native_player_give_experience_points(stale, 10));
             assert!(!game.native_player_give_levels(stale, 1));
             assert_eq!(game.experience.total, 0);

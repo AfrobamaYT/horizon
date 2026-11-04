@@ -896,7 +896,8 @@ pub fn main() -> horizon_client::Result<()> {
         .map(|(k, v)| (k.clone(), Arc::new(v.clone())))
         .collect();
     let biomes = Biomes::load(root)?;
-    let items = Items::load(root, registry, &facts, &PackOverlay::NONE)?;
+    let defaults = horizon_world::item_defaults::read(root)?;
+    let items = Items::load(root, registry, &facts, &PackOverlay::NONE, &defaults)?;
     let tables = LightTables::load(root, registry, &facts)?;
     let collision = collisions::load(root, registry)?;
     let air = registry.default_state("minecraft:air").ok_or("no air")?;

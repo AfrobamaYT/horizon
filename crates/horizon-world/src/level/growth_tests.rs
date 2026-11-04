@@ -375,7 +375,7 @@ fn bone_meal_answers_a_mod_blocks_three_questions() {
     assert_eq!(level.performed, vec![(pos, stone)]);
     assert!(level.inner.events.iter().any(|e| matches!(
         e,
-        LevelEvent::LevelEvent { id: 1505, pos: at, data: 15 } if *at == pos
+        LevelEvent::LevelEvent { id: 1505, pos: at, data: 15, .. } if *at == pos
     )));
     // A roll that fails still uses the meal up, without growing it.
     let mut level = ModLevel {
@@ -580,7 +580,7 @@ fn a_settled_grow_crop_answer_skips_the_growth() {
     assert_eq!(w.level.blocks, before, "a successful cancel grows nothing");
     assert!(w.level.events.iter().any(|e| matches!(
         e,
-        LevelEvent::LevelEvent { id: 1505, pos: at, data: 15 } if *at == crop
+        LevelEvent::LevelEvent { id: 1505, pos: at, data: 15, .. } if *at == crop
     )));
     assert!(!b.use_bone_meal(&mut w.level, &mut w.ticks, crop, Direction::Up, Some(false)));
     assert_eq!(w.level.block_state(crop), wheat);

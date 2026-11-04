@@ -22,7 +22,6 @@ use horizon_client::{
         farm::Climate,
         spawning::{self, BiomeFacts},
     },
-    mod_api::{EquipmentSlot, NativeItemDrop, NativeLootDrops},
     particles::{ParticleOptions, ParticleType},
     projectiles::{Hit, Projectile, ProjectileKind, ProjectileWorld, clip_including_border},
     text::Text,
@@ -32,6 +31,7 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
+use mod_api::{EquipmentSlot, NativeItemDrop, NativeLootDrops};
 use std::sync::Arc;
 
 /// Damage types of a projectile: its own entity is the direct one, and
@@ -652,20 +652,20 @@ impl Game<'_> {
         };
         // ArmorHurtEvent for a mob's body armor.
         let mut amount = amount;
-        if crate::mod_api::listened(crate::mod_api::HookId::ArmorHurt) {
+        if mod_api::__private::listened(mod_api::HookId::ArmorHurt) {
             let kind = self
                 .mobs
                 .iter()
                 .find(|m| m.id == id)
                 .map(super::native_hooks::mob_kind)
                 .unwrap_or_default();
-            let mut entries = vec![horizon_client::mod_api::NativeArmorHurt {
+            let mut entries = vec![mod_api::NativeArmorHurt {
                 slot: EquipmentSlot::Body,
                 stack: body.clone(),
                 damage: super::durability_damage(damage),
                 new_damage: super::durability_damage(damage),
             }];
-            let hit = horizon_client::health::HurtSource {
+            let hit = mod_api::health::HurtSource {
                 damage_type: name,
                 causing: 0,
                 direct: 0,
@@ -752,8 +752,8 @@ impl Game<'_> {
         }
         let t = self.res.mob_types().get(kind).cloned()?;
         let mut cancel = false;
-        let from_kind = (crate::mod_api::listened(crate::mod_api::HookId::LivingConversionPre)
-            || crate::mod_api::listened(crate::mod_api::HookId::LivingConversionPost))
+        let from_kind = (mod_api::__private::listened(mod_api::HookId::LivingConversionPre)
+            || mod_api::__private::listened(mod_api::HookId::LivingConversionPost))
         .then(|| super::native_hooks::mob_kind(from));
         if let Some(from_kind) = &from_kind {
             self.native_living_conversion_pre(from.id, from_kind, kind, &mut cancel);
@@ -973,11 +973,11 @@ impl Game<'_> {
                 None
             },
             asks_animal_tame: self.remote.is_none()
-                && crate::mod_api::listened(crate::mod_api::HookId::AnimalTame),
+                && mod_api::__private::listened(mod_api::HookId::AnimalTame),
             asks_living_destroy_block: self.remote.is_none()
-                && crate::mod_api::listened(crate::mod_api::HookId::LivingDestroyBlock),
+                && mod_api::__private::listened(mod_api::HookId::LivingDestroyBlock),
             asks_baby_spawn: self.remote.is_none()
-                && crate::mod_api::listened(crate::mod_api::HookId::BabyEntitySpawn),
+                && mod_api::__private::listened(mod_api::HookId::BabyEntitySpawn),
             border: Some(self.border.geometry()),
             // The first player in the level: a server has no player of its own.
             difficulty: self.local_difficulty(
@@ -1084,9 +1084,7 @@ impl Game<'_> {
         self.combat.exploded.clear();
         // EntityTickEvent.Pre for the mobs about to tick, before the loop holds them.
         let mut round = self.native_tick_round();
-        if round.listening()
-            || crate::mod_api::listened(crate::mod_api::HookId::CanContinueSleeping)
-        {
+        if round.listening() || mod_api::__private::listened(mod_api::HookId::CanContinueSleeping) {
             let ticking = self.entity_ticking_area();
             let mut i = 0;
             while let Some(m) = self.mobs.get(i) {
@@ -1374,7 +1372,7 @@ impl Game<'_> {
     }
     /// `LivingEntity.makePoofParticles` (entity event 60) about a mob's box.
     pub(super) fn death_poof(&mut self, at: [f64; 3], width: f64, height: f64) {
-        let options = horizon_client::particles::ParticleOptions::simple(
+        let options = mod_api::particles::ParticleOptions::simple(
             horizon_client::particles::ParticleType::Poof,
         );
         for _ in 0..20 {
@@ -1414,7 +1412,7 @@ impl Game<'_> {
     /// `LivingDeathEvent` for a mob whose health ran out: whether a native
     /// mod canceled the death. A canceled mob stays alive at 1 health.
     fn mob_death_canceled(&mut self, m: &Mob) -> bool {
-        if !crate::mod_api::listened(crate::mod_api::HookId::LivingDeath) {
+        if !mod_api::__private::listened(mod_api::HookId::LivingDeath) {
             return false;
         }
         let (damage_type, attacker) = self.mob_damage_source(m);
@@ -1442,8 +1440,7 @@ impl Game<'_> {
             self.set_bed_occupied(bed, false);
         }
         // The killing blow for the drop hooks, before the player's hit is forgotten.
-        let source =
-            (!horizon_client::mod_api::mods().is_empty()).then(|| self.mob_damage_source(m));
+        let source = (!mod_api::mods().is_empty()).then(|| self.mob_damage_source(m));
         let killer = self
             .last_hurt_by_player
             .remove(&m.id)
@@ -1817,7 +1814,7 @@ impl Game<'_> {
             }
         }
         let table = drops::death_loot_table(m, death.mob_drops).filter(|t| loot.has_table(t));
-        let context = NativeLootDrops {
+        let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {
             table: table.as_deref().unwrap_or_default(),
             dimension: self.dim.id(),
             origin: [m.position.x, m.position.y, m.position.z],
@@ -1827,7 +1824,7 @@ impl Game<'_> {
             tool: None,
             explosion: None,
             used: false,
-        };
+        });
         self.native_loot_drops(&context, &mut stacks);
         stacks.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
         let mut experience = None;
@@ -2185,7 +2182,7 @@ impl Game<'_> {
     /// `LivingDestroyBlockEvent` for the mob `id` about to destroy the block at
     /// `pos`: false when a mod canceled. Nothing is built when no mod is loaded.
     fn mob_may_destroy(&mut self, id: u32, pos: [i32; 3]) -> bool {
-        if !crate::mod_api::listened(crate::mod_api::HookId::LivingDestroyBlock) {
+        if !mod_api::__private::listened(mod_api::HookId::LivingDestroyBlock) {
             return true;
         }
         let Some(kind) = self
@@ -2246,7 +2243,7 @@ impl Game<'_> {
                     count,
                 } => {
                     if let Some(ty) = horizon_client::particles::ParticleType::from_name(kind) {
-                        let options = horizon_client::particles::ParticleOptions::simple(ty);
+                        let options = mod_api::particles::ParticleOptions::simple(ty);
                         self.particles
                             .send_particles(&options, at, spread, speed, count);
                         self.lan_level_particles(&options, at, spread, speed, count, None);
@@ -3060,7 +3057,7 @@ impl Game<'_> {
                         if kind.starts_with("item_") {
                             self.ensure_item_particle_sprites();
                         }
-                        let options = horizon_client::particles::ParticleOptions::simple(ty);
+                        let options = mod_api::particles::ParticleOptions::simple(ty);
                         if ty == horizon_client::particles::ParticleType::SonicBoom {
                             self.lan_sonic_boom(&options, at);
                         }
@@ -3098,7 +3095,7 @@ impl Game<'_> {
                 }
                 MobEvent::ParticleAt { kind, at, velocity } => {
                     if let Some(ty) = horizon_client::particles::ParticleType::from_name(kind) {
-                        let options = horizon_client::particles::ParticleOptions::simple(ty);
+                        let options = mod_api::particles::ParticleOptions::simple(ty);
                         self.particles.add(&options, at, velocity);
                     }
                 }
@@ -3106,7 +3103,7 @@ impl Game<'_> {
                     at,
                     color: [r, g, b],
                 } => {
-                    let options = horizon_client::particles::ParticleOptions::colored(
+                    let options = mod_api::particles::ParticleOptions::colored(
                         horizon_client::particles::ParticleType::EntityEffect,
                         [r, g, b, 1.0],
                     );
@@ -3498,7 +3495,7 @@ impl Game<'_> {
         if !matches!(
             p.species(),
             Species::Turtle | Species::Frog | Species::Sniffer
-        ) && crate::mod_api::listened(crate::mod_api::HookId::BabyEntitySpawn)
+        ) && mod_api::__private::listened(mod_api::HookId::BabyEntitySpawn)
         {
             let mule = matches!(
                 (
@@ -5618,7 +5615,7 @@ impl Game<'_> {
                 self.audio
                     .play("minecraft:entity.shulker_bullet.hit", Some(atp), 1.0, 1.0);
                 if let Some(ty) = horizon_client::particles::ParticleType::from_name("explosion") {
-                    let options = horizon_client::particles::ParticleOptions::simple(ty);
+                    let options = mod_api::particles::ParticleOptions::simple(ty);
                     for _ in 0..2 {
                         let r = &mut self.world.random;
                         let at = [
@@ -7099,11 +7096,7 @@ impl Game<'_> {
                 if hidden {
                     let mut skin = self.skin_frame.borrow_mut();
                     let end = skin.vertices as usize;
-                    horizon_client::gfx::pack_draw::EntitySpan::hide(
-                        &mut skin.spans,
-                        mark.2 as usize,
-                        end,
-                    );
+                    mod_api::render::EntitySpan::hide(&mut skin.spans, mark.2 as usize, end);
                 }
             }
             out.truncate(len - 2);
@@ -8179,7 +8172,7 @@ mod mob_subscription_tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn empty_mod_never_defers_taming_or_block_destruction() {
-        use crate::mod_api::{self, Hooks};
+        use mod_api::{self, Hooks};
         struct Empty;
         #[mod_api::__subscriptions]
         impl Hooks for Empty {}
@@ -8208,12 +8201,12 @@ mod mob_subscription_tests {
 #[cfg(test)]
 mod breeding_tests {
     use super::*;
-    use crate::mod_api::ServerHost;
+    use mod_api::ServerHost;
 
     #[test]
     #[ignore = "needs prepared resources"]
     fn breeding_announces_the_orb_before_the_lower_id_child() {
-        use crate::mod_api::{self, BabyEntitySpawnEvent, EntityJoinLevelEvent, Flow, Hooks};
+        use mod_api::{self, BabyEntitySpawnEvent, EntityJoinLevelEvent, Flow, Hooks};
         use std::sync::{
             Arc, Mutex,
             atomic::{AtomicBool, Ordering},
@@ -8406,9 +8399,9 @@ mod breeding_tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn first_chicken_breed_matches_without_mods_and_with_an_empty_mod() {
-        use crate::mod_api::{self, Hooks};
         use horizon_client::mobs::{BreedExperience, MobEvent, goals::Breed};
         use horizon_core::random::LegacyRandom;
+        use mod_api::{self, Hooks};
         struct Empty;
         #[mod_api::__subscriptions]
         impl Hooks for Empty {}
@@ -8466,7 +8459,7 @@ mod breeding_tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn empty_mod_never_defers_breeding_xp() {
-        use crate::mod_api::{self, Hooks};
+        use mod_api::{self, Hooks};
         struct Empty;
         #[mod_api::__subscriptions]
         impl Hooks for Empty {}
@@ -8576,11 +8569,13 @@ mod pearl_tests {
         let motion = horizon_client::motion::MotionResources::load(&root, &assets).unwrap();
         let data = horizon_client::mobs::MobData::load(&root, &facts);
         let biomes = horizon_client::biome::Biomes::load(&root).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = horizon_client::items::Items::load(
             &root,
             registry,
             &facts,
             &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
         )
         .unwrap();
         let collision = horizon_client::collisions::load(&root, registry).unwrap();
@@ -8800,7 +8795,9 @@ mod dye_mix_tests {
         let registry = horizon_world::level::data::load_registry(&root).unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, &registry).unwrap();
         let overlay = horizon_world::loot::PackOverlay::NONE;
-        let items = crate::items::Items::load(&root, &registry, &facts, &overlay).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items =
+            crate::items::Items::load(&root, &registry, &facts, &overlay, &defaults).unwrap();
         let recipes = Recipes::load(&root, &items, &overlay).unwrap();
         let dye = |name: &str| {
             u8::try_from(
@@ -8838,7 +8835,7 @@ mod dye_mix_tests {
 #[cfg(test)]
 mod conversion_subscriber_tests {
     use super::*;
-    use crate::mod_api::{self, Hooks, LivingConversionPostEvent, ModEntry, ServerHost};
+    use mod_api::{self, Hooks, LivingConversionPostEvent, ModEntry, ServerHost};
     use std::sync::Mutex;
 
     #[test]
@@ -8893,7 +8890,9 @@ mod conversion_subscriber_tests {
                     let events = seen.lock().unwrap();
                     assert_eq!(events.last(), Some(&(from.id, converted)));
                 }
-                assert!(!mod_api::listened(mod_api::HookId::LivingConversionPre));
+                assert!(!mod_api::__private::listened(
+                    mod_api::HookId::LivingConversionPre
+                ));
                 assert_eq!(seen.lock().unwrap().len(), 2);
             });
         });
@@ -8903,7 +8902,7 @@ mod conversion_subscriber_tests {
 #[cfg(test)]
 mod living_drops_tests {
     use super::*;
-    use crate::mod_api::ServerHost;
+    use mod_api::ServerHost;
 
     #[test]
     fn a_projectile_blow_has_no_known_direct_entity_and_a_melee_one_is_its_causer() {
@@ -8921,7 +8920,7 @@ mod living_drops_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_golems_preserved_equipment_and_a_broken_stand_reach_living_drops() {
-        use horizon_client::mod_api::{self, Flow, Hooks, LivingDropsEvent};
+        use mod_api::{self, Flow, Hooks, LivingDropsEvent};
         use std::sync::{
             Mutex,
             atomic::{AtomicBool, Ordering},
@@ -8952,12 +8951,11 @@ mod living_drops_tests {
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
         let cancel = Arc::new(AtomicBool::new(false));
-        let mods: horizon_client::mod_api::Mods =
-            Arc::from(vec![horizon_client::mod_api::ModEntry::new(
-                "living-drops-observer",
-                Box::new(Observer(seen.clone(), cancel.clone())),
-            )]);
-        horizon_client::mod_api::testing::with_mods(mods, || {
+        let mods: mod_api::Mods = Arc::from(vec![mod_api::ModEntry::new(
+            "living-drops-observer",
+            Box::new(Observer(seen.clone(), cancel.clone())),
+        )]);
+        mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.load_server_loot();
                 let golem_type = game
@@ -9019,7 +9017,7 @@ mod living_drops_tests {
 mod armor_destroy_tests {
     use super::MobEvent;
     use crate::game::{answered_wear, durability_damage, native_entity_refs::tests::with_game};
-    use horizon_client::mod_api::{EquipmentSlot, ItemStack, NativeArmorHurt};
+    use mod_api::{EquipmentSlot, ItemStack, NativeArmorHurt};
 
     fn entry(slot: EquipmentSlot, new_damage: f32) -> NativeArmorHurt {
         NativeArmorHurt {

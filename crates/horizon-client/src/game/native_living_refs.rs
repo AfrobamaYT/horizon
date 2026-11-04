@@ -1,5 +1,5 @@
 //! Living entities for native server mods, through a `LivingRef`
-//! (docs/native-mods.md, "Entity and level handles", #7387): the equipment
+//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): the equipment
 //! of mobs, players and armor stands, throwing a stack, and whether a mob
 //! is tamed. Reads return `None`, writes false, for a stale handle or on a
 //! client; the exception is the reads marked side `both` (`living`, `equipment`,
@@ -8,10 +8,10 @@
 use super::Game;
 use super::commands::{Target, items::Owner};
 use crate::mobs::Who;
-use horizon_client::first_person::Hand;
 use horizon_client::items::ItemStack;
 use horizon_client::mobs::Mob;
-use horizon_client::mod_api::{EntityRef, EquipmentSlot, LivingRef};
+use mod_api::first_person::Hand;
+use mod_api::{EntityRef, EquipmentSlot, LivingRef};
 
 /// A player's armour slots (`armor`, head first) by equipment slot.
 fn armor_index(slot: EquipmentSlot) -> Option<usize> {
@@ -99,10 +99,11 @@ impl Game<'_> {
             _ => None,
         }
     }
-    /// The effective value of an attribute on a living entity. None for an
-    /// unknown or absent attribute, an unavailable entity, or on a client.
-    /// Mobs, armor stands and the dragon return None until they have live
-    /// attribute maps.
+    /// The effective value of an attribute on a living entity
+    /// (`AttributeMap.getValue`). None for an unknown or absent attribute, an
+    /// unavailable entity, or on a client. A mob, an armor stand and the
+    /// dragon answer from their live attribute map: the type's defaults, the
+    /// saved `attributes`, and the modifiers of what they wear or hold.
     pub(super) fn native_living_attribute_value(&self, living: LivingRef, id: &str) -> Option<f64> {
         self.native_living_attribute(
             living,
@@ -111,8 +112,8 @@ impl Game<'_> {
         )
     }
 
-    /// The base value of an attribute, before modifiers. Mobs, armor stands
-    /// and the dragon return None until they have live attribute maps.
+    /// The base value of an attribute, before modifiers
+    /// (`AttributeMap.getBaseValue`), read as the effective value is.
     pub(super) fn native_living_attribute_base(&self, living: LivingRef, id: &str) -> Option<f64> {
         self.native_living_attribute(living, id, horizon_world::attribute_map::ValueKind::Base)
     }
@@ -132,9 +133,31 @@ impl Game<'_> {
         name: &str,
         kind: horizon_world::attribute_map::ValueKind,
     ) -> Option<f64> {
+        let catalog = &self.motion.attributes;
         let player = match target {
             Target::Player => self.player.as_ref()?,
             Target::Guest(conn) => self.command_guest(conn)?.motion.as_deref()?,
+            Target::Mob(id) => {
+                let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
+                return m.extra.live.read(catalog, &m.kind.id, name, kind, || {
+                    horizon_client::entity_nbt::attribute_entries(m)
+                        .into_iter()
+                        .map(|(_, entry)| entry)
+                        .collect()
+                });
+            }
+            Target::Stand(id) => {
+                let a = self.armor_stands.iter().find(|a| a.id == id)?;
+                return a
+                    .live
+                    .read(catalog, "minecraft:armor_stand", name, kind, Vec::new);
+            }
+            Target::Dragon(id) => {
+                let d = self.dragon.as_ref().filter(|d| d.id == id)?;
+                return d
+                    .live
+                    .read(catalog, "minecraft:ender_dragon", name, kind, Vec::new);
+            }
             _ => return None,
         };
         let key = player.attributes.key(name)?;
@@ -652,9 +675,10 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn immutable_host_attribute_read_refreshes_live_cache() {
-        use horizon_client::{mod_api::Host, motion::PlayerMotion};
+        use horizon_client::motion::PlayerMotion;
         use horizon_core::geometry::Vec3;
         use horizon_world::attributes::{Modifier, Operation};
+        use mod_api::Host;
         super::super::native_entity_refs::tests::with_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.lan_acting_uuid = Some(123);
@@ -951,7 +975,7 @@ mod tests {
                 game.record_combat(&events);
                 let living = game.native_living(game.native_entity(20).unwrap()).unwrap();
                 health.push(living.health(game));
-                let host: &dyn crate::mod_api::Host = game;
+                let host: &dyn mod_api::Host = game;
                 attackers.push(living.last_attacker(host).map(|attacker| attacker.id()));
             }
             assert_eq!(
@@ -1335,7 +1359,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn armor_stand_first_tick_equipment_change_fires_after_base_tick() {
-        use crate::mod_api::{self, Hooks, LivingEquipmentChangeEvent, ModEntry, ServerHost};
+        use mod_api::{self, Hooks, LivingEquipmentChangeEvent, ModEntry, ServerHost};
         struct Reequip;
         #[mod_api::__subscriptions]
         impl Hooks for Reequip {
@@ -1440,8 +1464,9 @@ mod tests {
         use super::super::{
             Audio, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
         };
-        use horizon_client::{chunk::Chunk, entities::ArmorStand, mod_api::NativeAuthority};
+        use horizon_client::{chunk::Chunk, entities::ArmorStand};
         use horizon_core::geometry::Vec3;
+        use mod_api::NativeAuthority;
 
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -1452,7 +1477,7 @@ mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )

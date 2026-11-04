@@ -1,13 +1,13 @@
 //! Removing an entity for native server mods, through an `EntityRef`
-//! (docs/native-mods.md, "Entity and level handles", #7387): `Entity.discard`
+//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): `Entity.discard`
 //! and `Entity.remove` with a reason. Nothing dies and nothing drops loot.
 //! The handle reads as gone from the call on, as `isRemoved` does. A mob
 //! leaves at once; the other kinds leave at the level's next sweep of
 //! departed entities, a few times per tick, so a hook that removes one never
 //! shifts the lists the game is walking. A vehicle with a chest spills it, as vanilla's `remove` does.
 use super::{Game, commands::Target};
-use horizon_client::mod_api::{EntityRef, NativeRemovalReason};
 use horizon_core::position::BlockPos;
+use mod_api::{EntityRef, NativeRemovalReason};
 
 impl Game<'_> {
     /// Removes the entity with no death and no loot (`Entity.discard`): a

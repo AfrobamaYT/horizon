@@ -3,8 +3,8 @@
 //! for the condition, entry and modifier types used by block drops).
 use crate::{Result, blocks::BlockFacts};
 use horizon_core::random::RandomSource;
-use horizon_world::loot::PackOverlay;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
+use horizon_world::{item_defaults::ItemDefaults, loot::PackOverlay};
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
@@ -688,6 +688,7 @@ impl Items {
         registry: &BlockRegistry,
         facts: &BlockFacts,
         overlay: &PackOverlay,
+        defaults: &ItemDefaults,
     ) -> Result<Self> {
         let mut block_for_item: HashMap<&str, BlockStateId> = HashMap::new();
         for (i, s) in facts.states.iter().enumerate() {
@@ -698,7 +699,7 @@ impl Items {
                     .or_insert(BlockStateId(i as u32));
             }
         }
-        let mut items = Self::load_with(root, &block_for_item, overlay)?;
+        let mut items = Self::load_with(root, &block_for_item, overlay, defaults)?;
         let path = root.join(MOD_ITEM_BLOCKS);
         match fs::read(&path) {
             Ok(bytes) => {
@@ -722,15 +723,15 @@ impl Items {
     }
     /// Every item's default components and the tags, without the block <->
     /// item mapping (for headless tools that never place blocks).
-    pub fn catalog(root: &Path, overlay: &PackOverlay) -> Result<Self> {
-        Self::load_with(root, &HashMap::new(), overlay)
+    pub fn catalog(root: &Path, overlay: &PackOverlay, defaults: &ItemDefaults) -> Result<Self> {
+        Self::load_with(root, &HashMap::new(), overlay, defaults)
     }
     fn load_with(
         root: &Path,
         block_for_item: &HashMap<&str, BlockStateId>,
         overlay: &PackOverlay,
+        defaults: &ItemDefaults,
     ) -> Result<Self> {
-        let raw = horizon_world::item_defaults::read(root)?;
         let entity_tags = load_tags(root, "entity_type", overlay)?;
         let path = root.join(MOD_CRAFT_REMAINDERS);
         let mod_remainders: HashMap<String, String> = match fs::read(&path) {
@@ -742,7 +743,7 @@ impl Items {
         };
         let mut items = HashMap::new();
         let mut order = Vec::new();
-        for (name, c) in &raw {
+        for (name, c) in defaults.entries() {
             let id: Arc<str> = Arc::from(name.as_str());
             let tool = c["minecraft:tool"]["rules"]
                 .as_array()
@@ -969,7 +970,9 @@ impl Items {
             loot,
             songs: load_songs(root),
             instruments: load_instruments(root),
-            enchantments: Arc::new(crate::enchant::Enchantments::load_with(root, overlay)),
+            enchantments: Arc::new(crate::enchant::Enchantments::load_with(
+                root, overlay, defaults,
+            )),
         })
     }
     /// Use the server's loaded loot-table snapshot for item and block drops.
@@ -993,7 +996,7 @@ impl Items {
     /// Only the block and item tags (and the enchantment registry, which the
     /// station rules and loot functions are built from), for tools that need
     /// tag membership.
-    pub fn tags_only(root: &Path, overlay: &PackOverlay) -> Result<Self> {
+    pub fn tags_only(root: &Path, overlay: &PackOverlay, defaults: &ItemDefaults) -> Result<Self> {
         Ok(Self {
             items: HashMap::new(),
             order: Vec::new(),
@@ -1007,7 +1010,9 @@ impl Items {
             loot: Default::default(),
             songs: HashMap::new(),
             instruments: HashMap::new(),
-            enchantments: Arc::new(crate::enchant::Enchantments::load_with(root, overlay)),
+            enchantments: Arc::new(crate::enchant::Enchantments::load_with(
+                root, overlay, defaults,
+            )),
         })
     }
     /// An item table with only tags, for unit tests of item rules.
@@ -1463,7 +1468,7 @@ impl LootContext<'_> {
     /// The context a mod's own loot kind sees in this engine: the block and
     /// the tool it has, and a seed from the roll's random. The entity, the
     /// damage, the player and the biome belong to the main loot engine's
-    /// rolls; they are None here (docs/native-mods.md).
+    /// rolls; they are None here (docs/modding/src/how-to/native-mods.md).
     fn native_loot_context<R: RandomSource>(
         &self,
         random: &mut R,
@@ -2305,7 +2310,8 @@ pub(crate) fn prepared_items() -> Option<Items> {
         BlockRegistry::from_facts_json_with_flags(fs::File::open(root.join("facts.json")).ok()?)
             .ok()?;
     let facts = BlockFacts::load(&root, &registry).ok()?;
-    Items::load(&root, &registry, &facts, &PackOverlay::NONE).ok()
+    let defaults = horizon_world::item_defaults::read(&root).ok()?;
+    Items::load(&root, &registry, &facts, &PackOverlay::NONE, &defaults).ok()
 }
 
 #[cfg(test)]
@@ -2831,7 +2837,8 @@ mod tests {
         fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
         let items = r#"{"minecraft:bowl": {}, "minecraft:milk_bucket": {}, "ruby:stew": {}}"#;
         fs::write(root.join("items.json"), items).unwrap();
-        let catalog = |root: &Path| Items::catalog(root, &PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let catalog = |root: &Path| Items::catalog(root, &PackOverlay::NONE, &defaults).unwrap();
         let remainder = |items: &Items, id: &str| items.items[id].crafting_remainder.clone();
         let vanilla = catalog(&root);
         assert_eq!(remainder(&vanilla, "ruby:stew"), None);

@@ -212,9 +212,15 @@ fn server(resources: &Path) -> Server {
 }
 
 fn server_with(resources: &Path, net: NetConfig) -> Server {
+    let defaults = horizon_world::item_defaults::read(resources).expect("item defaults");
     server_sync(
         Arc::new(
-            SyncData::load(resources, &horizon_world::loot::PackOverlay::NONE).expect("sync data"),
+            SyncData::load(
+                resources,
+                &horizon_world::loot::PackOverlay::NONE,
+                &defaults,
+            )
+            .expect("sync data"),
         ),
         net,
     )
@@ -473,10 +479,12 @@ fn neoforge_shapes_items_reach_two_guests() {
             ],
         ),
     ];
+    let defaults = horizon_world::item_defaults::read(&resources).expect("item defaults");
     let sync = Arc::new(
         SyncData::load(
             &resources,
             &horizon_world::loot::PackOverlay { files: &packs },
+            &defaults,
         )
         .expect("sync data"),
     );
@@ -735,8 +743,14 @@ fn a_signed_in_hosts_lan_authenticates_guests_but_not_its_own_player() {
     let Some(resources) = resources() else {
         return;
     };
+    let defaults = horizon_world::item_defaults::read(&resources).expect("item defaults");
     let sync = Arc::new(
-        SyncData::load(&resources, &horizon_world::loot::PackOverlay::NONE).expect("sync data"),
+        SyncData::load(
+            &resources,
+            &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
+        )
+        .expect("sync data"),
     );
     let net = NetConfig {
         online: Some(Arc::new(OnlineMode::generate(false).unwrap())),

@@ -1,4 +1,4 @@
-//! Native mods (docs/native-mods.md): mixin bundles that
+//! Native mods (docs/modding/src/how-to/native-mods.md): mixin bundles that
 //! levzzz5154's horizon-mixins (MIT, <https://github.com/horizon-rust/horizon-mixins>) applies to
 //! Horizon's source, which the launcher then compiles into a game of its own with its portable Rust
 //! ([`rust_toolchain`]). Unlike `.hmod` mods they are not sandboxed: their code runs with the
@@ -1500,7 +1500,7 @@ fn pipeline(
     let ordered: Vec<Bundle> = resolution.order.iter().map(|&i| mods[i].clone()).collect();
     let projects: Vec<_> = mods
         .iter()
-        .map(|bundle| api::Project::read(bundle, target))
+        .map(api::Project::read)
         .collect::<Result<_, _>>()
         .map_err(|error| error.to_string())?;
     let revision = match &built_on {
