@@ -430,6 +430,62 @@ impl Game<'_> {
         self.native_screen_init_post(&screen_view_with_id(&none, id));
     }
 
+    /// Shows `title`, as `Minecraft.setScreen(new TitleScreen())` (or the
+    /// screen it opens on: the multiplayer list, a disconnect, an error)
+    /// does at startup and when a world closes. `screen_opening` fires to its
+    /// screen, then `screen_closing` for an overlay it replaces, before it
+    /// shows; `screen_init_post` follows. With no world open nothing else can
+    /// show, so a mod's `Cancel` or its own screen doesn't keep it shut (a
+    /// mod's screen can't open over the title).
+    pub(super) fn show_title(&mut self, title: horizon_client::title::Title) {
+        if !self.screen_hooks_heard() {
+            self.title = Some(title);
+            return;
+        }
+        let id = title.mode.id();
+        self.title_change(Some(id));
+        self.title = Some(title);
+        self.observed_screen = self.observed_now();
+        let none = self.screen_change_view(Screen::Playing);
+        self.native_screen_init_post(&screen_view_with_id(&none, id));
+    }
+    /// Takes the title down as a world opens over it (`setScreen` to the
+    /// loading screen, then null): `screen_opening` to no screen, then
+    /// `screen_closing` for the title's screen, before it goes. The world
+    /// is opening, so a `Cancel` doesn't keep it.
+    pub(super) fn hide_title(&mut self) {
+        if self.title.is_none() {
+            return;
+        }
+        if self.screen_hooks_heard() {
+            self.title_change(None);
+        }
+        self.title = None;
+        self.observed_screen = self.observed_now();
+    }
+    /// The hooks of the title appearing (`to` is its screen) or going
+    /// (`None`), from what shows now. What changed before is told first.
+    fn title_change(&mut self, to: Option<&'static str>) {
+        let now = self.observed_now();
+        self.observe_change(now);
+        let none = self.screen_change_view(Screen::Playing);
+        // The title's screen or an overlay; a `Screen` told its own change.
+        let from = self.observed_screen.as_ref().filter(|old| old.overlay);
+        let from = match (from, self.title.as_ref()) {
+            (Some(old), _) => Some(old.view()),
+            // No renderer yet (startup, a test): the title is still known.
+            (None, Some(title)) => Some(screen_view_with_id(&none, title.mode.id())),
+            (None, None) => None,
+        };
+        let to = to.map(|id| screen_view_with_id(&none, id));
+        self.screen_change(
+            from.as_ref().unwrap_or(&none),
+            to.as_ref().unwrap_or(&none),
+            true,
+            from.is_some(),
+        );
+    }
+
     pub(super) fn observe_screen(&mut self) {
         self.settle_title_mode();
         // Free with no native mod: the snapshot clones the title and menu.
@@ -439,13 +495,13 @@ impl Game<'_> {
         let current = self.observed_now();
         self.observe_change(current);
     }
-    /// What the frame's screen changed since the last one. The `Screen` list
-    /// announces its own changes in `set_screen`; the title's screens and the
-    /// overlays have no single place they open or close, so they are
-    /// announced here, through the same `screen_change` and in the same order,
-    /// but after the change: a mod's answer to `screen_opening` cannot keep
-    /// them shut. `screen_init_post` follows for every kind, on opening and on
-    /// a resize.
+    /// What the frame's screen changed since the last one. The `Screen` list,
+    /// the overlays' opening and the title's screens announce their own
+    /// changes before they apply (`set_screen`, `open_screen_overlay`,
+    /// `settle_title_mode`, `show_title`, `hide_title`); what is left, an
+    /// overlay closing, is announced here, through the same `screen_change`
+    /// and in the same order, but after the change. `screen_init_post`
+    /// follows for every kind, on opening and on a resize.
     fn observe_change(&mut self, current: Option<ObservedScreen>) {
         let changed = match (&self.observed_screen, &current) {
             (Some(old), Some(new)) => old.id != new.id || old.menu != new.menu,
@@ -11980,6 +12036,32 @@ mod screen_open_tests {
             ));
             assert_eq!(take(log), ["opening title->world_create", "closing title"]);
             game.settle_title_mode();
+            assert!(take(log).is_empty());
+        });
+    }
+
+    /// The title appearing (a world closed) and going (a world opened) fires
+    /// `screen_opening`, then `screen_closing` for what it leaves, before the
+    /// change, so the frame's observer has nothing left to announce. With no
+    /// world, `Cancel` doesn't keep the title shut.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn the_title_appears_and_goes_through_screen_opening() {
+        use horizon_client::title::Title;
+        run(|game, log, answer| {
+            let saves = std::env::temp_dir().join("horizon-title-gate-test-no-saves");
+            game.title = None;
+            *answer.lock().unwrap() = Some(ScreenOpening::Cancel);
+            game.show_title(Title::new(saves, &game.options.resources));
+            assert!(game.title.is_some());
+            assert_eq!(take(log), ["opening playing->title"]);
+            game.observe_screen();
+            assert!(take(log).is_empty());
+            *answer.lock().unwrap() = None;
+            game.hide_title();
+            assert!(game.title.is_none());
+            assert_eq!(take(log), ["opening title->playing", "closing title"]);
+            game.observe_screen();
             assert!(take(log).is_empty());
         });
     }
