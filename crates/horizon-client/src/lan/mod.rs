@@ -10,6 +10,7 @@ mod advancements;
 pub mod anticheat;
 pub mod attributes;
 pub mod border;
+pub mod chunk_watch;
 pub mod chunks;
 pub mod code_of_conduct;
 mod command_order;

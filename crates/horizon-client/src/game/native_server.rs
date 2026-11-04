@@ -611,6 +611,39 @@ impl Game<'_> {
         ))
     }
 
+    /// The chunks players started and stopped watching that the hub
+    /// recorded (`lan::chunk_watch`), told to the mods in the hub's order,
+    /// with no player's state swapped in. The player handle is built from
+    /// the record, so an unwatch after a disconnect still names them.
+    pub(super) fn run_chunk_watches(&mut self) {
+        use horizon_client::lan::chunk_watch::ChunkWatchKind;
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
+        let watches = std::mem::take(&mut host.hub.chunk_watches);
+        let Some(epoch) = self.native_lifecycle.epoch() else {
+            return;
+        };
+        for watch in watches {
+            let (Some(level), Ok(id)) = (
+                self.native_level(&watch.dimension),
+                u32::try_from(watch.entity_id),
+            ) else {
+                continue;
+            };
+            let player = mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(epoch, id),
+                watch.uuid,
+            );
+            let chunk = mod_api::ChunkRef::new(level, watch.chunk);
+            match watch.kind {
+                ChunkWatchKind::Watch => self.native_chunk_watch(player, chunk),
+                ChunkWatchKind::Sent => self.native_chunk_sent(player, chunk),
+                ChunkWatchKind::Unwatch => self.native_chunk_unwatch(player, chunk),
+            }
+        }
+    }
+
     fn player_lookup(&self, uuid: u128) -> Option<(PlayerRead<'_>, u32)> {
         if self.lan_acting_uuid == Some(uuid) && !self.lan_acting_fake {
             return Some((
@@ -1496,6 +1529,81 @@ impl Drop for Acting {
 mod tests {
     use super::*;
     use horizon_client::items::ItemStack;
+
+    type Heard = Vec<(&'static str, u32, u128, &'static str, [i32; 2])>;
+    /// Logs each of the watch trio: (hook, player id, UUID, level, chunk).
+    struct Watcher(std::sync::Arc<std::sync::Mutex<Heard>>);
+    impl Watcher {
+        fn log(&self, hook: &'static str, player: PlayerRef, chunk: mod_api::ChunkRef) {
+            self.0.lock().unwrap().push((
+                hook,
+                player.entity().id(),
+                player.uuid(),
+                chunk.level().dimension(),
+                chunk.pos(),
+            ));
+        }
+    }
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Watcher {
+        fn chunk_watch(&self, _: &mut dyn mod_api::ServerHost, e: &mut mod_api::ChunkWatchEvent) {
+            self.log("watch", e.player, e.chunk);
+        }
+        fn chunk_sent(&self, _: &mut dyn mod_api::ServerHost, e: &mut mod_api::ChunkSentEvent) {
+            self.log("sent", e.player, e.chunk);
+        }
+        fn chunk_unwatch(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            e: &mut mod_api::ChunkUnwatchEvent,
+        ) {
+            self.log("unwatch", e.player, e.chunk);
+        }
+    }
+
+    /// `ChunkWatchEvent`: the hub's records reach the mods in order, each
+    /// with the player (entity id and UUID, even after they left) and the
+    /// chunk in its level; a level the server doesn't hold is skipped.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn the_hubs_chunk_watches_reach_the_mods_in_order() {
+        use horizon_client::lan::chunk_watch::{ChunkWatch, ChunkWatchKind};
+        let heard = std::sync::Arc::default();
+        let mods = vec![mod_api::ModEntry::new(
+            "watch",
+            Box::new(Watcher(std::sync::Arc::clone(&heard))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                super::super::native_item_places::tests::open_to_lan(game);
+                let here = game.dim.id();
+                let record = |kind, dimension: &str, chunk| ChunkWatch {
+                    kind,
+                    uuid: 127,
+                    entity_id: 42,
+                    dimension: dimension.into(),
+                    chunk,
+                };
+                game.lan.as_mut().unwrap().hub.chunk_watches = vec![
+                    record(ChunkWatchKind::Watch, here, [1, 2]),
+                    record(ChunkWatchKind::Sent, here, [1, 2]),
+                    record(ChunkWatchKind::Unwatch, "minecraft:nowhere", [0, 0]),
+                    record(ChunkWatchKind::Unwatch, here, [1, 2]),
+                ];
+                game.run_chunk_watches();
+                assert!(game.lan.as_ref().unwrap().hub.chunk_watches.is_empty());
+                assert_eq!(
+                    *heard.lock().unwrap(),
+                    [
+                        ("watch", 42, 127, here, [1, 2]),
+                        ("sent", 42, 127, here, [1, 2]),
+                        ("unwatch", 42, 127, here, [1, 2]),
+                    ]
+                );
+            });
+        });
+    }
 
     fn player_guest() -> Guest {
         use horizon_client::lan::{Joined, PlayerSender};

@@ -6,6 +6,7 @@
 //! game thread inside the tick, only when the world is open to the network.
 use super::{
     Lan, NetEvent,
+    chunk_watch::{ChunkWatchKind, record},
     chunks::ChunkEncoder,
     data::SyncData,
     entity::{Entities, EntityState, Viewer},
@@ -285,6 +286,9 @@ fn take_tracking(
 pub struct Hub {
     /// Clicks on and closings of native mods' menus, for the game.
     pub native_menu_events: Vec<super::menu::NativeMenuEvent>,
+    /// The chunks players started and stopped watching, for the mods
+    /// (`chunk_watch`): recorded only while a mod listens.
+    pub chunk_watches: Vec<super::chunk_watch::ChunkWatch>,
     /// Kicks waiting for the game thread to notify native mods.
     pending_kicks: Vec<HostEvent>,
     /// The entities players started and stopped tracking, collected by
@@ -736,6 +740,7 @@ impl Hub {
             entity_gone: Vec::new(),
             mod_commands: (serde_json::Value::Null, None),
             native_menu_events: Vec::new(),
+            chunk_watches: Vec::new(),
             pending_kicks: Vec::new(),
             native_tracking: Vec::new(),
             attachment_snapshots: Vec::new(),
@@ -2061,6 +2066,7 @@ impl Hub {
 
     fn remove_guest(&mut self, i: usize, reason: &str) -> Guest {
         let mut g = self.guests.remove(i);
+        super::chunk_watch::unwatch_all(&mut self.chunk_watches, &mut g);
         if let Some(m) = g
             .menu
             .as_ref()
@@ -2204,10 +2210,11 @@ impl Hub {
         if let Some(far) = self.far.as_mut() {
             far.poll();
         }
+        let watching = super::chunk_watch::listened();
         let mut batches = Vec::new();
         for i in 0..self.guests.len() {
             if self.here(&self.guests[i]) {
-                self.update_view(i);
+                self.update_view(i, watching);
                 if let Some(batch) = self.next_batch(i, world, ctx.streaming) {
                     batches.push((i, batch));
                 }
@@ -2272,6 +2279,19 @@ impl Hub {
                 }));
                 g.unacknowledged += 1;
             }
+            if watching {
+                // ChunkMap.markChunkPendingToSend, then PlayerChunkSender.sendChunk's end:
+                // Horizon picks a chunk only as it sends it.
+                let near: Vec<_> = taken.iter().map(|&idx| g.chunk_queue[idx]).collect();
+                for &key in &near {
+                    if g.watched.insert(key) {
+                        record(&mut self.chunk_watches, g, ChunkWatchKind::Watch, key);
+                    }
+                }
+                for key in near {
+                    record(&mut self.chunk_watches, g, ChunkWatchKind::Sent, key);
+                }
+            }
             let mut seen: Vec<_> = taken
                 .into_iter()
                 .rev()
@@ -2299,7 +2319,7 @@ impl Hub {
     /// ChunkMap.move's view change: the new centre, the chunks that left
     /// the view forgotten and the ones that entered it queued, closest first;
     /// past the view, the far ring's.
-    fn update_view(&mut self, i: usize) {
+    fn update_view(&mut self, i: usize, watching: bool) {
         let (cx, cz) = self.guests[i].chunk();
         let r = self.guests[i].view_distance;
         let reach = self.reach(&self.guests[i]);
@@ -2324,6 +2344,7 @@ impl Hub {
         for (x, z) in forget {
             g.sent_chunks.remove(&(x, z));
             g.far_sent_chunks.remove(&(x, z));
+            super::chunk_watch::unwatch(&mut self.chunk_watches, g, (x, z));
             g.send(&C::ForgetLevelChunk(play::ForgetLevelChunk { pos: [x, z] }));
         }
         // Far columns have no attachment snapshots. Resend them as near chunks
@@ -2336,6 +2357,20 @@ impl Hub {
                 true
             }
         });
+        if watching && reach > r {
+            // A far column the client keeps as it comes into the view is watched from here.
+            let mut entered: Vec<_> = g
+                .sent_chunks
+                .iter()
+                .copied()
+                .filter(|&(x, z)| tracked(cx, cz, r, x, z) && !g.watched.contains(&(x, z)))
+                .collect();
+            entered.sort_unstable();
+            for key in entered {
+                g.watched.insert(key);
+                record(&mut self.chunk_watches, g, ChunkWatchKind::Watch, key);
+            }
+        }
         requeue(&mut g.chunk_queue, &g.sent_chunks, (cx, cz), r);
         if reach > r {
             requeue_ring(&mut g.far_queue, &g.sent_chunks, (cx, cz), r, reach);
@@ -4232,6 +4267,8 @@ impl Hub {
         let info = self.spawn_info(i, 0);
         self.close_container_for(i);
         let g = &mut self.guests[i];
+        // The old player leaves its level with its chunks (ChunkMap.removeEntity).
+        super::chunk_watch::unwatch_all(&mut self.chunk_watches, g);
         // PlayerList.respawn: into the level in place (the respawn level).
         g.dimension = self.config.dimension.clone();
         // restartClientLoadTimerAfterRespawn: the client loads a whole new level before it
@@ -4365,6 +4402,8 @@ impl Hub {
         let info = self.spawn_info(i, portal_cooldown);
         self.close_container_for(i);
         let g = &mut self.guests[i];
+        // Out of the old level with its chunks (ChunkMap.removeEntity).
+        super::chunk_watch::unwatch_all(&mut self.chunk_watches, g);
         g.dimension = self.config.dimension.clone();
         // The load timer is not restarted: vanilla resets the client's loaded state on death and
         // respawn only, and covers a level change with its separate `isChangingDimension` term.
@@ -5670,5 +5709,125 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Listens to `chunk_watch`, so the hub records the watch trio.
+    struct Watcher;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Watcher {
+        fn chunk_watch(&self, _: &mut dyn mod_api::ServerHost, _: &mut mod_api::ChunkWatchEvent) {}
+    }
+
+    /// The hub's chunk step for its one guest, as many batches as the level holds.
+    fn send_chunks(hub: &mut Hub, world: &mut World) {
+        let mut next_entity = 100;
+        let border = crate::worldborder::WorldBorder::default();
+        let ctx = TickCtx {
+            world,
+            entities: &[],
+            next_entity: &mut next_entity,
+            spawn: [0.5, 64.0, 0.5],
+            difficulty: 2,
+            difficulty_locked: false,
+            clock_rate: 1.0,
+            tick_rate: 20.0,
+            tick_frozen: false,
+            tick_steps: Default::default(),
+            collision: None,
+            border: &border,
+            streaming: None,
+        };
+        for _ in 0..3 {
+            hub.ticks += 10;
+            hub.guests[0].unacknowledged = 0;
+            hub.update_chunks(&ctx);
+        }
+    }
+
+    /// The recorded `(kind, dimension, chunk)`s since the last call, sorted
+    /// within each kind's run.
+    fn watches(
+        hub: &mut Hub,
+    ) -> Vec<(super::super::chunk_watch::ChunkWatchKind, String, [i32; 2])> {
+        std::mem::take(&mut hub.chunk_watches)
+            .into_iter()
+            .map(|w| {
+                assert_eq!((w.uuid, w.entity_id), (1, 1));
+                (w.kind, w.dimension, w.chunk)
+            })
+            .collect()
+    }
+
+    /// `ChunkWatchEvent`: each near chunk sent is watched then sent, once;
+    /// leaving the view, changing level and disconnecting unwatch it, in the
+    /// level it was watched in. Nothing is recorded while no mod listens.
+    #[test]
+    fn the_watch_trio_follows_each_sent_chunk() {
+        use super::super::chunk_watch::ChunkWatchKind::{Sent, Unwatch, Watch};
+        let overworld = || "minecraft:overworld".to_string();
+        let four = [[-1, -1], [-1, 0], [0, -1], [0, 0]];
+        let run = |kind, dimension: &str| -> Vec<_> {
+            four.iter()
+                .map(|&c| (kind, dimension.to_string(), c))
+                .collect()
+        };
+        let sorted = |mut v: Vec<_>| {
+            v.sort_by_key(|(k, _, c): &(_, String, [i32; 2])| (*k as u8, *c));
+            v
+        };
+
+        // No listener: chunks go out, nothing is recorded or kept.
+        let (mut hub, _rx) = hub_with_a_guest();
+        let mut world = floor_at(1);
+        hub.guests[0].view_distance = 2;
+        send_chunks(&mut hub, &mut world);
+        assert_eq!(hub.guests[0].sent_chunks.len(), 4);
+        assert!(hub.chunk_watches.is_empty() && hub.guests[0].watched.is_empty());
+
+        let mods = vec![mod_api::ModEntry::new("watch", Box::new(Watcher))].into();
+        mod_api::testing::with_mods(mods, || {
+            let (mut hub, _rx) = hub_with_a_guest();
+            hub.guests[0].view_distance = 2;
+            send_chunks(&mut hub, &mut world);
+            let got = watches(&mut hub);
+            // The batch's watches come before its sends.
+            assert_eq!(sorted(got[..4].to_vec()), run(Watch, &overworld()));
+            assert_eq!(sorted(got[4..].to_vec()), run(Sent, &overworld()));
+            // A chunk crossing that leaves the four behind.
+            hub.guests[0].position = [400.5, 64.0, 0.5];
+            send_chunks(&mut hub, &mut world);
+            assert_eq!(sorted(watches(&mut hub)), run(Unwatch, &overworld()));
+            assert!(hub.guests[0].watched.is_empty());
+            // Back, then through a portal: unwatched in the level left, in
+            // vanilla's view order.
+            hub.guests[0].position = [0.5, 64.0, 0.5];
+            send_chunks(&mut hub, &mut world);
+            assert_eq!(watches(&mut hub).len(), 8);
+            hub.set_dimension("minecraft:the_nether");
+            let mut next_entity = 100;
+            let border = crate::worldborder::WorldBorder::default();
+            let ctx = TickCtx {
+                world: &mut world,
+                entities: &[],
+                next_entity: &mut next_entity,
+                spawn: [0.5, 64.0, 0.5],
+                difficulty: 2,
+                difficulty_locked: false,
+                clock_rate: 1.0,
+                tick_rate: 20.0,
+                tick_frozen: false,
+                tick_steps: Default::default(),
+                collision: None,
+                border: &border,
+                streaming: None,
+            };
+            hub.change_level(0, [0.5, 64.0, 0.5], 0.0, None, true, 0, &ctx);
+            assert_eq!(watches(&mut hub), run(Unwatch, &overworld()));
+            // The nether's chunks, then a disconnect.
+            send_chunks(&mut hub, &mut world);
+            assert_eq!(watches(&mut hub).len(), 8);
+            let _ = hub.remove_guest(0, "bye");
+            assert_eq!(watches(&mut hub), run(Unwatch, "minecraft:the_nether"));
+        });
     }
 }

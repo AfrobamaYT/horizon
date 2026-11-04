@@ -2,13 +2,15 @@
   "hooks": [
     {
       "name": "living_shield_block",
-      "doc": "NeoForge's `LivingShieldBlockEvent`: entity `entity` of type `kind`\n(`minecraft:player`, `minecraft:zombie`) is hit for `damage` from `source` (its\ntype and entities, as `native_living_incoming_damage` names them), and\n`LivingEntity.applyItemBlocking` is\nabout to resolve what a raised `blocks_attacks` item stops. Every hit with damage\nasks, raised item or not: `original_blocked` is whether vanilla blocks (only a\nplayer raises one). Change `block`: `blocked` makes the entity block or not (a block\nforced on a hit vanilla lets through stops all of it), `blocked_damage` what is\nstopped (kept within 0 and `damage`) and `shield_damage` the durability a raised\nitem loses (below 0: vanilla's `itemDamage` of what is stopped). Set `blocked` to false and nothing is blocked, as NeoForge's `setBlocked(false)`; the event has no cancel. No `self`, as\n`native_living_incoming_damage`: the game is in the middle of the hit.",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_shield_block",
+      "doc": "NeoForge's `LivingShieldBlockEvent`: entity `entity` of type `kind`\n(`minecraft:player`, `minecraft:zombie`) is hit for `damage` from `source` (its\ntype and entities, as `native_living_incoming_damage` names them), and\n`LivingEntity.applyItemBlocking` is\nabout to resolve what a raised `blocks_attacks` item stops. Every hit with damage\nasks, raised item or not: `original_blocked` is whether vanilla blocks (only a\nplayer raises one). Change `block`: `blocked` makes the entity block or not (a block\nforced on a hit vanilla lets through stops all of it), `blocked_damage` what is\nstopped (kept within 0 and `damage`) and `shield_damage` the durability a raised\nitem loses (below 0: vanilla's `itemDamage` of what is stopped). Set `blocked` to false and nothing is blocked, as NeoForge's `setBlocked(false)`; the event has no cancel. The level is the hit's: its blocks, random and own\nattachments.",
+      "target": "horizon_client::game::native_hooks::HitLevel<'_>::native_living_shield_block",
       "neoforge": "LivingShieldBlockEvent",
       "side": "server",
       "mod_api": {
         "contract": "listen"
-      }
+      },
+      "host": "level",
+      "version": 2
     }
   ]
 }
