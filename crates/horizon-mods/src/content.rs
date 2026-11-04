@@ -462,8 +462,6 @@ pub struct MobEffect {
     pub color: u32,
 }
 
-/// the vanilla entity types a mod's type may copy: thrown item
-/// projectiles (`ThrowableItemProjectile`).
 /// Vanilla's `DyeColor` names, by id.
 pub const DYE_COLORS: [&str; 16] = [
     "white",
@@ -484,6 +482,8 @@ pub const DYE_COLORS: [&str; 16] = [
     "black",
 ];
 
+/// the vanilla entity types a mod's type may copy: thrown item
+/// projectiles (`ThrowableItemProjectile`).
 pub const ENTITY_TEMPLATES: [&str; 1] = ["minecraft:snowball"];
 
 /// an entity type the mod adds: a copy of a vanilla template's, thrown
