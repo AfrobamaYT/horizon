@@ -6804,6 +6804,8 @@ impl Game<'_> {
                         Default::default,
                         horizon_client::first_person::item_use_animation,
                     );
+                m.extra.held_arm_pose = [m.extra.main_hand_id(), m.extra.off_hand_id()]
+                    .map(|held| held.and_then(|i| world_items!(self).get(i)?.arm_pose));
             }
             if m.extra.using_item > 0 {
                 if player {
