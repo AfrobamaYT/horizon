@@ -8,7 +8,8 @@
       "cancellable": true,
       "mod_api": {
         "contract": "replace",
-        "out": "outcome"
+        "out": "outcome",
+        "answered_by": "mod"
       }
     }
   ]
