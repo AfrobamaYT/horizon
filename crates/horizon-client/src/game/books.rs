@@ -65,6 +65,19 @@ pub(super) enum BookScreen {
         lectern: Option<(i32, i32, i32)>,
     },
 }
+impl BookScreen {
+    /// The id the screen hooks see (`NativeScreenView.id`).
+    pub(super) fn id(&self) -> &'static str {
+        match self {
+            Self::Edit { signing: true, .. } => "book_sign",
+            Self::Edit { .. } => "book_edit",
+            Self::View {
+                lectern: Some(_), ..
+            } => "lectern",
+            Self::View { .. } => "book_view",
+        }
+    }
+}
 /// The pages a book screen reads: a written book's components (so their
 /// click events stay), else a writable book's text.
 fn view_pages(data: Option<&StackData>) -> Vec<Text> {
@@ -257,11 +270,24 @@ impl Game<'_> {
             self.open_book(screen);
         }
     }
-    fn open_book(&mut self, screen: BookScreen) {
-        self.book = Some(screen);
-        self.keys.clear();
-        self.right = false;
-        self.capture(false);
+    /// Opens `screen` (through `open_screen_overlay`: a mod may keep it shut).
+    pub(super) fn open_book(&mut self, screen: BookScreen) {
+        self.open_screen_overlay(screen.id(), |game| {
+            game.book = Some(screen);
+            game.keys.clear();
+            game.right = false;
+            game.capture(false);
+        });
+    }
+    /// `BookEditScreen` to `BookSignScreen` and back, each a
+    /// `Minecraft.setScreen` (through `open_screen_overlay`).
+    fn set_book_signing(&mut self, on: bool) {
+        let id = if on { "book_sign" } else { "book_edit" };
+        self.open_screen_overlay(id, |game| {
+            if let Some(BookScreen::Edit { signing, .. }) = game.book.as_mut() {
+                *signing = on;
+            }
+        });
     }
     pub(super) fn close_book(&mut self) {
         // A server's lectern: LecternScreen's menu closes (closeContainer).
@@ -415,9 +441,7 @@ impl Game<'_> {
             },
             Some(BookScreen::Edit { signing: true, .. }) => match key {
                 Some(KeyCode::Escape) => {
-                    if let Some(BookScreen::Edit { signing, .. }) = self.book.as_mut() {
-                        *signing = false;
-                    }
+                    self.set_book_signing(false);
                 }
                 Some(KeyCode::Enter | KeyCode::NumpadEnter) => {
                     let blank = self.book.as_ref().is_some_and(
@@ -972,14 +996,12 @@ impl Game<'_> {
                     title,
                     ..
                 }) if !title.trim().is_empty() => self.save_book(true),
-                Some(BookScreen::Edit { signing, .. }) => *signing = true,
+                Some(BookScreen::Edit { .. }) => self.set_book_signing(true),
                 _ => return Err("not a book and quill".into()),
             },
             Some("done") => match self.book.as_mut() {
                 Some(BookScreen::Edit { signing: true, .. }) => {
-                    if let Some(BookScreen::Edit { signing, .. }) = self.book.as_mut() {
-                        *signing = false;
-                    }
+                    self.set_book_signing(false);
                 }
                 Some(BookScreen::Edit { .. }) => self.save_book(false),
                 _ => self.close_book(),
@@ -1141,9 +1163,7 @@ impl Game<'_> {
                     self.save_book(true);
                 } else if inside(w / 2.0 + 2.0, 196.0, 98.0, 20.0) {
                     click(self);
-                    if let Some(BookScreen::Edit { signing, .. }) = self.book.as_mut() {
-                        *signing = false;
-                    }
+                    self.set_book_signing(false);
                 } else if inside(left + 36.0, 50.0, 114.0, 9.0) {
                     self.book_title_click(left + 36.0, mx);
                 }
@@ -1156,9 +1176,7 @@ impl Game<'_> {
                     self.turn_page(false);
                 } else if inside(w / 2.0 - 100.0, 196.0, 98.0, 20.0) {
                     click(self);
-                    if let Some(BookScreen::Edit { signing, .. }) = self.book.as_mut() {
-                        *signing = true;
-                    }
+                    self.set_book_signing(true);
                 } else if inside(w / 2.0 + 2.0, 196.0, 98.0, 20.0) {
                     click(self);
                     self.save_book(false);

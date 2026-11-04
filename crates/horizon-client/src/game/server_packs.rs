@@ -268,6 +268,19 @@ impl Game<'_> {
         }
         // addOrUpdatePackPrompt: one prompt for every pack pushed before it is answered.
         let text = p.prompt.as_ref().map(|t| comp_text(&tag_to_json(t)));
+        // A new prompt opens as a screen (a mod may keep it shut, and then
+        // nothing answers the pack); an open one only takes the pack.
+        if self.server_packs.prompt.is_none()
+            && !self.open_screen_overlay("server_pack_prompt", |game| {
+                game.server_packs.prompt = Some(PackPrompt {
+                    requests: Vec::new(),
+                    required: p.required,
+                    prompt: None,
+                });
+            })
+        {
+            return;
+        }
         let state = &mut self.server_packs;
         let open = state.prompt.get_or_insert(PackPrompt {
             requests: Vec::new(),
