@@ -37,8 +37,8 @@ use horizon_client::{
     fast_hash::FxHashMap,
     first_person::Hand,
     health::{
-        Attack, DamageContainer, DamageHooks, DamageLevel, HurtSource, Hurting, Knock, NO_ATTACK,
-        ShieldBlock, Victim,
+        Attack, DamageContainer, DamageHooks, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock,
+        Victim,
     },
     hud::{HudBatch, rgba},
     item_tooltip::TooltipDisplay,
@@ -12636,7 +12636,8 @@ mod tests {
     /// player, the direct one when it deals the damage itself.
     #[test]
     fn the_damage_hook_names_the_source() {
-        use super::{Attack, HurtSource, Hurting, NO_ATTACK, hurt_server_args, mob_source};
+        use super::{Attack, HurtSource, Hurting, hurt_server_args, mob_source};
+        use horizon_client::health::NO_ATTACK;
         use horizon_client::mobs::{Damage, DamageKind as K, Who};
         let source = |kind, attacker| {
             let s = mob_source(
