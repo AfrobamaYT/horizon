@@ -869,6 +869,7 @@ mod tests {
     fn a_creative_stack_keeps_its_components_across_the_wire() {
         let mut components = vec![String::new(); 60];
         for (id, name) in [
+            (component::MAX_DAMAGE, "minecraft:max_damage"),
             (component::DAMAGE, "minecraft:damage"),
             (component::CUSTOM_NAME, "minecraft:custom_name"),
             (component::ITEM_NAME, "minecraft:item_name"),
@@ -937,6 +938,7 @@ mod tests {
         stack.damage = 5;
         stack.enchant("minecraft:protection", 4);
         let d = stack.data_mut();
+        d.set_other("minecraft:max_damage", Some(Tag::Int(500)));
         d.stored_enchantments
             .push((Arc::from("minecraft:sharpness"), 2));
         d.repair_cost = 9;
@@ -967,6 +969,7 @@ mod tests {
         assert_eq!(back.item, stack.item);
         assert_eq!(back.damage, 5);
         let d = back.data().expect("components");
+        assert_eq!(d.other("minecraft:max_damage"), Some(&Tag::Int(500)));
         assert_eq!(d.enchantments, vec![(Arc::from("minecraft:protection"), 4)]);
         assert_eq!(
             d.stored_enchantments,
