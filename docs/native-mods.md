@@ -476,10 +476,18 @@ And a `cancellable = true` `HEAD` on a hook point:
 warning: alpha's `stop` can cancel at hook `frame` HEAD: a Break skips the later injections and the function's body.
 ```
 
-A raw `target` is not matched against the catalog — whether it names a hook point's function only the source knows —
-so the third warning names a `hook`, and `hook = "frame"` and `target = "…::native_frame"` are not told apart. Only
+The third warning names a `hook`: it does not know whether a raw `target` is a hook point's function. Only
 `HEAD` is named: the interior kinds may carry `cancellable` too, but what a `Break` skips there is less than the body.
 A mod's `priority` defaults to 0, as horizon-mixins defaults it. Neither warning stops the build.
+
+A raw `target` that is the function a catalog hook is called from gets a hint, once the build has the game's
+source (it holds the catalog), whichever kind it has:
+
+```
+warning: alpha's `raw` targets hook point `frame`: use `hook = "frame"`, `hook_version = 1`, or implement `Hooks::frame` with no injection.
+```
+
+A scoped hook says "the `<name>` Part method" instead of `Hooks::<name>`.
 
 ### A mod's own ingredient kinds, matching at craft time
 
