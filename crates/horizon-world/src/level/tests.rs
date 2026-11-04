@@ -503,6 +503,84 @@ fn neighbor_observation_follows_dispatch_order() {
 }
 
 #[test]
+fn a_part_asks_for_neighbour_updates_after_the_class_in_the_order_it_asked() {
+    use super::NeighbourUpdate;
+    use std::cell::RefCell;
+
+    struct Asker {
+        inner: TestLevel,
+        seen: RefCell<Vec<BlockPos>>,
+        asked: RefCell<Vec<(BlockPos, bool)>>,
+    }
+    impl LevelAccess for Asker {
+        fn block_state(&self, pos: BlockPos) -> BlockStateId {
+            self.inner.block_state(pos)
+        }
+        fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
+            self.inner.set_raw(pos, state)
+        }
+        fn is_loaded(&self, pos: BlockPos) -> bool {
+            self.inner.is_loaded(pos)
+        }
+        fn random(&mut self) -> &mut LegacyRandom {
+            self.inner.random()
+        }
+        fn game_time(&self) -> i64 {
+            self.inner.game_time()
+        }
+        fn observe_neighbor_changed(&self, pos: BlockPos, _: BlockStateId, _: BlockId, _: bool) {
+            self.seen.borrow_mut().push(pos);
+        }
+        fn affect_neighbors_after_removal(
+            &self,
+            pos: BlockPos,
+            _: BlockStateId,
+            moved: bool,
+            updates: &mut Vec<NeighbourUpdate>,
+        ) {
+            self.asked.borrow_mut().push((pos, moved));
+            updates.extend([
+                NeighbourUpdate::NeighboursExcept(Direction::Up),
+                NeighbourUpdate::OutputSignal,
+                NeighbourUpdate::Neighbours,
+            ]);
+        }
+    }
+    let Some(f) = fixture() else { return };
+    let b = &f.behaviours;
+    let mut level = Asker {
+        inner: TestLevel::new(b),
+        seen: RefCell::new(Vec::new()),
+        asked: RefCell::new(Vec::new()),
+    };
+    let mut ticks = Ticks::new(0);
+    let stone = f.registry.default_state("minecraft:stone").unwrap();
+    b.sim(&mut level, &mut ticks)
+        .affect_neighbors_after_removal(stone, BlockPos::new(0, 0, 0), false);
+    let at = |x, y, z| BlockPos::new(x, y, z);
+    // The part is asked once, after the class (stone has none); its requests run in the order
+    // pushed: five neighbours without the one above, no comparator to hear the output
+    // signal, then all six.
+    assert_eq!(*level.asked.borrow(), [(at(0, 0, 0), false)]);
+    assert_eq!(
+        *level.seen.borrow(),
+        [
+            at(-1, 0, 0),
+            at(1, 0, 0),
+            at(0, -1, 0),
+            at(0, 0, -1),
+            at(0, 0, 1),
+            at(-1, 0, 0),
+            at(1, 0, 0),
+            at(0, -1, 0),
+            at(0, 1, 0),
+            at(0, 0, -1),
+            at(0, 0, 1),
+        ]
+    );
+}
+
+#[test]
 fn random_tick_hook_can_change_the_block_and_skip_its_own_tick() {
     use std::cell::Cell;
 

@@ -360,6 +360,15 @@ validates identity against its embedded inventory.
   copy's `nbt`. A saved chunk sent past the view distance asks it on its own thread, so read only `entity`. Keep it to what clients show (a machine running, its facing, a tank's level), not a menu's progress:
   menus have their own data slots.
 
+- `native_affect_neighbors_after_removal` is a mod block's `Block.affectNeighborsAfterRemoval`: the block was
+  removed from `pos` (`moved`: a piston pushed it) with `UPDATE_NEIGHBORS` or the piston flag. There is no bus
+  event for it, so it is a `BlockPart` method only. The block's own class has already run its updates, as an
+  override's `super` call; the part then pushes onto `updates` what it wants, in order: `NeighbourUpdate::OutputSignal`
+  (`updateNeighbourForOutputSignal`), `Neighbours` (`updateNeighborsAt`) and `NeighboursExcept(direction)`
+  (`updateNeighborsAtExceptFromFacing`), and the level runs each at once with vanilla's own functions. It runs
+  inside the level's write with the level host, so it reads but cannot write blocks or spawn entities; a mod that
+  needs either reports the gap on #44. The cost with no part on the block is one `has_part_hook` read.
+
 - `native_pre_remove_side_effects` is a mod block entity's `BlockEntity.preRemoveSideEffects`: its block is being
   replaced or broken with side effects (not under flag 256). Its part puts the stacks it held in `drops`, and they
   scatter as `Containers.dropItemStack` scatters them, after the block entity's own container slots. It runs inside

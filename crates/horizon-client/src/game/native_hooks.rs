@@ -30,7 +30,7 @@ use horizon_client::mod_api::{
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
     LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult,
-    NativeItemClick, NativeTriState, Suggestion, TooltipElement, UsePhase,
+    NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion, TooltipElement, UsePhase,
 };
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -495,6 +495,27 @@ impl GameLevel<'_> {
         cancel: &mut bool,
     ) {
         mod_api::dispatch_dragon_egg_form(self, dimension, pos, cancel);
+    }
+
+    /// `Block.affectNeighborsAfterRemoval` for a mod's block: an authoritative server removed the
+    /// block `state` from `pos` (`moved`: a piston pushed it) and has run its template class's own
+    /// updates. Push onto `updates` the neighbour updates it wants, in order: `OutputSignal`
+    /// (`updateNeighbourForOutputSignal`), `Neighbours` (`updateNeighborsAt`) and
+    /// `NeighboursExcept(direction)` (`updateNeighborsAtExceptFromFacing`); the level runs each
+    /// at once, as the block's own override would. Answered from inside the level's write: it
+    /// reads, and cannot write blocks or spawn entities.
+    #[inline(always)]
+    pub(super) fn native_affect_neighbors_after_removal(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        moved: bool,
+        updates: &mut Vec<NeighbourUpdate>,
+    ) {
+        mod_api::dispatch_affect_neighbors_after_removal(
+            self, dimension, pos, state, moved, updates,
+        );
     }
 
     /// An authoritative server is about to deliver `neighborChanged`.
