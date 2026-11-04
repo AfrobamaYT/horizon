@@ -99,13 +99,23 @@ impl Providers {
             .as_array()
             .into_iter()
             .flatten()
-            .map(|e| (e["data"].as_f64().unwrap_or(0.0), e["weight"].as_f64().unwrap_or(0.0)))
+            .map(|e| {
+                (
+                    e["data"].as_f64().unwrap_or(0.0),
+                    e["weight"].as_f64().unwrap_or(0.0),
+                )
+            })
             .collect();
         let total: f64 = weights.iter().map(|(_, w)| w).sum();
         if total <= 0.0 {
             return 0.0;
         }
-        (weights.iter().filter(|(d, _)| *d > 0.0).map(|(_, w)| w).sum::<f64>() / total) as f32
+        (weights
+            .iter()
+            .filter(|(d, _)| *d > 0.0)
+            .map(|(_, w)| w)
+            .sum::<f64>()
+            / total) as f32
     }
     /// A plain `context_int_provider` value or reference (no context conditions).
     pub fn int_value(&self, v: &Value) -> i32 {
