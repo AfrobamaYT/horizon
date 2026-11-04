@@ -1484,15 +1484,37 @@ impl LevelAccess for GameLevel<'_> {
         &self,
         piston: BlockPos,
         direction: horizon_core::geometry::Direction,
+        extending: bool,
         push: &[BlockPos],
         destroy: &[BlockPos],
     ) -> bool {
         let mut canceled = false;
         if self.native_authoritative {
             let step = direction.normal();
-            self.native_piston_move(self.dimension, piston, step, push, destroy, &mut canceled);
+            self.native_piston_pre(
+                self.dimension,
+                piston,
+                step,
+                extending,
+                push,
+                destroy,
+                &mut canceled,
+            );
         }
         !canceled
+    }
+    fn observe_piston_moved(
+        &self,
+        piston: BlockPos,
+        direction: horizon_core::geometry::Direction,
+        extending: bool,
+        push: &[BlockPos],
+        destroy: &[BlockPos],
+    ) {
+        if self.native_authoritative {
+            let step = direction.normal();
+            self.native_piston_post(self.dimension, piston, step, extending, push, destroy);
+        }
     }
     fn adjust_signal_source(&self, state: BlockStateId, vanilla: bool) -> bool {
         let mut source = vanilla;

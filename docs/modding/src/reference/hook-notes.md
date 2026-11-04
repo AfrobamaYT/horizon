@@ -165,7 +165,7 @@ requires a farmer at work and `mob_griefing` enabled.
   hook; and the players `native_server_players` lists carry their health.
 
 - What a server mod needs to keep the world itself out of guarded land. `native_block_spread` hears a
-  fluid flow or fire spread into a block, `native_piston_move` a piston's push or pull, `native_explosion_detonate` the
+  fluid flow or fire spread into a block, `native_piston_pre` a piston's push or pull, `native_explosion_detonate` the
   blocks an explosion is about to break (a mod takes out those it spares), `native_fill_bucket` a bucket filled or
   emptied, and `native_attack_entity` a player's blow on an entity (an item frame, an armor stand, an animal, a
   player). Each may cancel, and nothing happens.
@@ -1854,9 +1854,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `PlayerInteractEvent.RightClickItem`, on both sides, before air `Item.use` and its Part, never for a
   block/entity target. Canceling answers with `cancellation_result` (default `Pass`). On the client,
   every canceled result except `Success` continues to the other hand without a predicted swing.
-- **`native_block_spread(dimension, kind, from, to, canceled)`** and **`native_piston_move(dimension, piston,
-  direction, push, destroy, canceled)`** (on `GameLevel`, like the block observers): a fluid flowing or fire
-  spreading (`kind` `fluid` or `fire`) from `from` into `to`, and a piston moving blocks once its structure resolved.
+- **`native_block_spread(dimension, kind, from, to, canceled)`** and **`native_piston_pre(dimension, piston,
+  direction, extending, push, destroy, canceled)`** and **`native_piston_post(dimension, piston, direction, extending, push, destroy)`** (on `GameLevel`, like the block observers): a fluid flowing or fire
+  spreading (`kind` `fluid` or `fire`) from `from` into `to`, and a piston moving blocks once its structure resolved (`native_piston_pre`, NeoForge's `PistonEvent.Pre`; `native_piston_post`, `PistonEvent.Post`, hears the move done).
   Canceled, the block at `to` stays as it is, and the piston moves nothing. Fluids ask on every flow: answer from
   memory, fast.
 - **`native_block_ignite(dimension, player, pos, cause, cancel)`** (on `GameLevel`): fire is about to be placed.
