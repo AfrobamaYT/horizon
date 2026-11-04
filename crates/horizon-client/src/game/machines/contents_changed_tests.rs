@@ -25,16 +25,17 @@ struct Changes(Arc<Mutex<Vec<Notice>>>);
 #[mod_api::horizon_part]
 impl BlockPart for Changes {
     fn contents_changed(&self, host: &mut dyn ServerHost, event: &mut ContentsChangedEvent) {
+        let pos = [event.pos.x, event.pos.y, event.pos.z];
         let amount = event
             .level
-            .capability(host, &ITEMS, event.pos, None)
+            .capability(host, &ITEMS, pos, None)
             .map_or(0, |items| {
                 (0..items.size(host))
                     .map(|slot| items.amount(host, slot))
                     .sum()
             });
         let version = host
-            .block_entity(event.level, event.pos)
+            .block_entity(event.level, pos)
             .and_then(|entity| entity.data(host))
             .and_then(|data| match data.get(&"Version".into()) {
                 Some(Tag::Int(value)) => Some(*value),
@@ -42,7 +43,7 @@ impl BlockPart for Changes {
             });
         self.0.lock().unwrap().push(Notice {
             level: event.level,
-            pos: event.pos,
+            pos,
             amount,
             version,
         });
@@ -57,16 +58,51 @@ impl BlockEntityPart for Changes {
     }
 }
 
-struct Observed(Changes);
+#[derive(Clone)]
+struct Observed {
+    changes: Changes,
+    self_writes: bool,
+}
+
+#[mod_api::horizon_part]
+impl BlockPart for Observed {
+    fn contents_changed(&self, host: &mut dyn ServerHost, event: &mut ContentsChangedEvent) {
+        self.changes.contents_changed(host, event);
+        if !self.self_writes || event.pos != BlockPos::new(0, 64, 0) {
+            return;
+        }
+        let pos = [event.pos.x, event.pos.y, event.pos.z];
+        let source = event.level.capability(host, &ITEMS, pos, None).unwrap();
+        let other = event
+            .level
+            .capability(host, &ITEMS, [2, 64, 0], None)
+            .unwrap();
+        let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
+        assert_eq!(
+            host.transaction(|host, tx| {
+                assert_eq!(source.insert(host, tx, 0, &sticks, 2), 2);
+                assert_eq!(other.insert(host, tx, 0, &sticks, 3), 3);
+                Ok::<_, ()>(())
+            }),
+            Ok(())
+        );
+        assert!(
+            host.block_entity(event.level, pos)
+                .unwrap()
+                .set_changed(host)
+        );
+    }
+}
+
 #[mod_api::__subscriptions]
 impl Hooks for Observed {
     fn register(&self, r: &mut Registrar, _: &RegistrationContext<'_>) {
         // An unbacked vehicle coordinate would select air if it were dispatched as a block.
         for block in ["minecraft:air", "minecraft:chest", "minecraft:crafter"] {
-            r.block_part(block, self.0.clone());
+            r.block_part(block, self.clone());
         }
         let kind = r.block_entity_type("depot").blocks(&[DEPOT]).build();
-        r.block_entity_part(&kind, self.0.clone()).unwrap();
+        r.block_entity_part(&kind, self.changes.clone()).unwrap();
     }
 
     fn blocks(&self, _: &RegistrationContext<'_>, event: &mut BlocksEvent<'_>) {
@@ -78,14 +114,21 @@ impl Hooks for Observed {
     }
 }
 
-fn with_changes(name: &str, test: impl FnOnce(&mut Game<'_>, LevelRef, Changes)) {
+fn with_changes(
+    name: &str,
+    self_writes: bool,
+    test: impl FnOnce(&mut Game<'_>, LevelRef, Changes),
+) {
     if run_fresh_cases(name, "HORIZON_CONTENTS_CHANGED_CHILD", &["game"]) {
         return;
     }
     let changes = Changes::default();
     let mods: Mods = vec![ModEntry::new(
         "contents_changed",
-        Box::new(Observed(changes.clone())),
+        Box::new(Observed {
+            changes: changes.clone(),
+            self_writes,
+        }),
     )]
     .into();
     mod_api::install(mods.clone());
@@ -112,6 +155,7 @@ fn place(game: &mut Game<'_>, level: LevelRef, pos: [i32; 3], block: &str) {
 fn a_contents_notice_reads_the_root_commit_and_not_aborted_writes() {
     with_changes(
         "game::machines::contents_changed_tests::a_contents_notice_reads_the_root_commit_and_not_aborted_writes",
+        false,
         |game, level, changes| {
             let pos = [0, 64, 0];
             place(game, level, pos, "minecraft:chest");
@@ -146,7 +190,10 @@ fn a_contents_notice_reads_the_root_commit_and_not_aborted_writes() {
                 amount: 5,
                 version: None,
             };
-            assert_eq!(*changes.0.lock().unwrap(), [expected.clone()]);
+            assert_eq!(
+                changes.0.lock().unwrap().as_slice(),
+                std::slice::from_ref(&expected)
+            );
             assert!(
                 game.transaction(|host, tx| {
                     assert_eq!(items.insert(host, tx, 0, &sticks, 4), 4);
@@ -156,7 +203,10 @@ fn a_contents_notice_reads_the_root_commit_and_not_aborted_writes() {
                 .is_err()
             );
             assert_eq!(items.amount(game, 0), 5);
-            assert_eq!(*changes.0.lock().unwrap(), [expected.clone()]);
+            assert_eq!(
+                changes.0.lock().unwrap().as_slice(),
+                std::slice::from_ref(&expected)
+            );
             assert!(entity.set_changed(game));
             assert_eq!(*changes.0.lock().unwrap(), [expected.clone(), expected]);
             // A storage with no attached observer is not broadcast to this Part.
@@ -173,9 +223,100 @@ fn a_contents_notice_reads_the_root_commit_and_not_aborted_writes() {
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_self_write_does_not_reenter_but_another_backing_block_notifies() {
+    with_changes(
+        "game::machines::contents_changed_tests::a_self_write_does_not_reenter_but_another_backing_block_notifies",
+        true,
+        |game, level, changes| {
+            let source = [0, 64, 0];
+            let other = [2, 64, 0];
+            for pos in [source, other] {
+                place(game, level, pos, "minecraft:chest");
+            }
+            changes.0.lock().unwrap().clear();
+            let entity = game.block_entity(level, source).unwrap();
+            // No outer transaction: set_changed dispatches immediately. The listener writes
+            // into itself and another block, and explicitly invalidates itself on every call.
+            assert!(entity.set_changed(game));
+            assert_eq!(
+                *changes.0.lock().unwrap(),
+                [
+                    Notice {
+                        level,
+                        pos: source,
+                        amount: 0,
+                        version: None
+                    },
+                    Notice {
+                        level,
+                        pos: other,
+                        amount: 3,
+                        version: None
+                    },
+                ]
+            );
+            assert_eq!(
+                level
+                    .capability(game, &ITEMS, source, None)
+                    .unwrap()
+                    .amount(game, 0),
+                2
+            );
+            // The first dispatch is finished: the same block must notify again, not stay guarded.
+            assert!(entity.set_changed(game));
+            assert_eq!(
+                *changes.0.lock().unwrap(),
+                [
+                    Notice {
+                        level,
+                        pos: source,
+                        amount: 0,
+                        version: None
+                    },
+                    Notice {
+                        level,
+                        pos: other,
+                        amount: 3,
+                        version: None
+                    },
+                    Notice {
+                        level,
+                        pos: source,
+                        amount: 2,
+                        version: None
+                    },
+                    Notice {
+                        level,
+                        pos: other,
+                        amount: 6,
+                        version: None
+                    },
+                ]
+            );
+            assert_eq!(
+                level
+                    .capability(game, &ITEMS, source, None)
+                    .unwrap()
+                    .amount(game, 0),
+                4
+            );
+            assert_eq!(
+                level
+                    .capability(game, &ITEMS, other, None)
+                    .unwrap()
+                    .amount(game, 0),
+                6
+            );
+        },
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_double_container_notifies_each_backing_block_once() {
     with_changes(
         "game::machines::contents_changed_tests::a_double_container_notifies_each_backing_block_once",
+        false,
         |game, level, changes| {
             let base = game
                 .pack
@@ -241,6 +382,7 @@ fn a_double_container_notifies_each_backing_block_once() {
 fn a_native_types_inherited_block_part_reads_the_committed_payload() {
     with_changes(
         "game::machines::contents_changed_tests::a_native_types_inherited_block_part_reads_the_committed_payload",
+        false,
         |game, level, changes| {
             let pos = [0, 64, 0];
             place(game, level, pos, DEPOT);
@@ -277,6 +419,7 @@ fn a_native_types_inherited_block_part_reads_the_committed_payload() {
 fn a_crafter_notices_its_source_but_not_a_vehicles_placeholder() {
     with_changes(
         "game::machines::contents_changed_tests::a_crafter_notices_its_source_but_not_a_vehicles_placeholder",
+        false,
         |game, level, changes| {
             use crate::game::minecarts::{CartKind, Minecart};
             let pos = [0, 66, 0];

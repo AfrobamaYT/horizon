@@ -2263,7 +2263,9 @@ impl Game<'_> {
     /// `BlockEntity.setChanged`), after its contents were written and before
     /// dirty/comparator updates. A native transaction tells it once per backing
     /// block at the root commit, never for an abort or a simulation. Explicit
-    /// `set_changed` also tells it, even if the contents compare equal.
+    /// `set_changed` also tells it, even if the contents compare equal. Writes
+    /// inside this notice still apply, but do not re-enter it for the same block;
+    /// a write to another backing block has its own notice.
     ///
     /// A server-only, non-cancellable BlockPart notice, not a global bus event.
     /// `level` and `pos` name the backing block, not an automation entity or its
@@ -2274,10 +2276,15 @@ impl Game<'_> {
     pub(super) fn native_contents_changed(
         &mut self,
         level: LevelRef,
-        pos: [i32; 3],
+        pos: BlockPos,
         state: BlockStateId,
     ) {
+        if self.contents_changing.contains(&(level, pos)) {
+            return;
+        }
+        self.contents_changing.push((level, pos));
         mod_api::dispatch_contents_changed(self, level, pos, state);
+        self.contents_changing.pop();
     }
     /// Block `block`'s block entity has item slots (a `WorldlyContainer`):
     /// set `container` when the block is yours. Asked once for each mod

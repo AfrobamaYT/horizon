@@ -3153,6 +3153,8 @@ struct Game<'a> {
     hoppers: HashMap<(i32, i32, i32), machines::HopperState>,
     /// The open `host.transaction`s, innermost last (`transactions.rs`).
     transactions: Vec<transactions::Level>,
+    /// Backing blocks whose contents notice is on the call stack, innermost last.
+    contents_changing: Vec<(horizon_client::mod_api::LevelRef, BlockPos)>,
     /// The screen of a mod block's menu open on this client (`native_screen`).
     mod_screen: Option<native_hooks::OpenNativeScreen>,
     /// The players with each mod container open, by level (`tick_mod_container_viewers`).
@@ -19815,6 +19817,7 @@ impl<'a> Game<'a> {
             tnts: Default::default(),
             hoppers: HashMap::new(),
             transactions: Vec::new(),
+            contents_changing: Vec::new(),
             mod_screen: None,
             mod_container_viewers: HashMap::new(),
             item_columns: None,

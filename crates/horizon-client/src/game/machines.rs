@@ -627,7 +627,7 @@ impl Game<'_> {
         if mod_api::has_scoped_hook(mod_api::HookId::ContentsChanged)
             && let Some(level) = self.native_level_here()
         {
-            let at = [pos.0, pos.1, pos.2];
+            let at = BlockPos::new(pos.0, pos.1, pos.2);
             self.native_contents_changed(level, at, self.world.block(pos.0, pos.1, pos.2));
         }
         self.chiseled_bookshelf_synced(pos);
