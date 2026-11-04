@@ -2902,6 +2902,8 @@ struct Game<'a> {
     /// Mod block entities' geometry their mods kept
     /// (game/native_block_entity_draw.rs).
     kept_block_entities: std::cell::RefCell<native_block_entity_draw::KeptGeometry>,
+    /// The mod block entities' view distances, asked of the parts once (`native_block_entity_draw`).
+    mod_view_distances: std::cell::OnceCell<native_block_entity_draw::ViewDistances>,
     /// `item_level` for one frame, game time, day time and dimension.
     item_level_cache: std::cell::RefCell<
         Option<(
@@ -20032,6 +20034,7 @@ impl<'a> Game<'a> {
             frames: 0,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
+            mod_view_distances: Default::default(),
             item_level_cache: Default::default(),
             world_frames: 0,
             fps: 0.0,

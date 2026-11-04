@@ -905,7 +905,8 @@ pub trait Hooks {
     fn may_place_on();
     /// Draw the mod block entity at `pos`, of block `block`
     /// (`mymod:machine`), on this client: once a frame while it is in view
-    /// (vanilla's `BlockEntityRenderer.submit`: within 64 blocks, its chunk
+    /// (vanilla's `BlockEntityRenderer.submit`: within its view distance, 64 blocks unless
+    /// `block_entity_view_distance` says otherwise, its chunk
     /// faded in, and its bounds, `native_block_entity_render_bounding_box`,
     /// in the frustum), when its `id` is yours. `state` is the block's state
     /// (`blockEntity.getBlockState()`: read its `facing` with
@@ -928,7 +929,7 @@ pub trait Hooks {
     /// as the block with a block of margin around it; widen it when your
     /// `native_block_entity_submit` draws further (a tall shaft, a beam), or
     /// set an infinite value for one never culled. Asked once a frame for each
-    /// within 64 blocks whose chunk is drawn.
+    /// within its view distance (`block_entity_view_distance`) whose chunk is drawn.
     #[hook(
         side = "client",
         contract = "collect",

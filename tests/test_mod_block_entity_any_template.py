@@ -44,8 +44,11 @@ struct GameLevel { world: World }
 impl GameLevel {
     HAS_MOD
 }
+struct ViewDistances { furthest: f64 }
 struct Game { world: World, res: Res }
 impl Game {
+    // The parts' view distances are their own test (`view_distances_are_asked_once_per_mod_block`).
+    fn view_distances(&self) -> ViewDistances { ViewDistances { furthest: VIEW_DISTANCE } }
     UNTEMPLATED
 }
 struct Sim { b: Blocks, level: GameLevel }

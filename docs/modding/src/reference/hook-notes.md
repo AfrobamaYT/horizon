@@ -544,7 +544,8 @@ or transactions. Declarations still go on each event or registrar.
   block: keep them short.
 
 - Drawing mod block entities on the client. `native_block_entity_submit(pos, block, state, entity, draw)` runs once a frame
-  for each mod block entity in view, as vanilla's `BlockEntityRenderer.submit` does (within 64 blocks, in the frustum,
+  for each mod block entity in view, as vanilla's `BlockEntityRenderer.submit` does (within its view distance, 64 blocks
+  unless `native_block_entity_view_distance` answers otherwise, asked once per mod block and kept; in the frustum,
   its chunk faded in), with the copy the server sent (`native_block_entity_update_tag`). It draws into the entity batch
   under `draw`'s pose stack (`push`, `pop`, `translate`, `rotate_about`, `scale`, in blocks from the block's corner, as
   vanilla's `PoseStack`): `native_draw_quad` (four corners and a sprite's UVs), `native_draw_cube` (a model element's box,
