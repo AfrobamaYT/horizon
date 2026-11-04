@@ -13,7 +13,7 @@ use super::*;
 use crate::glass_ui as ui;
 use gpui::RenderImage;
 use horizon_cosmetics::prefs::{self, Others, Prefs};
-use horizon_cosmetics::{Item, Texture, preview};
+use horizon_cosmetics::{preview, Item, Texture};
 use horizon_launcher::wardrobe::{Catalogue, Change, ClaimState, Error, Saved, Service, Session};
 use horizon_theme::glass::{fill, ink, radius};
 use std::collections::HashMap;

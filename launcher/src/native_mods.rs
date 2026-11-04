@@ -1532,11 +1532,13 @@ fn pipeline(
         .map_err(|error| error.to_string())?;
     }
     // Said with a failure: a mod made for another revision may not apply or compile on this one.
-    let blame = |e: String| match &other {
+    let blame = |e: String| {
+        match &other {
         Some(list) => format!(
             "{e}\n\nSome mods were made for other Horizon versions ({list}), which may be why. Install versions made for the same Nightly."
         ),
         None => e,
+    }
     };
     let mixins = newest(
         &mods,
@@ -2474,18 +2476,15 @@ mod tests {
         assert_eq!(injections.len(), 1);
         assert!(!input.join("plain").exists());
         assert!(input.join("ordinary").join(MANIFEST).is_file());
-        assert!(
-            input
-                .join("trait_injection/horizon-trait-injection-0.rs")
-                .is_file()
-        );
+        assert!(input
+            .join("trait_injection/horizon-trait-injection-0.rs")
+            .is_file());
         let manifest = fs::read_to_string(input.join("trait_injection").join(MANIFEST)).unwrap();
         assert!(manifest.contains("horizon-trait-injection-0.rs"));
         assert!(!manifest.contains("trait_method"));
-        assert!(
-            mods.iter()
-                .all(|bundle| !bundle.dir.join(MANIFEST).exists())
-        );
+        assert!(mods
+            .iter()
+            .all(|bundle| !bundle.dir.join(MANIFEST).exists()));
         for bundle in &mods {
             let id = &bundle.manifest.id;
             let copied = root.join("packages").join(id);

@@ -3,7 +3,7 @@
 //! pages in a glass tab strip, the player, Microsoft sign-in and Settings; and the menus they open.
 //! Dark appearance only for now (`docs/design-system.md`, "Glass").
 use super::*;
-use crate::glass_ui::{self as ui, Tone, white};
+use crate::glass_ui::{self as ui, white, Tone};
 use crate::instances_page::java_line;
 use gpui::{anchored, canvas, deferred, point};
 use horizon_launcher::account::Player;

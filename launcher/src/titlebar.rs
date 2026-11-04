@@ -37,7 +37,7 @@ pub fn render(_theme: &Theme, _window: &Window) -> Option<Div> {
 #[cfg(target_os = "linux")]
 pub fn render(theme: &Theme, window: &Window) -> Option<Div> {
     use crate::{blocks, mark};
-    use gpui::{Decorations, FontWeight, MouseButton, div, prelude::*, px};
+    use gpui::{div, prelude::*, px, Decorations, FontWeight, MouseButton};
 
     if matches!(window.window_decorations(), Decorations::Server) {
         return None;
@@ -157,7 +157,7 @@ pub fn render(theme: &Theme, window: &Window) -> Option<Div> {
 
 #[cfg(target_os = "linux")]
 pub fn resize_handles(window: &Window) -> Option<Div> {
-    use gpui::{CursorStyle, Decorations, MouseButton, ResizeEdge, div, prelude::*, px};
+    use gpui::{div, prelude::*, px, CursorStyle, Decorations, MouseButton, ResizeEdge};
 
     if matches!(window.window_decorations(), Decorations::Server) || window.is_maximized() {
         return None;
@@ -288,7 +288,7 @@ pub fn apply_appearance(_: &Window, _: Appearance) {}
 mod windows {
     use super::*;
     use crate::{blocks, mark};
-    use gpui::{FontWeight, Stateful, WindowControlArea, div, prelude::*, px};
+    use gpui::{div, prelude::*, px, FontWeight, Stateful, WindowControlArea};
 
     const HEIGHT: f32 = 32.;
     const BUTTON_WIDTH: f32 = 46.;

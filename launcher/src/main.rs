@@ -83,10 +83,10 @@ mod while_playing;
 mod worlds_page;
 
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, Bounds, ClickEvent, Context, Div, ElementId,
-    FocusHandle, FontWeight, Hsla, KeyBinding, KeyDownEvent, Menu, MenuItem, MouseDownEvent,
-    PathPromptOptions, Pixels, Point, SharedString, Stateful, Subscription, Window, WindowBounds,
-    WindowOptions, actions, div, ease_out_quint, prelude::*, px, relative, size,
+    actions, div, ease_out_quint, prelude::*, px, relative, size, Animation, AnimationExt,
+    AnyElement, App, Bounds, ClickEvent, Context, Div, ElementId, FocusHandle, FontWeight, Hsla,
+    KeyBinding, KeyDownEvent, Menu, MenuItem, MouseDownEvent, PathPromptOptions, Pixels, Point,
+    SharedString, Stateful, Subscription, Window, WindowBounds, WindowOptions,
 };
 use horizon_launcher::account::{self, Accounts, SignIn, SignInState};
 use horizon_launcher::backend::{self, Job, Msg, Release, Running, Settings, Updates};
@@ -99,9 +99,9 @@ use horizon_launcher::telemetry;
 use scrollbar::Scrollbar;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use theme::Theme;
 
@@ -485,17 +485,15 @@ impl Launcher {
             cx.notify();
         });
         let window_handle = window.window_handle();
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(80))
-                    .await;
-                if this
-                    .update(cx, |this, cx| this.drain(window_handle, cx))
-                    .is_err()
-                {
-                    break;
-                }
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(80))
+                .await;
+            if this
+                .update(cx, |this, cx| this.drain(window_handle, cx))
+                .is_err()
+            {
+                break;
             }
         })
         .detach();
@@ -5477,7 +5475,7 @@ mod tests {
     #[test]
     fn a_menu_button_stays_closed_after_the_press_that_closed_its_menu() {
         use super::closed_by_press;
-        use gpui::{ClickEvent, KeyboardClickEvent, MouseClickEvent, MouseDownEvent, point, px};
+        use gpui::{point, px, ClickEvent, KeyboardClickEvent, MouseClickEvent, MouseDownEvent};
         let click = |x: f32| {
             ClickEvent::Mouse(MouseClickEvent {
                 down: MouseDownEvent {
@@ -5500,7 +5498,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn cmd_q_quits_and_cmd_w_closes_the_window() {
-        use super::{CloseWindow, Quit, key_bindings};
+        use super::{key_bindings, CloseWindow, Quit};
         use gpui::{Keymap, Keystroke};
         let keymap = Keymap::new(key_bindings());
         let key = |s: &'static str| [Keystroke::parse(s).unwrap()];
@@ -5544,7 +5542,7 @@ mod tests {
     /// it stays off: signing in comes first.
     #[test]
     fn play_prepares_first_for_an_owner() {
-        use super::{PlayPress, play_press};
+        use super::{play_press, PlayPress};
         assert_eq!(play_press(true, Some(true), false), PlayPress::Play);
         assert_eq!(play_press(true, None, false), PlayPress::Play);
         assert_eq!(
@@ -5574,7 +5572,7 @@ mod tests {
 
     #[test]
     fn a_completed_sign_in_is_handled_once_across_ui_polls() {
-        use super::{SignInState, sign_in_change};
+        use super::{sign_in_change, SignInState};
         let mut shown = None;
         let completed = SignInState::Done(Ok(horizon_launcher::account::Account {
             uuid: "11111111111111111111111111111111".into(),

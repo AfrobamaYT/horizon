@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn github_and_local_files_are_listed_once_and_drive_build_state() {
-        use crate::browser::{Kind, SourceId, installed};
+        use crate::browser::{installed, Kind, SourceId};
         use std::io::Write;
         let home = std::env::temp_dir().join(format!("native-list-{}", std::process::id()));
         let _ = fs::remove_dir_all(&home);

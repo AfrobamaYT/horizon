@@ -6,7 +6,7 @@
 //! own corners, its tint mixed in. The pieces are small images (a texel per 4 logical pixels: a
 //! 24 px blur has nothing finer), kept while the pages that drew them may still be on screen.
 use crate::scene::{Backdrop, Model};
-use gpui::{Bounds, Corners, Div, Pixels, RenderImage, Size, Window, canvas, div, prelude::*, px};
+use gpui::{canvas, div, prelude::*, px, Bounds, Corners, Div, Pixels, RenderImage, Size, Window};
 use horizon_theme::glass::Glass;
 use std::cell::Cell;
 use std::cell::RefCell;

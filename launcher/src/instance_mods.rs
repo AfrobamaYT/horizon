@@ -9,9 +9,9 @@
 //! cache at the row's size), else the package's icon or the one its jar names, else a generic glyph.
 use super::*;
 use crate::plate::alpha;
-use crate::shell::{Action, c};
+use crate::shell::{c, Action};
 use horizon_launcher::browser::{
-    Kind as PackKind, SourceId, horizon, images, installed, java, modrinth,
+    horizon, images, installed, java, modrinth, Kind as PackKind, SourceId,
 };
 use servers_page::Field;
 use std::collections::{HashMap, HashSet};
