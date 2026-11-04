@@ -1931,7 +1931,7 @@ impl Game<'_> {
         partial: f32,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_block_highlight(self, pos, state, partial, canceled);
+        self.fire_block_highlight(pos, state, partial, canceled);
     }
     /// The world frame's local visual sources. Push requests; Horizon validates
     /// and limits them before rendering. Called only while a world is visible.
@@ -12122,6 +12122,142 @@ mod tests {
             Some(super::BlockEntity::Banner(_))
         ));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn generated_fire_matches_dispatch() {
+        use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
+        use mod_api::{ClientHost, Flow, Hooks, ModEntry};
+        use std::sync::{Arc, Mutex};
+
+        struct Listener(usize, Arc<Mutex<Vec<usize>>>);
+        #[mod_api::horizon_mod]
+        impl Hooks for Listener {
+            fn block_highlight(
+                &self,
+                _: &dyn ClientHost,
+                _: &mut mod_api::BlockHighlightEvent,
+            ) -> Flow {
+                self.1.lock().unwrap().push(self.0);
+                if self.0 == 1 {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+            fn screen_exclusion_areas(
+                &self,
+                _: &dyn ClientHost,
+                event: &mut mod_api::ScreenExclusionAreasEvent<'_>,
+            ) {
+                self.1.lock().unwrap().push(self.0);
+                event.areas.push([self.0 as f32, 0.0, 0.0, 0.0]);
+            }
+            fn movement_input(&self, _: &dyn ClientHost, event: &mut mod_api::MovementInputEvent) {
+                self.1.lock().unwrap().push(self.0);
+                event.forward += self.0 as f32;
+            }
+        }
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            super::super::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = super::super::execution_role::ExecutionRole::IntegratedServer;
+        let game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let mods = (0..3)
+            .map(|i| ModEntry::new("listener", Box::new(Listener(i, trace.clone()))))
+            .collect::<Vec<_>>();
+        mod_api::testing::with_mods(mods.into(), || {
+            let run = |fire: bool| {
+                trace.lock().unwrap().clear();
+                let mut canceled = false;
+                if fire {
+                    game.fire_block_highlight(
+                        [1, 2, 3],
+                        super::BlockStateId(7),
+                        0.5,
+                        &mut canceled,
+                    );
+                } else {
+                    mod_api::dispatch_block_highlight(
+                        &game,
+                        [1, 2, 3],
+                        super::BlockStateId(7),
+                        0.5,
+                        &mut canceled,
+                    );
+                }
+                let cancel_trace = trace.lock().unwrap().clone();
+                trace.lock().unwrap().clear();
+                let view = super::ObservedScreen {
+                    id: "inventory",
+                    overlay: false,
+                    menu: None,
+                    title: None,
+                    rect: [0.0; 4],
+                    slots: 0,
+                    mouse: [0.0; 2],
+                    partial_tick: 0.0,
+                };
+                let mut areas = Vec::new();
+                if fire {
+                    game.fire_screen_exclusion_areas(&view.view(), &mut areas);
+                } else {
+                    mod_api::dispatch_screen_exclusion_areas(&game, &view.view(), &mut areas);
+                }
+                let collect_trace = trace.lock().unwrap().clone();
+                trace.lock().unwrap().clear();
+                let (mut forward, mut strafe, mut jump, mut sneak) = (1.0, 0.0, false, false);
+                if fire {
+                    game.fire_movement_input(&mut forward, &mut strafe, &mut jump, &mut sneak);
+                } else {
+                    mod_api::dispatch_movement_input(
+                        &game,
+                        &mut forward,
+                        &mut strafe,
+                        &mut jump,
+                        &mut sneak,
+                    );
+                }
+                (
+                    canceled,
+                    cancel_trace,
+                    areas,
+                    collect_trace,
+                    forward,
+                    trace.lock().unwrap().clone(),
+                )
+            };
+            let old = run(false);
+            assert_eq!(old.0, true);
+            assert_eq!(old.1, [0, 1]);
+            assert_eq!(old.3, [0, 1, 2]);
+            assert_eq!(old.4, 4.0);
+            assert_eq!(old, run(true));
+        });
     }
 
     /// With no window to lay a screen out in there is no slot under the pointer.
