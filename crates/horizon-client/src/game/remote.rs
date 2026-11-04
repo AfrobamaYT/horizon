@@ -49,6 +49,7 @@ use horizon_world::{
     registry::BlockStateId,
     stepped_interpolation::{Path, PosRot, Start, SteppedInterpolation},
 };
+use mod_api::InteractionKey;
 use std::{
     collections::{HashMap, VecDeque},
     sync::Arc,
@@ -7449,7 +7450,7 @@ impl Game<'_> {
         }
         // InputEvent.InteractionKeyMappingTriggered for the main hand: a cancel
         // ends the whole click, the off hand gets no turn.
-        if let Some(swing) = self.native_interaction(1, Hand::Main) {
+        if let Some(swing) = self.native_interaction(InteractionKey::Use, Hand::Main) {
             if swing {
                 self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
             }
@@ -8581,7 +8582,7 @@ impl Game<'_> {
             return;
         }
         // The off hand's turn: the event again, then the entity or the block.
-        if let Some(swing) = self.native_interaction(1, Hand::Off) {
+        if let Some(swing) = self.native_interaction(InteractionKey::Use, Hand::Off) {
             if swing {
                 self.swing_hand(Hand::Off, SwingAnimation::DEFAULT);
             }
@@ -8893,7 +8894,7 @@ impl Game<'_> {
         }
         // InputEvent.InteractionKeyMappingTriggered, after the checks that stop
         // an attack: a cancel ends it there, swinging unless the mod said not to.
-        if let Some(swing) = self.native_interaction(0, Hand::Main) {
+        if let Some(swing) = self.native_interaction(InteractionKey::Attack, Hand::Main) {
             if swing {
                 let animation = spear.map_or(SwingAnimation::DEFAULT, |k| k.attack_animation());
                 self.swing_hand(Hand::Main, animation);
@@ -9124,7 +9125,7 @@ impl Game<'_> {
             let canceled = if air {
                 None
             } else {
-                self.native_interaction(0, Hand::Main)
+                self.native_interaction(InteractionKey::Attack, Hand::Main)
             };
             if let Some(swing) = canceled {
                 if swing {
@@ -10642,7 +10643,11 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
         // for (`handlePickItemFromEntity`), else the block.
         if let Some(entity) = self.0.pick_entity_hit() {
             if let Some(id) = entity {
-                if self.0.native_interaction(2, Hand::Main).is_some() {
+                if self
+                    .0
+                    .native_interaction(InteractionKey::PickBlock, Hand::Main)
+                    .is_some()
+                {
                     return;
                 }
                 self.0.send(S::PickItemFromEntity(play::PickItemFromEntity {
@@ -10651,7 +10656,11 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
                 }));
             }
         } else if let Some(hit) = self.0.pick() {
-            if self.0.native_interaction(2, Hand::Main).is_some() {
+            if self
+                .0
+                .native_interaction(InteractionKey::PickBlock, Hand::Main)
+                .is_some()
+            {
                 return;
             }
             self.0.send(S::PickItemFromBlock(play::PickItemFromBlock {

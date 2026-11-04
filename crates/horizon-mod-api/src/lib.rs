@@ -3044,6 +3044,18 @@ pub struct NativeBlockClick<'a> {
     pub player_entity_id: i32,
 }
 
+/// The key of `InteractionKeyMappingTriggered`: what the player's click was about to do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InteractionKey {
+    /// `key.attack`: an attack, or a held key digging on.
+    Attack,
+    /// `key.use`: once for each hand tried, the main hand first.
+    Use,
+    /// `key.pickItem`: only with a block or entity aimed at.
+    PickBlock,
+}
+
 /// The behaviour about to run in `UseItemOnBlockEvent`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
