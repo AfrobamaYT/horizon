@@ -1625,6 +1625,7 @@ mod tests {
         fs::remove_dir_all(base).unwrap();
     }
 
+    #[test]
     fn companion_maps_follow_the_winning_colour_or_a_higher_map_only_pack() {
         let root =
             std::env::temp_dir().join(format!("horizon-material-owner-{}", std::process::id()));
