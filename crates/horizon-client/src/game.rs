@@ -20411,7 +20411,11 @@ impl Game<'_> {
                 self.res.item_defaults(),
             ) {
                 Ok(mut loot) => {
-                    loot.apply_native_table_loads();
+                    let context = self.res.core.item_data.context().for_load(
+                        horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
+                        mod_api::__private::loaded_mods().ids(),
+                    );
+                    loot.apply_native_table_loads(&context);
                     Some(Arc::new(loot))
                 }
                 Err(e) => {

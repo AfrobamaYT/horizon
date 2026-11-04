@@ -10,6 +10,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 /// An error loading a resource, including the resource that caused it.
 #[derive(Debug)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ReloadResourceError {
     resource: Identifier,
     source: Box<dyn std::error::Error + Send + Sync>,
@@ -39,6 +40,7 @@ impl std::error::Error for ReloadResourceError {
 
 /// Infallible publication, run only after every listener prepared successfully.
 /// One closure is allocated per listener per reload, never per tick.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ReloadApply(Box<dyn FnOnce() + Send>);
 impl ReloadApply {
     /// Capture newly parsed state without publishing it yet.
@@ -87,6 +89,7 @@ impl Drop for ReloadMark {
 }
 
 /// One registered listener of either side, between registration and ordering.
+#[non_exhaustive]
 pub struct RegisteredListener<L: ?Sized> {
     /// The listener's name.
     pub id: Identifier,
@@ -236,6 +239,7 @@ impl<L: ?Sized + 'static> ReloadCore<L> {
 /// listener's `prepare` returned an error. Both sides share this form, so the
 /// reload paths report listeners alike.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ReloadStageError {
     /// The listeners could not be ordered.
     Order(ReloadOrderError),
@@ -269,6 +273,7 @@ impl std::error::Error for ReloadStageError {
 /// One mod listener's prepared step, between its `prepare` and its `apply`.
 /// The server's vanilla function library rides along as the `Vanilla` step of
 /// its own reload; the client's has none.
+#[non_exhaustive]
 pub enum PreparedStep<V = ()> {
     /// A mod listener's prepared step.
     Mod {
@@ -346,6 +351,7 @@ pub fn apply_listeners<V>(
 /// The files one converter selected from a reload's packs, shared by both
 /// sides' contexts; each side keeps its own context type so a wrong-side read
 /// does not compile.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ReloadFiles(BTreeMap<Identifier, Vec<u8>>);
 impl ReloadFiles {
     pub(crate) fn new(files: BTreeMap<Identifier, Vec<u8>>) -> Self {

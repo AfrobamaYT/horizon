@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// whether what it kept of it (`BlockEntityDraw::keep`) is still right
 /// without comparing the whole entity, and no write can skip that. Its type
 /// identity is fixed at construction and is not part of the mutable fields.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ModBlockEntity {
     id: String,
     fields: ModBlockEntityFields,
@@ -19,6 +20,7 @@ pub struct ModBlockEntity {
 /// slots its menu shows (`ContainerData`: a furnace menu's flame and arrow),
 /// which the mod sets and nothing saves.
 #[derive(Clone, Debug, Default, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct ModBlockEntityFields {
     pub nbt: Compound,
     pub items: Vec<Option<ItemStack>>,
@@ -28,6 +30,7 @@ pub struct ModBlockEntityFields {
 /// is another), counted on by each change. Equal revisions, equal contents.
 /// Neither saved nor compared.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ModRevision {
     born: u64,
     changes: u64,
@@ -115,6 +118,7 @@ impl std::ops::DerefMut for ModBlockEntity {
 /// from (`canTakeItemThroughFace`); and the vanilla menu that shows its
 /// slots when the block is used, if any (`MOD_MENUS`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct ModContainer {
     pub slots: usize,
     pub faces: [Vec<usize>; 6],
@@ -128,6 +132,7 @@ pub struct ModContainer {
 /// not here: they live in the entity's saved compound, under `fluids`, so
 /// they survive restarts and the block's own tick reads them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ModFluidTanks {
     /// Each tank's capacity in millibuckets, in tank order.
     pub tanks: Vec<i32>,
@@ -143,6 +148,7 @@ pub struct ModFluidTanks {
 /// The amount is not here: it lives in the entity's saved compound, under
 /// `energy`, so it survives restarts and the block's own tick reads it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct ModEnergyBuffer {
     pub capacity: i32,
     /// The most one insert moves; 0 takes none.

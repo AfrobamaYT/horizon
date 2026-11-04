@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn mod_sizes_are_sanitised() {
         let _ = crate::native_load_hooks::install(crate::native_load_hooks::NativeLoadHooks {
-            loot_table_load: |_, _| {},
+            loot_table_load: |_, _, _| {},
             modify_default_components: |_, item, components| match item {
                 "a:raised" => {
                     components.insert(super::STACK_SIZE.into(), 500.into());

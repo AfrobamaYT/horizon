@@ -71,6 +71,15 @@ impl LoadContext {
         }
     }
 
+    /// A new owning load of `origin` over this load's registry inputs, with fresh settings.
+    pub fn for_load<'a>(
+        &self,
+        origin: DataLoadOrigin,
+        mod_ids: impl IntoIterator<Item = &'a str>,
+    ) -> Self {
+        Self::new(origin, self.inputs.clone(), mod_ids)
+    }
+
     pub fn origin(&self) -> DataLoadOrigin {
         self.origin
     }
