@@ -210,10 +210,9 @@ impl Game<'_> {
             spawning::villager_type(&facts)
         });
         self.mobs[ib].extra.age = 6000;
-        let Some(id) = self.spawn_mob_for(
+        let Some(id) = self.spawn_mob(
             "minecraft:villager",
             [from.x, from.y, from.z],
-            true,
             true,
             super::creatures::SpawnSite::Plain,
         ) else {

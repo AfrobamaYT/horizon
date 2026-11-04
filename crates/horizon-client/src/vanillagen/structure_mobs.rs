@@ -8,7 +8,8 @@ use crate::{
     items::Items,
     mobs::{
         Mob, MobType, MobTypes,
-        finalize::{self, Ctx, FinalizeLevel, Group, Reason, SpawnData, SpawnRegistries},
+        finalize::{self, Ctx, FinalizeLevel, Group, SpawnRegistries},
+        spawn_rules::Reason,
         spawning::{LocalDifficulty, MOON_BRIGHTNESS},
     },
 };
@@ -133,13 +134,20 @@ impl FinalizeLevel for Level<'_> {
         self.next_id += 1;
         Some(Mob::new(self.next_id, t, Vec3::ZERO, 0.0))
     }
+    fn spawn_data(&self) -> finalize::SpawnData<'_> {
+        finalize::SpawnData {
+            registries: &self.data.registries,
+            enchantments: &self.data.enchantments,
+            items: &self.data.items,
+            camel_husk_size: self.data.camel_husk,
+        }
+    }
 }
 
 fn run<R: RandomSource>(
     level: &mut Level<'_>,
     random: &mut R,
     difficulty: LocalDifficulty,
-    data: &SpawnData<'_>,
     m: &mut Mob,
     reason: Reason,
     group: &mut Option<Group>,
@@ -148,7 +156,6 @@ fn run<R: RandomSource>(
         level,
         random,
         difficulty,
-        data,
         created: Vec::new(),
         jockey_rider: None,
     };
@@ -284,17 +291,11 @@ impl StructureMobFinalizer {
         let moon = MOON_BRIGHTNESS[level.moon_phase([0; 3])];
         // WorldGenRegion.getCurrentDifficultyAt: no inhabited time.
         let difficulty = LocalDifficulty::new(base, day_time, 0, moon);
-        let spawn = SpawnData {
-            registries: &data.registries,
-            enchantments: &data.enchantments,
-            items: &data.items,
-            camel_husk_size: data.camel_husk,
-        };
         let any = random.as_any();
         let created = if let Some(r) = any.downcast_mut::<LegacyRandom>() {
-            run(&mut level, r, difficulty, &spawn, &mut m, reason, group)
+            run(&mut level, r, difficulty, &mut m, reason, group)
         } else if let Some(r) = any.downcast_mut::<XoroshiroRandom>() {
-            run(&mut level, r, difficulty, &spawn, &mut m, reason, group)
+            run(&mut level, r, difficulty, &mut m, reason, group)
         } else {
             log::error!("Horizon: unknown region random, structure mobs are finalized when loaded");
             return None;
