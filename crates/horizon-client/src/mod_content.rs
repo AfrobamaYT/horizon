@@ -667,6 +667,23 @@ impl std::fmt::Display for UnknownBaseBlock {
 }
 impl std::error::Error for UnknownBaseBlock {}
 
+/// A native block entity declaration uses vanilla's reserved namespace.
+#[derive(Debug)]
+pub struct ReservedBlockEntityNamespace {
+    /// The refused type's registry ID.
+    pub kind: String,
+}
+impl fmt::Display for ReservedBlockEntityNamespace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "block entity type {} cannot use the minecraft namespace",
+            self.kind
+        )
+    }
+}
+impl std::error::Error for ReservedBlockEntityNamespace {}
+
 /// A block ID resolved against the complete content and vanilla registry.
 struct KnownBlock<'a>(&'a str);
 
@@ -1009,6 +1026,12 @@ impl<'a> Plan<'a> {
             };
             let mut ids: BTreeSet<&str> = entries.iter().map(|(id, _)| id.as_str()).collect();
             for (mod_id, kind) in &block_entity_types {
+                if kind.id.starts_with("minecraft:") {
+                    return Err(ReservedBlockEntityNamespace {
+                        kind: kind.id.clone(),
+                    }
+                    .into());
+                }
                 if !ids.insert(&kind.id) {
                     return Err(format!("block entity type {} is already declared", kind.id).into());
                 }

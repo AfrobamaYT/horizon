@@ -805,7 +805,7 @@ impl LongJump {
                 cx.events.push(MobEvent::Sound(landing, at, 2.0, 1.0));
             }
             set_jump_pose(m, cx.w, sync::STANDING);
-            sample_cooldown(m, cx.lr, 1);
+            sample_cooldown(m, cx.level.random(), 1);
         }
         set_discard_friction(m, false);
         *self = Self::default();
@@ -882,7 +882,7 @@ impl Goal for LongJump {
             && !m.fluids.in_lava
             && cx.w.block_name(x, y, z) != "minecraft:honey_block";
         if !can {
-            sample_cooldown(m, cx.lr, 2);
+            sample_cooldown(m, cx.level.random(), 2);
         }
         can
     }
@@ -933,7 +933,7 @@ impl Goal for LongJump {
             && !m.fluids.in_water
             && !(self.chosen.is_none() && self.candidates.is_empty());
         if !valid {
-            sample_cooldown(m, cx.lr, 2);
+            sample_cooldown(m, cx.level.random(), 2);
         }
         valid
     }
@@ -946,7 +946,7 @@ impl Goal for LongJump {
         }
         let Some(jump) = self.chosen else {
             self.tries -= 1;
-            self.pick(m, cx.w, cx.lr);
+            self.pick(m, cx.w, cx.level.random());
             return;
         };
         m.look_at(self.look);

@@ -488,6 +488,7 @@ mod tests {
             sleeping: false,
             sleep_timer: 0,
             passenger: false,
+            riding_vehicle: None,
             vehicle: None,
         }
     }
