@@ -1719,7 +1719,12 @@ fn content_root_registers_a_mod_entity_type() {
     assert_eq!(speed(&root).to_bits(), speed(&base).to_bits());
     assert!(root.join(crate::content_identity::MARKER).exists());
     let identity = crate::content_identity::identity;
-    assert_ne!(identity(&root).unwrap(), identity(&base).unwrap());
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
+    let base_defaults = horizon_world::item_defaults::read(&base).unwrap();
+    assert_ne!(
+        identity(&root, &defaults).unwrap(),
+        identity(&base, &base_defaults).unwrap()
+    );
     fs::remove_dir_all(&scratch).unwrap();
 }
 
@@ -1755,7 +1760,12 @@ fn content_root_registers_a_mod_menu_type() {
     assert_eq!(ids.id("minecraft:furnace"), vanilla.id("minecraft:furnace"));
     assert!(root.join(crate::content_identity::MARKER).exists());
     let identity = crate::content_identity::identity;
-    assert_ne!(identity(&root).unwrap(), identity(&base).unwrap());
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
+    let base_defaults = horizon_world::item_defaults::read(&base).unwrap();
+    assert_ne!(
+        identity(&root, &defaults).unwrap(),
+        identity(&base, &base_defaults).unwrap()
+    );
     fs::remove_dir_all(&scratch).unwrap();
 }
 

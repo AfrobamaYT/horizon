@@ -340,7 +340,9 @@ mod tests {
             panic!("no nbt");
         };
         nbt.remove(&"UUID".into());
-        let hook = StructureMobFinalizer::new(root, "minecraft:the_nether");
+        let item_data = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)
+            .unwrap();
+        let hook = StructureMobFinalizer::new(root, "minecraft:the_nether", item_data);
         let mut random = LegacyRandom::new(12345);
         hook.finalize(&mut nbt, "minecraft:nether_wastes", &[], &mut random);
         let keys: Vec<String> = {

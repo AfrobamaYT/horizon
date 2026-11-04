@@ -1240,6 +1240,17 @@ mod tests {
     use super::*;
     use horizon_world::native_load_context::DataLoadOrigin;
 
+    fn empty_item_data(name: &str) -> (PathBuf, Arc<ItemData>) {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-net-data-{name}-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload).unwrap();
+        (root, data)
+    }
+
     /// Launchers find the last server joined in `latest.log` by vanilla's line.
     #[test]
     fn the_connecting_line_is_vanillas() {
@@ -1260,6 +1271,7 @@ mod tests {
 
     #[test]
     fn direct_login_preserves_hostname_and_negotiates_brand() {
+        let (root, data) = empty_item_data("brand");
         for server_brand in [
             b"\x07vanilla".as_slice(),
             b"\x07horizon",
@@ -1274,7 +1286,7 @@ mod tests {
                 None,
                 cfg::ClientInformation::new(8),
                 Arc::new(Language::new()),
-                PathBuf::new(),
+                Arc::clone(&data),
             );
             let (stream, _) = listener.accept().unwrap();
             stream
@@ -1356,6 +1368,7 @@ mod tests {
             drop(server);
             drop(session);
         }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1417,10 +1430,7 @@ mod tests {
         let (c, _, _) = connect_tcp("127.0.0.1", port, true, Duration::from_millis(300)).unwrap();
         let _server = held.join().unwrap().unwrap();
         let (mut reader, writer) = c.split();
-        let root = std::env::temp_dir().join(format!("horizon-net-timeout-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join("items.json"), "{}").unwrap();
-        let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload).unwrap();
+        let (root, data) = empty_item_data("timeout");
         let (done, result) = channel();
         std::thread::spawn(move || {
             let (send, _events) = channel();
@@ -1589,6 +1599,7 @@ mod tests {
 
     #[test]
     fn pings_wait_behind_teleports_but_keepalives_do_not_wait_for_the_game() {
+        let (root, data) = empty_item_data("pings");
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let (mut reader, writer) = Connection::local(client).split();
         let writer = Arc::new(Mutex::new(Some(writer)));
@@ -1603,7 +1614,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 &crate::lod_net::Inbox::default(),
-                Path::new("."),
+                &data,
             )
         });
         let mut server = Connection::local(server);
@@ -1638,10 +1649,12 @@ mod tests {
         );
         writer.lock().unwrap().take().unwrap().shutdown();
         assert!(thread.join().unwrap().is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn play_packets_wait_out_a_reconfiguration() {
+        let (root, data) = empty_item_data("reconfiguration");
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let (mut reader, writer) = Connection::local(client).split();
         let (send, events) = channel();
@@ -1668,7 +1681,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 &crate::lod_net::Inbox::default(),
-                Path::new("."),
+                &data,
             )
         });
         let mut server = Connection::local(server);
@@ -1697,10 +1710,12 @@ mod tests {
         assert_eq!(play::Serverbound::decode(id, &body).unwrap(), tick_end);
         drop(session);
         assert!(thread.join().unwrap().is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn play_answers_cookie_requests_from_stored_cookies_and_follows_transfers() {
+        let (root, data) = empty_item_data("cookies");
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let (mut reader, writer) = Connection::local(client).split();
         let writer = Arc::new(Mutex::new(Some(writer)));
@@ -1716,7 +1731,7 @@ mod tests {
                 &send,
                 &thread_cookies,
                 &crate::lod_net::Inbox::default(),
-                Path::new("."),
+                &data,
             )
         });
         let mut server = Connection::local(server);
@@ -1761,6 +1776,7 @@ mod tests {
             cookies.lock().unwrap().get("proxy:session"),
             Some(&vec![1, 2, 3])
         );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1786,6 +1802,7 @@ mod tests {
     /// client login listener by test_lan_auth_parity.py.
     #[test]
     fn lan_login_continues_after_authentication_failure() {
+        let (root, data) = empty_item_data("lan-auth");
         for lan in [true, false] {
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let port = listener.local_addr().unwrap().port();
@@ -1852,7 +1869,7 @@ mod tests {
                 None,
                 cfg::ClientInformation::new(8),
                 Arc::new(lang),
-                PathBuf::new(),
+                Arc::clone(&data),
             );
             let reason = loop {
                 if let Event::Disconnected { reason, .. } = session
@@ -1878,5 +1895,6 @@ mod tests {
                 !goes_on
             );
         }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
