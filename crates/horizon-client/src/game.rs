@@ -837,7 +837,7 @@ impl Options {
         Ok(Some(o))
     }
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Screen {
     Playing,
     GameModeSwitcher,
@@ -6052,7 +6052,7 @@ impl Game<'_> {
             ));
             return;
         }
-        self.screen = Screen::Inventory;
+        self.set_screen(Screen::Inventory);
         self.capture(false);
         self.right = false;
     }
@@ -7888,7 +7888,7 @@ impl Game<'_> {
         player.glider = self.glider_worn();
         // A saved death already dropped inventory/XP and counted the death.
         if player.health.dead_or_dying() {
-            self.screen = Screen::Dead;
+            self.set_screen(Screen::Dead);
             self.death_focus = None;
             self.ui.died_at = Some(Instant::now());
             self.ui.death_text = None;
@@ -7960,7 +7960,7 @@ impl Game<'_> {
                 if let Some(c) = self.carried.take() {
                     let _ = self.give(c);
                 }
-                self.screen = Screen::Inventory;
+                self.set_screen(Screen::Inventory);
             }
         }
         if self.remote.is_some() {
@@ -8458,7 +8458,7 @@ impl Game<'_> {
             && !self.dialog_open()
         {
             self.pause_focus = None;
-            self.screen = Screen::Paused;
+            self.set_screen(Screen::Paused);
         }
     }
     /// `KeyMapping.setAll`: every key physically held is held again, as the
@@ -12599,7 +12599,7 @@ impl Game<'_> {
             }
             Action::DataPacks { dir, selected } => {
                 self.keys.clear();
-                self.screen = Screen::Options;
+                self.set_screen(Screen::Options);
                 self.options_from_title = true;
                 let resources = self.vanilla_root();
                 self.ui.options.open_data_packs(dir, selected, resources);
@@ -12852,7 +12852,7 @@ impl Game<'_> {
         };
         self.carried = None;
         self.using = None;
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         self.title = None;
         self.clear_lod();
         self.pending_uploads.clear();
@@ -13094,7 +13094,7 @@ impl Game<'_> {
         self.sleep_timer = 0;
         self.player_beds.clear();
         self.clear_entities();
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         self.clear_lod();
         self.pending_uploads.clear();
         if let Some(r) = self.renderer.as_mut() {
@@ -16941,20 +16941,20 @@ impl Game<'_> {
                 Screen::Options => self.options_key(KeyCode::Escape, None)?,
                 Screen::Playing => {
                     self.pause_focus = None;
-                    self.screen = Screen::Paused;
+                    self.set_screen(Screen::Paused);
                     self.pause_menu = true;
                     self.capture(false);
                 }
                 Screen::Creative => {
                     self.pad_clear_focus();
                     self.carried = None;
-                    self.screen = Screen::Playing;
+                    self.set_screen(Screen::Playing);
                     self.capture(true);
                 }
                 Screen::Paused | Screen::Inventory => {
                     self.close_container();
                     self.pause_focus = None;
-                    self.screen = Screen::Playing;
+                    self.set_screen(Screen::Playing);
                     self.pause_menu = true;
                     self.capture(true);
                 }
@@ -16964,13 +16964,13 @@ impl Game<'_> {
                         self.death_confirm_answer(false)?;
                     }
                 }
-                Screen::Stats | Screen::Friends => self.screen = Screen::Paused,
+                Screen::Stats | Screen::Friends => self.set_screen(Screen::Paused),
                 Screen::Social => self.close_social(),
-                Screen::ServerLinks => self.screen = Screen::Paused,
+                Screen::ServerLinks => self.set_screen(Screen::Paused),
                 // ConfirmScreen.keyPressed: Escape answers no; both return to
                 // the Server Links screen they came from.
-                Screen::ConfirmLink => self.screen = self.confirm_link_back(),
-                Screen::DialogWarning => self.screen = Screen::ServerLinks,
+                Screen::ConfirmLink => self.set_screen(self.confirm_link_back()),
+                Screen::DialogWarning => self.set_screen(Screen::ServerLinks),
                 Screen::Advancements => self.close_advancements(),
                 Screen::WorldOptions => self.world_options_escape(),
                 Screen::CommandBlock => self.close_command_block(),
@@ -17052,12 +17052,12 @@ impl Game<'_> {
                             self.persist_tutorial_step();
                         }
                         if self.creative {
-                            self.screen = Screen::Creative;
+                            self.set_screen(Screen::Creative);
                             self.refresh_creative_tabs();
                             self.creative_screen.reopen();
                             self.refresh_saved_hotbars();
                         } else {
-                            self.screen = Screen::Inventory;
+                            self.set_screen(Screen::Inventory);
                         }
                         self.capture(false);
                     }
@@ -17067,12 +17067,12 @@ impl Game<'_> {
                     if let Some(c) = self.carried.take() {
                         let _ = self.give(c);
                     }
-                    self.screen = Screen::Playing;
+                    self.set_screen(Screen::Playing);
                     self.capture(true);
                 }
                 Screen::Inventory => {
                     self.close_container();
-                    self.screen = Screen::Playing;
+                    self.set_screen(Screen::Playing);
                     self.capture(true);
                 }
                 _ => {}

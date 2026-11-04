@@ -44,7 +44,7 @@ impl Game<'_> {
             frame: Instant::now(),
         });
         self.keys.clear();
-        self.screen = Screen::Win;
+        self.set_screen(Screen::Win);
         self.capture(false);
     }
     /// Stop the scroll `scroll` pixels in (`horizon-ctl credits ... SCROLL`).
@@ -117,13 +117,13 @@ impl Game<'_> {
         self.music
             .stop_playing_music(&credits, None, &mut self.audio);
         match win.finish {
-            Finish::Options => self.screen = Screen::Options,
-            Finish::Closed if self.title.is_some() => self.screen = Screen::Playing,
+            Finish::Options => self.set_screen(Screen::Options),
+            Finish::Closed if self.title.is_some() => self.set_screen(Screen::Playing),
             Finish::RemoteRespawn | Finish::Closed => {
                 if win.finish == Finish::RemoteRespawn {
                     self.remote_respawn();
                 }
-                self.screen = Screen::Playing;
+                self.set_screen(Screen::Playing);
                 self.capture(true);
             }
         }

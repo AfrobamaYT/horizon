@@ -224,7 +224,7 @@ impl Game<'_> {
                     super::packs::open_folder(std::path::Path::new(url));
                 }
             }
-            Action::Done => self.screen = super::Screen::Paused,
+            Action::Done => self.set_screen(super::Screen::Paused),
         }
     }
 

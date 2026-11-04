@@ -28,7 +28,7 @@ impl Game<'_> {
         self.craft_size = 2;
         self.container = None;
         self.station = Some(Station::new_kind(kind, pos));
-        self.screen = Screen::Inventory;
+        self.set_screen(Screen::Inventory);
         self.capture(false);
     }
 

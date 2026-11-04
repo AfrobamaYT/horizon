@@ -258,7 +258,7 @@ impl Split<'_> {
         self.turn(i + 1);
         let guest = &mut self.guests[i];
         // Its profile page closes as it goes in.
-        guest.game.screen = crate::game::Screen::Playing;
+        guest.game.set_screen(crate::game::Screen::Playing);
         settings.extras.agent_control &= guest.game.options.control.is_some();
         guest.game.settings = settings;
         guest.game.options.player_name = Some(name.clone());

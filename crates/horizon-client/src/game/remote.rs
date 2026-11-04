@@ -961,7 +961,7 @@ impl Game<'_> {
         self.build_registries();
         self.ui.registries.permission = 0;
         self.ui.chat.clear();
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         self.title = None;
         self.dim = Dim::Overworld;
         self.clear_lod();
@@ -1221,7 +1221,7 @@ impl Game<'_> {
         self.score.board = Default::default();
         self.tab_list = Default::default();
         self.border = Default::default();
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         self.container = None;
         self.clear_lod();
         self.pending_uploads.clear();
@@ -1909,7 +1909,7 @@ impl Game<'_> {
                         remote.session.reset_far_terrain();
                     }
                     self.player = None;
-                    self.screen = Screen::Playing;
+                    self.set_screen(Screen::Playing);
                     self.capture(false);
                     // clearClientLevel drops the client level now, so its
                     // unload comes before the configuration screen, not
@@ -2121,7 +2121,7 @@ impl Game<'_> {
         // The replacement player starts with its inventory menu, even if the
         // server switched levels without closing the previous container.
         self.remote_close_local();
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         let Some(r) = self.remote.as_ref() else {
             return;
         };
@@ -3226,7 +3226,7 @@ impl Game<'_> {
                     let (music, _) = self.situational_music();
                     self.music.stop_playing(music.as_ref(), &mut self.audio);
                 }
-                self.screen = Screen::Playing;
+                self.set_screen(Screen::Playing);
                 if let Some(r) = self.remote.as_mut() {
                     r.death_message = None;
                     r.health = (20.0, 20, 5.0);
@@ -4247,7 +4247,7 @@ impl Game<'_> {
                 if p.health <= 0.0 && shown && self.screen != Screen::Dead && self.player.is_some()
                 {
                     self.close_dialogs();
-                    self.screen = Screen::Dead;
+                    self.set_screen(Screen::Dead);
                     self.ui.death_time = 0;
                     self.ui.death_confirm = None;
                     self.capture(false);
@@ -4268,7 +4268,7 @@ impl Game<'_> {
                 if me && self.screen != Screen::Dead && self.player.is_some() {
                     if self.remote.as_ref().is_none_or(|r| r.show_death_screen) {
                         self.close_dialogs();
-                        self.screen = Screen::Dead;
+                        self.set_screen(Screen::Dead);
                         self.ui.death_time = 0;
                         self.ui.death_confirm = None;
                         self.capture(false);
@@ -4543,7 +4543,7 @@ impl Game<'_> {
                 }
                 if !self.remote_lectern_closed() && (self.screen == Screen::Inventory || dialog) {
                     self.remote_close_local();
-                    self.screen = Screen::Playing;
+                    self.set_screen(Screen::Playing);
                     self.capture(true);
                 }
             }
@@ -9114,7 +9114,7 @@ impl Game<'_> {
             if (key == KeyCode::KeyE || key == KeyCode::Escape) && self.screen == Screen::Inventory
             {
                 self.remote_close_container();
-                self.screen = Screen::Playing;
+                self.set_screen(Screen::Playing);
                 self.capture(true);
                 return Ok(true);
             }
@@ -9156,12 +9156,12 @@ impl Game<'_> {
                 }
                 self.recipe_ui.reset_screen();
                 if self.creative {
-                    self.screen = Screen::Creative;
+                    self.set_screen(Screen::Creative);
                     self.refresh_creative_tabs();
                     self.creative_screen.reopen();
                     self.refresh_saved_hotbars();
                 } else {
-                    self.screen = Screen::Inventory;
+                    self.set_screen(Screen::Inventory);
                 }
                 self.craft_size = 2;
                 self.capture(false);
@@ -9541,7 +9541,7 @@ impl Game<'_> {
     fn remote_reject_container(&mut self, container: i32) {
         self.remote_close_local();
         if self.screen == Screen::Inventory {
-            self.screen = Screen::Playing;
+            self.set_screen(Screen::Playing);
             self.capture(true);
         }
         self.send(S::ContainerClose(play::ContainerClose { container }));
@@ -9775,7 +9775,7 @@ impl Game<'_> {
                 return;
             }
         }
-        self.screen = Screen::Inventory;
+        self.set_screen(Screen::Inventory);
         self.capture(false);
     }
     /// `ClientPacketListener.handleMountScreenOpen`: a horse's or llama's
@@ -10845,7 +10845,7 @@ mod tests {
                 let remote = game.remote.as_mut().unwrap();
                 remote.menu.set(Some((7, "minecraft:generic_9x3".into())));
                 let generation = remote.menu.generation;
-                game.screen = Screen::Inventory;
+                game.set_screen(Screen::Inventory);
                 game.carried = Some(ItemStack::new("minecraft:stone", 1));
                 game.handle_packet(packet).unwrap();
                 let remote = game.remote.as_ref().unwrap();

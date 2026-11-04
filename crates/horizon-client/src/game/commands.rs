@@ -1245,7 +1245,7 @@ impl Game<'_> {
         }
         self.set_mode(mode);
         if self.screen == Screen::Inventory && (self.creative || self.spectator()) {
-            self.screen = Screen::Playing;
+            self.set_screen(Screen::Playing);
         }
         true
     }
