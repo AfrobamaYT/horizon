@@ -1044,7 +1044,6 @@
     "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml에 패키지 이름이 없습니다.",
     "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod}: Cargo.toml에 horizon-mod-api 의존성이 없습니다.",
     "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod}: Cargo.toml이 게임에 의존합니다 ({key}). 모드는 horizon-mod-api에만 의존합니다.",
-    "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client가 {fields}을(를) 요청합니다. 서버 빌드는 헤드리스이며 horizon-client 기능은 런처가 관리합니다. features를 제거하고 default-features = false를 사용하거나 생략하세요.",
     "{mod}: {error}": "{mod}: {error}",
     "{mode} · stopped": "{mode} · 중지됨",
     "{online} of {max}": "{online}/{max}",
