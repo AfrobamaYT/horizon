@@ -109,7 +109,10 @@ pub fn walk_target_value(m: &Mob, w: &MobWorld, p: [i32; 3]) -> f32 {
 /// `StriderGoToLavaGoal.isValidTarget`: lava with room to stand above.
 fn lava_target(w: &MobWorld, p: [i32; 3]) -> bool {
     w.block_name(p[0], p[1], p[2]) == "minecraft:lava"
-        && w.data.pathfindable(w.world.block(p[0], p[1] + 1, p[2]), PathComputationType::Land)
+        && w.data.pathfindable(
+            w.world.block(p[0], p[1] + 1, p[2]),
+            PathComputationType::Land,
+        )
 }
 /// `Strider.StriderGoToLavaGoal`: a `MoveToBlockGoal` for the nearest lava,
 /// aiming at the lava block itself rather than the one above.

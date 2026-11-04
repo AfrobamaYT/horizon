@@ -27,6 +27,8 @@ mod tests {
         #[derive(Clone, Copy)]
         pub(super) struct LevelDimension;
         pub(super) struct NeighbourUpdate;
+        #[derive(Clone, Copy)]
+        pub(super) struct PathComputationType;
         pub(super) struct GlobalPos;
         pub(super) struct Ticks;
         pub(super) trait LevelHost {

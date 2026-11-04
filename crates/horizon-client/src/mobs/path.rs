@@ -677,7 +677,9 @@ impl<'a, 'w> Finder<'a, 'w> {
                     start_y = y;
                     y -= 1;
                     let s = self.w.world.block(bx, y, bz);
-                    if !self.w.facts.is_air(s) && !self.w.data.pathfindable(s, PathComputationType::Land) {
+                    if !self.w.facts.is_air(s)
+                        && !self.w.data.pathfindable(s, PathComputationType::Land)
+                    {
                         break;
                     }
                 }

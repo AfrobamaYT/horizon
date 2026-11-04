@@ -25,8 +25,8 @@ use horizon_client::mod_api::{
     self, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef,
     NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
     NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
-    NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase,
-    TicketController, ToolUse, WorldPhase,
+    NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening,
+    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,

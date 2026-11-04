@@ -4,11 +4,16 @@
 //! pathfindability, spawn-surface predicates, collision tops, each entity
 //! type's spawn placement and the client's keyframe animation definitions.
 use super::keyframes::Animation;
-use horizon_world::registry::BlockStateId;
 use super::path::PathType;
 use crate::blocks::{BlockFacts, Fluid};
+use horizon_world::registry::BlockStateId;
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::Path, sync::atomic::{AtomicU8, Ordering}};
+use std::{
+    collections::HashMap,
+    fs,
+    path::Path,
+    sync::atomic::{AtomicU8, Ordering},
+};
 
 const LAND: u16 = 1;
 const WATER: u16 = 2;
@@ -61,14 +66,11 @@ pub enum Placement {
     InLava,
     NoRestrictions,
 }
-fn no_overrides(states: &[StateData]) -> Vec<AtomicU8> {
-    states.iter().map(|_| AtomicU8::new(0)).collect()
-}
 pub struct MobData {
     pub states: Vec<StateData>,
     /// Each state's `isPathfindable` answers a mod part gave (see [`MobData::set_pathfindable`]),
     /// by state: [`OVERRIDDEN`] plus one bit per [`PathComputationType`]. Zero for the rest.
-    pathfindable_overrides: Vec<AtomicU8>,
+    pub pathfindable_overrides: std::sync::OnceLock<Vec<AtomicU8>>,
     pub placements: HashMap<String, Placement>,
     /// Each entity type's `SpawnPlacements.getHeightmapType`.
     pub heightmaps: HashMap<String, String>,
@@ -140,7 +142,8 @@ impl MobData {
     pub fn pathfindable(&self, state: BlockStateId, kind: PathComputationType) -> bool {
         let given = self
             .pathfindable_overrides
-            .get(state.0 as usize)
+            .get()
+            .and_then(|table| table.get(state.0 as usize))
             .map_or(0, |slot| slot.load(Ordering::Relaxed));
         if given & OVERRIDDEN != 0 {
             u16::from(given) & kind.bit() != 0
@@ -156,7 +159,10 @@ impl MobData {
         asked: bool,
         answer: impl Fn(BlockStateId, PathComputationType, bool) -> bool,
     ) {
-        for (i, slot) in self.pathfindable_overrides.iter().enumerate() {
+        let table = self
+            .pathfindable_overrides
+            .get_or_init(|| self.states.iter().map(|_| AtomicU8::new(0)).collect());
+        for (i, slot) in table.iter().enumerate() {
             let state = BlockStateId(i as u32);
             let given = if asked {
                 PathComputationType::ALL
@@ -178,7 +184,7 @@ impl MobData {
         self.biome_tags.get(tag).is_some_and(|s| s.contains(biome))
     }
     fn from_json(v: &Value) -> Self {
-        let states: Vec<StateData> = v["states"]
+        let states = v["states"]
             .as_array()
             .into_iter()
             .flatten()
@@ -215,7 +221,7 @@ impl MobData {
             .map(|(k, a)| (k.clone(), Animation::parse(a)))
             .collect();
         Self {
-            pathfindable_overrides: no_overrides(&states),
+            pathfindable_overrides: Default::default(),
             states,
             placements,
             heightmaps,
@@ -233,7 +239,7 @@ impl MobData {
     }
     /// Without the export, approximate path types from the gameplay facts.
     pub fn fallback(facts: &BlockFacts) -> Self {
-        let states: Vec<StateData> = facts
+        let states = facts
             .states
             .iter()
             .map(|f| {
@@ -277,7 +283,7 @@ impl MobData {
             })
             .collect();
         Self {
-            pathfindable_overrides: no_overrides(&states),
+            pathfindable_overrides: Default::default(),
             states,
             placements: HashMap::new(),
             heightmaps: HashMap::new(),

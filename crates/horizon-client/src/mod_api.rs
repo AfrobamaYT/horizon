@@ -66,6 +66,7 @@ pub use crate::items::ItemStack;
 pub use crate::menu::{LogicalSide, StackedOnOther};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
+pub use crate::mobs::data::PathComputationType;
 pub use crate::mod_chunk_tickets::TicketOwner as NativeTicketOwner;
 pub use crate::mod_chunk_tickets::{TicketSet, TicketValidation};
 pub use crate::music::{Music, MusicLayer};
@@ -78,7 +79,6 @@ pub use horizon_core::{
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
-pub use crate::mobs::data::PathComputationType;
 pub use horizon_items::items::TagRegistry;
 pub use horizon_world::consumable::UseAnimation;
 pub use horizon_world::player_inventory::EquipmentSlot;
