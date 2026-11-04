@@ -1,0 +1,14 @@
+//! The `block_drops` hooks and helpers: declarations the mod API generator reads (see `hooks/mod.rs`).
+
+pub trait Hooks {
+    /// NeoForge's `BlockDropsEvent`: a block `state` broke at `pos` and `Block.dropResources` has built the item entities `drops` it will spawn, but nothing is in the world yet. `breaker` is the breaking player's UUID (none for a break the level makes: a piston, water, a neighbour update, `/setblock destroy`) and `tool` the stack they used (none when no tool). `drops` is the list `Block.popResource` built: each stack with the position, motion and pickup delay its item entity will have, drawn before the event as vanilla draws them, so the level random's order does not depend on whether a mod listens. Edit the list (take out, change or add drops; empty stacks don't spawn) or `experience`, the points `spawnAfterBreak` would award at the block's centre (ores, sculk, spawners; silk touch has already zeroed it, as NeoForge's description says, "the true value, after enchantments"). Set `cancel` and nothing spawns: no drops, no experience, and none of `spawnAfterBreak`'s other effects (an infested block's silverfish); a bee nest's bees are `playerDestroy`'s, not `spawnAfterBreak`'s, and still come out. With the `block_drops` rule off the list and the experience are emptied after the event. It fires on the player's break and on every level-side `Block.dropResources` (a piston breaking a block, water washing one away, a removed support); it does not fire for explosion drops, a mob's block break, a dispenser or a block's own loot-table drop through another path, and a level-side break is not asked `loot_drops`. It runs inside the level's write, so the level host reads blocks and draws the level's random in vanilla's order and writes nothing. Authoritative servers only. Replaces `block_exp`, whose catalog row named no NeoForge event (`none`) and fired only on the level-side path: the amount is `experience` here. Diverges from upstream: `block_exp` is removed into this hook.
+    #[hook(
+        side = "server",
+        contract = "cancel",
+        out = "cancel",
+        neoforge = "BlockDropsEvent",
+        cancellable = true,
+        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_drops"
+    )]
+    fn block_drops();
+}
