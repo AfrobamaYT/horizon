@@ -2452,9 +2452,11 @@ impl Game<'_> {
         if display.shows("minecraft:attribute_modifiers") {
             // The item's own modifiers, then its enchantments' for each slot
             // group (`ItemStack.forEachModifier`).
-            let mut modifiers = stack
-                .attribute_modifiers_or(item_info.map_or(&[], |i| &i.modifiers))
-                .into_owned();
+            let mut modifiers = horizon_client::item_attributes::attribute_modifiers_or(
+                stack,
+                item_info.map_or(&[], |i| &i.modifiers),
+            )
+            .into_owned();
             modifiers.extend(e.modifier_rows(stack));
             let base = |name: &str, default| {
                 self.player

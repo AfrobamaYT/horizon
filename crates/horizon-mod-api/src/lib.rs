@@ -46,6 +46,12 @@ pub mod health;
 pub mod hud_layout;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
+pub mod item_attributes;
+// hidden: a module of game-side types; mods use their re-exports
+#[doc(hidden)]
+pub mod enchantments;
+// hidden: a module of game-side types; mods use their re-exports
+#[doc(hidden)]
 pub mod item_tooltip;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
@@ -85,8 +91,8 @@ pub mod __private;
 mod phase;
 pub use horizon_mods::Side;
 pub use phase::{
-    DataLoadContext, DataLoadOrigin, LoadedMods, OwningLoad, PackageInfo, PackageKind,
-    RegistrationContext,
+    DataLoadContext, DataLoadOrigin, LoadedMods, LoopContext, LoopSide, OwningLoad, OwningLoop,
+    PackageInfo, PackageKind, RegistrationContext,
 };
 mod config_files;
 pub use config_files::{
@@ -123,7 +129,7 @@ pub use crate::biome::{BiomeColors, SpawnEntry};
 pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
-pub use crate::crafting::{Ingredient, RecipeFile};
+pub use crate::crafting::{Ingredient, RecipeFile, RecipePropertyAddition};
 pub use crate::extras::Corner;
 pub use crate::extras_hud::Corners;
 pub use crate::first_person::Hand;
@@ -163,6 +169,28 @@ pub use horizon_client_core::text::Text;
 #[horizon_mod_api_macros::wasm(via = (u64, Option<f64>))]
 pub use horizon_core::random::LegacyRandom;
 pub use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
+/// The registry facts a recipe viewer needs for an enchantment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct EnchantmentInfo {
+    /// Registry name, including namespace.
+    pub id: String,
+    /// Largest supported level.
+    pub max_level: u32,
+    /// Whether the enchantment is in the curse tag.
+    pub curse: bool,
+}
+impl EnchantmentInfo {
+    /// Construct registry facts for an enchantment.
+    pub fn new(id: String, max_level: u32, curse: bool) -> Self {
+        Self {
+            id,
+            max_level,
+            curse,
+        }
+    }
+}
+
 #[horizon_mod_api_macros::wasm(via = horizon_world::nbt::Tag)]
 pub use horizon_items::item_data::StackData;
 #[horizon_mod_api_macros::wasm(via = horizon_world::nbt::Tag)]
@@ -937,7 +965,6 @@ pub enum NativeAuthority {
 }
 
 /// Supported vanilla `Block.UPDATE_*` flags for a level block write.
-/// Horizon currently sends all writes to clients regardless of client flags.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct NativeBlockUpdateFlags(i32);
@@ -947,6 +974,10 @@ impl NativeBlockUpdateFlags {
     pub const NONE: Self = Self(0);
     /// Notify neighboring blocks.
     pub const NEIGHBORS: Self = Self(1);
+    /// Send the block update to clients.
+    pub const CLIENTS: Self = Self(2);
+    /// Suppress the client-side block update notification.
+    pub const INVISIBLE: Self = Self(4);
     /// Skip neighbor shape updates.
     pub const KNOWN_SHAPE: Self = Self(16);
     /// Suppress drops caused by neighbor shape updates.
@@ -1108,19 +1139,234 @@ pub enum ModifierLifetime {
     Permanent,
 }
 
+/// The slots an item's attribute modifier applies in (vanilla's
+/// `EquipmentSlotGroup`).
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EquipmentSlotGroup {
+    /// `any`: every slot.
+    Any,
+    /// `mainhand`.
+    MainHand,
+    /// `offhand`.
+    OffHand,
+    /// `hand`: either hand.
+    Hand,
+    /// `feet`.
+    Feet,
+    /// `legs`.
+    Legs,
+    /// `chest`.
+    Chest,
+    /// `head`.
+    Head,
+    /// `armor`: feet, legs, chest, head and body.
+    Armor,
+    /// `body`: an animal's armor slot.
+    Body,
+    /// `saddle`.
+    Saddle,
+}
+
+/// One attribute modifier an item stack grants (vanilla's
+/// `ItemAttributeModifiers.Entry`): the attribute (`minecraft:armor`), the
+/// modifier, and the slots it applies in.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ItemAttributeModifier {
+    /// The attribute's id.
+    pub attribute: Identifier,
+    /// The modifier.
+    pub modifier: AttributeModifier,
+    /// The slots it applies in.
+    pub slot: EquipmentSlotGroup,
+}
+
+impl ItemAttributeModifier {
+    /// `modifier` on `attribute`, in the slots of `slot`.
+    pub fn new(
+        attribute: Identifier,
+        modifier: AttributeModifier,
+        slot: EquipmentSlotGroup,
+    ) -> Self {
+        Self {
+            attribute,
+            modifier,
+            slot,
+        }
+    }
+}
+
+/// The attribute modifiers of one item stack, as `item_attribute_modifier`
+/// edits them (`ItemAttributeModifierEvent`'s list). It starts as the
+/// stack's own `minecraft:attribute_modifiers`, or its item's, in order.
+// exhaustive: its fields are private, so mods only edit it through its methods
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ItemAttributeModifiers {
+    entries: Vec<ItemAttributeModifier>,
+    changed: bool,
+}
+
+impl ItemAttributeModifiers {
+    /// The modifiers, in order.
+    pub fn iter(&self) -> std::slice::Iter<'_, ItemAttributeModifier> {
+        self.entries.iter()
+    }
+    /// How many modifiers there are.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+    /// Whether there are none.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+    /// `addModifier`: adds `modifier` on `attribute` in the slots of `slot`,
+    /// unless `attribute` already has a modifier with its id. Whether it
+    /// was added.
+    pub fn add(
+        &mut self,
+        attribute: Identifier,
+        modifier: AttributeModifier,
+        slot: EquipmentSlotGroup,
+    ) -> bool {
+        if self.find(&attribute, &modifier.id).is_some() {
+            return false;
+        }
+        self.entries
+            .push(ItemAttributeModifier::new(attribute, modifier, slot));
+        self.changed = true;
+        true
+    }
+    /// `replaceModifier`: puts `modifier` on `attribute` in the slots of
+    /// `slot`, in place of the one with its id, or at the end.
+    pub fn replace(
+        &mut self,
+        attribute: Identifier,
+        modifier: AttributeModifier,
+        slot: EquipmentSlotGroup,
+    ) {
+        let entry = ItemAttributeModifier::new(attribute, modifier, slot);
+        match self.find(&entry.attribute, &entry.modifier.id) {
+            Some(i) => self.entries[i] = entry,
+            None => self.entries.push(entry),
+        }
+        self.changed = true;
+    }
+    /// `removeModifier`: removes the modifier `id` of `attribute`. Whether
+    /// there was one.
+    pub fn remove(&mut self, attribute: &Identifier, id: &Identifier) -> bool {
+        let Some(i) = self.find(attribute, id) else {
+            return false;
+        };
+        self.entries.remove(i);
+        self.changed = true;
+        true
+    }
+    /// `removeIf`: keeps only the modifiers `keep` accepts. Whether any went.
+    pub fn retain(&mut self, mut keep: impl FnMut(&ItemAttributeModifier) -> bool) -> bool {
+        let len = self.entries.len();
+        self.entries.retain(|entry| keep(entry));
+        let removed = self.entries.len() != len;
+        self.changed |= removed;
+        removed
+    }
+    /// `removeAllModifiersFor`: removes every modifier of `attribute`.
+    /// Whether any went.
+    pub fn remove_all_for(&mut self, attribute: &Identifier) -> bool {
+        self.retain(|entry| entry.attribute != *attribute)
+    }
+    /// `clearModifiers`: removes every modifier.
+    pub fn clear(&mut self) {
+        self.changed |= !self.entries.is_empty();
+        self.entries.clear();
+    }
+    fn find(&self, attribute: &Identifier, id: &Identifier) -> Option<usize> {
+        self.entries
+            .iter()
+            .position(|e| e.attribute == *attribute && e.modifier.id == *id)
+    }
+}
+
+/// The enchantments `get_enchantment_level` (`GetEnchantmentLevelEvent`)
+/// hands a mod: NeoForge's `ItemEnchantments.Mutable`, each enchantment's id
+/// (`minecraft:sharpness`) with its level, in order. Private fields, edited
+/// through methods, so the game knows whether a mod changed them.
+// exhaustive: its fields are private, so mods only edit it through its methods
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ItemEnchantments {
+    entries: Vec<(Identifier, u32)>,
+    changed: bool,
+}
+
+impl ItemEnchantments {
+    /// The highest level an enchantment can have (`ItemEnchantments.MAX_LEVEL`).
+    pub const MAX_LEVEL: u32 = 255;
+
+    /// The enchantments and their levels, in order (`keySet` and `getLevel`).
+    pub fn iter(&self) -> impl Iterator<Item = (&Identifier, u32)> {
+        self.entries.iter().map(|(id, level)| (id, *level))
+    }
+    /// How many enchantments there are.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+    /// Whether there are none.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+    /// `getLevel`: `enchantment`'s level, 0 when it isn't there.
+    pub fn level(&self, enchantment: &Identifier) -> u32 {
+        self.find(enchantment).map_or(0, |i| self.entries[i].1)
+    }
+    /// `set`: gives `enchantment` `level`, at most [`Self::MAX_LEVEL`]; 0
+    /// removes it.
+    pub fn set(&mut self, enchantment: Identifier, level: u32) {
+        let level = level.min(Self::MAX_LEVEL);
+        match (self.find(&enchantment), level) {
+            (Some(i), 0) => {
+                self.entries.remove(i);
+            }
+            (Some(i), _) if self.entries[i].1 == level => return,
+            (Some(i), _) => self.entries[i].1 = level,
+            (None, 0) => return,
+            (None, _) => self.entries.push((enchantment, level)),
+        }
+        self.changed = true;
+    }
+    /// `upgrade`: raises `enchantment` to `level` (at most
+    /// [`Self::MAX_LEVEL`]) when that is higher than its own; 0 does nothing.
+    pub fn upgrade(&mut self, enchantment: Identifier, level: u32) {
+        if level > self.level(&enchantment) {
+            self.set(enchantment, level);
+        }
+    }
+    /// `removeIf`: keeps only the enchantments `keep` accepts. Whether any
+    /// went.
+    pub fn retain(&mut self, mut keep: impl FnMut(&Identifier, u32) -> bool) -> bool {
+        let len = self.entries.len();
+        self.entries.retain(|(id, level)| keep(id, *level));
+        let removed = self.entries.len() != len;
+        self.changed |= removed;
+        removed
+    }
+    fn find(&self, enchantment: &Identifier) -> Option<usize> {
+        self.entries.iter().position(|(id, _)| id == enchantment)
+    }
+}
+
 /// A living entity's active effect (vanilla's `MobEffectInstance`), as
 /// [`LivingRef`] reads its effects and as `add_effect` gives one: the
-/// effect's id namespaced as the registry has it (`minecraft:speed`, a
-/// content mod's `mod:custom`; a bare vanilla id reads as `minecraft:`'s),
+/// effect's id, an [`Identifier`] namespaced as the registry has it
+/// (`minecraft:speed`, a content mod's `mod:custom`),
 /// the ticks left (-1 is infinite), the amplifier from 0, and the flags a
 /// beacon-style effect carries: `ambient` (an ambient one gives no
 /// particles) and `visible` (whether its particles show). Horizon keeps no
 /// separate show-icon flag: the icon always shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeActiveEffect {
     /// The effect's namespaced id.
-    pub id: &'static str,
+    pub id: Identifier,
     /// The ticks left; -1 is infinite.
     pub duration: i32,
     /// The amplifier, from 0.
@@ -1134,7 +1380,7 @@ pub struct NativeActiveEffect {
 impl NativeActiveEffect {
     /// Construct an effect with its duration, amplifier and visual flags.
     pub fn new(
-        id: &'static str,
+        id: Identifier,
         duration: i32,
         amplifier: i32,
         ambient: bool,
@@ -3059,6 +3305,37 @@ pub enum BonemealSource {
     Mob,
 }
 
+/// One block a placement writes (`entity_place`'s `Placement::Multi`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BlockPlacement {
+    /// Where the block goes.
+    pub pos: BlockPos,
+    /// The state it is placed in.
+    pub state: BlockStateId,
+}
+
+impl BlockPlacement {
+    /// Create a placement for the game.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn new(pos: BlockPos, state: BlockStateId) -> Self {
+        Self { pos, state }
+    }
+}
+
+/// What an `entity_place` writes: one block, or the blocks of a multi-block
+/// placement (`EntityMultiPlaceEvent`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Placement {
+    /// The placed block alone.
+    Single,
+    /// Every block the placement writes, the primary block first: a bed's
+    /// foot and head, a door's halves, a tall plant's two halves.
+    Multi(Vec<BlockPlacement>),
+}
+
 /// A player's right click on a block, shared by the block's use behaviours
 /// and `right_click_block` (`PlayerInteractEvent.RightClickBlock`). The
 /// event hears it once per hand on the clicking client and on the server.
@@ -3259,6 +3536,14 @@ pub trait LevelHost {
     fn state_block(&self, _state: BlockStateId) -> Option<&str> {
         unimplemented!("LevelHost::state_block")
     }
+    /// Parse a block name and properties as `BlockStateParser.parseForBlock`; None for invalid input or unavailable context.
+    fn block_state_id(&self, _name: &str) -> Option<BlockStateId> {
+        unimplemented!("LevelHost::block_state_id")
+    }
+    /// The block's default state (`Block.defaultBlockState`), or None for an unknown block.
+    fn block_state_default(&self, _block: &str) -> Option<BlockStateId> {
+        unimplemented!("LevelHost::block_state_default")
+    }
     /// The full block state name and properties, as `BlockStateParser.serialize`; None for an unknown id.
     fn state_string(&self, _state: BlockStateId) -> Option<String> {
         unimplemented!("LevelHost::state_string")
@@ -3271,14 +3556,12 @@ pub trait LevelHost {
     fn height(&self) -> i32 {
         unimplemented!("LevelHost::height")
     }
-    /// `BlockState.is(TagKey)`: the block of `state` is in the block tag `tag` (`minecraft:logs`
-    /// or `logs`, no `#`), over the world's merged tags, its data packs and content mods
-    /// included. False for an unknown tag or state. None on a client level, whose tags are not
-    /// the server's, as `Host::block_state_in_tag` is.
-    fn block_state_in_tag(&self, _state: BlockStateId, _tag: &str) -> Option<bool> {
-        unimplemented!("LevelHost::block_state_in_tag")
+    /// `BlockState.is(TagKey)`: whether the block registry name is in the merged block tag.
+    /// Unknown names and tags return false; unavailable authoritative tags return None.
+    fn block_in_tag(&self, _block: &str, _tag: &str) -> Option<bool> {
+        unimplemented!("LevelHost::block_in_tag")
     }
-    /// `ItemStack.is(TagKey)`: `stack` is in the item tag `tag`, as `block_state_in_tag` reads
+    /// `ItemStack.is(TagKey)`: `stack` is in the item tag `tag`, as `block_in_tag` reads
     /// a tag. An empty stack tests `minecraft:air`.
     fn item_stack_in_tag(&self, _stack: &ItemStack, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::item_stack_in_tag")
@@ -3293,9 +3576,8 @@ pub trait LevelHost {
     fn state_fluid_state(&self, _state: BlockStateId) -> Option<FluidState> {
         unimplemented!("LevelHost::state_fluid_state")
     }
-    /// `FluidState.is(TagKey)`: the fluid is in the fluid tag `tag` (`minecraft:water`), as
-    /// `block_state_in_tag` reads a tag. The empty fluid is in none.
-    fn fluid_in_tag(&self, _fluid: FluidState, _tag: &str) -> Option<bool> {
+    /// `FluidState.is(TagKey)`: whether the fluid registry name is in the merged fluid tag, as `block_in_tag` reads.
+    fn fluid_in_tag(&self, _fluid: &str, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::fluid_in_tag")
     }
     /// `BlockState.setValue`, through `native_state_with_property`; None if invalid.
@@ -3397,6 +3679,10 @@ pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
         _flags: NativeBlockUpdateFlags,
     ) -> bool {
         unimplemented!("LevelWriteHost::set_block")
+    }
+    /// Remove a block through `Level.removeBlock`, preserving its fluid. `moved` marks a piston move.
+    fn remove_block(&mut self, _pos: [i32; 3], _moved: bool) -> bool {
+        unimplemented!("LevelWriteHost::remove_block")
     }
     /// Change a block property through `native_set_block_property`.
     fn set_block_property(
@@ -4621,7 +4907,8 @@ pub(crate) mod built {
                 visible,
             } = v;
             Self {
-                id,
+                id: crate::Identifier::parse_namespaced(id)
+                    .expect("the game's effect ids are namespaced"),
                 duration,
                 amplifier,
                 ambient,

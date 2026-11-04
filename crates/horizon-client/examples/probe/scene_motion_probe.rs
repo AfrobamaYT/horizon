@@ -324,6 +324,8 @@ pub fn main() -> Result<()> {
                 assets: &assets,
                 collision_binding: &binding,
                 resources: &resources,
+                tag_items: None,
+                block_registries: None,
             };
             match op["mode"].as_str().unwrap() {
                 "shift" => world.player.shift_key_down = op["value"].as_bool().unwrap(),

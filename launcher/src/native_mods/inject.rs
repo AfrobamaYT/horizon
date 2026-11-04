@@ -137,7 +137,15 @@ pub(super) fn prepare(
                         ));
                     }
                 };
-                let injection = Injection::new(ident, parameters, contract);
+                let injection = Injection::new(
+                    ident,
+                    format!(
+                        "Injection at `{target}` ({kind}), from mod {}.",
+                        bundle.manifest.id
+                    ),
+                    parameters,
+                    contract,
+                );
                 let helper_path = format!("horizon-trait-injection-{index}.rs");
                 let helper_file = bundle.dir.join(&helper_path);
                 if helper_file.exists() {
@@ -218,10 +226,12 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&compiled.stderr)
         );
-        assert!(std::process::Command::new(binary)
-            .status()
-            .unwrap()
-            .success());
+        assert!(
+            std::process::Command::new(binary)
+                .status()
+                .unwrap()
+                .success()
+        );
     }
 
     #[test]
@@ -263,7 +273,28 @@ mod tests {
             &fs::read_to_string(stage_dir.join(INPUT)).unwrap(),
         )
         .unwrap();
-        assert!(syn::parse_file(&output).is_ok());
+        let file = syn::parse_file(&output).unwrap();
+        // `horizon-mod-api` denies missing docs: the generated method and every event field need one.
+        let documented = |attrs: &[syn::Attribute]| attrs.iter().any(|a| a.path().is_ident("doc"));
+        for item in &file.items {
+            match item {
+                syn::Item::Trait(hooks) if hooks.ident == "Hooks" => {
+                    for member in &hooks.items {
+                        if let syn::TraitItem::Fn(method) = member {
+                            assert!(documented(&method.attrs), "{} has no doc", method.sig.ident);
+                        }
+                    }
+                }
+                syn::Item::Struct(event) if event.ident == "InjectExampleTickEvent" => {
+                    assert!(documented(&event.attrs));
+                    assert!(event.fields.iter().all(|field| documented(&field.attrs)));
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            output.contains("Injection at `horizon_client::game::tick` (HEAD), from mod example.")
+        );
         let program = format!(
             r#"
             mod mod_api {{

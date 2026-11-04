@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "create_fluid_source",
+      "doc": "A fluid source at `pos` (`state`) is about to count towards turning\nthe flowing fluid beside it into a source (NeoForge's\n`CreateFluidSourceEvent`, `FlowingFluid.getNewLiquid`): two counted\nsources beside a block over a solid block or a source make it one.\nAsked for each horizontal neighbour source, whenever the game works\nout a block's new fluid, spread checks included: answer fast.\n`can_convert` starts as the fluid's rule (`water_source_conversion`\nor `lava_source_conversion`). Server-side.",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_create_fluid_source",
+      "side": "server",
+      "neoforge": "BlockEvent.CreateFluidSourceEvent",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

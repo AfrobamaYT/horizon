@@ -15,8 +15,20 @@ use horizon_client::{
     },
 };
 use horizon_protocol::packets::play::{AttributeModifier, AttributeSnapshot};
+use std::sync::Arc;
 
 /// `EquipmentSlotGroup.test`: whether a modifier's slot group covers a slot.
+/// For one snapshot of the mobs, each type's movement speed: its synced
+/// instance (`synced_attribute`) and the type's default base, both looked up
+/// by name. The pointers are only compared while the snapshot holds the types.
+#[derive(Default)]
+pub(super) struct SpeedByType(
+    horizon_client::fast_hash::FxHashMap<
+        *const horizon_client::mobs::MobType,
+        (Option<i32>, Option<f64>),
+    >,
+);
+
 fn slot_in_group(group: &str, slot: &str) -> bool {
     group == slot
         || group == "any"
@@ -55,7 +67,7 @@ fn gear_knockback(items: &Items, worn: &[Option<&ItemStack>; 6]) -> Vec<(f64, Op
         let Some(stack) = stack else {
             continue;
         };
-        for row in stack.attribute_modifiers(items).iter() {
+        for row in horizon_client::item_attributes::attribute_modifiers(stack, items).iter() {
             if row.attribute == "minecraft:knockback_resistance" && slot_in_group(&row.slot, slot) {
                 let op = match operation_named(&row.operation) {
                     1 => Op::AddMultipliedBase,
@@ -150,7 +162,8 @@ impl Game<'_> {
                 amount,
                 operation: op,
                 slot: group,
-            } in stack.attribute_modifiers(self.items()).iter()
+            } in
+                horizon_client::item_attributes::attribute_modifiers(stack, self.items()).iter()
             {
                 if !slot_in_group(group, slot) {
                     continue;
@@ -178,13 +191,28 @@ impl Game<'_> {
     /// `LivingEntity.removeFrost`), what finalizeSpawn set, the baby speed
     /// modifier, its effects' modifiers, its equipment's, and what
     /// `/attribute` changed.
-    pub(super) fn mob_attributes(&self, m: &Mob, out: &mut Vec<AttributeSnapshot>) {
+    pub(super) fn mob_attributes(
+        &self,
+        m: &Mob,
+        speeds: &mut SpeedByType,
+        out: &mut Vec<AttributeSnapshot>,
+    ) {
         let kind = m.kind.id.as_str();
         // Movement speed is synced for nearly every mob, and read up to three
-        // times below: looked up once per mob and tick.
-        let speed = self
-            .synced_attribute(kind, Attr::MovementSpeed.id())
-            .map(|a| (a, finalize::base_value(m, Attr::MovementSpeed)));
+        // times below: its instance and the type's default are looked up by
+        // name once per type and snapshot, its base once per mob.
+        let (synced, default) = *speeds.0.entry(Arc::as_ptr(&m.kind)).or_insert_with(|| {
+            (
+                self.synced_attribute(kind, Attr::MovementSpeed.id()),
+                finalize::default_value(m, Attr::MovementSpeed),
+            )
+        });
+        let speed = synced.map(|a| {
+            (
+                a,
+                finalize::base_value_with(m, Attr::MovementSpeed, || default),
+            )
+        });
         if let Some((a, base)) = speed {
             instance(out, a, base);
         }

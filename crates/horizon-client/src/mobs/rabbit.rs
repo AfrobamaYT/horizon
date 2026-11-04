@@ -420,7 +420,9 @@ fn jump_power(m: &Mob, block_factor: f32) -> f32 {
         .iter()
         .find(|e| e.0 == "minecraft:jump_boost")
         .map_or(0.0, |e| 0.1 * (e.2 + 1) as f32);
-    m.attrs.jump_strength as f32 * jump_scale(m) * block_factor + boost
+    let mut power = m.attrs.jump_strength as f32 * jump_scale(m) * block_factor + boost;
+    crate::motion::native_living_jump_power(m.id, &m.kind.id, &mut power);
+    power
 }
 fn apply_jump(m: &mut Mob, power: f32) {
     if power > 1.0e-5 {

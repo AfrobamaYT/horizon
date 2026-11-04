@@ -28,6 +28,8 @@ mod tests {
         pub(super) struct Direction;
         #[derive(Clone, Copy)]
         pub(super) struct LevelDimension;
+        #[derive(Clone, Copy)]
+        pub(super) struct PlayerRef;
         pub(super) struct NeighbourUpdate;
         #[derive(Clone, Copy)]
         pub(super) struct PathComputationType;
@@ -37,6 +39,12 @@ mod tests {
         pub(super) enum AttributeOperation {}
         #[derive(Clone, Copy)]
         pub(super) enum ModifierLifetime {}
+        #[derive(Clone, Copy)]
+        pub(super) enum EquipmentSlotGroup {}
+        pub(super) struct ItemAttributeModifier;
+        pub(super) struct ItemAttributeModifiers;
+        pub(super) struct ItemEnchantments;
+        pub(super) struct Identifier;
         pub(super) struct Ticks;
         pub(super) trait LevelHost {
             fn state_block(&self, _: BlockStateId) -> Option<&str> {
@@ -47,6 +55,9 @@ mod tests {
         pub(super) trait LevelRandomHost: LevelHost {}
         pub(super) trait LevelWriteHost: LevelTicksHost + LevelRandomHost {}
         pub(super) struct Compound;
+        pub(super) enum Placement {
+            Single,
+        }
         pub(super) struct LandingWrite;
         pub(super) struct Tag;
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
@@ -171,6 +182,7 @@ mod tests {
         pub(super) struct NativeConfig;
         pub(super) struct NativeConfigFile;
         pub(super) struct RecipeBookCategory;
+        pub(super) struct RecipePropertyAddition;
         pub(super) struct NativeMapDecoration;
         pub(super) struct NativeMapInfo<'a>(pub &'a ());
         pub(super) struct NativePlayerRender<'a>(pub &'a ());
@@ -196,6 +208,9 @@ mod tests {
                 self.0
             }
         }
+        pub(super) trait LoopContext {}
+        pub(super) struct Loop(pub &'static str);
+        impl LoopContext for Loop {}
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
         #[derive(Clone, Copy)]
@@ -694,7 +709,8 @@ mod tests {
         fn menu_subscribed(&self) -> &'static [Option<HookId>] {
             &[]
         }
-        fn menu_slot_rules(&self, event: &mut MenuSlotRulesEvent<'_>) {
+        fn menu_slot_rules(&self, context: &dyn LoopContext, event: &mut MenuSlotRulesEvent<'_>) {
+            assert_eq!(context.0, "loop");
             event.may_place = false;
             event.max_stack = self.id;
         }
@@ -851,6 +867,7 @@ mod tests {
         });
         let (mut may_place, mut max_stack) = (true, 64);
         dispatch_menu_slot_rules(
+            &Loop("loop"),
             "test:menu",
             0,
             &ItemStack::default(),

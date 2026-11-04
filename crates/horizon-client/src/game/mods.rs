@@ -484,6 +484,26 @@ fn not_built(
 }
 
 impl Game<'_> {
+    /// Build this game's loop context over the loaded registries and the mods'
+    /// current settings. Called where a resource generation starts or reloads: a
+    /// client at window start and after a resource reload, a server when it starts
+    /// its mods and on `/reload`. A client hands a second one to its audio.
+    pub(super) fn refresh_loop_context(&mut self) {
+        let side = self.options.execution_role.loop_side();
+        let item_data = self.res.core.item_data.context();
+        self.loop_context = std::sync::Arc::new(
+            item_data.loop_context(side, mod_api::__private::loaded_mods().ids()),
+        );
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.loop_context = self.loop_context.clone();
+        }
+        if self.options.execution_role.is_client() {
+            self.audio.set_loop_context(
+                item_data.loop_context(side, mod_api::__private::loaded_mods().ids()),
+            );
+        }
+    }
+
     /// Lists the installed mods on the Mods page. Content mods load with the resources
     /// (`content_root`); native ones are built into the game (`native_hooks.rs`). Unsupported
     /// files get the same unreadable-file row as any other invalid package.

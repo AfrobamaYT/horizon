@@ -24,6 +24,16 @@ impl ExecutionRole {
         }
     }
 
+    /// The side a menu, recipe or player-list loop of this game's runs on.
+    pub fn loop_side(self) -> horizon_world::native_load_context::LoopSide {
+        use horizon_world::native_load_context::LoopSide;
+        if self.is_logical_server() {
+            LoopSide::Server
+        } else {
+            LoopSide::Client
+        }
+    }
+
     /// Single-player worlds (on the integrated server thread) keep the owner's state in
     /// `Level` and write `players/data/<singleplayer_uuid>.dat` with the world; a dedicated
     /// server saves each connected player separately.

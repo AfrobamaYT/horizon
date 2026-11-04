@@ -3191,15 +3191,15 @@ mod tests {
         let mut batch = HudBatch::new([320, 240]);
         crate::hud_layout::paint(&mut batch, &atlas, &draws);
         assert!(batch.vertices.iter().any(|v| v.uv == [rect.u0, rect.v0]));
-        let panels = crate::inventory_effects::panels(
-            320,
-            [72, 37],
-            176,
-            &[effect],
-            20.0,
-            &|_| None,
-            &|_| 60,
-        );
+        let panels = {
+            let space = crate::inventory_effects::EffectsSpace {
+                screen_width: 320,
+                origin: [72, 37],
+                image_width: 176,
+            };
+            let vanilla = crate::inventory_effects::EffectsLayout::vanilla(space.available());
+            crate::inventory_effects::panels(&space, &vanilla, &[effect], 20.0, &|_| None, &|_| 60)
+        };
         batch.vertices.clear();
         crate::inventory_effects::paint(&mut batch, &atlas, &panels, [0, 0]);
         assert!(batch.vertices.iter().any(|v| v.uv == [rect.u0, rect.v0]));
@@ -3950,15 +3950,22 @@ texture=wide",
         assert_eq!(batch.vertices[6].uv, [rect.u0, rect.v0]);
         assert_eq!(batch.vertices[8].uv, [rect.u1, rect.v1]);
 
-        let panels = inventory_effects::panels(
-            320,
-            [72, 37],
-            176,
-            std::slice::from_ref(&effect),
-            20.0,
-            &|_| None,
-            &|_| 60,
-        );
+        let panels = {
+            let space = crate::inventory_effects::EffectsSpace {
+                screen_width: 320,
+                origin: [72, 37],
+                image_width: 176,
+            };
+            let vanilla = crate::inventory_effects::EffectsLayout::vanilla(space.available());
+            crate::inventory_effects::panels(
+                &space,
+                &vanilla,
+                std::slice::from_ref(&effect),
+                20.0,
+                &|_| None,
+                &|_| 60,
+            )
+        };
         batch.vertices.clear();
         let tooltip = inventory_effects::paint(&mut batch, &atlas, &panels, [257, 44]);
         assert_eq!(tooltip.unwrap()[0].0, "levitation");
@@ -3968,8 +3975,15 @@ texture=wide",
         assert_eq!(batch.vertices[20].uv, [rect.u1, rect.v1]);
 
         // Wide panels retain the four-pixel border instead of stretching it.
-        let panels =
-            inventory_effects::panels(480, [72, 37], 176, &[effect], 20.0, &|_| None, &|_| 60);
+        let panels = {
+            let space = crate::inventory_effects::EffectsSpace {
+                screen_width: 480,
+                origin: [72, 37],
+                image_width: 176,
+            };
+            let vanilla = crate::inventory_effects::EffectsLayout::vanilla(space.available());
+            crate::inventory_effects::panels(&space, &vanilla, &[effect], 20.0, &|_| None, &|_| 60)
+        };
         batch.vertices.clear();
         assert!(inventory_effects::paint(&mut batch, &atlas, &panels, [0, 0]).is_none());
         assert!(batch.vertices.iter().any(|v| v.color == 0xff808080));

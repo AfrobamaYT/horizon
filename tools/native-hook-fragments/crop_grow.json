@@ -1,0 +1,24 @@
+{
+  "hooks": [
+    {
+      "name": "crop_grow_pre",
+      "doc": "A crop-like block at `pos` is about to grow on a random tick\n(NeoForge's `CropGrowEvent.Pre`): crops, stems, nether wart, cocoa,\nsweet berries and bamboo at their own position; cactus and chorus\nflowers at the block above; sugar cane at its own position; kelp,\nweeping and twisting vines and cave vines at the block they grow\ninto. `state` is the growing block. Leave `result` at `Default` for\nvanilla's own chance, or set `True` to grow now or `False` to stop\nit (`DO_NOT_GROW`). Vanilla's random roll is drawn either way, in\nvanilla's order. Server-side.",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_crop_grow_pre",
+      "side": "server",
+      "neoforge": "CropGrowEvent.Pre",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "crop_grow_post",
+      "doc": "A crop-like block grew (NeoForge's `CropGrowEvent.Post`).\n`original_state` is the block before it grew and `state` what is at\n`pos` now. Sugar cane reports the new cane above it, and kelp and\nvines the new head, as both states. Server-side.",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_crop_grow_post",
+      "side": "server",
+      "neoforge": "CropGrowEvent.Post",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

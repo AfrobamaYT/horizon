@@ -127,12 +127,7 @@ impl Game<'_> {
                 .lan_acting_uuid
                 .or_else(|| self.remote.as_ref().map(|r| r.profile())),
             player_entity_id: Some(self.own_entity_id()),
-            // The server thread's and a dedicated server's menus are the server's.
-            side: if self.native_authoritative() {
-                mod_api::menu::LogicalSide::Server
-            } else {
-                mod_api::menu::LogicalSide::Client
-            },
+            loop_context: &self.loop_context,
             items: self.items(),
             recipes: self.recipes(),
             brewing: &self.stations().brewing,
@@ -172,7 +167,7 @@ impl Game<'_> {
         let env = Env {
             player: Some(host.hub.guests[gi].uuid),
             player_entity_id: Some(host.hub.guests[gi].entity_id),
-            side: mod_api::menu::LogicalSide::Server,
+            loop_context: &self.loop_context,
             maps: maps.as_ref().map(|m| m as &dyn horizon_client::menu::Maps),
             limited_crafting: host.hub.limited_crafting,
             known_recipes: Some(&host.hub.guests[gi].recipe_book),

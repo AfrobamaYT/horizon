@@ -752,20 +752,13 @@
       }
     },
     {
-      "name": "destroy_block", "doc": "A player breaks the block `state` at `pos`, once the game allowed it\n(the held item can break blocks, the debug stick didn't take the\nclick): where `ServerPlayerGameMode.destroyBlock` starts. Set\n`canceled` to keep the block: nothing is destroyed or dropped, and a\nguest sees it back. Server-side, for every player of the world (the\nhelpers read the acting one).", "side": "server",
+      "name": "break_block", "doc": "A player breaks the block `state` at `pos`, once the game allowed it\n(the held item can break blocks, the debug stick didn't take the\nclick): where `ServerPlayerGameMode.destroyBlock` starts. Set\n`canceled` to keep the block: nothing is destroyed or dropped, and a\nguest sees it back. Server-side, for every player of the world (the\nhelpers read the acting one). Diverges from upstream: renamed from\n`destroy_block`, to NeoForge's `BlockEvent.BreakEvent`.", "neoforge": "BlockEvent.BreakEvent",
+      "side": "server",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_destroy_block",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_break_block",
       "mod_api": {
         "contract": "cancel",
         "out": "canceled"
-      }
-    },
-    {
-      "name": "place_block", "doc": "A player placed `stack` as the block `state` at `pos`: where\n`BlockItem.place` set it, before the stack shrinks. It only hears; a\nmod stops a placement by claiming `native_use_on`, which runs\nbefore it. Server-side, for every player of the world.", "side": "server",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_place_block",
-      "mod_api": {
-        "contract": "listen"
       }
     },
     {
@@ -790,12 +783,24 @@
       }
     },
     {
-      "name": "piston_move", "doc": "On an authoritative server, the piston at `piston` is about to push\nthe blocks at `push` one step `direction` (`[0, 1, 0]` is up; pulling\nwhen it retracts) and destroy those at `destroy`:\n`PistonBaseBlock.moveBlocks`, once its structure resolved. Set\n`canceled` and nothing moves, as when the structure can't; a sticky\npiston then retracts without its block, and clients are sent the\nblocks rather than the retraction to replay.", "side": "server",
+      "name": "piston_pre", "doc": "On an authoritative server, the piston at `piston` is about to push\nthe blocks at `push` one step `direction` (`[0, 1, 0]` is up; pulling\nwhen it retracts, `extending` false) and destroy those at `destroy`\n(NeoForge's `PistonEvent.Pre`, in `PistonBaseBlock.moveBlocks`, once its\nstructure resolved). Set\n`canceled` and nothing moves, as when the structure can't; a sticky\npiston then retracts without its block, and clients are sent the\nblocks rather than the retraction to replay. Diverges from upstream: `piston_move` is renamed to\n`piston_pre`, and `piston_post` is new.", "neoforge": "PistonEvent.Pre",
+      "side": "server",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_piston_move",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_piston_pre",
       "mod_api": {
         "contract": "cancel",
         "out": "canceled"
+      }
+    },
+    {
+      "name": "piston_post",
+      "doc": "On an authoritative server, the piston at `piston` pushed the blocks at\n`push` one step `direction` (`[0, 1, 0]` is up; pulling when it\nretracts, `extending` false) and destroyed those at `destroy`\n(NeoForge's `PistonEvent.Post`, at the end of `PistonBaseBlock.moveBlocks`,\nafter the neighbour updates). It only hears; `piston_pre` is the veto.\nServer-side. Diverges from upstream: `piston_move` is split into\n`piston_pre` and `piston_post`.",
+      "neoforge": "PistonEvent.Post",
+      "side": "server",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_piston_post",
+      "mod_api": {
+        "contract": "listen"
       }
     },
     {
@@ -866,14 +871,6 @@
       }
     },
     {
-      "name": "item_dropped", "doc": "`player` threw `count` of `item` (`Player.drop`: the drop key, a\nmenu's throw...), not what scatters when they die. It only hears.\nServer-side.", "side": "server",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_dropped",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "item_picked_up", "doc": "`player` is about to take `count` of `item` from the ground\n(`ItemEntity.playerTouch`). Set `canceled` to leave it there: the\nstack isn't offered again for 10 ticks. Server-side.", "side": "server",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_item_picked_up",
@@ -938,9 +935,9 @@
       }
     },
     {
-      "name": "interact_entity", "doc": "A player right-clicks the entity `entity` (`Entity.getId`) of type\n`kind` (`minecraft:cow`) with `self.hand`, holding `stack` (none in an\nempty hand): where `Player.interactOn` starts, before the entity's own\n`interact` and the item's `interactLivingEntity`. Set `claimed` to take\nthe click: the hand swings and neither runs. Asked once per hand, as\nvanilla tries the main hand then the off hand. Server-side, for every\nplayer of the world (the helpers read the acting one).", "side": "server",
+      "name": "entity_interact", "doc": "A player right-clicks the entity `entity` (`Entity.getId`) of type\n`kind` (`minecraft:cow`) with `self.hand`, holding `stack` (none in an\nempty hand): where `Player.interactOn` starts, before the entity's own\n`interact` and the item's `interactLivingEntity`. Set `claimed` to take\nthe click: the hand swings and neither runs. Asked once per hand, as\nvanilla tries the main hand then the off hand. Server-side, for every\nplayer of the world (the helpers read the acting one). Diverges from upstream: renamed from\n`interact_entity`, to NeoForge's `PlayerInteractEvent.EntityInteract`.", "neoforge": "PlayerInteractEvent.EntityInteract", "side": "server",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_interact_entity",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_interact",
       "mod_api": {
         "contract": "cancel",
         "out": "claimed"
@@ -1603,6 +1600,17 @@
       }
     },
     {
+      "name": "player_respawn_position",
+      "doc": "`PlayerRespawnPositionEvent`: where `player` respawns, once the server has\nfound it: the bed or anchor they stand up at (facing it), or the world\nspawn's free column. `original_level` and `original_position` are that\npoint; `missing_respawn_block` says the bed or anchor was gone, so the\nplayer came back at the world spawn. Change `level`, `position`, `yaw`\nand `pitch` to send them elsewhere: within the level a teleport, into\nanother level a level change. `copy_original_spawn_position` (default:\nthe block wasn't missing) says whether they keep their respawn point for\nnext time. Horizon places the player first and finds the point once its\nchunks have loaded, so this fires then, before `player_respawned` only\nwhen no chunks had to load. Not for the End exit, which isn't a respawn\nhere (as for `player_respawned`). Server-side.",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_respawn_position",
+      "neoforge": "PlayerRespawnPositionEvent",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
       "name": "player_respawned",
       "doc": "`player` (`name`) respawned (NeoForge's `PlayerRespawnEvent`): at the\nend of `PlayerList.respawn`, once they are placed and their health,\nfood and experience reset, with their state swapped in. Once for each\ndeath that ends in a respawn, on a server; not for the End-exit one.",
       "version": 1,
@@ -1764,10 +1772,11 @@
     },
     {
       "name": "menu_slot_rules",
-      "doc": "Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`\nwith the game's): container slot `slot` of the content mod menu type `menu`\n(`data/<id>/horizon/menu/`) is asked whether it takes `stack`\n(`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).\n`may_place` and `max_stack` hold the type's own answer (false on one of its\n`results`, true elsewhere, and 99): change them for your own menu types.\n`max_stack` is kept to 1 to 99,\nand the item's own stack size still caps it. Asked on the server, for each\nclick, drag and shift-click that puts an item in a slot, several times for\none shift-click: answer from `stack` alone, and fast.",
-      "version": 1,
+      "doc": "Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`\nwith the game's): container slot `slot` of the content mod menu type `menu`\n(`data/<id>/horizon/menu/`) is asked whether it takes `stack`\n(`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).\n`may_place` and `max_stack` hold the type's own answer (false on one of its\n`results`, true elsewhere, and 99): change them for your own menu types.\n`max_stack` is kept to 1 to 99,\nand the item's own stack size still caps it. Asked on the server, for each\nclick, drag and shift-click that puts an item in a slot, several times for\none shift-click: answer from `stack` and `context` alone, and fast. `context`\nholds the side, the registries and the settings of the resource generation;\na `/reload` builds the next one.",
+      "version": 2,
       "target": "horizon_client_lib::menu::native_menu_slot_rules",
       "side": "server",
+      "context": "loop",
       "cancellable": false,
       "mod_api": {
         "contract": "listen",
@@ -2482,11 +2491,11 @@
       }
     },
     {
-      "name": "chorus_fruit_teleport",
-      "doc": "A server player who ate chorus fruit (or another item with the\n`teleport_randomly` consume effect) is about to try a random spot\n(NeoForge's `EntityTeleportEvent.ChorusFruit`, vanilla's\n`TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),\nafter they stopped riding. `from` is their feet, `target` the spot\ndrawn; a mod may move it (its y kept inside the level's height, a\nvalue that is not a number ignored), and the game still looks down\nfrom it for ground it may land on. Canceling ends the effect: no teleport and no\nmore attempts. The player's state is swapped in\n(`native_acting_player`). Foxes are not heard.",
+      "name": "item_consumption_teleport",
+      "doc": "A server player who ate chorus fruit (or another item with the\n`teleport_randomly` consume effect) is about to try a random spot\n(NeoForge's `EntityTeleportEvent.ItemConsumption`, vanilla's\n`TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),\nafter they stopped riding. `from` is their feet, `target` the spot\ndrawn; a mod may move it (its y kept inside the level's height, a\nvalue that is not a number ignored), and the game still looks down\nfrom it for ground it may land on. Canceling ends the effect: no teleport and no\nmore attempts. The player's state is swapped in\n(`native_acting_player`). Foxes are not heard. Diverges from upstream: renamed from\n`chorus_fruit_teleport`.",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_chorus_fruit_teleport",
-      "neoforge": "EntityTeleportEvent.ChorusFruit",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_consumption_teleport",
+      "neoforge": "EntityTeleportEvent.ItemConsumption",
       "side": "server",
       "cancellable": true,
       "mod_api": {
@@ -2775,10 +2784,10 @@
       }
     },
     {
-      "name": "experience_orb_pickup_listened",
-      "doc": "Whether a mod hears `native_experience_orb_pickup`: set `listened`\n(a HEAD injection), or the server skips swapping the player in for it,\nand with this empty the pickup costs nothing more without mods.\nServer-side.",
+      "name": "pickup_xp_listened",
+      "doc": "Whether a mod hears `native_pickup_xp`: set `listened`\n(a HEAD injection), or the server skips swapping the player in for it,\nand with this empty the pickup costs nothing more without mods.\nServer-side.",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_experience_orb_pickup_listened",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_pickup_xp_listened",
       "side": "server",
       "mod_api": {
         "contract": "collect",
@@ -2786,10 +2795,11 @@
       }
     },
     {
-      "name": "experience_orb_pickup",
-      "doc": "Before `player` picks up orb `orb` in `dimension`. Mutations to `value`\nand `count` take effect only when not canceled; value is clamped to\n1..=i32::MAX and count to at least one.\nCanceling leaves the orb and pickup delay unchanged. Server-side.",
+      "name": "pickup_xp",
+      "doc": "Before `player` picks up orb `orb` in `dimension`. Mutations to `value`\nand `count` take effect only when not canceled; value is clamped to\n1..=i32::MAX and count to at least one.\nCanceling leaves the orb and pickup delay unchanged. Server-side. Diverges from upstream: renamed from `experience_orb_pickup`, to NeoForge's `PlayerXpEvent.PickupXp`.",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_experience_orb_pickup",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_pickup_xp",
+      "neoforge": "PlayerXpEvent.PickupXp",
       "side": "server",
       "cancellable": true,
       "mod_api": {
@@ -2945,9 +2955,9 @@
       }
     },
     {
-      "name": "ingredient", "doc": "A recipe ingredient of a mod's own kind: the entry named a type in a\nnamespace outside `minecraft:`, and the loader kept it for this call.\nThe kind and the JSON the file wrote are here; fill `items` with the\nitem ids the ingredient matches (item ids only: components are not\nchecked here; a match-time hook follows separately). Duplicates are\nremoved keeping first-seen order. The hook is called once per\noccurrence of the kind in each load that parses recipes, with the\n`DataLoadContext` of that owning load: the client's own recipe load has\n`origin()` `ClientPreload`, the server's has `ServerDataLoad`. A server\ncurrently parses the recipes in more than one load, all with\n`ServerDataLoad` (its recipe tables and the copy synchronised to guests,\nand on a dedicated server its startup load as well), so expect repeated\ncalls per occurrence there until those loads share one parse; the answer\nmust be the same every time. A client's speculative preload of the sync copy, read ahead for a world it may open as its own server, can also report `ServerDataLoad` before it joins a remote server; it is not used there. An\nunclaimed kind leaves the list empty and the recipe fails, as an unknown\nkind does.", "side": "both",
+      "name": "ingredient", "doc": "A recipe ingredient of a mod's own kind: the entry named a type in a\nnamespace outside `minecraft:`, and the loader kept it for this call.\nThe kind and the JSON the file wrote are here; fill `items` with the\nitem ids the ingredient matches (item ids only: components are not\nchecked here; a match-time hook follows separately). Duplicates are\nremoved keeping first-seen order. The hook is called once per\noccurrence of the kind (nested inside a compound, intersection or\ndifference too, and under any slot a recipe reads an ingredient from) in\neach load, before the load's tables parse the recipes, with the\n`DataLoadContext` of that owning load: the client's own recipe load has\n`origin()` `ClientPreload`, the server's has `ServerDataLoad`. A server\nloads its recipes once, however many tables and copies read them (its\nrecipe tables, the stations and the copy synchronised to guests, on a\ndedicated server too), and a `/reload` asks again once; a client that\nonly joins a remote server is never told `ServerDataLoad`. The answer\nmust be the same every time. An\nunclaimed kind leaves the list empty and the recipe fails, as an unknown\nkind does.", "side": "both",
       "context": "data_load",
-      "version": 2,
+      "version": 3,
       "target": "mod_api::crafting::native_ingredient",
       "mod_api": {
         "contract": "collect",
@@ -3712,16 +3722,28 @@
       }
     },
     {
-      "name": "player_item_held",
-      "doc": "A server player selected a new hotbar slot. The player's state is not swapped in. Set `cancel`\nto keep the old slot; the client is sent that slot again.",
+      "name": "player_switch_hotbar_slot_pre",
+      "doc": "`PlayerSwitchHotbarSlotEvent.Pre`: a server player is switching from hotbar slot\n`old_slot` to `new_slot` (0 to 8), after the slot range check and before the\nselected slot changes. Fired only when the slot differs. The player's state is not\nswapped in. Set `cancel` to keep the old slot; the client is sent that slot again,\nand `player_switch_hotbar_slot_post` doesn't fire.",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_item_held",
-      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerItemHeldEvent)",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_switch_hotbar_slot_pre",
+      "neoforge": "PlayerSwitchHotbarSlotEvent.Pre",
       "side": "server",
       "cancellable": true,
       "mod_api": {
         "contract": "cancel",
         "out": "cancel"
+      }
+    },
+    {
+      "name": "player_switch_hotbar_slot_post",
+      "doc": "`PlayerSwitchHotbarSlotEvent.Post`: a server player switched from hotbar slot\n`old_slot` to `new_slot` (0 to 8), after the selected slot changed and a main-hand\nitem use stopped. Fired only when the slot differs and\n`player_switch_hotbar_slot_pre` didn't cancel it. The player's state is not swapped in.",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_switch_hotbar_slot_post",
+      "neoforge": "PlayerSwitchHotbarSlotEvent.Post",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
       }
     },
     {
@@ -4168,14 +4190,15 @@
     },
     {
       "name": "sleep_finished_time",
-      "doc": "Enough players have slept through the night in level `dimension`\nand the clock is about to move to the morning (NeoForge's\n`SleepFinishedTimeEvent`, vanilla's `ServerLevel.tick` when it moves\nthe clock to `wake_up_from_sleep`): `new_time` comes in as the next\nmorning's day time and may be changed to wake everyone at another\ntime. A time before `current` (the day time now) is refused, as\n`setTimeAddition` refuses one, and the morning stays. Unlike\nNeoForge, which refuses a bad value as it is set, the check runs once\nafter every mod, so a later mod sees the value an earlier one left.\nOn the server, only when the `advance_time` rule is on;\n`native_time_skip` then hears the jump to the time chosen here and\nmay still cancel it. The players wake and the weather resets as\nusual either way.",
+      "doc": "Enough players have slept through the night in level `dimension`\nand the clock is about to move to the morning (NeoForge's\n`SleepFinishedTimeEvent`, vanilla's `ServerLevel.tick` when it moves\nthe clock to `wake_up_from_sleep`): `new_time` comes in as the next\nmorning's day time and may be changed to wake everyone at another\ntime. A time before `current` (the day time now) is refused, as\n`setTimeAddition` refuses one, and the morning stays. Unlike\nNeoForge, which refuses a bad value as it is set, the check runs once\nafter every mod, so a later mod sees the value an earlier one left.\nOn the server, only when the `advance_time` rule is on;\n`native_time_skip` then hears the jump to the time chosen here and\nmay still cancel it. The players wake and the weather resets as\nusual either way. Set `canceled` and the clock is left where it is, as NeoForge's cancel leaves it:\n`native_time_skip` is not asked either.",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_sleep_finished_time",
       "neoforge": "SleepFinishedTimeEvent",
       "side": "server",
-      "cancellable": false,
+      "cancellable": true,
       "mod_api": {
-        "contract": "listen"
+        "contract": "cancel",
+        "out": "canceled"
       }
     },
     {

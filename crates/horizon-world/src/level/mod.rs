@@ -170,7 +170,7 @@ pub enum LandingWrite {
 }
 pub use interact::{InteractionResult, PlayerContext, PlayerEffect, UseBranch, hit_slot};
 pub use pistons::{BlockEventData, MovingPiston};
-pub use place::{PlaceContext, PlaceOutcome, PlacementContext};
+pub use place::{PlaceContext, PlaceOutcome, PlacementContext, PlacementPreview};
 pub use portal::PortalShape;
 pub use states::{BlockId, PropKey, StateTable};
 pub use tick::{Precipitation, PrecipitationKind, RandomTickMask};
@@ -385,6 +385,12 @@ pub trait LevelAccess {
     ) -> bool {
         true
     }
+    /// Whether the fluid source at `pos` (`state`) counts towards making a new
+    /// source beside it (NeoForge's `CreateFluidSourceEvent`). `vanilla` is
+    /// the fluid's own rule (`water_source_conversion`, `lava_source_conversion`).
+    fn create_fluid_source(&self, _pos: BlockPos, _state: BlockStateId, vanilla: bool) -> bool {
+        vanilla
+    }
     fn allow_block_ignite(&self, _pos: BlockPos, _cause: &'static str) -> bool {
         true
     }
@@ -400,6 +406,14 @@ pub trait LevelAccess {
     ) -> Option<std::borrow::Cow<'a, str>> {
         feature.map(std::borrow::Cow::Borrowed)
     }
+    /// Whether a crop-like block grows on this random tick (NeoForge's
+    /// `CommonHooks.canCropGrow`). `vanilla` is the game's own answer, its
+    /// random roll already drawn.
+    fn crop_grow_pre(&mut self, _pos: BlockPos, _state: BlockStateId, vanilla: bool) -> bool {
+        vanilla
+    }
+    /// A crop-like block grew (NeoForge's `CommonHooks.fireCropGrowPost`).
+    fn crop_grow_post(&mut self, _pos: BlockPos, _original: BlockStateId) {}
     fn allow_leaves_decay(&self, _pos: BlockPos) -> bool {
         true
     }
@@ -461,16 +475,31 @@ pub trait LevelAccess {
     }
     /// Whether the piston at `piston` may push the blocks `push` one step
     /// `direction` and destroy `destroy` (`PistonBaseBlock.moveBlocks`, once
-    /// the structure resolved). Refused, it moves nothing, as a structure
-    /// that can't move. The default allows.
+    /// the structure resolved; `extending` is the piston's move type).
+    /// Refused, it moves nothing, as a structure that can't move. The default
+    /// allows.
     fn allow_piston_move(
         &self,
         _piston: BlockPos,
         _direction: Direction,
+        _extending: bool,
         _push: &[BlockPos],
         _destroy: &[BlockPos],
     ) -> bool {
         true
+    }
+    /// Observe the piston at `piston` having pushed the blocks `push` one step
+    /// `direction` and destroyed `destroy`, at the end of
+    /// `PistonBaseBlock.moveBlocks`, after the neighbour updates. The default
+    /// does nothing.
+    fn observe_piston_moved(
+        &self,
+        _piston: BlockPos,
+        _direction: Direction,
+        _extending: bool,
+        _push: &[BlockPos],
+        _destroy: &[BlockPos],
+    ) {
     }
     /// Observe a committed `Level.setBlock` state change, before its side effects.
     fn observe_block_changed(&self, _pos: BlockPos, _old: BlockStateId, _new: BlockStateId) {}
@@ -632,6 +661,8 @@ pub trait LevelAccess {
     /// Storage write (`LevelChunkSection.setBlockState`). Returns the previous
     /// state, or None when nothing could be stored (unloaded chunk).
     fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId>;
+    /// Notify clients of a completed block write, when `UPDATE_CLIENTS` is set.
+    fn send_block_updated(&mut self, _pos: BlockPos) {}
     fn is_loaded(&self, pos: BlockPos) -> bool;
     /// Inclusive minimum and exclusive maximum build height.
     fn min_y(&self) -> i32 {
@@ -769,6 +800,25 @@ pub trait LevelAccess {
         _pos: BlockPos,
         _state: BlockStateId,
         _direction: Option<Direction>,
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
+    /// Whether fence connection queries need the level hook.
+    fn has_fence_connection_hook(&self) -> bool {
+        false
+    }
+    /// `FenceBlock.connectsTo` once the library answered `vanilla` for the fence
+    /// `fence` at `pos` and the `neighbour` state beside it, `direction`
+    /// pointing from the fence toward it and `face_solid` its face's
+    /// sturdiness: whether the fence connects an arm. The default keeps it.
+    fn adjust_fence_connects_to(
+        &self,
+        _pos: BlockPos,
+        _fence: BlockStateId,
+        _neighbour: BlockStateId,
+        _direction: Direction,
+        _face_solid: bool,
         vanilla: bool,
     ) -> bool {
         vanilla

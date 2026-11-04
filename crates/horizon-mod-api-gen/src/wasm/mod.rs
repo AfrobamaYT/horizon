@@ -31,6 +31,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "CapabilityProviders",
     "TicketValidation",
     "DataLoadContext",
+    "LoopContext",
     "AttachmentStore",
     "ServerReloadListeners",
     "ClientReloadListeners",

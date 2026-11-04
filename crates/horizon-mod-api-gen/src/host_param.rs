@@ -1,4 +1,4 @@
-use super::{CatalogHook, HelperSide, HookContext};
+use super::{Hook, HostAccess, PhaseContext, Side};
 use syn::Type;
 
 /// The hook's host parameter type and the expression passed by its native method.
@@ -10,19 +10,17 @@ pub(super) struct HostParam {
 
 /// Whether the hook's host is a level host: a `GameLevel` method, or a hook marked
 /// `"host": "level"` whose receiver is another level (a hit's `HitLevel`).
-pub(super) fn is_level(hook: &CatalogHook) -> bool {
-    hook["host"].as_str() == Some("level") || game_level(hook)
+pub(super) fn is_level(hook: &Hook) -> bool {
+    hook.host == Some(HostAccess::Level) || game_level(hook)
 }
 
-fn game_level(hook: &CatalogHook) -> bool {
-    hook["target"]
-        .as_str()
-        .is_some_and(|target| target.contains("::GameLevel<"))
+fn game_level(hook: &Hook) -> bool {
+    hook.target.contains("::GameLevel<")
 }
 
 /// Validate catalog access restrictions against the hook's receiver.
 pub(super) fn validate(
-    hook: &CatalogHook,
+    hook: &Hook,
     name: &str,
     is_level: bool,
     mutable: Option<bool>,
@@ -30,38 +28,35 @@ pub(super) fn validate(
 ) -> Result<(), String> {
     if hook.context.is_some() {
         let owns_host = mutable.is_some() || is_level || ticks;
-        let host_marker = hook.get("host").is_some();
-        let scoped = hook["mod_api"].get("scope").is_some();
-        if owns_host || host_marker || scoped {
+        if owns_host || hook.host.is_some() {
             return Err(format!(
-                "{name}: a phase context cannot be combined with a game/level host or Parts scope"
+                "{name}: a phase context cannot be combined with a game/level host"
             ));
         }
     }
-    if let Some(marker) = hook.get("host") {
-        match marker.as_str() {
-            Some("read") if !is_level && hook.side != HelperSide::Client => {}
-            Some("level")
+    if let Some(marker) = hook.host {
+        match marker {
+            HostAccess::Read if !is_level && hook.side != Side::Client => {}
+            HostAccess::Level
                 if !game_level(hook)
-                    && hook.side == HelperSide::Server
+                    && hook.side == Side::Server
                     && mutable == Some(true)
                     && !ticks => {}
-            Some("read" | "level") => {
+            HostAccess::Read | HostAccess::Level => {
                 return Err(format!("{name}: this entry takes no host marker"));
             }
-            _ => return Err(format!("{name}: invalid host marker")),
         }
     }
     if !is_level
-        && hook.side == HelperSide::Both
+        && hook.side == Side::Both
         && mutable == Some(false)
-        && hook["host"].as_str() != Some("read")
+        && hook.host != Some(HostAccess::Read)
     {
         return Err(format!(
             "{name}: a both-side hook with a &self target takes host \"read\""
         ));
     }
-    if is_level && hook.side == HelperSide::Both && (mutable == Some(true) || ticks) {
+    if is_level && hook.side == Side::Both && (mutable == Some(true) || ticks) {
         return Err(format!(
             "{name}: a both-side level hook takes the read kind until a client level seam exists"
         ));
@@ -71,16 +66,17 @@ pub(super) fn validate(
 
 /// Remove the native phase input from the event, selecting its public context.
 pub(super) fn context_param(
-    hook: &CatalogHook,
+    hook: &Hook,
     args: &mut Vec<(String, &Type)>,
 ) -> Result<Option<HostParam>, String> {
     let Some(kind) = hook.context else {
         return Ok(None);
     };
-    let name = hook["name"].as_str().ok_or("hook name missing")?;
+    let name = &hook.name;
     let expected = match kind {
-        HookContext::Registration => "RegistrationContext",
-        HookContext::DataLoad => "LoadContext",
+        PhaseContext::Registration => "RegistrationContext",
+        PhaseContext::DataLoad => "LoadContext",
+        PhaseContext::Loop => "LoopContext",
     };
     let valid = args.first().is_some_and(|(name, ty)| {
         name == "context"
@@ -96,8 +92,9 @@ pub(super) fn context_param(
     args.remove(0);
     Ok(Some(HostParam {
         ty: match kind {
-            HookContext::Registration => "&RegistrationContext",
-            HookContext::DataLoad => "&dyn DataLoadContext",
+            PhaseContext::Registration => "&RegistrationContext",
+            PhaseContext::DataLoad => "&dyn DataLoadContext",
+            PhaseContext::Loop => "&dyn LoopContext",
         }
         .into(),
         call: "context",
@@ -105,29 +102,25 @@ pub(super) fn context_param(
 }
 
 /// Select the host once for both generated signatures and the native call.
-pub(super) fn host_param(
-    hook: &CatalogHook,
-    mutable: Option<bool>,
-    ticks: bool,
-) -> Option<HostParam> {
+pub(super) fn host_param(hook: &Hook, mutable: Option<bool>, ticks: bool) -> Option<HostParam> {
     let is_level = is_level(hook);
     mutable.map(|mutable| {
         if !is_level {
             let (ty, call) = match hook.side {
-                HelperSide::Server | HelperSide::Both if hook["host"].as_str() == Some("read") => {
+                Side::Server | Side::Both if hook.host == Some(HostAccess::Read) => {
                     ("&dyn Host", "&*self")
                 }
-                HelperSide::Server => ("&mut dyn ServerHost", "self"),
-                HelperSide::Client if mutable => ("&mut dyn ClientHost", "self"),
-                HelperSide::Client => ("&dyn ClientHost", "&*self"),
-                HelperSide::Both => ("HostSide", "super::execution_role::host_side(self)"),
+                Side::Server => ("&mut dyn ServerHost", "self"),
+                Side::Client if mutable => ("&mut dyn ClientHost", "self"),
+                Side::Client => ("&dyn ClientHost", "&*self"),
+                Side::Both => ("HostSide", "super::execution_role::host_side(self)"),
             };
             return HostParam {
                 ty: ty.into(),
                 call,
             };
         }
-        if hook.side == HelperSide::Both {
+        if hook.side == Side::Both {
             return HostParam {
                 ty: "LevelSide".into(),
                 call: "super::mod_api_host::level_side(self)",
@@ -167,20 +160,20 @@ mod tests {
     fn phase_context_is_not_an_event_field_or_game_host() {
         for (kind, input, public) in [
             (
-                HookContext::Registration,
+                PhaseContext::Registration,
                 "&RegistrationContext",
                 "&RegistrationContext",
             ),
             (
-                HookContext::DataLoad,
+                PhaseContext::DataLoad,
                 "&LoadContext<'_>",
                 "&dyn DataLoadContext",
             ),
+            (PhaseContext::Loop, "&LoopContext<'_>", "&dyn LoopContext"),
         ] {
-            let hook = CatalogHook {
-                entry: serde_json::json!({"name": "phase", "side": "both"}),
-                side: HelperSide::Both,
+            let hook = Hook {
                 context: Some(kind),
+                ..Hook::sample("horizon_client::game::Game<'_>::native_phase", Side::Both)
             };
             let ty = syn::parse_str(input).unwrap();
             let output = syn::parse_quote!(&mut Vec<String>);

@@ -1000,7 +1000,9 @@ pub struct Extra {
     /// spear stabbed in the current use were stabbed (game time). It exists
     /// only while a kinetic weapon is in use.
     pub stabbed: Option<Vec<(Who, i64)>>,
-    pub blocking: bool,
+    /// `ItemStack.getUseAnimation` of the item in use (`None` when nothing is);
+    /// a player model's arm pose and `isBlocking` follow it.
+    pub use_animation: horizon_world::consumable::UseAnimation,
     pub fall_flying: bool,
     pub fall_fly_ticks: i32,
     /// `Entity.deltaMovementOnPreviousTick`: the velocity before this tick's
@@ -1885,6 +1887,14 @@ pub enum MobEvent {
         pos: [i32; 3],
         state: horizon_world::registry::BlockStateId,
     },
+    /// A mob placing a block (an enderman putting its carried block down, a
+    /// snow golem's trail): `entity_place` may refuse it, and a refused
+    /// enderman keeps carrying `state`.
+    PlaceBlock {
+        mob: u32,
+        pos: [i32; 3],
+        state: horizon_world::registry::BlockStateId,
+    },
     /// `TurtleEggBlock.decreaseEggs` after a mob's step won its 1 in 100: the
     /// break sound, then one egg fewer, or the block destroyed when it was
     /// the last.
@@ -2016,6 +2026,8 @@ pub enum MobEvent {
         effect: &'static str,
         ticks: i32,
         amplifier: i32,
+        /// `MobEffectInstance` ambient flag (the beacon-style translucent icon).
+        ambient: bool,
     },
     /// Set an entity on fire.
     Ignite {
@@ -3000,6 +3012,7 @@ impl Mob {
             _ => self.extra.pick_up_loot,
         }
     }
+    #[inline]
     pub fn bounds(&self) -> Aabb {
         self.bounds_at(self.position)
     }
@@ -3029,12 +3042,14 @@ impl Mob {
         };
         self.combat.record(entry, self.age);
     }
+    #[inline]
     pub fn alive(&self) -> bool {
         self.health > 0.0
     }
     pub fn hostile(&self) -> bool {
         self.kind.category == "monster"
     }
+    #[inline]
     pub fn species(&self) -> Species {
         self.kind.species
     }

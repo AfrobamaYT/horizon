@@ -170,6 +170,12 @@ pub(super) fn level_side<'a>(level: &'a super::GameLevel<'_>) -> mod_api::LevelS
 }
 
 impl mod_api::LevelHost for super::GameLevel<'_> {
+    fn block_state_id(&self, name: &str) -> Option<BlockStateId> {
+        super::native_block_states::parse(self.block_registries, self.registry, name)
+    }
+    fn block_state_default(&self, block: &str) -> Option<BlockStateId> {
+        super::native_block_states::default_state(self.registry, block)
+    }
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
         horizon_world::level::LevelAccess::block_state(self, BlockPos::new(pos[0], pos[1], pos[2]))
     }
@@ -187,9 +193,9 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
     fn height(&self) -> i32 {
         self.world.shape.height
     }
-    fn block_state_in_tag(&self, state: BlockStateId, tag: &str) -> Option<bool> {
+    fn block_in_tag(&self, block: &str, tag: &str) -> Option<bool> {
         self.native_authoritative
-            .then(|| super::native_world_read::state_in_tag(self.items, self.registry, state, tag))
+            .then(|| super::native_world_read::block_in_tag(self.items, block, tag))
     }
     fn item_stack_in_tag(&self, stack: &mod_api::ItemStack, tag: &str) -> Option<bool> {
         self.native_authoritative
@@ -205,7 +211,7 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
     fn state_fluid_state(&self, state: BlockStateId) -> Option<mod_api::FluidState> {
         super::native_world_read::state_fluid(self.behaviours, self.registry, state)
     }
-    fn fluid_in_tag(&self, fluid: mod_api::FluidState, tag: &str) -> Option<bool> {
+    fn fluid_in_tag(&self, fluid: &str, tag: &str) -> Option<bool> {
         self.native_authoritative
             .then(|| super::native_world_read::fluid_in_tag(self.items, fluid, tag))
     }
@@ -276,6 +282,27 @@ impl mod_api::LevelRandomHost for super::GameLevel<'_> {
 }
 
 impl mod_api::LevelHost for super::native_hooks::HitLevel<'_> {
+    fn block_state_id(&self, name: &str) -> Option<BlockStateId> {
+        super::native_block_states::parse(self.0.block_registries()?, self.0.registry(), name)
+    }
+    fn block_state_default(&self, block: &str) -> Option<BlockStateId> {
+        self.0.block_registries()?;
+        super::native_block_states::default_state(self.0.registry(), block)
+    }
+    fn block_in_tag(&self, block: &str, tag: &str) -> Option<bool> {
+        Some(super::native_world_read::block_in_tag(
+            self.0.tags()?,
+            block,
+            tag,
+        ))
+    }
+    fn fluid_in_tag(&self, fluid: &str, tag: &str) -> Option<bool> {
+        Some(super::native_world_read::fluid_in_tag(
+            self.0.tags()?,
+            fluid,
+            tag,
+        ))
+    }
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
         self.0.block(pos)
     }
@@ -334,6 +361,12 @@ pub(super) struct LevelTicks<'a, L> {
 impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::LevelHost
     for LevelTicks<'b, L>
 {
+    fn block_state_id(&self, name: &str) -> Option<BlockStateId> {
+        mod_api::LevelHost::block_state_id(&*self.level, name)
+    }
+    fn block_state_default(&self, block: &str) -> Option<BlockStateId> {
+        mod_api::LevelHost::block_state_default(&*self.level, block)
+    }
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
         mod_api::LevelHost::block_state(&*self.level, pos)
     }
@@ -349,8 +382,8 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::Lev
     fn height(&self) -> i32 {
         mod_api::LevelHost::height(&*self.level)
     }
-    fn block_state_in_tag(&self, state: BlockStateId, tag: &str) -> Option<bool> {
-        mod_api::LevelHost::block_state_in_tag(&*self.level, state, tag)
+    fn block_in_tag(&self, block: &str, tag: &str) -> Option<bool> {
+        mod_api::LevelHost::block_in_tag(&*self.level, block, tag)
     }
     fn item_stack_in_tag(&self, stack: &mod_api::ItemStack, tag: &str) -> Option<bool> {
         mod_api::LevelHost::item_stack_in_tag(&*self.level, stack, tag)
@@ -361,7 +394,7 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::Lev
     fn state_fluid_state(&self, state: BlockStateId) -> Option<mod_api::FluidState> {
         mod_api::LevelHost::state_fluid_state(&*self.level, state)
     }
-    fn fluid_in_tag(&self, fluid: mod_api::FluidState, tag: &str) -> Option<bool> {
+    fn fluid_in_tag(&self, fluid: &str, tag: &str) -> Option<bool> {
         mod_api::LevelHost::fluid_in_tag(&*self.level, fluid, tag)
     }
     fn state_with_property(
@@ -423,6 +456,10 @@ impl<'a: 'b, 'b> mod_api::LevelWriteHost for LevelTicks<'b, &mut super::GameLeve
     ) -> bool {
         self.level
             .native_set_block(self.ticks, pos, state, flags.bits())
+    }
+
+    fn remove_block(&mut self, pos: [i32; 3], moved: bool) -> bool {
+        self.level.native_remove_block(self.ticks, pos, moved)
     }
 
     fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str, flags: i32) -> bool {

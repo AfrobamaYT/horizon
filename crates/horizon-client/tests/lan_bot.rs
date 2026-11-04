@@ -219,7 +219,11 @@ fn server_with(resources: &Path, net: NetConfig) -> Server {
                 resources,
                 &horizon_world::loot::PackOverlay::NONE,
                 &defaults,
-                &server_load(),
+                &horizon_client::crafting::ResolvedSources::load_or_empty(
+                    resources,
+                    &horizon_world::loot::PackOverlay::NONE,
+                    &server_load(),
+                ),
             )
             .expect("sync data"),
         ),
@@ -260,6 +264,9 @@ fn server_sync(sync: Arc<SyncData>, net: NetConfig) -> Server {
             max_players: 8,
             levels: Default::default(),
         },
+        Arc::new(
+            server_load().loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+        ),
     );
     Server {
         hub,
@@ -486,7 +493,11 @@ fn neoforge_shapes_items_reach_two_guests() {
             &resources,
             &horizon_world::loot::PackOverlay { files: &packs },
             &defaults,
-            &server_load(),
+            &horizon_client::crafting::ResolvedSources::load_or_empty(
+                &resources,
+                &horizon_world::loot::PackOverlay { files: &packs },
+                &server_load(),
+            ),
         )
         .expect("sync data"),
     );
@@ -751,7 +762,11 @@ fn a_signed_in_hosts_lan_authenticates_guests_but_not_its_own_player() {
             &resources,
             &horizon_world::loot::PackOverlay::NONE,
             &defaults,
-            &server_load(),
+            &horizon_client::crafting::ResolvedSources::load_or_empty(
+                &resources,
+                &horizon_world::loot::PackOverlay::NONE,
+                &server_load(),
+            ),
         )
         .expect("sync data"),
     );
@@ -1646,7 +1661,7 @@ fn a_respawned_guest_is_immune_until_its_client_loads_the_world() {
         border: &border,
         streaming: None,
     };
-    s.hub.respawn(0, at, &ctx);
+    s.hub.respawn(0, at, None, &ctx);
     assert!(
         !s.hub.guests[0].client_loaded(),
         "a respawn unloads the client"

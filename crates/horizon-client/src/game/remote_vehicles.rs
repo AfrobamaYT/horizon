@@ -470,6 +470,8 @@ impl Game<'_> {
                 &self.world,
                 self.pack.assets.registry,
                 &mut lent,
+                None,
+                None,
             )
             .predicted();
             mob.tick(&world, &mut level, &mut events);

@@ -65,6 +65,11 @@ pub(crate) struct TestLevel {
     /// What `adjust_should_redstone_wire_connect_to` answers at a position: whether
     /// redstone wire connects there.
     pub wire_connect: HashMap<BlockPos, bool>,
+    /// What `adjust_fence_connects_to` answers for a neighbour state: whether
+    /// a fence connects an arm toward it.
+    pub fence_connect: HashMap<BlockStateId, bool>,
+    /// The directions `adjust_fence_connects_to` was asked about.
+    pub fence_directions: std::cell::RefCell<Vec<Direction>>,
     /// What `before_fire_odds` answers for a state.
     pub fire_odds: HashMap<BlockStateId, (i32, i32)>,
     /// What `before_smoke_source` answers for a state.
@@ -91,9 +96,11 @@ impl TestLevel {
             signals: HashMap::new(),
             weak_power: HashMap::new(),
             weak_power_directions: std::cell::RefCell::new(Vec::new()),
+            fence_directions: std::cell::RefCell::new(Vec::new()),
             analog: HashMap::new(),
             analog_states: HashSet::new(),
             wire_connect: HashMap::new(),
+            fence_connect: HashMap::new(),
             time: 0,
             day_time: 0,
             events: Vec::new(),
@@ -142,6 +149,24 @@ impl LevelAccess for TestLevel {
         vanilla: bool,
     ) -> bool {
         self.wire_connect.get(&pos).copied().unwrap_or(vanilla)
+    }
+    fn has_fence_connection_hook(&self) -> bool {
+        !self.fence_connect.is_empty()
+    }
+    fn adjust_fence_connects_to(
+        &self,
+        _pos: BlockPos,
+        _fence: BlockStateId,
+        neighbour: BlockStateId,
+        direction: Direction,
+        _face_solid: bool,
+        vanilla: bool,
+    ) -> bool {
+        self.fence_directions.borrow_mut().push(direction);
+        self.fence_connect
+            .get(&neighbour)
+            .copied()
+            .unwrap_or(vanilla)
     }
     fn adjust_analog_output(
         &self,
@@ -206,6 +231,7 @@ impl LevelAccess for TestLevel {
         &self,
         _piston: BlockPos,
         direction: Direction,
+        _extending: bool,
         push: &[BlockPos],
         destroy: &[BlockPos],
     ) -> bool {
@@ -610,6 +636,62 @@ fn a_parts_updates_follow_the_blocks_own_as_an_override_calling_super() {
             true
         )
     );
+}
+
+#[test]
+fn block_update_notifications_follow_client_and_invisible_flags() {
+    struct Level {
+        inner: TestLevel,
+        client: bool,
+        notifications: usize,
+    }
+    impl LevelAccess for Level {
+        fn block_state(&self, pos: BlockPos) -> BlockStateId {
+            self.inner.block_state(pos)
+        }
+        fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
+            self.inner.set_raw(pos, state)
+        }
+        fn is_loaded(&self, pos: BlockPos) -> bool {
+            self.inner.is_loaded(pos)
+        }
+        fn random(&mut self) -> &mut LegacyRandom {
+            self.inner.random()
+        }
+        fn game_time(&self) -> i64 {
+            self.inner.game_time()
+        }
+        fn is_client_side(&self) -> bool {
+            self.client
+        }
+        fn send_block_updated(&mut self, _: BlockPos) {
+            self.notifications += 1;
+        }
+    }
+    let Some(f) = fixture() else { return };
+    let stone = f.registry.default_state("minecraft:stone").unwrap();
+    let pos = BlockPos::new(0, 1, 0);
+    for (client, flags, expected) in [
+        (false, 0, 0),
+        (false, flags::UPDATE_CLIENTS, 1),
+        (false, flags::UPDATE_CLIENTS | flags::UPDATE_INVISIBLE, 1),
+        (true, flags::UPDATE_CLIENTS, 1),
+        (true, flags::UPDATE_CLIENTS | flags::UPDATE_INVISIBLE, 0),
+    ] {
+        let mut level = Level {
+            inner: TestLevel::new(&f.behaviours),
+            client,
+            notifications: 0,
+        };
+        assert!(
+            f.behaviours
+                .set_block(&mut level, &mut Ticks::new(0), pos, stone, flags)
+        );
+        assert_eq!(
+            level.notifications, expected,
+            "client={client}, flags={flags}"
+        );
+    }
 }
 
 #[test]
@@ -1361,6 +1443,37 @@ fn wire_connects_only_to_the_block_that_answers_should_redstone_wire_connect_to(
     );
     w.level.wire_connect.remove(&BlockPos::new(6, 1, 0));
     assert_eq!(connection(&mut w), before);
+}
+
+#[test]
+fn fence_connection_follows_fence_connects_to_both_ways() {
+    let mut w = world!();
+    let fence = w.id("oak_fence", &[]);
+    let stone = w.id("stone", &[]);
+    let glass = w.id("glass", &[]);
+    let pos = BlockPos::new(0, 1, 0);
+    let connects = |w: &mut World<'_>, neighbour, sturdy| {
+        w.f.behaviours
+            .sim(&mut w.level, &mut w.ticks)
+            .fence_connects_to(pos, fence, neighbour, sturdy, Direction::West)
+    };
+    // Vanilla: a sturdy face connects, a glass pane's face does not.
+    assert!(connects(&mut w, stone, true));
+    assert!(!connects(&mut w, glass, false));
+    // The hook denies what vanilla connects, and connects what it doesn't.
+    w.level.fence_connect.insert(stone, false);
+    w.level.fence_connect.insert(glass, true);
+    assert!(!connects(&mut w, stone, true));
+    assert!(connects(&mut w, glass, false));
+    // Vanilla's argument points from the neighbour to the fence; the hook is
+    // told the way from the fence to the neighbour.
+    assert_eq!(
+        *w.level.fence_directions.borrow().last().unwrap(),
+        Direction::East
+    );
+    // A state the hook doesn't answer keeps vanilla's answer.
+    let dirt = w.id("dirt", &[]);
+    assert!(connects(&mut w, dirt, true));
 }
 
 #[test]

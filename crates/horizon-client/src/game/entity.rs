@@ -312,20 +312,26 @@ pub(super) fn tick_item(
     no_physics: bool,
     entity_boxes: &[Aabb],
     border: Option<&horizon_core::geometry::border::BorderGeometry>,
+    splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
 ) -> bool {
-    let heights = item.push_by_fluid(world, fluids);
+    let (water, _lava) = item.push_by_fluid(world, fluids);
+    // `Entity.baseTick` splashes before the item moves. The first tick does not.
+    item.water_entry(water > 0.0, item.ticks == 0, splash);
     let step = item.tick_move(
         world,
         facts,
         collision,
         no_physics,
-        heights,
+        (water, _lava),
         entity_boxes,
         border,
     );
     item.push_by_bubble_column(world, registry, facts, collision);
     let alive = item.tick_settle(world, facts, no_physics, step);
-    item.push_by_fluid(world, fluids);
+    // `ItemEntity.tick` refreshes immersion after moving and splashes if that
+    // move is what entered the water.
+    let (water, _) = item.push_by_fluid(world, fluids);
+    item.water_entry(water > 0.0, false, splash);
     alive
 }
 
@@ -547,11 +553,16 @@ macro_rules! entity_lists_of {
     };
 }
 pub(super) use entity_lists_of;
-/// The level `$game` ticks, lent to a hit's damage hooks: it borrows only the game's world
-/// and block registry, so a mob or the player beside them can take the hit.
+/// The level `$game` ticks, lent to a hit's damage hooks with its block registry and merged
+/// tag tables, so a mob or the player beside them can take the hit.
 macro_rules! damage_level_of {
-    ($game:expr) => {
-        &mut horizon_client::health::DamageLevel::of(&mut $game.world, $game.pack.assets.registry)
+    ($game:ident) => {
+        &mut horizon_client::health::DamageLevel::of(
+            &mut $game.world,
+            $game.pack.assets.registry,
+            Some(world_items!($game)),
+            Some(&$game.pack.block_registries),
+        )
     };
 }
 pub(super) use damage_level_of;

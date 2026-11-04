@@ -283,7 +283,12 @@ impl MotionWorld<'_, '_, '_> {
         damage: f32,
     ) -> f32 {
         crate::block_contact::fall(
-            &mut crate::health::DamageLevel::of(&mut *self.scene, self.assets.registry),
+            &mut crate::health::DamageLevel::of(
+                &mut *self.scene,
+                self.assets.registry,
+                self.tag_items,
+                self.block_registries,
+            ),
             crate::block_contact::Contact {
                 entity: self.player.entity_id,
                 kind: "minecraft:player",
@@ -695,7 +700,12 @@ impl LivingFallWorld for FallCall<'_, '_, '_, '_> {
         let resources = &self.world.resources.health;
         let rules = self.world.scene.health_rules;
         self.world.player.hurt(
-            &mut crate::health::DamageLevel::of(self.world.scene, self.world.assets.registry),
+            &mut crate::health::DamageLevel::of(
+                self.world.scene,
+                self.world.assets.registry,
+                self.world.tag_items,
+                self.world.block_registries,
+            ),
             resources,
             rules,
             resources.landing_source(self.source),

@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "item_attribute_modifier",
+      "doc": "`ItemAttributeModifierEvent`: the attribute modifiers `stack` grants\n(`ItemStack.getAttributeModifiers`), starting from its own\n`minecraft:attribute_modifiers` or its item's. Add, replace or remove\nentries in `modifiers`; what is left is what every reader of the stack's\nmodifiers uses: the equipment of players, mobs, armor stands and the\ndragon when it changes, mobs' gear knockback and pickup choices, the\nattribute sync and the tooltip. A worn stack is asked again only when it\nchanges (`ItemStack.matches`), so the answer must be the same for the\nsame stack. Asked on the server and on a client (its tooltips).",
+      "side": "both",
+      "version": 1,
+      "target": "mod_api::item_attributes::native_item_attribute_modifier",
+      "neoforge": "ItemAttributeModifierEvent",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

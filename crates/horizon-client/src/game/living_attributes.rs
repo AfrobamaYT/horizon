@@ -730,7 +730,11 @@ mod tests {
             assert_eq!(map.value(key).unwrap(), 0.2);
             let mut synced = Vec::new();
             let zombie_mob = game.mobs[0].clone();
-            game.mob_attributes(&zombie_mob, &mut synced);
+            game.mob_attributes(
+                &zombie_mob,
+                &mut crate::game::lan_attributes::SpeedByType::default(),
+                &mut synced,
+            );
             let registry = key.registry_id();
             let sent = synced.iter().find(|s| s.attribute == registry).unwrap();
             assert_eq!(sent.base, 0.1);
@@ -802,6 +806,51 @@ mod tests {
             let zombie = living(game, 12);
             game.mobs.clear();
             assert!(!zombie.set_attribute_base(game, "minecraft:gravity", 1.0));
+        });
+    }
+
+    /// Plates every chestplate with +0.4 knockback resistance and no armor
+    /// toughness (`item_attribute_modifier`).
+    struct Plated;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Plated {
+        fn item_attribute_modifier(&self, event: &mut mod_api::ItemAttributeModifierEvent<'_>) {
+            if !event.stack.item.ends_with("_chestplate") {
+                return;
+            }
+            let id = |text: &str| Identifier::parse(text).unwrap();
+            event.modifiers.add(
+                id("minecraft:knockback_resistance"),
+                modifier("test:plated", 0.4, AttributeOperation::AddValue),
+                mod_api::EquipmentSlotGroup::Chest,
+            );
+            event
+                .modifiers
+                .remove_all_for(&id("minecraft:armor_toughness"));
+        }
+    }
+
+    /// A mod's answer to `item_attribute_modifier` is what the zombie's
+    /// gameplay reads: its knockback and its live map.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mods_item_modifiers_reach_the_wearer() {
+        let mods = vec![mod_api::ModEntry::new("plated", Box::new(Plated))].into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                spawn(game);
+                let chestplate = stack("minecraft:netherite_chestplate");
+                game.mobs[0].set_equipment_stack(CHEST, chestplate);
+                game.refresh_gear_knockback_resistance();
+                game.tick_equipment_attributes();
+                // Netherite's own 0.1, and the mod's 0.4.
+                let resistance = game.mobs[0].gear_knockback_resistance.unwrap();
+                assert!((resistance - 0.5).abs() < 1e-6, "{resistance}");
+                let toughness = read(game, 12, "minecraft:armor_toughness");
+                assert_eq!(toughness, (Some(0.0), Some(0.0)));
+                // Netherite's 8 armor still counts, on the zombie's own 2.
+                assert_eq!(read(game, 12, "minecraft:armor"), (Some(10.0), Some(2.0)));
+            });
         });
     }
 }

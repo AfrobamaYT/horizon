@@ -1,5 +1,5 @@
 //! Restricted views for registration and data loading.
-pub use horizon_world::native_load_context::DataLoadOrigin;
+pub use horizon_world::native_load_context::{DataLoadOrigin, LoopSide};
 use std::sync::{Arc, OnceLock};
 
 /// Whether a package contains compiled code or content alone.
@@ -262,6 +262,70 @@ impl DataLoadContext for OwningLoad<'_> {
     }
 }
 
+/// The view of a hook fired inside a menu, recipe or player-list loop, where no
+/// game is at hand: the side, the registries, the settings and the mod list.
+/// The side that owns the loop builds it once per resource generation; a hook
+/// never builds one, and its answers never change while it is held.
+///
+/// ```compile_fail
+/// use mod_api::{Host, LoopContext};
+/// fn game(_: &dyn Host) {}
+/// fn each(context: &dyn LoopContext) { game(context); }
+/// ```
+///
+/// ```compile_fail
+/// use mod_api::{HostTransaction, LoopContext};
+/// fn each(context: &mut dyn LoopContext) {
+///     let _: Result<(), ()> = context.transaction(|_, _| Ok(()));
+/// }
+/// ```
+pub trait LoopContext {
+    /// The side whose loop fires the hook.
+    fn side(&self) -> LoopSide;
+
+    /// Registry names in ID order, from the resource generation's snapshot.
+    fn registry(&self, name: &str) -> Option<Arc<[String]>>;
+
+    /// A loaded mod's setting captured when this context was built, without file I/O.
+    fn setting(&self, mod_id: &str, key: &str) -> Option<String>;
+
+    /// The same loaded-mod view available during registration.
+    fn mods(&self) -> LoadedMods;
+}
+
+/// The game's loop, as a [`LoopContext`].
+// hidden: the game's side of the context, not part of the mod surface
+#[doc(hidden)]
+// exhaustive: its fields are private; only the game builds it
+pub struct OwningLoop<'a> {
+    source: &'a horizon_world::native_load_context::LoopContext,
+    mods: LoadedMods,
+}
+
+impl<'a> OwningLoop<'a> {
+    pub fn new(source: &'a horizon_world::native_load_context::LoopContext) -> Self {
+        Self {
+            source,
+            mods: LoadedMods::new(),
+        }
+    }
+}
+
+impl LoopContext for OwningLoop<'_> {
+    fn side(&self) -> LoopSide {
+        self.source.side()
+    }
+    fn registry(&self, name: &str) -> Option<Arc<[String]>> {
+        self.source.registry(name)
+    }
+    fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
+        self.source.setting(mod_id, key)
+    }
+    fn mods(&self) -> LoadedMods {
+        self.mods.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,5 +367,29 @@ mod tests {
         assert_eq!(plain.namespaces().collect::<Vec<_>>(), ["plain"]);
         assert!(!plain.depends_on("runtime"));
         assert!(view.get("missing").is_none());
+    }
+
+    #[test]
+    fn a_loop_context_reads_its_side_registries_and_mods() {
+        use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
+        let registries =
+            std::collections::BTreeMap::from([("item".to_owned(), vec!["a:b".into()])]);
+        let load = LoadContext::new(
+            DataLoadOrigin::ClientPreload,
+            std::sync::Arc::new(LoadInputs::new(registries, Default::default())),
+            [],
+        );
+        let source = load.loop_context(LoopSide::Client, []);
+        with_test_packages(&["one", "two"], || {
+            let context = OwningLoop::new(&source);
+            assert_eq!(context.side(), LoopSide::Client);
+            assert_eq!(
+                context.registry("item").as_deref(),
+                Some(&["a:b".to_owned()][..])
+            );
+            assert_eq!(context.registry("block"), None);
+            assert_eq!(context.setting("one", "mode"), None);
+            assert_eq!(context.mods().ids().collect::<Vec<_>>(), ["one", "two"]);
+        });
     }
 }

@@ -89,6 +89,16 @@ impl Game<'_> {
     /// `ItemStack.hurtAndBreak` for the player's `stack`: the wear Unbreaking
     /// leaves, and `ItemDurabilityTrigger` when some is left (`applyDamage`).
     pub(super) fn wear(&mut self, stack: &ItemStack, amount: u32) -> u32 {
+        let loss = self.modify_wear(stack, amount);
+        if loss > 0 {
+            self.trigger_item_durability(stack, (stack.damage as i32).wrapping_add(loss as i32));
+        }
+        loss
+    }
+
+    /// Enchantment and mod changes to a positive durability loss, before the
+    /// durability-changed advancement and the stack write.
+    pub(super) fn modify_wear(&mut self, stack: &ItemStack, amount: u32) -> u32 {
         let mut loss = self.durability_loss(stack, amount);
         // The mods hear a server player's wear once Unbreaking has had its say,
         // and may change it or stop it.
@@ -99,9 +109,6 @@ impl Game<'_> {
             let mut cancel = false;
             self.native_item_damaged(uuid, &name, &stack.item, &mut points, &mut cancel);
             loss = if cancel { 0 } else { points.max(0) as u32 };
-        }
-        if loss > 0 {
-            self.trigger_item_durability(stack, stack.damage + loss);
         }
         loss
     }
@@ -199,7 +206,7 @@ impl Game<'_> {
         let mut ignite = 0.0f32;
         let mut mob_effects = Vec::new();
         let mut hook_calls: Vec<(String, String, Value, u32)> = Vec::new();
-        for (id, level) in held.enchantments() {
+        for (id, level) in held.all_enchantments().iter() {
             let Some(def) = world_stations!(self).enchantments.get(id) else {
                 continue;
             };
@@ -267,7 +274,7 @@ impl Game<'_> {
             return;
         };
         let mut effects = Vec::new();
-        for (id, level) in held.enchantments() {
+        for (id, level) in held.all_enchantments().iter() {
             let Some(def) = self.stations().enchantments.get(id) else {
                 continue;
             };
@@ -411,7 +418,7 @@ impl Game<'_> {
             ..Default::default()
         };
         let mut bursts = Vec::new();
-        for (id, level) in held.enchantments() {
+        for (id, level) in held.all_enchantments().iter() {
             let Some(def) = world_stations!(self).enchantments.get(id) else {
                 continue;
             };
@@ -518,20 +525,13 @@ impl Game<'_> {
             }
             hits.push(1.0 + self.world.random.next_float() * 4.0);
             // ChangeItemDamage -> ItemStack.hurtAndBreak: unbreaking applies.
-            let loss = self.wear(&stack, 2);
-            if let Some(s) = self.armor[slot].as_mut() {
-                s.damage += loss;
-                if self
-                    .res
-                    .items()
-                    .get(&s.item)
-                    .is_some_and(|i| s.damage >= i.max_damage)
-                {
-                    self.armor[slot] = None;
-                    self.player_equipment_broke(super::armor_slot(slot), &stack);
-                    self.apply_equipment();
-                }
-            }
+            let equipment = [
+                mod_api::EquipmentSlot::Head,
+                mod_api::EquipmentSlot::Chest,
+                mod_api::EquipmentSlot::Legs,
+                mod_api::EquipmentSlot::Feet,
+            ][slot];
+            self.damage_player_equipment(equipment, 2);
         }
         hits
     }
@@ -681,7 +681,7 @@ impl Game<'_> {
             ..Default::default()
         };
         let mut ignite: Option<f32> = None;
-        for (id, level) in bow.enchantments() {
+        for (id, level) in bow.all_enchantments().iter() {
             let Some(def) = world_stations!(self).enchantments.get(id) else {
                 continue;
             };
@@ -809,31 +809,10 @@ impl Game<'_> {
     /// `ItemStack.hurtAndBreak` on the worn boots (`change_item_damage`):
     /// Unbreaking applies, and they break when worn out.
     fn wear_boots(&mut self, amount: u32) {
-        let Some(stack) = self.armor[3].clone() else {
-            return;
-        };
-        let loss = self.wear(&stack, amount);
-        let max = self
-            .res
-            .items()
-            .get(&stack.item)
-            .map_or(0, |info| info.max_damage);
-        if max == 0 {
-            return;
-        }
-        let Some(boots) = self.armor[3].as_mut() else {
-            return;
-        };
-        boots.damage += loss;
-        if boots.damage >= max {
-            self.armor[3] = None;
-            // LivingEntity.onEquippedItemBroken: the broken boots.
-            self.player_equipment_broke(
-                horizon_world::player_inventory::EquipmentSlot::Feet,
-                &stack,
-            );
-            self.apply_equipment();
-        }
+        self.damage_player_equipment(
+            mod_api::EquipmentSlot::Feet,
+            amount.min(i32::MAX as u32) as i32,
+        );
     }
     /// `EnchantmentHelper.runLocationChangedEffects` for the worn armor of the
     /// player, run on the server once the player has moved: `LivingEntity.baseTick`
@@ -1075,11 +1054,12 @@ impl Game<'_> {
             return;
         };
         for (attr, id, _, op) in std::mem::take(&mut self.potions.enchant_modifiers) {
-            let _ = p.set_modifier(&attr, &id, 0.0, &op, false);
+            let _ = p.set_modifier_unclamped(&attr, &id, 0.0, &op, false);
         }
         for (attr, id, amount, op) in &wanted {
-            let _ = p.set_modifier(attr, id, *amount, op, true);
+            let _ = p.set_modifier_unclamped(attr, id, *amount, op, true);
         }
+        let _ = p.clamp_health_to_max();
         self.potions.enchant_modifiers = wanted;
     }
 }
@@ -1095,7 +1075,7 @@ fn location_disks<'a>(
     let mut disks = Vec::new();
     for (stack, slot) in equipment {
         let Some(stack) = stack else { continue };
-        for (id, level) in stack.enchantments() {
+        for (id, level) in stack.all_enchantments().iter() {
             let Some(def) = enchantments.get(id) else {
                 continue;
             };
@@ -1182,6 +1162,28 @@ fn location_requirements(req: &Value, on_ground: bool, riding: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::block_break_speed_factor;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn thorns_and_boots_wear_break_the_equipped_piece() {
+        use horizon_client::items::ItemStack;
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let mut chest = ItemStack::new("minecraft:diamond_chestplate", 1);
+            chest.damage = game.items().get(&chest.item).unwrap().max_damage - 1;
+            chest.data_mut().enchantments = vec![("minecraft:thorns".into(), 255)];
+            game.armor[1] = Some(chest);
+            assert!(!game.thorns_damage().is_empty());
+            assert!(game.armor[1].is_none());
+            let mut boots = ItemStack::new("minecraft:diamond_boots", 1);
+            boots.damage = game.items().get(&boots.item).unwrap().max_damage - 1;
+            game.armor[3] = Some(boots);
+            game.wear_boots(1);
+            assert!(game.armor[3].is_none());
+        });
+    }
 
     /// #4094: `BLOCK_BREAK_SPEED` is a multiplier on the destroy speed.
     #[test]

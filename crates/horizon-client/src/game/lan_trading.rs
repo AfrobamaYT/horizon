@@ -263,7 +263,7 @@ impl Game<'_> {
         let env = Env {
             player: Some(player_uuid),
             player_entity_id: Some(player_entity_id),
-            side: mod_api::menu::LogicalSide::Server,
+            loop_context: &self.loop_context,
             items: self.items(),
             recipes: self.recipes(),
             brewing: &self.stations().brewing,

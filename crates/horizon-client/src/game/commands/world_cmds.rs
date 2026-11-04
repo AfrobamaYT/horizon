@@ -844,6 +844,12 @@ impl Game<'_> {
                     "attribute.base.set" => {
                         self.write_attribute(target, &attribute, AttributeWrite::Base(value_arg))
                             .ok_or_else(|| no_attribute(&name, &description))?;
+                        // onAttributeUpdated: a lowered max_health clamps health.
+                        if attribute == "minecraft:max_health"
+                            && let Some(player) = self.player.as_mut()
+                        {
+                            let _ = player.clamp_health_to_max();
+                        }
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.set.success",
                             &[description, name, java_double_text(value_arg)],
@@ -856,7 +862,13 @@ impl Game<'_> {
                         let v = self
                             .player
                             .as_mut()
-                            .and_then(|p| p.attributes.value(Some(key), ValueKind::Base).ok())
+                            .and_then(|p| {
+                                let v = p.attributes.value(Some(key), ValueKind::Base).ok();
+                                if attribute == "minecraft:max_health" {
+                                    let _ = p.clamp_health_to_max();
+                                }
+                                v
+                            })
                             .unwrap_or(0.0);
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.reset.success",

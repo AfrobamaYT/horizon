@@ -419,7 +419,11 @@ impl Game<'_> {
             return self.player_text(name, uuid);
         }
         let mut displayname = self.target_name(Target::Player);
-        horizon_client::lan::hub::native_player_name_format(&Text::literal(name), &mut displayname);
+        horizon_client::lan::hub::native_player_name_format(
+            &self.loop_context,
+            &Text::literal(name),
+            &mut displayname,
+        );
         displayname
     }
     fn source_position(&self) -> [f64; 3] {
@@ -1816,6 +1820,35 @@ impl Game<'_> {
             _ => {}
         }
     }
+    /// `TeleportCommand.performTeleport`'s `EntityTeleportEvent.TeleportCommand`:
+    /// where `t` goes in `level`, or None when a mod canceled the teleport.
+    /// A target that is not a number keeps the command's. Only a server's
+    /// entities with a network id are asked.
+    fn teleport_command_target(
+        &mut self,
+        t: Target,
+        level: super::Dim,
+        pos: [f64; 3],
+    ) -> Option<[f64; 3]> {
+        let (Some(entity), Some(from)) = (self.network_entity_id(t), self.target_position(t))
+        else {
+            return Some(pos);
+        };
+        if !self.native_authoritative() {
+            return Some(pos);
+        }
+        let mut to = pos;
+        let mut cancel = false;
+        self.native_teleport_command(level.id(), entity as u32, from, &mut to, &mut cancel);
+        if cancel {
+            return None;
+        }
+        Some(if to.iter().all(|v| v.is_finite()) {
+            to
+        } else {
+            pos
+        })
+    }
     fn cmd_teleport(&mut self, id: &str, ctx: &Context) -> R<i32> {
         let targets = if id.starts_with("teleport.targets") {
             self.entities(ctx, "targets", false)?
@@ -1833,6 +1866,9 @@ impl Game<'_> {
             // TeleportCommand.teleportToEntity: the destination's rotation too.
             let rotation = Some(self.target_rotation(dest).map(wrap_degrees));
             for &t in &targets {
+                let Some(pos) = self.teleport_command_target(t, level, pos) else {
+                    continue;
+                };
                 if !self.teleport_across(t, level, pos, rotation) {
                     self.teleport_to(t, pos, rotation);
                 }
@@ -1899,14 +1935,14 @@ impl Game<'_> {
         // Entity.lookAt: from the source's anchor (the feet, unless `anchored
         // eyes`) on the teleported entity, so the eyes depend on the target.
         let anchored_eyes = self.command_source.is_some_and(|s| s.eyes);
-        let look_at = |this: &Self, t: Target| {
+        let look_at = |this: &Self, t: Target, at: [f64; 3]| {
             let f = facing?;
             let eye = if anchored_eyes {
-                pos[1] + this.target_eye_height(t)
+                at[1] + this.target_eye_height(t)
             } else {
-                pos[1]
+                at[1]
             };
-            Some(world_cmds::look_at([pos[0], eye, pos[2]], f))
+            Some(world_cmds::look_at([at[0], eye, at[2]], f))
         };
         // A server's player in another level than the source's (`execute
         // in`, the console's Overworld) moves there (ServerPlayer.teleport
@@ -1917,7 +1953,10 @@ impl Game<'_> {
             None => self.dim,
         };
         for &t in &targets {
-            let rotation = look_at(self, t).or_else(|| {
+            let Some(pos) = self.teleport_command_target(t, source_level, pos) else {
+                continue;
+            };
+            let rotation = look_at(self, t, pos).or_else(|| {
                 let (angles, relative) = rotation?;
                 let current = self.target_rotation(t);
                 // performTeleport wraps relative deltas before calculateAbsolute

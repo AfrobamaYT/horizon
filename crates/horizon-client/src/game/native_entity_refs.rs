@@ -190,8 +190,7 @@ impl Game<'_> {
     }
     /// Set a block in the level in place (`Level.setBlock`). Parked levels,
     /// stale handles, clients and unloaded or out-of-height positions return
-    /// false. Client-update and client-render flags are not supported; Horizon
-    /// sends every change to clients.
+    /// false. Client notification follows the supplied update flags.
     pub(super) fn native_level_set_block(
         &mut self,
         level: LevelRef,
@@ -203,6 +202,21 @@ impl Game<'_> {
             return false;
         }
         self.native_set_block(level.dimension(), pos, state, flags.bits())
+    }
+    /// Remove a block in place (`Level.removeBlock`), preserving its fluid.
+    pub(super) fn native_level_remove_block(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        moved: bool,
+    ) -> bool {
+        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+            return false;
+        }
+        let changed =
+            self.with_level(|_, level, ticks| level.native_remove_block(ticks, pos, moved));
+        let _ = self.process_level_events();
+        changed
     }
     /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
     /// dropping its resources. Parked levels and invalid positions return false.
@@ -709,6 +723,43 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn block_part_flips_fence_connections_in_a_real_game_level() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::{geometry::Direction, position::BlockPos};
+        use std::sync::Arc;
+
+        mod_api::__private::part_tests::fence_game_thread();
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let oak = registry.default_state("minecraft:oak_fence").unwrap();
+            let spruce = registry.default_state("minecraft:spruce_fence").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let torch = registry.default_state("minecraft:torch").unwrap();
+            let pos = BlockPos::new(5, 64, 5);
+            let neighbour = BlockPos::new(6, 64, 5);
+            let arm = |game: &mut crate::game::Game<'_>, fence, beside| {
+                game.world.set(6, 64, 5, beside).unwrap();
+                let shaped = game.with_level(|b, level, ticks| {
+                    b.update_shape(level, ticks, fence, pos, Direction::East, neighbour, beside)
+                });
+                registry.state(shaped).unwrap().properties["east"].clone()
+            };
+            game.world.set(5, 63, 5, stone).unwrap();
+            // Vanilla joins a fence to a sturdy face and not to a torch; the oak
+            // fence's part flips both answers, the spruce fence has no part.
+            assert_eq!(arm(game, oak, stone), "false");
+            assert_eq!(arm(game, oak, torch), "true");
+            assert_eq!(arm(game, spruce, stone), "true");
+            assert_eq!(arm(game, spruce, torch), "false");
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn side_guards_agree_across_integrated_dedicated_and_client() {
         use super::super::execution_role::ExecutionRole;
         use horizon_client::chunk::Chunk;
@@ -1001,6 +1052,10 @@ pub(super) mod tests {
                         fire_ticks: 0,
                         air: 300,
                         fall_distance: 0.0,
+                        velocity: [0.0; 3],
+                        food_exhaustion: 0.0,
+                        food_tick_timer: 0,
+                        ticks_frozen: 0,
                     });
                 }
                 guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));
@@ -1013,6 +1068,10 @@ pub(super) mod tests {
             .unwrap();
             game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = Some(Box::new(motion));
             let player = game.native_player_ref(12).unwrap();
+            assert_eq!(
+                player.inventory(game),
+                Some(vec![ItemStack::new("minecraft:stone", 1)])
+            );
             let guest_living = game.native_living(player.fields().entity).unwrap();
             let host: &dyn mod_api::Host = game;
             assert_eq!(
@@ -1340,7 +1399,16 @@ pub(super) mod tests {
                 integrated: false,
                 levels: Default::default(),
             };
-            let mut hub = Hub::new(lan, sync, encoder, config.clone());
+            let mut hub = Hub::new(
+                lan,
+                sync,
+                encoder,
+                config.clone(),
+                std::sync::Arc::new(
+                    crate::game::test_server_load()
+                        .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+                ),
+            );
             let motion = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
             let fake = Guest::connectionless(fake_id, 2, "fake".into(), 2, [0.0; 3], motion);
             assert!(fake.placed && fake.motion.is_some());
@@ -2436,6 +2504,65 @@ pub(super) mod tests {
             .registry
             .default_state("minecraft:air")
             .unwrap();
+        // Flag-aware writes log only client updates; ordinary World::set still logs by default.
+        game.world.block_log = Some(Vec::new());
+        assert!(game.native_level_set_block(
+            level,
+            [2, 64, 0],
+            stone,
+            NativeBlockUpdateFlags::NONE
+        ));
+        assert!(game.world.block_log.as_ref().unwrap().is_empty());
+        assert!(game.native_level_set_block(
+            level,
+            [3, 64, 0],
+            stone,
+            NativeBlockUpdateFlags::CLIENTS
+        ));
+        assert_eq!(game.world.block_log.as_ref().unwrap(), &vec![(3, 64, 0)]);
+        assert!(game.native_level_set_block(
+            level,
+            [4, 64, 0],
+            stone,
+            NativeBlockUpdateFlags::CLIENTS | NativeBlockUpdateFlags::INVISIBLE
+        ));
+        assert_eq!(
+            game.world.block_log.as_ref().unwrap(),
+            &vec![(3, 64, 0), (4, 64, 0)]
+        );
+        game.world.block_log = None;
+        let waterlogged = game
+            .pack
+            .assets
+            .registry
+            .resolve(&horizon_world::chunk::BlockState {
+                name: "minecraft:oak_slab".into(),
+                properties: [
+                    ("type".into(), "bottom".into()),
+                    ("waterlogged".into(), "true".into()),
+                ]
+                .into_iter()
+                .collect(),
+            })
+            .unwrap();
+        let water = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:water")
+            .unwrap();
+        for moved in [false, true] {
+            game.world.set(5, 64, 0, waterlogged).unwrap();
+            assert!(game.native_level_remove_block(level, [5, 64, 0], moved));
+            assert_eq!(game.world.block(5, 64, 0), water);
+            game.world.set(5, 64, 0, waterlogged).unwrap();
+            let removed = game.with_level(|_, level, ticks| {
+                let mut host = super::super::mod_api_host::LevelTicks { level, ticks };
+                mod_api::LevelWriteHost::remove_block(&mut host, [5, 64, 0], moved)
+            });
+            assert!(removed);
+            assert_eq!(game.world.block(5, 64, 0), water);
+        }
         let flags = NativeBlockUpdateFlags::NEIGHBORS;
         assert!(game.native_level_set_block(level, [0, 64, 0], stone, flags));
         assert_eq!(game.world.block(0, 64, 0), stone);
