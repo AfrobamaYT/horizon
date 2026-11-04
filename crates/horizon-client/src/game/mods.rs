@@ -82,11 +82,29 @@ pub(super) fn register_standalone_models(role: ExecutionRole) {
 /// (docs/modpacks.md): their blocks, items, data and assets. Read once at
 /// start, before the resources load; a mod whose content is refused is left
 /// out here and its row on the Mods page says why.
-pub(super) fn content_root(
+/// The merged content root and the accepted content mods behind it, before
+/// any process-wide registration. A caller that only reads the overlay (the
+/// reload tests) must not freeze the mod registries for the rest of the
+/// process.
+pub(super) struct ContentOverlay {
+    /// The root with the mods' content merged in.
+    pub(super) root: std::path::PathBuf,
+    /// The accepted content mods, in overlay order.
+    pub(super) mods: Vec<horizon_client::mod_content::ContentMod>,
+    /// The protocol entries of the accepted mods.
+    pub(super) announced: Vec<horizon_protocol::mod_list::Entry>,
+    /// Whether the protocol's local mod list is still unset.
+    pub(super) announce: bool,
+}
+
+/// Builds the content overlay: every enabled or dev content mod's files
+/// merged over `root`. Registration of what the mods declare is
+/// [`content_root`]'s step.
+pub(super) fn content_overlay(
     root: &std::path::Path,
     enabled: &std::collections::BTreeSet<String>,
     dev: &[std::path::PathBuf],
-) -> horizon_client::Result<std::path::PathBuf> {
+) -> horizon_client::Result<ContentOverlay> {
     use horizon_client::mod_content::{self, ContentMod};
     use horizon_mods::Content;
     let here = std::env::current_dir().unwrap_or_default();
@@ -159,23 +177,40 @@ pub(super) fn content_root(
             log::warn!("Horizon: {e}");
         }
     }
-    let out = mod_content::resource_root(root, &mods, &here.join(".horizon-cache"))?;
-    register_block_entity_types(&out, &mods)?;
-    if announce {
-        horizon_protocol::mod_list::set_local(announced);
+    let root = mod_content::resource_root(root, &mods, &here.join(".horizon-cache"))?;
+    Ok(ContentOverlay {
+        root,
+        mods,
+        announced,
+        announce,
+    })
+}
+
+/// The content root with everything the mods declare registered against the
+/// process: block entities, mob effects, entity and menu types, fluid looks,
+/// and the protocol's local mod list, each set once.
+pub(super) fn content_root(
+    root: &std::path::Path,
+    enabled: &std::collections::BTreeSet<String>,
+    dev: &[std::path::PathBuf],
+) -> horizon_client::Result<std::path::PathBuf> {
+    let overlay = content_overlay(root, enabled, dev)?;
+    register_block_entity_types(&overlay.root, &overlay.mods)?;
+    if overlay.announce {
+        horizon_protocol::mod_list::set_local(overlay.announced);
     }
-    if out != root {
+    if overlay.root != root {
         log::info!(
             "Horizon: content from {} mod(s) in {}",
-            mods.len(),
-            out.display()
+            overlay.mods.len(),
+            overlay.root.display()
         );
     }
-    register_mob_effects(&mods);
-    register_entity_types(&mods);
-    register_menu_types(&mods);
-    horizon_client::mod_content::set_fluid_looks(&mods);
-    Ok(out)
+    register_mob_effects(&overlay.mods);
+    register_entity_types(&overlay.mods);
+    register_menu_types(&overlay.mods);
+    horizon_client::mod_content::set_fluid_looks(&overlay.mods);
+    Ok(overlay.root)
 }
 
 fn register_block_entity_types(
@@ -226,6 +261,12 @@ fn announced_entry(m: &horizon_mods::Manifest) -> horizon_protocol::mod_list::En
 fn register_mob_effects(mods: &[horizon_client::mod_content::ContentMod]) {
     use horizon_client::brewing::{self, Category};
     use horizon_mods::content::EffectCategory;
+    // No content mods: there is nothing to freeze the registry with. The
+    // first root that carries mods sets it, and a game without mods reads the
+    // same empty list either way.
+    if mods.is_empty() {
+        return;
+    }
     let effects = horizon_client::mod_content::mob_effects(mods);
     let ids: Vec<String> = effects.iter().map(|e| e.id.clone()).collect();
     let set = brewing::register_mod_effects(effects.into_iter().map(|e| {

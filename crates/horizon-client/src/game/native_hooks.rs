@@ -21,11 +21,11 @@ use super::{
 };
 use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
-    self, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef, NativeCamera, NativeCommand,
-    NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
-    NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
-    RecipeBookCategory, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse,
-    WorldPhase,
+    self, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef,
+    NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
+    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
+    NativeServerPlayer, RecipeBookCategory, ServerReloadListeners, ServerTickPhase,
+    TicketController, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
@@ -1506,6 +1506,20 @@ impl Game<'_> {
     /// `AddServerReloadListenersEvent.getRegistryAccess` does.
     pub(super) fn native_add_server_reload_listeners(&self, listeners: &mut ServerReloadListeners) {
         mod_api::dispatch_add_server_reload_listeners(self, listeners);
+    }
+    /// Register client asset reload listeners before a reload stages its
+    /// assets (NeoForge's `AddClientReloadListenersEvent`, the client's
+    /// counterpart of `native_add_server_reload_listeners`): the first load
+    /// before the loader thread runs, then every later reload — the player
+    /// changed resource packs, F3+T was pressed, or a server sent its packs.
+    /// The listener's `prepare` then reads the merged asset view with
+    /// resource-pack overrides resolved, and its returned apply publishes the
+    /// parsed state, all applies after all prepares, before
+    /// `native_client_resources_reloaded`. A listener that returns an error
+    /// aborts the reload and keeps every listener's previous assets.
+    /// Client-side.
+    pub(super) fn native_add_client_reload_listeners(&self, listeners: &mut ClientReloadListeners) {
+        mod_api::dispatch_add_client_reload_listeners(self, listeners);
     }
     /// The server is assembling its data tables, as for
     /// `native_data_pack_files` (a world's first open and every `/reload`):
@@ -8165,16 +8179,6 @@ impl Game<'_> {
     /// as plain text.
     pub(super) fn native_screen_title(&self) -> Option<String> {
         self.remote_menu_title().map(|t| t.plain())
-    }
-    /// A data file of the game's resources, content mods' included
-    /// (`data/mymod/machines.json`), when there is one: what a mod's content
-    /// says, read at runtime. Only relative paths of plain names.
-    pub(super) fn native_data(&self, path: &str) -> Option<Vec<u8>> {
-        let plain = |p: &str| !p.is_empty() && p != "." && p != ".." && !p.contains('\\');
-        if !path.starts_with("data/") || !path.split('/').all(plain) {
-            return None;
-        }
-        fs::read(self.options.resources.join(path)).ok()
     }
     /// The block at `pos` (`mymod:cable`; air where nothing is loaded).
     pub(super) fn native_block(&self, pos: [i32; 3]) -> String {

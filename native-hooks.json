@@ -213,10 +213,6 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_title", "side": "client"
     },
     {
-      "name": "data",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_data", "side": "both"
-    },
-    {
       "name": "block",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block", "side": "both"
     },
