@@ -10,6 +10,7 @@ use crate::{
     engine,
     http::Response,
 };
+use horizon_server_launch::config;
 use horizon_server_files::user_lists::{
     BanList, IpBanList, OpList, UserList, WhiteList, format_date,
 };
@@ -248,12 +249,12 @@ fn uuid(id: u128) -> String {
 /// Whether the whitelist is on: the game writes `white-list` to server.properties when `/whitelist on|off`
 /// changes it; server.toml catches up when it stops.
 fn whitelist_on(dir: &Path) -> bool {
-    std::fs::read(dir.join(crate::config::PROPERTIES))
+    std::fs::read(dir.join(config::PROPERTIES))
         .ok()
         .and_then(|b| horizon_server_files::java_properties::Properties::load_file(&b).ok())
         .and_then(|p| p.get("white-list").map(|v| v == "true"))
         .or_else(|| {
-            crate::config::Config::load(dir)
+            config::Config::load(dir)
                 .ok()
                 .map(|c| c.server.whitelist)
         })

@@ -134,13 +134,22 @@ fn all_missing_hashes_share_one_consent_and_each_download_once() {
         assert_eq!(jars.len(), 2);
         true
     };
+    let lookups = Cell::new(0);
     let mut downloads = 0;
     let jars = collect([&manifest(vec![a.clone()]), &manifest(vec![b, a.clone()])]).unwrap();
     prepare_with(
         &home.0,
         &jars,
         Permission::Ask(&ask),
-        |jar| Ok(Some(jar.sha512().to_owned())),
+        |missing| {
+            assert_eq!(prompts.get(), 1, "consent precedes metadata requests");
+            lookups.set(lookups.get() + 1);
+            assert_eq!(missing.len(), 2);
+            Ok(missing
+                .iter()
+                .map(|jar| (jar.sha512().to_owned(), jar.sha512().to_owned()))
+                .collect())
+        },
         |url, jar, dest| {
             assert_eq!(url, jar.sha512());
             downloads += 1;
@@ -157,8 +166,36 @@ fn all_missing_hashes_share_one_consent_and_each_download_once() {
     )
     .unwrap();
     assert_eq!(prompts.get(), 1);
+    assert_eq!(lookups.get(), 1);
     assert_eq!(downloads, 2);
     assert_eq!(fs::read_dir(home.0.join("jars")).unwrap().count(), 2);
+}
+
+#[test]
+fn one_unresolved_hash_refuses_the_whole_batch_before_any_download() {
+    let home = Scratch::new();
+    let (first, _) = source(b"available");
+    let (second, _) = source(b"unavailable");
+    let error = prepare_with(
+        &home.0,
+        &[first.clone(), second.clone()],
+        Permission::Allow,
+        |missing| {
+            assert_eq!(missing.len(), 2);
+            Ok(BTreeMap::from([(first.sha512().into(), "exact.jar".into())]))
+        },
+        |_, _, _| panic!("an incomplete lookup must not download any file"),
+    )
+    .unwrap_err();
+    let PrepareError::Download { jar, path, .. } = error else {
+        panic!("the unresolved file must be named");
+    };
+    assert_eq!(*jar, second);
+    assert_eq!(
+        path,
+        home.0.join("jars").join(format!("{}.jar", second.sha512()))
+    );
+    assert!(!home.0.join("jars").exists());
 }
 
 #[test]
@@ -189,13 +226,17 @@ fn declined_consent_and_missing_or_failed_lookup_never_download() {
         &home.0,
         std::slice::from_ref(&jar),
         Permission::Ask(&ask),
-        |_| Ok(Some("exact.jar".into())),
+        |_| panic!("declined consent must not contact Modrinth"),
         |_, _, _| panic!("declined"),
     )
     .unwrap_err();
     assert!(matches!(error, PrepareError::Refused { .. }));
-    for result in [Ok(None), Err("transport failed".to_owned())] {
-        let ask = |_: &[&JarRef]| panic!("lookup failure must not prompt");
+    for result in [Ok(BTreeMap::new()), Err("transport failed".to_owned())] {
+        let consented = Cell::new(false);
+        let ask = |_: &[&JarRef]| {
+            consented.set(true);
+            true
+        };
         let expected = if result.is_err() {
             "transport failed"
         } else {
@@ -205,7 +246,10 @@ fn declined_consent_and_missing_or_failed_lookup_never_download() {
             &home.0,
             std::slice::from_ref(&jar),
             Permission::Ask(&ask),
-            |_| result.clone(),
+            |_| {
+                assert!(consented.get());
+                result.clone()
+            },
             |_, _, _| panic!("lookup failed"),
         )
         .unwrap_err();

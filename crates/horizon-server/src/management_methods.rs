@@ -9,6 +9,7 @@ use crate::{
     engine,
     management::{Failure, INTERNAL_ERROR, invalid_params},
 };
+use horizon_server_launch::config;
 use serde_json::{Value, json};
 use std::{path::Path, sync::atomic::Ordering};
 
@@ -439,7 +440,7 @@ impl Game<'_> {
                 "enforce_allowlist" => "enforce_whitelist",
                 _ => unreachable!("allowlist setting is validated by its callers"),
             };
-            crate::config::update(
+            config::update(
                 &self.shared.dir,
                 "properties",
                 property,
@@ -494,7 +495,7 @@ impl Game<'_> {
             return Err((INTERNAL_ERROR, Some(error.to_owned())));
         }
         if let Some(value) = value {
-            crate::config::update(
+            config::update(
                 &self.shared.dir,
                 "properties",
                 "pause-when-empty-seconds",
@@ -517,7 +518,7 @@ impl Game<'_> {
             return Err((INTERNAL_ERROR, Some(error.to_owned())));
         }
         if let Some(value) = value {
-            crate::config::update(
+            config::update(
                 &self.shared.dir,
                 "properties",
                 "force-gamemode",
@@ -540,7 +541,7 @@ impl Game<'_> {
             return Err((INTERNAL_ERROR, Some(error.to_owned())));
         }
         if let Some(value) = value {
-            crate::config::update(
+            config::update(
                 &self.shared.dir,
                 "properties",
                 "allow-flight",
@@ -563,7 +564,7 @@ impl Game<'_> {
             return Err((INTERNAL_ERROR, Some(error.to_owned())));
         }
         if let Some(value) = value {
-            crate::config::update(
+            config::update(
                 &self.shared.dir,
                 "properties",
                 "hide-online-players",
@@ -586,7 +587,7 @@ impl Game<'_> {
             return Err((INTERNAL_ERROR, Some(error.to_owned())));
         }
         if let Some(value) = value {
-            crate::config::update(
+            config::update(
                 &self.shared.dir,
                 "properties",
                 "player-idle-timeout",
@@ -609,7 +610,7 @@ impl Game<'_> {
             return Err((INTERNAL_ERROR, Some(error.to_owned())));
         }
         if let Some(value) = value {
-            crate::config::update(
+            config::update(
                 &self.shared.dir,
                 "server",
                 "max_players",
@@ -632,7 +633,7 @@ impl Game<'_> {
             return Err((INTERNAL_ERROR, Some(error.to_owned())));
         }
         if let Some(value) = value {
-            crate::config::update(
+            config::update(
                 &self.shared.dir,
                 "world",
                 "game_mode",
@@ -656,7 +657,7 @@ impl Game<'_> {
         }
         // server.toml's `motd` writes server.properties' at each start: keep the new one there too.
         if let Some(value) = value {
-            crate::config::update(
+            config::update(
                 &self.shared.dir,
                 "server",
                 "motd",
@@ -679,7 +680,7 @@ impl Game<'_> {
             return Err((INTERNAL_ERROR, Some(error.to_owned())));
         }
         if let Some(value) = value {
-            crate::config::update(
+            config::update(
                 &self.shared.dir,
                 "world",
                 "difficulty",

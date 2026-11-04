@@ -2,6 +2,7 @@
 //! `restart`, `status`, `cmd`, `report` and `logs`. They talk to the running supervisor through the control API.
 
 use crate::{api::Client, backup, signals, supervisor};
+use horizon_server_launch::config;
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -22,7 +23,7 @@ pub fn start(dir: &Path) -> Result<(), String> {
     if Client::open(dir)?.is_some() {
         return Err(format!("a server is already running in {}", dir.display()));
     }
-    crate::config::Config::load(dir)?;
+    config::Config::load(dir)?;
     // Left by a supervisor that was killed: the new one writes its own.
     let endpoint = dir.join(".horizon/api.json");
     let _ = std::fs::remove_file(&endpoint);
@@ -469,7 +470,7 @@ pub fn backup(dir: &Path, name: Option<&str>) -> Result<(), String> {
             .to_owned(),
         None => {
             let _lock = supervisor::lock(dir)?;
-            let config = crate::config::Config::load(dir)?;
+            let config = config::Config::load(dir)?;
             let file = backup::file_name(std::time::SystemTime::now(), name)?;
             backup::create(dir, &config, &file)?;
             file
@@ -557,7 +558,7 @@ pub fn restore(dir: &Path, name: &str, dimension: Option<&str>, yes: bool) -> Re
         return Ok(());
     }
     let _lock = supervisor::lock(dir)?;
-    let config = crate::config::Config::load(dir)?;
+    let config = config::Config::load(dir)?;
     let done = match &dimension {
         Some(d) => backup::restore_dimension(dir, &config, &name, d)?,
         None => backup::restore(dir, &config, &name)?,

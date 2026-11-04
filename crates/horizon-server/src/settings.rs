@@ -2,7 +2,8 @@
 //! (docs/server.md, section 4). A running server takes what vanilla can change live through its console
 //! (difficulty, the default game mode, the whitelist) at once; the rest applies at the next start.
 
-use crate::{api::Client, config};
+use crate::api::Client;
+use horizon_server_launch::config;
 use serde_json::{Value, json};
 use std::path::Path;
 

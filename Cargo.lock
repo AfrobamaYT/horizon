@@ -1726,13 +1726,12 @@ dependencies = [
  "base64",
  "chrono",
  "getrandom 0.3.4",
- "horizon-anticheat",
  "horizon-bench",
- "horizon-chat-filter",
  "horizon-core",
  "horizon-mcp",
  "horizon-release-sign",
  "horizon-server-files",
+ "horizon-server-launch",
  "libc",
  "p12-keystore",
  "png",
@@ -1743,7 +1742,6 @@ dependencies = [
  "sha1",
  "sha2",
  "toml",
- "toml_edit",
  "ureq",
  "windows-sys 0.61.2",
  "zip",
@@ -1759,6 +1757,19 @@ dependencies = [
  "horizon-world",
  "log",
  "ureq",
+]
+
+[[package]]
+name = "horizon-server-launch"
+version = "0.1.0"
+dependencies = [
+ "horizon-anticheat",
+ "horizon-chat-filter",
+ "horizon-server-files",
+ "serde",
+ "toml",
+ "toml_edit",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

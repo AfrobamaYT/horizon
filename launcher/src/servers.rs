@@ -358,10 +358,10 @@ pub fn run_managed(
     permission: crate::jars::Permission<'_>,
 ) -> Result<(), Problem> {
     let supervisor = command(dir, args).map_err(Problem::plain)?;
-    let mut engine = horizon_server::engine_command(Path::new(supervisor.get_program()), dir)
+    let mut engine = horizon_server_launch::engine_command(Path::new(supervisor.get_program()), dir)
         .map_err(|error| {
             let mut problem = Problem::plain(error.to_string());
-            if matches!(error, horizon_server::EngineCommandError::Resources(_)) {
+            if matches!(error, horizon_server_launch::EngineCommandError::Resources(_)) {
                 problem.fix = Some(Fix::Prepare);
             }
             problem

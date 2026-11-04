@@ -5,7 +5,6 @@ mod admin;
 mod api;
 mod backup;
 mod cli;
-mod config;
 mod console;
 mod discord;
 mod engine;
@@ -31,7 +30,7 @@ mod supervisor;
 mod update;
 mod websocket;
 
-pub use engine::{EngineCommandError, engine_command};
+use horizon_server_launch::config;
 
 use std::{path::PathBuf, process::ExitCode};
 

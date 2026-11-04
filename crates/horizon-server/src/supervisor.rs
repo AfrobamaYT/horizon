@@ -5,9 +5,12 @@
 
 use crate::{
     api::{self, Phase, Shared},
-    backup, config,
-    config::Config,
-    engine, signals, update,
+    backup, engine, signals,
+    update::{self, UpdateInstall},
+};
+use horizon_server_launch::{
+    self as launch,
+    config::{self, Config},
 };
 use serde_json::json;
 use std::{
@@ -103,8 +106,8 @@ struct Watch {
 pub fn run(dir: &Path) -> Result<(), String> {
     signals::install();
     let config = Config::load(dir)?;
-    let program = engine::program(&config, dir)?;
-    let resources = engine::resources(&config, dir, Some(&program))?;
+    let program = launch::program(&config, dir)?;
+    let resources = launch::resources(&config, dir, Some(&program))?;
     // Half-copied game files would only crash the engine again at every restart: name what is missing.
     engine::check_prepared(&resources)?;
     // A game the system can't load would only crash again at every restart: say why at once.
@@ -152,8 +155,8 @@ pub fn run(dir: &Path) -> Result<(), String> {
         // Read again before every start: edits to server.toml apply on the next restart, and so does a
         // switch to another release.
         let config = Config::load(dir)?;
-        if let Ok(found) = engine::program_in(&config, dir, shared.install.as_ref())
-            && let Ok(found_resources) = engine::resources(&config, dir, Some(&found))
+        if let Ok(found) = launch::program_in(&config, dir, shared.install.as_ref())
+            && let Ok(found_resources) = launch::resources(&config, dir, Some(&found))
         {
             (program, resources) = (found, found_resources);
         }
@@ -337,7 +340,7 @@ fn switch(
         return None;
     }
     if let Err(e) =
-        engine::program_in(config, dir, Some(install)).and_then(|p| engine::check_starts(&p))
+        launch::program_in(config, dir, Some(install)).and_then(|p| engine::check_starts(&p))
     {
         let back = install
             .switch_back(&from, previous.as_deref())
@@ -592,7 +595,7 @@ fn schedule_backups(shared: Arc<Shared>) {
                 let Ok(config) = Config::load(&shared.dir) else {
                     continue;
                 };
-                let Ok(Some(every)) = backup::interval(&config.backups.every) else {
+                let Ok(Some(every)) = config.backups.interval() else {
                     continue;
                 };
                 if last.elapsed() < every || shared.state.lock().unwrap().phase != Phase::Running {
@@ -763,7 +766,7 @@ mod tests {
         let dir = root.join("server");
         std::fs::create_dir_all(dir.join("world")).unwrap();
         std::fs::write(dir.join("world/level.dat"), "before").unwrap();
-        let install = update::Install { root };
+        let install = launch::Install { root };
         (Shared::with_install(&dir, Some(install)), dir)
     }
 
