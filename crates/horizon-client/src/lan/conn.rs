@@ -1001,7 +1001,8 @@ fn login_and_configure(
                         Err(error) => {
                             let text = mod_list_unreadable(&error);
                             let reason = super::data::component_nbt(&text.component());
-                            let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
+                            let _ =
+                                send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
                             lost(
                                 shared,
                                 &format!("{name} ({})", uuid_string(uuid)),
