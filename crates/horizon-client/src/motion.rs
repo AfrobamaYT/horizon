@@ -30,8 +30,8 @@ use horizon_world::{
         self as emission, MovementDistances, MovementEmission, MovementEmissionWorld, MovementEvent,
     },
     movement_properties::{
-        BoundMovementProperties, MovementBlockProvider, MovementProperties, MovementTags,
-        RegistryMovementWorld,
+        BlockFactorEdits, BoundMovementProperties, MovementBlockError, MovementBlockProvider,
+        MovementProperties, MovementTags, NoFactorEdits, RegistryMovementWorld,
     },
     movement_restitution::{self, RestitutionInput, RestitutionWorld},
     movement_statistics::{self, MovementStat, MovementStatisticsWorld},
@@ -74,6 +74,36 @@ pub fn native_living_speed(context: &LoopContext, entity: u32, kind: &str, speed
 #[inline(never)]
 pub fn native_living_flying_speed(context: &LoopContext, entity: u32, kind: &str, speed: &mut f32) {
     crate::native_client_hooks::living_flying_speed(context, entity, kind, speed);
+}
+
+/// A block state's jump factor (`Block.getJumpFactor`) is being read (beyond NeoForge: no event).
+/// Its parts may change it. Fires on replayed ticks too, so a listener must be a pure function of
+/// its inputs.
+#[inline(never)]
+pub fn native_block_jump_factor(context: &LoopContext, state: BlockStateId, factor: &mut f32) {
+    crate::native_client_hooks::block_jump_factor(context, state, factor);
+}
+
+/// A block state's speed factor (`Block.getSpeedFactor`) is being read (beyond NeoForge: no
+/// event). Its parts may change it. Fires on replayed ticks too, so a listener must be a pure
+/// function of its inputs.
+#[inline(never)]
+pub fn native_block_speed_factor(context: &LoopContext, state: BlockStateId, factor: &mut f32) {
+    crate::native_client_hooks::block_speed_factor(context, state, factor);
+}
+
+/// The factors the `block_jump_factor` and `block_speed_factor` parts give the blocks an entity
+/// reads, for the loop of the side that ticks it.
+pub(crate) struct ModBlockFactors<'a>(pub &'a LoopContext);
+impl BlockFactorEdits for ModBlockFactors<'_> {
+    fn jump(&self, state: BlockStateId, mut factor: f32) -> f32 {
+        native_block_jump_factor(self.0, state, &mut factor);
+        factor
+    }
+    fn speed(&self, state: BlockStateId, mut factor: f32) -> f32 {
+        native_block_speed_factor(self.0, state, &mut factor);
+        factor
+    }
 }
 
 /// The player's crouch edge backoff asks whether it is staying on the ground surface
@@ -1039,6 +1069,7 @@ impl MotionWorld<'_, '_, '_> {
             &mut RegistryMovementWorld {
                 properties: &self.resources.blocks,
                 world: self,
+                edits: &NoFactorEdits,
             },
             position,
             support,
@@ -2535,10 +2566,12 @@ impl EntityMoveWorld for MotionWorld<'_, '_, '_> {
     fn block_speed_factor(&mut self) -> Result<f32> {
         let efficiency = self.player.attribute("minecraft:movement_efficiency")? as f32;
         let location = self.location();
+        let context = self.loop_context;
         let block = movement_support::block_speed_factor(
             &mut RegistryMovementWorld {
                 properties: &self.resources.blocks,
                 world: self,
+                edits: &ModBlockFactors(context),
             },
             location,
         )?;
@@ -2951,10 +2984,12 @@ impl LivingMotionWorld for MotionWorld<'_, '_, '_> {
     }
     fn block_jump_factor(&mut self) -> Result<f32> {
         let location = self.location();
+        let context = self.loop_context;
         Ok(movement_support::block_jump_factor(
             &mut RegistryMovementWorld {
                 properties: &self.resources.blocks,
                 world: self,
+                edits: &ModBlockFactors(context),
             },
             location,
         )?)
@@ -3023,22 +3058,28 @@ fn fly_into_wall_damage(before: f64, after: f64) -> f32 {
     ((before - after) * 10.0 - 3.0) as f32
 }
 
-/// `Entity.getBlockSpeedFactor` for a kind that keeps no motion world of its
-/// own (mobs, boats): the factor of the block at `position`, else of the one
-/// below it, through the same port the player's move uses.
-pub fn block_speed_factor_at(
+/// The block factors an entity reads for a kind that keeps no motion world of its own (mobs,
+/// boats, minecarts): the block at `position`, else the one below it, through the same port the
+/// player's move uses, with the `block_jump_factor` and `block_speed_factor` parts applied.
+struct WorldBlocks<'a>(&'a World);
+impl MovementBlockProvider for WorldBlocks<'_> {
+    type Error = ();
+    fn movement_block_state(&mut self, p: BlockPos) -> std::result::Result<BlockStateId, ()> {
+        Ok(self.0.block(p.x, p.y, p.z))
+    }
+}
+
+fn block_factor_at(
     world: &World,
     properties: &BoundMovementProperties,
+    context: &LoopContext,
     position: Vec3,
     supporting_block: Option<BlockPos>,
+    read: impl FnOnce(
+        &mut RegistryMovementWorld<'_, WorldBlocks<'_>>,
+        movement_support::MovementLocation,
+    ) -> std::result::Result<f32, MovementBlockError<()>>,
 ) -> f32 {
-    struct Blocks<'a>(&'a World);
-    impl MovementBlockProvider for Blocks<'_> {
-        type Error = ();
-        fn movement_block_state(&mut self, p: BlockPos) -> std::result::Result<BlockStateId, ()> {
-            Ok(self.0.block(p.x, p.y, p.z))
-        }
-    }
     let location = movement_support::MovementLocation {
         position,
         block_position: BlockPos::new(
@@ -3048,15 +3089,52 @@ pub fn block_speed_factor_at(
         ),
         supporting_block,
     };
-    let mut view = Blocks(world);
-    movement_support::block_speed_factor(
+    let mut view = WorldBlocks(world);
+    read(
         &mut RegistryMovementWorld {
             properties,
             world: &mut view,
+            edits: &ModBlockFactors(context),
         },
         location,
     )
     .unwrap_or(1.0)
+}
+
+/// `Entity.getBlockSpeedFactor` for a kind that keeps no motion world of its own.
+pub fn block_speed_factor_at(
+    world: &World,
+    properties: &BoundMovementProperties,
+    context: &LoopContext,
+    position: Vec3,
+    supporting_block: Option<BlockPos>,
+) -> f32 {
+    block_factor_at(
+        world,
+        properties,
+        context,
+        position,
+        supporting_block,
+        |blocks, location| movement_support::block_speed_factor(blocks, location),
+    )
+}
+
+/// `Entity.getBlockJumpFactor` for a kind that keeps no motion world of its own.
+pub fn block_jump_factor_at(
+    world: &World,
+    properties: &BoundMovementProperties,
+    context: &LoopContext,
+    position: Vec3,
+    supporting_block: Option<BlockPos>,
+) -> f32 {
+    block_factor_at(
+        world,
+        properties,
+        context,
+        position,
+        supporting_block,
+        |blocks, location| movement_support::block_jump_factor(blocks, location),
+    )
 }
 
 #[cfg(test)]

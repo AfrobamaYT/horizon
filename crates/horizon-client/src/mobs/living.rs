@@ -743,6 +743,7 @@ impl Mob {
         crate::motion::block_speed_factor_at(
             w.world,
             w.movement,
+            w.loop_context,
             self.position,
             self.supporting.map(|[x, y, z]| BlockPos::new(x, y, z)),
         )
