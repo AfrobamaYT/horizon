@@ -1,5 +1,5 @@
 //! Cargo-facing generation and the launcher's trait injection boundary.
-use super::{Target, catalog_hooks, free_function_source, sources};
+use super::{Catalog, Target, free_function_source, sources};
 use quote::ToTokens;
 use std::{collections::HashSet, fs, path::Path};
 
@@ -54,14 +54,8 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
     }
     directory(&root.join("tools/native-hook-fragments"), "json", false)?;
     directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
-    let catalog = serde_json::from_str(
-        &fs::read_to_string(root.join("native-hooks.json")).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    for hook in catalog_hooks(root, &catalog)? {
-        if let Some((krate, path)) =
-            free_function_source(hook["target"].as_str().ok_or("target missing")?)
-        {
+    for hook in Catalog::load(root)?.hooks {
+        if let Some((krate, path)) = free_function_source(&hook.target) {
             let (module, _) = path.rsplit_once("::").ok_or("target missing module")?;
             let path = root
                 .join("crates")
