@@ -79,13 +79,20 @@ pub trait TicketValidation {
 }
 
 /// The game's [`TicketValidation`]: one controller's loaded tickets, and those removed.
-#[derive(Debug)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ControllerTickets {
     /// The `[mod] id` that owns the controller.
     owner: &'static str,
     loaded: Vec<ModTicket>,
     removed: Vec<ModTicket>,
+}
+/// Shows only how many tickets the calling mod's controller holds, never another mod's.
+impl std::fmt::Debug for ControllerTickets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ControllerTickets")
+            .field("own", &self.own().count())
+            .finish()
+    }
 }
 impl ControllerTickets {
     /// A validation of the `loaded` tickets of one controller, owned by mod
