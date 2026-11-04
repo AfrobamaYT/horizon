@@ -1387,17 +1387,6 @@ fn chars_to_type(text: &str, canceled: impl FnMut(char) -> bool) -> Option<Strin
 
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
-    /// The id of the item in the slot under the pointer on the open container screen
-    /// (`AbstractContainerScreen.getHoveredSlot().getItem()`), None over no slot or an empty one.
-    pub(super) fn native_screen_hovered_item(&self) -> Option<String> {
-        let size = self
-            .renderer
-            .as_ref()
-            .map(|r| [r.config.width, r.config.height])?;
-        let batch = HudBatch::new(size);
-        let slot = self.slot_at(&batch, self.cursor.0, self.cursor.1)?;
-        Some(self.slot_view(slot)?.item.to_string())
-    }
     /// Declare categories for custom recipe types, with registered item icons.
     /// Asked lazily once per recipe table by `native_recipe_book_category`.
     /// Invalid declarations are logged and skipped; the first valid category
@@ -7881,6 +7870,17 @@ fn put_block_entity(world: &mut horizon_client::world::World, pos: [i32; 3], ent
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
 impl Game<'_> {
+    /// The id of the item in the slot under the pointer on the open container screen
+    /// (`AbstractContainerScreen.getHoveredSlot().getItem()`), None over no slot or an empty one.
+    pub(super) fn native_screen_hovered_item(&self) -> Option<String> {
+        let size = self
+            .renderer
+            .as_ref()
+            .map(|r| [r.config.width, r.config.height])?;
+        let batch = HudBatch::new(size);
+        let slot = self.slot_at(&batch, self.cursor.0, self.cursor.1)?;
+        Some(self.slot_view(slot)?.item.to_string())
+    }
     /// Access a server-owned holder's attachment map. On a client it is the
     /// copy of what the server synced: `set` and `remove` change only the copy.
     pub(super) fn native_attachments(
