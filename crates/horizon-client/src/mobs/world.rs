@@ -544,18 +544,3 @@ pub(crate) fn test_player(position: Vec3) -> super::PlayerView {
         vehicle: None,
     }
 }
-
-impl crate::block_contact::ContactLevel for MobWorld<'_> {
-    fn block(&self, position: BlockPos) -> BlockStateId {
-        self.world.block(position.x, position.y, position.z)
-    }
-    fn registry(&self) -> &horizon_world::registry::BlockRegistry {
-        self.registry
-    }
-    fn min_y(&self) -> i32 {
-        self.world.shape.min_y
-    }
-    fn height(&self) -> i32 {
-        self.world.shape.height
-    }
-}

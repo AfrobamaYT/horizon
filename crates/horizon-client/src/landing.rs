@@ -276,14 +276,14 @@ impl FallEvent {
 }
 impl MotionWorld<'_, '_, '_> {
     fn mod_block_fall(
-        &self,
+        &mut self,
         state: BlockStateId,
         position: BlockPos,
         distance: f64,
         damage: f32,
     ) -> f32 {
         crate::block_contact::fall(
-            self,
+            &mut crate::health::DamageLevel::of(&mut *self.scene, self.assets.registry),
             crate::block_contact::Contact {
                 entity: self.player.entity_id,
                 kind: "minecraft:player",

@@ -2659,7 +2659,7 @@ impl RestitutionWorld for MotionWorld<'_, '_, '_> {
             )
             .map_err(|e| e.to_string())?;
         Ok(crate::block_contact::bounce(
-            &*self,
+            &mut crate::health::DamageLevel::of(&mut *self.scene, self.assets.registry),
             crate::block_contact::Contact {
                 entity: self.player.entity_id,
                 kind: "minecraft:player",
@@ -5526,19 +5526,5 @@ mod tests {
             0.1,
             "the flight speed follows the sprint state, not the sprint key"
         );
-    }
-}
-impl crate::block_contact::ContactLevel for MotionWorld<'_, '_, '_> {
-    fn block(&self, position: BlockPos) -> BlockStateId {
-        self.scene.block(position.x, position.y, position.z)
-    }
-    fn registry(&self) -> &horizon_world::registry::BlockRegistry {
-        self.assets.registry
-    }
-    fn min_y(&self) -> i32 {
-        self.scene.shape.min_y
-    }
-    fn height(&self) -> i32 {
-        self.scene.shape.height
     }
 }

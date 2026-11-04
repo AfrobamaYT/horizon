@@ -7149,13 +7149,55 @@ pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
     cancel
 }
 
-/// The level a hit lands in, as its damage hooks' level host: its blocks, its random and its
+/// The level a hit or a landing happens in, as its hooks' level host: its blocks, its random and its
 /// own attachments. Not `GameLevel`, which a hit can't build: a mob's hit lands in the mob
 /// tick, where the world is read by every mob and its random is lent out, and building one
 /// per hit would allocate its entity boxes.
 pub(super) struct HitLevel<'a>(pub(super) DamageLevel<'a>);
 
 impl HitLevel<'_> {
+    /// `Block.fallOn`: entity `entity` of type `kind` landed on `state` at `pos` after falling
+    /// `distance` blocks. `damage` is the fall damage `causeFallDamage` calculated, before hurt
+    /// handling and the fall sounds: change it, and zero prevents both. A creative or
+    /// fall-immune entity is told with zero damage and keeps its immunity. Players and mobs
+    /// land here; dropped items, projectiles and the other entities do not yet.
+    pub(super) fn native_fall_on(
+        &mut self,
+        dimension: &str,
+        entity: i32,
+        kind: &str,
+        state: BlockStateId,
+        pos: BlockPos,
+        distance: f64,
+        damage: &mut f32,
+    ) {
+        mod_api::dispatch_fall_on(self, dimension, entity, kind, state, pos, distance, damage);
+    }
+    /// `Block.bounceOn`: entity `entity` of type `kind` bounced off `state` at `pos` and fell
+    /// `fall_distance` blocks. `movement` is the movement the bounce leaves it, before
+    /// vanilla sets it: change it to change what the entity keeps. Players and mobs bounce
+    /// here; dropped items and the other entities do not yet.
+    pub(super) fn native_bounce_on(
+        &mut self,
+        dimension: &str,
+        entity: i32,
+        kind: &str,
+        state: BlockStateId,
+        pos: BlockPos,
+        fall_distance: f64,
+        movement: &mut [f64; 3],
+    ) {
+        mod_api::dispatch_bounce_on(
+            self,
+            dimension,
+            entity,
+            kind,
+            state,
+            pos,
+            fall_distance,
+            movement,
+        );
+    }
     /// NeoForge's `LivingIncomingDamageEvent`: `LivingEntity.hurtServer`, past its guards (an
     /// invulnerable or dead entity, fire on a fire-resistant one), is about to hurt entity
     /// `entity` of type `kind` (`minecraft:zombie`, `minecraft:player`) by `source`: its damage
@@ -7441,13 +7483,13 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
             mod_api::block_listens(mod_api::HookId::BounceOn, "bounce_on", state)
         },
         fall_on: |dimension, level, c, distance, damage| {
-            LandingLevel(level).native_fall_on(
+            HitLevel(level.reborrow()).native_fall_on(
                 dimension, c.entity, c.kind, c.state, c.position, distance, damage,
             );
         },
         bounce_on: |dimension, level, c, fall_distance, movement| {
             let mut answer = [movement.x, movement.y, movement.z];
-            LandingLevel(level).native_bounce_on(
+            HitLevel(level.reborrow()).native_bounce_on(
                 dimension,
                 c.entity,
                 c.kind,
@@ -7459,56 +7501,6 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
             *movement = horizon_core::geometry::Vec3::new(answer[0], answer[1], answer[2]);
         },
     };
-
-/// The level an entity lands in, as the landing hooks' level host: its blocks. The simulation
-/// that landed the entity holds the world, so the host is a borrow of it, with no random or
-/// attachments of its own.
-pub(super) struct LandingLevel<'a>(pub(super) &'a dyn horizon_client::block_contact::ContactLevel);
-
-impl LandingLevel<'_> {
-    /// `Block.fallOn`: entity `entity` of type `kind` landed on `state` at `pos` after falling
-    /// `distance` blocks. `damage` is the fall damage `causeFallDamage` calculated, before hurt
-    /// handling and the fall sounds: change it, and zero prevents both. A creative or
-    /// fall-immune entity is told with zero damage and keeps its immunity. Players and mobs
-    /// land here; dropped items, projectiles and the other entities do not yet.
-    pub(super) fn native_fall_on(
-        &mut self,
-        dimension: &str,
-        entity: i32,
-        kind: &str,
-        state: BlockStateId,
-        pos: BlockPos,
-        distance: f64,
-        damage: &mut f32,
-    ) {
-        mod_api::dispatch_fall_on(self, dimension, entity, kind, state, pos, distance, damage);
-    }
-    /// `Block.bounceOn`: entity `entity` of type `kind` bounced off `state` at `pos` and fell
-    /// `fall_distance` blocks. `movement` is the movement the bounce leaves it, before
-    /// vanilla sets it: change it to change what the entity keeps. Players and mobs bounce
-    /// here; dropped items and the other entities do not yet.
-    pub(super) fn native_bounce_on(
-        &mut self,
-        dimension: &str,
-        entity: i32,
-        kind: &str,
-        state: BlockStateId,
-        pos: BlockPos,
-        fall_distance: f64,
-        movement: &mut [f64; 3],
-    ) {
-        mod_api::dispatch_bounce_on(
-            self,
-            dimension,
-            entity,
-            kind,
-            state,
-            pos,
-            fall_distance,
-            movement,
-        );
-    }
-}
 
 /// `native_living_incoming_damage`'s entity, entity type and source for a hit.
 fn hurt_server_args(hurting: Hurting<'_>) -> (i32, &str, HurtSource<'_>) {
@@ -10993,7 +10985,6 @@ mod tests {
         };
         let level_hooks = impl_hooks("impl GameLevel<'_> {");
         let hit_hooks = impl_hooks("impl HitLevel<'_> {");
-        let contact_hooks = impl_hooks("impl LandingLevel<'_> {");
         // Hook points that are free functions in other crates.
         let free_hooks = |source: &'static str| -> BTreeSet<&'static str> {
             source
@@ -11030,7 +11021,6 @@ mod tests {
             })
             .chain(level_hooks.iter().copied())
             .chain(hit_hooks.iter().copied())
-            .chain(contact_hooks.iter().copied())
             .chain(render_hooks.iter().copied())
             .chain(item_hooks.iter().copied())
             .chain(loot_hooks.iter().copied())
@@ -11082,8 +11072,6 @@ mod tests {
                 format!("horizon_client_lib::breathing::native_{name}")
             } else if level_hooks.contains(name) {
                 format!("horizon_client::game::native_hooks::GameLevel<'_>::native_{name}")
-            } else if contact_hooks.contains(name) {
-                format!("horizon_client::game::native_hooks::LandingLevel<'_>::native_{name}")
             } else if hit_hooks.contains(name) {
                 format!("horizon_client::game::native_hooks::HitLevel<'_>::native_{name}")
             } else {

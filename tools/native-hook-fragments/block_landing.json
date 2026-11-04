@@ -2,19 +2,19 @@
   "hooks": [
     {
       "name": "fall_on",
-      "target": "horizon_client::game::native_hooks::LandingLevel<'_>::native_fall_on",
+      "target": "horizon_client::game::native_hooks::HitLevel<'_>::native_fall_on",
       "side": "server",
       "host": "level",
       "mod_api": {"contract": "collect", "out": "damage", "scope": "block", "key": "state"},
-      "doc": "An entity landed on a block state this part is attached to (`Block.fallOn`), after falling `event.distance` blocks. `event.damage` is the fall damage the entity calculated, before hurt handling and the fall sounds: change it, and zero prevents both. An entity that cannot be hurt by the fall (creative, fall immune) is told with zero damage and keeps its immunity, and a cancelled fall still lands. It runs inside the entity's move, on the level host, which reads blocks and has no random or attachments of its own; for a write, record it in your own state and apply it from a tick hook. Players and mobs land here; dropped items, projectiles and the other entities do not yet."
+      "doc": "An entity landed on a block state this part is attached to (`Block.fallOn`), after falling `event.distance` blocks. `event.damage` is the fall damage the entity calculated, before hurt handling and the fall sounds: change it, and zero prevents both. An entity that cannot be hurt by the fall (creative, fall immune) is told with zero damage and keeps its immunity, and a cancelled fall still lands. It runs inside the entity's move, on the level random host: it reads blocks and draws the level's random in vanilla's order, but writes nothing. Players and mobs land here; dropped items, projectiles and the other entities do not yet."
     },
     {
       "name": "bounce_on",
-      "target": "horizon_client::game::native_hooks::LandingLevel<'_>::native_bounce_on",
+      "target": "horizon_client::game::native_hooks::HitLevel<'_>::native_bounce_on",
       "side": "server",
       "host": "level",
       "mod_api": {"contract": "collect", "out": "movement", "scope": "block", "key": "state"},
-      "doc": "An entity bounced off a block state this part is attached to (`Block.bounceOn`), after falling `event.fall_distance` blocks. It fires only when the entity bounced, just before vanilla sets its movement. `event.movement` is the movement the bounce leaves it (`x`, `y`, `z`): change it to change what the entity keeps. It runs inside the entity's move, on the level host, which reads blocks and has no random or attachments of its own. Players and mobs bounce here; dropped items and the other entities do not yet."
+      "doc": "An entity bounced off a block state this part is attached to (`Block.bounceOn`), after falling `event.fall_distance` blocks. It fires only when the entity bounced, just before vanilla sets its movement. `event.movement` is the movement the bounce leaves it (`x`, `y`, `z`): change it to change what the entity keeps. It runs inside the entity's move, on the level random host: it reads blocks and draws the level's random in vanilla's order, but writes nothing. Players and mobs bounce here; dropped items and the other entities do not yet."
     }
   ]
 }
