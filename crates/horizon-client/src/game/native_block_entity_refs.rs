@@ -364,7 +364,28 @@ mod tests {
             let chest = game.native_block_entity_ref(level, [0, 64, 0]).unwrap();
             let furnace = game.native_block_entity_ref(level, [2, 64, 0]).unwrap();
             let sign = game.native_block_entity_ref(level, [4, 64, 0]).unwrap();
+            use super::super::lan_actions::MenuOpen;
             assert!(!player.open_menu(game, sign));
+            assert_eq!(
+                game.open_block_menu(999, (0, 64, 0)),
+                MenuOpen::NotAProvider
+            );
+            game.world
+                .block_entities
+                .insert((0, 64, 0), BlockEntity::Chest(vec![None; 2]));
+            assert!(!player.open_menu(game, chest));
+            game.world
+                .block_entities
+                .insert((0, 64, 0), BlockEntity::Chest(vec![None; 27]));
+            let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
+            let dimension =
+                std::mem::replace(&mut guest.dimension, "minecraft:the_nether".to_owned());
+            assert!(!player.open_menu(game, chest));
+            game.lan.as_mut().unwrap().hub.guests[0].dimension = dimension;
+            let host = game.lan.take();
+            assert!(!player.open_menu(game, chest));
+            assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::NotAProvider);
+            game.lan = host;
             assert!(player.open_menu(game, chest));
             assert!(player.open_menu(game, furnace));
             game.world.block_entities.remove(&(2, 64, 0));
