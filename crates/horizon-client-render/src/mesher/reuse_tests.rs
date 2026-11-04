@@ -200,6 +200,7 @@ fn a_shader_pack_lights_every_nether_face_like_an_up_face() {
             cutout_leaves: true,
             translucent_layers: &[],
             leaf_culling: LeafCullingMode::Off,
+            hidden_states: &[],
         };
         let mesh = mesher.mesh(&region, 0);
         // Both blocks' six faces: 2 × 6 quads of 4 vertices.
