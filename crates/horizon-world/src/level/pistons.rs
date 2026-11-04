@@ -5,7 +5,7 @@
 //!
 //! Entity pushing by moving blocks is the caller's (see `piston_movement`).
 use super::{
-    Behaviours, LevelAccess, LevelEvent, Sim, Ticks,
+    Behaviours, LevelAccess, LevelEvent, Signals, Sim, Ticks,
     data::PushReaction,
     states::BlockId,
     update::{above, rel},
@@ -161,13 +161,6 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
 
     // ---- moving piston block entities ----
-    pub(crate) fn moving_piston(&self, pos: BlockPos) -> Option<MovingPiston> {
-        self.ticks
-            .moving_pistons
-            .iter()
-            .find(|(p, _)| *p == pos)
-            .map(|(_, m)| *m)
-    }
     fn set_moving_piston(&mut self, pos: BlockPos, mut piston: MovingPiston) {
         self.ticks.moving_pistons.retain(|(p, _)| *p != pos);
         self.ticks.next_block_entity_id += 1;
@@ -960,5 +953,22 @@ impl Behaviours {
                 });
             }
         }
+    }
+}
+
+impl<L: LevelAccess + ?Sized> Signals<'_, L> {
+    pub(crate) fn moving_piston(&self, pos: BlockPos) -> Option<MovingPiston> {
+        self.ticks
+            .moving_pistons
+            .iter()
+            .find(|(p, _)| *p == pos)
+            .map(|(_, m)| *m)
+    }
+}
+
+/// `Sim` reads these through its [`Signals`], so there is one implementation of each.
+impl<L: LevelAccess + ?Sized> Sim<'_, L> {
+    pub(crate) fn moving_piston(&self, pos: BlockPos) -> Option<MovingPiston> {
+        self.signals().moving_piston(pos)
     }
 }

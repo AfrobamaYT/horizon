@@ -1448,7 +1448,43 @@ pub(crate) struct Sim<'a, L: LevelAccess + ?Sized> {
     /// neighbours (`getBlockSignal`).
     pub wire_signal_off: std::cell::Cell<bool>,
 }
+/// A read-only view of a level for the queries that change nothing: `SignalGetter`,
+/// and the block, shape and moving-piston reads its wire connections ask. `Sim`
+/// reads through one (`Sim::signals`), so a caller that holds the level shared, such
+/// as a mod's read, gets the game's own answer.
+pub struct Signals<'a, L: LevelAccess + ?Sized> {
+    pub(crate) b: &'a Behaviours,
+    pub(crate) level: &'a L,
+    pub(crate) ticks: &'a Ticks,
+    /// `RedstoneWireBlock.shouldSignal` is false while a wire samples its
+    /// neighbours (`getBlockSignal`).
+    pub(crate) wire_signal_off: bool,
+}
+impl<'a, L: LevelAccess + ?Sized> Sim<'a, L> {
+    /// This simulation's level, read-only.
+    pub(crate) fn signals(&self) -> Signals<'_, L> {
+        Signals {
+            b: self.b,
+            level: &*self.level,
+            ticks: &*self.ticks,
+            wire_signal_off: self.wire_signal_off.get(),
+        }
+    }
+}
 impl Behaviours {
+    /// `level` read through the game's `SignalGetter`, for a caller holding it shared.
+    pub fn signals<'a, L: LevelAccess + ?Sized>(
+        &'a self,
+        level: &'a L,
+        ticks: &'a Ticks,
+    ) -> Signals<'a, L> {
+        Signals {
+            b: self,
+            level,
+            ticks,
+            wire_signal_off: false,
+        }
+    }
     pub(crate) fn sim<'a, L: LevelAccess + ?Sized>(
         &'a self,
         level: &'a mut L,
