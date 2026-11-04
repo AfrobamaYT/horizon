@@ -1452,7 +1452,7 @@ mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )

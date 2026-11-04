@@ -10437,7 +10437,7 @@ mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            super::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!("no menu handoff"),
         )

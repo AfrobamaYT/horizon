@@ -497,7 +497,7 @@ pub(super) mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -2168,7 +2168,7 @@ pub(super) mod tests {
             &settings,
             Instant::now(),
             false,
-            true,
+            super::super::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -2329,7 +2329,7 @@ pub(super) mod tests {
             &settings,
             Instant::now(),
             false,
-            true,
+            super::super::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
