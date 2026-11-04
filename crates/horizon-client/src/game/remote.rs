@@ -185,14 +185,18 @@ fn menu_title(tag: &Tag) -> horizon_client::text::Text {
 }
 
 /// A player message Chat Delay holds back, its signature and trust level,
-/// and what the narrator says of it once it shows.
-type QueuedChat = (
-    horizon_client::text::Text,
-    horizon_client::chat::ChatSource,
-    Option<Signature>,
-    ChatTrust,
-    String,
-);
+/// what the narrator says of it once it shows, and who sent it in which
+/// chat type, for mods told when it shows (`ClientChatReceivedEvent`).
+struct QueuedChat {
+    line: horizon_client::text::Text,
+    signature: Option<Signature>,
+    trust: ChatTrust,
+    narration: String,
+    /// The player's UUID, 0 for disguised chat (`Util.NIL_UUID`).
+    sender: u128,
+    /// The chat type's network ID (`ChatType.Bound.chatType`).
+    chat_type: i32,
+}
 
 /// `ChatTrustLevel`; a modified message keeps the signed content it was
 /// changed from.
@@ -657,6 +661,8 @@ pub(super) struct Remote {
     death_message: Option<horizon_client::text::Text>,
     /// `LocalPlayer.showDeathScreen`: off with `immediate_respawn`.
     show_death_screen: bool,
+    /// `Player.isReducedDebugInfo`: the server's `reduced_debug_info` rule.
+    pub(super) reduced_debug_info: bool,
     /// `LocalPlayer.doLimitedCrafting`: whether limited crafting is enabled.
     pub(super) do_limited_crafting: bool,
     player_type: Option<Arc<MobType>>,
@@ -1096,6 +1102,7 @@ impl Game<'_> {
             flat: false,
             death_message: None,
             show_death_screen: true,
+            reduced_debug_info: false,
             do_limited_crafting: false,
             player_type,
             synced: vec![None; CREATIVE_SYNCED],
@@ -1419,10 +1426,6 @@ impl Game<'_> {
         signature: Option<Signature>,
         trust: ChatTrust,
     ) -> bool {
-        // ChatListener.showMessageToPlayer: Only Show Secure Chat drops what is not secure.
-        if matches!(trust, ChatTrust::NotSecure) && self.settings.file.bool("onlyShowSecureChat") {
-            return false;
-        }
         if !self.ui.chat.shows(source) {
             return false;
         }
@@ -1463,21 +1466,13 @@ impl Game<'_> {
     /// `ChatListener.handleMessage` for player and disguised chat: held in the
     /// queue while Chat Delay is set, shown at once otherwise. `narration` is
     /// the chat type's narration of it (`decorateNarration`).
-    pub(super) fn handle_player_chat(
-        &mut self,
-        line: horizon_client::text::Text,
-        signature: Option<Signature>,
-        trust: ChatTrust,
-        narration: String,
-    ) {
-        let source = horizon_client::chat::ChatSource::Player;
+    fn handle_player_chat(&mut self, chat: QueuedChat) {
         if self.chat_delay_ms() > 0 {
             if let Some(r) = self.remote.as_mut() {
-                r.chat_queue
-                    .push_back((line, source, signature, trust, narration));
+                r.chat_queue.push_back(chat);
             }
         } else {
-            self.accept_chat(line, source, signature, trust, &narration);
+            self.accept_chat(chat);
         }
     }
 
@@ -1505,7 +1500,14 @@ impl Game<'_> {
         let narration = self
             .decorate_chat(chat_type, &error, Decoration::Narration)
             .plain();
-        self.handle_player_chat(line, None, ChatTrust::Error, narration);
+        self.handle_player_chat(QueuedChat {
+            line,
+            signature: None,
+            trust: ChatTrust::Error,
+            narration,
+            sender: 0,
+            chat_type: chat_type.chat_type,
+        });
     }
 
     /// `ChatTrustLevel.evaluate` of a player message, with
@@ -1571,7 +1573,7 @@ impl Game<'_> {
         r.secure_chat.ignore_pending(&signature);
         let queued = r.chat_queue.len();
         r.chat_queue
-            .retain(|(_, _, s, _, _)| s.as_ref() != Some(&signature));
+            .retain(|chat| chat.signature.as_ref() != Some(&signature));
         if r.chat_queue.len() == queued {
             self.ui
                 .chat
@@ -1582,15 +1584,9 @@ impl Game<'_> {
 
     /// A message's `accept`: shown, it is narrated (`narrateChatMessage`) and
     /// starts the Chat Delay wait again.
-    fn accept_chat(
-        &mut self,
-        line: horizon_client::text::Text,
-        source: horizon_client::chat::ChatSource,
-        signature: Option<Signature>,
-        trust: ChatTrust,
-        narration: &str,
-    ) -> bool {
-        let shown = self.player_chat_line(line, source, signature, trust, narration);
+    fn accept_chat(&mut self, chat: QueuedChat) -> bool {
+        let signature = chat.signature;
+        let shown = self.player_chat_line(chat);
         if let Some(signature) = &signature {
             self.mark_message_processed(signature, shown);
         }
@@ -1600,26 +1596,58 @@ impl Game<'_> {
         shown
     }
 
-    /// `showMessageToPlayer`: the line joins the chat if the Chat option and
-    /// Only Show Secure Chat let it through, and the narrator says it
-    /// (`sayChatQueued`).
-    fn player_chat_line(
-        &mut self,
-        line: horizon_client::text::Text,
-        source: horizon_client::chat::ChatSource,
-        signature: Option<Signature>,
-        trust: ChatTrust,
-        narration: &str,
-    ) -> bool {
-        // handleChatMessageError says its line as system chat.
+    /// `showMessageToPlayer`: the line joins the chat if Only Show Secure
+    /// Chat, mods and the Chat option let it through, and the narrator says
+    /// it (`sayChatQueued`).
+    fn player_chat_line(&mut self, chat: QueuedChat) -> bool {
+        let QueuedChat {
+            mut line,
+            signature,
+            trust,
+            narration,
+            sender,
+            chat_type,
+        } = chat;
+        // ChatListener.showMessageToPlayer: Only Show Secure Chat drops what is not secure.
+        if matches!(trust, ChatTrust::NotSecure) && self.settings.file.bool("onlyShowSecureChat") {
+            return false;
+        }
+        // handleChatMessageError says its line as system chat, and mods are not told of it.
         let error = matches!(trust, ChatTrust::Error);
+        if !error && !self.chat_received(false, false, sender, Some(chat_type), &mut line) {
+            return false;
+        }
+        let source = horizon_client::chat::ChatSource::Player;
         let shown = self.signed_chat_line(line, source, signature, trust);
         if shown && error {
-            self.say_system_chat_queued(&horizon_client::text::Text::literal(narration));
+            self.say_system_chat_queued(&horizon_client::text::Text::literal(&narration));
         } else if shown {
-            self.say_chat_queued(narration);
+            self.say_chat_queued(&narration);
         }
         shown
+    }
+
+    /// NeoForge's `ClientChatReceivedEvent` (`ClientHooks.onClientChat`,
+    /// `onClientPlayerChat` and `onClientSystemChat`): mods may replace
+    /// `line` or cancel it. False when cancelled.
+    fn chat_received(
+        &mut self,
+        system: bool,
+        overlay: bool,
+        sender: u128,
+        chat_type: Option<i32>,
+        line: &mut horizon_client::text::Text,
+    ) -> bool {
+        if !crate::mod_api::listened(crate::mod_api::HookId::ClientChatReceived) {
+            return true;
+        }
+        let registries = self.remote.as_ref().map(|r| Arc::clone(&r.registries));
+        let name = chat_type
+            .zip(registries.as_deref())
+            .and_then(|(id, registries)| registries.name("minecraft:chat_type", id));
+        let mut cancel = false;
+        self.native_client_chat_received(system, overlay, sender, name, line, &mut cancel);
+        !cancel
     }
 
     /// `ChatListener.messageDelay`: Chat Delay in milliseconds, as Java
@@ -1661,10 +1689,8 @@ impl Game<'_> {
         }
         // A message the Chat option hides is dropped and the next one is tried,
         // until one shows.
-        while let Some((line, source, signature, trust, narration)) =
-            self.remote.as_mut().and_then(|r| r.chat_queue.pop_front())
-        {
-            if self.accept_chat(line, source, signature, trust, &narration) {
+        while let Some(chat) = self.remote.as_mut().and_then(|r| r.chat_queue.pop_front()) {
+            if self.accept_chat(chat) {
                 break;
             }
         }
@@ -1680,8 +1706,8 @@ impl Game<'_> {
         else {
             return;
         };
-        for (line, source, signature, trust, narration) in queue {
-            self.accept_chat(line, source, signature, trust, &narration);
+        for chat in queue {
+            self.accept_chat(chat);
         }
         if let Some(r) = self.remote.as_mut() {
             r.chat_previous = None;
@@ -1708,6 +1734,11 @@ impl Game<'_> {
                 .map(|t| serde_json::json!({"kind": t.kind, "position": t.position, "velocity": [0.0, 0.0, 0.0]}))
                 .collect(),
         )
+    }
+
+    /// Connected to a server in online mode (its Login): each player needs its own account.
+    pub(super) fn online_server(&self) -> bool {
+        self.remote.as_ref().is_some_and(|r| r.online_mode)
     }
 
     /// `ClientSuggestionProvider.customCompletionSuggestions` of the server
@@ -3145,6 +3176,7 @@ impl Game<'_> {
                     r.view_distance = p.chunk_radius;
                     r.simulation_distance = p.simulation_distance;
                     r.show_death_screen = p.show_death_screen;
+                    r.reduced_debug_info = p.reduced_debug_info;
                     r.do_limited_crafting = p.limited_crafting;
                 }
                 self.streaming.radius =
@@ -4036,6 +4068,12 @@ impl Game<'_> {
                     self.ui.registries.permission = (p.event - 24) as u8;
                     self.remote_world_options_permission(p.event >= 26);
                 }
+                // Player.handleEntityEvent 22 / 23: reduced debug info on / off.
+                if (22..=23).contains(&p.event)
+                    && let Some(r) = self.remote.as_mut().filter(|r| r.entity_id == p.id)
+                {
+                    r.reduced_debug_info = p.event == 22;
+                }
                 // Ravager.handleEntityEvent 69: the roar's puff and push.
                 if p.event == 69 {
                     self.remote_ravager_roar(p.id);
@@ -4580,8 +4618,12 @@ impl Game<'_> {
             }
             C::SystemChat(p) => {
                 // The component as sent, translated in the client's own
-                // language. ChatListener.handleOverlay for the action bar.
-                let text = remote_text(&p.content);
+                // language; mods may change or cancel it. ChatListener.handleOverlay
+                // for the action bar.
+                let mut text = remote_text(&p.content);
+                if !self.chat_received(true, p.overlay, 0, None, &mut text) {
+                    return Ok(());
+                }
                 if p.overlay {
                     self.say_system_queued(&text);
                     self.titles.set_overlay(text, false);
@@ -4697,7 +4739,14 @@ impl Game<'_> {
                     }
                     return Ok(());
                 }
-                self.handle_player_chat(line, signature, trust, narration);
+                self.handle_player_chat(QueuedChat {
+                    line,
+                    signature,
+                    trust,
+                    narration,
+                    sender: p.sender,
+                    chat_type: p.chat_type.chat_type,
+                });
             }
             C::DisguisedChat(p) => {
                 let content = horizon_client::scoreboard::tag_to_json(&p.message);
@@ -4705,7 +4754,14 @@ impl Game<'_> {
                     .decorate_chat(&p.chat_type, &content, Decoration::Narration)
                     .plain();
                 let line = self.decorate_chat(&p.chat_type, &content, Decoration::Chat);
-                self.handle_player_chat(line, None, ChatTrust::Secure, narration);
+                self.handle_player_chat(QueuedChat {
+                    line,
+                    signature: None,
+                    trust: ChatTrust::Secure,
+                    narration,
+                    sender: 0,
+                    chat_type: p.chat_type.chat_type,
+                });
             }
             C::DeleteChat(p) => self.handle_delete_chat(&p.signature)?,
             C::PlayerInfoUpdate(p) => {
@@ -5167,6 +5223,41 @@ impl Game<'_> {
     /// `PlayerInfo.getSkin` for every player entity, including NPCs that are
     /// never in the tab list: resolve each profile's textures and give the
     /// level's player models their skin.
+    /// The 3D skin layers model for a player (Options → Skin Customization,
+    /// `threeDSkinLayers`): `kind`'s outer layer with one slab per painted
+    /// texel, built once per (skin, slim) from the decoded image the skin
+    /// downloader still holds (`horizon_client::mobs::skin_layers`). `None`
+    /// while the option is off or the image is not in memory yet.
+    fn skin_3d_model(
+        &self,
+        kind: &std::sync::Arc<horizon_client::mobs::MobType>,
+        skin: &str,
+        slim: bool,
+    ) -> Option<std::sync::Arc<horizon_client::mobs::Part>> {
+        use horizon_client::mobs::skin_layers;
+        if !self.settings.three_d_skin_layers {
+            return None;
+        }
+        let key = (skin.to_owned(), slim);
+        if let Some(model) = self.skin_3d.borrow_mut().get(&key) {
+            return Some(model);
+        }
+        let model_key = if slim { "player_slim#main" } else { "main" };
+        let base = kind
+            .layer(model_key)
+            .cloned()
+            .unwrap_or_else(|| kind.model.clone());
+        let image = self.skin_downloads.borrow().image(skin)?.to_vec();
+        let model = std::sync::Arc::new(skin_layers::extrude(
+            &base,
+            &image,
+            skin_layers::SIZE,
+            skin_layers::DEPTH,
+        )?);
+        self.skin_3d.borrow_mut().insert(key, model.clone());
+        Some(model)
+    }
+
     pub(super) fn update_remote_skins(&mut self) {
         let local = self.remote.as_ref().map(|r| r.profile);
         self.poll_own_profile();
@@ -5283,10 +5374,13 @@ impl Game<'_> {
                 continue;
             };
             let (skin, is_slim) = self.drawn_skin(uuid, skin_of(&skins, uuid));
+            let kind = self.mobs[i].kind.clone();
+            let skin_3d = self.skin_3d_model(&kind, &skin, is_slim);
             let cape = capes.get(&uuid).filter(|c| self.again_skin(c)).cloned();
             let mob = &mut self.mobs[i];
             mob.skin = Some(skin);
             mob.slim = is_slim;
+            mob.skin_3d = skin_3d;
             mob.cape = cape;
         }
         if self.player_model.is_some() {
@@ -5297,9 +5391,14 @@ impl Game<'_> {
                 .filter(|_| self.settings.file.bool("modelPart_cape"))
                 .filter(|c| self.again_skin(c))
                 .cloned();
+            let kind = self.player_model.as_ref().map(|m| m.kind.clone());
+            let skin_3d = kind
+                .as_ref()
+                .and_then(|kind| self.skin_3d_model(kind, &skin, is_slim));
             if let Some(mob) = self.player_model.as_mut() {
                 mob.skin = Some(skin);
                 mob.slim = is_slim;
+                mob.skin_3d = skin_3d;
                 mob.cape = cape;
             }
         }
@@ -5377,6 +5476,10 @@ impl Game<'_> {
     /// Puts a downloaded skin in an atlas skin slot (`SkinSlots::place`),
     /// unless every slot holds a skin drawn in the last frame.
     pub(super) fn store_skin(&mut self, location: String, rgba: Vec<u8>) {
+        // 3D skin layers reads the pixels back when it builds the slabs.
+        self.skin_downloads
+            .borrow_mut()
+            .remember_image(&location, &rgba);
         let Some((slot, evicted)) = self.skin_slots.place(location.clone()) else {
             return;
         };
@@ -6001,6 +6104,17 @@ impl Game<'_> {
         } else if !dead && !riding {
             player.client_side = true;
             player.velocity = player.velocity.add_vector(pushed);
+            // LivingEntity.checkAutoSpinAttack: a Riptide spin that touches a
+            // mob ends and bounces back; the server deals the hit.
+            player.spin_targets.clear();
+            if player.auto_spin_attack_ticks > 0 {
+                player.spin_targets.extend(
+                    self.mobs
+                        .iter()
+                        .filter(|m| !m.removed)
+                        .map(|m| (m.id, m.bounds())),
+                );
+            }
             MotionWorld {
                 entities: &entity_collisions,
                 player,
@@ -7736,6 +7850,10 @@ impl Game<'_> {
                 }
                 if let Some(placed) = &placed {
                     self.predict_place(placed, seq);
+                    if let Some(stack) = &held {
+                        let pos = placed.0;
+                        self.apply_predicted_item([pos.x, pos.y, pos.z], stack);
+                    }
                     self.with_hand(hand, Game::consume_held);
                 } else if let Some(r) = self.remote.as_mut() {
                     // BlockItem.place plays its sound only once the block is set: the
@@ -8337,6 +8455,9 @@ impl Game<'_> {
             return !self.may_build() || self.pick().is_none();
         }
         if id == "minecraft:glass_bottle" {
+            // A dragon's breath cloud never counts here: its owner is not
+            // synced, so this client's BottleItem.use finds none and PASSes;
+            // the packet still goes and the server fills the bottle.
             return !source(Some(Fluid::Water));
         }
         if super::boats::any_boat_wood(id).is_some() {
@@ -10733,6 +10854,85 @@ mod interaction_event_tests;
 
 #[cfg(test)]
 mod tests {
+    /// `ClientChatReceivedEvent`: a mod's replacement is the line the chat
+    /// shows, a cancelled system line never shows, and a cancelled message
+    /// held by Chat Delay lets the next one through in the same tick.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mods_replace_and_cancel_received_chat() {
+        use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
+        use horizon_client::{mod_api, text::Text};
+        use horizon_protocol::{
+            connection::Pipe,
+            packets::play::{self, Clientbound as C},
+        };
+        use horizon_world::nbt::Tag;
+
+        struct Censor;
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Censor {
+            fn client_chat_received(
+                &self,
+                _: &mut dyn mod_api::ClientHost,
+                event: &mut mod_api::ClientChatReceivedEvent<'_>,
+            ) -> mod_api::Flow {
+                let text = event.message.plain();
+                if text.contains("drop") {
+                    return mod_api::Flow::Cancel;
+                }
+                if event.system {
+                    *event.message = Text::literal(format!("[server] {text}"));
+                }
+                mod_api::Flow::Continue
+            }
+        }
+        mod_api::install(std::sync::Arc::from([mod_api::ModEntry::new(
+            "test-chat-received",
+            Box::new(Censor),
+        )]));
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "ChatTest").unwrap();
+            let lines = |game: &super::super::Game| -> Vec<String> {
+                let chat = &game.remote.as_ref().unwrap().chat;
+                chat.iter().map(|(line, _)| line.clone()).collect()
+            };
+            let system = |content: &str| {
+                C::SystemChat(play::SystemChat {
+                    content: Tag::String(content.into()),
+                    overlay: false,
+                })
+            };
+            game.handle_packet(system("hello")).unwrap();
+            game.handle_packet(system("drop me")).unwrap();
+            assert_eq!(lines(game), ["[server] hello"]);
+
+            game.settings.chat_delay = 1.0;
+            let disguised = |message: &str| {
+                C::DisguisedChat(play::DisguisedChat {
+                    message: Tag::String(message.into()),
+                    chat_type: play::ChatTypeBound {
+                        chat_type: 0,
+                        name: Tag::String("Steve".into()),
+                        target: None,
+                    },
+                })
+            };
+            game.handle_packet(disguised("drop this")).unwrap();
+            game.handle_packet(disguised("hi")).unwrap();
+            assert_eq!(lines(game).len(), 1, "Chat Delay holds both");
+            game.tick_chat_queue();
+            let shown = lines(game);
+            assert_eq!(shown.len(), 2, "{shown:?}");
+            assert!(
+                shown[1].contains("hi") && !shown[1].contains("drop"),
+                "{shown:?}"
+            );
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn rejected_menu_packets_retire_the_previous_client_menu() {

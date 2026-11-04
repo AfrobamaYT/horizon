@@ -736,6 +736,7 @@ impl Game<'_> {
                 health: g.health,
                 yaw: g.yaw,
                 pitch: g.pitch,
+                entity_id: g.entity_id,
             })
             .collect()
     }
@@ -967,6 +968,7 @@ impl Game<'_> {
             health: p.health.health(),
             yaw: p.yaw,
             pitch: p.pitch,
+            entity_id: self.native_acting_entity() as i32,
         })
     }
     /// Runs `line` (no slash) as the server's console does: permission
@@ -1285,6 +1287,7 @@ impl Game<'_> {
             health: g.health,
             yaw: g.yaw,
             pitch: g.pitch,
+            entity_id: g.entity_id,
         };
         if !self.native_command_valid(line, permission) {
             return true;
