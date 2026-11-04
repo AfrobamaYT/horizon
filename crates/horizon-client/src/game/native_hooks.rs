@@ -38,7 +38,6 @@
 //!
 //! API 385 adds per-stack conditional item model properties (`native_item_model_property`).
 //!
-//! API 384 adds a host-aware player-weapon damage hook (`native_living_incoming_damage_v2`), leaving v1 compatible.
 //!
 //! API 383 adds living_knockback_v2: raw knockback with the attacker's entity id and held items, including armor-stand sweeps.
 //!
@@ -965,7 +964,6 @@ use super::{
     native_configs::{NativeConfig, NativeConfigFile},
     native_mob_draw::{NativeMobRender, NativePlayerRender},
     native_panel_recipes::RecipePage,
-    native_reload_listeners::NativeReloadListener,
 };
 use horizon_assets::item_model::StackView;
 use horizon_client::block_contact::Pending;
@@ -3005,28 +3003,6 @@ impl Game<'_> {
     /// (`AddServerReloadListenersEvent`): push yours, each a listener id and a
     /// folder under `data/<namespace>/`. Asked at the start of every data load
     /// of a server: a world opening, `/reload`. A folder that leaves
-    /// `data/<namespace>/` is skipped. API @API:server_reload_listeners@.
-    pub(super) fn native_add_server_reload_listeners(
-        &mut self,
-        listeners: &mut Vec<NativeReloadListener>,
-    ) {
-        mod_api::dispatch_add_server_reload_listeners(self, mod_api::mods(), listeners);
-    }
-    /// A listener's files were read (`SimpleJsonResourceReloadListener`'s
-    /// `apply`): `files` holds `<namespace>:<path>` (the file's path under
-    /// the folder, without `.json`) and its JSON, sorted by id, from the
-    /// resource root (vanilla's and content mods' data) and the world's enabled
-    /// data packs; for each id the top pack's file, and a file that isn't JSON
-    /// is logged and left out. Every mod hears every listener, so check
-    /// `listener.id`. Fired on each data load before `native_server_data_loaded`.
-    /// Server-side. API @API:server_reload_listeners@.
-    pub(super) fn native_server_reload_listener_apply(
-        &mut self,
-        listener: &NativeReloadListener,
-        files: &[(String, serde_json::Value)],
-    ) {
-        mod_api::dispatch_server_reload_listener_apply(self, mod_api::mods(), listener, files);
-    }
     /// The server is assembling its data tables from the world's data packs
     /// (`ReloadableServerResources`): a world is opening, or `/reload` was
     /// run, and the recipes, tags, loot and advancements are built after
@@ -3494,39 +3470,6 @@ impl Game<'_> {
 
     /// Additional first-person hand and item pose, including empty arms and maps.
     /// Add offsets in blocks and pitch, yaw and roll in degrees; multiply scale.
-    /// API 369.
-    pub(super) fn native_render_hand_pose(
-        &self,
-        hand: horizon_client::first_person::Hand,
-        stack: Option<&ItemStack>,
-        partial: f32,
-        swing: f32,
-        equip: f32,
-        x: &mut f32,
-        y: &mut f32,
-        z: &mut f32,
-        pitch: &mut f32,
-        yaw: &mut f32,
-        roll: &mut f32,
-        scale: &mut f32,
-    ) {
-        mod_api::dispatch_render_hand_pose(
-            self,
-            mod_api::mods(),
-            hand,
-            stack,
-            partial,
-            swing,
-            equip,
-            x,
-            y,
-            z,
-            pitch,
-            yaw,
-            roll,
-            scale,
-        );
-    }
 
     /// Before a visible item frame's item or map is drawn. Cancel hides the item, not the frame.
     pub(super) fn native_render_item_in_frame(
@@ -3552,7 +3495,7 @@ impl Game<'_> {
         yaw: &mut f32,
         pitch: &mut f32,
     ) {
-        mod_api::dispatch_camera_pose(self, mod_api::mods(), partial, position, yaw, pitch);
+        mod_api::dispatch_camera_pose(self, partial, position, yaw, pitch);
     }
     /// Final scaled third-person camera distance, before visual-shape collision clipping.
     /// `entity` includes its living scale/distance and optional mount scale/distance.
@@ -6073,7 +6016,7 @@ impl Game<'_> {
         pos: [i32; 3],
         data: &mut Option<Vec<u8>>,
     ) {
-        mod_api::dispatch_menu_extra_data(self, mod_api::mods(), player, menu, block, pos, data);
+        mod_api::dispatch_menu_extra_data(self, player, menu, block, pos, data);
     }
 
     /// A sculk catalyst at `pos` has begun blooming after taking experience.
@@ -6332,8 +6275,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_trade_with_villager(self, merchant, kind, offer);
     }
-    /// A server player's shield was disabled by a blocked melee hit. The shield cooldown is set
-    /// immediately after this call. Server-side.
     /// A trade of a villager or a wandering trader was made and its `offer`
     /// (the live one in the trading session, not a copy) is in the state the
     /// trade left it in: `uses` counted. A mod may change it (Bukkit's
@@ -6353,7 +6294,7 @@ impl Game<'_> {
         kind: &str,
         offer: &mut MerchantOffer,
     ) {
-        mod_api::dispatch_merchant_offer_traded(self, mod_api::mods(), merchant, kind, offer);
+        mod_api::dispatch_merchant_offer_traded(self, merchant, kind, offer);
     }
     /// A server player's shield was disabled by a blocked melee hit. The
     /// shield cooldown is set immediately after this call. Helpers looking up
@@ -7209,27 +7150,6 @@ impl Game<'_> {
     /// one, while the narrator still says the original. Set `cancel` and it
     /// doesn't show: a delayed message lets the next one through. Lines the
     /// client adds itself and validation errors are not told. Client-side.
-    /// API @API:client_chat_received@.
-    pub(super) fn native_client_chat_received(
-        &mut self,
-        system: bool,
-        overlay: bool,
-        sender: u128,
-        chat_type: Option<&str>,
-        message: &mut Text,
-        cancel: &mut bool,
-    ) {
-        mod_api::dispatch_client_chat_received(
-            self,
-            mod_api::mods(),
-            system,
-            overlay,
-            sender,
-            chat_type,
-            message,
-            cancel,
-        );
-    }
 
     /// The dedicated server's whitelist changed to `enabled`. 305.
     pub(super) fn native_whitelist_state_update(&mut self, enabled: bool) {
@@ -9237,62 +9157,12 @@ impl Game<'_> {
     /// still counts as landed (`EnderDragon.hurt` returns true whatever
     /// `reallyHurt` did: the arrow is spent, the melee effects run). It runs
     /// on the thread that ticks the world (the server thread): state shared with render thread hooks needs synchronising.
-    /// No `self`: the game is in the middle of the hit. API 50.
-    pub(super) fn native_living_incoming_damage(
-        entity: i32,
-        kind: &str,
-        damage_type: &str,
-        causing: i32,
-        direct: i32,
-        amount: &mut f32,
-        canceled: &mut bool,
-    ) {
-        mod_api::dispatch_living_incoming_damage(
-            mod_api::mods(),
-            entity,
-            kind,
-            damage_type,
-            causing,
-            direct,
-            amount,
-            canceled,
-        );
-    }
     /// A player's weapon hit on a mob, before `Mob::damage_with` borrows the
     /// victim: melee, sweep and spear hits, including LAN guests. Unlike v1,
     /// this has a host and snapshots of the weapon, victim position/view and
     /// DamageSource position. The acting player's network id is `causing`
     /// (also the direct entity). Weapon enchantments include their levels.
     /// Runs after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before v1; cancellation refuses
-    /// delivery. Other damage routes still only fire v1. API 384.
-    pub(super) fn native_living_incoming_damage_v2(
-        &mut self,
-        entity: i32,
-        kind: &str,
-        damage_type: &str,
-        causing: i32,
-        source_position: Option<[f64; 3]>,
-        victim_position: [f64; 3],
-        victim_view: [f64; 3],
-        weapon: Option<&ItemStack>,
-        amount: &mut f32,
-        canceled: &mut bool,
-    ) {
-        mod_api::dispatch_living_incoming_damage_v2(
-            self,
-            mod_api::mods(),
-            entity,
-            kind,
-            damage_type,
-            causing,
-            source_position,
-            victim_position,
-            victim_view,
-            weapon,
-            amount,
-            canceled,
-        );
-    }
     /// `LivingEntity.knockback` is about to push entity `entity` of type `kind`
     /// (`minecraft:zombie`, `minecraft:player`) `strength` away from the direction (`x`, `z`),
     /// on the raw strength, before the entity's knockback resistance takes its share and its motion
@@ -9351,31 +9221,6 @@ impl Game<'_> {
     /// include the guest whose action runs. Includes mob melee and armor-stand sweeps, not
     /// direct velocity pushes (explosions, Punch arrows, hoglin throws). Non-finite changes
     /// are restored before resistance. Server-side, without self: damage borrows the victim.
-    /// API 383.
-    pub(super) fn native_living_knockback_v2(
-        entity: i32,
-        kind: &str,
-        attacker: i32,
-        attacker_main: Option<&ItemStack>,
-        attacker_off: Option<&ItemStack>,
-        strength: &mut f64,
-        x: &mut f64,
-        z: &mut f64,
-        canceled: &mut bool,
-    ) {
-        mod_api::dispatch_living_knockback_v2(
-            mod_api::mods(),
-            entity,
-            kind,
-            attacker,
-            attacker_main,
-            attacker_off,
-            strength,
-            x,
-            z,
-            canceled,
-        );
-    }
     /// Whether a mod hears projectiles' impacts (`native_projectile_impact`):
     /// set `hears`. Asked once a server tick before the projectiles fly; only
     /// then does the tick keep the copy of each flying projectile that a
@@ -10987,6 +10832,7 @@ impl Game<'_> {
     /// What the block's mod wrote for the mod screen that is open
     /// (`native_menu_extra_data` on the server), empty when it wrote nothing;
     /// None when no mod screen is open. @API:menu_extra_data@.
+    /// Not on wasm: it returns a borrowed view of the screen's bytes, which crosses only as a resource.
     pub(super) fn native_screen_extra_data(&self) -> Option<&[u8]> {
         let screen = self.shown_native_screen()?;
         Some(screen.extra.as_ref().map_or(&[], |e| e.data.as_slice()))

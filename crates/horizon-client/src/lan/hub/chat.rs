@@ -15,16 +15,6 @@ use horizon_world::nbt::{JavaString, Tag};
 /// a line to `replies` to answer them), or only answer. It cannot change the text: a signed message
 /// would no longer verify. Once for each message a player sends, on a server. Commands are
 /// `native_player_command`. API 399.
-#[inline(never)]
-pub fn native_player_chat(
-    player: u128,
-    name: &str,
-    message: &str,
-    replies: &mut Vec<Text>,
-    cancel: &mut bool,
-) {
-    crate::native_client_hooks::player_chat(player, name, message, replies, cancel);
-}
 
 /// Now, in epoch milliseconds (Instant.now()).
 pub fn now_millis() -> i64 {

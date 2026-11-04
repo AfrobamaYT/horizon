@@ -7,17 +7,20 @@ use std::{
     collections::BTreeMap,
     fs, io,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, Weak},
+    sync::{
+        Arc, Mutex, Weak,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 /// An immutable default-component snapshot. Kept only while a resource load
 /// holds it: a later load reads the files and applies native hooks afresh.
 pub type Defaults = BTreeMap<String, Value>;
-static SHARED: Mutex<Vec<(PathBuf, Weak<Defaults>)>> = Mutex::new(Vec::new());
+static SHARED: Mutex<Vec<(PathBuf, Weak<ItemDefaults>)>> = Mutex::new(Vec::new());
 
 /// Share parsed defaults with the other tables built during this load. Callers
 /// that need a fresh read regardless of other loads can still use [`read`].
-pub fn shared(root: &Path) -> io::Result<Arc<Defaults>> {
+pub fn shared(root: &Path) -> io::Result<Arc<ItemDefaults>> {
     let held = || {
         SHARED
             .lock()

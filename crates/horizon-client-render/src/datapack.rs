@@ -62,6 +62,8 @@ impl DataPack {
     /// The files of `data/<namespace>/<kind>/` for each kind.
     pub fn list_kinds(&self, kinds: &[&str]) -> Vec<String> {
         self.list_under("data", kinds)
+    }
+
     /// The files of `data/<namespace>/<folder>/` in every namespace, as
     /// `list` names them; a folder pack walks only those folders.
     pub fn list_folder(&self, folder: &str) -> Vec<String> {

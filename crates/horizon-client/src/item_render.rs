@@ -736,12 +736,7 @@ impl ItemRenderer {
         drawn: bool,
         item_data: &horizon_world::item_defaults::ItemData,
     ) -> crate::Result<Self> {
-        let prototypes: BTreeMap<String, Components> = horizon_world::item_defaults::shared(root)?
-            .iter()
-            .map(|(item, components)| {
-                Ok((item.clone(), serde::Deserialize::deserialize(components)?))
-            })
-            .collect::<serde_json::Result<_>>()?;
+        let prototypes = Arc::clone(item_data.prototypes()?);
         let models = ItemModels {
             definitions: if drawn {
                 load_definitions(root)

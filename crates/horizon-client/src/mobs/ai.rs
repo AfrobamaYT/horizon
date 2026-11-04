@@ -14,10 +14,9 @@ use super::{
 use crate::blocks::Fluid;
 use crate::breathing::{Breath, breathe, drown};
 use crate::health::DamageLevel;
-use horizon_core::{geometry::Vec3, random::RandomSource};
 use horizon_core::{
     geometry::{Aabb, ShapeOp, Vec3, VoxelShape},
-    random::{LegacyRandom, RandomSource},
+    random::RandomSource,
 };
 use horizon_world::native_load_context::LoopContext;
 

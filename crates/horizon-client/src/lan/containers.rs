@@ -253,7 +253,6 @@ impl Hub {
         self.close_container_at(i);
         let g = &mut self.guests[i];
         let window = g.next_menu_window();
-        let window = g.next_window;
         if let Some(data) = extra {
             let message = horizon_protocol::menu_extra::Message {
                 window,

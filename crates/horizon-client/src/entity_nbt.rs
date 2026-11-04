@@ -6527,6 +6527,8 @@ mod mod_thrown_nbt_tests {
 
 #[cfg(test)]
 mod equipment_tests;
+
+#[cfg(test)]
 mod axolotl_memory_ttl_tests {
     use super::*;
 
