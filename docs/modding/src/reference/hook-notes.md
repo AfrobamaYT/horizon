@@ -1887,6 +1887,12 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   its egg at `pos`. Set `cancel` to leave the block unchanged.
 - **`native_fluid_level_change(dimension, pos, fluid, from, to, cancel)`** (on `GameLevel`): flowing `water` or `lava`
   at `pos` is about to change level. Levels run from 0 through 8. Set `cancel` to keep the old level.
+- **`native_neighbor_notify(dimension, pos, state, skipped_side, cancel)`** (on `GameLevel`): NeoForge's
+  `NeighborNotifyEvent`. The block at `pos` is about to tell its neighbours it changed: `ServerLevel.updateNeighborsAt`
+  (all six sides, `skipped_side` is `None`) or `updateNeighborsAtExceptFromFacing` (all but `skipped_side`). Set
+  `cancel` and no neighbour hears, on both paths. That differs from NeoForge 26.3's implementation, which honours the
+  cancel only when a side is skipped, and follows its documented contract. Asked for every such update, redstone
+  included: answer fast.
 - **`native_create_fluid_source(dimension, pos, state, can_convert)`** (on `GameLevel`): NeoForge's
   `CreateFluidSourceEvent`. When the game works out a block's new fluid (`FlowingFluid.getNewLiquid`), it asks once
   for each horizontal neighbour that is a source of the same fluid, with that neighbour's `pos` and `state`; two
