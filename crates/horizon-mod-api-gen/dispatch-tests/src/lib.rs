@@ -37,6 +37,10 @@ mod tests {
         pub(super) enum AttributeOperation {}
         #[derive(Clone, Copy)]
         pub(super) enum ModifierLifetime {}
+        #[derive(Clone, Copy)]
+        pub(super) enum EquipmentSlotGroup {}
+        pub(super) struct ItemAttributeModifier;
+        pub(super) struct ItemAttributeModifiers;
         pub(super) struct Ticks;
         pub(super) trait LevelHost {
             fn state_block(&self, _: BlockStateId) -> Option<&str> {

@@ -13312,7 +13312,8 @@ impl Game<'_> {
                 amount,
                 operation: op,
                 slot: group,
-            } in stack.attribute_modifiers(world_items!(self)).iter()
+            } in horizon_client::item_attributes::attribute_modifiers(stack, world_items!(self))
+                .iter()
             {
                 // The attack code still reads the held item's attack damage and
                 // speed directly; the map copy is what `/attribute` reports.

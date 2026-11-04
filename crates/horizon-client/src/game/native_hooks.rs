@@ -11853,6 +11853,9 @@ mod tests {
         let breath_hooks = free_hooks(include_str!("../breathing.rs"));
         // The crafting loaders' (`horizon_client_lib::crafting`).
         let crafting_hooks = free_hooks(include_str!("../../../horizon-mod-api/src/crafting.rs"));
+        let item_attribute_hooks = free_hooks(include_str!(
+            "../../../horizon-mod-api/src/item_attributes.rs"
+        ));
         let hunger_hooks = free_hooks(include_str!("../hunger.rs"));
         let landing_hooks = free_hooks(include_str!("../landing.rs"));
         let motion_hooks = free_hooks(include_str!("../motion.rs"));
@@ -11874,6 +11877,7 @@ mod tests {
             .chain(menu_hooks.iter().copied())
             .chain(breath_hooks.iter().copied())
             .chain(crafting_hooks.iter().copied())
+            .chain(item_attribute_hooks.iter().copied())
             .chain(hunger_hooks.iter().copied())
             .chain(landing_hooks.iter().copied())
             .chain(motion_hooks.iter().copied())
@@ -11900,6 +11904,8 @@ mod tests {
                 // crafting.rs compiles into horizon-client-lib (#5446's
                 // split): horizon-mixins resolves the crate by its package.
                 format!("mod_api::crafting::native_{name}")
+            } else if item_attribute_hooks.contains(name) {
+                format!("mod_api::item_attributes::native_{name}")
             } else if hunger_hooks.contains(name) {
                 format!("horizon_client_lib::hunger::native_{name}")
             } else if landing_hooks.contains(name) {
