@@ -69,7 +69,16 @@ class OwnRunnerTests(unittest.TestCase):
         count = 0
         for where, _, _, _, value, pools in routed():
             count += 1
-            self.assertIn("vars.SELF_HOSTED_CI != 'off'", value, where)
+            # dyna-ci.yml (ours) routes through the changes job's self_hosted
+            # output and dyna-medium, or SELF_HOSTED_CI=all with the fork guard
+            # before the playhorizon-ci labels; the carried upstream files use
+            # SELF_HOSTED_CI != 'off'. Both fall back to GitHub's runners.
+            if "dyna-ci.yml" in where:
+                self.assertIn("needs.changes.outputs.self_hosted == 'true'", value, where)
+                self.assertIn("vars.SELF_HOSTED_CI == 'all'", value, where)
+                self.assertIn(FORK_GUARD, value, where)
+            else:
+                self.assertIn("vars.SELF_HOSTED_CI != 'off'", value, where)
             self.assertTrue(value.endswith("|| 'ubuntu-latest' }}"), where)
             if "checks" in pools:
                 # The desktop paused: every checks job back to GitHub, the bots stay.
@@ -77,12 +86,16 @@ class OwnRunnerTests(unittest.TestCase):
         self.assertGreaterEqual(count, 10)
 
     def test_light_runners_take_main_code_only(self):
-        for where, on, _, block, _, pools in routed():
+        for where, on, _, block, value, pools in routed():
             if "light" not in pools:
                 continue
             if "pull_request" in on:
-                job_if = next((l for l in block.splitlines() if l.strip().startswith("if:")), "")
-                self.assertIn(FORK_GUARD, job_if, f"{where}: a fork's pull request")
+                # The guard lives in the job's `if` upstream; dyna-ci.yml (ours)
+                # puts it in `runs-on`, before the self-hosted labels.
+                guarded = FORK_GUARD in next(
+                    (l for l in block.splitlines() if l.strip().startswith("if:")), ""
+                ) or FORK_GUARD in value
+                self.assertTrue(guarded, f"{where}: a fork's pull request")
             if "pull_request_target" in on:
                 # main's code only: every checkout is main's.
                 self.assertEqual(block.count("uses: actions/checkout"), block.count("ref: main"), where)
