@@ -654,7 +654,7 @@ fn ruby_mod_with_pistons(dir: &Path, pistons: bool) -> ContentMod {
             "data/ruby/horizon/block/ruby_block.json",
             r##"{"template": "minecraft:iron_block", "properties": {"hardness": 4.0, "light": 3,
                 "sounds": "minecraft:amethyst_block", "map_color": 28, "friction": 0.8,
-                "random_ticks": true, "occludes": false},
+                "random_ticks": true, "occludes": false, "destroy_overlay": false},
                 "components": {"minecraft:max_stack_size": 16,
                     "minecraft:damage_resistant": {"types": "#minecraft:is_fire"}}}"##,
         ),
@@ -845,6 +845,8 @@ fn content_root_loads_with_every_table() {
         (1, 15)
     );
     assert!(facts.get(iron).can_occlude && facts.get(iron).solid_render);
+    // `destroy_overlay: false` hides the crack on the declared block only.
+    assert!(!facts.get(ruby).destroy_overlay && facts.get(iron).destroy_overlay);
     let definitions: serde_json::Value =
         serde_json::from_slice(&fs::read(root.join("render-definitions.json")).unwrap()).unwrap();
     assert_eq!(

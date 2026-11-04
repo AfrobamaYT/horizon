@@ -126,6 +126,10 @@ pub struct BlockProperties {
     /// `false`: the block occludes nothing, so its neighbours' faces are drawn and light passes
     /// it (`BlockBehaviour.Properties.noOcclusion`); unset or `true`: as its template.
     pub occludes: Option<bool>,
+    /// `false`: the breaking crack (`destroy_stage_0..9`) is not drawn on the block, as for a
+    /// block broken by use; unset or `true`, it is drawn. Only the overlay: the break and the
+    /// destroy-progress packets are vanilla's.
+    pub destroy_overlay: Option<bool>,
 }
 
 /// Vanilla's `PushReaction`, by its constant's name.

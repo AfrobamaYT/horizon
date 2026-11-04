@@ -1444,6 +1444,9 @@ impl<'a> Plan<'a> {
         if let Some(ticks) = &p.random_ticks {
             row.set("random_ticks", J::Bool(ticks.applies(combo)));
         }
+        if p.destroy_overlay == Some(false) {
+            row.set("no_destroy_overlay", J::Bool(true));
+        }
         if let Some(shape) = p.render_shape {
             row.set("render_shape", J::Str(shape.name().into()));
         }
