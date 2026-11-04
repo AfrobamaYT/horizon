@@ -31,6 +31,7 @@ pub trait ConfigFiles {
 /// `..` part, no `\`, `:` or NUL. Checked once here; the service checks only
 /// that it is the calling mod's.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ConfigPath(String);
 
 impl ConfigPath {
@@ -178,6 +179,7 @@ mod tests {
 pub(crate) mod built {
     #[allow(unused_imports)]
     use super::*;
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct ConfigStat {
         pub kind: ConfigEntryKind,
         pub len: u64,
@@ -197,6 +199,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct ConfigEntry {
         pub name: String,
         pub stat: super::ConfigStat,
