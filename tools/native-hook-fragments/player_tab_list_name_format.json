@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "player_tab_list_name_format",
+      "doc": "ServerPlayer.getTabListDisplayName: the name the Tab list shows for\n`player`, None to let the client choose it. Replace `display_name` to\nchange it.",
       "target": "horizon_client_lib::lan::hub::native_player_tab_list_name_format",
       "side": "server",
       "cancellable": false,

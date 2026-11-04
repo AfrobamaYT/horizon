@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "server_chat",
+      "doc": "NeoForge's `ServerChatEvent`: a player's chat message, through their\nchain and the chat filter, is about to be broadcast.\n`player_id` is the server's entity id for the player, `player` their\nUUID, `username` their name and `raw_text` what they typed. `message`\nstarts as that text; replace it and players see the new message\n(`withUnsignedContent`: a signed message keeps its signature), and\nthe log shows it. Set `cancel` and nobody sees it, and it doesn't\ncount toward the chat spam limit. Commands (`/say`, `/msg`...) are\nnot chat here. Server-side, with no player's state swapped in.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_server_chat",
       "neoforge": "ServerChatEvent",
       "side": "server",

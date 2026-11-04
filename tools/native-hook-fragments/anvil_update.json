@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "anvil_update",
+      "doc": "An anvil at `pos` made vanilla's result with a left input, for\n`player` (UUID) and `player_entity_id` (`AnvilUpdateEvent`, after\n`AnvilMenu.createResult`), whenever an input or the name changed:\n`update` holds the inputs (the right one may be empty, for a rename),\nthe rename text and vanilla's result, and its `output`, `xp_cost`\nand `material_cost` start at vanilla's for the mods to change; set\n`cancel` for no result. Negative costs are clamped to zero, unlike\nthe NeoForge event. Both sides: the server's menu, and a server's\nclient menu with the local player.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_anvil_update",
       "neoforge": "AnvilUpdateEvent",
       "side": "both",

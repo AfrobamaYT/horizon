@@ -1,5 +1,5 @@
 //! A living entity's active effects for native server mods, through a
-//! `LivingRef` (docs/native-mods.md, "Entity and level handles"): vanilla's
+//! `LivingRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles"): vanilla's
 //! `activeEffects` read whole, and `addEffect`, `removeEffect`,
 //! `removeAllEffects` and `hasEffect` by the game's own paths, so an effect
 //! a mod gives lands as a potion's or `/effect`'s does, through

@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "explosion_knockback",
+      "doc": "An explosion at `center` in `dimension`, about to break `blocks`, pushes\n`entity` (None for a player, whom `native_acting_player` names):\n`ServerExplosion.hurtEntities`, after the knockback is calculated. Change `knockback_velocity` to change\nwhat is added to the entity's velocity; a player's client is sent the\nsame. Wind bursts too, except dragons and end crystals. End crystals\nare also omitted from ordinary blasts: Horizon removes them without a\nvelocity to change. Server-side.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_explosion_knockback",
       "neoforge": "ExplosionKnockbackEvent",
       "side": "server",

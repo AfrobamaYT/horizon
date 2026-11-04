@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "render_arm",
+      "doc": "Before this window's player's first-person `left` or right arm is\ndrawn (`RenderArmEvent`, in `renderPlayerArm` and `renderMapHand`):\nthe empty main hand's arm, and the arms under a held map, never while\nthe player is invisible. `player` and `player_entity_id` are the\nlocal player's UUID and entity id. `draw`'s pose stack starts at the\narm model's origin, in blocks, posed as vanilla's arm is (with any\n`native_render_hand`), lit with the light at the eyes; add\ngeometry with `native_draw_cube`, `native_draw_quad`, `native_draw_block`\nand `native_draw_item`. Set `canceled` to leave out vanilla's arm;\nwhat the mods drew stays. Client-side.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_render_arm",
       "neoforge": "RenderArmEvent",
       "side": "client",

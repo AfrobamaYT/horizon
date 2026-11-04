@@ -1,4 +1,4 @@
-//! The mod registry's index, `index.json` (docs/api/mod-index.md): every
+//! The mod registry's index, `index.json` (docs/modding/src/reference/registry-index.md): every
 //! reviewed mod and modpack, its versions, the file of each with its size,
 //! SHA-256 and minisign signature, and the files taken down. The launcher
 //! reads it to browse and install, the website to show it, and the
