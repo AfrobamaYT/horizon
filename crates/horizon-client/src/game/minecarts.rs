@@ -19,6 +19,7 @@ use horizon_client::{
 };
 use horizon_core::{
     geometry::{Aabb, Vec3, trig},
+    position::BlockPos,
     random::RandomSource,
 };
 use horizon_world::registry::BlockStateId;
@@ -1002,6 +1003,7 @@ impl Game<'_> {
             }
             c.fall_distance = 0.0;
             step_start = c.position;
+            self.note_cart_pass(c, pos);
             if &*rail.name == "minecraft:activator_rail" {
                 self.activate_cart(c, rail.powered);
             }
@@ -1279,6 +1281,7 @@ impl Game<'_> {
             self.move_along_track_new(c, intent);
         } else if let Some(rail) = self.rail(pos[0], pos[1], pos[2]) {
             self.move_along_track(c, pos, &rail, intent);
+            self.note_cart_pass(c, pos);
             if &*rail.name == "minecraft:activator_rail" {
                 self.activate_cart(c, rail.powered);
             }
@@ -1382,6 +1385,14 @@ impl Game<'_> {
             _ => {}
         }
         true
+    }
+    /// The cart passes over the rail at `pos`: `minecart_pass`, delivered after its batch.
+    fn note_cart_pass(&self, c: &Minecart, pos: [i32; 3]) {
+        horizon_client::block_contact::minecart_pass(
+            c.id as i32,
+            self.world.block(pos[0], pos[1], pos[2]),
+            BlockPos::new(pos[0], pos[1], pos[2]),
+        );
     }
     /// `activateMinecart` on an activator rail.
     fn activate_cart(&mut self, c: &mut Minecart, powered: bool) {
