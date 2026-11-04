@@ -1,0 +1,30 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "level_signal", "side": "server",
+      "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_signal",
+      "receiver": "level"
+    },
+    {
+      "name": "level_direct_signal", "side": "server",
+      "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_direct_signal",
+      "receiver": "level"
+    },
+    {
+      "name": "level_direct_signal_to", "side": "server",
+      "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_direct_signal_to",
+      "receiver": "level"
+    },
+    {
+      "name": "level_best_neighbor_signal", "side": "server",
+      "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_best_neighbor_signal",
+      "receiver": "level"
+    },
+    {
+      "name": "level_has_neighbor_signal", "side": "server",
+      "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_has_neighbor_signal",
+      "receiver": "level"
+    }
+  ]
+}
