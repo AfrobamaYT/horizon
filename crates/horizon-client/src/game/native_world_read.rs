@@ -1,6 +1,5 @@
 //! Read-only block, tag and fluid queries for native mods.
 use super::{Dim, Game};
-use horizon_client::mod_api::{LevelRef, NativeLifecycleContext, TagRegistry};
 use horizon_client::{
     items::{ItemStack, Items},
     world::World,
@@ -11,6 +10,7 @@ use horizon_world::{
     level::Behaviours,
     registry::{BlockRegistry, BlockStateId},
 };
+use mod_api::{LevelRef, NativeLifecycleContext, TagRegistry};
 
 /// Why a server block cannot be read.
 #[allow(dead_code)]
@@ -186,7 +186,7 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use super::*;
     use horizon_client::chunk::Chunk;
-    use horizon_client::mod_api::LevelHost;
+    use mod_api::LevelHost;
     use std::sync::Arc;
 
     #[test]
@@ -417,7 +417,7 @@ mod tests {
                 );
             });
             {
-                use horizon_client::mod_api::LevelHost;
+                use mod_api::LevelHost;
                 let hit =
                     super::super::native_hooks::HitLevel(horizon_client::health::DamageLevel::of(
                         &mut game.world,

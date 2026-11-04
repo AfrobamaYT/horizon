@@ -1282,9 +1282,13 @@ const MODELS: [(&str, &str); 27] = [
 const VIEW_DISTANCE: f64 = 64.0;
 
 impl BlockEntityRenderer {
-    pub fn load(root: &Path, registry: &BlockRegistry) -> Result<Self> {
+    pub fn load(
+        root: &Path,
+        registry: &BlockRegistry,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
+    ) -> Result<Self> {
         let visibility = load_visibility(root, registry)?;
-        Self::load_with_visibility(root, registry, visibility)
+        Self::load_with_visibility(root, registry, visibility, defaults)
     }
     /// [`BlockEntityRenderer::load`] over the face visibility the meshes use
     /// (`MeshTables::visibility`): a clone shares its shapes and their faces.
@@ -1292,6 +1296,7 @@ impl BlockEntityRenderer {
         root: &Path,
         registry: &BlockRegistry,
         visibility: FaceVisibility,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
     ) -> Result<Self> {
         let all: Value = serde_json::from_slice(&std::fs::read(root.join("entity-models.json"))?)?;
         let models = MODELS
@@ -1303,12 +1308,7 @@ impl BlockEntityRenderer {
         // The packs' custom entity models (`.jem` files), before anything draws.
         renderer.set_shapes(renderer.shapes_for(root));
         // Sherd items: provides_pottery_pattern -> decorated_pot_pattern asset id.
-        let items = match horizon_world::item_defaults::read(root) {
-            Ok(items) => items,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Default::default(),
-            Err(e) => return Err(e.into()),
-        };
-        for (item, components) in &items {
+        for (item, components) in defaults.entries() {
             let Some(pattern) = components["minecraft:provides_pottery_pattern"].as_str() else {
                 continue;
             };
@@ -3839,7 +3839,8 @@ mod tests {
         }
         let assets = Assets::load(&root).unwrap();
         let registry = assets.registry;
-        let renderer = BlockEntityRenderer::load(&root, registry).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let renderer = BlockEntityRenderer::load(&root, registry, &defaults).unwrap();
         let state = registry.default_state("minecraft:decorated_pot").unwrap();
         let sprites: HashMap<String, Rect> = [
             "entity/decorated_pot/decorated_pot_base",

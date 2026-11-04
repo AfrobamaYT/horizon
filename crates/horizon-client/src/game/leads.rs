@@ -7,9 +7,9 @@ use horizon_client::{
     items::ItemStack,
     mesher::Vertex,
     mobs::leash::{self, Holder, Pending},
-    mod_api::NativeLootDrops,
 };
 use horizon_world::nbt::Tag;
+use mod_api::NativeLootDrops;
 
 /// `Vec3.yRot(angle)`.
 /// `LocalPlayer.getRopeHoldPosition`'s `Mth.lerp(partialTick * 0.5F, getYRot(),
@@ -239,7 +239,7 @@ impl Game<'_> {
             return;
         };
         let mut drops = vec![ItemStack::new("minecraft:lead", 1)];
-        let context = NativeLootDrops {
+        let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {
             table: "",
             dimension: self.dim.id(),
             origin: at,
@@ -249,7 +249,7 @@ impl Game<'_> {
             tool: None,
             explosion: None,
             used,
-        };
+        });
         self.native_loot_drops(&context, &mut drops);
         for stack in drops {
             if stack.count > 0 && &*stack.item != "minecraft:air" {

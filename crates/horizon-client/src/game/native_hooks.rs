@@ -21,23 +21,6 @@ use super::{
 };
 use horizon_assets::item_model::StackView;
 use horizon_client::creative::Creative;
-use horizon_client::mod_api::{
-    self, Answered, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor,
-    LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
-    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
-    NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening,
-    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
-};
-use horizon_client::mod_api::{
-    AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
-    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult,
-    NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion, TooltipElement, UsePhase,
-};
-pub(crate) use horizon_client::mod_api::{
-    NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
-    NativeMinimap, NativeMod, NativeNoteInstrument, NativePanelEvent, NativePortalShape,
-    NativeScreen, NativeScreenView, NativeStack, NativeZoom,
-};
 use horizon_client::{
     atlas_sources::qualified,
     biome::{BiomeColors, SpawnEntry},
@@ -60,7 +43,6 @@ use horizon_client::{
     lan::menu::Slots,
     merchant::MerchantOffer,
     mobs::{Damage, Who},
-    mod_api::NativePermissionLevel,
     mod_list::{self, Installed, NativePage},
     music::{Music, MusicLayer},
     particles::{ParticleOptions, ParticleType},
@@ -77,6 +59,25 @@ use horizon_world::{
     level::{BlockId, LevelAccess, PlacementContext, Ticks},
     nbt::{Compound, Tag},
     registry::{BlockRegistry, BlockStateId},
+};
+use mod_api::NativePermissionLevel;
+pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
+use mod_api::{
+    self, Answered, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor,
+    LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
+    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
+    NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening,
+    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
+};
+use mod_api::{
+    AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
+    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult,
+    NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion, TooltipElement, UsePhase,
+};
+pub(crate) use mod_api::{
+    NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
+    NativeMinimap, NativeMod, NativeNoteInstrument, NativePanelEvent, NativePortalShape,
+    NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
 use std::{
     collections::HashMap,
@@ -103,7 +104,7 @@ pub(super) struct ObservedScreen {
 
 impl ObservedScreen {
     fn view(&self) -> NativeScreenView<'_> {
-        NativeScreenView {
+        NativeScreenView::from(mod_api::__private::built::NativeScreenView {
             id: self.id,
             menu: self.menu.as_deref(),
             title: self.title.as_ref(),
@@ -111,8 +112,22 @@ impl ObservedScreen {
             slots: self.slots,
             mouse: self.mouse,
             partial_tick: self.partial_tick,
-        }
+        })
     }
+}
+
+/// `view` as the screen `id` (an overlay or a title screen, which shows over
+/// the whole window with no menu).
+fn screen_view_with_id<'a>(view: &NativeScreenView<'a>, id: &'static str) -> NativeScreenView<'a> {
+    NativeScreenView::from(mod_api::__private::built::NativeScreenView {
+        id,
+        menu: view.menu,
+        title: view.title,
+        rect: view.rect,
+        slots: view.slots,
+        mouse: view.mouse,
+        partial_tick: view.partial_tick,
+    })
 }
 
 /// What `decide_screen` says the hooks answered to a change of screen.
@@ -146,15 +161,17 @@ impl Game<'_> {
         };
         let renderer = self.renderer.as_ref()?;
         let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
-        Some(NativeScreenView {
-            id,
-            menu: None,
-            title: None,
-            rect: [0.0, 0.0, batch.width, batch.height],
-            slots: 0,
-            mouse: self.native_cursor(),
-            partial_tick: self.clock.fraction() as f32,
-        })
+        Some(NativeScreenView::from(
+            mod_api::__private::built::NativeScreenView {
+                id,
+                menu: None,
+                title: None,
+                rect: [0.0, 0.0, batch.width, batch.height],
+                slots: 0,
+                mouse: self.native_cursor(),
+                partial_tick: self.clock.fraction() as f32,
+            },
+        ))
     }
 
     /// Opens `screen` (`Gui.setScreen`; `Screen::Playing` is vanilla's null):
@@ -194,8 +211,8 @@ impl Game<'_> {
     /// `screen_opening` or `screen_closing`, on a client's own `Game` (not a
     /// server's, not on a guest's behalf). Otherwise it is a plain assignment.
     fn screen_hooks_heard(&self) -> bool {
-        (mod_api::listened(mod_api::HookId::ScreenOpening)
-            || mod_api::listened(mod_api::HookId::ScreenClosing))
+        (mod_api::__private::listened(mod_api::HookId::ScreenOpening)
+            || mod_api::__private::listened(mod_api::HookId::ScreenClosing))
             && self.options.execution_role.is_client()
             && self.lan_acting.is_none()
     }
@@ -217,6 +234,7 @@ impl Game<'_> {
             Some(Answered {
                 answer: ScreenOpening::ModScreen,
                 mod_id,
+                ..
             }) if !self.mod_screen_blocked() => ScreenDecision::ModScreen(mod_id),
             _ => ScreenDecision::Open,
         }
@@ -273,7 +291,7 @@ impl Game<'_> {
             None => [0.0; 4],
         };
         let none = screen == Screen::Playing;
-        NativeScreenView {
+        NativeScreenView::from(mod_api::__private::built::NativeScreenView {
             id: screen.id(),
             menu: self.remote_menu_type().filter(|m| !none && !m.is_empty()),
             title: self
@@ -285,7 +303,7 @@ impl Game<'_> {
             slots: if none { 0 } else { self.slot_count() },
             mouse: self.native_cursor(),
             partial_tick: self.clock.fraction() as f32,
-        }
+        })
     }
     /// A mod's own screen cannot open now: over the title screen, a book, a
     /// sign editor, a dialog or a prompt, with no player or a
@@ -324,7 +342,7 @@ impl Game<'_> {
             let none = self.screen_change_view(Screen::Playing);
             let from = self.observed_screen.as_ref().filter(|old| old.overlay);
             let from = from.map(ObservedScreen::view);
-            let to = NativeScreenView { id, ..none };
+            let to = screen_view_with_id(&none, id);
             self.decide_screen(from.as_ref().unwrap_or(&none), &to, from.is_some())
         };
         match decision {
@@ -340,7 +358,7 @@ impl Game<'_> {
         // Told here, so the frame's `observe_screen` sees no change to announce.
         self.observed_screen = self.observed_now();
         let none = self.screen_change_view(Screen::Playing);
-        self.native_screen_init_post(&NativeScreenView { id, ..none });
+        self.native_screen_init_post(&screen_view_with_id(&none, id));
         true
     }
 
@@ -385,11 +403,8 @@ impl Game<'_> {
         self.observe_change(now);
         let decision = {
             let none = self.screen_change_view(Screen::Playing);
-            let from = NativeScreenView {
-                id: current,
-                ..none
-            };
-            let to = NativeScreenView { id, ..none };
+            let from = screen_view_with_id(&none, current);
+            let to = screen_view_with_id(&none, id);
             self.decide_screen(&from, &to, true)
         };
         if let ScreenDecision::Keep = decision {
@@ -400,7 +415,7 @@ impl Game<'_> {
         }
         self.observed_screen = self.observed_now();
         let none = self.screen_change_view(Screen::Playing);
-        self.native_screen_init_post(&NativeScreenView { id, ..none });
+        self.native_screen_init_post(&screen_view_with_id(&none, id));
     }
 
     pub(super) fn observe_screen(&mut self) {
@@ -1209,16 +1224,6 @@ impl GameLevel<'_> {
     }
 }
 
-/// The camera shake native mods ask for (`native_camera_shake`): turns in
-/// degrees, and an offset in blocks along the camera's right, up and back.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct NativeShake {
-    pub pitch: f32,
-    pub yaw: f32,
-    pub roll: f32,
-    pub offset: [f32; 3],
-}
-
 /// The largest turn a shake gives, in degrees, on each axis.
 const SHAKE_MAX_DEGREES: f32 = 10.0;
 /// The largest offset a shake gives, in blocks, along each axis.
@@ -1314,28 +1319,6 @@ impl OpenNativeScreen {
     }
 }
 
-/// `PlayerSpawnPhantomsEvent.Result`: whether the phantom spawner tries a spawn near a player.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum PhantomSpawnResult {
-    /// Always try, skipping the skylight and sea level check.
-    Allow,
-    /// Try only above sea level with the sky in view.
-    Default,
-    /// Never try.
-    Deny,
-}
-
-/// `Player.BedSleepingProblem` as `CanContinueSleepingEvent.getProblem` reports it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SleepProblem {
-    /// The sleeper's bed is gone.
-    NotPossibleHere,
-    /// The bed rule no longer lets a player sleep: it is daytime.
-    NotPossibleNow,
-}
-
 /// The player as a native mod reads it.
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
@@ -1348,17 +1331,6 @@ pub(crate) struct NativePlayer {
     pub(crate) pitch: f32,
     /// `minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`.
     pub(crate) dimension: &'static str,
-}
-
-/// The world's clock as a client mod reads it (`native_clock`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NativeClock {
-    /// Ticks since the world was created (`Level.getGameTime`).
-    pub game_time: i64,
-    /// The time of day in ticks (`Level.getOverworldClockTime`): 0 at sunrise, 24000 a
-    /// day. It keeps counting past 24000 (`/time add`, days going by), so take
-    /// it modulo 24000 for the hour; `/time set` can make it negative.
-    pub day_time: i64,
 }
 
 /// How the panel lays out a recipe of `native_panel_recipes`.
@@ -1549,7 +1521,10 @@ impl Game<'_> {
         &mut self,
         categories: &mut Vec<RecipeBookCategory>,
     ) {
-        mod_api::dispatch_recipe_book_categories(mod_api::HostSide::of(self), categories);
+        mod_api::dispatch_recipe_book_categories(
+            super::execution_role::host_side(self),
+            categories,
+        );
     }
     /// Once a frame, in a world or not, after Horizon's extras.
     pub(super) fn native_frame(&mut self, elapsed: Duration) {
@@ -1640,8 +1615,11 @@ impl Game<'_> {
     /// starts as that text; replace it and players see the new message
     /// (`withUnsignedContent`: a signed message keeps its signature), and
     /// the log shows it. Set `cancel` and nobody sees it, and it doesn't
-    /// count toward the chat spam limit. Commands (`/say`, `/msg`...) are
-    /// not chat here. Server-side, with no player's state swapped in.
+    /// count toward the chat spam limit. Lines pushed to `replies` go to the
+    /// sender alone as system chat, whether or not the message is canceled
+    /// (no other player sees them). Commands (`/say`, `/msg`...) are not
+    /// chat here. Server-side, with no player's state swapped in.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn native_server_chat(
         &mut self,
         player_id: i32,
@@ -1649,9 +1627,12 @@ impl Game<'_> {
         username: &str,
         raw_text: &str,
         message: &mut Text,
+        replies: &mut Vec<Text>,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_server_chat(self, player_id, player, username, raw_text, message, cancel);
+        mod_api::dispatch_server_chat(
+            self, player_id, player, username, raw_text, message, replies, cancel,
+        );
     }
     /// NeoForge's `ClientChatEvent`: a client is about to send `message`.
     /// `original_message` is immutable; change `message` or set `cancel` to
@@ -1725,7 +1706,7 @@ impl Game<'_> {
     /// and on servers), and the server's own (`native_window` is false
     /// there: the single player server thread, a dedicated server).
     pub(super) fn native_tick(&mut self) {
-        mod_api::dispatch_tick(mod_api::HostSide::of(self));
+        mod_api::dispatch_tick(super::execution_role::host_side(self));
     }
     /// Before an eligible targeted block's selection outline is built.
     /// Cancel skips only the default block highlight, after normal HUD and game-mode gates.
@@ -1887,7 +1868,7 @@ impl Game<'_> {
     /// time. A file outside `config/`, or one already registered, is skipped.
     ///
     pub(super) fn native_register_configs(&mut self, configs: &mut Vec<NativeConfig>) {
-        mod_api::dispatch_register_configs(mod_api::HostSide::of(self), configs);
+        mod_api::dispatch_register_configs(super::execution_role::host_side(self), configs);
     }
     /// A registered config was read (`ModConfigEvent.Loading`): `config`
     /// says whose, which file and its text, which the mod parses (TOML by
@@ -1895,7 +1876,7 @@ impl Game<'_> {
     /// where the config's kind loads (`native_register_configs`), a `Server`
     /// one before `native_server_about_to_start`.
     pub(super) fn native_config_loading(&mut self, config: &NativeConfigFile) {
-        mod_api::dispatch_config_loading(mod_api::HostSide::of(self), config);
+        mod_api::dispatch_config_loading(super::execution_role::host_side(self), config);
     }
     /// A loaded config's file changed on disk (`ModConfigEvent.Reloading`):
     /// its new text. The game looks at the files' modification times once a
@@ -1903,7 +1884,7 @@ impl Game<'_> {
     /// same text, removed or unreadable fires nothing and keeps its last
     /// text.
     pub(super) fn native_config_reloading(&mut self, config: &NativeConfigFile) {
-        mod_api::dispatch_config_reloading(mod_api::HostSide::of(self), config);
+        mod_api::dispatch_config_reloading(super::execution_role::host_side(self), config);
     }
     /// A `Server` config is dropped as its server stops
     /// (`ModConfigEvent.Unloading`), after `native_server_stopping`; the next
@@ -1937,8 +1918,15 @@ impl Game<'_> {
     /// `corners.place` (boxes stack away from their edge) and draw it with
     /// `native_fill` and `native_text`. Skip a corner `native_corner_shown`
     /// says is taken.
-    pub(super) fn native_hud(&mut self, batch: &mut HudBatch, corners: &mut Corners) {
-        mod_api::dispatch_hud(self, batch, corners);
+    pub(super) fn native_hud(&self, draw: &mut HudBatch, corners: &mut Corners) {
+        mod_api::dispatch_hud(
+            self,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+            corners,
+        );
     }
     /// Before one of vanilla's HUD layers is drawn (`RenderGuiLayerEvent.Pre`):
     /// draw here to put something below the layer, or set `canceled` to hide
@@ -1953,23 +1941,38 @@ impl Game<'_> {
     /// screen draws the focused chat itself, so `chat` is only the unfocused
     /// lines. The camera overlays and the debug screen are not layers here:
     /// they are not drawn in this pass. Draw with `native_fill`, `native_text`
-    /// and the sprite helpers; `batch.width` and `batch.height` are the GUI
+    /// and the sprite helpers; `draw.size()` is the GUI
     /// size. Together with `native_gui_layer_post` this is NeoForge's
     /// `RegisterGuiLayersEvent`: a mod keeps its own list of what it draws
     /// above or below which layer.
     pub(super) fn native_gui_layer_pre(
-        &mut self,
+        &self,
         layer: &str,
-        batch: &mut HudBatch,
+        draw: &mut HudBatch,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_gui_layer_pre(self, layer, batch, canceled);
+        mod_api::dispatch_gui_layer_pre(
+            self,
+            layer,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+            canceled,
+        );
     }
     /// After one of vanilla's HUD layers (or after the layer a mod hid), with
     /// the ids of `native_gui_layer_pre`: draw here to put something above
     /// the layer (`RenderGuiLayerEvent.Post`).
-    pub(super) fn native_gui_layer_post(&mut self, layer: &str, batch: &mut HudBatch) {
-        mod_api::dispatch_gui_layer_post(self, layer, batch);
+    pub(super) fn native_gui_layer_post(&self, layer: &str, draw: &mut HudBatch) {
+        mod_api::dispatch_gui_layer_post(
+            self,
+            layer,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+        );
     }
     /// A player right-clicks the entity `entity` (`Entity.getId`) of type
     /// `kind` (`minecraft:cow`) with `self.hand`, holding `stack` (none in an
@@ -2031,18 +2034,24 @@ impl Game<'_> {
     /// Nothing set draws Horizon's own.
     pub(super) fn native_health_hud(
         &mut self,
-        inputs: &horizon_client::hud_layout::HealthInputs,
+        inputs: &mod_api::hud_layout::HealthInputs,
         wi: i32,
         hi: i32,
-        draws: &mut Option<Vec<horizon_client::hud_layout::GuiDraw>>,
+        draws: &mut Option<Vec<mod_api::hud_layout::GuiDraw>>,
     ) {
         mod_api::dispatch_health_hud(self, inputs, wi, hi, draws);
     }
-    /// A real window key event after handling, including repeats and consumed shortcuts.
-    /// Receives the original physical/logical key, text, location, state and repeat flag.
-    /// Modifier bits use the screen hooks' GLFW encoding. Not cancellable.
-    pub(super) fn native_input_key(&mut self, event: &winit::event::KeyEvent, modifiers: u32) {
-        mod_api::dispatch_input_key(self, event, modifiers);
+    /// A real window key event after handling, including repeats and consumed shortcuts
+    /// (`InputEvent.Key`). `key` is vanilla's name for the physical key (`key.keyboard.a`,
+    /// `key.keyboard.unknown` for one it doesn't name), `action` what it did, and the
+    /// modifier bits the screen hooks' GLFW encoding. Not cancellable.
+    pub(super) fn native_input_key(
+        &mut self,
+        key: &str,
+        action: mod_api::KeyAction,
+        modifiers: u32,
+    ) {
+        mod_api::dispatch_input_key(self, key, action, modifiers);
     }
     /// Raw mouse button input on any screen, before dispatch; cancel skips dispatch and Post.
     /// Button/modifiers use the same GLFW encoding as screen hooks. Synthetic clicks skip it.
@@ -2095,7 +2104,7 @@ impl Game<'_> {
         &mut self,
         button: i32,
         key_mapping: &str,
-        hand: horizon_client::first_person::Hand,
+        hand: mod_api::first_person::Hand,
         swing_hand: &mut bool,
         canceled: &mut bool,
     ) {
@@ -2104,7 +2113,7 @@ impl Game<'_> {
     /// A command typed or clicked in chat, without its slash, before the
     /// server and Horizon's commands see it: set `ran` when the mod ran it.
     pub(super) fn native_command(&mut self, command: &str, ran: &mut bool) {
-        mod_api::dispatch_command(mod_api::HostSide::of(self), command, ran);
+        mod_api::dispatch_command(super::execution_role::host_side(self), command, ran);
     }
     /// The commands `native_command` runs, by name and without their slash:
     /// push the ones that are yours. Asked when a connection starts and
@@ -2118,7 +2127,7 @@ impl Game<'_> {
     /// Invalid values or values outside 0.01..=10 revert to base.
     pub(super) fn native_compute_fov_modifier(
         &self,
-        player: &horizon_client::camera::FovPlayer,
+        player: &mod_api::camera::FovPlayer,
         base: f32,
         modifier: &mut f32,
     ) {
@@ -2151,7 +2160,7 @@ impl Game<'_> {
         &self,
         partial: f32,
         camera: [f64; 3],
-        fog_type: horizon_client::fog::FogType,
+        fog_type: mod_api::fog::FogType,
         rgb: &mut [f32; 3],
     ) {
         mod_api::dispatch_compute_fog_color(self, partial, camera, fog_type, rgb);
@@ -2163,8 +2172,8 @@ impl Game<'_> {
         &self,
         partial: f32,
         camera: [f64; 3],
-        fog_type: horizon_client::fog::FogType,
-        fog: &mut horizon_client::fog::FogData,
+        fog_type: mod_api::fog::FogType,
+        fog: &mut mod_api::fog::FogData,
     ) {
         mod_api::dispatch_render_fog(self, partial, camera, fog_type, fog);
     }
@@ -2219,7 +2228,17 @@ impl Game<'_> {
         draw: &mut BlockEntityDraw,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_render_arm(self, player, player_entity_id, left, draw, canceled);
+        mod_api::dispatch_render_arm(
+            self,
+            player,
+            player_entity_id,
+            left,
+            &mut super::mod_api_host::generated::GameBlockEntityDrawContext {
+                game: self,
+                surface: draw,
+            },
+            canceled,
+        );
     }
     /// Before a visible item frame's item or map is drawn. Cancel hides the item, not the frame.
     pub(super) fn native_render_item_in_frame(
@@ -2239,7 +2258,7 @@ impl Game<'_> {
         &self,
         partial: f32,
         mirrored: bool,
-        entity: &horizon_client::camera::CameraEntity,
+        entity: &mod_api::camera::CameraEntity,
         distance: &mut f32,
     ) {
         mod_api::dispatch_camera_distance(self, partial, mirrored, entity, distance);
@@ -2349,13 +2368,13 @@ impl Game<'_> {
     }
     /// Options > Mods lists the native mods: push yours.
     pub(super) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {
-        mod_api::dispatch_mods(mod_api::HostSide::of(self), mods);
+        mod_api::dispatch_mods(super::execution_role::host_side(self), mods);
     }
     /// The buttons of mod `mod_id`'s settings page, under its keys: push
     /// their labels when it is yours. Asked again each time the page opens
     /// and after each click.
     pub(super) fn native_settings(&mut self, mod_id: &str, buttons: &mut Vec<String>) {
-        mod_api::dispatch_settings(mod_api::HostSide::of(self), mod_id, buttons);
+        mod_api::dispatch_settings(super::execution_role::host_side(self), mod_id, buttons);
     }
     /// Button `button` of mod `mod_id`'s settings page was clicked.
     pub(super) fn native_settings_click(&mut self, mod_id: &str, button: usize) {
@@ -2506,7 +2525,17 @@ impl Game<'_> {
         entity: &ModBlockEntity,
         draw: &mut BlockEntityDraw,
     ) {
-        mod_api::dispatch_block_entity_submit(self, pos, block, state, entity, draw);
+        mod_api::dispatch_block_entity_submit(
+            self,
+            pos,
+            block,
+            state,
+            entity,
+            &mut super::mod_api_host::generated::GameBlockEntityDrawContext {
+                game: self,
+                surface: draw,
+            },
+        );
     }
     /// Where the mod block entity at `pos` draws, for culling
     /// (NeoForge's `getRenderBoundingBox`): `bounds` is min x, y, z then max
@@ -2545,7 +2574,15 @@ impl Game<'_> {
         draw: &mut BlockEntityDraw,
         drawn: &mut bool,
     ) {
-        mod_api::dispatch_mob_submit(self, mob, draw, drawn);
+        mod_api::dispatch_mob_submit(
+            self,
+            mob,
+            &mut super::mod_api_host::generated::GameBlockEntityDrawContext {
+                game: self,
+                surface: draw,
+            },
+            drawn,
+        );
     }
     /// Whether a mod listens to `native_player_submit` or `native_mob_layer`: a
     /// mod that hooks either hooks this one too and sets `listened` (HEAD,
@@ -2569,7 +2606,16 @@ impl Game<'_> {
         draw: &mut BlockEntityDraw,
         drawn: &mut bool,
     ) {
-        mod_api::dispatch_player_submit(self, player, who, draw, drawn);
+        mod_api::dispatch_player_submit(
+            self,
+            player,
+            who,
+            &mut super::mod_api_host::generated::GameBlockEntityDrawContext {
+                game: self,
+                surface: draw,
+            },
+            drawn,
+        );
     }
     /// A layer on every mob and player in view, once a frame after its
     /// vanilla model and layers (`EntityRenderersEvent.AddLayers`, with
@@ -2585,7 +2631,15 @@ impl Game<'_> {
         who: Option<&NativePlayerRender<'_>>,
         draw: &mut BlockEntityDraw,
     ) {
-        mod_api::dispatch_mob_layer(self, mob, who, draw);
+        mod_api::dispatch_mob_layer(
+            self,
+            mob,
+            who,
+            &mut super::mod_api_host::generated::GameBlockEntityDrawContext {
+                game: self,
+                surface: draw,
+            },
+        );
     }
     /// Icons a mod puts on map `map` each time it is drawn: held, in an
     /// item frame or on the cartography table's screen (a map's pixels are
@@ -2624,10 +2678,19 @@ impl Game<'_> {
         &self,
         block: &str,
         data: &[i32],
-        batch: &mut HudBatch,
+        draw: &mut HudBatch,
         origin: [f32; 2],
     ) {
-        mod_api::dispatch_screen_draw(self, block, data, batch, origin);
+        mod_api::dispatch_screen_draw(
+            self,
+            block,
+            data,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+            origin,
+        );
     }
     /// `Gui.setScreen` is about to replace the `current` screen with `new`
     /// (`ScreenEvent.Opening`; the screen `playing` is none: vanilla's null).
@@ -2674,10 +2737,17 @@ impl Game<'_> {
     /// their `rect`, and no dialog or prompt over them.
     pub(super) fn native_screen_render_post(
         &self,
-        batch: &mut HudBatch,
+        draw: &mut HudBatch,
         screen: &NativeScreenView<'_>,
     ) {
-        mod_api::dispatch_screen_render_post(self, batch, screen);
+        mod_api::dispatch_screen_render_post(
+            self,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+            screen,
+        );
     }
     /// A mouse button went down over the open screen
     /// (`ScreenEvent.MouseButtonPressed.Pre`, vanilla's
@@ -2861,7 +2931,7 @@ impl Game<'_> {
     /// drawn this frame, which `NativeScreenView.id` comes from. Borrowed:
     /// nothing is copied per frame.
     pub(super) fn screen_view(&self, batch: &HudBatch, screen: Screen) -> NativeScreenView<'_> {
-        NativeScreenView {
+        NativeScreenView::from(mod_api::__private::built::NativeScreenView {
             id: screen.id(),
             menu: self.remote_menu_type().filter(|m| !m.is_empty()),
             title: self.remote.as_ref().and_then(|r| r.menu_title.as_ref()),
@@ -2869,7 +2939,7 @@ impl Game<'_> {
             slots: self.slot_count(),
             mouse: self.native_cursor(),
             partial_tick: self.clock.fraction() as f32,
-        }
+        })
     }
     /// The title's own screen as a native mod sees it (`NativeScreenView`):
     /// its id from the title state machine (`title`, `world_select`,
@@ -2878,15 +2948,17 @@ impl Game<'_> {
     /// open). None while no title screen is up.
     pub(super) fn title_screen_view(&self, batch: &HudBatch) -> Option<NativeScreenView<'_>> {
         let title = self.title.as_ref()?;
-        Some(NativeScreenView {
-            id: title.mode.id(),
-            menu: None,
-            title: None,
-            rect: [0.0, 0.0, batch.width, batch.height],
-            slots: 0,
-            mouse: self.native_cursor(),
-            partial_tick: self.clock.fraction() as f32,
-        })
+        Some(NativeScreenView::from(
+            mod_api::__private::built::NativeScreenView {
+                id: title.mode.id(),
+                menu: None,
+                title: None,
+                rect: [0.0, 0.0, batch.width, batch.height],
+                slots: 0,
+                mouse: self.native_cursor(),
+                partial_tick: self.clock.fraction() as f32,
+            },
+        ))
     }
     /// The open screen's container panel in GUI pixels (`screen`'s, the one
     /// this frame draws), or the whole window for a screen with none
@@ -3091,7 +3163,7 @@ impl Game<'_> {
     /// mods may change it and the clicking player's carried stack.
     pub(super) fn native_menu_button(
         &mut self,
-        context: &horizon_client::menu::MenuButtonContext,
+        context: &mod_api::menu::MenuButtonContext,
         entity: &mut ModBlockEntity,
         carried: &mut Option<ItemStack>,
     ) {
@@ -3440,7 +3512,7 @@ impl Game<'_> {
         entity: u32,
         kind: &str,
         source: &HurtSource<'_>,
-        entries: &mut Vec<horizon_client::mod_api::NativeArmorHurt>,
+        entries: &mut Vec<mod_api::NativeArmorHurt>,
         cancel: &mut bool,
     ) {
         mod_api::dispatch_armor_hurt(self, player, entity, kind, source, entries, cancel);
@@ -4265,7 +4337,7 @@ impl Game<'_> {
     pub(super) fn native_enchantment_level_set(
         &mut self,
         pos: [i32; 3],
-        offer: &horizon_client::stations::EnchantmentRow<'_>,
+        offer: &mod_api::stations::EnchantmentRow<'_>,
         level: &mut i32,
     ) {
         mod_api::dispatch_enchantment_level_set(self, pos, offer, level);
@@ -4376,7 +4448,7 @@ impl Game<'_> {
         can_harvest: &mut bool,
     ) {
         mod_api::dispatch_player_harvest_check(
-            mod_api::HostSide::of(self),
+            super::execution_role::host_side(self),
             player,
             pos,
             state,
@@ -4395,7 +4467,7 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_player_break_speed(
-            mod_api::HostSide::of(self),
+            super::execution_role::host_side(self),
             player,
             pos,
             state,
@@ -4705,8 +4777,8 @@ impl Game<'_> {
         player: u128,
         player_entity_id: i32,
         name: &str,
-        old: &horizon_client::mod_api::NativeClientInfo,
-        new: &horizon_client::mod_api::NativeClientInfo,
+        old: &mod_api::NativeClientInfo,
+        new: &mod_api::NativeClientInfo,
     ) {
         mod_api::dispatch_client_information_updated(
             self,
@@ -4817,7 +4889,7 @@ impl Game<'_> {
         projectile: &mut Option<ItemStack>,
     ) {
         mod_api::dispatch_living_get_projectile(
-            mod_api::HostSide::of(self),
+            super::execution_role::host_side(self),
             player,
             name,
             entity,
@@ -4930,7 +5002,7 @@ impl Game<'_> {
         player: u128,
         name: &str,
         pos: [i32; 3],
-        craft: &horizon_client::menu::AnvilCraft,
+        craft: &mod_api::menu::AnvilCraft,
         cancel: &mut bool,
     ) {
         mod_api::dispatch_anvil_craft_pre(self, player, name, pos, craft, cancel);
@@ -4941,7 +5013,7 @@ impl Game<'_> {
         player: u128,
         name: &str,
         pos: [i32; 3],
-        craft: &horizon_client::menu::AnvilCraft,
+        craft: &mod_api::menu::AnvilCraft,
     ) {
         mod_api::dispatch_anvil_craft_post(self, player, name, pos, craft);
     }
@@ -4959,11 +5031,11 @@ impl Game<'_> {
         player: u128,
         player_entity_id: i32,
         pos: [i32; 3],
-        update: &mut horizon_client::menu::AnvilUpdate,
+        update: &mut mod_api::menu::AnvilUpdate,
         cancel: &mut bool,
     ) {
         mod_api::dispatch_anvil_update(
-            mod_api::HostSide::of(self),
+            super::execution_role::host_side(self),
             player,
             player_entity_id,
             pos,
@@ -4983,7 +5055,7 @@ impl Game<'_> {
         player: u128,
         player_entity_id: i32,
         pos: [i32; 3],
-        place: &mut horizon_client::menu::GrindstonePlace,
+        place: &mut mod_api::menu::GrindstonePlace,
         cancel: &mut bool,
     ) {
         mod_api::dispatch_grindstone_place(self, player, player_entity_id, pos, place, cancel);
@@ -5001,7 +5073,7 @@ impl Game<'_> {
         player: u128,
         player_entity_id: i32,
         pos: [i32; 3],
-        take: &mut horizon_client::menu::GrindstoneTake,
+        take: &mut mod_api::menu::GrindstoneTake,
         cancel: &mut bool,
     ) {
         mod_api::dispatch_grindstone_take(self, player, player_entity_id, pos, take, cancel);
@@ -5730,11 +5802,20 @@ impl Game<'_> {
     pub(super) fn native_tooltip_component_draw(
         &self,
         stack: &ItemStack,
-        batch: &mut HudBatch,
+        draw: &mut HudBatch,
         origin: [f32; 2],
         size: [f32; 2],
     ) {
-        mod_api::dispatch_tooltip_component_draw(self, stack, batch, origin, size);
+        mod_api::dispatch_tooltip_component_draw(
+            self,
+            stack,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+            origin,
+            size,
+        );
     }
 
     /// The small bar `GuiGraphicsExtractor.itemDecorations` draws under an
@@ -5773,9 +5854,18 @@ impl Game<'_> {
         stack: &ItemStack,
         x: f32,
         y: f32,
-        batch: &mut HudBatch,
+        draw: &mut HudBatch,
     ) {
-        mod_api::dispatch_item_decorations(self, stack, x, y, batch);
+        mod_api::dispatch_item_decorations(
+            self,
+            stack,
+            x,
+            y,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+        );
     }
     /// A player uses `stack` (right click) with `self.hand` on the block at
     /// `pos`, `face` the face clicked (`[0, 1, 0]` is the top), once the
@@ -5913,7 +6003,7 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_living_entity_use_item_start(
-            mod_api::HostSide::of(self),
+            super::execution_role::host_side(self),
             stack,
             entity,
             hand,
@@ -5970,7 +6060,7 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_living_entity_use_item_tick(
-            mod_api::HostSide::of(self),
+            super::execution_role::host_side(self),
             stack,
             entity,
             hand,
@@ -5993,7 +6083,12 @@ impl Game<'_> {
         entity: Option<i32>,
         remaining: i32,
     ) {
-        mod_api::dispatch_on_use_tick(mod_api::HostSide::of(self), stack, entity, remaining);
+        mod_api::dispatch_on_use_tick(
+            super::execution_role::host_side(self),
+            stack,
+            entity,
+            remaining,
+        );
     }
     /// NeoForge's `LivingEntityUseItemEvent.Stop`: `entity` lets go of
     /// `stack` in `hand` before its use ran its time
@@ -6012,7 +6107,7 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_living_entity_use_item_stop(
-            mod_api::HostSide::of(self),
+            super::execution_role::host_side(self),
             stack,
             entity,
             hand,
@@ -6079,7 +6174,7 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_sweep_attack(
-            mod_api::HostSide::of(self),
+            super::execution_role::host_side(self),
             target,
             vanilla_sweep,
             sweeping,
@@ -6102,7 +6197,7 @@ impl Game<'_> {
         used: &mut bool,
     ) {
         mod_api::dispatch_release_using(
-            mod_api::HostSide::of(self),
+            super::execution_role::host_side(self),
             stack,
             entity,
             time_left,
@@ -6188,7 +6283,7 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_right_click_block(
-            mod_api::HostSide::of(self),
+            super::execution_role::host_side(self),
             click,
             use_block,
             use_item,
@@ -6207,7 +6302,7 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_use_item_on_block(
-            mod_api::HostSide::of(self),
+            super::execution_role::host_side(self),
             click,
             phase,
             cancellation_result,
@@ -6224,7 +6319,7 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_right_click_item(
-            mod_api::HostSide::of(self),
+            super::execution_role::host_side(self),
             click,
             cancellation_result,
             canceled,
@@ -6251,7 +6346,7 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_bonemeal(
-            mod_api::HostSide::of(self),
+            super::execution_role::host_side(self),
             dimension,
             player,
             player_entity_id,
@@ -6375,7 +6470,7 @@ impl Game<'_> {
         &mut self,
         dimension: &str,
         controller: TicketController,
-        validation: &mut horizon_client::mod_chunk_tickets::TicketValidation,
+        validation: &mut mod_api::mod_chunk_tickets::TicketValidation,
     ) {
         mod_api::dispatch_validate_tickets(self, dimension, controller, validation);
     }
@@ -7245,7 +7340,7 @@ impl Game<'_> {
 /// `native_living_use_totem` for the damage code (`health::USE_TOTEM`): whether it
 /// canceled the totem. The entity and the source are named as the damage hook names them.
 pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
-    if !mod_api::listened(mod_api::HookId::LivingUseTotem) {
+    if !mod_api::__private::listened(mod_api::HookId::LivingUseTotem) {
         return false;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
@@ -7388,7 +7483,7 @@ pub(super) fn incoming_damage(
     victim: Victim,
     container: &mut DamageContainer,
 ) -> bool {
-    if !mod_api::listened(mod_api::HookId::LivingIncomingDamage) {
+    if !mod_api::__private::listened(mod_api::HookId::LivingIncomingDamage) {
         return false;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
@@ -7413,7 +7508,7 @@ pub(super) fn damage_pre(
     hurting: Hurting<'_>,
     container: &mut DamageContainer,
 ) {
-    if !mod_api::listened(mod_api::HookId::LivingDamagePre) {
+    if !mod_api::__private::listened(mod_api::HookId::LivingDamagePre) {
         return;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
@@ -7426,7 +7521,7 @@ pub(super) fn damage_post(
     hurting: Hurting<'_>,
     container: &DamageContainer,
 ) {
-    if !mod_api::listened(mod_api::HookId::LivingDamagePost) {
+    if !mod_api::__private::listened(mod_api::HookId::LivingDamagePost) {
         return;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
@@ -7495,7 +7590,7 @@ impl Game<'_> {
 /// canceled the push. Its one caller. The pushed entity and the source are named as the
 /// damage hook names them.
 pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
-    if !mod_api::listened(mod_api::HookId::LivingKnockback) {
+    if !mod_api::__private::listened(mod_api::HookId::LivingKnockback) {
         return false;
     }
     let attacker = match &pushed {
@@ -8376,6 +8471,10 @@ impl Game<'_> {
         let charts = self.debug_charts.corners(!self.has_singleplayer_server());
         !debug_takes(corner, self.debug, charts)
     }
+    /// The GUI's size in GUI pixels, width then height.
+    pub(super) fn native_size(&self, draw: &HudBatch) -> [f32; 2] {
+        [draw.width, draw.height]
+    }
     /// The width of `text` in GUI pixels.
     pub(super) fn native_text_width(&self, text: &str) -> f32 {
         HudBatch::text_width(&self.gui.atlas, text)
@@ -8765,13 +8864,16 @@ impl Game<'_> {
     /// where the WebAssembly mod of the same id kept its storage, so a
     /// player's settings carry over. Not created here.
     pub(super) fn native_data_dir(&self, mod_id: &str) -> PathBuf {
-        let mods = Self::game_dir().join(mod_list::DIR);
-        mods.join(".horizon-mod-data").join(mod_id)
+        Self::mod_data_root().join(mod_id)
+    }
+    pub(super) fn mod_data_root() -> PathBuf {
+        Self::game_dir()
+            .join(mod_list::DIR)
+            .join(".horizon-mod-data")
     }
     /// A mod's setting `key` (one file per key in `native_data_dir`).
     pub(super) fn native_setting(&self, mod_id: &str, key: &str) -> Option<String> {
-        let path = self.native_data_dir(mod_id).join(key);
-        fs::read_to_string(path).ok().map(|v| v.trim().to_owned())
+        horizon_world::native_load_context::read_setting(&self.native_data_dir(mod_id), key)
     }
     /// Keeps a mod's setting `key`.
     pub(super) fn native_set_setting(&self, mod_id: &str, key: &str, value: &str) {
@@ -8992,7 +9094,7 @@ impl Game<'_> {
         by_player: bool,
         stack: &mut ItemStack,
     ) -> Option<bool> {
-        if !mod_api::listened(mod_api::HookId::Bonemeal) {
+        if !mod_api::__private::listened(mod_api::HookId::Bonemeal) {
             return None;
         }
         let client = self.remote.is_some();
@@ -9040,7 +9142,7 @@ impl Game<'_> {
         stack: Option<&ItemStack>,
     ) -> BlockClickAnswer {
         let (mut use_block, mut use_item) = (NativeTriState::Default, NativeTriState::Default);
-        if !mod_api::listened(mod_api::HookId::RightClickBlock) {
+        if !mod_api::__private::listened(mod_api::HookId::RightClickBlock) {
             return BlockClickAnswer::Go {
                 use_block,
                 use_item,
@@ -9072,7 +9174,7 @@ impl Game<'_> {
         stack: Option<&ItemStack>,
         phase: UsePhase,
     ) -> Option<NativeInteractionResult> {
-        if !mod_api::listened(mod_api::HookId::UseItemOnBlock) {
+        if !mod_api::__private::listened(mod_api::HookId::UseItemOnBlock) {
             return None;
         }
         let click = self.block_click(hit, hand, stack);
@@ -9101,7 +9203,7 @@ impl Game<'_> {
         hand: Hand,
         stack: &ItemStack,
     ) -> Option<NativeInteractionResult> {
-        if !mod_api::listened(mod_api::HookId::RightClickItem)
+        if !mod_api::__private::listened(mod_api::HookId::RightClickItem)
             || self.entity_targeted()
             || self.pick().is_some()
         {
@@ -9111,7 +9213,7 @@ impl Game<'_> {
             .target_position(super::commands::Target::Player)?
             .map(|v| v.floor() as i32);
         let (player, player_entity_id) = self.native_clicker();
-        let click = NativeItemClick {
+        let click = NativeItemClick::from(mod_api::__private::built::NativeItemClick {
             side: if self.remote.is_some() {
                 LogicalSide::Client
             } else {
@@ -9123,7 +9225,7 @@ impl Game<'_> {
             stack,
             player,
             player_entity_id,
-        };
+        });
         let instant = self.use_duration(stack) <= 0;
         let (mut result, mut canceled) = (NativeInteractionResult::Pass, false);
         self.native_right_click_item(&click, &mut result, &mut canceled);
@@ -9140,7 +9242,7 @@ impl Game<'_> {
         stack: Option<&'a ItemStack>,
     ) -> NativeBlockClick<'a> {
         let (player, player_entity_id) = self.native_clicker();
-        NativeBlockClick {
+        NativeBlockClick::from(mod_api::__private::built::NativeBlockClick {
             side: if self.remote.is_some() {
                 LogicalSide::Client
             } else {
@@ -9153,7 +9255,7 @@ impl Game<'_> {
             stack,
             player,
             player_entity_id,
-        }
+        })
     }
     /// `GameRuleChangedEvent` once the server set the rule `name` to `value`
     /// (`GameRules.set` with a server).
@@ -9163,14 +9265,14 @@ impl Game<'_> {
         value: GameRuleValue,
         actor: Option<&GameRuleActor<'_>>,
     ) {
-        if mod_api::listened(mod_api::HookId::GameRuleChanged) {
+        if mod_api::__private::listened(mod_api::HookId::GameRuleChanged) {
             self.native_game_rule_changed(&["minecraft:", name].concat(), value, actor);
         }
     }
     /// `MobSplitEvent` for the dying cube mob `m`, which made `count`
     /// children: how many to spawn.
     pub(super) fn mob_split_count(&mut self, m: &horizon_client::mobs::Mob, count: u32) -> u32 {
-        if !mod_api::listened(mod_api::HookId::MobSplit) {
+        if !mod_api::__private::listened(mod_api::HookId::MobSplit) {
             return count;
         }
         let (size, kind) = (m.extra.size, mob_kind(m));
@@ -9187,7 +9289,7 @@ impl Game<'_> {
         tamer: u128,
         tamer_entity_id: i32,
     ) -> bool {
-        if !mod_api::listened(mod_api::HookId::AnimalTame) {
+        if !mod_api::__private::listened(mod_api::HookId::AnimalTame) {
             return false;
         }
         let m = &self.mobs[index];
@@ -9226,7 +9328,7 @@ impl Game<'_> {
             None => self.res.items(),
         };
         let table = items.block_loot_table(self.pack.assets.registry, state);
-        let context = NativeLootDrops {
+        let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {
             table: table.as_deref().unwrap_or_default(),
             dimension: self.dim.id(),
             origin: pos.map(|c| f64::from(c) + 0.5),
@@ -9236,7 +9338,7 @@ impl Game<'_> {
             tool,
             explosion,
             used: false,
-        };
+        });
         self.native_loot_drops(&context, drops);
         drops.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
     }
@@ -9253,7 +9355,7 @@ impl Game<'_> {
         tool: Option<&ItemStack>,
         drops: &mut Vec<ItemStack>,
     ) {
-        let context = NativeLootDrops {
+        let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {
             table,
             dimension: self.dim.id(),
             origin,
@@ -9263,7 +9365,7 @@ impl Game<'_> {
             tool,
             explosion: None,
             used: true,
-        };
+        });
         self.native_loot_drops(&context, drops);
         drops.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
     }
@@ -9808,7 +9910,7 @@ impl Game<'_> {
     /// with the acting player's cursor stack (`carried`, read and written).
     pub(super) fn mod_menu_button(
         &mut self,
-        context: horizon_client::menu::MenuButtonContext,
+        context: mod_api::menu::MenuButtonContext,
         carried: &mut Option<ItemStack>,
     ) {
         let pos = (context.pos[0], context.pos[1], context.pos[2]);
@@ -9943,7 +10045,7 @@ impl Game<'_> {
     pub(super) fn native_interaction(
         &mut self,
         button: i32,
-        hand: horizon_client::first_person::Hand,
+        hand: mod_api::first_person::Hand,
     ) -> Option<bool> {
         let key_mapping = match button {
             0 => "key.attack",
@@ -10152,16 +10254,13 @@ fn mod_screen_opens(
 
 #[cfg(test)]
 mod tests {
+    use mod_api::__private::game::*;
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn declared_types_create_tick_and_reload_through_game() {
         use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
-        use horizon_client::{
-            chunk::Chunk,
-            containers::BlockEntity,
-            mod_api::{self, *},
-            save,
-        };
+        use horizon_client::{chunk::Chunk, containers::BlockEntity, save};
+        use mod_api::{self, *};
         use std::sync::Arc;
 
         const CHILD: &str = "HORIZON_DECLARED_BE_GAME_CHILD";
@@ -10220,7 +10319,7 @@ mod tests {
             keys: Arc<Keys>,
             unknown: Option<&'static str>,
         }
-        #[horizon_client::mod_api::__subscriptions]
+        #[mod_api::__subscriptions]
         impl Hooks for User {
             fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 let kind = registrar.block_entity_type_key("be_test:shared");
@@ -10243,7 +10342,7 @@ mod tests {
             invalid: bool,
             keys: Arc<Keys>,
         }
-        #[horizon_client::mod_api::__subscriptions]
+        #[mod_api::__subscriptions]
         impl Hooks for TestMod {
             fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 let kind = registrar
@@ -10298,8 +10397,8 @@ mod tests {
                 }),
             ),
         ]);
-        horizon_client::mod_api::install(mods.clone());
-        horizon_client::mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install(mods.clone());
+        mod_api::__private::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let root = super::super::mods::content_root(&base, &Default::default());
         if invalid {
@@ -10424,7 +10523,7 @@ mod tests {
     fn client_host_reads_current_pause_state() {
         use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
-        use horizon_client::mod_api::ClientHost;
+        use mod_api::ClientHost;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -10441,8 +10540,8 @@ mod tests {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
-        use horizon_client::mod_api;
         use horizon_client::save::{decode_block_entity, encode_block_entity};
+        use mod_api;
         use std::sync::Arc;
 
         with_game(|game| {
@@ -10581,7 +10680,7 @@ mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            super::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!("no menu handoff"),
         )
@@ -10943,7 +11042,7 @@ mod tests {
 
     #[test]
     fn native_ingredient_stays_hookable() {
-        let source = include_str!("../crafting.rs").replace("\r\n", "\n");
+        let source = include_str!("../../../horizon-mod-api/src/crafting.rs").replace("\r\n", "\n");
         let at = source.find("pub fn native_ingredient(").unwrap();
         let start = source[..at].rfind("///").unwrap();
         let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
@@ -11053,9 +11152,7 @@ mod tests {
                 .collect()
         };
         // The renderer's (`horizon_client_render::gfx::native_render`).
-        let render_hooks = free_hooks(include_str!(
-            "../../../horizon-client-render/src/gfx/native_render.rs"
-        ));
+        let render_hooks = free_hooks(include_str!("../../../horizon-mod-api/src/render.rs"));
         // Items' default components (`horizon_world::item_defaults`).
         let item_hooks = free_hooks(include_str!("../../../horizon-world/src/item_defaults.rs"));
         // The loot tables' hook point (`horizon_world::loot`).
@@ -11065,7 +11162,7 @@ mod tests {
         // The air supply's (`horizon_client::breathing`).
         let breath_hooks = free_hooks(include_str!("../breathing.rs"));
         // The crafting loaders' (`horizon_client_lib::crafting`).
-        let crafting_hooks = free_hooks(include_str!("../crafting.rs"));
+        let crafting_hooks = free_hooks(include_str!("../../../horizon-mod-api/src/crafting.rs"));
         let hunger_hooks = free_hooks(include_str!("../hunger.rs"));
         let landing_hooks = free_hooks(include_str!("../landing.rs"));
         let motion_hooks = free_hooks(include_str!("../motion.rs"));
@@ -11104,7 +11201,7 @@ mod tests {
             );
             names.insert(name);
             let target = if render_hooks.contains(name) {
-                format!("horizon_client_render::gfx::native_render::native_{name}")
+                format!("mod_api::render::native_{name}")
             } else if item_hooks.contains(name) {
                 format!("horizon_world::item_defaults::native_{name}")
             } else if loot_hooks.contains(name) {
@@ -11112,7 +11209,7 @@ mod tests {
             } else if crafting_hooks.contains(name) {
                 // crafting.rs compiles into horizon-client-lib (#5446's
                 // split): horizon-mixins resolves the crate by its package.
-                format!("horizon_client_lib::crafting::native_{name}")
+                format!("mod_api::crafting::native_{name}")
             } else if hunger_hooks.contains(name) {
                 format!("horizon_client_lib::hunger::native_{name}")
             } else if landing_hooks.contains(name) {
@@ -11268,7 +11365,7 @@ mod tests {
 #[cfg(test)]
 mod screen_open_tests {
     use super::*;
-    use crate::mod_api::{
+    use mod_api::{
         ClientHost, Hooks, ModEntry, ScreenClosingEvent, ScreenOpeningEvent, testing::with_mods,
     };
     use std::sync::{Arc, Mutex};
@@ -11542,7 +11639,7 @@ mod screen_open_tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn an_overlay_fires_init_post_after_it_opens() {
-        use crate::mod_api::ScreenInitPostEvent;
+        use mod_api::ScreenInitPostEvent;
         /// Hears Opening and Init.Post, in one log.
         struct Ordered(Arc<Mutex<Vec<String>>>);
         #[mod_api::__subscriptions]

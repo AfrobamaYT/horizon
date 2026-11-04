@@ -3,6 +3,8 @@
 //! `ModelBlockRenderer`/`BlockModelLighter` (smooth light, ambient occlusion,
 //! cardinal shading, tint sources, block offsets; see `lighting`). Fluids
 //! follow `FluidRenderer` (see `fluid`).
+pub use mod_api::mesher::TintSource;
+pub use mod_api::render::Vertex;
 mod fluid;
 mod leaf_culling;
 mod lighting;
@@ -30,24 +32,6 @@ use horizon_world::{
 pub use sides::{Part, Sides, group_parts};
 use std::sync::Arc;
 
-/// An entity, item and effect vertex (the entity pipelines), with a face
-/// normal for `entity.wgsl`'s directional light.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Vertex {
-    pub pos: [f32; 3],
-    pub uv: [f32; 2],
-    pub layer: u32,
-    /// RGBA8: tint multiplied by directional shade and ambient occlusion.
-    pub color: u32,
-    /// Smooth light, 16x fixed point: sky in bits 0..8, block in bits 8..16.
-    pub light: u32,
-    /// RGBA8_SNORM face normal; w = -127 for two-sided lighting, 0 to keep baked/unlit colour,
-    /// [`CULL_BACK`] to keep it and also drop back-facing pixels.
-    pub normal: [i8; 4],
-    /// The `GLINT_TEXTURING` atlas UV for a foil item quad; zero elsewhere.
-    pub glint_uv: [f32; 2],
-}
 /// `Vertex::normal` of a baked-colour quad of an `entitySolid` model: the render type culls
 /// back faces, which the entity pipelines here do not, so `entity.wgsl` discards them.
 pub const CULL_BACK: [i8; 4] = [0, 0, 0, 1];
@@ -506,17 +490,6 @@ fn visibility_rows(open: &[u16; 256]) -> u64 {
 mod particle_tests;
 #[cfg(test)]
 mod visibility_tests;
-/// A face's tint source as the game colours it (`BlockColors.createDefault`), for drawing a block
-/// elsewhere ([`crate::block_sprites`]): the biome's grass, foliage, dry foliage or water colour
-/// where the block is, or a fixed colour (0xRRGGBB).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TintSource {
-    Grass,
-    Foliage,
-    DryFoliage,
-    Water,
-    Fixed(u32),
-}
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tint {
     None,

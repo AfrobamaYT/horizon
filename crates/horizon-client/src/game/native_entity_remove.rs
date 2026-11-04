@@ -6,8 +6,8 @@
 //! departed entities, a few times per tick, so a hook that removes one never
 //! shifts the lists the game is walking. A vehicle with a chest spills it, as vanilla's `remove` does.
 use super::{Game, commands::Target};
-use horizon_client::mod_api::{EntityRef, NativeRemovalReason};
 use horizon_core::position::BlockPos;
+use mod_api::{EntityRef, NativeRemovalReason};
 
 impl Game<'_> {
     /// Removes the entity with no death and no loot (`Entity.discard`): a

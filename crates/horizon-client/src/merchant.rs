@@ -9,6 +9,7 @@ use crate::{
 };
 use horizon_core::random::{RandomSource, XoroshiroRandom, mix_stafford13, seed_from_hash};
 use horizon_world::loot::PackOverlay;
+pub use mod_api::merchant::{ItemCost, MerchantOffer};
 use serde_json::Value;
 use std::{collections::HashMap, path::Path, sync::Arc};
 
@@ -117,102 +118,6 @@ pub fn update_special_prices(offers: &mut [MerchantOffer], reputation: i32, hero
                 (hero_modifier * f64::from(offer.base_cost_a.stack.count)).floor() as i32;
             offer.special_price_diff -= reduction.max(1);
         }
-    }
-}
-/// An `ItemCost`: item and count (component predicates are not used by the
-/// 26.3 trade data except for one exact match, kept as the stack's data).
-#[derive(Clone, Debug, PartialEq)]
-pub struct ItemCost {
-    pub stack: ItemStack,
-}
-impl ItemCost {
-    pub fn test(&self, s: &ItemStack) -> bool {
-        s.item == self.stack.item && (self.stack.extra.is_none() || s.data() == self.stack.data())
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
-pub struct MerchantOffer {
-    pub base_cost_a: ItemCost,
-    pub cost_b: Option<ItemCost>,
-    pub result: ItemStack,
-    pub uses: i32,
-    pub max_uses: i32,
-    pub reward_exp: bool,
-    pub special_price_diff: i32,
-    pub demand: i32,
-    pub price_multiplier: f32,
-    pub xp: i32,
-}
-impl MerchantOffer {
-    fn max_stack(items: &Items, s: &ItemStack) -> u32 {
-        items.get(&s.item).map_or(64, |i| i.max_stack)
-    }
-    /// `getModifiedCostCount` for cost A.
-    pub fn cost_a_count(&self, items: &Items) -> u32 {
-        let base = self.base_cost_a.stack.count as i32;
-        // Mth.floor(basePrice * demand * priceMultiplier): an int product, then the float.
-        let demand_diff =
-            ((base.wrapping_mul(self.demand) as f32 * self.price_multiplier).floor() as i32).max(0);
-        (base + demand_diff + self.special_price_diff)
-            .clamp(1, Self::max_stack(items, &self.base_cost_a.stack) as i32) as u32
-    }
-    pub fn cost_a(&self, items: &Items) -> ItemStack {
-        ItemStack {
-            count: self.cost_a_count(items),
-            ..self.base_cost_a.stack.clone()
-        }
-    }
-    pub fn cost_b(&self) -> Option<ItemStack> {
-        self.cost_b.as_ref().map(|c| c.stack.clone())
-    }
-    pub fn out_of_stock(&self) -> bool {
-        self.uses >= self.max_uses
-    }
-    /// `MerchantOffer.updateDemand` (on restock).
-    pub fn update_demand(&mut self) {
-        self.demand = self.demand + self.uses - (self.max_uses - self.uses);
-    }
-    /// `satisfiedBy(buyA, buyB)`.
-    pub fn satisfied_by(
-        &self,
-        items: &Items,
-        a: Option<&ItemStack>,
-        b: Option<&ItemStack>,
-    ) -> bool {
-        let Some(a) = a else { return false };
-        if !self.base_cost_a.test(a) || a.count < self.cost_a_count(items) {
-            return false;
-        }
-        match (&self.cost_b, b) {
-            (None, b) => b.is_none(),
-            (Some(c), Some(b)) => c.test(b) && b.count >= c.stack.count,
-            (Some(_), None) => false,
-        }
-    }
-    /// `MerchantOffer.take`: consume the payment; false when not satisfied.
-    pub fn take(
-        &self,
-        items: &Items,
-        a: &mut Option<ItemStack>,
-        b: &mut Option<ItemStack>,
-    ) -> bool {
-        if !self.satisfied_by(items, a.as_ref(), b.as_ref()) {
-            return false;
-        }
-        let n = self.cost_a_count(items);
-        if let Some(s) = a.as_mut() {
-            s.count -= n;
-            if s.count == 0 {
-                *a = None;
-            }
-        }
-        if let (Some(c), Some(s)) = (&self.cost_b, b.as_mut()) {
-            s.count -= c.stack.count;
-            if s.count == 0 {
-                *b = None;
-            }
-        }
-        true
     }
 }
 /// `MerchantOffers.getRecipeFor`: a hint past the first offer names the only

@@ -462,7 +462,7 @@ impl Game<'_> {
         let swinging = self.swing.swinging();
         // currentSwing.hand().asArm(mainArm).
         let swing_right_arm = swinging.then(|| {
-            (self.swing.attack_hand() == horizon_client::first_person::Hand::Main)
+            (self.swing.attack_hand() == mod_api::first_person::Hand::Main)
                 != self.settings.main_hand_left
         });
         // LivingEntity.isVisuallySwimming and Entity.isInWater.
@@ -650,7 +650,7 @@ impl Game<'_> {
         &self,
         camera: glam::DVec3,
         alpha: f64,
-        out: &mut Vec<horizon_client::mesher::Vertex>,
+        out: &mut Vec<mod_api::render::Vertex>,
     ) {
         if !self.player_model_shown() {
             return;
@@ -884,7 +884,7 @@ impl Game<'_> {
         camera: glam::DVec3,
         partial: f32,
         light: u32,
-        out: &mut Vec<horizon_client::mesher::Vertex>,
+        out: &mut Vec<mod_api::render::Vertex>,
     ) {
         let stack = m
             .extra
@@ -933,7 +933,7 @@ impl Game<'_> {
         crouching: bool,
         light: u32,
         overlay: u32,
-        out: &mut Vec<horizon_client::mesher::Vertex>,
+        out: &mut Vec<mod_api::render::Vertex>,
     ) {
         let Some(asset) = chest
             .and_then(|item| self.items().get(item))
@@ -1020,7 +1020,7 @@ impl Game<'_> {
         camera: glam::DVec3,
         partial: f32,
         light: u32,
-        out: &mut Vec<horizon_client::mesher::Vertex>,
+        out: &mut Vec<mod_api::render::Vertex>,
     ) {
         let Some(rect) = m
             .cape
@@ -1062,7 +1062,7 @@ impl Game<'_> {
         camera: glam::DVec3,
         partial: f32,
         light: u32,
-        out: &mut Vec<horizon_client::mesher::Vertex>,
+        out: &mut Vec<mod_api::render::Vertex>,
     ) {
         if name != "deadmau5" {
             return;
@@ -1105,7 +1105,7 @@ impl Game<'_> {
         camera: glam::DVec3,
         partial: f32,
         light: u32,
-        out: &mut Vec<horizon_client::mesher::Vertex>,
+        out: &mut Vec<mod_api::render::Vertex>,
     ) {
         let sprites = &self.gui.atlas.sprites;
         let layers = [
@@ -1149,7 +1149,7 @@ impl Game<'_> {
         camera: glam::DVec3,
         partial: f32,
         light: u32,
-        out: &mut Vec<horizon_client::mesher::Vertex>,
+        out: &mut Vec<mod_api::render::Vertex>,
     ) {
         let Some(parrot) = self.res.mob_types().get("minecraft:parrot") else {
             return;
@@ -1173,7 +1173,7 @@ impl Game<'_> {
         camera: glam::DVec3,
         partial: f32,
         light: u32,
-        out: &mut Vec<horizon_client::mesher::Vertex>,
+        out: &mut Vec<mod_api::render::Vertex>,
     ) {
         if !m.extra.auto_spin_attack {
             return;
@@ -1221,7 +1221,7 @@ fn entity_in_ui_shade(normal: glam::Vec3) -> f32 {
 }
 
 pub(super) fn player_preview_quads(
-    verts: Vec<horizon_client::mesher::Vertex>,
+    verts: Vec<mod_api::render::Vertex>,
     gui: glam::Mat4,
     fire: Option<(f32, f32)>,
     sprites: &std::collections::HashMap<String, horizon_client::hud::Rect>,
@@ -1233,7 +1233,7 @@ pub(super) fn player_preview_quads(
 /// kept when they look away (a `NoCull` render type); their light still comes
 /// from the face's own outward normal, as the vertex normal gives it.
 pub(super) fn player_preview_quads_no_cull(
-    mut verts: Vec<horizon_client::mesher::Vertex>,
+    mut verts: Vec<mod_api::render::Vertex>,
     gui: glam::Mat4,
     fire: Option<(f32, f32)>,
     sprites: &std::collections::HashMap<String, horizon_client::hud::Rect>,
@@ -1456,7 +1456,7 @@ mod preview_tests {
 
     #[test]
     fn no_cull_faces_stay_in_the_preview_when_they_look_away() {
-        use horizon_client::mesher::Vertex;
+        use mod_api::render::Vertex;
         // The wings' `armorCutoutNoCull`: a face turned from the viewer is
         // dropped by the preview's culling unless its vertices are no-cull.
         let face = |z: f32| {

@@ -8,8 +8,8 @@
 //! and the player's own in third person with the `ownNameTag` extra.
 use super::{Game, view_vector};
 use horizon_client::{
-    block_entity_render::vertex_light, hud::HudBatch, mesher::Vertex, mobs::Mob, mod_api,
-    save::uuid_text, scoreboard as sb, text::Text,
+    block_entity_render::vertex_light, hud::HudBatch, mesher::Vertex, mobs::Mob, save::uuid_text,
+    scoreboard as sb, text::Text,
 };
 
 /// The world size of one text pixel in a name tag: `Matrix4f.scale(0.025F, -0.025F, 0.025F)`.
