@@ -2945,6 +2945,12 @@ pub(crate) use part_table::{
     ProvidedBy, answered, ask_providers, has_part_hook, parts, place_provider, providers,
 };
 
+#[macro_use]
+mod wasm_codec;
+#[cfg(target_arch = "wasm32")]
+#[doc(hidden)]
+pub mod wasm;
+
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
 }

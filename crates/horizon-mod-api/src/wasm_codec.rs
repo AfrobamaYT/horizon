@@ -4,7 +4,6 @@
 
 macro_rules! codecs {
     ($w:path) => {
-        use $w as w;
         use crate::{
             BlockEntityRef, BossBarRef, ChunkRef, DisplayRef, DragonRef, EntityRef, ItemEntityRef,
             LevelRef, LivingRef, MerchantRef, MinecartRef, MobRef, NativeBlockUpdateFlags,
@@ -14,6 +13,7 @@ macro_rules! codecs {
         use horizon_items::items::ItemStack;
         use horizon_world::identifier::Identifier;
         use horizon_world::nbt::{Compound, Limits, Tag};
+        use $w as w;
 
         fn u128_of((high, low): (u64, u64)) -> u128 {
             (high as u128) << 64 | low as u128
@@ -37,7 +37,9 @@ macro_rules! codecs {
         pub(super) fn lower_native_block_update_flags(v: &NativeBlockUpdateFlags) -> u32 {
             v.0 as u32
         }
-        pub(super) fn lift_native_block_update_flags(v: u32) -> Result<NativeBlockUpdateFlags, Refused> {
+        pub(super) fn lift_native_block_update_flags(
+            v: u32,
+        ) -> Result<NativeBlockUpdateFlags, Refused> {
             Ok(NativeBlockUpdateFlags(v as i32))
         }
         pub(super) fn lower_duration(v: &std::time::Duration) -> u64 {
@@ -47,7 +49,10 @@ macro_rules! codecs {
             Ok(std::time::Duration::from_nanos(v))
         }
         pub(super) fn lower_entity_ref(v: &EntityRef) -> w::EntityRef {
-            w::EntityRef { epoch: v.epoch.0, id: v.id }
+            w::EntityRef {
+                epoch: v.epoch.0,
+                id: v.id,
+            }
         }
         pub(super) fn lift_entity_ref(v: w::EntityRef) -> Result<EntityRef, Refused> {
             Ok(EntityRef::new(NativeWorldEpoch(v.epoch), v.id))
@@ -101,42 +106,80 @@ macro_rules! codecs {
             Ok(MerchantRef(lift_entity_ref(v)?))
         }
         pub(super) fn lower_player_ref(v: &PlayerRef) -> w::PlayerRef {
-            w::PlayerRef { entity: lower_entity_ref(&v.entity), uuid: split(v.uuid) }
+            w::PlayerRef {
+                entity: lower_entity_ref(&v.entity),
+                uuid: split(v.uuid),
+            }
         }
         pub(super) fn lift_player_ref(v: w::PlayerRef) -> Result<PlayerRef, Refused> {
-            Ok(PlayerRef { entity: lift_entity_ref(v.entity)?, uuid: u128_of(v.uuid) })
+            Ok(PlayerRef {
+                entity: lift_entity_ref(v.entity)?,
+                uuid: u128_of(v.uuid),
+            })
         }
         pub(super) fn lower_level_ref(v: &LevelRef) -> w::LevelRef {
-            w::LevelRef { epoch: v.epoch.0, dimension: v.dimension.to_string() }
+            w::LevelRef {
+                epoch: v.epoch.0,
+                dimension: v.dimension.to_string(),
+            }
         }
         pub(super) fn lift_level_ref(v: w::LevelRef) -> Result<LevelRef, Refused> {
-            Ok(LevelRef::new(NativeWorldEpoch(v.epoch), super::intern(v.dimension)))
+            Ok(LevelRef::new(
+                NativeWorldEpoch(v.epoch),
+                super::intern(v.dimension),
+            ))
         }
         pub(super) fn lower_chunk_ref(v: &ChunkRef) -> w::ChunkRef {
-            w::ChunkRef { level: lower_level_ref(&v.level), pos: (v.pos[0], v.pos[1]) }
+            w::ChunkRef {
+                level: lower_level_ref(&v.level),
+                pos: (v.pos[0], v.pos[1]),
+            }
         }
         pub(super) fn lift_chunk_ref(v: w::ChunkRef) -> Result<ChunkRef, Refused> {
-            Ok(ChunkRef { level: lift_level_ref(v.level)?, pos: [v.pos.0, v.pos.1] })
+            Ok(ChunkRef {
+                level: lift_level_ref(v.level)?,
+                pos: [v.pos.0, v.pos.1],
+            })
         }
         pub(super) fn lower_block_entity_ref(v: &BlockEntityRef) -> w::BlockEntityRef {
             let [x, y, z] = v.position;
-            w::BlockEntityRef { level: lower_level_ref(&v.level), pos: (x, y, z) }
+            w::BlockEntityRef {
+                level: lower_level_ref(&v.level),
+                pos: (x, y, z),
+            }
         }
-        pub(super) fn lift_block_entity_ref(v: w::BlockEntityRef) -> Result<BlockEntityRef, Refused> {
+        pub(super) fn lift_block_entity_ref(
+            v: w::BlockEntityRef,
+        ) -> Result<BlockEntityRef, Refused> {
             let (x, y, z) = v.pos;
-            Ok(BlockEntityRef { level: lift_level_ref(v.level)?, position: [x, y, z] })
+            Ok(BlockEntityRef {
+                level: lift_level_ref(v.level)?,
+                position: [x, y, z],
+            })
         }
         pub(super) fn lower_boss_bar_ref(v: &BossBarRef) -> w::BossBarRef {
-            w::BossBarRef { epoch: v.epoch.0, id: split(v.uuid) }
+            w::BossBarRef {
+                epoch: v.epoch.0,
+                id: split(v.uuid),
+            }
         }
         pub(super) fn lift_boss_bar_ref(v: w::BossBarRef) -> Result<BossBarRef, Refused> {
-            Ok(BossBarRef { epoch: NativeWorldEpoch(v.epoch), uuid: u128_of(v.id) })
+            Ok(BossBarRef {
+                epoch: NativeWorldEpoch(v.epoch),
+                uuid: u128_of(v.id),
+            })
         }
         pub(super) fn lower_raid_ref(v: &RaidRef) -> w::RaidRef {
-            w::RaidRef { level: lower_level_ref(&v.level), id: v.id }
+            w::RaidRef {
+                level: lower_level_ref(&v.level),
+                id: v.id,
+            }
         }
         pub(super) fn lift_raid_ref(v: w::RaidRef) -> Result<RaidRef, Refused> {
-            Ok(RaidRef { level: lift_level_ref(v.level)?, id: v.id })
+            Ok(RaidRef {
+                level: lift_level_ref(v.level)?,
+                id: v.id,
+            })
         }
         pub(super) fn lower_tag(v: &Tag) -> Vec<u8> {
             horizon_world::nbt::write_network(v, Limits::default()).unwrap_or_default()
@@ -166,8 +209,58 @@ macro_rules! codecs {
         }
         pub(super) fn lift_text(v: String) -> Result<Text, Refused> {
             let value: serde_json::Value = serde_json::from_str(&v).map_err(|_| Refused)?;
-            Ok(horizon_client_core::component::to_text(&value, &mut |s| Text::literal(s))
-                .with_component(value))
+            Ok(
+                horizon_client_core::component::to_text(&value, &mut |s| Text::literal(s))
+                    .with_component(value),
+            )
+        }
+        pub(super) fn lower_config_path(v: &crate::ConfigPath) -> String {
+            v.as_str().to_string()
+        }
+        pub(super) fn lift_config_path(v: String) -> Result<crate::ConfigPath, Refused> {
+            crate::ConfigPath::new(&v).map_err(|_| Refused)
+        }
+        pub(super) fn lower_config_file_error(v: &crate::ConfigFileError) -> w::ConfigFileError {
+            use crate::ConfigFileError as E;
+            match v {
+                E::NoCallingMod => w::ConfigFileError::NoCallingMod,
+                E::NotOwned => w::ConfigFileError::NotOwned,
+                E::InvalidPath => w::ConfigFileError::InvalidPath,
+                E::TooLarge => w::ConfigFileError::TooLarge,
+                E::NotFound => w::ConfigFileError::NotFound,
+                E::NotAFile => w::ConfigFileError::NotAFile,
+                E::NotAFolder => w::ConfigFileError::NotAFolder,
+                E::Symlink => w::ConfigFileError::Symlink,
+                E::Io(kind) => w::ConfigFileError::Io(format!("{kind:?}")),
+            }
+        }
+        pub(super) fn lift_config_file_error(
+            v: w::ConfigFileError,
+        ) -> Result<crate::ConfigFileError, Refused> {
+            use crate::ConfigFileError as E;
+            use std::io::ErrorKind as K;
+            Ok(match v {
+                w::ConfigFileError::NoCallingMod => E::NoCallingMod,
+                w::ConfigFileError::NotOwned => E::NotOwned,
+                w::ConfigFileError::InvalidPath => E::InvalidPath,
+                w::ConfigFileError::TooLarge => E::TooLarge,
+                w::ConfigFileError::NotFound => E::NotFound,
+                w::ConfigFileError::NotAFile => E::NotAFile,
+                w::ConfigFileError::NotAFolder => E::NotAFolder,
+                w::ConfigFileError::Symlink => E::Symlink,
+                // The kinds a file system call answers; any other reads as `Other`.
+                w::ConfigFileError::Io(kind) => E::Io(match kind.as_str() {
+                    "NotFound" => K::NotFound,
+                    "PermissionDenied" => K::PermissionDenied,
+                    "AlreadyExists" => K::AlreadyExists,
+                    "InvalidInput" => K::InvalidInput,
+                    "InvalidData" => K::InvalidData,
+                    "UnexpectedEof" => K::UnexpectedEof,
+                    "Interrupted" => K::Interrupted,
+                    "OutOfMemory" => K::OutOfMemory,
+                    _ => K::Other,
+                }),
+            })
         }
         pub(super) fn lower_identifier(v: &Identifier) -> String {
             v.to_string()

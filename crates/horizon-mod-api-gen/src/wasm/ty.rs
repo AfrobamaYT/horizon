@@ -41,6 +41,8 @@ pub(super) enum Str {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum List {
     Vec,
+    /// A map, as its container names it, crossing as a list of pairs.
+    Map(&'static str),
     Slice,
     Boxed,
     Shared,
@@ -53,8 +55,8 @@ pub(super) struct Def {
     pub(super) rust: String,
     /// Its WIT name, also the bindings' type name in upper camel case.
     pub(super) wit: String,
-    /// It has lifetime parameters: it borrows.
-    pub(super) borrows: bool,
+    /// Its lifetime parameters: it borrows when there are any.
+    pub(super) lifetimes: usize,
     pub(super) kind: Kind,
 }
 
@@ -124,6 +126,8 @@ pub(super) const CODECS: &[(&str, &str)] = &[
     ("BossBarRef", "boss-bar-ref"),
     ("NativeTickId", "u64"),
     ("NativeBlockUpdateFlags", "u32"),
+    ("ConfigPath", "string"),
+    ("ConfigFileError", "config-file-error"),
 ];
 
 /// The resolved types, by definition.
@@ -153,7 +157,12 @@ impl<'a> Types<'a> {
     }
 
     /// `ty`, written in `module`, with `subst` giving the generic parameters in scope.
-    pub(super) fn ty(&mut self, module: usize, ty: &Type, subst: &[(String, Ty)]) -> Result<Ty, String> {
+    pub(super) fn ty(
+        &mut self,
+        module: usize,
+        ty: &Type,
+        subst: &[(String, Ty)],
+    ) -> Result<Ty, String> {
         Ok(match ty {
             Type::Paren(ty) => self.ty(module, &ty.elem, subst)?,
             Type::Group(ty) => self.ty(module, &ty.elem, subst)?,
@@ -175,7 +184,9 @@ impl<'a> Types<'a> {
                 };
                 Ty::Array(Box::new(self.ty(module, &array.elem, subst)?), len)
             }
-            Type::Slice(slice) => Ty::List(Box::new(self.ty(module, &slice.elem, subst)?), List::Slice),
+            Type::Slice(slice) => {
+                Ty::List(Box::new(self.ty(module, &slice.elem, subst)?), List::Slice)
+            }
             Type::Reference(reference) => {
                 let mutable = reference.mutability.is_some();
                 let is_static = reference
@@ -184,9 +195,11 @@ impl<'a> Types<'a> {
                     .is_some_and(|lifetime| lifetime.ident == "static");
                 match &*reference.elem {
                     Type::TraitObject(object) => Ty::Dyn(trait_name(object)?, mutable),
-                    Type::Path(path) if path.path.is_ident("str") => {
-                        Ty::Str(if is_static { Str::Static } else { Str::Borrowed })
-                    }
+                    Type::Path(path) if path.path.is_ident("str") => Ty::Str(if is_static {
+                        Str::Static
+                    } else {
+                        Str::Borrowed
+                    }),
                     Type::Slice(slice) if !mutable => {
                         Ty::List(Box::new(self.ty(module, &slice.elem, subst)?), List::Slice)
                     }
@@ -198,7 +211,12 @@ impl<'a> Types<'a> {
         })
     }
 
-    fn path(&mut self, module: usize, path: &syn::Path, subst: &[(String, Ty)]) -> Result<Ty, String> {
+    fn path(
+        &mut self,
+        module: usize,
+        path: &syn::Path,
+        subst: &[(String, Ty)],
+    ) -> Result<Ty, String> {
         let last = path.segments.last().ok_or("empty path")?;
         let name = last.ident.to_string();
         if path.segments.len() == 1
@@ -219,7 +237,10 @@ impl<'a> Types<'a> {
             PathArguments::Parenthesized(_) => return Err(format!("closure type {name}")),
         };
         let one = |args: &[Ty]| -> Result<Box<Ty>, String> {
-            args.first().cloned().map(Box::new).ok_or_else(|| format!("{name} needs a type argument"))
+            args.first()
+                .cloned()
+                .map(Box::new)
+                .ok_or_else(|| format!("{name} needs a type argument"))
         };
         if let Some(prim) = primitive(&name) {
             return Ok(prim);
@@ -254,14 +275,24 @@ impl<'a> Types<'a> {
                 "str" => Ty::Str(Str::Borrowed),
                 "HashMap" | "BTreeMap" => {
                     let value = args.get(1).cloned().ok_or("map needs a value type")?;
-                    Ty::List(Box::new(Ty::Tuple(vec![*one(&args)?, value])), List::Vec)
+                    let map = if std == "HashMap" {
+                        "std::collections::HashMap"
+                    } else {
+                        "std::collections::BTreeMap"
+                    };
+                    Ty::List(
+                        Box::new(Ty::Tuple(vec![*one(&args)?, value])),
+                        List::Map(map),
+                    )
                 }
                 "Value" | "Map" => Ty::Named(self.json(&segments)?),
                 "Duration" => Ty::Named(self.codec_def("Duration", "std::time::Duration")?),
                 _ => return Err(format!("unsupported type {}", segments.join("::"))),
             });
         }
-        let Ok(Found::Item(id)) = found else { unreachable!() };
+        let Ok(Found::Item(id)) = found else {
+            unreachable!()
+        };
         self.item(id, &name, args)
     }
 
@@ -272,13 +303,16 @@ impl<'a> Types<'a> {
             "Value" => "serde_json::Value",
             _ => "serde_json::Map<String, serde_json::Value>",
         };
-        if let Some(&id) = self.wit_names.get(&format!("json-{}", name.to_kebab_case())) {
+        if let Some(&id) = self
+            .wit_names
+            .get(&format!("json-{}", name.to_kebab_case()))
+        {
             return Ok(id);
         }
         Ok(self.push(Def {
             rust: rust.into(),
             wit: format!("json-{}", name.to_kebab_case()),
-            borrows: false,
+            lifetimes: 0,
             kind: Kind::Json,
         }))
     }
@@ -292,7 +326,7 @@ impl<'a> Types<'a> {
         Ok(self.push(Def {
             rust: rust.into(),
             wit,
-            borrows: false,
+            lifetimes: 0,
             kind: Kind::Codec(codec),
         }))
     }
@@ -308,7 +342,11 @@ impl<'a> Types<'a> {
     fn item(&mut self, id: ItemId, name: &str, args: Vec<Ty>) -> Result<Ty, String> {
         let item = self.index.item(id).clone();
         if let Item::Type(alias) = &item {
-            let params: Vec<String> = alias.generics.type_params().map(|p| p.ident.to_string()).collect();
+            let params: Vec<String> = alias
+                .generics
+                .type_params()
+                .map(|p| p.ident.to_string())
+                .collect();
             let subst: Vec<(String, Ty)> = params.into_iter().zip(args).collect();
             return self.ty(id.module, &alias.ty, &subst);
         }
@@ -320,12 +358,12 @@ impl<'a> Types<'a> {
         }
         let rust = self.public_path(id, name);
         let wit = self.unique_wit(id, name);
-        let borrows = generics(&item).lifetimes().next().is_some();
+        let lifetimes = generics(&item).lifetimes().count();
         // Reserve the slot first: a type may refer to itself.
         let def = self.push(Def {
             rust,
             wit: wit.clone(),
-            borrows,
+            lifetimes,
             kind: Kind::Opaque("recursive".into()),
         });
         self.by_item.insert(id, def);
@@ -340,13 +378,17 @@ impl<'a> Types<'a> {
         }
         let serde = derives(item, "Serialize") && derives(item, "Deserialize");
         if generics(item).type_params().next().is_some() {
-            return Ok(if serde { Kind::Json } else { Kind::Opaque(format!("{name} is generic")) });
+            return Ok(if serde {
+                Kind::Json
+            } else {
+                Kind::Opaque(format!("{name} is generic"))
+            });
         }
         let structural = match item {
             Item::Struct(item) => match &item.fields {
-                Fields::Named(fields) if fields.named.iter().all(|f| is_pub(&f.vis)) => {
-                    self.fields(id.module, fields.named.iter()).map(Kind::Record)
-                }
+                Fields::Named(fields) if fields.named.iter().all(|f| is_pub(&f.vis)) => self
+                    .fields(id.module, fields.named.iter())
+                    .map(Kind::Record),
                 Fields::Unnamed(fields) if fields.unnamed.iter().all(|f| is_pub(&f.vis)) => fields
                     .unnamed
                     .iter()
@@ -356,8 +398,15 @@ impl<'a> Types<'a> {
                 Fields::Unit => Ok(Kind::Unit),
                 _ => Err(format!("{name} has private fields")),
             },
-            Item::Enum(item) if item.variants.iter().all(|v| matches!(v.fields, Fields::Unit)) => {
-                Ok(Kind::Enum(item.variants.iter().map(|v| v.ident.to_string()).collect()))
+            Item::Enum(item)
+                if item
+                    .variants
+                    .iter()
+                    .all(|v| matches!(v.fields, Fields::Unit)) =>
+            {
+                Ok(Kind::Enum(
+                    item.variants.iter().map(|v| v.ident.to_string()).collect(),
+                ))
             }
             Item::Enum(item) => item
                 .variants
@@ -537,17 +586,58 @@ pub(super) fn bound_type(wit: &str) -> String {
 }
 
 const WIT_KEYWORDS: &[&str] = &[
-    "use", "type", "func", "u8", "u16", "u32", "u64", "s8", "s16", "s32", "s64", "f32", "f64",
-    "float32", "float64", "char", "record", "resource", "own", "borrow", "flags", "variant",
-    "enum", "bool", "string", "option", "result", "future", "stream", "error-context", "list",
-    "_", "as", "from", "static", "interface", "tuple", "import", "export", "world", "package",
-    "constructor", "include", "with", "async", "map",
+    "use",
+    "type",
+    "func",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "s8",
+    "s16",
+    "s32",
+    "s64",
+    "f32",
+    "f64",
+    "float32",
+    "float64",
+    "char",
+    "record",
+    "resource",
+    "own",
+    "borrow",
+    "flags",
+    "variant",
+    "enum",
+    "bool",
+    "string",
+    "option",
+    "result",
+    "future",
+    "stream",
+    "error-context",
+    "list",
+    "_",
+    "as",
+    "from",
+    "static",
+    "interface",
+    "tuple",
+    "import",
+    "export",
+    "world",
+    "package",
+    "constructor",
+    "include",
+    "with",
+    "async",
+    "map",
 ];
 
 const RUST_KEYWORDS: &[&str] = &[
     "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for",
     "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return",
-    "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use",
-    "where", "while", "async", "await", "dyn", "abstract", "become", "box", "do", "final",
-    "macro", "override", "priv", "typeof", "unsized", "virtual", "yield", "try", "gen",
+    "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where",
+    "while", "async", "await", "dyn", "abstract", "become", "box", "do", "final", "macro",
+    "override", "priv", "typeof", "unsized", "virtual", "yield", "try", "gen",
 ];

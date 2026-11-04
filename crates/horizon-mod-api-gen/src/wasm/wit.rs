@@ -159,6 +159,16 @@ pub(super) fn out_name(def: &Def) -> String {
     format!("{}-out", def.wit)
 }
 
+/// Whether `def` is a record with fields a `&mut` borrow writes back: it then has an `-out`.
+pub(super) fn has_out(types: &Types<'_>, def: &Def) -> bool {
+    let Kind::Record(fields) = &def.kind else {
+        return false;
+    };
+    fields
+        .iter()
+        .any(|f| writable(&f.ty) && wit(types, &f.ty).ok().flatten().is_some())
+}
+
 /// The WIT of one def.
 fn def_wit(types: &Types<'_>, def: &Def, out: &mut String, used_out: bool) -> Result<(), String> {
     let name = &def.wit;
@@ -189,7 +199,24 @@ fn def_wit(types: &Types<'_>, def: &Def, out: &mut String, used_out: bool) -> Re
                         ty: f.ty.clone(),
                     })
                     .collect();
-                let text = fields(&writable)?;
+                // A `&mut` record inside is written back too, as its own `-out`.
+                let mut text = String::new();
+                for field in &writable {
+                    match &field.ty {
+                        Ty::Ref(inner, true)
+                            if let Ty::Named(id) = &**inner
+                                && has_out(types, &types.defs[*id]) =>
+                        {
+                            write!(text, "{}: {}, ", field.wit, out_name(&types.defs[*id]))
+                                .unwrap();
+                        }
+                        ty => {
+                            if let Some(ty) = wit(types, ty)? {
+                                write!(text, "{}: {ty}, ", field.wit).unwrap();
+                            }
+                        }
+                    }
+                }
                 if !text.is_empty() {
                     writeln!(out, "  record {} {{ {text}}}", out_name(def)).unwrap();
                 }
@@ -205,12 +232,18 @@ fn def_wit(types: &Types<'_>, def: &Def, out: &mut String, used_out: bool) -> Re
         }
         Kind::Unit => writeln!(out, "  enum {name} {{ value }}").unwrap(),
         Kind::Enum(cases) => {
-            let cases: Vec<_> = cases.iter().map(|c| wit_ident(&c.to_kebab_case())).collect();
+            let cases: Vec<_> = cases
+                .iter()
+                .map(|c| wit_ident(&c.to_kebab_case()))
+                .collect();
             writeln!(out, "  enum {name} {{ {} }}", cases.join(", ")).unwrap();
         }
         Kind::Variant(cases) => {
             let mut text = Vec::new();
-            for Case { wit: case, payload, .. } in cases {
+            for Case {
+                wit: case, payload, ..
+            } in cases
+            {
                 let case = wit_ident(case);
                 match payload {
                     Payload::None => text.push(case),
@@ -265,8 +298,13 @@ pub(super) fn signature(types: &Types<'_>, method: &Method) -> Result<Signature,
             match &**inner {
                 Ty::Named(def) if matches!(types.defs[*def].kind, Kind::Record(_)) => {
                     let def = &types.defs[*def];
-                    let Kind::Record(fields) = &def.kind else { unreachable!() };
-                    if fields.iter().any(|f| writable(&f.ty) && wit(types, &f.ty).ok().flatten().is_some()) {
+                    let Kind::Record(fields) = &def.kind else {
+                        unreachable!()
+                    };
+                    if fields
+                        .iter()
+                        .any(|f| writable(&f.ty) && wit(types, &f.ty).ok().flatten().is_some())
+                    {
                         results.push(out_name(def));
                     }
                 }
@@ -286,28 +324,64 @@ pub(super) fn interface(owner: &str) -> String {
     owner.rsplit("::").next().unwrap().to_kebab_case()
 }
 
-/// The whole WIT package.
-pub(super) fn package(types: &Types<'_>, methods: &[&Method]) -> Result<String, String> {
+/// Every def the methods reach, and those passed `&mut` (with written-back records).
+pub(super) fn reached(
+    types: &Types<'_>,
+    methods: &[&Method],
+) -> (BTreeSet<usize>, BTreeSet<usize>) {
     let mut defs = BTreeSet::new();
     let mut outs = BTreeSet::new();
     for method in methods {
         for (_, ty) in &method.params {
             named(types, ty, &mut defs);
-            if let Ty::Ref(inner, true) = ty
-                && let Ty::Named(def) = &**inner
-            {
-                outs.insert(*def);
-            }
+            mut_records(ty, &mut outs);
         }
         named(types, &method.ret, &mut defs);
     }
+    // A `&mut` record inside a written-back record is written back too.
+    loop {
+        let before = outs.len();
+        for id in outs.clone() {
+            for ty in def_fields(&types.defs[id]) {
+                mut_records(ty, &mut outs);
+            }
+        }
+        if outs.len() == before {
+            break;
+        }
+    }
+    (defs, outs)
+}
+
+fn mut_records(ty: &Ty, outs: &mut BTreeSet<usize>) {
+    if let Ty::Ref(inner, true) = ty
+        && let Ty::Named(def) = &**inner
+    {
+        outs.insert(*def);
+    }
+}
+
+/// The whole WIT package.
+pub(super) fn package(types: &Types<'_>, methods: &[&Method]) -> Result<String, String> {
+    let (defs, outs) = reached(types, methods);
     let mut text = String::from(
-        "// @generated by horizon-mod-api-gen from the mod API's traits; do not edit.\npackage horizon:mod-api;\n\ninterface types {\n  record entity-ref { epoch: u64, id: u32 }\n  record player-ref { entity: entity-ref, uuid: tuple<u64, u64> }\n  record level-ref { epoch: u64, dimension: string }\n  record chunk-ref { level: level-ref, pos: tuple<s32, s32> }\n  record block-entity-ref { level: level-ref, pos: tuple<s32, s32, s32> }\n  record boss-bar-ref { epoch: u64, id: tuple<u64, u64> }\n  record raid-ref { level: level-ref, id: s32 }\n",
+        "// @generated by horizon-mod-api-gen from the mod API's traits; do not edit.\npackage horizon:mod-api;\n\ninterface types {\n  record entity-ref { epoch: u64, id: u32 }\n  record player-ref { entity: entity-ref, uuid: tuple<u64, u64> }\n  record level-ref { epoch: u64, dimension: string }\n  record chunk-ref { level: level-ref, pos: tuple<s32, s32> }\n  record block-entity-ref { level: level-ref, pos: tuple<s32, s32, s32> }\n  record boss-bar-ref { epoch: u64, id: tuple<u64, u64> }\n  record raid-ref { level: level-ref, id: s32 }\n  variant config-file-error { no-calling-mod, not-owned, invalid-path, too-large, not-found, not-a-file, not-a-folder, symlink, io(string) }\n",
     );
     let mut type_names = Vec::new();
     for def in &defs {
         let def = &types.defs[*def];
-        def_wit(types, def, &mut text, outs.contains(&types.defs.iter().position(|d| std::ptr::eq(d, def)).unwrap()))?;
+        def_wit(
+            types,
+            def,
+            &mut text,
+            outs.contains(
+                &types
+                    .defs
+                    .iter()
+                    .position(|d| std::ptr::eq(d, def))
+                    .unwrap(),
+            ),
+        )?;
         type_names.push(def.wit.clone());
     }
     text.push_str("}\n");
@@ -340,7 +414,12 @@ pub(super) fn package(types: &Types<'_>, methods: &[&Method]) -> Result<String, 
                 _ => ty,
             })
             .collect();
-        writeln!(text, "\ninterface {name} {{\n  use types.{{{}}};", uses.join(", ")).unwrap();
+        writeln!(
+            text,
+            "\ninterface {name} {{\n  use types.{{{}}};",
+            uses.join(", ")
+        )
+        .unwrap();
         let rename = |wire: &str| -> String {
             let mut out = String::new();
             let mut word = String::new();
@@ -370,14 +449,28 @@ pub(super) fn package(types: &Types<'_>, methods: &[&Method]) -> Result<String, 
                 [one] => format!(" -> {one}"),
                 many => format!(" -> tuple<{}>", many.join(", ")),
             };
-            writeln!(text, "  {}: func({}){results};", wit_ident(&method.name), params.join(", ")).unwrap();
+            writeln!(
+                text,
+                "  {}: func({}){results};",
+                wit_ident(&method.name),
+                params.join(", ")
+            )
+            .unwrap();
         }
         if let Some((_, _)) = super::SUBSCRIBED.iter().find(|(o, _)| o == owner) {
-            let handler = if *owner == "Hooks" { "" } else { "handler: u32" };
+            let handler = if *owner == "Hooks" {
+                ""
+            } else {
+                "handler: u32"
+            };
             writeln!(text, "  subscribed: func({handler}) -> list<string>;").unwrap();
         }
         text.push_str("}\n");
-        let way = if EXPORTS.contains(owner) { "export" } else { "import" };
+        let way = if EXPORTS.contains(owner) {
+            "export"
+        } else {
+            "import"
+        };
         writeln!(world, "  {way} {name};").unwrap();
     }
     world.push_str("}\n");
@@ -421,9 +514,11 @@ fn used(types: &Types<'_>, methods: &[&Method], owner: &str) -> Vec<String> {
 /// The defs a type names at its top level, not through other defs.
 fn direct(ty: &Ty, out: &mut BTreeSet<usize>) {
     match ty {
-        Ty::List(item, _) | Ty::Array(item, _) | Ty::Option(item) | Ty::Ref(item, _) | Ty::Boxed(item) => {
-            direct(item, out)
-        }
+        Ty::List(item, _)
+        | Ty::Array(item, _)
+        | Ty::Option(item)
+        | Ty::Ref(item, _)
+        | Ty::Boxed(item) => direct(item, out),
         Ty::Result(a, b) => {
             direct(a, out);
             direct(b, out);

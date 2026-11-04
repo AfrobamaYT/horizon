@@ -7,7 +7,9 @@
 //! fallibly (a value the other side sent may not be one `R` can hold). A type that borrows is
 //! lifted where it is used: each borrowed part into a local first, then the value pointing at
 //! them.
-use super::ty::{Case, Def, Kind, List, Payload, Str, Ty, Types, bound_ident, bound_type, wit_ident};
+use super::ty::{
+    Case, Def, Kind, List, Payload, Str, Ty, Types, bound_ident, bound_type, wit_ident,
+};
 use super::wit::{self, Signature, writable};
 use super::{EXPORTS, Method};
 use heck::ToSnakeCase;
@@ -22,7 +24,10 @@ pub(super) fn rust_path(def: &Def) -> String {
         Some(rest) => format!("crate::{rest}"),
         None => def.rust.clone(),
     };
-    if def.borrows { format!("{path}<'_>") } else { path }
+    match def.lifetimes {
+        0 => path,
+        n => format!("{path}<{}>", vec!["'_"; n].join(", ")),
+    }
 }
 
 fn wire_path(def: &Def) -> String {
@@ -38,7 +43,7 @@ fn borrows(types: &Types<'_>, ty: &Ty) -> bool {
         }
         Ty::Result(a, b) => borrows(types, a) || borrows(types, b),
         Ty::Tuple(items) => items.iter().any(|item| borrows(types, item)),
-        Ty::Named(def) => types.defs[*def].borrows,
+        Ty::Named(def) => types.defs[*def].lifetimes > 0,
         _ => false,
     }
 }
@@ -47,12 +52,20 @@ fn borrows(types: &Types<'_>, ty: &Ty) -> bool {
 pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
     match ty {
         Ty::Unit | Ty::Dyn(..) => "()".into(),
-        Ty::Prim(rust, wire) if rust == wire || (*rust == "i32" || *rust == "i64" || *rust == "i8" || *rust == "i16") => format!("*{e}"),
+        Ty::Prim(rust, wire)
+            if rust == wire
+                || (*rust == "i32" || *rust == "i64" || *rust == "i8" || *rust == "i16") =>
+        {
+            format!("*{e}")
+        }
         Ty::Prim(_, wire) => format!("(*{e} as {})", wire_prim(wire)),
         Ty::Wide(_) => format!("{{ let v = *{e} as u128; ((v >> 64) as u64, v as u64) }}"),
         Ty::Str(_) => format!("{e}.to_string()"),
         Ty::List(item, _) | Ty::Array(item, _) => {
-            format!("{e}.iter().map(|x| {}).collect::<Vec<_>>()", lower(types, item, "x"))
+            format!(
+                "{e}.iter().map(|x| {}).collect::<Vec<_>>()",
+                lower(types, item, "x")
+            )
         }
         Ty::Option(item) => format!("{e}.as_ref().map(|x| {})", lower(types, item, "x")),
         Ty::Result(ok, err) => format!(
@@ -68,7 +81,11 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
                 .filter(|(item, _)| crosses(types, item))
                 .map(|(item, name)| lower(types, item, name))
                 .collect();
-            format!("{{ let ({}) = {e}; ({},) }}", names.join(", "), parts.join(", "))
+            format!(
+                "{{ let ({}) = {e}; ({},) }}",
+                names.join(", "),
+                parts.join(", ")
+            )
         }
         Ty::Ref(inner, _) => lower(types, inner, &format!("(&**{e})")),
         Ty::Boxed(inner) => lower(types, inner, &format!("(&**{e})")),
@@ -77,7 +94,11 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
 }
 
 fn lower_or_unit(types: &Types<'_>, ty: &Ty, e: &str) -> String {
-    if crosses(types, ty) { lower(types, ty, e) } else { "()".into() }
+    if crosses(types, ty) {
+        lower(types, ty, e)
+    } else {
+        "()".into()
+    }
 }
 
 fn wire_prim(wire: &str) -> &'static str {
@@ -98,11 +119,15 @@ fn crosses(types: &Types<'_>, ty: &Ty) -> bool {
 pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
     match ty {
         Ty::Unit => "()".into(),
-        Ty::Prim(rust, wire) if wire.starts_with(['u', 's']) && (*rust == "usize" || *rust == "isize") => {
+        Ty::Prim(rust, wire)
+            if wire.starts_with(['u', 's']) && (*rust == "usize" || *rust == "isize") =>
+        {
             format!("({e} as {rust})")
         }
         Ty::Prim(..) => e.into(),
-        Ty::Wide(rust) => format!("{{ let (h, l) = {e}; ((h as u128) << 64 | l as u128) as {rust} }}"),
+        Ty::Wide(rust) => {
+            format!("{{ let (h, l) = {e}; ((h as u128) << 64 | l as u128) as {rust} }}")
+        }
         Ty::Str(Str::Owned) => e.into(),
         Ty::Str(Str::Static) => format!("super::intern({e})"),
         Ty::Str(_) => format!("{e}.into()"),
@@ -113,6 +138,7 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
             );
             match kind {
                 List::Vec => vec,
+                List::Map(map) => format!("{vec}.into_iter().collect::<{map}<_, _>>()"),
                 _ => format!("{vec}.into()"),
             }
         }
@@ -140,7 +166,11 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
                     parts.push("()".into());
                 }
             }
-            format!("{{ let ({},) = {e}; ({},) }}", names.join(", "), parts.join(", "))
+            format!(
+                "{{ let ({},) = {e}; ({},) }}",
+                names.join(", "),
+                parts.join(", ")
+            )
         }
         Ty::Boxed(inner) => format!("Box::new({})", lift(types, inner, e)),
         Ty::Named(def) => format!("lift_{def}({e})?"),
@@ -149,7 +179,11 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
 }
 
 fn lift_or_unit(types: &Types<'_>, ty: &Ty, e: &str) -> String {
-    if crosses(types, ty) { lift(types, ty, e) } else { "()".into() }
+    if crosses(types, ty) {
+        lift(types, ty, e)
+    } else {
+        "()".into()
+    }
 }
 
 /// Lifts wire values where they are used. Borrowed parts go into the call's arena `keep`
@@ -204,7 +238,11 @@ impl<'t, 'a> InPlace<'t, 'a> {
                         parts.push(self.value(item, "()")?);
                     }
                 }
-                format!("{{ let ({},) = {e}; ({},) }}", names.join(", "), parts.join(", "))
+                format!(
+                    "{{ let ({},) = {e}; ({},) }}",
+                    names.join(", "),
+                    parts.join(", ")
+                )
             }
             Ty::Ref(inner, _) if matches!(**inner, Ty::Dyn(..)) => self.value(inner, e)?,
             Ty::Ref(inner, false) => format!("keep.val({})", self.value(inner, e)?),
@@ -218,7 +256,7 @@ impl<'t, 'a> InPlace<'t, 'a> {
     fn named(&self, id: usize, e: &str) -> Result<String, String> {
         let def = &self.types.defs[id];
         let path = rust_path(def);
-        let path = path.trim_end_matches("<'_>");
+        let path = path.split('<').next().unwrap();
         Ok(match &def.kind {
             Kind::Record(fields) => {
                 let mut parts = Vec::new();
@@ -228,7 +266,11 @@ impl<'t, 'a> InPlace<'t, 'a> {
                     } else {
                         "()".into()
                     };
-                    parts.push(format!("{}: {}", field.rust, self.value(&field.ty, &source)?));
+                    parts.push(format!(
+                        "{}: {}",
+                        field.rust,
+                        self.value(&field.ty, &source)?
+                    ));
                 }
                 format!("{{ let w = {e}; {path} {{ {} }} }}", parts.join(", "))
             }
@@ -272,7 +314,11 @@ impl<'t, 'a> InPlace<'t, 'a> {
 }
 
 /// The conversion functions of every def the bound methods reach.
-pub(super) fn conversions(types: &Types<'_>, defs: &std::collections::BTreeSet<usize>, outs: &std::collections::BTreeSet<usize>) -> String {
+pub(super) fn conversions(
+    types: &Types<'_>,
+    defs: &std::collections::BTreeSet<usize>,
+    outs: &std::collections::BTreeSet<usize>,
+) -> String {
     let mut code = String::new();
     for &id in defs {
         let def = &types.defs[id];
@@ -287,7 +333,13 @@ pub(super) fn conversions(types: &Types<'_>, defs: &std::collections::BTreeSet<u
                 let parts: Vec<String> = fields
                     .iter()
                     .filter(|f| crosses(types, &f.ty))
-                    .map(|f| format!("{}: {}", bound_ident(&f.wit), lower(types, &f.ty, &format!("(&v.{})", f.rust))))
+                    .map(|f| {
+                        format!(
+                            "{}: {}",
+                            bound_ident(&f.wit),
+                            lower(types, &f.ty, &format!("(&v.{})", f.rust))
+                        )
+                    })
                     .collect();
                 if parts.is_empty() {
                     format!("{wire}::Value")
@@ -308,52 +360,77 @@ pub(super) fn conversions(types: &Types<'_>, defs: &std::collections::BTreeSet<u
             },
             Kind::Unit => format!("{wire}::Value"),
             Kind::Enum(cases) => {
-                let path = rust.trim_end_matches("<'_>");
+                let path = rust.split('<').next().unwrap();
                 let arms: Vec<String> = cases
                     .iter()
-                    .map(|c| format!("{path}::{c} => {wire}::{}", bound_type(&wit_ident(&c.to_snake_case()))))
+                    .map(|c| {
+                        format!(
+                            "{path}::{c} => {wire}::{}",
+                            bound_type(&wit_ident(&c.to_snake_case()))
+                        )
+                    })
                     .collect();
                 format!("match v {{ {} }}", arms.join(", "))
             }
             Kind::Variant(cases) => {
-                let path = rust.trim_end_matches("<'_>");
+                let path = rust.split('<').next().unwrap();
                 let arms: Vec<String> = cases
                     .iter()
-                    .map(|Case { rust: case, wit: w, payload }| {
-                        let target = format!("{wire}::{}", bound_type(&wit_ident(w)));
-                        match payload {
-                            Payload::None => format!("{path}::{case} => {target}"),
-                            Payload::Tuple(items) => {
-                                let names: Vec<String> = (0..items.len()).map(|i| format!("p{i}")).collect();
-                                let lowered: Vec<String> = items
-                                    .iter()
-                                    .zip(&names)
-                                    .filter(|(item, _)| crosses(types, item))
-                                    .map(|(item, name)| lower(types, item, name))
-                                    .collect();
-                                let pattern = format!("{path}::{case}({})", names.join(", "));
-                                match lowered.len() {
-                                    0 => format!("{pattern} => {{ let _ = ({},); {target} }}", names.join(", ")),
-                                    1 => format!("{pattern} => {target}({})", lowered[0]),
-                                    _ => format!("{pattern} => {target}(({},))", lowered.join(", ")),
+                    .map(
+                        |Case {
+                             rust: case,
+                             wit: w,
+                             payload,
+                         }| {
+                            let target = format!("{wire}::{}", bound_type(&wit_ident(w)));
+                            match payload {
+                                Payload::None => format!("{path}::{case} => {target}"),
+                                Payload::Tuple(items) => {
+                                    let names: Vec<String> =
+                                        (0..items.len()).map(|i| format!("p{i}")).collect();
+                                    let lowered: Vec<String> = items
+                                        .iter()
+                                        .zip(&names)
+                                        .filter(|(item, _)| crosses(types, item))
+                                        .map(|(item, name)| lower(types, item, name))
+                                        .collect();
+                                    let pattern = format!("{path}::{case}({})", names.join(", "));
+                                    match lowered.len() {
+                                        0 => format!(
+                                            "{pattern} => {{ let _ = ({},); {target} }}",
+                                            names.join(", ")
+                                        ),
+                                        1 => format!("{pattern} => {target}({})", lowered[0]),
+                                        _ => format!(
+                                            "{pattern} => {target}(({},))",
+                                            lowered.join(", ")
+                                        ),
+                                    }
+                                }
+                                Payload::Record(record, fields) => {
+                                    let names: Vec<&str> =
+                                        fields.iter().map(|f| f.rust.as_str()).collect();
+                                    let parts: Vec<String> = fields
+                                        .iter()
+                                        .filter(|f| crosses(types, &f.ty))
+                                        .map(|f| {
+                                            format!(
+                                                "{}: {}",
+                                                bound_ident(&f.wit),
+                                                lower(types, &f.ty, &f.rust)
+                                            )
+                                        })
+                                        .collect();
+                                    format!(
+                                        "{path}::{case} {{ {} }} => {target}({W}::{} {{ {} }})",
+                                        names.join(", "),
+                                        bound_type(record),
+                                        parts.join(", ")
+                                    )
                                 }
                             }
-                            Payload::Record(record, fields) => {
-                                let names: Vec<&str> = fields.iter().map(|f| f.rust.as_str()).collect();
-                                let parts: Vec<String> = fields
-                                    .iter()
-                                    .filter(|f| crosses(types, &f.ty))
-                                    .map(|f| format!("{}: {}", bound_ident(&f.wit), lower(types, &f.ty, &f.rust)))
-                                    .collect();
-                                format!(
-                                    "{path}::{case} {{ {} }} => {target}({W}::{} {{ {} }})",
-                                    names.join(", "),
-                                    bound_type(record),
-                                    parts.join(", ")
-                                )
-                            }
-                        }
-                    })
+                        },
+                    )
                     .collect();
                 format!("match v {{ {} }}", arms.join(", "))
             }
@@ -363,7 +440,7 @@ pub(super) fn conversions(types: &Types<'_>, defs: &std::collections::BTreeSet<u
         };
         writeln!(code, "#[allow(unused_variables, clippy::all)] fn lower_{id}(v: &{rust}) -> {wire} {{ {body} }}").unwrap();
         // Lifting, for types that own their contents.
-        if !def.borrows {
+        if def.lifetimes == 0 {
             let path = rust.as_str();
             let body = match &def.kind {
                 Kind::Record(fields) => {
@@ -383,54 +460,89 @@ pub(super) fn conversions(types: &Types<'_>, defs: &std::collections::BTreeSet<u
                 Kind::TupleRecord(items) => match items.as_slice() {
                     [one] => format!("{path}({})", lift(types, one, "w")),
                     _ => {
-                        let names: Vec<String> = (0..items.len()).map(|i| format!("t{i}")).collect();
+                        let names: Vec<String> =
+                            (0..items.len()).map(|i| format!("t{i}")).collect();
                         let parts: Vec<String> = items
                             .iter()
                             .zip(&names)
                             .map(|(item, name)| lift(types, item, name))
                             .collect();
-                        format!("{{ let ({},) = w; {path}({}) }}", names.join(", "), parts.join(", "))
+                        format!(
+                            "{{ let ({},) = w; {path}({}) }}",
+                            names.join(", "),
+                            parts.join(", ")
+                        )
                     }
                 },
                 Kind::Unit => format!("{{ let _ = w; {path} }}"),
                 Kind::Enum(cases) => {
                     let arms: Vec<String> = cases
                         .iter()
-                        .map(|c| format!("{wire}::{} => {path}::{c}", bound_type(&wit_ident(&c.to_snake_case()))))
+                        .map(|c| {
+                            format!(
+                                "{wire}::{} => {path}::{c}",
+                                bound_type(&wit_ident(&c.to_snake_case()))
+                            )
+                        })
                         .collect();
                     format!("match w {{ {} }}", arms.join(", "))
                 }
                 Kind::Variant(cases) => {
                     let arms: Vec<String> = cases
                         .iter()
-                        .map(|Case { rust: case, wit: w, payload }| {
-                            let source = format!("{wire}::{}", bound_type(&wit_ident(w)));
-                            match payload {
-                                Payload::None => format!("{source} => {path}::{case}"),
-                                Payload::Tuple(items) => {
-                                    let crossing: Vec<&Ty> = items.iter().filter(|i| crosses(types, i)).collect();
-                                    let values: Vec<String> = match crossing.len() {
-                                        0 => Vec::new(),
-                                        1 => vec![lift(types, crossing[0], "p")],
-                                        _ => (0..crossing.len())
-                                            .map(|i| lift(types, crossing[i], &format!("p.{i}")))
-                                            .collect(),
-                                    };
-                                    if crossing.is_empty() {
-                                        format!("{source} => {path}::{case}()")
-                                    } else {
-                                        format!("{source}(p) => {path}::{case}({})", values.join(", "))
+                        .map(
+                            |Case {
+                                 rust: case,
+                                 wit: w,
+                                 payload,
+                             }| {
+                                let source = format!("{wire}::{}", bound_type(&wit_ident(w)));
+                                match payload {
+                                    Payload::None => format!("{source} => {path}::{case}"),
+                                    Payload::Tuple(items) => {
+                                        let crossing: Vec<&Ty> =
+                                            items.iter().filter(|i| crosses(types, i)).collect();
+                                        let values: Vec<String> = match crossing.len() {
+                                            0 => Vec::new(),
+                                            1 => vec![lift(types, crossing[0], "p")],
+                                            _ => (0..crossing.len())
+                                                .map(|i| {
+                                                    lift(types, crossing[i], &format!("p.{i}"))
+                                                })
+                                                .collect(),
+                                        };
+                                        if crossing.is_empty() {
+                                            format!("{source} => {path}::{case}()")
+                                        } else {
+                                            format!(
+                                                "{source}(p) => {path}::{case}({})",
+                                                values.join(", ")
+                                            )
+                                        }
+                                    }
+                                    Payload::Record(_, fields) => {
+                                        let parts: Vec<String> = fields
+                                            .iter()
+                                            .map(|f| {
+                                                format!(
+                                                    "{}: {}",
+                                                    f.rust,
+                                                    lift(
+                                                        types,
+                                                        &f.ty,
+                                                        &format!("p.{}", bound_ident(&f.wit))
+                                                    )
+                                                )
+                                            })
+                                            .collect();
+                                        format!(
+                                            "{source}(p) => {path}::{case} {{ {} }}",
+                                            parts.join(", ")
+                                        )
                                     }
                                 }
-                                Payload::Record(_, fields) => {
-                                    let parts: Vec<String> = fields
-                                        .iter()
-                                        .map(|f| format!("{}: {}", f.rust, lift(types, &f.ty, &format!("p.{}", bound_ident(&f.wit)))))
-                                        .collect();
-                                    format!("{source}(p) => {path}::{case} {{ {} }}", parts.join(", "))
-                                }
-                            }
-                        })
+                            },
+                        )
                         .collect();
                     format!("match w {{ {} }}", arms.join(", "))
                 }
@@ -444,40 +556,71 @@ pub(super) fn conversions(types: &Types<'_>, defs: &std::collections::BTreeSet<u
         if outs.contains(&id)
             && let Kind::Record(fields) = &def.kind
         {
-            let writable: Vec<_> = fields.iter().filter(|f| writable(&f.ty) && crosses(types, &f.ty)).collect();
+            let writable: Vec<_> = fields
+                .iter()
+                .filter(|f| writable(&f.ty) && crosses(types, &f.ty))
+                .collect();
             if writable.is_empty() {
                 continue;
             }
             let out = format!("{W}::{}", bound_type(&wit::out_name(def)));
             let parts: Vec<String> = writable
                 .iter()
-                .map(|f| format!("{}: {}", bound_ident(&f.wit), lower(types, &f.ty, &format!("(&v.{})", f.rust))))
+                .map(|f| {
+                    let value = match &f.ty {
+                        Ty::Ref(inner, true)
+                            if let Ty::Named(inner) = &**inner
+                                && wit::has_out(types, &types.defs[*inner]) =>
+                        {
+                            format!("lower_out_{inner}(&*v.{})", f.rust)
+                        }
+                        ty => lower(types, ty, &format!("(&v.{})", f.rust)),
+                    };
+                    format!("{}: {value}", bound_ident(&f.wit))
+                })
                 .collect();
             writeln!(code, "#[allow(unused_variables, clippy::all)] fn lower_out_{id}(v: &{rust}) -> {out} {{ {out} {{ {} }} }}", parts.join(", ")).unwrap();
             let mut writes = String::new();
             for f in &writable {
                 let source = format!("o.{}", bound_ident(&f.wit));
                 match &f.ty {
+                    Ty::Ref(inner, true)
+                        if let Ty::Named(inner) = &**inner
+                            && wit::has_out(types, &types.defs[*inner]) =>
+                    {
+                        writeln!(writes, "write_back_{inner}(&mut *v.{}, {source})?;", f.rust)
+                            .unwrap();
+                    }
                     Ty::Ref(inner, true) if !borrows(types, inner) => {
-                        writeln!(writes, "*v.{} = {};", f.rust, lift(types, inner, &source)).unwrap()
+                        writeln!(writes, "*v.{} = {};", f.rust, lift(types, inner, &source))
+                            .unwrap()
                     }
                     Ty::Ref(inner, true) => {
                         if let Ty::Named(inner) = &**inner
                             && outs.contains(inner)
                         {
-                            writeln!(writes, "write_back_{inner}(v.{}, {source})?;", f.rust).unwrap();
+                            writeln!(writes, "write_back_{inner}(v.{}, {source})?;", f.rust)
+                                .unwrap();
                         } else {
                             writeln!(writes, "let _ = {source};").unwrap();
                         }
                     }
-                    ty if !borrows(types, ty) => writeln!(writes, "v.{} = {};", f.rust, lift(types, ty, &source)).unwrap(),
+                    ty if !borrows(types, ty) => {
+                        writeln!(writes, "v.{} = {};", f.rust, lift(types, ty, &source)).unwrap()
+                    }
                     // A wrapper around one mutable borrow (`CarriedAccess`): write through it.
                     Ty::Named(inner)
                         if let Kind::TupleRecord(items) = &types.defs[*inner].kind
                             && let [Ty::Ref(target, true)] = items.as_slice()
                             && !borrows(types, target) =>
                     {
-                        writeln!(writes, "*v.{}.0 = {};", f.rust, lift(types, target, &source)).unwrap()
+                        writeln!(
+                            writes,
+                            "*v.{}.0 = {};",
+                            f.rust,
+                            lift(types, target, &source)
+                        )
+                        .unwrap()
                     }
                     _ => writeln!(writes, "let _ = {source};").unwrap(),
                 }
@@ -503,4 +646,3 @@ pub(super) fn unpack(sig: &Signature) -> (String, Vec<String>) {
 pub(super) fn exported(method: &Method) -> bool {
     EXPORTS.contains(&method.owner)
 }
-

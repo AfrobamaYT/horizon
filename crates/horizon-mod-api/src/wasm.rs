@@ -20,43 +20,52 @@ fn expect<T>(value: Result<T, Refused>) -> T {
     }
 }
 
-/// Any value, held only to be dropped.
-trait Held {}
-impl<T> Held for T {}
-
-/// One call's storage for the values its borrowed arguments point into.
+/// One call's storage for the values its borrowed arguments point into. The values may
+/// borrow each other, so they are held type-erased and dropped newest first with the store.
 #[derive(Default)]
-pub(crate) struct Keep<'a> {
-    held: RefCell<Vec<Box<dyn Held + 'a>>>,
+pub(crate) struct Keep {
+    held: RefCell<Vec<(*mut u8, unsafe fn(*mut u8))>>,
 }
 
-impl<'a> Keep<'a> {
-    fn hold<T: 'a>(&self, value: T) -> *mut T {
-        let mut boxed = Box::new(value);
-        let pointer: *mut T = &mut *boxed;
-        self.held.borrow_mut().push(boxed);
+impl Keep {
+    fn hold<T>(&self, value: T) -> *mut T {
+        unsafe fn drop_box<T>(pointer: *mut u8) {
+            // SAFETY: `pointer` came from `Box::into_raw` of a `Box<T>` in `hold`, once.
+            drop(unsafe { Box::from_raw(pointer.cast::<T>()) });
+        }
+        let pointer = Box::into_raw(Box::new(value));
+        self.held.borrow_mut().push((pointer.cast(), drop_box::<T>));
         pointer
     }
 
     pub(crate) fn str(&self, value: String) -> &str {
-        // SAFETY: the box stays in `held`, unmoved and handed out once, until `self` drops.
+        // SAFETY: the box stays allocated, unmoved and handed out once, until `self` drops.
         unsafe { &*self.hold(value) }
     }
 
-    pub(crate) fn slice<T: 'a>(&self, value: Vec<T>) -> &[T] {
+    pub(crate) fn slice<T>(&self, value: Vec<T>) -> &[T] {
         // SAFETY: as in `str`.
         unsafe { &*self.hold(value) }
     }
 
-    pub(crate) fn val<T: 'a>(&self, value: T) -> &T {
+    pub(crate) fn val<T>(&self, value: T) -> &T {
         // SAFETY: as in `str`.
         unsafe { &*self.hold(value) }
     }
 
     #[allow(clippy::mut_from_ref)]
-    pub(crate) fn val_mut<T: 'a>(&self, value: T) -> &mut T {
+    pub(crate) fn val_mut<T>(&self, value: T) -> &mut T {
         // SAFETY: as in `str`.
         unsafe { &mut *self.hold(value) }
+    }
+}
+
+impl Drop for Keep {
+    fn drop(&mut self) {
+        for (pointer, drop) in self.held.get_mut().drain(..).rev() {
+            // SAFETY: each entry is a live box `hold` made, dropped once here.
+            unsafe { drop(pointer) };
+        }
     }
 }
 
@@ -105,7 +114,10 @@ unsafe impl<T: ?Sized> Send for Handler<T> {}
 
 fn handler<T: ?Sized + 'static>(index: u32) -> &'static T {
     let handlers = HANDLERS.lock().unwrap_or_else(|e| e.into_inner());
-    match handlers.get(index as usize).and_then(|h| h.downcast_ref::<Handler<T>>()) {
+    match handlers
+        .get(index as usize)
+        .and_then(|h| h.downcast_ref::<Handler<T>>())
+    {
         Some(handler) => handler.0,
         None => panic!("the game called a handler the mod didn't register"),
     }
@@ -116,9 +128,16 @@ mod codec {
     codecs!(super::glue::horizon::mod_api::types);
 }
 
-#[allow(clippy::all, unused_imports, unused_variables, dead_code, non_snake_case)]
+#[allow(
+    clippy::all,
+    unused_imports,
+    unused_variables,
+    unused_parens,
+    dead_code,
+    non_snake_case
+)]
 mod glue {
-    use super::{Guest, Refused, array, expect, intern};
+    use super::{array, expect, intern};
     include!(concat!(env!("OUT_DIR"), "/wasm_guest_generated.rs"));
 }
 

@@ -1,11 +1,10 @@
 //! The two sides' code: the guest's `Guest` (every imported trait) and exports, and the game's
 //! imports and proxies (every exported trait).
 use super::glue::{InPlace, conversions, lift, lower, rust_path, unpack};
-use super::ty::{List, Str, Ty, Types, bound_ident, wit_ident};
+use super::ty::{Kind, List, Str, Ty, Types, bound_ident, wit_ident};
 use super::wit::{self, Signature, interface, signature};
 use super::{EXPORTS, Method};
 use heck::{ToSnakeCase, ToUpperCamelCase};
-use std::collections::BTreeSet;
 use std::fmt::Write;
 
 /// `ty` as Rust names it in a trait method's signature.
@@ -22,12 +21,28 @@ fn rust_ty(types: &Types<'_>, ty: &Ty, ret: bool) -> String {
         Ty::List(item, List::Slice) => format!("&[{}]", rust_ty(types, item, ret)),
         Ty::List(item, List::Boxed) => format!("Box<[{}]>", rust_ty(types, item, ret)),
         Ty::List(item, List::Shared) => format!("std::sync::Arc<[{}]>", rust_ty(types, item, ret)),
+        Ty::List(item, List::Map(map)) => match &**item {
+            Ty::Tuple(pair) => format!(
+                "{map}<{}, {}>",
+                rust_ty(types, &pair[0], ret),
+                rust_ty(types, &pair[1], ret)
+            ),
+            _ => unreachable!("a map's items are pairs"),
+        },
         Ty::Array(item, n) => format!("[{}; {n}]", rust_ty(types, item, ret)),
         Ty::Option(item) => format!("Option<{}>", rust_ty(types, item, ret)),
-        Ty::Result(a, b) => format!("Result<{}, {}>", rust_ty(types, a, ret), rust_ty(types, b, ret)),
+        Ty::Result(a, b) => format!(
+            "Result<{}, {}>",
+            rust_ty(types, a, ret),
+            rust_ty(types, b, ret)
+        ),
         Ty::Tuple(items) => format!(
             "({},)",
-            items.iter().map(|i| rust_ty(types, i, ret)).collect::<Vec<_>>().join(", ")
+            items
+                .iter()
+                .map(|i| rust_ty(types, i, ret))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         Ty::Ref(inner, true) => format!("&mut {}", rust_ty(types, inner, ret)),
         Ty::Ref(inner, false) => format!("&{}", rust_ty(types, inner, ret)),
@@ -63,6 +78,17 @@ fn rust_sig(types: &Types<'_>, method: &Method) -> String {
     format!("fn {}({}){ret}", method.name, params.join(", "))
 }
 
+/// Whether `ty`'s wire value is a string or list, which the bindings borrow as a slice.
+fn wire_is_list(types: &Types<'_>, ty: &Ty) -> bool {
+    match ty {
+        Ty::Str(_) | Ty::List(..) | Ty::Array(..) => true,
+        Ty::Named(def) => {
+            matches!(&types.defs[*def].kind, Kind::Codec(wire) if wire.starts_with("list<") || *wire == "string")
+        }
+        _ => false,
+    }
+}
+
 /// The form the bindings take an argument in: borrowed where it holds a string or list.
 fn arg(types: &Types<'_>, ty: &Ty, e: &str) -> String {
     match ty {
@@ -70,12 +96,18 @@ fn arg(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         Ty::Option(item) => match &**item {
             Ty::Str(_) | Ty::List(..) | Ty::Array(..) => format!("{e}.as_deref()"),
             Ty::Ref(inner, _) | Ty::Boxed(inner) => arg(types, &Ty::Option(inner.clone()), e),
+            item if wire_is_list(types, item) => {
+                format!("{e}.as_deref()")
+            }
             item if heap(types, item) => format!("{e}.as_ref()"),
             _ => e.into(),
         },
         Ty::Ref(inner, _) | Ty::Boxed(inner) => arg(types, inner, e),
         Ty::Tuple(items) if items.iter().any(|i| heap(types, i)) => {
-            let crossing: Vec<&Ty> = items.iter().filter(|i| wit::wit(types, i).ok().flatten().is_some()).collect();
+            let crossing: Vec<&Ty> = items
+                .iter()
+                .filter(|i| wit::wit(types, i).ok().flatten().is_some())
+                .collect();
             let parts: Vec<String> = crossing
                 .iter()
                 .enumerate()
@@ -99,48 +131,15 @@ fn heap(types: &Types<'_>, ty: &Ty) -> bool {
         Ty::Named(def) => {
             let def = &types.defs[*def];
             match &def.kind {
-                super::ty::Kind::Codec(wire) => {
-                    !matches!(*wire, "u64" | "u32" | "entity-ref" | "player-ref" | "boss-bar-ref")
-                }
+                super::ty::Kind::Codec(wire) => !matches!(
+                    *wire,
+                    "u64" | "u32" | "entity-ref" | "player-ref" | "boss-bar-ref"
+                ),
                 super::ty::Kind::Json => true,
                 _ => wit::def_fields(def).into_iter().any(|t| heap(types, t)),
             }
         }
         _ => false,
-    }
-}
-
-/// Every def the methods reach, and those passed `&mut` (with written-back records).
-fn reached(types: &Types<'_>, methods: &[&Method]) -> (BTreeSet<usize>, BTreeSet<usize>) {
-    let mut defs = BTreeSet::new();
-    let mut outs = BTreeSet::new();
-    for method in methods {
-        for (_, ty) in &method.params {
-            wit::named(types, ty, &mut defs);
-            mut_records(ty, &mut outs);
-        }
-        wit::named(types, &method.ret, &mut defs);
-    }
-    // A `&mut` record inside a written-back record is written back too.
-    loop {
-        let before = outs.len();
-        for id in outs.clone() {
-            for ty in wit::def_fields(&types.defs[id]) {
-                mut_records(ty, &mut outs);
-            }
-        }
-        if outs.len() == before {
-            break;
-        }
-    }
-    (defs, outs)
-}
-
-fn mut_records(ty: &Ty, outs: &mut BTreeSet<usize>) {
-    if let Ty::Ref(inner, true) = ty
-        && let Ty::Named(def) = &**inner
-    {
-        outs.insert(*def);
     }
 }
 
@@ -151,7 +150,13 @@ fn header(wit_text: &str, macro_call: &str, options: &str) -> String {
 }
 
 /// The function returning what the method's results tuple holds, after the call.
-fn results(types: &Types<'_>, method: &Method, sig: &Signature, ret: &str, outs: &[(usize, String, Ty)]) -> String {
+fn results(
+    types: &Types<'_>,
+    method: &Method,
+    sig: &Signature,
+    ret: &str,
+    outs: &[(usize, String, Ty)],
+) -> String {
     let mut parts = Vec::new();
     if wit::wit(types, &method.ret).ok().flatten().is_some() {
         parts.push(lower(types, &method.ret, &format!("(&{ret})")));
@@ -173,15 +178,28 @@ fn results(types: &Types<'_>, method: &Method, sig: &Signature, ret: &str, outs:
 }
 
 /// The guest side: `Guest` implementing every imported trait, and the exports calling the mod.
-pub(super) fn guest(types: &Types<'_>, methods: &[&Method], wit_text: &str, hooks: &[(String, String)]) -> Result<String, String> {
-    let (defs, outs) = reached(types, methods);
+pub(super) fn guest(
+    types: &Types<'_>,
+    methods: &[&Method],
+    wit_text: &str,
+    hooks: &[(String, String)],
+) -> Result<String, String> {
+    let (defs, outs) = wit::reached(types, methods);
     let mut code = header(wit_text, "wit_bindgen::generate", "generate_all");
     code.push_str(&conversions(types, &defs, &outs));
-    code.push_str("/// The host as the guest reaches it: each method calls its import.\npub struct Guest;\n");
+    code.push_str(
+        "/// The host as the guest reaches it: each method calls its import.\npub struct Guest;\n",
+    );
     let mut owners: Vec<&str> = Vec::new();
     for method in methods {
         if !owners.contains(&method.owner) {
             owners.push(method.owner);
+        }
+    }
+    // Every imported trait, a method or not: a trait with none bound still holds up its subtraits.
+    for owner in super::IMPORTS {
+        if !owners.contains(owner) {
+            writeln!(code, "impl {} for Guest {{}}", trait_path(owner)).unwrap();
         }
     }
     for owner in owners.iter().filter(|o| !EXPORTS.contains(o)) {
@@ -197,7 +215,12 @@ pub(super) fn guest(types: &Types<'_>, methods: &[&Method], wit_text: &str, hook
             let mut args = Vec::new();
             for (i, (_, ty)) in method.params.iter().enumerate() {
                 if wit::wit(types, ty)?.is_some() {
-                    writeln!(prep, "let a{i} = {};", lower(types, ty, &format!("(&p{i})"))).unwrap();
+                    writeln!(
+                        prep,
+                        "let a{i} = {};",
+                        lower(types, ty, &format!("(&p{i})"))
+                    )
+                    .unwrap();
                     args.push(arg(types, ty, &format!("a{i}")));
                 }
             }
@@ -207,13 +230,16 @@ pub(super) fn guest(types: &Types<'_>, methods: &[&Method], wit_text: &str, hook
             for (i, (_, ty)) in method.params.iter().enumerate() {
                 if let Ty::Ref(inner, true) = ty {
                     match &**inner {
-                        Ty::Named(def) if sig.results.contains(&wit::out_name(&types.defs[*def])) => {
+                        Ty::Named(def)
+                            if sig.results.contains(&wit::out_name(&types.defs[*def])) =>
+                        {
                             writeln!(back, "write_back_{def}(p{i}, {})?;", names[next]).unwrap();
                             next += 1;
                         }
                         Ty::Named(_) => {}
                         inner => {
-                            writeln!(back, "*p{i} = {};", lift(types, inner, &names[next])).unwrap();
+                            writeln!(back, "*p{i} = {};", lift(types, inner, &names[next]))
+                                .unwrap();
                             next += 1;
                         }
                     }
@@ -222,7 +248,7 @@ pub(super) fn guest(types: &Types<'_>, methods: &[&Method], wit_text: &str, hook
             let value = if wit::wit(types, &method.ret)?.is_some() {
                 guest_ret(types, &method.ret, &names[0])
             } else if let Ty::Dyn(..) = method.ret {
-                "&Guest".to_string()
+                format!("&Guest as {}", rust_ty(types, &method.ret, true))
             } else {
                 "()".to_string()
             };
@@ -238,32 +264,54 @@ pub(super) fn guest(types: &Types<'_>, methods: &[&Method], wit_text: &str, hook
         }
         code.push_str("}\n");
     }
-    let arms: Vec<String> = hooks.iter().map(|(v, n)| format!("crate::HookId::{v} => \"{n}\"")).collect();
-    writeln!(code, "fn hook_name(id: crate::HookId) -> &'static str {{ match id {{ {} }} }}", arms.join(", ")).unwrap();
+    let arms: Vec<String> = hooks
+        .iter()
+        .map(|(v, n)| format!("crate::HookId::{v} => \"{n}\""))
+        .collect();
+    writeln!(
+        code,
+        "fn hook_name(id: crate::HookId) -> &'static str {{ match id {{ {} }} }}",
+        arms.join(", ")
+    )
+    .unwrap();
     // Exports.
     code.push_str("struct Exports;\nexport!(Exports);\n");
     for owner in owners.iter().filter(|o| EXPORTS.contains(o)) {
         let iface = bound_ident(&interface(owner));
-        writeln!(code, "impl exports::horizon::mod_api::{iface}::Guest for Exports {{").unwrap();
+        writeln!(
+            code,
+            "impl exports::horizon::mod_api::{iface}::Guest for Exports {{"
+        )
+        .unwrap();
         if let Some((_, list)) = super::SUBSCRIBED.iter().find(|(o, _)| o == owner) {
             let (param, receiver) = match *owner {
                 "Hooks" => ("", "super::hooks()".to_string()),
-                _ => ("handler: u32", format!("super::handler::<dyn {}>(handler)", trait_path(owner))),
+                _ => (
+                    "handler: u32",
+                    format!("super::handler::<dyn {}>(handler)", trait_path(owner)),
+                ),
             };
             writeln!(code, "fn subscribed({param}) -> Vec<String> {{ {receiver}.{list}().iter().flatten().map(|id| hook_name(*id).to_string()).collect() }}").unwrap();
         }
         for method in methods.iter().filter(|m| m.owner == *owner) {
             let sig = signature(types, method)?;
-            let wire_params: Vec<String> = sig.params.iter().map(|(n, _)| bound_ident(n)).collect();
             let object = |_: &str, mutable: bool| {
-                if mutable { "keep.val_mut(Guest)".to_string() } else { "&Guest".to_string() }
+                if mutable {
+                    "keep.val_mut(Guest)".to_string()
+                } else {
+                    "&Guest".to_string()
+                }
             };
             let place = InPlace::new(types, &object);
             let mut out = String::from("let keep = super::Keep::default();");
             let mut call_args = Vec::new();
             let mut mut_locals = Vec::new();
             for (name, ty) in &method.params {
-                let source = if wit::wit(types, ty)?.is_some() { bound_ident(&wit_ident(name)) } else { "()".into() };
+                let source = if wit::wit(types, ty)?.is_some() {
+                    bound_ident(&wit_ident(name))
+                } else {
+                    "()".into()
+                };
                 match ty {
                     Ty::Ref(inner, true) if !matches!(**inner, Ty::Dyn(..)) => {
                         let value = place.value(inner, &source)?;
@@ -281,13 +329,6 @@ pub(super) fn guest(types: &Types<'_>, methods: &[&Method], wit_text: &str, hook
                 format!("super::handler::<dyn {}>(handler)", trait_path(owner))
             };
             let result = results(types, method, &sig, "r", &mut_locals);
-            let params: Vec<String> = sig
-                .params
-                .iter()
-                .zip(&wire_params)
-                .map(|((_, wire), name)| format!("{name}: {}", wire_rust(wire)))
-                .collect();
-            let _ = params;
             writeln!(
                 code,
                 "#[allow(unused_variables, unused_mut, clippy::all)] fn {}({}) {} {{ super::expect((|| -> Result<_, Refused> {{ {} let r = {receiver}.{}({}); Ok({result}) }})()) }}",
@@ -305,8 +346,48 @@ pub(super) fn guest(types: &Types<'_>, methods: &[&Method], wit_text: &str, hook
     Ok(code)
 }
 
-fn wire_rust(_wire: &str) -> String {
-    String::new()
+/// The Rust type wit-bindgen gives the WIT type `wire`.
+fn wire_rust(wire: &str) -> String {
+    fn parse(text: &mut &str) -> String {
+        *text = text.trim_start();
+        let end = text
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '%'))
+            .unwrap_or(text.len());
+        let name = &text[..end];
+        *text = &text[end..];
+        let mut args = Vec::new();
+        if text.starts_with('<') {
+            *text = &text[1..];
+            loop {
+                args.push(parse(text));
+                *text = text.trim_start();
+                let c = text.as_bytes()[0];
+                *text = &text[1..];
+                if c == b'>' {
+                    break;
+                }
+            }
+        }
+        match name {
+            "bool" | "u8" | "u16" | "u32" | "u64" | "f32" | "f64" | "char" => name.into(),
+            "s8" | "s16" | "s32" | "s64" => format!("i{}", &name[1..]),
+            "string" => "String".into(),
+            "list" => format!("Vec<{}>", args[0]),
+            "option" => format!("Option<{}>", args[0]),
+            "tuple" => format!("({},)", args.join(", ")),
+            "result" => format!(
+                "Result<{}, {}>",
+                args[0],
+                args.get(1).map_or("()", String::as_str)
+            ),
+            _ => format!(
+                "horizon::mod_api::types::{}",
+                heck::ToUpperCamelCase::to_upper_camel_case(name.trim_start_matches('%'))
+            ),
+        }
+    }
+    let mut text = wire;
+    parse(&mut text)
 }
 
 /// An export's parameters as the guest bindings declare them: owned wire values.
@@ -317,15 +398,28 @@ fn export_params(types: &Types<'_>, method: &Method, sig: &Signature) -> Result<
     }
     for (name, ty) in &method.params {
         if wit::wit(types, ty)?.is_some() {
-            params.push(format!("{}: {}", bound_ident(&wit_ident(name)), wire_type(types, ty)));
+            params.push(format!(
+                "{}: {}",
+                bound_ident(&wit_ident(name)),
+                wire_type(types, ty)
+            ));
         }
     }
     Ok(params.join(", "))
 }
 
 fn export_ret(sig: &Signature) -> String {
-    let _ = sig;
-    "-> _".into()
+    match sig.results.as_slice() {
+        [] => String::new(),
+        [one] => format!("-> {}", wire_rust(one)),
+        many => format!(
+            "-> ({},)",
+            many.iter()
+                .map(|r| wire_rust(r))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
 }
 
 /// The owned wire Rust type of `ty`.
@@ -355,7 +449,14 @@ fn wire_type(types: &Types<'_>, ty: &Ty) -> String {
                 .join(", ")
         ),
         Ty::Ref(inner, _) | Ty::Boxed(inner) => wire_type(types, inner),
-        Ty::Named(def) => format!("{}::{}", "horizon::mod_api::types", types.defs[*def].wit.trim_start_matches('%').to_upper_camel_case()),
+        Ty::Named(def) => format!(
+            "{}::{}",
+            "horizon::mod_api::types",
+            types.defs[*def]
+                .wit
+                .trim_start_matches('%')
+                .to_upper_camel_case()
+        ),
     }
 }
 
@@ -366,19 +467,39 @@ fn guest_ret(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         Ty::Ref(inner, _) => format!("super::keep({})", lift(types, inner, e)),
         Ty::Str(Str::Borrowed) => format!("super::intern({e})"),
         Ty::List(item, List::Slice) => {
-            format!("super::keep({}).as_slice()", lift(types, &Ty::List(item.clone(), List::Vec), e))
+            format!(
+                "super::keep({}).as_slice()",
+                lift(types, &Ty::List(item.clone(), List::Vec), e)
+            )
         }
-        Ty::Option(inner) if matches!(**inner, Ty::Ref(..) | Ty::Str(Str::Borrowed) | Ty::List(_, List::Slice)) => {
-            format!("match {e} {{ Some(x) => Some({}), None => None }}", guest_ret(types, inner, "x"))
+        Ty::Option(inner)
+            if matches!(
+                **inner,
+                Ty::Ref(..) | Ty::Str(Str::Borrowed) | Ty::List(_, List::Slice)
+            ) =>
+        {
+            format!(
+                "match {e} {{ Some(x) => Some({}), None => None }}",
+                guest_ret(types, inner, "x")
+            )
         }
         ty => lift(types, ty, e),
     }
 }
 
 /// The game's side: each import forwarding to the frame's host, and the proxies.
-pub(super) fn host(types: &Types<'_>, methods: &[&Method], wit_text: &str, hooks: &[(String, String)]) -> Result<String, String> {
-    let (defs, outs) = reached(types, methods);
-    let mut code = header(wit_text, "wasmtime::component::bindgen", "imports: { default: trappable }");
+pub(super) fn host(
+    types: &Types<'_>,
+    methods: &[&Method],
+    wit_text: &str,
+    hooks: &[(String, String)],
+) -> Result<String, String> {
+    let (defs, outs) = wit::reached(types, methods);
+    let mut code = header(
+        wit_text,
+        "wasmtime::component::bindgen",
+        "imports: { default: trappable }",
+    );
     code.push_str(&conversions(types, &defs, &outs));
     let mut owners: Vec<&str> = Vec::new();
     for method in methods {
@@ -387,7 +508,10 @@ pub(super) fn host(types: &Types<'_>, methods: &[&Method], wit_text: &str, hooks
         }
     }
     code.push_str("impl api::types::Host for super::State {}\n");
-    let arms: Vec<String> = hooks.iter().map(|(v, n)| format!("\"{n}\" => Some(crate::HookId::{v})")).collect();
+    let arms: Vec<String> = hooks
+        .iter()
+        .map(|(v, n)| format!("\"{n}\" => Some(crate::HookId::{v})"))
+        .collect();
     writeln!(code, "/// The hook a mod names in its subscriptions, if this game has it.\npub(super) fn hook_id(name: &str) -> Option<crate::HookId> {{ match name {{ {}, _ => None }} }}", arms.join(", ")).unwrap();
     for owner in owners.iter().filter(|o| !EXPORTS.contains(o)) {
         let iface = bound_ident(&interface(owner));
@@ -395,7 +519,11 @@ pub(super) fn host(types: &Types<'_>, methods: &[&Method], wit_text: &str, hooks
         for method in methods.iter().filter(|m| m.owner == *owner) {
             let sig = signature(types, method)?;
             let object = |name: &str, mutable: bool| {
-                format!("super::frame::{}{}()?", name.rsplit("::").next().unwrap().to_snake_case(), if mutable { "_mut" } else { "" })
+                format!(
+                    "super::frame::{}{}()?",
+                    name.rsplit("::").next().unwrap().to_snake_case(),
+                    if mutable { "_mut" } else { "" }
+                )
             };
             let place = InPlace::new(types, &object);
             let mut out = String::from("let keep = super::Keep::default();");
@@ -404,7 +532,11 @@ pub(super) fn host(types: &Types<'_>, methods: &[&Method], wit_text: &str, hooks
             let mut params = Vec::new();
             for (name, ty) in &method.params {
                 let wire = wit::wit(types, ty)?;
-                let source = if wire.is_some() { bound_ident(&wit_ident(name)) } else { "()".into() };
+                let source = if wire.is_some() {
+                    bound_ident(&wit_ident(name))
+                } else {
+                    "()".into()
+                };
                 if wire.is_some() {
                     params.push(format!("{source}: {}", wire_type(types, ty)));
                 }
@@ -422,7 +554,11 @@ pub(super) fn host(types: &Types<'_>, methods: &[&Method], wit_text: &str, hooks
             let receiver = format!(
                 "super::frame::{}{}()?",
                 owner.rsplit("::").next().unwrap().to_snake_case(),
-                if method.receiver == Some(true) { "_mut" } else { "" }
+                if method.receiver == Some(true) {
+                    "_mut"
+                } else {
+                    ""
+                }
             );
             let result = results(types, method, &sig, "r", &mut_locals);
             writeln!(
@@ -443,10 +579,18 @@ pub(super) fn host(types: &Types<'_>, methods: &[&Method], wit_text: &str, hooks
     // Proxies: the mod's traits, each method calling its export.
     for owner in owners.iter().filter(|o| EXPORTS.contains(o)) {
         let iface = bound_ident(&interface(owner));
-        let proxy = if *owner == "Hooks" { "super::WasmMod" } else { "super::WasmHandler" };
+        let proxy = if *owner == "Hooks" {
+            "super::WasmMod"
+        } else {
+            "super::WasmHandler"
+        };
         writeln!(code, "impl {} for {proxy} {{", trait_path(owner)).unwrap();
         if let Some((_, list)) = super::SUBSCRIBED.iter().find(|(o, _)| o == owner) {
-            writeln!(code, "fn {list}(&self) -> &'static [Option<crate::HookId>] {{ self.subscribed }}").unwrap();
+            writeln!(
+                code,
+                "fn {list}(&self) -> &'static [Option<crate::HookId>] {{ self.subscribed }}"
+            )
+            .unwrap();
         }
         for method in methods.iter().filter(|m| m.owner == *owner) {
             let sig = signature(types, method)?;
@@ -459,7 +603,12 @@ pub(super) fn host(types: &Types<'_>, methods: &[&Method], wit_text: &str, hooks
             for (i, (_, ty)) in method.params.iter().enumerate() {
                 frame_objects(types, ty, &format!("p{i}"), &mut frame);
                 if wit::wit(types, ty)?.is_some() {
-                    writeln!(prep, "let a{i} = {};", lower(types, ty, &format!("(&p{i})"))).unwrap();
+                    writeln!(
+                        prep,
+                        "let a{i} = {};",
+                        lower(types, ty, &format!("(&p{i})"))
+                    )
+                    .unwrap();
                     args.push(arg(types, ty, &format!("a{i}")));
                 }
             }
@@ -469,19 +618,26 @@ pub(super) fn host(types: &Types<'_>, methods: &[&Method], wit_text: &str, hooks
             for (i, (_, ty)) in method.params.iter().enumerate() {
                 if let Ty::Ref(inner, true) = ty {
                     match &**inner {
-                        Ty::Named(def) if sig.results.contains(&wit::out_name(&types.defs[*def])) => {
+                        Ty::Named(def)
+                            if sig.results.contains(&wit::out_name(&types.defs[*def])) =>
+                        {
                             writeln!(back, "write_back_{def}(p{i}, {})?;", names[next]).unwrap();
                             next += 1;
                         }
                         Ty::Named(_) | Ty::Dyn(..) => {}
                         inner => {
-                            writeln!(back, "*p{i} = {};", lift(types, inner, &names[next])).unwrap();
+                            writeln!(back, "*p{i} = {};", lift(types, inner, &names[next]))
+                                .unwrap();
                             next += 1;
                         }
                     }
                 }
             }
-            let value = if wit::wit(types, &method.ret)?.is_some() { lift(types, &method.ret, &names[0]) } else { "()".into() };
+            let value = if wit::wit(types, &method.ret)?.is_some() {
+                lift(types, &method.ret, &names[0])
+            } else {
+                "()".into()
+            };
             writeln!(
                 code,
                 "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ let mut frame = super::Frame::default(); {frame} {prep} self.call(frame, |m, store| -> wasmtime::Result<_> {{ let {pattern} = m.horizon_mod_api_{iface}().call_{}(store, {})?; {back} Ok({value}) }}) }}",
@@ -497,17 +653,23 @@ pub(super) fn host(types: &Types<'_>, methods: &[&Method], wit_text: &str, hooks
 }
 
 /// The Rust type of an import's results.
-fn results_type(types: &Types<'_>, method: &Method, sig: &Signature, outs: &[(usize, String, Ty)]) -> String {
+fn results_type(
+    types: &Types<'_>,
+    method: &Method,
+    sig: &Signature,
+    outs: &[(usize, String, Ty)],
+) -> String {
     let mut parts = Vec::new();
     if wit::wit(types, &method.ret).ok().flatten().is_some() {
         parts.push(wire_type(types, &method.ret));
     }
     for (_, _, ty) in outs {
         match ty {
-            Ty::Named(def) if sig.results.contains(&wit::out_name(&types.defs[*def])) => parts.push(format!(
-                "horizon::mod_api::types::{}",
-                wit::out_name(&types.defs[*def]).to_upper_camel_case()
-            )),
+            Ty::Named(def) if sig.results.contains(&wit::out_name(&types.defs[*def])) => parts
+                .push(format!(
+                    "horizon::mod_api::types::{}",
+                    wit::out_name(&types.defs[*def]).to_upper_camel_case()
+                )),
             Ty::Named(_) => {}
             ty => parts.push(wire_type(types, ty)),
         }
@@ -523,7 +685,13 @@ fn results_type(types: &Types<'_>, method: &Method, sig: &Signature, outs: &[(us
 fn frame_objects(types: &Types<'_>, ty: &Ty, e: &str, out: &mut String) {
     match ty {
         Ty::Dyn(name, mutable) => {
-            writeln!(out, "frame.{}{}({e});", name.to_snake_case(), if *mutable { "_mut" } else { "" }).unwrap();
+            writeln!(
+                out,
+                "frame.{}{}({e});",
+                name.to_snake_case(),
+                if *mutable { "_mut" } else { "" }
+            )
+            .unwrap();
         }
         Ty::Ref(inner, _) => {
             if let Ty::Named(def) = &**inner

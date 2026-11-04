@@ -13,7 +13,7 @@ use syn::{FnArg, Item, Pat, ReturnType, TraitItem};
 use ty::{Ty, Types};
 
 /// Traits a mod calls: their methods are the world's imports.
-const IMPORTS: &[&str] = &[
+pub(super) const IMPORTS: &[&str] = &[
     "Host",
     "ServerHost",
     "ClientHost",
@@ -172,7 +172,12 @@ fn hook_ids(types: &mut Types<'_>) -> Result<Vec<(String, String)>, String> {
     Ok(item
         .variants
         .iter()
-        .map(|v| (v.ident.to_string(), heck::ToSnakeCase::to_snake_case(v.ident.to_string().as_str())))
+        .map(|v| {
+            (
+                v.ident.to_string(),
+                heck::ToSnakeCase::to_snake_case(v.ident.to_string().as_str()),
+            )
+        })
         .collect())
 }
 
@@ -228,7 +233,12 @@ mod tests {
     #[test]
     #[ignore]
     fn print_surface() {
-        std::thread::Builder::new().stack_size(64 << 20).spawn(print).unwrap().join().unwrap();
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(print)
+            .unwrap()
+            .join()
+            .unwrap();
     }
     fn print() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");

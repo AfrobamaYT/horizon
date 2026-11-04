@@ -78,10 +78,13 @@ impl<'a> Index<'a> {
             None => self.parse(krate, "lib.rs")?,
             Some((last, parent)) => {
                 let parent = self.module(krate, parent)?;
-                let inline = self.modules[parent].items.iter().find_map(|item| match item {
-                    Item::Mod(item) if item.ident == last.as_str() => item.content.clone(),
-                    _ => None,
-                });
+                let inline = self.modules[parent]
+                    .items
+                    .iter()
+                    .find_map(|item| match item {
+                        Item::Mod(item) if item.ident == last.as_str() => item.content.clone(),
+                        _ => None,
+                    });
                 match inline {
                     Some((_, items)) => self.expand_includes(items)?,
                     None => {
@@ -139,7 +142,11 @@ impl<'a> Index<'a> {
         if self.depth > 64 {
             self.depth = 0;
             let m = &self.modules[module];
-            return Err(format!("{name} in {}::{} imports itself", m.krate, m.path.join("::")));
+            return Err(format!(
+                "{name} in {}::{} imports itself",
+                m.krate,
+                m.path.join("::")
+            ));
         }
         let found = self.lookup(module, name, &mut Vec::new());
         self.depth = self.depth.saturating_sub(1);
@@ -167,11 +174,15 @@ impl<'a> Index<'a> {
         let mut globs = Vec::new();
         for item in items {
             if let Item::Use(item) = item {
-                uses(&item.tree, &mut Vec::new(), &mut |path, alias| match alias {
-                    Some(alias) if alias == name && named.is_none() => named = Some(path),
-                    None => globs.push(path),
-                    _ => {}
-                });
+                uses(
+                    &item.tree,
+                    &mut Vec::new(),
+                    &mut |path, alias| match alias {
+                        Some(alias) if alias == name && named.is_none() => named = Some(path),
+                        None => globs.push(path),
+                        _ => {}
+                    },
+                );
             }
         }
         if let Some(path) = named {
@@ -222,7 +233,11 @@ impl<'a> Index<'a> {
             "crate" => (m.krate, Vec::new()),
             "self" => (m.krate, m.path.clone()),
             "super" => (m.krate, m.path[..m.path.len().checked_sub(1)?].to_vec()),
-            name if m.items.iter().any(|item| matches!(item, Item::Mod(item) if item.ident == name)) => {
+            name if m
+                .items
+                .iter()
+                .any(|item| matches!(item, Item::Mod(item) if item.ident == name)) =>
+            {
                 let mut path = m.path.clone();
                 path.push(name.to_string());
                 (m.krate, path)
