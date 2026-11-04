@@ -10,18 +10,9 @@
 //! merged each time the server's tables are built: a world's first open and
 //! every `/reload`.
 use super::Game;
+pub use mod_api::game::NativeDataMapType;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
-
-/// A data map type a mod registers (`RegisterDataMapTypesEvent`).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NativeDataMapType {
-    /// `mod_id:name`: not in the `minecraft` namespace. Its files are
-    /// `data/<mod_id>/data_maps/<registry path>/<name>.json`.
-    pub id: String,
-    /// The registry it is for: `minecraft:item` or `minecraft:block`.
-    pub registry: String,
-}
 
 /// The registries data maps can be attached to so far, with their folder
 /// (the registry's path: `minecraft` registries have no namespace folder).

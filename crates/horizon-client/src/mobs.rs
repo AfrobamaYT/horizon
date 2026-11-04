@@ -595,6 +595,15 @@ impl MobTypes {
     }
 }
 pub use horizon_client_core::who::Who;
+impl From<mod_api::NativeEffectDamage> for DamageKind {
+    fn from(damage: mod_api::NativeEffectDamage) -> Self {
+        match damage {
+            mod_api::NativeEffectDamage::Magic => Self::Magic,
+            mod_api::NativeEffectDamage::Wither => Self::Wither,
+            _ => unreachable!("NativeEffectDamage: unhandled variant"),
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DamageKind {
     PlayerAttack,
@@ -1155,6 +1164,10 @@ pub struct Extra {
     /// (`LivingEntity.lastEquipmentItems`, empty at first), by
     /// `EquipmentSlot` ordinal: see `Mob::equipment_stacks`.
     pub equipment_heard: Option<Box<horizon_items::equipment::Equipment>>,
+    /// The live attribute map (`AttributeMap`), built when an item with
+    /// attribute modifiers is worn or it is read. Mob logic still reads
+    /// `MobType::attributes` and `attributes` above.
+    pub live: crate::living_attributes::LivingAttributes,
 }
 impl Extra {
     /// The body item id (`getItemBySlot(BODY)`).

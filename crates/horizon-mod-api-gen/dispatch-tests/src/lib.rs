@@ -16,6 +16,8 @@ mod tests {
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub(super) struct BlockStateId;
         #[derive(Clone, Copy)]
+        pub(super) struct LevelRef;
+        #[derive(Clone, Copy)]
         pub(super) struct FluidState;
         pub(super) struct PlacementContext;
         #[derive(Clone, Copy)]
@@ -27,6 +29,8 @@ mod tests {
         #[derive(Clone, Copy)]
         pub(super) struct LevelDimension;
         pub(super) struct NeighbourUpdate;
+        #[derive(Clone, Copy)]
+        pub(super) struct PathComputationType;
         pub(super) struct GlobalPos;
         pub(super) struct Ticks;
         pub(super) trait LevelHost {
@@ -177,6 +181,7 @@ mod tests {
         }
         pub(super) struct NativeLifecycleContext;
         pub(super) struct RegistrationContext<'a>(pub &'a str);
+        pub(super) struct DataLoadContext<'a>(pub &'a str);
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
         #[derive(Clone, Copy)]
@@ -214,6 +219,16 @@ mod tests {
     trait Host {}
     trait ServerHost: Host {}
     trait ClientHost: Host {}
+    trait DrawContext {}
+    /// Records which part drew, in order.
+    trait BlockEntityDrawContext {
+        fn mark(&mut self, part: u32);
+    }
+    impl BlockEntityDrawContext for BlockEntityDraw {
+        fn mark(&mut self, part: u32) {
+            self.0.push(part);
+        }
+    }
     enum HostSide<'a> {
         Server(&'a mut dyn ServerHost),
         Client(&'a mut dyn ClientHost),
@@ -252,11 +267,6 @@ mod tests {
     impl Host for TestHost {}
     impl ServerHost for TestHost {}
     impl ClientHost for TestHost {}
-    mod winit {
-        pub mod event {
-            pub struct KeyEvent;
-        }
-    }
     #[allow(dead_code)]
     mod generated {
         mod horizon_mods {
@@ -265,15 +275,15 @@ mod tests {
                 pub struct Item;
             }
         }
-        pub(super) mod horizon_client {
+        pub(super) mod mod_api {
             pub mod camera {
                 pub struct CameraEntity;
                 pub struct FovPlayer;
             }
-            pub mod mod_api {
-                pub struct NativeClientInfo;
-                pub struct NativeArmorHurt;
-            }
+            pub struct NativeClientInfo;
+            #[derive(Clone, Copy)]
+            pub enum KeyAction {}
+            pub struct NativeArmorHurt;
             pub mod menu {
                 pub struct MenuButtonContext {
                     pub player: u128,
@@ -559,7 +569,11 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Active {
             fn loot_table_load(&self, event: &mut LootTableLoadEvent<'_>) {
-                dispatch_modify_default_components("test", &mut Map::new());
+                dispatch_modify_default_components(
+                    &DataLoadContext("defaults"),
+                    "test",
+                    &mut Map::new(),
+                );
                 Other.loot_table_load(event);
             }
         }
@@ -660,7 +674,7 @@ mod tests {
         fn block_entity_submit(&self, _: &dyn ClientHost, event: &mut BlockEntitySubmitEvent<'_>) {
             assert_eq!(event.pos, [1, 2, 3]);
             assert_eq!(event.block, "example:machine");
-            event.draw.0.push(self.id);
+            event.draw.mark(self.id);
         }
     }
     impl MenuPart for Mod {
@@ -720,7 +734,12 @@ mod tests {
         fn loot_table_load(&self, event: &mut LootTableLoadEvent<'_>) {
             event.table.as_array_mut().unwrap().push(self.id.into());
         }
-        fn modify_default_components(&self, event: &mut ModifyDefaultComponentsEvent<'_>) {
+        fn modify_default_components(
+            &self,
+            context: &DataLoadContext<'_>,
+            event: &mut ModifyDefaultComponentsEvent<'_>,
+        ) {
+            assert_eq!(context.0, "defaults");
             let value = event
                 .components
                 .entry("order")
@@ -768,7 +787,7 @@ mod tests {
             block_entities: vec![part(1, &calls)],
             ..Parts::default()
         });
-        let context = generated::horizon_client::menu::MenuButtonContext {
+        let context = generated::mod_api::menu::MenuButtonContext {
             player: 123,
             player_entity_id: 42,
             pos: [1, 2, 3],
@@ -1147,7 +1166,7 @@ mod tests {
         dispatch_loot_table_load("table", &mut table);
         assert_eq!(table, serde_json::json!([1, 2]));
         let mut components = Map::new();
-        dispatch_modify_default_components("item", &mut components);
+        dispatch_modify_default_components(&DataLoadContext("defaults"), "item", &mut components);
         assert_eq!(components["order"], serde_json::json!([1, 2]));
         let mut host = TestHost;
         dispatch_level_tick_pre(&mut host, "overworld");

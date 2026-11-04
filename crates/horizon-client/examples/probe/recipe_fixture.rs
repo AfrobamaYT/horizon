@@ -20,10 +20,11 @@ pub fn main() -> horizon_client::Result<()> {
             .ok_or("usage: recipe_fixture RESOURCES INPUT OUTPUT")?,
     );
     let input = fs::read_to_string(args.get(2).ok_or("missing INPUT")?)?;
-    let items = Items::catalog(root, &PackOverlay::NONE)?;
+    let defaults = horizon_world::item_defaults::read(root)?;
+    let items = Items::catalog(root, &PackOverlay::NONE, &defaults)?;
     let recipes = Recipes::load(root, &items, &PackOverlay::NONE)?;
     let stations = StationRecipes::load(root, &items, &PackOverlay::NONE);
-    let enchantments = Enchantments::load(root);
+    let enchantments = Enchantments::load(root, &defaults);
     let mut out = String::new();
     for line in input.lines() {
         let f: Vec<&str> = line.split('\t').collect();

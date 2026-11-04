@@ -15,6 +15,15 @@ impl ExecutionRole {
         self == Self::Client
     }
 
+    /// Select the phase once at an owning data-load boundary.
+    pub fn data_load_origin(self) -> horizon_world::native_load_context::DataLoadOrigin {
+        use horizon_world::native_load_context::DataLoadOrigin;
+        match self {
+            Self::Client => DataLoadOrigin::ClientPreload,
+            Self::IntegratedServer | Self::DedicatedServer => DataLoadOrigin::ServerDataLoad,
+        }
+    }
+
     /// Single-player worlds (on the integrated server thread) keep the owner's state in
     /// `Level` and write `players/data/<singleplayer_uuid>.dat` with the world; a dedicated
     /// server saves each connected player separately.
@@ -31,15 +40,14 @@ impl ExecutionRole {
 }
 
 use super::Game;
-use crate::mod_api::HostSide;
+use mod_api::HostSide;
 
-impl<'a> HostSide<'a> {
-    pub(super) fn of(game: &'a mut Game<'_>) -> Self {
-        if game.is_logical_server() {
-            Self::Server(game)
-        } else {
-            Self::Client(game)
-        }
+/// The hook host of `game`'s side.
+pub(super) fn host_side<'a>(game: &'a mut Game<'_>) -> HostSide<'a> {
+    if game.is_logical_server() {
+        HostSide::Server(game)
+    } else {
+        HostSide::Client(game)
     }
 }
 

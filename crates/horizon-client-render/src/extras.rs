@@ -3,6 +3,7 @@
 //! stays exactly vanilla's, and the logic behind them. Every extra is off by
 //! default; see `docs/extras.md`. Horizon's own switches outside the Extras page
 //! (No AI, Agent Control, Discord Rich Presence) are kept here too.
+pub use mod_api::extras::Corner;
 use std::{collections::VecDeque, fs, path::Path};
 
 pub const FILE: &str = "horizon-extras.txt";
@@ -12,51 +13,6 @@ pub const SORT_KEY: &str = "horizon.sort";
 /// The minimap's sizes in GUI pixels, and its zooms in blocks per pixel.
 pub const MINIMAP_SIZES: [(u8, &str); 3] = [(64, "Small"), (96, "Medium"), (128, "Large")];
 pub const MINIMAP_ZOOMS: [f32; 4] = [0.5, 1.0, 2.0, 4.0];
-
-/// A screen corner for an overlay.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Corner {
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    BottomRight,
-}
-impl Corner {
-    pub const ALL: [Corner; 4] = [
-        Corner::TopLeft,
-        Corner::TopRight,
-        Corner::BottomLeft,
-        Corner::BottomRight,
-    ];
-    pub fn name(self) -> &'static str {
-        match self {
-            Corner::TopLeft => "top_left",
-            Corner::TopRight => "top_right",
-            Corner::BottomLeft => "bottom_left",
-            Corner::BottomRight => "bottom_right",
-        }
-    }
-    pub fn label(self) -> &'static str {
-        match self {
-            Corner::TopLeft => "Top left",
-            Corner::TopRight => "Top right",
-            Corner::BottomLeft => "Bottom left",
-            Corner::BottomRight => "Bottom right",
-        }
-    }
-    fn parse(s: &str, default: Corner) -> Corner {
-        Self::ALL
-            .into_iter()
-            .find(|c| c.name() == s)
-            .unwrap_or(default)
-    }
-    pub fn top(self) -> bool {
-        matches!(self, Corner::TopLeft | Corner::TopRight)
-    }
-    pub fn left(self) -> bool {
-        matches!(self, Corner::TopLeft | Corner::BottomLeft)
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Extras {

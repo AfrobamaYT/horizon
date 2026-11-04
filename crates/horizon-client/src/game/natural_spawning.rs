@@ -453,7 +453,7 @@ impl SpawnLevel for GameLevel<'_, '_> {
 }
 impl NaturalLevel for GameLevel<'_, '_> {
     fn spawn_hooks(&self) -> bool {
-        !horizon_client::mod_api::mods().is_empty()
+        !mod_api::mods().is_empty()
     }
     fn potential_spawns(&self, category: Category, pos: [i32; 3], entries: &mut Vec<SpawnEntry>) {
         let mut canceled = false;
@@ -597,7 +597,9 @@ impl NaturalLevel for GameLevel<'_, '_> {
             .map_or(self.w.world.bottom_y(), |y| y + 1)
     }
     fn pathfindable_land(&self, x: i32, y: i32, z: i32) -> bool {
-        self.w.data.state(self.state(x, y, z)).flags & data::LAND != 0
+        self.w
+            .data
+            .pathfindable(self.state(x, y, z), data::PathComputationType::Land)
     }
 }
 impl horizon_client::mobs::spawner::SpawnerLevel for GameLevel<'_, '_> {

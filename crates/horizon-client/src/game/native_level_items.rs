@@ -6,7 +6,7 @@
 //! server's players, and in-frame on the window's own level. Clients get the
 //! new entities through the tracker, as any other.
 use super::{Game, dispenser, spill};
-use horizon_client::mod_api::{EntityRef, ItemStack, LevelRef};
+use mod_api::{EntityRef, ItemStack, LevelRef};
 
 impl Game<'_> {
     /// Whether vanilla could make an item entity of `stack`: not empty
@@ -141,7 +141,7 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::mod_api::ServerHost;
+    use mod_api::ServerHost;
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_level_pops_spawns_and_awards_as_vanilla() {
@@ -150,8 +150,8 @@ mod tests {
             load_resources, spill,
         };
         use horizon_client::gamerules::Value as RuleValue;
-        use horizon_client::mod_api::{ItemStack, LevelRef, NativeAuthority, NativeWorldEpoch};
         use horizon_core::random::RandomSource;
+        use mod_api::{ItemStack, LevelRef, NativeAuthority, NativeWorldEpoch};
 
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -162,7 +162,7 @@ mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -281,9 +281,9 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources and an isolated process for native mods"]
     fn an_orb_awarded_in_a_merge_hook_is_merged_by_a_later_scan() {
-        use crate::mod_api::{self, ExperienceOrbMergeEvent, Flow, Hooks};
         use horizon_client::entities::ExperienceOrb;
         use horizon_core::geometry::Vec3;
+        use mod_api::{self, ExperienceOrbMergeEvent, Flow, Hooks};
 
         // Each scanForMerges queries the level afresh (ExperienceOrb.java:183),
         // so B's scan finds the orb a hook awarded during A's.

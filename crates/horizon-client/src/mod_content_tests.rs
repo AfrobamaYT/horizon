@@ -1,5 +1,6 @@
 use super::*;
 use crate::{assets::Assets, blocks::BlockFacts, items::Items};
+use horizon_world::native_load_context::DataLoadOrigin;
 
 #[path = "mod_content_block_entity_tests.rs"]
 mod block_entity_tests;
@@ -686,7 +687,8 @@ fn content_root_loads_with_every_table() {
     assert_eq!(facts.get(iron).hardness, a.hardness);
     assert_eq!(&*facts.get(iron).name, "minecraft:iron_block");
 
-    let items = Items::load(&root, new, &facts, &PackOverlay::NONE).unwrap();
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
+    let items = Items::load(&root, new, &facts, &PackOverlay::NONE, &defaults).unwrap();
     let ruby_block = &items.items["ruby:ruby_block"];
     assert_eq!(ruby_block.block, Some(ruby));
     let iron_block = &items.items["minecraft:iron_block"];
@@ -1366,13 +1368,15 @@ fn content_root_carries_a_structure_mod() {
 
     let assets = Assets::load(&root).unwrap();
     let biomes = crate::biome::Biomes::load(&root).unwrap();
-    let terrain = crate::vanillagen::VanillaTerrain::new(
-        &root.join("worldgen"),
-        assets.registry,
-        &biomes,
-        1234,
-    )
-    .unwrap();
+    let item_data =
+        crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
+    let terrain_resources = crate::vanillagen::TerrainResources {
+        dir: &root.join("worldgen"),
+        registry: assets.registry,
+        biomes: &biomes,
+        item_data: &item_data,
+    };
+    let terrain = crate::vanillagen::VanillaTerrain::new(terrain_resources, 1234).unwrap();
     let (name, at) = terrain
         .locate(&["huts:hut".to_owned()], [0, 64, 0], 16)
         .expect("the mod's structure generates");
@@ -1393,6 +1397,14 @@ fn a_superflat_world_runs_its_structure_sets_on_flat_ground() {
     };
     let assets = Assets::load(&base).unwrap();
     let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let item_data =
+        crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
+    let terrain_resources = crate::vanillagen::TerrainResources {
+        dir: &base.join("worldgen"),
+        registry: assets.registry,
+        biomes: &biomes,
+        item_data: &item_data,
+    };
     let flat = horizon_world::worldgen::generator::FlatSettings {
         layers: vec![
             ("minecraft:bedrock".into(), 1),
@@ -1406,10 +1418,8 @@ fn a_superflat_world_runs_its_structure_sets_on_flat_ground() {
         ]),
     };
     let terrain = crate::vanillagen::VanillaTerrain::for_flat(
-        &base.join("worldgen"),
+        terrain_resources,
         &Default::default(),
-        assets.registry,
-        &biomes,
         1234,
         &flat,
         true,
@@ -1461,6 +1471,14 @@ fn a_superflat_world_keeps_its_strongholds_on_every_seed_and_leaves_null_layers_
     };
     let assets = Assets::load(&base).unwrap();
     let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let item_data =
+        crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
+    let terrain_resources = crate::vanillagen::TerrainResources {
+        dir: &base.join("worldgen"),
+        registry: assets.registry,
+        biomes: &biomes,
+        item_data: &item_data,
+    };
     let flat = horizon_world::worldgen::generator::FlatSettings {
         layers: vec![
             ("minecraft:bedrock".into(), 1),
@@ -1472,10 +1490,8 @@ fn a_superflat_world_keeps_its_strongholds_on_every_seed_and_leaves_null_layers_
     };
     let make = |seed| {
         crate::vanillagen::VanillaTerrain::for_flat(
-            &base.join("worldgen"),
+            terrain_resources,
             &Default::default(),
-            assets.registry,
-            &biomes,
             seed,
             &flat,
             true,
@@ -1533,6 +1549,14 @@ fn a_superflat_structure_override_naming_no_set_lets_every_set_generate() {
     };
     let assets = Assets::load(&base).unwrap();
     let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let item_data =
+        crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
+    let terrain_resources = crate::vanillagen::TerrainResources {
+        dir: &base.join("worldgen"),
+        registry: assets.registry,
+        biomes: &biomes,
+        item_data: &item_data,
+    };
     let flat = horizon_world::worldgen::generator::FlatSettings {
         layers: vec![
             ("minecraft:bedrock".into(), 1),
@@ -1543,10 +1567,8 @@ fn a_superflat_structure_override_naming_no_set_lets_every_set_generate() {
         structure_overrides: Some(vec!["minecraft:village".into()]),
     };
     let terrain = crate::vanillagen::VanillaTerrain::for_flat(
-        &base.join("worldgen"),
+        terrain_resources,
         &Default::default(),
-        assets.registry,
-        &biomes,
         1234,
         &flat,
         true,
@@ -1632,9 +1654,11 @@ fn content_root_with_only_an_item_checks_its_identity() {
     let ids = horizon_protocol::registry::Builtin::load(&root.join("registries.json")).unwrap();
     assert!(ids.get("minecraft:item").unwrap().id("gem:opal").is_some());
     assert!(root.join(crate::content_identity::MARKER).exists());
+    let base_defaults = horizon_world::item_defaults::read(&base).unwrap();
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
     assert_ne!(
-        crate::content_identity::identity(&root).unwrap(),
-        crate::content_identity::identity(&base).unwrap()
+        crate::content_identity::identity(&root, &defaults).unwrap(),
+        crate::content_identity::identity(&base, &base_defaults).unwrap()
     );
     fs::remove_dir_all(&scratch).unwrap();
 }
@@ -1698,7 +1722,12 @@ fn content_root_registers_a_mod_entity_type() {
     assert_eq!(speed(&root).to_bits(), speed(&base).to_bits());
     assert!(root.join(crate::content_identity::MARKER).exists());
     let identity = crate::content_identity::identity;
-    assert_ne!(identity(&root).unwrap(), identity(&base).unwrap());
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
+    let base_defaults = horizon_world::item_defaults::read(&base).unwrap();
+    assert_ne!(
+        identity(&root, &defaults).unwrap(),
+        identity(&base, &base_defaults).unwrap()
+    );
     fs::remove_dir_all(&scratch).unwrap();
 }
 
@@ -1734,7 +1763,12 @@ fn content_root_registers_a_mod_menu_type() {
     assert_eq!(ids.id("minecraft:furnace"), vanilla.id("minecraft:furnace"));
     assert!(root.join(crate::content_identity::MARKER).exists());
     let identity = crate::content_identity::identity;
-    assert_ne!(identity(&root).unwrap(), identity(&base).unwrap());
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
+    let base_defaults = horizon_world::item_defaults::read(&base).unwrap();
+    assert_ne!(
+        identity(&root, &defaults).unwrap(),
+        identity(&base, &base_defaults).unwrap()
+    );
     fs::remove_dir_all(&scratch).unwrap();
 }
 
@@ -1966,25 +2000,21 @@ fn exploration_maps_skip_the_starts_a_chunk_saved_as_referenced() {
     };
     let assets = Assets::load(&base).unwrap();
     let biomes = crate::biome::Biomes::load(&base).unwrap();
-    let terrain = crate::vanillagen::VanillaTerrain::new(
-        &base.join("worldgen"),
-        assets.registry,
-        &biomes,
-        1234,
-    )
-    .unwrap();
+    let item_data =
+        crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
+    let terrain_resources = crate::vanillagen::TerrainResources {
+        dir: &base.join("worldgen"),
+        registry: assets.registry,
+        biomes: &biomes,
+        item_data: &item_data,
+    };
+    let terrain = crate::vanillagen::VanillaTerrain::new(terrain_resources, 1234).unwrap();
     let names = ["minecraft:buried_treasure".to_owned()];
     let first = terrain
         .locate_for_map(&names, [0, 64, 0], 50, true)
         .unwrap();
     // Another terrain, on the same seed, whose chunks saved one reference for it.
-    let fresh = crate::vanillagen::VanillaTerrain::new(
-        &base.join("worldgen"),
-        assets.registry,
-        &biomes,
-        1234,
-    )
-    .unwrap();
+    let fresh = crate::vanillagen::VanillaTerrain::new(terrain_resources, 1234).unwrap();
     let (name, at) = (first.0.clone(), (first.1[0] >> 4, first.1[2] >> 4));
     fresh.set_saved_references(std::sync::Arc::new(move |n, x, z| {
         i32::from(n == name && (x, z) == at)
@@ -2011,14 +2041,16 @@ fn exploration_maps_skip_the_structures_maps_pointed_at() {
     let _ = fs::remove_dir_all(&scratch);
     let assets = Assets::load(&base).unwrap();
     let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let item_data =
+        crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
+    let terrain_resources = crate::vanillagen::TerrainResources {
+        dir: &base.join("worldgen"),
+        registry: assets.registry,
+        biomes: &biomes,
+        item_data: &item_data,
+    };
     let open = || {
-        let terrain = crate::vanillagen::VanillaTerrain::new(
-            &base.join("worldgen"),
-            assets.registry,
-            &biomes,
-            1234,
-        )
-        .unwrap();
+        let terrain = crate::vanillagen::VanillaTerrain::new(terrain_resources, 1234).unwrap();
         terrain.set_reference_file(scratch.join("refs.json"));
         terrain
     };
@@ -2062,13 +2094,15 @@ fn debug_density_line_lists_the_noise_settings_functions() {
     };
     let assets = Assets::load(&base).unwrap();
     let biomes = crate::biome::Biomes::load(&base).unwrap();
-    let terrain = crate::vanillagen::VanillaTerrain::new(
-        &base.join("worldgen"),
-        assets.registry,
-        &biomes,
-        1234,
-    )
-    .unwrap();
+    let item_data =
+        crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
+    let terrain_resources = crate::vanillagen::TerrainResources {
+        dir: &base.join("worldgen"),
+        registry: assets.registry,
+        biomes: &biomes,
+        item_data: &item_data,
+    };
+    let terrain = crate::vanillagen::VanillaTerrain::new(terrain_resources, 1234).unwrap();
     let line = terrain.density_debug_line([0, 70, 0]).unwrap();
     let labels: Vec<&str> = line
         .strip_prefix("Density ")
@@ -2445,15 +2479,15 @@ fn an_old_chunks_saved_village_comes_back_with_its_pieces() {
     };
     let assets = Assets::load(&base).unwrap();
     let biomes = crate::biome::Biomes::load(&base).unwrap();
-    let open = || {
-        crate::vanillagen::VanillaTerrain::new(
-            &base.join("worldgen"),
-            assets.registry,
-            &biomes,
-            1234,
-        )
-        .unwrap()
+    let item_data =
+        crate::test_resources::item_data(&base, DataLoadOrigin::ServerDataLoad).unwrap();
+    let terrain_resources = crate::vanillagen::TerrainResources {
+        dir: &base.join("worldgen"),
+        registry: assets.registry,
+        biomes: &biomes,
+        item_data: &item_data,
     };
+    let open = || crate::vanillagen::VanillaTerrain::new(terrain_resources, 1234).unwrap();
     let villages: Vec<String> = ["plains", "desert", "savanna", "snowy", "taiga"]
         .iter()
         .map(|k| format!("minecraft:village_{k}"))
@@ -2651,7 +2685,8 @@ fn mod_recipe_results_are_an_item_stack_or_a_bare_item_id() {
     let assets = Assets::load(&root).unwrap();
     let new = assets.registry;
     let facts = BlockFacts::load(&root, new).unwrap();
-    let items = Items::load(&root, new, &facts, &PackOverlay::NONE).unwrap();
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
+    let items = Items::load(&root, new, &facts, &PackOverlay::NONE, &defaults).unwrap();
     let recipes = crate::crafting::Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
     for (name, input, _, item, count) in cases {
         let grid = [
@@ -4092,13 +4127,15 @@ fn content_root_generates_a_biome_modifier_ore() {
         let assets = Assets::load(&root).unwrap();
         let zinc = assets.registry.default_state("zinc:zinc_ore").unwrap().0;
         let biomes = crate::biome::Biomes::load(&root).unwrap();
-        let terrain = crate::vanillagen::VanillaTerrain::new(
-            &root.join("worldgen"),
-            assets.registry,
-            &biomes,
-            1234,
-        )
-        .unwrap();
+        let item_data =
+            crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
+        let terrain_resources = crate::vanillagen::TerrainResources {
+            dir: &root.join("worldgen"),
+            registry: assets.registry,
+            biomes: &biomes,
+            item_data: &item_data,
+        };
+        let terrain = crate::vanillagen::VanillaTerrain::new(terrain_resources, 1234).unwrap();
         let mut worker = terrain.worker();
         let mut region: [Proto; 9] =
             std::array::from_fn(|i| terrain.proto(&mut worker, i as i32 % 3 - 1, i as i32 / 3 - 1));
@@ -4244,7 +4281,15 @@ fn blocks_and_items_declared_in_code_get_ids() {
         );
     }
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
-    let items = Items::load(&root, assets.registry, &facts, &PackOverlay::NONE).unwrap();
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
+    let items = Items::load(
+        &root,
+        assets.registry,
+        &facts,
+        &PackOverlay::NONE,
+        &defaults,
+    )
+    .unwrap();
     assert_eq!(items.items["gears:wrench"].max_stack, 1);
     assert!(items.items["gears:shaft"].block.is_some());
     // The same declarations reuse the root; others build a new one.
@@ -4258,7 +4303,15 @@ fn blocks_and_items_declared_in_code_get_ids() {
     assert_ne!(changed, root);
     assert_eq!(fs::read(root.join(STAMP)).unwrap(), stamp);
     assert_ne!(fs::read(changed.join(STAMP)).unwrap(), stamp);
-    let changed_items = Items::load(&changed, assets.registry, &facts, &PackOverlay::NONE).unwrap();
+    let changed_defaults = horizon_world::item_defaults::read(&changed).unwrap();
+    let changed_items = Items::load(
+        &changed,
+        assets.registry,
+        &facts,
+        &PackOverlay::NONE,
+        &changed_defaults,
+    )
+    .unwrap();
     assert_eq!(changed_items.items["gears:wrench"].max_stack, 2);
     assert_eq!(items.items["gears:wrench"].max_stack, 1);
     let _ = fs::remove_dir_all(&scratch);
@@ -4391,8 +4444,9 @@ fn signs_take_their_form_wood_and_wall_block_from_their_declaration() {
     );
     assert_eq!(&*block("signs:board").item, "signs:notice");
     assert_eq!(&*block("signs:bracket").item, "signs:lantern");
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
     let mut renderer =
-        crate::block_entity_render::BlockEntityRenderer::load(&root, registry).unwrap();
+        crate::block_entity_render::BlockEntityRenderer::load(&root, registry, &defaults).unwrap();
     renderer.add_mod_signs(&facts, registry);
     for name in [
         "signs:notice",
@@ -4461,11 +4515,17 @@ fn a_feature_gives_a_mods_sign_its_block_entity() {
     let registry = assets.registry;
     let facts = BlockFacts::load(&root, registry).unwrap();
     let biomes = crate::biome::Biomes::load(&root).unwrap();
+    let item_data =
+        crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
+    let terrain_resources = crate::vanillagen::TerrainResources {
+        dir: &root.join("worldgen"),
+        registry,
+        biomes: &biomes,
+        item_data: &item_data,
+    };
     let notice = registry.default_state("post:notice").unwrap().0;
     let generate = |signs: bool| -> (usize, usize) {
-        let mut terrain =
-            crate::vanillagen::VanillaTerrain::new(&root.join("worldgen"), registry, &biomes, 1234)
-                .unwrap();
+        let mut terrain = crate::vanillagen::VanillaTerrain::new(terrain_resources, 1234).unwrap();
         if signs {
             terrain.add_mod_signs(&facts);
         }

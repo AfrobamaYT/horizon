@@ -6,62 +6,7 @@ use crate::{
     items::{ItemInfo, ItemStack},
 };
 use horizon_world::nbt::Tag;
-
-/// The `minecraft:tooltip_display` component applied by `ItemStack` while it
-/// builds a hover tooltip.
-pub struct TooltipDisplay<'a> {
-    component: Option<&'a Tag>,
-    ominous_banner: bool,
-}
-
-impl<'a> TooltipDisplay<'a> {
-    pub fn for_stack(stack: &'a ItemStack) -> Self {
-        Self {
-            component: stack
-                .data()
-                .and_then(|data| data.other("minecraft:tooltip_display")),
-            ominous_banner: stack.data().is_some_and(|data| data.ominous_banner),
-        }
-    }
-
-    fn hides_tooltip(&self) -> bool {
-        matches!(
-            self.component.and_then(|display| display.get("hide_tooltip")),
-            Some(Tag::Byte(value)) if *value != 0
-        )
-    }
-
-    /// `ItemStack.getTooltipLines`: `hide_tooltip` suppresses the name unless
-    /// the tooltip flag is creative.
-    pub fn name_visible(&self, creative: bool) -> bool {
-        creative || !self.hides_tooltip()
-    }
-
-    /// `TooltipDisplay.shows`: whether details for a data component are shown.
-    pub fn shows(&self, component: &str) -> bool {
-        if self.hides_tooltip() {
-            return false;
-        }
-        // `item_data::decode_components` models the raid captain banner's
-        // default hidden pattern tooltip as `ominous_banner` instead of
-        // retaining its redundant `tooltip_display` component.
-        if self.ominous_banner
-            && self.component.is_none()
-            && component == "minecraft:banner_patterns"
-        {
-            return false;
-        }
-        let Some(Tag::List(hidden)) = self
-            .component
-            .and_then(|display| display.get("hidden_components"))
-        else {
-            return true;
-        };
-        !hidden.iter().any(|tag| {
-            matches!(tag, Tag::String(id) if id.0.iter().copied().eq(component.encode_utf16()))
-        })
-    }
-}
+pub use mod_api::item_tooltip::TooltipDisplay;
 
 /// `EquipmentSlotGroup` in declaration order, the order tooltips list them in.
 const SLOT_GROUPS: [&str; 11] = [
@@ -1540,7 +1485,9 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        let enchantments = crate::enchant::Enchantments::load(&root);
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let enchantments = crate::enchant::Enchantments::load(&root, &defaults);
         std::fs::remove_dir_all(&root).unwrap();
         let translate = |key: &str| enchantments.translate(key).map(str::to_owned);
         let mut rocket = ItemStack::new("minecraft:firework_rocket", 1);
@@ -1622,7 +1569,9 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        let enchantments = crate::enchant::Enchantments::load(&root);
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let enchantments = crate::enchant::Enchantments::load(&root, &defaults);
         std::fs::remove_dir_all(&root).unwrap();
         let lang = |key: &str| enchantments.translate(key).map(str::to_owned);
         let green = rgba(0, 170, 0, 255);
@@ -1659,8 +1608,9 @@ mod tests {
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
         );
-        let items = crate::items::Items::catalog(&root, &PackOverlay::NONE).unwrap();
-        let enchantments = crate::enchant::Enchantments::load(&root);
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = crate::items::Items::catalog(&root, &PackOverlay::NONE, &defaults).unwrap();
+        let enchantments = crate::enchant::Enchantments::load(&root, &defaults);
         let translate = |key: &str| enchantments.translate(key).map(str::to_owned);
         for (item, expected) in [
             (

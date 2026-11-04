@@ -5,8 +5,8 @@
 //! stale handle or on a client.
 use super::entity::{Entity as _, EntityHandle, with_entity, with_entity_mut};
 use super::{Game, commands::Target};
-use horizon_client::mod_api::EntityRef;
 use horizon_core::geometry::{Aabb, Axis, Vec3};
+use mod_api::EntityRef;
 
 fn corners(b: Aabb) -> [[f64; 3]; 2] {
     let axes = [Axis::X, Axis::Y, Axis::Z];

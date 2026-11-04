@@ -1059,7 +1059,12 @@ mod tests {
         if !root.join("entity-models.json").exists() {
             return;
         }
-        let renderer = ItemRenderer::load(&root).unwrap();
+        let data = crate::test_resources::item_data(
+            &root,
+            horizon_world::native_load_context::DataLoadOrigin::ClientPreload,
+        )
+        .unwrap();
+        let renderer = ItemRenderer::load(&root, &data).unwrap();
         let tinted: Vec<i32> = super::layer_state(&renderer, "minecraft:grass_block")
             .layers
             .iter()

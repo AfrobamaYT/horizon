@@ -1,18 +1,15 @@
 //! AI goals of native mod mob handles.
 use super::{Game, commands::Target};
-use horizon_client::{
-    mobs::{
-        self, Species,
-        goals::{
-            Avoid, AvoidEntity, BreathAir, Breed, ClimbOnTopOfPowderSnow, Cx, EatBlock, FleeSun,
-            Float, FollowMob, FollowParent, Goal, HurtByTarget, LeapAtTarget, LookAtPlayer,
-            MeleeAttack, NearestTarget, Panic, Prey, RandomLookAround, RestrictSun, Stroll, Tempt,
-            TryFindWater,
-        },
-        nav::NavKind,
+use horizon_client::mobs::{
+    self, Species,
+    goals::{
+        Avoid, AvoidEntity, BreathAir, Breed, ClimbOnTopOfPowderSnow, Cx, EatBlock, FleeSun, Float,
+        FollowMob, FollowParent, Goal, HurtByTarget, LeapAtTarget, LookAtPlayer, MeleeAttack,
+        NearestTarget, Panic, Prey, RandomLookAround, RestrictSun, Stroll, Tempt, TryFindWater,
     },
-    mod_api::{MobRef, NativeGoal, NativeMobFilter, NativeMobGoalEntry},
+    nav::NavKind,
 };
+use mod_api::{MobRef, NativeGoal, NativeMobFilter, NativeMobGoalEntry};
 
 /// The goal's kind id ([`NativeGoal::id`]) of a registered goal, by its
 /// internal name: the plain vanilla kinds map to their snake_case id, and a
@@ -365,6 +362,7 @@ impl Game<'_> {
                 let what = match what {
                     NativeMobFilter::Player => Avoid::Player,
                     NativeMobFilter::Species(ids) => Avoid::Species(self.species_list(ids)?),
+                    _ => unreachable!("&NativeMobFilter: unhandled variant"),
                 };
                 Some(Box::new(AvoidEntity::new(what, *max_dist, *walk, *sprint)))
             }
@@ -428,6 +426,7 @@ impl Game<'_> {
                 let prey = match prey {
                     NativeMobFilter::Player => Prey::Player,
                     NativeMobFilter::Species(ids) => Prey::Species(self.species_list(ids)?),
+                    _ => unreachable!("&NativeMobFilter: unhandled variant"),
                 };
                 let mut g = NearestTarget::new(prey, *must_see);
                 g.must_reach = *must_reach;
@@ -439,6 +438,7 @@ impl Game<'_> {
                 g.alert = *alert;
                 Some(Box::new(g))
             }
+            _ => unreachable!("&NativeGoal: unhandled variant"),
         }
     }
 
@@ -472,12 +472,9 @@ fn namespaced(id: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
-    use horizon_client::{
-        chunk::Chunk,
-        mobs::Mob,
-        mod_api::{EntityRef, MobRef, NativeGoal, NativeMobFilter, NativeWorldEpoch},
-    };
+    use horizon_client::{chunk::Chunk, mobs::Mob};
     use horizon_core::geometry::Vec3;
+    use mod_api::{EntityRef, MobRef, NativeGoal, NativeMobFilter, NativeWorldEpoch};
     use std::sync::Arc;
 
     /// A mob of `kind` in the game's list, its species goals registered by

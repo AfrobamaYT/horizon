@@ -2579,7 +2579,12 @@ fn axolotl_action(m: &mut Mob, cx: &mut Bx, action: AxolotlAction, until: &mut i
                             q[1].floor() as i32,
                             q[2].floor() as i32,
                         );
-                        if cx.w.data.state(state).flags & super::data::WATER != 0 || count >= 10 {
+                        if cx
+                            .w
+                            .data
+                            .pathfindable(state, super::data::PathComputationType::Water)
+                            || count >= 10
+                        {
                             break;
                         }
                         count += 1;

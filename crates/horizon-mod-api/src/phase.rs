@@ -1,4 +1,5 @@
-//! Restricted views for bootstrap registration.
+//! Restricted views for registration and data loading.
+pub use horizon_world::native_load_context::DataLoadOrigin;
 use std::sync::OnceLock;
 
 /// Whether a package contains compiled code or content alone.
@@ -45,13 +46,13 @@ impl PackageInfo {
 
 static PACKAGES: OnceLock<Vec<PackageInfo>> = OnceLock::new();
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 thread_local! {
     static TEST_PACKAGES: std::cell::Cell<Option<&'static [PackageInfo]>> = const { std::cell::Cell::new(None) };
 }
 
-#[cfg(test)]
-pub(crate) fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
+#[cfg(any(test, feature = "testing"))]
+pub fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
     let packages: Vec<_> = ids
         .iter()
         .map(|id| PackageInfo {
@@ -92,7 +93,7 @@ fn inventory(
     packages
 }
 
-pub(crate) fn install_packages(
+pub fn install_packages(
     native: &[horizon_mods::packages::AdjacentManifest],
     content: &[horizon_mods::selection::SelectedPackage],
 ) {
@@ -109,7 +110,7 @@ pub struct LoadedMods<'a> {
 
 impl LoadedMods<'_> {
     pub(crate) fn new() -> Self {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         if let Some(entries) = TEST_PACKAGES.get() {
             return Self { entries };
         }
@@ -138,18 +139,18 @@ impl LoadedMods<'_> {
 /// no world, handle constructor, transaction or game Host at this point.
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::{Host, RegistrationContext};
+/// use mod_api::{Host, RegistrationContext};
 /// fn game(_: &dyn Host) {}
 /// fn registration(context: &RegistrationContext<'_>) { game(context); }
 /// ```
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::{Host, RegistrationContext};
+/// use mod_api::{Host, RegistrationContext};
 /// fn registration(context: &RegistrationContext<'_>) { let _ = Host::entity(context, 1); }
 /// ```
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::{HostTransaction, RegistrationContext};
+/// use mod_api::{HostTransaction, RegistrationContext};
 /// fn registration(context: &mut RegistrationContext<'_>) {
 ///     let _: Result<(), ()> = context.transaction(|_, _| Ok(()));
 /// }
@@ -166,6 +167,60 @@ impl RegistrationContext<'_> {
     }
 
     /// The loaded-mod view, independent of this phase's event or registrar.
+    pub fn mods(&self) -> &LoadedMods<'_> {
+        &self.mods
+    }
+}
+
+/// A data load's read-only view. The owning loader supplies its origin and
+/// metadata; reading already-loaded data never creates this context.
+///
+/// ```compile_fail
+/// use mod_api::{DataLoadContext, Host};
+/// fn game(_: &dyn Host) {}
+/// fn load(context: &DataLoadContext<'_>) { game(context); }
+/// ```
+///
+/// ```compile_fail
+/// use mod_api::{DataLoadContext, Host};
+/// fn load(context: &DataLoadContext<'_>) { let _ = Host::entity(context, 1); }
+/// ```
+///
+/// ```compile_fail
+/// use mod_api::{DataLoadContext, HostTransaction};
+/// fn load(context: &mut DataLoadContext<'_>) {
+///     let _: Result<(), ()> = context.transaction(|_, _| Ok(()));
+/// }
+/// ```
+pub struct DataLoadContext<'a> {
+    source: &'a horizon_world::native_load_context::LoadContext,
+    mods: LoadedMods<'a>,
+}
+
+impl<'a> DataLoadContext<'a> {
+    pub(crate) fn new(source: &'a horizon_world::native_load_context::LoadContext) -> Self {
+        Self {
+            source,
+            mods: LoadedMods::new(),
+        }
+    }
+
+    /// The phase selected at the owning load boundary.
+    pub fn origin(&self) -> DataLoadOrigin {
+        self.source.origin()
+    }
+
+    /// Registry names in ID order, from this resource generation's snapshot.
+    pub fn registry(&self, name: &str) -> Option<&[String]> {
+        self.source.registry(name)
+    }
+
+    /// Read a mod's setting without creating or writing any files.
+    pub fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
+        self.source.setting(mod_id, key)
+    }
+
+    /// The same loaded-mod view available during registration.
     pub fn mods(&self) -> &LoadedMods<'_> {
         &self.mods
     }
