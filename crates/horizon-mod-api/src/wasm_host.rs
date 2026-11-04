@@ -242,14 +242,6 @@ pub(crate) mod frame {
             _ => Err(missing("level ticks host")),
         }
     }
-    pub(crate) fn level_random_host_mut() -> wasmtime::Result<&'static mut dyn LevelRandomHost> {
-        let frame = current()?;
-        match (frame.level_random_host, frame.level_write_host) {
-            (Some(h), _) => Ok(unsafe { &mut *h }),
-            (None, Some(h)) => Ok(unsafe { &mut *h }),
-            _ => Err(missing("level random host")),
-        }
-    }
     pub(crate) fn level_host() -> wasmtime::Result<&'static dyn LevelHost> {
         let frame = current()?;
         if let Some(h) = frame.level_host {
@@ -352,11 +344,6 @@ impl Keep {
     pub(crate) fn val<T>(&self, value: T) -> &T {
         // SAFETY: as in `str`.
         unsafe { &*self.hold(value) }
-    }
-    #[allow(clippy::mut_from_ref)]
-    pub(crate) fn val_mut<T>(&self, value: T) -> &mut T {
-        // SAFETY: as in `str`.
-        unsafe { &mut *self.hold(value) }
     }
 }
 
@@ -571,6 +558,8 @@ pub fn instantiate(
     Ok(entries)
 }
 
+// Both sides expand the same codecs; each uses only its own direction of some of them.
+#[allow(dead_code)]
 mod codec {
     use super::Refused;
     codecs!(super::glue::horizon::mod_api::types);
