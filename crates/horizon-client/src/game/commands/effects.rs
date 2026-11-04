@@ -70,17 +70,37 @@ impl Game<'_> {
                     self.for_player(t, |g| g.add_player_effect(instance))
                         .unwrap_or(false)
                 }
-                Target::Mob(id) => match self.mobs.iter_mut().find(|m| m.id == id) {
-                    Some(m) => {
-                        let name = namespaced(effect.id);
-                        let new = !m.has_effect(name);
-                        // `new MobEffectInstance(effect, duration, amplifier, false, particles)`.
-                        m.add_effect_with(name, duration, amplifier, false, particles);
-                        self.mod_effect_added(name, Some(id as i32), amplifier, new);
-                        true
+                Target::Mob(id) => {
+                    let Some(kind) = self
+                        .mobs
+                        .iter()
+                        .find(|m| m.id == id && !m.removed)
+                        .map(|m| m.kind.id.clone())
+                    else {
+                        tracker.track(t, false);
+                        continue;
+                    };
+                    let name = namespaced(effect.id);
+                    // `LivingEntity.addEffect` refuses what the mob cannot
+                    // be affected by.
+                    if !self.can_be_affected(Some(id as i32), &kind, name) {
+                        false
+                    } else {
+                        let applied = self.mobs.iter_mut().find(|m| m.id == id).map(|m| {
+                            let new = !m.has_effect(name);
+                            // `new MobEffectInstance(effect, duration, amplifier, false, particles)`.
+                            m.add_effect_with(name, duration, amplifier, false, particles);
+                            new
+                        });
+                        match applied {
+                            Some(new) => {
+                                self.mod_effect_added(name, Some(id as i32), amplifier, new);
+                                true
+                            }
+                            None => false,
+                        }
                     }
-                    None => false,
-                },
+                }
                 _ => continue,
             };
             tracker.track(t, changed);

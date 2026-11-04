@@ -9,7 +9,6 @@
 //! on a client, for the local player, from the effects the server sent it.
 use super::Game;
 use super::commands::Target;
-use super::potions::mob_can_be_affected;
 use horizon_client::brewing;
 use horizon_client::effects::{EffectInstance, PlayerEffects};
 use horizon_client::mobs::Mob;
@@ -116,8 +115,9 @@ impl Game<'_> {
                 let kind = m.kind.id.clone();
                 let name = brewing::namespaced(def.id);
                 let new = !m.has_effect(name);
-                if !mob_can_be_affected(&self.res.stations().enchantments.entity_tags, &kind, name)
-                {
+                // `LivingEntity.addEffect` refuses what the mob cannot be
+                // affected by, the `mob_effect_applicable` hook asked first.
+                if !self.can_be_affected(Some(id as i32), &kind, name) {
                     return false;
                 }
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
@@ -220,11 +220,31 @@ impl Game<'_> {
                 .for_player(t, |g| g.remove_player_effects(Some(def.id)))
                 .unwrap_or(false),
             Some(Target::Mob(id)) => {
-                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
+                let Some(name_amp) = self
+                    .mobs
+                    .iter()
+                    .find(|m| m.id == id && !m.removed)
+                    .and_then(|m| {
+                        m.extra
+                            .effects
+                            .iter()
+                            .find(|e| e.0 == brewing::namespaced(def.id))
+                            .map(|e| (e.0, e.2))
+                    })
+                else {
                     return false;
                 };
-                let name = brewing::namespaced(def.id);
-                m.retain_effects(|e| e.0 != name)
+                let name = name_amp.0;
+                // `MobEffectEvent.Remove`: refusing the removal keeps it.
+                let mut cancel = false;
+                self.native_mob_effect_remove(Some(id as i32), name, name_amp.1, &mut cancel);
+                if cancel {
+                    return false;
+                }
+                self.mobs
+                    .iter_mut()
+                    .find(|m| m.id == id)
+                    .is_some_and(|m| m.retain_effects(|e| e.0 != name))
             }
             _ => false,
         }
@@ -240,10 +260,32 @@ impl Game<'_> {
                 .for_player(t, |g| g.remove_player_effects(None))
                 .unwrap_or(false),
             Some(Target::Mob(id)) => {
-                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
-                    return false;
-                };
-                m.retain_effects(|_| false)
+                let held: Vec<(&'static str, i32)> = self
+                    .mobs
+                    .iter()
+                    .find(|m| m.id == id && !m.removed)
+                    .map(|m| m.extra.effects.iter().map(|e| (e.0, e.2)).collect())
+                    .unwrap_or_default();
+                // `MobEffectEvent.Remove` per effect: a refused removal
+                // keeps that effect.
+                let keep: Vec<&'static str> = held
+                    .iter()
+                    .filter(|(name, amplifier)| {
+                        let mut cancel = false;
+                        self.native_mob_effect_remove(
+                            Some(id as i32),
+                            name,
+                            *amplifier,
+                            &mut cancel,
+                        );
+                        cancel
+                    })
+                    .map(|(name, _)| *name)
+                    .collect();
+                self.mobs
+                    .iter_mut()
+                    .find(|m| m.id == id)
+                    .is_some_and(|m| m.retain_effects(|e| !keep.contains(&e.0)))
             }
             _ => false,
         }

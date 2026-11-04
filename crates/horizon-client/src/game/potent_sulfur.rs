@@ -4,10 +4,7 @@
 //! its next change of state and push the entities an eruption throws up. The
 //! client's draw the gas clouds and the eruption's plume, play its sound and
 //! push the local player, who moves on its own client and not on the server.
-use super::{
-    Game,
-    potions::{mob_can_be_affected, mob_effect_id},
-};
+use super::{Game, potions::mob_effect_id};
 use horizon_client::{
     Result,
     block_entities::Pos,
@@ -83,15 +80,10 @@ fn launch_area(pos: Pos, height: i32) -> Aabb {
     Aabb::new(Vec3::new(x, min_y, z), Vec3::new(x + 1.0, max_y, z + 1.0))
 }
 
-/// `PotentSulfurBlockEntity.applyNauseaEffect` on a mob, if it can be
-/// affected.
-fn apply_nausea_effect_to_mob(
-    mob: &mut Mob,
-    tags: &std::collections::HashMap<String, std::collections::HashSet<String>>,
-) {
-    if mob_can_be_affected(tags, &mob.kind.id, "nausea")
-        && let Some(nausea) = mob_effect_id("nausea")
-    {
+/// `PotentSulfurBlockEntity.applyNauseaEffect` on a mob that passed the
+/// `canBeAffected` ask.
+fn apply_nausea_effect_to_mob(mob: &mut Mob) {
+    if let Some(nausea) = mob_effect_id("nausea") {
         mob.add_effect(nausea, EFFECT_DURATION_IN_TICKS, 0);
     }
 }
@@ -178,15 +170,22 @@ impl Game<'_> {
             collision: self.collision,
             player: None,
         };
-        let tags = &self.res.stations().enchantments.entity_tags;
-        for mob in self
+        let reached: Vec<(u32, String)> = self
             .mobs
-            .iter_mut()
+            .iter()
             .filter(|m| m.alive() && m.bounds().intersects(area))
-        {
-            let eye = [mob.position.x, mob.eye_y(), mob.position.z];
-            if can_be_reached_by_noxious_gas(&level, source, eye) {
-                apply_nausea_effect_to_mob(mob, tags);
+            .filter_map(|m| {
+                let eye = [m.position.x, m.eye_y(), m.position.z];
+                can_be_reached_by_noxious_gas(&level, source, eye)
+                    .then(|| (m.id, m.kind.id.clone()))
+            })
+            .collect();
+        for (mob_id, kind) in reached {
+            // `applyNauseaEffect` asks `canBeAffected` before it adds.
+            if self.can_be_affected(Some(mob_id as i32), &kind, "nausea")
+                && let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob_id)
+            {
+                apply_nausea_effect_to_mob(m);
             }
         }
     }

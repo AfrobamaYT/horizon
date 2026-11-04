@@ -307,6 +307,13 @@ mod tests {
             #[derive(Clone, Copy)]
             pub enum KeyAction {}
             pub struct NativeArmorHurt;
+            #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+            pub enum EffectApplicable {
+                #[default]
+                Default,
+                Allow,
+                Deny,
+            }
             pub mod menu {
                 pub struct MenuButtonContext {
                     pub player: u128,

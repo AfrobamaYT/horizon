@@ -7923,6 +7923,50 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_mob_effect_added(self, effect, entity, amplifier);
     }
+    /// NeoForge's `MobEffectEvent.Applicable`, vanilla's
+    /// `LivingEntity.canBeAffected`: asked wherever the game checks whether
+    /// the effect `effect` can land on `entity` (as in
+    /// `native_apply_effect_tick`), of kind `kind`, before `addEffect`
+    /// accepts it. `applicable` starts `Default`: leave it and the vanilla
+    /// tag check decides; `Allow` or `Deny` overrides it. Server-side.
+    pub(super) fn native_mob_effect_applicable(
+        &mut self,
+        entity: Option<i32>,
+        kind: &str,
+        effect: &str,
+        applicable: &mut Option<mod_api::EffectApplicable>,
+    ) {
+        mod_api::dispatch_mob_effect_applicable(self, entity, kind, effect, applicable);
+    }
+    /// NeoForge's `MobEffectEvent.Expired`, vanilla `LivingEntity.tickEffects`:
+    /// the effect `effect` (`minecraft:speed`, amplifier `amplifier`) on
+    /// `entity` counted down to nothing and is about to leave. The first mod
+    /// to answer decides: `keep` true refuses the expiry and the effect stays,
+    /// kept at no ticks and asking again next tick. It runs inside the
+    /// entity's tick, so the game is read-only there. Server-side.
+    pub(super) fn native_mob_effect_expired(
+        &self,
+        entity: Option<i32>,
+        effect: &str,
+        amplifier: i32,
+        keep: &mut Option<bool>,
+    ) {
+        mod_api::dispatch_mob_effect_expired(self, entity, effect, amplifier, keep);
+    }
+    /// NeoForge's `MobEffectEvent.Remove`, vanilla `LivingEntity.removeEffect`:
+    /// the effect `effect` on `entity` is about to be removed by any path
+    /// that walks the vanilla funnel: a command or milk for the player, a
+    /// cure for a zombie villager, a mod's removal helper. Cancel and the
+    /// effect stays. Server-side.
+    pub(super) fn native_mob_effect_remove(
+        &mut self,
+        entity: Option<i32>,
+        effect: &str,
+        amplifier: i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_mob_effect_remove(self, entity, effect, amplifier, cancel);
+    }
     /// NeoForge's `LivingShieldBlockEvent`: entity `entity` of type `kind`
     /// (`minecraft:player`, `minecraft:zombie`) is hit for `damage` from `source` (its
     /// type and entities, as `native_living_incoming_damage` names them), and

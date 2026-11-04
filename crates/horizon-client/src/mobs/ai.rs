@@ -2855,7 +2855,18 @@ pub(crate) fn tick_effects(
         }
         i += 1;
     }
-    m.retain_effects(|e| e.1 > 0 || e.1 == -1);
+    let mob_id = m.id;
+    m.retain_effects(|e| {
+        if e.1 > 0 || e.1 == -1 {
+            return true;
+        }
+        // `MobEffectEvent.Expired`: an answered `keep` true keeps the effect.
+        let mut keep = None;
+        if let Some(mods) = mods {
+            mods.effect_expired(mob_id, e.0, e.2, &mut keep);
+        }
+        keep == Some(true)
+    });
     if m.effects_dirty {
         let invisible = m.has_effect("minecraft:invisibility");
         m.needs_sync |= m.invisible != invisible;

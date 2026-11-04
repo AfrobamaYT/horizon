@@ -28,7 +28,7 @@ use horizon_core::{
     geometry::{Aabb, Axis, Direction, Vec3},
     random::{LegacyRandom, RandomSource},
 };
-use mod_api::{EffectTickChange, EntityRef, LivingRef, NativePlayerFood};
+use mod_api::{EffectApplicable, EffectTickChange, EntityRef, LivingRef, NativePlayerFood};
 
 /// A thrown splash or lingering potion in flight.
 #[derive(Clone, Debug)]
@@ -818,7 +818,6 @@ impl Game<'_> {
                     .get("minecraft:inverted_healing_and_harm")
                     .is_some_and(|t| t.contains(&self.mobs[i].kind.id));
                 for (effect, duration, amp) in effects {
-                    let tags = &self.res.stations().enchantments.entity_tags;
                     // A mod's `onEffectAdded` may have changed the mobs.
                     let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
                         return;
@@ -838,9 +837,16 @@ impl Game<'_> {
                             }
                         }
                         _ => {
-                            if mob_can_be_affected(tags, &m.kind.id, effect)
+                            // `LivingEntity.addEffect` refuses what the mob
+                            // cannot be affected by: the borrow ends before
+                            // the hook asks, and the mob is found again.
+                            let kind = m.kind.id.clone();
+                            if self.can_be_affected(Some(id as i32), &kind, effect)
                                 && let Some(name) = mob_effect_id(effect)
                             {
+                                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
+                                    return;
+                                };
                                 let new = !m.has_effect(name);
                                 m.add_effect(name, duration, amp);
                                 self.mod_effect_added(name, Some(id as i32), amp, new);
@@ -974,6 +980,30 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|p| p.health.absorption() <= 0.0);
         let mut effects = std::mem::take(&mut self.potions.effects);
+        // `MobEffectEvent.Expired`: ask before the pass, for the effects at
+        // zero ticks and the ones reaching it in this pass (the last tick of
+        // their countdown); a refused expiry keeps the effect at no ticks,
+        // asking again next tick. Only on the server, where the effects tick.
+        let keep_expired: Vec<&'static str> = if self.remote.is_none() {
+            effects
+                .list
+                .iter()
+                .filter(|e| matches!(e.duration, 0 | 1))
+                .filter(|e| {
+                    let mut keep = None;
+                    self.native_mob_effect_expired(
+                        None,
+                        mob_effect_id(e.id).unwrap_or(e.id),
+                        e.amplifier,
+                        &mut keep,
+                    );
+                    keep == Some(true)
+                })
+                .map(|e| e.id)
+                .collect()
+        } else {
+            Vec::new()
+        };
         let (actions, raid_omen_added) = effects.tick_with(
             &mut |e, t, actions, dispatch| {
                 for action in actions.drain(..) {
@@ -1033,6 +1063,7 @@ impl Game<'_> {
                 }
             },
             absorption_empty,
+            &keep_expired,
         );
         self.potions.effects = effects;
         if raid_omen_added {
@@ -1072,7 +1103,33 @@ impl Game<'_> {
         self.apply_effect_status();
     }
     /// Add an active effect to the player and update attributes / absorption.
+    /// `LivingEntity.canBeAffected` with the `mob_effect_applicable` hook:
+    /// the event fires first, for every effect, and `Allow` or `Deny`
+    /// decides; `Default` falls back to the vanilla tag check. `entity` is a
+    /// mob's `Entity.getId`, None for the player.
+    pub(super) fn can_be_affected(
+        &mut self,
+        entity: Option<i32>,
+        kind: &str,
+        effect: &str,
+    ) -> bool {
+        let mut answered = None;
+        self.native_mob_effect_applicable(entity, kind, effect, &mut answered);
+        match answered {
+            Some(EffectApplicable::Allow) => true,
+            Some(EffectApplicable::Deny) => false,
+            // `Default`, an unanswered hook, or a future variant defers to
+            // the vanilla tag check.
+            _ => mob_can_be_affected(&self.res.stations().enchantments.entity_tags, kind, effect),
+        }
+    }
     pub(super) fn add_player_effect(&mut self, effect: EffectInstance) -> bool {
+        // `LivingEntity.addEffect` refuses what cannot affect the entity;
+        // players pass the tag check, but the `mob_effect_applicable` hook
+        // is asked for every add.
+        if !self.can_be_affected(None, "minecraft:player", effect.id) {
+            return false;
+        }
         let id = effect.id;
         let amp = effect.amplifier;
         let new = self.potions.effects.get(id).is_none();
@@ -1091,10 +1148,30 @@ impl Game<'_> {
     /// Removes one effect, or all effects, and refreshes the player's derived state.
     pub(super) fn remove_player_effects(&mut self, effect: Option<&str>) -> bool {
         let before = self.potions.effects.list.len();
-        self.potions
-            .effects
-            .list
-            .retain(|e| effect.is_some_and(|id| e.id != id));
+        let mut index = 0;
+        while index < self.potions.effects.list.len() {
+            let current = &self.potions.effects.list[index];
+            // The one being removed, or all of them when `effect` is None.
+            if effect.is_some_and(|id| current.id != id) {
+                index += 1;
+                continue;
+            }
+            let (id, amplifier) = (current.id, current.amplifier);
+            // `MobEffectEvent.Remove`: refusing the removal keeps it, and the
+            // next one is asked with this one still in place, as in vanilla.
+            let mut cancel = false;
+            self.native_mob_effect_remove(
+                None,
+                mob_effect_id(id).unwrap_or(id),
+                amplifier,
+                &mut cancel,
+            );
+            if cancel {
+                index += 1;
+            } else {
+                self.potions.effects.list.remove(index);
+            }
+        }
         let changed = self.potions.effects.list.len() != before;
         if changed {
             self.apply_effect_status();
@@ -1436,18 +1513,22 @@ impl Game<'_> {
             inside.push((Victim::Player(p.who), p.position.x, p.position.z));
         }
         let effects = potion.effects.clone();
-        let tags = &self.stations().enchantments.entity_tags;
         // Only mobs that at least one of the cloud's effects can affect are
         // taken (`allEffects.stream().anyMatch(entity::canBeAffected)`), so
         // the others neither become victims nor use up its radius.
-        for m in self.mobs.iter().filter(|m| {
-            m.alive()
-                && m.bounds().intersects(area)
-                && effects
-                    .iter()
-                    .any(|(id, ..)| mob_can_be_affected(tags, &m.kind.id, id))
-        }) {
-            inside.push((Victim::Mob(m.id), m.position.x, m.position.z));
+        let candidates: Vec<(u32, String, f64, f64)> = self
+            .mobs
+            .iter()
+            .filter(|m| m.alive() && m.bounds().intersects(area))
+            .map(|m| (m.id, m.kind.id.clone(), m.position.x, m.position.z))
+            .collect();
+        for (mob_id, kind, x, z) in candidates {
+            let affected = effects
+                .iter()
+                .any(|(id, ..)| self.can_be_affected(Some(mob_id as i32), &kind, id));
+            if affected {
+                inside.push((Victim::Mob(mob_id), x, z));
+            }
         }
         for (victim, x, z) in inside {
             let (dx, dz) = (x - c.at[0], z - c.at[2]);
@@ -1557,7 +1638,6 @@ impl Game<'_> {
                     .get("minecraft:inverted_healing_and_harm")
                     .is_some_and(|t| t.contains(&self.mobs[i].kind.id));
                 for (id, duration, amp) in effects {
-                    let tags = &world_stations!(self).enchantments.entity_tags;
                     // A mod's `onEffectAdded` may have changed the mobs.
                     let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) else {
                         return;
@@ -1575,10 +1655,15 @@ impl Game<'_> {
                         }
                         _ => {
                             // `LivingEntity.addEffect` refuses what the mob
-                            // cannot be affected by.
-                            if mob_can_be_affected(tags, &m.kind.id, id)
+                            // cannot be affected by: the borrow ends before
+                            // the hook asks, and the mob is found again.
+                            let kind = m.kind.id.clone();
+                            if self.can_be_affected(Some(mob as i32), &kind, id)
                                 && let Some(name) = mob_effect_id(id)
                             {
+                                let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) else {
+                                    return;
+                                };
                                 let new = !m.has_effect(name);
                                 m.add_effect_with(
                                     name,
@@ -2100,6 +2185,15 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
             }
         }
         keep
+    }
+    fn effect_expired(
+        &self,
+        mob: u32,
+        effect: &'static str,
+        amplifier: i32,
+        keep: &mut Option<bool>,
+    ) {
+        self.native_mob_effect_expired(Some(mob as i32), effect, amplifier, keep);
     }
 }
 
