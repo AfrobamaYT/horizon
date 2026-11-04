@@ -488,14 +488,6 @@
       }
     },
     {
-      "name": "hud", "doc": "The HUD (not drawn under F1), after the minimap: place a box with\n`corners.place` (boxes stack away from their edge) and draw it with\n`native_fill` and `native_text`. Skip a corner `native_corner_shown`\nsays is taken.", "side": "client",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_hud",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "command", "doc": "A command typed or clicked in chat, without its slash, before the\nserver and Horizon's commands see it: set `ran` when the mod ran it.", "side": "both",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_command",

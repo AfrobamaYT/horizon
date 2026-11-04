@@ -259,3 +259,27 @@ fn render_frame_pre_and_post_hear_their_own_moment_with_the_frames_time() {
     let frame = Duration::from_millis(16);
     assert_eq!(*heard.lock().unwrap(), [("pre", frame), ("post", frame)]);
 }
+
+#[test]
+fn render_gui_pre_cancel_reaches_the_game() {
+    use std::sync::Mutex;
+    struct TestHost;
+    impl Host for TestHost {}
+    impl ClientHost for TestHost {}
+    struct Gui(Arc<Mutex<Vec<&'static str>>>, bool);
+    #[mod_api::__subscriptions]
+    impl Hooks for Gui {
+        fn render_gui_pre(&self, _: &dyn ClientHost, _: &mut RenderGuiPreEvent) -> Flow {
+            self.0.lock().unwrap().push("pre");
+            if self.1 { Flow::Cancel } else { Flow::Continue }
+        }
+    }
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let mut canceled = false;
+    testing::with_mods(
+        vec![ModEntry::new("gui", Box::new(Gui(heard.clone(), true)))].into(),
+        || dispatch_render_gui_pre(&TestHost, &mut canceled),
+    );
+    assert!(canceled, "a mod's cancel reaches the game");
+    assert_eq!(*heard.lock().unwrap(), ["pre"]);
+}
