@@ -321,16 +321,8 @@ impl Game<'_> {
             m.extra.owner = None;
             let id = m.id;
             self.play_allay_sound("minecraft:entity.allay.item_taken", at, id);
-            if carried > 0 {
-                self.spawn_item(
-                    ItemStack {
-                        count: carried as u32,
-                        ..held.clone()
-                    },
-                    at,
-                    [0.0, 0.2, 0.0],
-                    40,
-                );
+            if let Some(stack) = carried {
+                self.spawn_item(stack, at, [0.0, 0.2, 0.0], 40);
             }
             if let Some(rest) = self.give(ItemStack { count: 1, ..held })
                 && let Some(eye) = self.eye_position()

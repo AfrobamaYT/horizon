@@ -1346,7 +1346,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                     .starts_with(native_mods::MISMATCH)
                 {
                     true => {
-                        format!("{e} They often still build: pass --allow-version-mismatch to try.")
+                        format!("{e} Run `cargo horizon-mod update` to rebuild them for this game.")
                     }
                     false => e,
                 })?;

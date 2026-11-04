@@ -462,27 +462,6 @@ mod tests {
     }
 
     /// A build from before pins were recorded that compiled another commit than its Nightly's
-    /// was pinned by a mod (the Mods page then reads which from the instance's mods); one on its
-    /// Nightly's commit, a release's, or a newer record's, says itself.
-    #[test]
-    fn an_older_build_off_its_nightlys_commit_was_pinned() {
-        let about = |base: &str, horizon: &str, base_horizon: Option<&str>| native_mods::About {
-            base: base.into(),
-            horizon: horizon.into(),
-            target: native_mods::Target::Client,
-            base_horizon: base_horizon.map(str::to_owned),
-            pinned_by: Vec::new(),
-            on_base: false,
-        };
-        let pin = "9d979caa48a3bb58203319b9ea044db58c38e0d8";
-        let own = "d91cab6000000000000000000000000000000000";
-        let nightly = "nightly-2026-11-01-d91cab6";
-        assert!(Build::of(about(nightly, pin, None)).pinned_unknown);
-        assert!(!Build::of(about(nightly, own, None)).pinned_unknown);
-        assert!(!Build::of(about("v0.2.93", pin, None)).pinned_unknown);
-        assert!(!Build::of(about(nightly, pin, Some(pin))).pinned_unknown);
-    }
-
     #[test]
     fn only_hmods_in_the_native_folder_are_native() {
         assert!(is_native_file("horizon-native-mods/veinminer.hmod"));

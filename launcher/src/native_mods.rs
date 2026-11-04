@@ -2650,109 +2650,9 @@ mod tests {
         assert!(installed_mods(&home).is_err(), "only Rust and TOML sources");
     }
 
-    #[test]
-    fn the_mods_of_one_build_pin_one_revision() {
-        let pinned = |id: &str, horizon: Option<&str>| {
-            let mut manifest =
-                horizon_mods::manifest::Manifest::parse(&project_manifest(id, "1", A, B)).unwrap();
-            manifest.native.as_mut().unwrap().horizon = horizon.unwrap_or_default().into();
-            Bundle {
-                manifest,
-                dir: PathBuf::new(),
-                injections: Vec::new(),
-            }
-        };
-        let never = || -> Result<String, String> { panic!("a pin wins") };
-        fn get(b: &Bundle) -> Option<&String> {
-            Some(&b.native().horizon).filter(|pin| !pin.is_empty())
-        }
-        let same = [
-            pinned("a", Some(A)),
-            pinned("b", None),
-            pinned("c", Some(A)),
-        ];
-        assert_eq!(agreed(&same, "Horizon", get, never).unwrap(), A);
-        let none = [pinned("a", None)];
-        assert_eq!(agreed(&none, "Horizon", get, || Ok(B.into())).unwrap(), B);
-        let split = [pinned("veinminer", Some(A)), pinned("minimap", Some(B))];
-        let err = agreed(&split, "Horizon", get, never).unwrap_err();
-        assert!(
-            err.contains("veinminer → aaaaaaa") && err.contains("minimap → bbbbbbb"),
-            "{err}"
-        );
-        let bad = [pinned("a", Some("nightly"))];
-        assert!(agreed(&bad, "Horizon", get, never).is_err());
-    }
-
     /// A player's report (11-04): Right-Click Crops 1.0.0 pins Nightly 2026-10-31's commit, so
-    /// every build of their instance compiled that commit, whatever Nightly or profile they
-    /// picked. The pin still chooses by default, and the build now says which mod chose it;
-    /// Rebuild on Horizon (`on_base`) compiles the picked version's own commit.
-    #[test]
-    #[test]
-    fn mods_made_for_different_revisions_build_on_the_newest() {
-        let pinned = |id: &str, horizon: &str, mixins: &str| Bundle {
-            manifest: horizon_mods::manifest::Manifest::parse(&project_manifest(
-                id, "1", horizon, mixins,
-            ))
-            .unwrap(),
-            dir: PathBuf::new(),
-            injections: Vec::new(),
-        };
-        let c = "c".repeat(40);
-        // a is the oldest commit, then b, then c.
-        let date = |r: &str| -> Result<String, String> {
-            Ok(match &r[..1] {
-                "a" => "2026-10-28T00:00:00Z",
-                "b" => "2026-10-29T00:00:00Z",
-                _ => "2026-10-30T00:00:00Z",
-            }
-            .into())
-        };
-        let never = || -> Result<String, String> { panic!("a pin wins") };
-        fn horizon(b: &Bundle) -> Option<&String> {
-            Some(&b.native().horizon)
-        }
-        fn mixins(b: &Bundle) -> Option<&String> {
-            Some(&b.native().mixins)
-        }
-        let split = [
-            pinned("veinminer", B, &c),
-            pinned("lookat", A, A),
-            pinned("zoom", B, &c),
-        ];
-        assert_eq!(
-            newest(&split, "Horizon", horizon, never, None, date).unwrap(),
-            B
-        );
-        // horizon-mixins: never older than a pin, and the launcher's own when it is newer.
-        assert_eq!(
-            newest(&split, "horizon-mixins", mixins, never, Some(B), date).unwrap(),
-            c
-        );
-        let older = [pinned("a", A, A), pinned("b", B, B)];
-        assert_eq!(
-            newest(&older, "horizon-mixins", mixins, never, Some(&c), date).unwrap(),
-            c
-        );
-        // One pin, or the same one everywhere: that pin, and no date is asked for.
-        let no_date = |_: &str| -> Result<String, String> { panic!("no date needed") };
-        let same = [pinned("a", A, A), pinned("b", A, A)];
-        assert_eq!(
-            newest(&same, "Horizon", horizon, never, None, no_date).unwrap(),
-            A
-        );
-        let offline = |_: &str| -> Result<String, String> { Err("offline".into()) };
-        let err = newest(&split, "Horizon", horizon, never, None, offline).unwrap_err();
-        assert!(err.contains("offline"), "{err}");
-        // What the player is shown: each mod made for another revision, and the build's.
-        assert_eq!(
-            mismatch(&split, B).unwrap(),
-            "lookat → aaaaaaa; the build uses bbbbbbb"
-        );
-        assert_eq!(mismatch(&same, A), None);
-    }
-
+    /// The commit-date cache (`dates.json`) is asked once per revision and kept for later
+    /// builds.
     #[test]
     fn a_commit_date_is_asked_once_and_kept() {
         let d = dir("commit-dates");
@@ -3030,14 +2930,17 @@ mod tests {
             about_in(&d)
         };
         assert_eq!(
-            record(None).target,
+            record(None).unwrap().target,
             Target::Client,
             "a build from before targets"
         );
-        assert_eq!(record(Some("client")).target, Target::Client);
-        assert_eq!(record(Some("server")).target, Target::Server);
-        assert_eq!(record(Some("anything-else")).target, Target::Client);
-        assert_eq!(record(None).horizon, A);
+        assert_eq!(record(Some("client")).unwrap().target, Target::Client);
+        assert_eq!(record(Some("server")).unwrap().target, Target::Server);
+        assert_eq!(
+            record(Some("anything-else")).unwrap().target,
+            Target::Client
+        );
+        assert_eq!(record(None).unwrap().horizon, A);
     }
 
     /// The export ([`build_server`]): a standalone runtime folder with the engine, resources
@@ -3189,8 +3092,6 @@ mod tests {
             "v0.0.0-not-installed",
             &folder,
             &output,
-            true,
-            false,
             Profile::Performance,
             false,
             |_| {},
@@ -3203,8 +3104,6 @@ mod tests {
             "v0.0.0-not-installed",
             &folder,
             &managed,
-            true,
-            false,
             Profile::Performance,
             false,
             |_| {},
@@ -3258,8 +3157,6 @@ mod tests {
             "v0.0.0-not-installed",
             &folder,
             &out.join("server"),
-            true,
-            false,
             Profile::Performance,
             false,
             |_| {},

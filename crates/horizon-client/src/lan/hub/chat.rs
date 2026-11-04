@@ -10,12 +10,6 @@ use horizon_protocol::{
 };
 use horizon_world::nbt::{JavaString, Tag};
 
-/// A player's chat message is about to be sent to everyone (after the secure-chat chain and the chat
-/// filter took it). A mod may cancel it, which drops it for everybody (the sender is not told, so push
-/// a line to `replies` to answer them), or only answer. It cannot change the text: a signed message
-/// would no longer verify. Once for each message a player sends, on a server. Commands are
-/// `native_player_command`. API 399.
-
 /// Now, in epoch milliseconds (Instant.now()).
 pub fn now_millis() -> i64 {
     std::time::SystemTime::now()

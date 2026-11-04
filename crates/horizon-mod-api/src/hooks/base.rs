@@ -4185,13 +4185,16 @@ pub trait Hooks {
     /// `special_price_diff`, `price_multiplier`, `xp`. The change stands: the
     /// next click and the offers sent to the player see it. Not asked for a
     /// trade window without a trader. The player's state is swapped in
-    /// (`native_acting_player`). Server-side.
+    /// (`native_acting_player`). Server-side. Version 2: was a listen hook
+    /// returning the offer read-only; now collects the live offer as `out`
+    /// (the moment upstream's separate `merchant_offer_traded` covered).
     #[hook(
         side = "server",
         contract = "collect",
         out = "offer",
         neoforge = "TradeWithVillagerEvent",
-        cancellable = false
+        cancellable = false,
+        version = 2
     )]
     fn trade_with_villager();
     /// A vault at `pos` changed to `state`. Its block state is updated.
