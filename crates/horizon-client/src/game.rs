@@ -5680,6 +5680,23 @@ impl Game<'_> {
                     data,
                     ..
                 } => self.trial_level_event(id, [pos.x, pos.y, pos.z], data),
+                // LevelEvent.SOUND_PORTAL_TRAVEL: LevelEventHandler.levelEvent
+                // plays SimpleSoundInstance.forLocalAmbience (ambient, no
+                // position). EndPortalBlock.entityInside travels through
+                // TeleportTransition.PLAY_PORTAL_SOUND, which sends 1032 to
+                // the traveling player. The packet's position is BlockPos.ZERO,
+                // so a positional play would not be heard; at None is the
+                // relative sound, and it is not captured for other players.
+                LevelEvent::LevelEvent { id: 1032, .. } => {
+                    let pitch = self.particles.level_random().next_float() * 0.4 + 0.8;
+                    self.audio.play_on(
+                        horizon_client::sound_engine::AMBIENT,
+                        "minecraft:block.portal.travel",
+                        None,
+                        0.25,
+                        pitch,
+                    );
+                }
                 LevelEvent::LevelEvent { id, pos, .. } => {
                     let c = Some([
                         f64::from(pos.x) + 0.5,
@@ -13332,7 +13349,7 @@ impl Game<'_> {
             return;
         };
         for (attribute, id) in std::mem::take(&mut self.applied_modifiers) {
-            let _ = player.set_modifier(&attribute, &id, 0.0, "add_value", false);
+            let _ = player.set_modifier_unclamped(&attribute, &id, 0.0, "add_value", false);
         }
         let slots = ["head", "chest", "legs", "feet"];
         let mut equipped: Vec<(Option<&ItemStack>, &str)> = self
@@ -13362,13 +13379,14 @@ impl Game<'_> {
                     continue;
                 }
                 if player
-                    .set_modifier(attribute, id, *amount, op, true)
+                    .set_modifier_unclamped(attribute, id, *amount, op, true)
                     .is_ok()
                 {
                     self.applied_modifiers.push((attribute.clone(), id.clone()));
                 }
             }
         }
+        let _ = player.clamp_health_to_max();
         self.apply_enchantment_attributes();
     }
     /// The armor hits among a tick's motion events (`Player.hurtArmor` from
@@ -14637,8 +14655,14 @@ impl Game<'_> {
         self.native_entity_shoot_bow(player, &name, projectile, power * 3.0);
         self.player_projectile_shot();
         let pitch = 1.0 / (self.world.random.next_float() * 0.4 + 1.2) + power * 0.5;
+        // BowItem.releaseUsing: `playSound(null, getX(), getY(), getZ(), ...)`, at
+        // the feet: an eye-height source a few cm from the listener pans hard.
+        let feet = self
+            .player
+            .as_ref()
+            .map_or(eye, |pl| [pl.position.x, pl.position.y, pl.position.z]);
         self.audio
-            .play("minecraft:entity.arrow.shoot", Some(eye), 1.0, pitch);
+            .play("minecraft:entity.arrow.shoot", Some(feet), 1.0, pitch);
         if !self.creative
             && !infinity
             && let Some(i) = arrow_slot
@@ -19128,8 +19152,9 @@ impl Game<'_> {
                             PhysicalKey::Code(
                                 code @ (KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Space),
                             ) if code != KeyCode::Space
-                                || self.title.as_ref().is_some_and(|t| {
-                                    t.list_focused() || t.focused_button.is_some()
+                                || self.title.as_mut().is_some_and(|t| {
+                                    !t.has_caret_field()
+                                        && (t.list_focused() || t.focused_button.is_some())
                                 }) =>
                             {
                                 let (action, sound) = self
