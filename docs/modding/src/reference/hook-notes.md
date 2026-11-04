@@ -51,8 +51,11 @@ requires a farmer at work and `mob_griefing` enabled.
   continuing in rows under it, 27 in all; and up to eight `fluid_inputs` and `fluid_outputs`, each a well under the
   slots with its amount in mB, drawn in the fluid's client look (`data/<mod>/horizon/fluid/`, [installing and using mods](../start/installing.md)).
   `native_sprite` takes an optional `tint` (`0xAARRGGBB`) that multiplies every texel, as a fluid's colour does.
+  `DrawContext::text(text, at, argb, shadow)` takes its colour as vanilla's `GuiGraphics` does, `0xAARRGGBB`
+  (`0xFFFFFFFF` is opaque white), and draws nothing for a fully transparent one, as vanilla's does.
   `DrawContext::text_width(text)` and `DrawContext::sprite_size(name)` measure what `native_text` and `native_sprite`
   draw, in GUI pixels and in the sprite's own pixels, to lay text and sprites out before drawing them (`Font.width`).
+  Diverges from upstream: there `native_text` takes an opaque `0xRRGGBB`.
   Slot clicks keep their `SlotClicked` numbering: inputs, then results.
 
 - `GameLevel::native_send_particles` on authoritative servers. It sends supported
@@ -545,8 +548,11 @@ or transactions. Declarations still go on each event or registrar.
   its chunk faded in), with the copy the server sent (`native_block_entity_update_tag`). It draws into the entity batch
   under `draw`'s pose stack (`push`, `pop`, `translate`, `rotate_about`, `scale`, in blocks from the block's corner, as
   vanilla's `PoseStack`): `native_draw_quad` (four corners and a sprite's UVs), `native_draw_cube` (a model element's box,
-  its faces baked as a model's are; `CubeFace` is in `super::native_block_entity_draw`) and `native_draw_block` (a block
-  state's model, as `submitBlockModel`: a moving part is often a block of the mod's own). Sprites are the atlas's:
+  its faces baked as a model's are; `CubeFace` is in `super::native_block_entity_draw`), `native_draw_block` (a block
+  state's model, as `submitBlockModel`: a moving part is often a block of the mod's own) and `native_draw_text`
+  (`BlockEntityDrawContext::text(text, at, rgb)`: a line of the game's font, as a sign's, in font pixels with y down as
+  `Font.drawInBatch` lays it out under the pose, opaque `0xRRGGBB`, in the frame's light; `set_light` to full bright for
+  a glowing display such as a nixie tube; `text_width` measures it to centre it). Sprites are the atlas's:
   `<ns>:block/...` and `block/...`, and a content mod's `assets/<ns>/textures/entity/` as `<ns>:entity/...`. Culling uses the bounds
   `native_block_entity_render_bounding_box` gives (NeoForge's `getRenderBoundingBox`): the block with a block of margin
   unless the mod widens them, or never culled when a bound is infinite. Both run every frame for every one in view: keep

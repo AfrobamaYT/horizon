@@ -9915,19 +9915,29 @@ impl Game<'_> {
     pub(super) fn native_translate(&self, key: &str) -> Option<String> {
         horizon_client::lang::has(key).then(|| horizon_client::lang::get(key))
     }
-    /// A line of text at `(x, y)` in GUI pixels, opaque `rgb`.
+    /// A line of text at `(x, y)` in GUI pixels, in `argb` as vanilla's `GuiGraphics` takes it
+    /// (`0xFFFFFFFF` is opaque white). Fully transparent text draws nothing, as vanilla's.
     pub(super) fn native_text(
         &self,
         batch: &mut HudBatch,
         text: &str,
         at: [f32; 2],
-        rgb: u32,
+        argb: u32,
         shadow: bool,
     ) {
+        let [a, r, g, b] = argb.to_be_bytes();
+        if a == 0 {
+            return;
+        }
         let [x, y] = at;
-        let [_, r, g, b] = rgb.to_be_bytes();
-        let color = rgba(r, g, b, 0xFF);
-        batch.text_styled(&self.gui.atlas, &Text::literal(text), x, y, color, shadow);
+        batch.text_styled(
+            &self.gui.atlas,
+            &Text::literal(text),
+            x,
+            y,
+            rgba(r, g, b, a),
+            shadow,
+        );
     }
     /// The player, in a world.
     pub(super) fn native_player(&self) -> Option<NativePlayer> {
@@ -13376,6 +13386,38 @@ mod item_toss_tests {
                 assert!(game.throw_from_eyes(stack(), eye, true, false).is_some());
                 assert_eq!(*heard.lock().unwrap(), 1);
             });
+        });
+    }
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::*;
+
+    /// `DrawContext::text` takes ARGB as vanilla's `GuiGraphics` does: the alpha reaches the
+    /// vertices, and fully transparent text draws nothing.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn text_takes_argb_and_skips_transparent_text() {
+        use mod_api::DrawContext;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let drawn = |argb: u32| {
+                let mut batch = HudBatch::new([640, 480]);
+                super::super::mod_api_host::generated::GameDrawContext {
+                    game,
+                    surface: &mut batch,
+                }
+                .text("Hi", [4.0, 4.0], argb, false);
+                batch.vertices
+            };
+            let opaque = drawn(0xFFFF_FFFF);
+            let half = drawn(0x80FF_FFFF);
+            assert!(!opaque.is_empty());
+            assert_eq!(opaque.len(), half.len());
+            assert!(opaque.iter().all(|v| v.color >> 24 == 0xFF));
+            assert!(half.iter().all(|v| v.color >> 24 == 0x80));
+            // RGB alone, as the API took before, is fully transparent now.
+            assert!(drawn(0x00FF_FFFF).is_empty());
         });
     }
 }
