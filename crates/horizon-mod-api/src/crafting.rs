@@ -115,28 +115,34 @@ pub fn dedup_keep_order(items: &mut Vec<String>) {
 /// `tags` resolves it), a list of them, or NeoForge's three shapes with
 /// their children walked the same way, each answered by the flat list of
 /// ids it matches in the order the sources named them. A kind outside the
-/// shapes comes back as `custom` for the wrapper: the item ingredient
-/// answers it through its hook, a fluid one fails the file. An empty
+/// shapes is answered by the wrapper's `custom` as the walk meets it, so a
+/// shape sees its ids like any child's: the item ingredient gives the list
+/// its hook left at load, a fluid one none, which fails the file. An empty
 /// result is no ingredient, as an empty list or an unloaded tag is.
-// hidden: the shared half of the two ingredients' parse, not part of the mod surface
-// exhaustive: the two ingredients' shared walk; each keeps its own copy of the answer
-#[doc(hidden)]
 #[derive(Clone, Debug)]
-pub struct WalkedIngredient {
+pub(crate) struct WalkedIngredient {
     /// The ids it accepts, however the source shape named them.
-    pub set: HashSet<String>,
+    pub(crate) set: HashSet<String>,
     /// The same ids in the sources' order (`HolderSet`).
-    pub order: Vec<String>,
+    pub(crate) order: Vec<String>,
     /// NeoForge's shapes, with their children walked.
-    pub children: Option<(Shape, Vec<Self>)>,
+    pub(crate) children: Option<(Shape, Vec<Self>)>,
     /// A kind outside the standard shapes: the kind and its JSON, as the
-    /// file wrote it.
-    pub custom: Option<(String, serde_json::Map<String, Value>)>,
+    /// file wrote it, without the wrapper's answer.
+    pub(crate) custom: Option<(String, serde_json::Map<String, Value>)>,
 }
+/// The wrapper's answer for a kind outside the standard shapes: the ids it
+/// matches, taken out of its JSON, or none to fail the file.
+pub(crate) type CustomIds<'a> =
+    &'a dyn Fn(&mut serde_json::Map<String, Value>) -> Option<Vec<String>>;
 impl WalkedIngredient {
     /// The walk of `v`: the shapes' flat lists in the sources' order, their
     /// children kept for matching a concrete stack.
-    pub fn walk(v: &Value, tags: &std::collections::HashMap<String, Vec<String>>) -> Option<Self> {
+    pub(crate) fn walk(
+        v: &Value,
+        tags: &std::collections::HashMap<String, Vec<String>>,
+        custom: CustomIds<'_>,
+    ) -> Option<Self> {
         let mut list: Vec<String> = Vec::new();
         let mut add = |s: &str| {
             let more: Vec<String> = match s.strip_prefix('#') {
@@ -152,7 +158,7 @@ impl WalkedIngredient {
         match v {
             Value::String(s) => add(s),
             Value::Array(a) => a.iter().filter_map(Value::as_str).for_each(&mut add),
-            Value::Object(o) => return Self::walk_object(o, tags),
+            Value::Object(o) => return Self::walk_object(o, tags, custom),
             _ => return None,
         }
         Self::flat(list)
@@ -169,11 +175,12 @@ impl WalkedIngredient {
     /// NeoForge's ingredient types (`NeoForgeRegistries.Keys.INGREDIENT_TYPES`),
     /// the standard shapes mods' recipes carry, each answered by the flat id
     /// list it matches, with the children kept for matching a concrete
-    /// stack. A kind outside these comes back as `custom` for the wrapper;
-    /// one of `minecraft:`'s the wrapper does not know still fails the file.
+    /// stack. A kind outside these is the wrapper's `custom`; one of
+    /// `minecraft:`'s the wrapper does not know still fails the file.
     fn walk_object(
         o: &serde_json::Map<String, Value>,
         tags: &std::collections::HashMap<String, Vec<String>>,
+        custom: CustomIds<'_>,
     ) -> Option<Self> {
         // Current NeoForge marks a custom ingredient with
         // `neoforge:ingredient_type`; `type` is the older packs' key.
@@ -192,7 +199,7 @@ impl WalkedIngredient {
             "neoforge:compound" => {
                 let subs: Vec<Self> = children()?
                     .iter()
-                    .map(|s| Self::walk(s, tags))
+                    .map(|s| Self::walk(s, tags, custom))
                     .collect::<Option<_>>()?;
                 let mut seen = Vec::new();
                 for sub in &subs {
@@ -210,7 +217,7 @@ impl WalkedIngredient {
             "neoforge:intersection" => {
                 let subs: Vec<Self> = children()?
                     .iter()
-                    .map(|s| Self::walk(s, tags))
+                    .map(|s| Self::walk(s, tags, custom))
                     .collect::<Option<_>>()?;
                 nested = Some((Shape::Intersection, subs.clone()));
                 subs.first()?
@@ -222,8 +229,8 @@ impl WalkedIngredient {
             }
             // The base's ids without the subtracted's.
             "neoforge:difference" => {
-                let base = Self::walk(o.get("base")?, tags)?;
-                let gone = Self::walk(o.get("subtracted")?, tags)?;
+                let base = Self::walk(o.get("base")?, tags, custom)?;
+                let gone = Self::walk(o.get("subtracted")?, tags, custom)?;
                 nested = Some((Shape::Difference, vec![base.clone(), gone.clone()]));
                 base.order
                     .iter()
@@ -234,11 +241,13 @@ impl WalkedIngredient {
             // A kind outside these shapes: the wrapper answers it — the
             // item ingredient asks its hook, a fluid one fails the file.
             k if is_custom(k) => {
-                return Some(Self {
-                    set: HashSet::new(),
-                    order: Vec::new(),
+                let mut data = o.clone();
+                let list = custom(&mut data)?;
+                return (!list.is_empty()).then(|| Self {
+                    set: list.iter().cloned().collect(),
+                    order: list,
                     children: None,
-                    custom: Some((k.to_owned(), o.clone())),
+                    custom: Some((k.to_owned(), data)),
                 });
             }
             _ => return None,
@@ -252,7 +261,7 @@ impl WalkedIngredient {
     }
     /// `test` by id: a shape asks each child its own way — a mod's kind
     /// among them answers through `custom` — and a plain list names it.
-    pub fn test(
+    pub(crate) fn test(
         &self,
         id: &str,
         custom: &dyn Fn(&str, &serde_json::Map<String, Value>) -> bool,
@@ -386,26 +395,20 @@ impl Ingredient {
         }
     }
     pub fn parse(v: &Value, items: &Items) -> Option<Self> {
-        Self::of_walked(WalkedIngredient::walk(v, &items.item_tag_order)?)
+        // A mod's own kind: `resolve` asked the hook once at load and left
+        // the item list it matches with the occurrence; one no load
+        // resolved fails the file.
+        Self::of_walked(WalkedIngredient::walk(
+            v,
+            &items.item_tag_order,
+            &resolved_items,
+        )?)
     }
     /// The walk of an item ingredient's answer: NeoForge's standard shapes
-    /// keep their children, and a mod's own kind carries the list its hook
-    /// left with the occurrence — one no load resolved fails the file.
+    /// keep their children, and a mod's own kind keeps its kind and JSON,
+    /// since the load-time list only names items and matching a concrete
+    /// stack (its components) is the match-time hook's.
     fn of_walked(walked: WalkedIngredient) -> Option<Self> {
-        // A mod's own kind: `resolve` asked the hook once at load and
-        // left the item list it matches with the occurrence.
-        if let Some((kind, mut data)) = walked.custom {
-            let list = resolved_items(&mut data)?;
-            // The kind and its JSON stay with the ingredient: the
-            // load-time list only names items, and matching a concrete
-            // stack (its components) is the match-time hook's.
-            return (!list.is_empty()).then(|| Self {
-                order: list.clone(),
-                items: list.iter().cloned().collect(),
-                custom: Some((kind, data)),
-                children: None,
-            });
-        }
         // The shapes' children walk the same way; a child no wrapper
         // answers fails the file.
         let children = match walked.children {
@@ -420,7 +423,7 @@ impl Ingredient {
         (!walked.order.is_empty()).then(|| Self {
             items: walked.set,
             order: walked.order,
-            custom: None,
+            custom: walked.custom,
             children,
         })
     }

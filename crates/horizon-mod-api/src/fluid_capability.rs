@@ -3,8 +3,9 @@
 //! [`ITEMS`](super::ITEMS) is of items. Amounts are millibuckets: a bucket is 1000.
 use super::{
     BlockSide, CapabilityKey, DataLoadContext, ItemCapabilityKey, ItemPlace, ItemResource,
-    ItemStack, ResourceHandler, ServerHost, Transaction, WalkedIngredient,
+    ItemStack, ResourceHandler, ServerHost, Transaction,
 };
+use crate::crafting::WalkedIngredient;
 use horizon_items::item_data::StackData;
 use std::{fmt, marker::PhantomData, sync::Arc};
 
@@ -116,10 +117,9 @@ impl FluidIngredient {
                 tags.insert(tag.clone(), fluids.iter().cloned().collect());
             }
         }
-        let walked = WalkedIngredient::walk(v, &tags)?;
         // A custom kind is the item ingredient's hook; a fluid one fails
         // the file, as a kind outside these does.
-        walked.custom.is_none().then(|| Self(walked))
+        WalkedIngredient::walk(v, &tags, &|_| None).map(Self)
     }
     /// `FluidIngredient.test`: the stack's fluid among the ones the source
     /// named — and for a shape, each child its own way (any for
@@ -495,6 +495,28 @@ mod tests {
         .unwrap();
         assert_eq!(union.order, ["minecraft:oak_planks", "minecraft:stone"]);
         assert!(crate::Ingredient::parse(&json(r#"{"type":"mymod:aspect"}"#), &items).is_none());
+        // A mod's kind nested in a shape brings the list its hook left at
+        // load into the shape's ids, as on main before the shared walk.
+        let aspect = r#"{"type":"mymod:aspect","horizon:resolved_items":["minecraft:oak_planks","minecraft:stone"]}"#;
+        let union = crate::Ingredient::parse(
+            &json(&format!(
+                r#"{{"type":"neoforge:compound","children":[{aspect},"minecraft:dirt"]}}"#
+            )),
+            &items,
+        )
+        .unwrap();
+        assert_eq!(
+            union.order,
+            ["minecraft:oak_planks", "minecraft:stone", "minecraft:dirt"]
+        );
+        let both = crate::Ingredient::parse(
+            &json(&format!(
+                r#"{{"type":"neoforge:intersection","children":[{aspect},["minecraft:stone","minecraft:dirt"]]}}"#
+            )),
+            &items,
+        )
+        .unwrap();
+        assert_eq!(both.order, ["minecraft:stone"]);
         assert!(
             crate::Ingredient::parse(&json(r#"{"type":"minecraft:future_shape"}"#), &items)
                 .is_none()

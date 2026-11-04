@@ -133,9 +133,6 @@ pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
 pub use crate::crafting::{Ingredient, Recipe, RecipePropertyAddition};
-// hidden: the shared parse of the item and fluid ingredients, not part of the mod surface
-#[doc(hidden)]
-pub use crate::crafting::WalkedIngredient;
 pub use crate::extras::Corner;
 pub use crate::extras_hud::Corners;
 pub use crate::first_person::Hand;
