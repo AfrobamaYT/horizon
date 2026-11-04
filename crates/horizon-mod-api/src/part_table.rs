@@ -458,7 +458,7 @@ impl Parts {
         index!(items, item_subscribed);
         index!(menus, menu_subscribed);
     }
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(test)]
     pub(crate) fn block_entity<'k>(
         &self,
         id: impl FnOnce() -> Option<&'k str>,
@@ -1150,11 +1150,16 @@ pub fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
     use super::super::*;
-    use super::{Attached, KnownIds, mark_game_thread, resolve_parts};
+    use super::mark_game_thread;
+    #[cfg(test)]
+    use super::{Attached, KnownIds, resolve_parts};
+    #[cfg(test)]
     use std::any::{TypeId, type_name};
+    #[cfg(test)]
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
 
+    #[cfg(test)]
     fn type_key(id: &str) -> BlockEntityTypeKey {
         BlockEntityTypeKey(id.into())
     }
@@ -1306,8 +1311,11 @@ pub mod tests {
             }
         }
     }
+    #[cfg(test)]
     struct NoHost;
+    #[cfg(test)]
     impl Host for NoHost {}
+    #[cfg(test)]
     impl ServerHost for NoHost {}
 
     #[test]
@@ -1438,16 +1446,19 @@ pub mod tests {
         }
     }
 
+    #[cfg(test)]
     /// A test host's whole state, kept on each transaction it opens and put back on an abort, as
     /// the game's journal keeps its storages.
     trait Journal: Clone {
         fn kept(&mut self) -> &mut Vec<Self>;
     }
+    #[cfg(test)]
     fn open<J: Journal>(host: &mut J) {
         let mut now = host.clone();
         now.kept().clear();
         host.kept().push(now);
     }
+    #[cfg(test)]
     fn close<J: Journal>(host: &mut J, commit: bool) {
         let Some(was) = host.kept().pop() else {
             return;
@@ -1544,19 +1555,24 @@ pub mod tests {
         }
     }
 
+    #[cfg(test)]
     /// A pipe at (0, 64, 0), and a one-slot vanilla chest east of it, answered by the game.
     #[derive(Clone, Default)]
     struct PipeWorld {
         chest: Option<ItemStack>,
         kept: Vec<Self>,
     }
+    #[cfg(test)]
     const PIPE: [i32; 3] = [0, 64, 0];
+    #[cfg(test)]
     const CHEST: [i32; 3] = [1, 64, 0];
+    #[cfg(test)]
     impl Journal for PipeWorld {
         fn kept(&mut self) -> &mut Vec<Self> {
             &mut self.kept
         }
     }
+    #[cfg(test)]
     impl Backend for PipeWorld {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -1578,6 +1594,7 @@ pub mod tests {
             self.chest.clone().filter(|_| pos == CHEST && slot == 0)
         }
     }
+    #[cfg(test)]
     impl BackendMut for PipeWorld {
         fn container_insert(
             &mut self,
@@ -1593,6 +1610,7 @@ pub mod tests {
             None
         }
     }
+    #[cfg(test)]
     impl Host for PipeWorld {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
@@ -1601,6 +1619,7 @@ pub mod tests {
             Some(BlockEntityRef { level, position })
         }
     }
+    #[cfg(test)]
     impl ServerHost for PipeWorld {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -1837,6 +1856,7 @@ pub mod tests {
         }
     }
 
+    #[cfg(test)]
     /// Player 1's hands and slots, and what was given to them: an item split off their hand.
     #[derive(Clone, Default)]
     struct Player {
@@ -1849,11 +1869,13 @@ pub mod tests {
         player: 1,
         hand: Hand::Main,
     };
+    #[cfg(test)]
     impl Journal for Player {
         fn kept(&mut self) -> &mut Vec<Self> {
             &mut self.kept
         }
     }
+    #[cfg(test)]
     impl Backend for Player {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -1889,6 +1911,7 @@ pub mod tests {
             None
         }
     }
+    #[cfg(test)]
     impl BackendMut for Player {
         fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
             Some(u128::from(entity.id()))
@@ -1934,6 +1957,7 @@ pub mod tests {
             took
         }
     }
+    #[cfg(test)]
     impl Host for Player {
         fn player(&self, uuid: u128) -> Option<PlayerRef> {
             let entity = EntityRef::new(NativeWorldEpoch::new(1), u32::try_from(uuid).ok()?);
@@ -1955,6 +1979,7 @@ pub mod tests {
             Some(BackendRef::of(self))
         }
     }
+    #[cfg(test)]
     impl ServerHost for Player {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -1966,13 +1991,16 @@ pub mod tests {
             Some(BackendMutRef::of(self))
         }
     }
+    #[cfg(test)]
     impl Player {
+        #[cfg(test)]
         fn is_place(&self, place: &ItemPlace) -> bool {
             matches!(
                 place,
                 ItemPlace::PlayerHand { player: 1, .. } | ItemPlace::PlayerSlot { player: 1, .. }
             )
         }
+        #[cfg(test)]
         fn put(&mut self, place: &ItemPlace, stack: Option<ItemStack>) {
             match place {
                 ItemPlace::PlayerHand { .. } => self.main_hand = stack,
@@ -2095,6 +2123,7 @@ pub mod tests {
         assert!(entity(4).capability(host, &ENTITY_ITEMS, ()).is_none());
     }
 
+    #[cfg(test)]
     /// Items counted with what they hold: a pouch's sticks, a bag's pouch and its sticks.
     fn items(stacks: impl IntoIterator<Item = ItemStack>) -> u32 {
         stacks
@@ -2105,13 +2134,16 @@ pub mod tests {
             })
             .sum()
     }
+    #[cfg(test)]
     impl Player {
+        #[cfg(test)]
         fn items(&self) -> u32 {
             let held = self.main_hand.iter().chain(self.slots.values());
             items(held.chain(&self.given).cloned())
         }
     }
 
+    #[cfg(test)]
     /// Three shelf slots at (2, 64, 0), answered by the game's handler, else by
     /// `ItemOverstates`. A slot takes up to `limit` of one item, the `output` slot none, and
     /// gives at most one item per extract, unless `whole_extract`; with `one_per_insert`, it
@@ -2126,6 +2158,7 @@ pub mod tests {
         overstates: bool,
         kept: Vec<Self>,
     }
+    #[cfg(test)]
     fn shelf(slots: [Option<ItemStack>; 3]) -> Shelf {
         Shelf {
             slots,
@@ -2138,6 +2171,7 @@ pub mod tests {
         }
     }
     const SHELF: [i32; 3] = [2, 64, 0];
+    #[cfg(test)]
     fn shelf_slot(slot: usize) -> ItemPlace {
         ItemPlace::BlockEntity {
             level: here(),
@@ -2146,11 +2180,13 @@ pub mod tests {
             slot,
         }
     }
+    #[cfg(test)]
     impl Journal for Shelf {
         fn kept(&mut self) -> &mut Vec<Self> {
             &mut self.kept
         }
     }
+    #[cfg(test)]
     impl Backend for Shelf {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -2172,6 +2208,7 @@ pub mod tests {
             self.slots.get(slot)?.clone()
         }
     }
+    #[cfg(test)]
     impl BackendMut for Shelf {
         fn container_insert(
             &mut self,
@@ -2220,6 +2257,7 @@ pub mod tests {
             Some(out)
         }
     }
+    #[cfg(test)]
     impl Host for Shelf {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
@@ -2240,6 +2278,7 @@ pub mod tests {
             Some(BlockEntityRef { level, position })
         }
     }
+    #[cfg(test)]
     impl ServerHost for Shelf {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -2251,7 +2290,9 @@ pub mod tests {
             Some(BackendMutRef::of(self))
         }
     }
+    #[cfg(test)]
     impl Shelf {
+        #[cfg(test)]
         fn items(&self) -> u32 {
             items(self.slots.iter().flatten().cloned())
         }
@@ -2313,8 +2354,10 @@ pub mod tests {
         }
     }
 
+    #[cfg(test)]
     /// State 1 is a `test:gauge`, state 2 a `test:other`.
     struct Level;
+    #[cfg(test)]
     impl LevelHost for Level {
         fn block_state(&self, _: [i32; 3]) -> BlockStateId {
             unimplemented!()
@@ -2692,6 +2735,7 @@ pub mod tests {
         mark_game_thread();
     }
 
+    #[cfg(test)]
     /// The comparator reading of state `state`, from 1.
     fn read(state: u32) -> i32 {
         let mut output = 1;
@@ -2706,6 +2750,7 @@ pub mod tests {
         output
     }
 
+    #[cfg(test)]
     /// Resolve this thread's parts with tag `test:gauged` holding `members`.
     fn resolve(members: &[&str]) -> Result<(), Vec<String>> {
         let tags = HashMap::from([(
@@ -2954,6 +2999,7 @@ pub mod tests {
         assert!(here().capability(host, &CHEMICALS, CHEST, None).is_none());
     }
 
+    #[cfg(test)]
     /// Puts `amount` of `item` into slot 0 of [`ITEM_ITEMS`]' handler for the item at `place`, in a
     /// transaction committed when all went in: how much did.
     fn fill(host: &mut dyn ServerHost, place: &ItemPlace, item: ItemStack, amount: u32) -> u32 {
@@ -3107,6 +3153,7 @@ pub mod tests {
         assert_eq!(insert(host, &unknown, stick()), 0);
     }
 
+    #[cfg(test)]
     /// `place.insert` of `stack` in a transaction of its own: how much went.
     fn insert(host: &mut dyn ServerHost, place: &ItemPlace, stack: ItemStack) -> u32 {
         let resource = ItemResource::of(&stack);
@@ -3115,6 +3162,7 @@ pub mod tests {
         went.unwrap_or(0)
     }
 
+    #[cfg(test)]
     /// `place.exchange` of `stack.count` of what is there for `stack`, in a transaction of its
     /// own: how many.
     fn exchange(host: &mut dyn ServerHost, place: &ItemPlace, stack: ItemStack) -> u32 {
@@ -3124,6 +3172,7 @@ pub mod tests {
         swapped.unwrap_or(0)
     }
 
+    #[cfg(test)]
     /// Two three-slot game chests, `FROM` and `INTO`; `INTO`'s slots hold up to `limit` each.
     #[derive(Clone)]
     struct TwoChests {
@@ -3132,9 +3181,13 @@ pub mod tests {
         limit: u32,
         kept: Vec<Self>,
     }
+    #[cfg(test)]
     const FROM: [i32; 3] = [3, 64, 0];
+    #[cfg(test)]
     const INTO: [i32; 3] = [4, 64, 0];
+    #[cfg(test)]
     impl TwoChests {
+        #[cfg(test)]
         fn slots(&mut self, pos: [i32; 3]) -> Option<(&mut [Option<ItemStack>; 3], u32)> {
             match pos {
                 FROM => Some((&mut self.from, 64)),
@@ -3142,6 +3195,7 @@ pub mod tests {
                 _ => None,
             }
         }
+        #[cfg(test)]
         fn count(slots: &[Option<ItemStack>; 3], item: &str) -> u32 {
             slots
                 .iter()
@@ -3151,11 +3205,13 @@ pub mod tests {
                 .sum()
         }
     }
+    #[cfg(test)]
     impl Journal for TwoChests {
         fn kept(&mut self) -> &mut Vec<Self> {
             &mut self.kept
         }
     }
+    #[cfg(test)]
     impl Backend for TwoChests {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -3178,6 +3234,7 @@ pub mod tests {
             self.limit
         }
     }
+    #[cfg(test)]
     impl BackendMut for TwoChests {
         fn container_insert(
             &mut self,
@@ -3227,6 +3284,7 @@ pub mod tests {
             Some(out)
         }
     }
+    #[cfg(test)]
     impl Host for TwoChests {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
@@ -3235,6 +3293,7 @@ pub mod tests {
             None
         }
     }
+    #[cfg(test)]
     impl ServerHost for TwoChests {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -3247,8 +3306,10 @@ pub mod tests {
         }
     }
 
+    #[cfg(test)]
     /// A target that answers one more than it was given, and keeps nothing.
     struct TakesMore;
+    #[cfg(test)]
     impl ResourceHandler<ItemResource> for TakesMore {
         fn size(&self, _: &mut dyn ServerHost) -> usize {
             1
@@ -3983,9 +4044,12 @@ pub mod tests {
         }
     }
 
+    #[cfg(test)]
     /// `test:ordered` block entities, where the game has slots of its own from x = 8 on.
     struct Ordered;
+    #[cfg(test)]
     impl ServerHost for Ordered {}
+    #[cfg(test)]
     impl Backend for Ordered {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -3997,6 +4061,7 @@ pub mod tests {
             (pos[0] >= 8).then_some(27)
         }
     }
+    #[cfg(test)]
     impl Host for Ordered {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
@@ -4066,13 +4131,16 @@ pub mod tests {
         assert_eq!(item(1, 2), (true, 3));
     }
 
+    #[cfg(test)]
     /// Block entities of one type, or vanilla ones (none).
     struct TypeOf(Option<&'static str>);
+    #[cfg(test)]
     impl Backend for TypeOf {
         fn block_entity_kind(&self, _: BlockEntityRef) -> Option<BlockEntityTypeKey> {
             self.0.map(type_key)
         }
     }
+    #[cfg(test)]
     impl Host for TypeOf {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
@@ -4082,24 +4150,29 @@ pub mod tests {
         }
     }
 
+    #[cfg(test)]
     /// Player 1 holding one stack in their hand, which has game slots (`item_container`) when
     /// its damage is 1.
     struct HeldItem(ItemStack);
+    #[cfg(test)]
     impl Backend for HeldItem {
         fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
             (stack.damage == 1).then(|| vec![None; 27])
         }
     }
+    #[cfg(test)]
     impl BackendMut for HeldItem {
         fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
             (*place == HAND).then(|| self.0.clone())
         }
     }
+    #[cfg(test)]
     impl Host for HeldItem {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
     }
+    #[cfg(test)]
     impl ServerHost for HeldItem {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
@@ -4190,6 +4263,7 @@ pub mod tests {
         }
     }
 
+    #[cfg(test)]
     /// One tank, as the game answers it: what it holds, its capacity, and whether it fills and
     /// drains. Truthfully: a `halving` tank takes half of each offer, a `half_room` one at most
     /// half its room, a `short` one gives one less than asked, and a `quarters` one gives and
@@ -4205,6 +4279,7 @@ pub mod tests {
         short: bool,
         quarters: bool,
     }
+    #[cfg(test)]
     /// Game tanks by position, and the mod block entity types standing at some.
     #[derive(Clone, Default)]
     struct TankWorld {
@@ -4212,10 +4287,15 @@ pub mod tests {
         types: HashMap<[i32; 3], &'static str>,
         kept: Vec<Self>,
     }
+    #[cfg(test)]
     const SOURCE: [i32; 3] = [0, 64, 0];
+    #[cfg(test)]
     const TANK: [i32; 3] = [1, 64, 0];
+    #[cfg(test)]
     const OTHER: [i32; 3] = [2, 64, 0];
+    #[cfg(test)]
     impl TankWorld {
+        #[cfg(test)]
         fn tank(&mut self, pos: [i32; 3], held: Option<FluidStack>, fills: bool) -> &mut Self {
             let tank = GameTank {
                 held,
@@ -4230,12 +4310,15 @@ pub mod tests {
             self.tanks.insert(pos, tank);
             self
         }
+        #[cfg(test)]
         fn held(&self, pos: [i32; 3]) -> Option<FluidStack> {
             self.tanks[&pos].held.clone()
         }
+        #[cfg(test)]
         fn amount(&self, pos: [i32; 3]) -> u32 {
             self.tanks[&pos].held.as_ref().map_or(0, |held| held.amount)
         }
+        #[cfg(test)]
         /// Moves up to `max` from `from`'s handler through `from_side` into `to`'s through
         /// `to_side`, in a transaction of its own.
         fn moved(
@@ -4250,11 +4333,13 @@ pub mod tests {
             host.transaction(|host, tx| move_resources(host, &source, &target, |_| true, max, tx))
         }
     }
+    #[cfg(test)]
     impl Journal for TankWorld {
         fn kept(&mut self) -> &mut Vec<Self> {
             &mut self.kept
         }
     }
+    #[cfg(test)]
     impl Backend for TankWorld {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -4283,6 +4368,7 @@ pub mod tests {
                 .map_or(0, |tank| tank.capacity)
         }
     }
+    #[cfg(test)]
     impl BackendMut for TankWorld {
         fn fluid_tank_insert(
             &mut self,
@@ -4346,6 +4432,7 @@ pub mod tests {
             Some(held.with_amount(take))
         }
     }
+    #[cfg(test)]
     impl Host for TankWorld {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
@@ -4354,6 +4441,7 @@ pub mod tests {
             Some(BackendRef::of(self))
         }
     }
+    #[cfg(test)]
     impl ServerHost for TankWorld {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -4366,6 +4454,7 @@ pub mod tests {
         }
     }
 
+    #[cfg(test)]
     fn potion(amount: u32, potion: &str) -> FluidStack {
         let components = horizon_items::item_data::StackData {
             potion: Some(Arc::from(potion)),
@@ -4525,6 +4614,7 @@ pub mod tests {
         }
     }
 
+    #[cfg(test)]
     /// Batteries as the game answers them, by position: what each holds, and the most one
     /// insert moves, of a capacity of 1000; and the mod block entity types standing at some.
     #[derive(Clone, Default)]
@@ -4533,16 +4623,20 @@ pub mod tests {
         types: HashMap<[i32; 3], &'static str>,
         kept: Vec<Self>,
     }
+    #[cfg(test)]
     impl EnergyWorld {
+        #[cfg(test)]
         fn amounts(&self, at: &[[i32; 3]]) -> Vec<u32> {
             at.iter().map(|pos| self.batteries[pos].0).collect()
         }
     }
+    #[cfg(test)]
     impl Journal for EnergyWorld {
         fn kept(&mut self) -> &mut Vec<Self> {
             &mut self.kept
         }
     }
+    #[cfg(test)]
     impl Host for EnergyWorld {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
@@ -4551,6 +4645,7 @@ pub mod tests {
             Some(BackendRef::of(self))
         }
     }
+    #[cfg(test)]
     impl ServerHost for EnergyWorld {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -4562,6 +4657,7 @@ pub mod tests {
             Some(BackendMutRef::of(self))
         }
     }
+    #[cfg(test)]
     impl Backend for EnergyWorld {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -4579,6 +4675,7 @@ pub mod tests {
             1000
         }
     }
+    #[cfg(test)]
     impl BackendMut for EnergyWorld {
         fn energy_insert(&mut self, at: BlockSide, amount: u32, _: &Transaction) -> u32 {
             let Some((held, limit)) = self.batteries.get_mut(&at.pos) else {
