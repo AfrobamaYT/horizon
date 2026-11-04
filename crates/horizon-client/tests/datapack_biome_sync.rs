@@ -54,6 +54,7 @@ fn a_pack_biome_is_sent_with_its_data_and_read_back_by_a_client() {
         &horizon_world::loot::PackOverlay::NONE,
         Some(&world),
         &defaults,
+        &server_load(),
     )
     .unwrap();
 
@@ -125,4 +126,13 @@ fn recolouring_twice_starts_from_the_biome_files_each_time() {
     let lighter = |_: &str, c: &mut BiomeColors| c.grass += 0x10;
     let next = base.recolored_from(&once, lighter).unwrap();
     assert_eq!(grass(&next), grass(&base) + 0x10);
+}
+
+fn server_load() -> horizon_world::native_load_context::LoadContext {
+    use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
+    LoadContext::new(
+        DataLoadOrigin::ServerDataLoad,
+        std::sync::Arc::new(LoadInputs::new(Default::default(), Default::default())),
+        [],
+    )
 }

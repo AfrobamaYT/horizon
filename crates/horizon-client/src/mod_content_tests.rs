@@ -1071,7 +1071,13 @@ fn content_root_loads_with_every_table() {
         items.items["minecraft:mushroom_stew"].crafting_remainder,
         None
     );
-    let recipes = crate::crafting::Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+    let recipes = crate::crafting::Recipes::load(
+        &root,
+        &items,
+        &PackOverlay::NONE,
+        &crate::test_resources::server_load(),
+    )
+    .unwrap();
     let grid = [
         Some(crate::items::ItemStack::new("ruby:ruby_stew", 1)),
         None,
@@ -2990,7 +2996,13 @@ fn mod_recipe_results_are_an_item_stack_or_a_bare_item_id() {
     let facts = BlockFacts::load(&root, new).unwrap();
     let defaults = horizon_world::item_defaults::read(&root).unwrap();
     let items = Items::load(&root, new, &facts, &PackOverlay::NONE, &defaults).unwrap();
-    let recipes = crate::crafting::Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+    let recipes = crate::crafting::Recipes::load(
+        &root,
+        &items,
+        &PackOverlay::NONE,
+        &crate::test_resources::server_load(),
+    )
+    .unwrap();
     for (name, input, _, item, count) in cases {
         let grid = [
             Some(crate::items::ItemStack::new(input, 1)),

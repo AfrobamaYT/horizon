@@ -86,11 +86,20 @@ pub fn main() -> horizon_client::Result<()> {
     let input = fs::read_to_string(args.get(2).ok_or("missing INPUT")?)?;
     let defaults = horizon_world::item_defaults::read(root)?;
     let items = Items::catalog(root, &PackOverlay::NONE, &defaults)?;
-    let recipes = Recipes::load(root, &items, &PackOverlay::NONE)?;
+    let recipes = Recipes::load(
+        root,
+        &items,
+        &PackOverlay::NONE,
+        &crate::test_resources::server_load(),
+    )?;
     let brewing = horizon_client::brewing::Brewing::load(root, &items, &PackOverlay::NONE);
     let banners = horizon_client::banner::Banners::load(root, &defaults);
-    let station_recipes =
-        horizon_client::stations::StationRecipes::load(root, &items, &PackOverlay::NONE);
+    let station_recipes = horizon_client::stations::StationRecipes::load(
+        root,
+        &items,
+        &PackOverlay::NONE,
+        &crate::test_resources::server_load(),
+    );
     let enchantments = horizon_client::enchant::Enchantments::load(root, &defaults);
     let names = horizon_client::creative::Names::load(root);
     let case_maps = CaseMaps::default();

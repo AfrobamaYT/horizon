@@ -12294,10 +12294,11 @@ mod tests {
         let none = &horizon_world::loot::PackOverlay::NONE;
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = Items::catalog(&root, none, &defaults).unwrap();
-        let recipes = Recipes::load(&root, &items, none).unwrap();
+        let recipes = Recipes::load(&root, &items, none, &crate::game::test_server_load()).unwrap();
         let brewing = Brewing::load(&root, &items, none);
         let banners = Banners::load(&root, &defaults);
-        let station_recipes = StationRecipes::load(&root, &items, none);
+        let station_recipes =
+            StationRecipes::load(&root, &items, none, &crate::game::test_server_load());
         let enchantments = Enchantments::default();
         let names = Names::default();
         let env = Env {

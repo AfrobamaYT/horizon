@@ -37,7 +37,12 @@ pub fn main() -> horizon_client::Result<()> {
     let orders = fs::read_to_string(args.get(3).ok_or(usage)?)?;
     let defaults = horizon_world::item_defaults::read(root)?;
     let items = Items::catalog(root, &PackOverlay::NONE, &defaults)?;
-    let recipes = Recipes::load(root, &items, &PackOverlay::NONE)?;
+    let recipes = Recipes::load(
+        root,
+        &items,
+        &PackOverlay::NONE,
+        &crate::test_resources::server_load(),
+    )?;
     let brewing = horizon_client::brewing::Brewing::load(root, &items, &PackOverlay::NONE);
     let banners = horizon_client::banner::Banners::default();
     let station_recipes = horizon_client::stations::StationRecipes::default();

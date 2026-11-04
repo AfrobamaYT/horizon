@@ -9420,11 +9420,12 @@ impl Game<'_> {
             _ => return None,
         };
         let items = self.items();
-        let known: Vec<String> = Ingredient::parse(&json, items)?
-            .order
-            .into_iter()
-            .filter(|item| items.get(item).is_some())
-            .collect();
+        let known: Vec<String> =
+            Ingredient::parse(&json, items, self.res.core.item_data.context())?
+                .order
+                .into_iter()
+                .filter(|item| items.get(item).is_some())
+                .collect();
         (!known.is_empty()).then(|| Ingredient::of(known))
     }
     /// A stack as a recipe's `result` names it: `id` (a bare one as

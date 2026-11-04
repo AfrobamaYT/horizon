@@ -111,8 +111,9 @@ fn main() -> Result<()> {
         horizon_world::item_defaults::read(&root).map_err(|error| format!("items: {error}"))?;
     let items = Items::load(&root, registry, &facts, &PackOverlay::NONE, &defaults)
         .map_err(step("items"))?;
-    let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).map_err(step("recipes"))?;
-    let stations = StationRecipes::load(&root, &items, &PackOverlay::NONE);
+    let recipes = Recipes::load(&root, &items, &PackOverlay::NONE, &server_load())
+        .map_err(step("recipes"))?;
+    let stations = StationRecipes::load(&root, &items, &PackOverlay::NONE, &server_load());
     let enchantments = Enchantments::load(&root, &defaults);
     let collisions =
         horizon_client::collisions::load(&root, registry).map_err(step("collisions"))?;
@@ -333,4 +334,13 @@ fn main() -> Result<()> {
         recipe_rows.len()
     );
     Ok(())
+}
+
+fn server_load() -> horizon_world::native_load_context::LoadContext {
+    use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
+    LoadContext::new(
+        DataLoadOrigin::ServerDataLoad,
+        std::sync::Arc::new(LoadInputs::new(Default::default(), Default::default())),
+        [],
+    )
 }
