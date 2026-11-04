@@ -132,7 +132,7 @@ struct Env {
     grass: Vec<i32>,
     local_time: String,
     bundle_weight: bool,
-    prototypes: BTreeMap<String, Components>,
+    prototypes: std::sync::Arc<BTreeMap<String, Components>>,
 }
 impl ItemEnv for Env {
     fn grass_color(&self, temperature: f64, downfall: f64) -> i32 {
