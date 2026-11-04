@@ -2127,6 +2127,14 @@ handle, an entity the client doesn't track and a level it doesn't show:
   window id included), on a respawn, a dimension change or a logout, and after a reconnect. Nothing here sends a packet
   or changes the menu.
 
+Client input uses `menu.click(host, &[mod_api::MenuClick { slot, button, input }]) on a mutable `ClientHost`.
+It uses that same menu-order slot (`None` for outside), validates the current handle and button/mode,
+and submits through the normal predicted `ContainerClick` path. Complete quick-craft gestures belong
+in one batch; all clicks are validated before the first is predicted or sent. A stale handle, invalid request,
+spectator, non-client host or creative inventory screen returns `false` without side effects.
+`true` is submission, not server acceptance; authoritative slot/cursor corrections still win.
+See [A menu's slots](../concepts/trait-mods.md#a-menus-slots) for modes and a compiling example.
+
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
 - `level.block_state(host, pos)` returns a typed `BlockStateId` without allocating a state string. For text such as

@@ -1,4 +1,4 @@
-//! Read-only handles to supported server menus.
+//! Handles to supported menus: shared reads, server storage and client clicks.
 use super::{
     Game,
     lan_crafting::{load_player, machine_menu},
@@ -13,9 +13,45 @@ use horizon_client::{
     menu::{Kind, Menu},
 };
 use mod_api::__private::game::*;
-use mod_api::{EntityRef, MenuRef, MenuSlotBacking, PlayerRef};
+use mod_api::{EntityRef, Input, MenuClick, MenuRef, MenuSlotBacking, PlayerRef};
 
 impl Game<'_> {
+    /// Submit clicks on the local player's live menu through normal prediction
+    /// and `ContainerClick`. Slots use the same menu order as `slot`; `None`
+    /// is outside (-999). All clicks are validated before any prediction or send.
+    /// A quick-craft gesture must start and end in this batch, with matching mode.
+    /// Refuses stale menus, invalid slots/buttons, spectators, non-client hosts,
+    /// the creative inventory screen and empty batches without changing items.
+    /// True means submitted, not accepted by the server: its corrections win.
+    pub(super) fn native_menu_click(&mut self, menu: MenuRef, clicks: &[MenuClick]) -> bool {
+        if self.is_logical_server()
+            || self.screen == super::Screen::Creative
+            || self.spectator()
+            || !valid_client_clicks(clicks, self.instabuild())
+        {
+            return false;
+        }
+        let Some(name) = self.native_client_menu_name(menu) else {
+            return false;
+        };
+        let ops: Option<Vec<_>> = clicks
+            .iter()
+            .map(|click| {
+                let slot = match click.slot {
+                    Some(slot) => {
+                        Some(Self::menu_slot(name, i32::from(i16::try_from(slot).ok()?))?)
+                    }
+                    None => None,
+                };
+                Some((slot, click.button, click.input))
+            })
+            .collect();
+        let Some(ops) = ops else {
+            return false;
+        };
+        self.remote_menu_ops(&ops)
+    }
+
     fn native_client_menu_name(&self, menu: MenuRef) -> Option<&str> {
         let remote = self.remote.as_ref().filter(|remote| remote.logged_in)?;
         let epoch = self.native_lifecycle.epoch()?;
@@ -310,6 +346,48 @@ impl Game<'_> {
         Some(self.native_menu_guest(menu)?.carried.clone())
     }
 }
+fn valid_client_clicks(clicks: &[MenuClick], creative: bool) -> bool {
+    let mut dragging = None;
+    if clicks.is_empty() {
+        return false;
+    }
+    for click in clicks {
+        if !valid_client_click(click.slot, click.button, click.input, creative) {
+            return false;
+        }
+        if click.input == Input::QuickCraft {
+            let mode = click.button / 4;
+            match (click.button % 4, dragging) {
+                (0, None) => dragging = Some(mode),
+                (1, Some(active)) if mode == active => {}
+                (2, Some(active)) if mode == active => dragging = None,
+                _ => return false,
+            }
+        } else if dragging.is_some() {
+            return false;
+        }
+    }
+    dragging.is_none()
+}
+
+fn valid_client_click(slot: Option<usize>, button: i32, input: Input, creative: bool) -> bool {
+    match input {
+        Input::Pickup => matches!(button, 0 | 1),
+        Input::QuickMove | Input::Throw | Input::PickupAll => {
+            slot.is_some() && matches!(button, 0 | 1)
+        }
+        Input::Swap => slot.is_some() && matches!(button, 0..=8 | 40),
+        Input::Clone => slot.is_some() && button == 2 && creative,
+        Input::QuickCraft => match button {
+            0 | 2 | 4 | 6 => slot.is_none(),
+            1 | 5 => slot.is_some(),
+            8 | 10 => creative && slot.is_none(),
+            9 => creative && slot.is_some(),
+            _ => false,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::{lan::LanSettings, native_entity_refs::tests::with_game};
@@ -320,6 +398,82 @@ mod tests {
         Arc,
         atomic::{AtomicI32, AtomicUsize},
     };
+
+    #[test]
+    fn client_click_modes_validate_buttons_and_outside_before_prediction() {
+        for input in [
+            Input::Pickup,
+            Input::QuickMove,
+            Input::Swap,
+            Input::Clone,
+            Input::Throw,
+            Input::QuickCraft,
+            Input::PickupAll,
+        ] {
+            for slot in [None, Some(0)] {
+                for creative in [false, true] {
+                    for button in -2..=42 {
+                        let expected = match input {
+                            Input::Pickup => (0..=1).contains(&button),
+                            Input::QuickMove | Input::Throw | Input::PickupAll => {
+                                slot.is_some() && (0..=1).contains(&button)
+                            }
+                            Input::Swap => {
+                                slot.is_some() && ((0..=8).contains(&button) || button == 40)
+                            }
+                            Input::Clone => slot.is_some() && button == 2 && creative,
+                            Input::QuickCraft => {
+                                (0..=10).contains(&button)
+                                    && button % 4 != 3
+                                    && (button < 8 || creative)
+                                    && slot.is_some() == (button % 4 == 1)
+                            }
+                        };
+                        assert_eq!(
+                            valid_client_click(slot, button, input, creative),
+                            expected,
+                            "{input:?}, {slot:?}, {button}, creative={creative}"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(!valid_client_click(Some(0), i32::MAX, Input::Swap, true));
+        assert!(!valid_client_click(None, i32::MIN, Input::QuickCraft, true));
+    }
+
+    #[test]
+    fn client_click_batches_require_complete_matching_drag_gestures() {
+        let click = |slot, button, input| MenuClick {
+            slot,
+            button,
+            input,
+        };
+        let drag = |slot, button| click(slot, button, Input::QuickCraft);
+        assert!(!valid_client_clicks(&[], false));
+        for (mode, creative) in [(0, false), (4, false), (8, true)] {
+            let start = drag(None, mode);
+            let add = drag(Some(0), mode + 1);
+            let end = drag(None, mode + 2);
+            assert!(valid_client_clicks(&[start, add, end], creative));
+            assert!(valid_client_clicks(&[start, add, add, end], creative));
+            assert!(!valid_client_clicks(&[start, add], creative));
+            assert!(!valid_client_clicks(&[add, end], creative));
+            assert!(!valid_client_clicks(&[start, start, end], creative));
+            assert!(!valid_client_clicks(
+                &[start, drag(Some(0), (mode + 4) % 12 + 1), end],
+                creative
+            ));
+            assert!(!valid_client_clicks(
+                &[start, click(Some(0), 0, Input::Pickup), end],
+                creative
+            ));
+        }
+        assert!(valid_client_clicks(
+            &[click(Some(0), 0, Input::QuickMove)],
+            false
+        ));
+    }
 
     fn guest() -> Guest {
         let (tx, _) = std::sync::mpsc::channel();

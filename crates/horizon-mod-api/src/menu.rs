@@ -1,6 +1,53 @@
 //! Moved here from the game so mods can name it.
 #[allow(unused_imports)]
 use crate::*;
+/// One click on the local player's open menu, submitted with `MenuRef::click`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MenuClick {
+    /// Menu-order slot, as `MenuRef::slot` reads it; `None` is outside (-999).
+    pub slot: Option<usize>,
+    /// The button for `input` (documented on each `Input` variant).
+    pub button: i32,
+    /// The vanilla click mode.
+    pub input: Input,
+}
+
+/// A vanilla container click mode, as used by `MenuRef::click`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Input {
+    /// Pick up, place or drop the carried stack (button 0 or 1).
+    Pickup,
+    /// Shift-click a slot into the opposite inventory (button 0 or 1).
+    QuickMove,
+    /// Exchange with hotbar slot 0..=8, or the offhand (button 40).
+    Swap,
+    /// Clone a slot in creative mode (button 2).
+    Clone,
+    /// Drop one item (button 0) or a stack (button 1) from a slot.
+    Throw,
+    /// Drag distribution: start 0/4/8, add 1/5/9, end 2/6/10.
+    /// The third group (8/9/10) fills slots in creative mode only.
+    QuickCraft,
+    /// Collect matching stacks into the carried stack (button 0 or 1).
+    PickupAll,
+}
+
+impl Input {
+    /// Parse the vanilla uppercase container-input name.
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "PICKUP" => Self::Pickup,
+            "QUICK_MOVE" => Self::QuickMove,
+            "SWAP" => Self::Swap,
+            "CLONE" => Self::Clone,
+            "THROW" => Self::Throw,
+            "QUICK_CRAFT" => Self::QuickCraft,
+            "PICKUP_ALL" => Self::PickupAll,
+            _ => return None,
+        })
+    }
+}
+
 /// Identity and location of a player pressing a mod container button.
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct MenuButtonContext {

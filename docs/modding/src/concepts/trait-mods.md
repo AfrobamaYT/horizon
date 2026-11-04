@@ -407,6 +407,27 @@ unavailable and `Some(None)` for an empty slot. Each read checks the world epoch
 so a handle cannot read a replacement, reopened or respawned menu. These methods do not click or
 change slots.
 
+Mutable client hooks can submit a vanilla click with
+`menu.click(host, &[mod_api::MenuClick { slot: Some(slot), button: 0, input: mod_api::Input::QuickMove }])`. The slot is the same menu-order
+index used by `slot`, not a hotbar index or a GUI slot id. For example:
+
+```rust,ignore
+{{#include ../../examples/src/lib.rs:menu_quick_move}}
+```
+
+The modes are `Pickup`, `QuickMove`, `Swap`, `Clone`, `Throw`, `QuickCraft` and `PickupAll`;
+their `Input` documentation gives the buttons. `None` means outside (-999): a pickup drops
+the carried stack, and quick-craft uses outside for its start/end and a slot for its add phase.
+Pass a complete quick-craft gesture in one batch so prediction retains its drag state. Every click
+in a batch is validated before any prediction or sending; malformed, incomplete or mixed-mode drags
+and empty batches refuse without effects. Other batches may contain one or several clicks. Stale/replaced/respawned
+menus, spectators, non-client hosts and the creative inventory screen refuse with `false`.
+`true` means submitted, not server acceptance: prediction uses the normal menu engine and sends
+`ContainerClick` with its state id, changed slots and carried item. Server corrections still win.
+Inventory reads and direct server-side item transactions keep their existing contracts; a click does
+not expose direct client inventory writes or enforce a mod's locked-slot policy. Call from an explicit
+input action rather than submitting every render/tick.
+
 `ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`player.container_menu(host)`). It is
 a fork addition: NeoForge 26.3's `ItemAccess` reaches a player's inventory slot (`forPlayerSlot`) and cursor
 (`forPlayerCursor`), not a menu's slot. It is the storage the slot shows, named by `menu.slot_backing(host, slot)`
