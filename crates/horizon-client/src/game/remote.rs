@@ -6160,6 +6160,7 @@ impl Game<'_> {
                 assets: &self.pack.assets,
                 collision_binding: self.collision,
                 resources: self.motion,
+                loop_context: &self.loop_context,
                 tag_items: None,
             }
             .controlled_simulation_tick_with_sprint_window(keys, sprint_window)?;
@@ -6176,6 +6177,7 @@ impl Game<'_> {
                     assets: &self.pack.assets,
                     collision_binding: self.collision,
                     resources: self.motion,
+                    loop_context: &self.loop_context,
                     tag_items: None,
                 }
                 .passenger_pose_tick()?;

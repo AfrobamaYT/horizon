@@ -901,6 +901,7 @@ impl Game<'_> {
         let weather = self.can_have_weather();
         let player = self.player_view();
         MobWorld {
+            loop_context: &self.loop_context,
             world: &self.world,
             registry: self.pack.assets.registry,
             facts: self.res.facts(),
@@ -8617,6 +8618,8 @@ mod pearl_tests {
         let lid_openers = std::collections::HashMap::new();
         let w = MobWorld {
             teams: Default::default(),
+            loop_context: &crate::game::test_server_load()
+                .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
             world: &world,
             registry,
             facts: &facts,

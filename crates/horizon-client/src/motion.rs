@@ -11,6 +11,7 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
+use horizon_world::native_load_context::LoopContext;
 use horizon_world::{
     attribute_map::ValueKind,
     attributes::{Modifier, Operation, entity::Catalog, live::LiveAttributes},
@@ -55,24 +56,24 @@ pub fn native_living_jump(entity: u32, kind: &str) {
 /// A living entity's jump power is about to be used (beyond NeoForge: there is no counterpart).
 /// Mods may change it. Fires on replayed ticks too, so a listener must be a pure function of its inputs.
 #[inline(never)]
-pub fn native_living_jump_power(entity: u32, kind: &str, power: &mut f32) {
-    crate::native_client_hooks::living_jump_power(entity, kind, power);
+pub fn native_living_jump_power(context: &LoopContext, entity: u32, kind: &str, power: &mut f32) {
+    crate::native_client_hooks::living_jump_power(context, entity, kind, power);
 }
 
 /// A living entity's movement speed is about to drive its travel (beyond NeoForge: there is no
 /// counterpart). Mods may change it. Fires on replayed ticks too, so a listener must be a pure
 /// function of its inputs.
 #[inline(never)]
-pub fn native_living_speed(entity: u32, kind: &str, speed: &mut f32) {
-    crate::native_client_hooks::living_speed(entity, kind, speed);
+pub fn native_living_speed(context: &LoopContext, entity: u32, kind: &str, speed: &mut f32) {
+    crate::native_client_hooks::living_speed(context, entity, kind, speed);
 }
 
 /// A living entity's airborne acceleration is about to be used (beyond NeoForge: there is no
 /// counterpart). Mods may change it. Fires on replayed ticks too, so a listener must be a pure
 /// function of its inputs.
 #[inline(never)]
-pub fn native_living_flying_speed(entity: u32, kind: &str, speed: &mut f32) {
-    crate::native_client_hooks::living_flying_speed(entity, kind, speed);
+pub fn native_living_flying_speed(context: &LoopContext, entity: u32, kind: &str, speed: &mut f32) {
+    crate::native_client_hooks::living_flying_speed(context, entity, kind, speed);
 }
 
 pub(crate) mod environment;
@@ -946,6 +947,9 @@ pub struct MotionWorld<'p, 'w, 'r> {
     pub resources: &'w MotionResources,
     /// Authoritative merged tags, absent on client prediction.
     pub tag_items: Option<&'w crate::items::Items>,
+    /// What the motion value hooks are given: the side that owns this player's
+    /// tick builds it (server, or the client for its own prediction and replay).
+    pub loop_context: &'w LoopContext,
 }
 enum TickInput {
     Living([f32; 3]),
@@ -2766,7 +2770,12 @@ impl LivingAirWorld for MotionWorld<'_, '_, '_> {
     }
     fn speed(&mut self) -> Result<f32> {
         let mut speed = self.player.attribute("minecraft:movement_speed")? as f32;
-        native_living_speed(self.player.entity_id as u32, "minecraft:player", &mut speed);
+        native_living_speed(
+            self.loop_context,
+            self.player.entity_id as u32,
+            "minecraft:player",
+            &mut speed,
+        );
         Ok(speed)
     }
     fn flying_speed(&mut self) -> Result<f32> {
@@ -2778,7 +2787,12 @@ impl LivingAirWorld for MotionWorld<'_, '_, '_> {
         } else {
             0.02
         };
-        native_living_flying_speed(self.player.entity_id as u32, "minecraft:player", &mut speed);
+        native_living_flying_speed(
+            self.loop_context,
+            self.player.entity_id as u32,
+            "minecraft:player",
+            &mut speed,
+        );
         Ok(speed)
     }
     fn yaw(&mut self) -> Result<f32> {
@@ -2866,7 +2880,12 @@ impl LivingMotionWorld for MotionWorld<'_, '_, '_> {
         Ok(())
     }
     fn adjust_jump_power(&mut self, mut power: f32) -> f32 {
-        native_living_jump_power(self.player.entity_id as u32, "minecraft:player", &mut power);
+        native_living_jump_power(
+            self.loop_context,
+            self.player.entity_id as u32,
+            "minecraft:player",
+            &mut power,
+        );
         power
     }
     fn jump_strength(&mut self) -> Result<f64> {
@@ -3233,6 +3252,7 @@ mod tests {
         let mut tick = |player: &mut PlayerMotion, keys| {
             MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &entities,
                 player,
                 scene: &mut scene,
@@ -3320,6 +3340,7 @@ mod tests {
         for _ in 0..30 {
             MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -3337,6 +3358,7 @@ mod tests {
         for _ in 0..10 {
             MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -3375,6 +3397,7 @@ mod tests {
         let mut tick = |player: &mut PlayerMotion| {
             MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player,
                 scene: &mut scene,
@@ -3427,6 +3450,7 @@ mod tests {
         let mut tick = |player: &mut PlayerMotion| {
             MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player,
                 scene: &mut scene,
@@ -3489,6 +3513,7 @@ mod tests {
         let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
         MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -3504,6 +3529,7 @@ mod tests {
         let from = player.position;
         MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -3518,6 +3544,7 @@ mod tests {
         let mut away = PlayerMotion::new(&resources, Vec3::new(22.5, 4.0, 20.5)).unwrap();
         MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut away,
             scene: &mut scene,
@@ -3568,6 +3595,7 @@ mod tests {
             player.events.clear();
             MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -3599,6 +3627,7 @@ mod tests {
         scene.random = horizon_core::random::LegacyRandom::new(1);
         MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -3613,6 +3642,7 @@ mod tests {
         player.events.clear();
         MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -3643,6 +3673,7 @@ mod tests {
         let mut travel = |player: &mut PlayerMotion| {
             MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player,
                 scene: &mut scene,
@@ -3719,6 +3750,7 @@ mod tests {
         player.carry_client_movement(Vec3::new(1.2, 0.0, 0.0));
         MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -3759,6 +3791,7 @@ mod tests {
             player.flying_speed = crate::mouse::spectator_flying_speed(player.flying_speed, steps);
             MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -3818,6 +3851,7 @@ mod tests {
             for _ in 0..4 {
                 MotionWorld {
                     tag_items: unavailable_tags!(),
+                    loop_context: crate::test_resources::server_loop_context(),
                     entities: &[],
                     player: &mut player,
                     scene: &mut scene,
@@ -4165,6 +4199,7 @@ mod tests {
             player.velocity = Vec3::new(0.4, -0.3, 1.1);
             let mut w = MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -4204,6 +4239,7 @@ mod tests {
             player.fall_distance = 30.0;
             let mut w = MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -4257,6 +4293,7 @@ mod tests {
             player.fall_distance = 30.0;
             let mut w = MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -4295,6 +4332,7 @@ mod tests {
             player.spectator = spectator;
             let mut w = MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -4329,6 +4367,7 @@ mod tests {
             player.fall_distance = 30.0;
             let mut w = MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -4383,6 +4422,7 @@ mod tests {
             player.status.slow_falling = slow_falling;
             let mut w = MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -4423,6 +4463,7 @@ mod tests {
         player.auto_spin_attack_dmg = 8.0;
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -4467,6 +4508,7 @@ mod tests {
         let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 10.0, 20.5)).unwrap();
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -4520,6 +4562,7 @@ mod tests {
         assert_eq!(player.dimensions.eye_height, 0.4);
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -4554,6 +4597,7 @@ mod tests {
         player.set_pose(crate::pose::Pose::Swimming).unwrap();
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -4629,6 +4673,7 @@ mod tests {
         let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -4678,6 +4723,7 @@ mod tests {
             player.spin_targets = target.map(|b| (7, b)).into_iter().collect();
             let mut w = MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -4716,6 +4762,7 @@ mod tests {
         let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 4.2, 20.5)).unwrap();
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -4765,6 +4812,7 @@ mod tests {
         let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 4.2, 20.5)).unwrap();
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -4838,6 +4886,7 @@ mod tests {
         }
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -5092,6 +5141,7 @@ mod tests {
         let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -5169,6 +5219,7 @@ mod tests {
             player.fall_distance = 8.0;
             let mut w = MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -5222,6 +5273,7 @@ mod tests {
         let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -5308,6 +5360,7 @@ mod tests {
             player.ground.on_ground = true;
             let mut w = MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -5347,6 +5400,7 @@ mod tests {
             for _ in 0..ticks {
                 MotionWorld {
                     tag_items: unavailable_tags!(),
+                    loop_context: crate::test_resources::server_loop_context(),
                     entities: &[],
                     player: &mut *player,
                     scene: &mut scene,
@@ -5419,6 +5473,7 @@ mod tests {
             let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
             let mut w = MotionWorld {
                 tag_items: unavailable_tags!(),
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -5470,6 +5525,7 @@ mod tests {
         let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -5528,6 +5584,7 @@ mod tests {
         let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -5580,6 +5637,7 @@ mod tests {
         let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -5630,6 +5688,7 @@ mod tests {
         player.flying_speed = 0.0;
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -5683,6 +5742,7 @@ mod tests {
         let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 10.0, 20.5)).unwrap();
         let mut w = MotionWorld {
             tag_items: unavailable_tags!(),
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,

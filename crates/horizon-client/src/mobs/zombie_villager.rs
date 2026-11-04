@@ -196,6 +196,7 @@ mod tests {
         let lid_openers = std::collections::HashMap::new();
         let w = MobWorld {
             teams: Default::default(),
+            loop_context: crate::test_resources::server_loop_context(),
             world: &world,
             registry,
             facts: &facts,

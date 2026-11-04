@@ -4260,9 +4260,15 @@ pub(crate) mod tests {
                 living_drown: |_, _, _, _, _, _| {},
                 living_fall: |_, _, _, _, _| {},
                 living_jump: |_, _| {},
-                living_jump_power: |_, _, _| {},
-                living_speed: |_, _, _| {},
-                living_flying_speed: |_, _, _| {},
+                living_jump_power: |context, _, _, power| {
+                    *power += context.setting("rules_mod", "stack").map_or(0.0, |_| 1.0);
+                },
+                living_speed: |context, _, _, speed| {
+                    *speed += context.setting("rules_mod", "stack").map_or(0.0, |_| 2.0);
+                },
+                living_flying_speed: |context, _, _, speed| {
+                    *speed += context.setting("rules_mod", "stack").map_or(0.0, |_| 3.0);
+                },
                 ender_entity_teleport: |_, _, _, _, _| {},
             });
         assert!(installed.is_ok());
@@ -4294,6 +4300,16 @@ pub(crate) mod tests {
         bare_env_in(&before, |env| {
             assert_eq!(menu.mod_slot(env, 0, &stack), (true, 7));
         });
+        // The motion value hooks read it too, and change nothing without it.
+        let values = |context: &LoopContext| {
+            let (mut jump, mut speed, mut flying) = (0.5, 0.1, 0.02);
+            crate::motion::native_living_jump_power(context, 1, "minecraft:cow", &mut jump);
+            crate::motion::native_living_speed(context, 1, "minecraft:cow", &mut speed);
+            crate::motion::native_living_flying_speed(context, 1, "minecraft:cow", &mut flying);
+            (jump, speed, flying)
+        };
+        assert_eq!(values(&before), (0.5, 0.1, 0.02));
+        assert_eq!(values(&after), (1.5, 2.1, 3.02));
         std::fs::remove_dir_all(&settings).unwrap();
     }
 

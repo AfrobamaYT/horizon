@@ -5084,6 +5084,7 @@ impl Game<'_> {
                 assets: &game.pack.assets,
                 collision_binding: game.collision,
                 resources: game.motion,
+                loop_context: &game.loop_context,
                 tag_items: Some(world_items!(game)),
             };
             w.player.health.advance_clock();
@@ -5221,6 +5222,7 @@ impl Game<'_> {
                 assets: &game.pack.assets,
                 collision_binding: game.collision,
                 resources: game.motion,
+                loop_context: &game.loop_context,
                 tag_items: Some(world_items!(game)),
             }
             .server_travel();

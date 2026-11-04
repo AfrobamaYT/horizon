@@ -180,6 +180,7 @@ impl Game<'_> {
             assets: &self.pack.assets,
             collision_binding: self.collision,
             resources: self.motion,
+            loop_context: &self.loop_context,
             tag_items: Some(world_items!(self)),
         }
         .no_player_collision(bounds)
