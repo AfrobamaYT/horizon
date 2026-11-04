@@ -7,7 +7,7 @@ use horizon_client::{
     containers::BlockEntity,
     items::ItemStack,
     mobs::{
-        Who,
+        Mob, Who,
         spawner::SpawnerSpawn,
         trial_spawner::{
             TRIAL_OMEN_TICKS_PER_LEVEL, TrialEvent, TrialPlayer, TrialSpawner, TrialSpawnerExt,
@@ -153,14 +153,15 @@ impl Game<'_> {
         )));
         let mut uuids: Vec<(u32, Uuid)> = Vec::new();
         let mut ejected: Vec<(ItemStack, [f64; 3])> = Vec::new();
+        let extras: (Vec<Mob>, Vec<(u32, u32)>);
         let next = {
             let level = self.natural_level();
             let loot = self.server_loot.get();
             let seed = self.level.seed;
-            let mut spawn = |l: &GameLevel, r: &SpawnerSpawn| {
-                let added = l.game.plan_spawner_mob(l, r, source, &mut planned)?;
+            let mut spawn = |l: &GameLevel, r: &SpawnerSpawn, rng: &mut LegacyRandom| {
+                let added = l.game.plan_spawner_mob(l, r, source, &mut planned, rng)?;
                 let uuid = match planned.last_mut() {
-                    Some(Planned::Loaded(Tag::Compound(tag), _)) => {
+                    Some(Planned::Loaded(Tag::Compound(tag), _, _)) => {
                         let tag_uuid =
                             horizon_client::entity_nbt::uuid(&Tag::Compound(tag.clone()));
                         tag_uuid.unwrap_or_else(|| {
@@ -200,7 +201,7 @@ impl Game<'_> {
                 }
                 !drops.is_empty()
             };
-            spawner.server_tick(
+            let state = spawner.server_tick(
                 &level,
                 &mut random,
                 pos,
@@ -209,11 +210,17 @@ impl Game<'_> {
                 &mut spawn,
                 &mut eject,
                 &mut events,
-            )
+            );
+            extras = (
+                std::mem::take(&mut *level.spawned.borrow_mut()),
+                std::mem::take(&mut *level.rides.borrow_mut()),
+            );
+            state
         };
         self.world.random = random;
         self.rand_sequences = sequences;
-        let ids = self.add_planned(planned);
+        let (created, rides) = extras;
+        let ids = self.add_planned(planned, created, rides);
         let mut by_uuid = HashMap::new();
         for (provisional, uuid) in uuids {
             if let Some(id) = ids.get(&provisional) {

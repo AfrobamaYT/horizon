@@ -784,16 +784,12 @@ impl Game<'_> {
         } else {
             horizon_client::mobs::spawn_rules::Reason::Event
         };
-        match self.finalize_with(&mut mob, spawn_reason, None) {
-            Finalized::Cancelled => return None,
-            Finalized::Skipped => {}
-            Finalized::Done => raider::finalize(&mut mob, reason),
+        if self.finalize_with(&mut mob, spawn_reason, None) == Finalized::Cancelled {
+            return None;
         }
         let id = mob.id;
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
-        self.enchant_spawn_equipment(id);
-        self.halloween_spawn_head(id);
         Some(id)
     }
 
@@ -1386,12 +1382,6 @@ impl Game<'_> {
             (m.yaw, m.previous_yaw, m.body_yaw, m.previous_body_yaw) = (yaw, yaw, yaw, yaw);
             (m.head_yaw, m.previous_head_yaw) = (yaw, yaw);
         }
-        self.spawn_jockeys(
-            id,
-            super::creatures::SpawnSite::Finalizing(
-                horizon_client::mobs::spawn_rules::Reason::Event,
-            ),
-        );
     }
     /// `VillageSiege.findRandomSpawnPos`: ten tries within 8 blocks of the
     /// spot for a village column where a zombie may spawn.

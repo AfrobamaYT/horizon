@@ -637,26 +637,29 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let watches = std::mem::take(&mut host.hub.chunk_watches);
+        let runs = host.hub.chunk_watches.take();
         let Some(epoch) = self.native_lifecycle.epoch() else {
             return;
         };
-        for watch in watches {
-            let (Some(level), Ok(id)) = (
-                self.native_level(&watch.dimension),
-                u32::try_from(watch.entity_id),
-            ) else {
+        for run in runs {
+            // A level the server no longer holds: nothing to name.
+            let Some(level) = self.native_level(&run.dimension) else {
                 continue;
             };
-            let player = mod_api::__private::game::player_ref(
-                mod_api::EntityRef::new(epoch, id),
-                watch.uuid,
-            );
-            let chunk = mod_api::ChunkRef::new(level, watch.chunk);
-            match watch.kind {
-                ChunkWatchKind::Watch => self.native_chunk_watch(player, chunk),
-                ChunkWatchKind::Sent => self.native_chunk_sent(player, chunk),
-                ChunkWatchKind::Unwatch => self.native_chunk_unwatch(player, chunk),
+            for watch in run.watches {
+                let Ok(id) = u32::try_from(watch.entity_id) else {
+                    continue;
+                };
+                let player = mod_api::__private::game::player_ref(
+                    mod_api::EntityRef::new(epoch, id),
+                    watch.uuid,
+                );
+                let chunk = mod_api::ChunkRef::new(level, watch.chunk);
+                match watch.kind {
+                    ChunkWatchKind::Watch => self.native_chunk_watch(player, chunk),
+                    ChunkWatchKind::Sent => self.native_chunk_sent(player, chunk),
+                    ChunkWatchKind::Unwatch => self.native_chunk_unwatch(player, chunk),
+                }
             }
         }
     }
@@ -1584,7 +1587,9 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn the_hubs_chunk_watches_reach_the_mods_in_order() {
-        use horizon_client::lan::chunk_watch::{ChunkWatch, ChunkWatchKind};
+        use horizon_client::lan::chunk_watch::{
+            ChunkWatch, ChunkWatchKind, ChunkWatchLog, LevelWatches,
+        };
         let heard = std::sync::Arc::default();
         let mods = vec![mod_api::ModEntry::new(
             "watch",
@@ -1595,19 +1600,30 @@ mod tests {
             super::super::native_entity_refs::tests::with_game(|game| {
                 super::super::native_item_places::tests::open_to_lan(game);
                 let here = game.dim.id();
-                let record = |kind, dimension: &str, chunk| ChunkWatch {
+                let watch = |kind, chunk| ChunkWatch {
                     kind,
                     uuid: 127,
                     entity_id: 42,
-                    dimension: dimension.into(),
                     chunk,
                 };
-                game.lan.as_mut().unwrap().hub.chunk_watches = vec![
-                    record(ChunkWatchKind::Watch, here, [1, 2]),
-                    record(ChunkWatchKind::Sent, here, [1, 2]),
-                    record(ChunkWatchKind::Unwatch, "minecraft:nowhere", [0, 0]),
-                    record(ChunkWatchKind::Unwatch, here, [1, 2]),
-                ];
+                let run = |dimension: &str, watches| LevelWatches {
+                    dimension: dimension.into(),
+                    watches,
+                };
+                game.lan.as_mut().unwrap().hub.chunk_watches = ChunkWatchLog::new(vec![
+                    run(
+                        here,
+                        vec![
+                            watch(ChunkWatchKind::Watch, [1, 2]),
+                            watch(ChunkWatchKind::Sent, [1, 2]),
+                        ],
+                    ),
+                    run(
+                        "minecraft:nowhere",
+                        vec![watch(ChunkWatchKind::Unwatch, [0, 0])],
+                    ),
+                    run(here, vec![watch(ChunkWatchKind::Unwatch, [1, 2])]),
+                ]);
                 game.run_chunk_watches();
                 assert!(game.lan.as_ref().unwrap().hub.chunk_watches.is_empty());
                 assert_eq!(
