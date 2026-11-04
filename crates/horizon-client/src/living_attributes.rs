@@ -8,17 +8,20 @@
 //! because most mobs never need one and a map costs a few KiB.
 use crate::Result;
 use horizon_client_core::nbt_value::{float, string, text};
-use horizon_items::{equipment::Equipment, items::Items};
+use horizon_items::{
+    equipment::Equipment,
+    items::{ItemStack, Items},
+};
 use horizon_world::{
     attribute_map::ValueKind,
     attributes::{
-        Modifier, Operation, Packed,
+        AttributeError, Instance, Modifier, Operation, Packed,
         entity::Catalog,
-        live::{Identities, LiveAttributes},
+        live::{Dirty, Identities, LiveAttributes},
     },
     nbt::Tag,
 };
-use std::{cell::OnceCell, fmt, io, sync::Arc};
+use std::{cell::OnceCell, convert::Infallible, fmt, io, sync::Arc};
 
 /// An entity's attribute instances, as a player has them.
 pub type Live = LiveAttributes<Box<dyn Identities>>;
@@ -96,35 +99,38 @@ pub fn set_modifier(
 pub fn pack(attributes: &Live, modifiers: bool) -> Vec<Tag> {
     attributes
         .instances()
-        .map(|(_, key, instance)| {
-            let packed = instance.pack();
-            let mut entry = vec![
-                ("id", string(key.name())),
-                ("base", Tag::Double(packed.base.to_bits())),
-            ];
-            // `modifiers` is an optional field whose default is the empty list.
-            if modifiers && !packed.modifiers.is_empty() {
-                let modifiers = packed
-                    .modifiers
-                    .iter()
-                    .map(|m| {
-                        let operation = match m.operation() {
-                            Operation::AddValue => "add_value",
-                            Operation::AddMultipliedBase => "add_multiplied_base",
-                            Operation::AddMultipliedTotal => "add_multiplied_total",
-                        };
-                        Tag::compound([
-                            ("id", string(m.id())),
-                            ("amount", Tag::Double(m.amount().to_bits())),
-                            ("operation", string(operation)),
-                        ])
-                    })
-                    .collect();
-                entry.push(("modifiers", Tag::List(modifiers)));
-            }
-            Tag::compound(entry)
-        })
+        .map(|(_, key, instance)| packed_entry(key.name(), instance, modifiers))
         .collect()
+}
+
+/// One instance's entry of `pack`.
+fn packed_entry(name: &str, instance: &Instance, modifiers: bool) -> Tag {
+    let packed = instance.pack();
+    let mut entry = vec![
+        ("id", string(name)),
+        ("base", Tag::Double(packed.base.to_bits())),
+    ];
+    // `modifiers` is an optional field whose default is the empty list.
+    if modifiers && !packed.modifiers.is_empty() {
+        let modifiers = packed
+            .modifiers
+            .iter()
+            .map(|m| {
+                let operation = match m.operation() {
+                    Operation::AddValue => "add_value",
+                    Operation::AddMultipliedBase => "add_multiplied_base",
+                    Operation::AddMultipliedTotal => "add_multiplied_total",
+                };
+                Tag::compound([
+                    ("id", string(m.id())),
+                    ("amount", Tag::Double(m.amount().to_bits())),
+                    ("operation", string(operation)),
+                ])
+            })
+            .collect();
+        entry.push(("modifiers", Tag::List(modifiers)));
+    }
+    Tag::compound(entry)
 }
 
 /// `AttributeMap.apply` of a saved `attributes` list: each known attribute
@@ -180,15 +186,19 @@ pub struct LivingAttributes {
     map: OnceCell<Box<Live>>,
     /// The items whose modifiers the map holds, by `EquipmentSlot` ordinal
     /// (`LivingEntity.lastEquipmentItems`).
-    worn: Option<Box<[Option<Arc<str>>; 8]>>,
+    worn: Option<Box<[Option<ItemStack>; 8]>>,
     /// The loaded `attributes` entries, applied when the map is built.
     saved: Option<Box<[Tag]>>,
+    /// The transient modifiers mods added, by attribute: not saved, and put
+    /// back when the map is built again.
+    transient: Option<Box<Vec<(Arc<str>, Modifier)>>>,
 }
 impl fmt::Debug for LivingAttributes {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LivingAttributes")
             .field("live", &self.map.get().is_some())
             .field("saved", &self.saved.as_ref().map_or(0, |s| s.len()))
+            .field("transient", &self.transient.as_ref().map_or(0, |t| t.len()))
             .finish()
     }
 }
@@ -252,7 +262,82 @@ impl LivingAttributes {
         if let Some(saved) = &self.saved {
             apply_saved(&mut live, Some(&Tag::List(saved.to_vec())))?;
         }
+        for (name, modifier) in self.transient.iter().flat_map(|t| t.iter()) {
+            let Some(key) = live.key(name) else {
+                continue;
+            };
+            let Some(handle) = live.get_instance(Some(key)).map_err(attribute_error)? else {
+                continue;
+            };
+            live.edit(&handle, |value, observer| {
+                value.add_or_update_transient(modifier.clone(), observer)
+            })
+            .map_err(attribute_error)?;
+        }
         Ok(live)
+    }
+
+    /// Edits `name`'s instance (`AttributeMap.getInstance`, then the edit),
+    /// building the map first: a mod's write. None for an attribute the
+    /// entity type does not have. With `persist`, the instance's base and
+    /// permanent modifiers then replace its saved entry, so a rebuilt map and
+    /// the save keep them; without, another record (`finalize`'s) holds them.
+    pub fn edit<R>(
+        &mut self,
+        catalog: &Arc<Catalog>,
+        entity: &str,
+        name: &str,
+        persist: bool,
+        seed: impl FnOnce() -> Vec<Tag>,
+        edit: impl FnOnce(
+            &mut Instance,
+            &mut Dirty<'_>,
+        ) -> std::result::Result<R, AttributeError<Infallible>>,
+    ) -> Option<R> {
+        if self.map.get().is_none() {
+            let built = self.build(catalog, entity, seed()).ok()?;
+            self.map.get_or_init(|| Box::new(built));
+        }
+        let map = self.map.get_mut()?;
+        let key = map.key(name)?;
+        let handle = map.get_instance(Some(key)).ok()??;
+        let out = map.edit(&handle, edit).ok()?;
+        if persist {
+            let entry = packed_entry(name, map.instance(&handle).ok()?, true);
+            let mut saved = self.saved.take().map(Vec::from).unwrap_or_default();
+            match saved
+                .iter_mut()
+                .find(|t| text(t.get("id")).as_deref() == Some(name))
+            {
+                Some(t) => *t = entry,
+                None => saved.push(entry),
+            }
+            self.saved = Some(saved.into_boxed_slice());
+        }
+        Some(out)
+    }
+
+    /// Keeps a mod's transient modifier on `name` for the next build, or
+    /// with `None` forgets the one with id `id`.
+    pub fn keep_transient(&mut self, name: &str, id: &str, modifier: Option<Modifier>) {
+        if modifier.is_none() && self.transient.is_none() {
+            return;
+        }
+        let list = self.transient.get_or_insert_with(Box::default);
+        list.retain(|(n, m)| !(&**n == name && m.id() == id));
+        if let Some(modifier) = modifier {
+            list.push((Arc::from(name), modifier));
+        }
+        if list.is_empty() {
+            self.transient = None;
+        }
+    }
+
+    /// Whether a mod's transient modifier with id `id` is on `name`.
+    pub fn has_transient(&self, name: &str, id: &str) -> bool {
+        self.transient
+            .as_ref()
+            .is_some_and(|t| t.iter().any(|(n, m)| &**n == name && m.id() == id))
     }
 
     /// `AttributeMap.getValue` or `getBaseValue` of `name`: None for an
@@ -291,11 +376,16 @@ impl LivingAttributes {
         items: &Items,
         seed: impl FnOnce() -> Vec<Tag>,
     ) -> Result<()> {
-        let item = |slot: usize| equipment.get(slot).map(|s| &*s.item);
+        let item = |slot: usize| equipment.get(slot);
         let mut changed = 0u8;
         for slot in 0..8 {
-            let was = self.worn.as_ref().and_then(|w| w[slot].as_deref());
-            if item(slot) != was {
+            let was = self.worn.as_ref().and_then(|w| w[slot].as_ref());
+            // `LivingEntity.equipmentHasChanged`: `!ItemStack.matches`.
+            let same = match (item(slot), was) {
+                (Some(now), Some(was)) => now.matches(was),
+                (now, was) => now.is_none() && was.is_none(),
+            };
+            if !same {
                 changed |= 1 << slot;
             }
         }
@@ -319,11 +409,11 @@ impl LivingAttributes {
             if changed & (1 << slot) == 0 {
                 continue;
             }
-            worn[slot] = item(slot).map(Arc::from);
+            worn[slot] = item(slot).cloned();
             let Some(new) = &worn[slot] else {
                 continue;
             };
-            if items.get(new).is_none_or(|i| i.modifiers.is_empty()) {
+            if new.attribute_modifiers(items).is_empty() {
                 continue;
             }
             if self.map.get().is_none() {
@@ -361,12 +451,22 @@ impl LivingAttributes {
     }
 }
 
-fn apply_item(map: &mut Live, item: &str, slot: usize, items: &Items, present: bool) -> Result<()> {
-    let Some(info) = items.get(item) else {
-        return Ok(());
-    };
+fn apply_item(
+    map: &mut Live,
+    stack: &ItemStack,
+    slot: usize,
+    items: &Items,
+    present: bool,
+) -> Result<()> {
     let slot_name = horizon_items::equipment::SLOT_NAMES[slot];
-    for (attribute, id, amount, operation, group) in &info.modifiers {
+    for horizon_items::item_data::ModifierRow {
+        attribute,
+        id,
+        amount,
+        operation,
+        slot: group,
+    } in stack.attribute_modifiers(items).iter()
+    {
         if modifier_applies(group, slot_name) {
             set_modifier(map, attribute, id, *amount, operation, present)?;
         }

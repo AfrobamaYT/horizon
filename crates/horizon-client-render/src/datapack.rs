@@ -27,12 +27,13 @@ impl DataPack {
         match &self.source {
             Source::Zip(z) => z
                 .names()
-                .filter(|n| n.starts_with(prefix) && !n.ends_with('/'))
+                .filter(|n| n.starts_with(prefix) && crate::packs::stays_inside(n))
                 .map(str::to_owned)
                 .collect(),
             Source::Dir(root) => {
                 let mut out = Vec::new();
                 walk(root, &root.join(prefix), &mut out);
+                out.retain(|name| crate::packs::stays_inside(name));
                 out
             }
         }
@@ -115,6 +116,16 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
     }
 }
 impl DataPack {
+    /// A mod's passive data layer, without reading the archive's pack metadata.
+    pub fn mod_layer(id: String, source: &crate::packs::Source) -> std::io::Result<Self> {
+        Ok(Self {
+            id,
+            source: match source {
+                crate::packs::Source::Dir(root) => Source::Dir(root.clone()),
+                crate::packs::Source::Zip(path) => Source::Zip(Box::new(Zip::open(path)?)),
+            },
+        })
+    }
     /// The built-in `vanilla` pack: the game's own data directory.
     pub fn builtin(root: &Path) -> Self {
         DataPack {

@@ -60,7 +60,13 @@ pub(super) fn sync_data(
     sync.get_or_insert_with(|| Synced {
         with_packs: packs,
         generation,
-        result: SyncData::load(item_data.root(), overlay, item_data.defaults()).map(Arc::new),
+        result: SyncData::load(
+            item_data.root(),
+            overlay,
+            item_data.defaults(),
+            &server_data_load(item_data),
+        )
+        .map(Arc::new),
     })
     .result
     .clone()
@@ -86,7 +92,13 @@ pub(super) fn reload_sync_data(
     // Kept pack dialogs count as packs: a world opened without packs after
     // a `/reload` that dropped them must read its own registries again.
     let packs = !overlay.files.is_empty() || kept.has_pack_entries();
-    let sync = SyncData::load(root, overlay, item_data.defaults()).map(|mut sync| {
+    let sync = SyncData::load(
+        root,
+        overlay,
+        item_data.defaults(),
+        &server_data_load(item_data),
+    )
+    .map(|mut sync| {
         sync.keep_registries(root, kept);
         sync.features.clone_from(&kept.features);
         Arc::new(sync)
@@ -117,6 +129,17 @@ impl Game<'_> {
     }
 }
 
+/// A server's own data load over `item_data`'s registry inputs: the owner of
+/// the data a server reads and sends, whichever window shares the `ItemData`.
+pub(super) fn server_data_load(
+    item_data: &ItemData,
+) -> horizon_world::native_load_context::LoadContext {
+    item_data.context().for_load(
+        horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
+        mod_api::__private::loaded_mods().ids(),
+    )
+}
+
 /// The registries and tags a server sends without data packs over them, read
 /// on a helper thread while a server's world prepares: most worlds have no
 /// packs, so it is what `sync_data` would load once the world is open.
@@ -136,6 +159,7 @@ pub(super) fn preload_sync_data(item_data: &Arc<ItemData>) -> Option<SyncPreload
         return None;
     }
     let item_data = Arc::clone(item_data);
+    let context = server_data_load(&item_data);
     std::thread::Builder::new()
         .name("Server data preload".into())
         .spawn(move || {
@@ -143,6 +167,7 @@ pub(super) fn preload_sync_data(item_data: &Arc<ItemData>) -> Option<SyncPreload
                 item_data.root(),
                 &horizon_world::loot::PackOverlay::NONE,
                 item_data.defaults(),
+                &context,
             )
         })
         .map(|worker| SyncPreload { generation, worker })
@@ -1306,6 +1331,7 @@ impl Game<'_> {
                 &self.pack_files(),
                 packed.as_deref(),
                 self.res.item_defaults(),
+                &server_data_load(&self.res.core.item_data),
             )?;
             world_sync.features = features;
             sync = Arc::new(world_sync);
@@ -2809,44 +2835,20 @@ impl Game<'_> {
         if self.audio.capture.is_none() {
             return;
         }
-        // The acting guest's own break: `Block.playerWillDestroy` excludes the
-        // player from the destroy events up to the broken block's. What a
-        // break sets off after that (a torch popping off, a stalk falling) is
-        // `destroyBlock` with no player, which the breaker hears and sees too.
-        let mut own_break = self.lan_break_pos.is_some();
         for e in events {
             match e {
-                horizon_world::level::LevelEvent::LevelEvent { id, pos, data } => {
-                    let own = *id == 2001 && own_break;
-                    if own && self.lan_break_pos == Some([pos.x, pos.y, pos.z]) {
-                        own_break = false;
-                    }
-                    // The acting guest does not predict the egg's teleport
-                    // particles, bone meal's growth, anvil result sounds, or a
-                    // finished brushing or an eye inserted in a portal frame (these calls name no
-                    // excluded player), nor the digger's own crack and hit
-                    // sound (2019, 2020).
-                    let except = if matches!(
-                        *id,
-                        2015 | 1501
-                            | 1503
-                            | 1505
-                            | 1029
-                            | 1030
-                            | 1045
-                            | 1052
-                            | 2019
-                            | 2020
-                            | 3000
-                            | 3008
-                    ) || (*id == 2001 && self.lan_break_pos.is_some() && !own)
-                    {
-                        None
-                    } else {
-                        self.lan_acting
-                    };
-                    self.lan_events
-                        .push((*id, [pos.x, pos.y, pos.z], *data, except));
+                horizon_world::level::LevelEvent::LevelEvent {
+                    id,
+                    pos,
+                    data,
+                    source,
+                } => {
+                    self.lan_events.push(super::QueuedLevelEvent {
+                        kind: *id,
+                        pos: [pos.x, pos.y, pos.z],
+                        data: *data,
+                        source: *source,
+                    });
                 }
                 // `ServerLevel.runBlockEvents` broadcasts a handled block
                 // event (`ClientboundBlockEventPacket`): the guest re-runs
@@ -3002,12 +3004,25 @@ impl Game<'_> {
                 );
             }
         }
-        for (kind, pos, data, acting) in std::mem::take(&mut self.lan_events) {
+        for super::QueuedLevelEvent {
+            kind,
+            pos,
+            data,
+            source,
+        } in std::mem::take(&mut self.lan_events)
+        {
             if kind == 2001 {
                 host.broken
                     .push([f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2])]);
             }
-            host.hub.level_event(kind, pos, data, acting);
+            let except = source.and_then(|player| {
+                host.hub
+                    .guests
+                    .iter()
+                    .find(|guest| guest.uuid == player.0)
+                    .map(|guest| guest.conn)
+            });
+            host.hub.level_event(kind, pos, data, except);
         }
         // Level events 1010 and 1011: the guests' parrots dance or stop.
         for (pos, song) in std::mem::take(&mut self.lan_songs) {

@@ -4,6 +4,7 @@ use crate::*;
 use std::sync::Mutex;
 /// What a ticket belongs to: a block (a machine) or an entity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+// exhaustive: a closed set the game matches without a wildcard
 pub enum TicketOwner {
     /// The block at `[x, y, z]`.
     Block([i32; 3]),
@@ -12,6 +13,7 @@ pub enum TicketOwner {
 }
 /// One chunk a mod holds loaded for an owner.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct ModTicket {
     /// The controller that holds it: its slot in the installed controller table
     /// (`mod_api::TicketController::slot`).
@@ -26,6 +28,7 @@ pub struct ModTicket {
 }
 /// The chunks one owner holds, the two kinds apart (NeoForge's `TicketSet`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct TicketSet {
     /// Chunks held without natural spawning.
     pub non_natural_spawning: Vec<[i32; 2]>,
@@ -47,6 +50,7 @@ impl TicketSet {
 /// removes anything, block owners and entity owners apart. The removals made
 /// are the game's: a removal goes to a [`TicketRemovals`] queue only the game
 /// holds.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TicketValidation {
     /// The `[mod] id` that owns the controller.
     owner: &'static str,
@@ -62,6 +66,7 @@ impl std::fmt::Debug for TicketValidation {
 }
 /// The tickets the mods removed in one validation, for the game to release.
 #[derive(Debug)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TicketRemovals(Arc<Mutex<Vec<ModTicket>>>);
 impl TicketRemovals {
     /// The tickets removed.
@@ -72,6 +77,7 @@ impl TicketRemovals {
 impl TicketValidation {
     /// A validation of the `loaded` tickets of one controller, owned by mod
     /// `owner`, and the queue of what is removed. For the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(owner: &'static str, loaded: Vec<ModTicket>) -> (Self, TicketRemovals) {
         let removed = Arc::new(Mutex::new(Vec::new()));

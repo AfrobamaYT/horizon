@@ -656,6 +656,7 @@ fn remesh(
                         cutout_leaves,
                         translucent_layers: &[],
                         leaf_culling,
+                        hidden_states: &[],
                     };
                     let mut scratch = MeshScratch::default();
                     let mut out = Vec::new();

@@ -14,6 +14,19 @@ pub(crate) fn item_data(
     let inputs = LoadInputs::new(BTreeMap::new(), root.join("settings"));
     Ok(Arc::new(ItemData::load(
         root,
-        LoadContext::new(origin, Arc::new(inputs)),
+        LoadContext::new(origin, Arc::new(inputs), []),
     )?))
+}
+
+/// A server's data load with no mods and no settings, for loaders under test.
+#[allow(
+    dead_code,
+    reason = "standalone probes that include this file may not load recipes"
+)]
+pub(crate) fn server_load() -> LoadContext {
+    LoadContext::new(
+        DataLoadOrigin::ServerDataLoad,
+        Arc::new(LoadInputs::new(BTreeMap::new(), std::path::PathBuf::new())),
+        [],
+    )
 }

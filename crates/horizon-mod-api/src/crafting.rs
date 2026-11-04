@@ -2,6 +2,7 @@
 #[allow(unused_imports)]
 use crate::*;
 use horizon_items::items::Items;
+use horizon_world::native_load_context::LoadContext;
 use serde_json::Value;
 use std::collections::HashSet;
 /// A recipe ingredient of a mod's own kind: the entry named a type in a
@@ -14,11 +15,12 @@ use std::collections::HashSet;
 /// leaves the list empty and the recipe fails, as an unknown kind does.
 #[inline(never)]
 pub fn native_ingredient(
+    context: &LoadContext,
     kind: &str,
     data: &serde_json::Map<String, Value>,
     items: &mut Vec<String>,
 ) {
-    crate::dispatch_ingredient(kind, data, items);
+    crate::dispatch_ingredient(&DataLoadContext::new(context), kind, data, items);
 }
 /// A mod's own ingredient kind, matching a concrete stack at craft time:
 /// the ingredient's `test` calls here with the kind, its JSON and the
@@ -36,6 +38,7 @@ pub fn native_ingredient_test(
     crate::dispatch_ingredient_test(kind, data, stack, accept);
 }
 /// Keep first-seen order, drop the rest.
+// hidden: a game-side helper, not part of the mod surface
 #[doc(hidden)]
 pub fn dedup_keep_order(items: &mut Vec<String>) {
     let mut seen = std::collections::HashSet::new();
@@ -44,6 +47,7 @@ pub fn dedup_keep_order(items: &mut Vec<String>) {
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
 #[derive(Clone, Debug)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct Ingredient {
     /// The items it accepts, however the source shape named them.
     pub items: HashSet<String>,
@@ -59,6 +63,7 @@ pub struct Ingredient {
 }
 /// How a shape's children combine at match time.
 #[derive(Clone, Debug)]
+// exhaustive: a closed set the game matches without a wildcard
 pub enum Shape {
     /// Any child matching the stack is enough.
     Compound,
@@ -77,7 +82,7 @@ impl Ingredient {
             children: None,
         }
     }
-    pub fn parse(v: &Value, items: &Items) -> Option<Self> {
+    pub fn parse(v: &Value, items: &Items, context: &LoadContext) -> Option<Self> {
         let mut list: Vec<String> = Vec::new();
         let mut add = |s: &str| {
             let more: Vec<String> = match s.strip_prefix('#') {
@@ -93,7 +98,7 @@ impl Ingredient {
         match v {
             Value::String(s) => add(s),
             Value::Array(a) => a.iter().filter_map(Value::as_str).for_each(&mut add),
-            Value::Object(o) => return Self::parse_object(o, items),
+            Value::Object(o) => return Self::parse_object(o, items, context),
             _ => return None,
         }
         (!list.is_empty()).then(|| Self::of(list))
@@ -102,7 +107,11 @@ impl Ingredient {
     /// the standard shapes mods' recipes carry, each resolved to the flat item
     /// list it matches. A kind outside these still fails the file: a mod's
     /// own ingredient types come with their own hook, not the loader.
-    fn parse_object(o: &serde_json::Map<String, Value>, items: &Items) -> Option<Self> {
+    fn parse_object(
+        o: &serde_json::Map<String, Value>,
+        items: &Items,
+        context: &LoadContext,
+    ) -> Option<Self> {
         // Current NeoForge marks a custom ingredient with
         // `neoforge:ingredient_type`; `type` is the older packs' key.
         let kind = o
@@ -123,7 +132,7 @@ impl Ingredient {
             "neoforge:compound" => {
                 let subs: Vec<Self> = children()?
                     .iter()
-                    .map(|s| Self::parse(s, items))
+                    .map(|s| Self::parse(s, items, context))
                     .collect::<Option<_>>()?;
                 let mut seen = Vec::new();
                 for sub in &subs {
@@ -141,7 +150,7 @@ impl Ingredient {
             "neoforge:intersection" => {
                 let subs: Vec<Self> = children()?
                     .iter()
-                    .map(|s| Self::parse(s, items))
+                    .map(|s| Self::parse(s, items, context))
                     .collect::<Option<_>>()?;
                 nested = Some((Shape::Intersection, subs.clone()));
                 subs.first()?
@@ -153,8 +162,8 @@ impl Ingredient {
             }
             // The base's items without the subtracted's.
             "neoforge:difference" => {
-                let base = Self::parse(o.get("base")?, items)?;
-                let gone = Self::parse(o.get("subtracted")?, items)?;
+                let base = Self::parse(o.get("base")?, items, context)?;
+                let gone = Self::parse(o.get("subtracted")?, items, context)?;
                 nested = Some((Shape::Difference, vec![base.clone(), gone.clone()]));
                 base.order
                     .iter()
@@ -166,7 +175,7 @@ impl Ingredient {
             // matches; a bare type name is minecraft's own, not a mod's.
             k if k.contains(':') && !k.starts_with("minecraft:") => {
                 let mut list = Vec::new();
-                native_ingredient(k, o, &mut list);
+                native_ingredient(context, k, o, &mut list);
                 dedup_keep_order(&mut list);
                 // The kind and its JSON stay with the ingredient: the
                 // load-time list only names items, and matching a concrete
@@ -215,6 +224,7 @@ impl Ingredient {
 }
 /// A recipe as its file says, whatever its type (vanilla's or a mod's own): the mod reads it.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct RecipeFile {
     /// `<namespace>:<path>`, its place under `data/<namespace>/recipe/`.
     pub id: String,

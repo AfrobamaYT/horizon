@@ -725,13 +725,15 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "full content root: needs prepared vanilla data"]
     fn resource_pack_overrides_mod_and_vanilla() {
         use std::fs;
         let vanilla =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3");
-        if !vanilla.join("facts.json").is_file() {
-            return;
-        }
+        assert!(
+            vanilla.join("facts.json").is_file(),
+            "prepared vanilla data required"
+        );
         let dir =
             std::env::temp_dir().join(format!("horizon-pack-mod-order-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);

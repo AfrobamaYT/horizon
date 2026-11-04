@@ -466,6 +466,13 @@ move undone, in its transaction, and is warned once naming the mod, and `move_re
 neither end keeps any of it: a broken handler can't make a move overflow, duplicate or lose items, fluid or energy, or
 panic the game.
 
+A `LivingRef` on the server can apply one effect from an item's loaded consumable with
+`living.apply_consume_effect(host, &stack, index)`. The index is zero-based in component
+order; this does not eat food, shrink the stack or run consume triggers. `Some(true)` or
+`Some(false)` is the effect's result; `None` means the item, index or target is unavailable
+or the effect is unsupported. Mod-defined effects, mob random teleport, armor stands and
+dragons are not supported. Player random teleport uses the level random as normal.
+
 On a `ServerHost`, import `HostTransaction` to call `host.transaction(|host, tx| …)` (NeoForge 26.3's `Transaction`). It runs a closure whose `Ok` commits and whose
 `Err` aborts, nested in the open transaction if any. `tx`, a `&Transaction` (NeoForge's `TransactionContext`), is
 what every handler and place write takes, so none happens outside one. Inside, a capability write applies at once, so later steps see it,
@@ -661,6 +668,12 @@ custom copy handler, conditional serialization, the `sendToPlayer` predicate,
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's
 receiver and documentation; a helper without `self` (`config_files`) takes
 `&self` in `Host`. Level services stay on the level hosts above.
+For item registry facts, `host.item_crafting_remainder(&stack)` returns a count-one
+plain remainder stack, or `None` when there is none or the item is unknown. Horizon
+currently stores only the remainder item id, not a template's count or components.
+`host.block_item("minecraft:stone")` returns its item registry name; an unknown block
+returns `None`, while a known block with no item returns `Some("minecraft:air")`.
+Both reads are available on either side.
 A helper's `receiver` also exposes it on that handle. Receivers come from public
 `*Ref` structs in `mod_api.rs`: `BlockEntityRef` gives `block_entity`, for example.
 Adding a handle requires no separate generator registration.

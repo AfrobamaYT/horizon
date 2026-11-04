@@ -3,6 +3,7 @@
 use crate::*;
 /// `InteractionHand`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: a closed set the game matches without a wildcard
 pub enum Hand {
     Main,
     Off,

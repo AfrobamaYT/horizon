@@ -76,7 +76,7 @@ pub(super) struct Parked {
     persist: persist::EntityMemory,
     lectern_pulses: Vec<((i32, i32, i32), i32)>,
     lid_openers: HashMap<(i32, i32, i32), i32>,
-    lan_events: Vec<(i32, [i32; 3], i32, Option<u32>)>,
+    lan_events: Vec<super::QueuedLevelEvent>,
     lan_block_events: Vec<([i32; 3], i32, i32, u32)>,
     lan_entity_events: Vec<(i32, i8, [f64; 3])>,
     lan_critical_hits: Vec<(Option<u32>, i32, bool)>,
@@ -496,6 +496,7 @@ impl Game<'_> {
                     }
                 },
             );
+            self.drain_entity_inside();
             if result.is_err() {
                 break;
             }

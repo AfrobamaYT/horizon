@@ -64,6 +64,7 @@ pub(super) fn network_recipes(
     resources: &Path,
     overlay: &horizon_world::loot::PackOverlay,
     defaults: &horizon_world::item_defaults::ItemDefaults,
+    context: &horizon_world::native_load_context::LoadContext,
 ) -> (BTreeMap<String, Box<str>>, HashMap<String, i32>) {
     let mut all: BTreeMap<_, _> = match horizon_items::recipe_sources::sources(resources, overlay) {
         Ok(sources) => sources
@@ -76,7 +77,7 @@ pub(super) fn network_recipes(
         }
     };
     match horizon_client::items::Items::catalog(resources, overlay, defaults) {
-        Ok(items) => all.retain(|_, r| normalize_ingredients(r, &items)),
+        Ok(items) => all.retain(|_, r| normalize_ingredients(r, &items, context)),
         Err(e) => log::warn!("recipes: NeoForge's ingredient shapes stay unresolved: {e}"),
     }
     // RecipeManager.unpackRecipeInfo's group numbers, while the files are
@@ -101,16 +102,21 @@ pub(super) fn network_recipes(
 /// An ingredient object's flat item list: the shape NeoForge's standard
 /// kinds resolve to, or a brewing predicate's `item`. `None`: the object is
 /// a kind the loader does not know, a mod's own.
-fn flat(ing: &Value, items: &horizon_client::items::Items) -> Option<Value> {
+fn flat(
+    ing: &Value,
+    items: &horizon_client::items::Items,
+    context: &horizon_world::native_load_context::LoadContext,
+) -> Option<Value> {
     if !ing.is_object() {
         return None;
     }
-    let parsed = horizon_client::crafting::Ingredient::parse(ing, items).or_else(|| {
-        // A brewing slot's item predicate: its `ingredient`, as the
-        // property sets have always read it.
-        ing.get("item")
-            .and_then(|v| horizon_client::crafting::Ingredient::parse(v, items))
-    })?;
+    let parsed =
+        horizon_client::crafting::Ingredient::parse(ing, items, context).or_else(|| {
+            // A brewing slot's item predicate: its `ingredient`, as the
+            // property sets have always read it.
+            ing.get("item")
+                .and_then(|v| horizon_client::crafting::Ingredient::parse(v, items, context))
+        })?;
     Some(Value::Array(
         parsed
             .order
@@ -123,7 +129,11 @@ fn flat(ing: &Value, items: &horizon_client::items::Items) -> Option<Value> {
 /// Replace each of a recipe's ingredient objects with its flat item list,
 /// so `holder_set` writes the items instead of an empty list. `false`: the
 /// recipe keeps an object the loader cannot parse.
-fn normalize_ingredients(r: &mut Value, items: &horizon_client::items::Items) -> bool {
+fn normalize_ingredients(
+    r: &mut Value,
+    items: &horizon_client::items::Items,
+    context: &horizon_world::native_load_context::LoadContext,
+) -> bool {
     let known = r["type"]
         .as_str()
         .is_some_and(|t| t.starts_with("minecraft:"));
@@ -134,7 +144,7 @@ fn normalize_ingredients(r: &mut Value, items: &horizon_client::items::Items) ->
     // The shaped recipe's key: a map of symbols to ingredients.
     if let Some(map) = r.get_mut("key").and_then(|k| k.as_object_mut()) {
         for ing in map.values_mut() {
-            if let Some(replacement) = flat(ing, items) {
+            if let Some(replacement) = flat(ing, items, context) {
                 *ing = replacement;
             } else if ing.is_object() {
                 parsed = false;
@@ -153,13 +163,13 @@ fn normalize_ingredients(r: &mut Value, items: &horizon_client::items::Items) ->
         "reagent",
     ] {
         let Some(ing) = r.get_mut(key) else { continue };
-        if let Some(replacement) = flat(ing, items) {
+        if let Some(replacement) = flat(ing, items, context) {
             *ing = replacement;
             continue;
         }
         if let Value::Array(a) = ing {
             for entry in a.iter_mut() {
-                if let Some(replacement) = flat(entry, items) {
+                if let Some(replacement) = flat(entry, items, context) {
                     *entry = replacement;
                 } else if entry.is_object() {
                     parsed = false;
@@ -376,6 +386,91 @@ pub fn content() -> Arc<Vec<Vec<u8>>> {
 mod content_tests {
     use super::*;
     use serde_json::json;
+
+    use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
+
+    struct AspectListener(std::sync::Arc<std::sync::Mutex<Vec<(DataLoadOrigin, String)>>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for AspectListener {
+        fn ingredient(
+            &self,
+            context: &mod_api::DataLoadContext<'_>,
+            event: &mut mod_api::IngredientEvent<'_>,
+        ) {
+            self.0
+                .lock()
+                .unwrap()
+                .push((context.origin(), event.data["aspect"].to_string()));
+            event.items.push("minecraft:emerald".into());
+        }
+    }
+
+    fn load(origin: DataLoadOrigin) -> LoadContext {
+        LoadContext::new(
+            origin,
+            std::sync::Arc::new(LoadInputs::new(Default::default(), Default::default())),
+            [],
+        )
+    }
+
+    /// The `ingredient` hook hears each custom-ingredient occurrence once per
+    /// parse, with the origin of the load that owns the parse. A server parses
+    /// the recipes (`Ingredient::parse`) and then builds the guests' copy
+    /// (`normalize_ingredients`), so each occurrence is heard again with
+    /// `ServerDataLoad` until the copy reuses the server's parse; that change
+    /// flips the last assertion of this test on purpose. Measured in the game
+    /// per occurrence: an integrated open parses twice with `ServerDataLoad`
+    /// (the server thread and the sync copy) beside the window's
+    /// `ClientPreload` parse; a dedicated server parses three times (startup,
+    /// world open and the sync copy).
+    #[test]
+    fn ingredient_hook_hears_each_occurrence_once_per_parse_with_its_load_origin() {
+        let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "aspects",
+            Box::new(AspectListener(heard.clone())),
+        )];
+        let items = horizon_client::items::Items::for_tests(Default::default());
+        let recipe = json!({
+            "type": "minecraft:crafting_shapeless",
+            "ingredients": [
+                {"type": "neoforge:compound", "children": [
+                    {"type": "mymod:aspect", "aspect": "nested"}, "minecraft:stone"]},
+                {"type": "mymod:aspect", "aspect": "plain"}
+            ],
+            "result": {"id": "minecraft:stick", "count": 1}
+        });
+        mod_api::testing::with_mods(mods.into(), || {
+            let server = load(DataLoadOrigin::ServerDataLoad);
+            for ingredient in recipe["ingredients"].as_array().unwrap() {
+                horizon_client::crafting::Ingredient::parse(ingredient, &items, &server).unwrap();
+            }
+            let once = heard.lock().unwrap().clone();
+            let server_origin = DataLoadOrigin::ServerDataLoad;
+            assert_eq!(
+                once,
+                [
+                    (server_origin, "\"nested\"".to_owned()),
+                    (server_origin, "\"plain\"".to_owned())
+                ]
+            );
+
+            heard.lock().unwrap().clear();
+            let client = load(DataLoadOrigin::ClientPreload);
+            horizon_client::crafting::Ingredient::parse(&recipe["ingredients"][1], &items, &client)
+                .unwrap();
+            assert_eq!(
+                *heard.lock().unwrap(),
+                [(DataLoadOrigin::ClientPreload, "\"plain\"".to_owned())]
+            );
+
+            // The guests' copy parses the same occurrences again.
+            heard.lock().unwrap().clear();
+            let mut copy = recipe.clone();
+            assert!(normalize_ingredients(&mut copy, &items, &server));
+            assert_eq!(heard.lock().unwrap().len(), 2);
+        });
+    }
 
     #[test]
     fn content_keeps_the_asked_types_and_ends_with_them() {

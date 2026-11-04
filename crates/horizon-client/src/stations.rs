@@ -31,10 +31,11 @@ impl StationData {
         items: &Items,
         overlay: &PackOverlay,
         defaults: &horizon_world::item_defaults::ItemDefaults,
+        context: &horizon_world::native_load_context::LoadContext,
     ) -> Self {
         Self {
             enchantments: std::sync::Arc::clone(&items.enchantments),
-            recipes: StationRecipes::load(root, items, overlay),
+            recipes: StationRecipes::load(root, items, overlay, context),
             brewing: crate::brewing::Brewing::load(root, items, overlay),
             trades: crate::merchant::Trades::load(root, overlay),
             banners: crate::banner::Banners::load(root, defaults),
@@ -506,11 +507,20 @@ pub struct StationRecipes {
     /// `trim_material` registry: id -> (asset name, description).
     pub trim_materials: Vec<(String, String)>,
 }
-fn ingredient(v: &Value, items: &Items) -> Ingredient {
-    Ingredient::parse(v, items).unwrap_or_else(|| Ingredient::of(Vec::new()))
+fn ingredient(
+    v: &Value,
+    items: &Items,
+    context: &horizon_world::native_load_context::LoadContext,
+) -> Ingredient {
+    Ingredient::parse(v, items, context).unwrap_or_else(|| Ingredient::of(Vec::new()))
 }
 impl StationRecipes {
-    pub fn load(root: &Path, items: &Items, overlay: &PackOverlay) -> Self {
+    pub fn load(
+        root: &Path,
+        items: &Items,
+        overlay: &PackOverlay,
+        context: &horizon_world::native_load_context::LoadContext,
+    ) -> Self {
         // Vanilla's recipes, then the content mods' (docs/modpacks.md).
         let mut files = Vec::new();
         let namespaces =
@@ -563,18 +573,18 @@ impl StationRecipes {
             match v["type"].as_str().unwrap_or("") {
                 "minecraft:smithing_transform" => smithing.push(Smithing::Transform {
                     id,
-                    template: ingredient(&v["template"], items),
-                    base: ingredient(&v["base"], items),
-                    addition: ingredient(&v["addition"], items),
+                    template: ingredient(&v["template"], items, context),
+                    base: ingredient(&v["base"], items, context),
+                    addition: ingredient(&v["addition"], items, context),
                     result: horizon_world::loot::recipe_result_id(&v["result"])
                         .unwrap_or("minecraft:air")
                         .to_owned(),
                 }),
                 "minecraft:smithing_trim" => smithing.push(Smithing::Trim {
                     id,
-                    template: ingredient(&v["template"], items),
-                    base: ingredient(&v["base"], items),
-                    addition: ingredient(&v["addition"], items),
+                    template: ingredient(&v["template"], items, context),
+                    base: ingredient(&v["base"], items, context),
+                    addition: ingredient(&v["addition"], items, context),
                     pattern: v["pattern"].as_str().unwrap_or("").to_owned(),
                 }),
                 "minecraft:stonecutting" => {
@@ -582,7 +592,7 @@ impl StationRecipes {
                     if let Some(count) = crate::crafting::template_count(&v["result"]) {
                         stonecutting.push(Stonecutting {
                             id,
-                            input: ingredient(&v["ingredient"], items),
+                            input: ingredient(&v["ingredient"], items, context),
                             result: ItemStack::new(
                                 horizon_world::loot::recipe_result_id(&v["result"])
                                     .unwrap_or("minecraft:air"),
@@ -986,7 +996,13 @@ mod tests {
         }
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = Items::tags_only(&root, &PackOverlay::NONE, &defaults).unwrap();
-        let data = StationData::load(&root, &items, &PackOverlay::NONE, &defaults);
+        let data = StationData::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &defaults,
+            &crate::test_resources::server_load(),
+        );
         let e = &data.enchantments;
         assert_eq!(e.list.len(), 43);
         assert_eq!(
@@ -1082,11 +1098,16 @@ mod tests {
     #[test]
     fn smithing_ingredient_parses_holders() {
         let items = sample_items();
-        let a = ingredient(&serde_json::json!("minecraft:diamond_sword"), &items);
+        let a = ingredient(
+            &serde_json::json!("minecraft:diamond_sword"),
+            &items,
+            &crate::test_resources::server_load(),
+        );
         assert_eq!(a.order, vec!["minecraft:diamond_sword"]);
         let b = ingredient(
             &serde_json::json!(["minecraft:diamond_sword", "minecraft:diamond_axe"]),
             &items,
+            &crate::test_resources::server_load(),
         );
         assert_eq!(
             b.order,

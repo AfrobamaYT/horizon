@@ -220,7 +220,13 @@ mod tests {
         .unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = Items::catalog(&root, &PackOverlay::NONE, &defaults).unwrap();
-        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let recipes = Recipes::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let providers = Providers::load(&root);
         let mut furnace = Furnace {
             kind: FurnaceKind::Furnace,
