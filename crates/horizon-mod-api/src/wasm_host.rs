@@ -14,13 +14,24 @@ use std::time::{Duration, Instant};
 use wasmtime::Store;
 use wasmtime::component::{Component, Instance, Linker};
 
-/// A value a mod sent that the mod API can't hold: the call traps.
+/// A value that can't cross between the game and a mod, and why: the call traps with it.
 #[derive(Debug)]
-pub(crate) struct Refused;
+pub(crate) struct Refused(std::borrow::Cow<'static, str>);
+
+impl Refused {
+    /// A value of the wrong shape: a list of the wrong length, a case or handler that doesn't
+    /// exist.
+    pub(crate) const SHAPE: Self = Self(std::borrow::Cow::Borrowed("a value of the wrong shape"));
+
+    /// A value its conversion refused, for the reason it gives.
+    pub(crate) fn because(why: impl std::fmt::Display) -> Self {
+        Self(why.to_string().into())
+    }
+}
 
 impl std::fmt::Display for Refused {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("the mod sent a value the mod API can't hold")
+        f.write_str(&self.0)
     }
 }
 
@@ -116,7 +127,7 @@ fn missing(what: &str) -> wasmtime::Error {
 }
 
 fn array<T, const N: usize>(items: Vec<T>) -> Result<[T; N], Refused> {
-    items.try_into().map_err(|_| Refused)
+    items.try_into().map_err(|_| Refused::SHAPE)
 }
 
 /// The one `&'static str` for each distinct string a mod names. The game keeps each for good,
@@ -128,12 +139,15 @@ fn intern(value: String) -> Result<&'static str, Refused> {
     if let Some(existing) = set.get(value.as_str()) {
         return Ok(existing);
     }
-    let module = CALLER.take().ok_or(Refused)?;
+    let module = CALLER.take().ok_or(Refused::SHAPE)?;
     let group = &module.group;
     let charged = group.names.fetch_add(value.len(), Ordering::Relaxed) + value.len();
     CALLER.set(Some(module.clone()));
     if charged > group.budgets.names {
-        return Err(Refused);
+        return Err(Refused::because(format_args!(
+            "its group gave the game more than {} bytes of names",
+            group.budgets.names
+        )));
     }
     let leaked: &'static str = Box::leak(value.into_boxed_str());
     set.insert(leaked);
@@ -367,6 +381,13 @@ impl Running {
     }
 }
 
+/// The answer of a call not sent to `module` because an argument can't cross, with the reason
+/// logged.
+fn unsent<T>(module: &Running, why: Refused, no_answer: impl FnOnce() -> T) -> T {
+    log::error!("wasm mod {}: a call wasn't sent: {why}", module.id);
+    no_answer()
+}
+
 /// The error a fallible export answers when the mod's call didn't run (refused, or a trap).
 fn refused<E: From<(crate::Identifier, String)>>() -> E {
     let mod_api = crate::Identifier::parse("horizon:wasm_mod").expect("a valid id");
@@ -580,7 +601,7 @@ fn hook_ids(names: Vec<String>) -> &'static [Option<HookId>] {
 /// The game's proxy of a handler the calling mod handed over (a part it registers), which calls
 /// back into it by the index it keeps the handler under.
 fn handler_of(handler: glue::horizon::mod_api::types::Handler) -> Result<WasmHandler, Refused> {
-    let module = CALLER.take().ok_or(Refused)?;
+    let module = CALLER.take().ok_or(Refused::SHAPE)?;
     CALLER.set(Some(module.clone()));
     Ok(WasmHandler {
         module,

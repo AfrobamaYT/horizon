@@ -126,7 +126,7 @@ fn results(
     for (_, local, ty) in outs {
         match ty {
             Ty::Named(def) if sig.results.contains(&wit::out_name(&types.defs[*def])) => {
-                parts.push(format!("lower_out_{def}(&{local})"))
+                parts.push(format!("lower_out_{def}(&{local})?"))
             }
             Ty::Named(def) if matches!(types.defs[*def].kind, Kind::Record(_)) => {}
             ty => parts.push(lower(types, ty, &format!("(&{local})"))),
@@ -620,6 +620,19 @@ pub(super) fn host(
                 Ty::Result(..) => "|| Err(super::refused())",
                 _ => "super::NoAnswer::no_answer",
             };
+            // An argument that can't cross (a tag past the limits) isn't sent: the call answers
+            // as one that didn't run, and the reason is logged.
+            let sent: Vec<&String> = args.iter().filter(|a| a.starts_with('a')).collect();
+            if !sent.is_empty() {
+                let sent = sent
+                    .iter()
+                    .map(|a| a.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                prep = format!(
+                    "let ({sent},) = match (|| -> Result<_, super::Refused> {{ {prep} Ok(({sent},)) }})() {{ Ok(a) => a, Err(why) => return super::unsent(&self.module, why, {no_answer}) }};"
+                );
+            }
             writeln!(
                 code,
                 "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ let mut frame = super::Frame::default(); {frame} {prep} self.call_or(frame, {no_answer}, |m, store| -> wasmtime::Result<_> {{ let {pattern} = m.horizon_mod_api_{iface}().call_{}(store, {})?; {back} Ok({value}) }}) }}",
