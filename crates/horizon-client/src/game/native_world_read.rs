@@ -232,6 +232,25 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn recipes_of_type_answers_vanilla_types_from_the_live_table() {
+        with_game(|game| {
+            let smelting = game.native_recipes_of_type("minecraft:smelting");
+            let iron = smelting
+                .iter()
+                .find(|recipe| recipe.id == "minecraft:iron_ingot_from_smelting_raw_iron")
+                .expect("vanilla's smelting recipe of raw iron");
+            assert_eq!(iron.json["cookingtime"], 200);
+            assert!(
+                !game
+                    .native_recipes_of_type("minecraft:campfire_cooking")
+                    .is_empty()
+            );
+            assert!(game.native_recipes_of_type("nope:missing").is_empty());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn tag_and_fluid_reads_follow_vanilla_and_load_nothing() {
         with_game(|game| {
             let dir =
