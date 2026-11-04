@@ -489,7 +489,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     table.set_bool(
                         state,
                         self.direction_prop(dir),
-                        self.bars_attach_to(nstate, sturdy),
+                        self.bars_attach_to(pos, state, nstate, sturdy, dir),
                     )
                 } else {
                     sup!()
@@ -800,6 +800,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         .map(|d| {
                             if d == dir {
                                 self.wall_connects_to(
+                                    pos,
+                                    state,
                                     nstate,
                                     b.is_face_sturdy(nstate, opposite),
                                     opposite,
@@ -954,27 +956,58 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             vanilla
         }
     }
-    /// `IronBarsBlock.attachsTo`.
-    pub(crate) fn bars_attach_to(&self, state: BlockStateId, face_solid: bool) -> bool {
-        let b = self.b;
-        (!b.is_exception_for_connection(state) && face_solid)
-            || b.instance_of(state, Class::IronBars)
-            || b.in_set(state, &b.tags.walls)
-    }
-    /// `WallBlock.connectsTo`.
-    pub(crate) fn wall_connects_to(
+    /// `IronBarsBlock.attachsTo` for the bars or pane `bars` at `pos`, then the
+    /// hook. Vanilla's rule takes no direction: `direction` points from the bars
+    /// toward the neighbour `state`, for the hook only.
+    pub(crate) fn bars_attach_to(
         &self,
+        pos: BlockPos,
+        bars: BlockStateId,
         state: BlockStateId,
         face_solid: bool,
         direction: Direction,
     ) -> bool {
         let b = self.b;
+        let vanilla = (!b.is_exception_for_connection(state) && face_solid)
+            || b.instance_of(state, Class::IronBars)
+            || b.in_set(state, &b.tags.walls);
+        if self.level.has_bars_attachment_hook() {
+            self.level
+                .adjust_bars_attach_to(pos, bars, state, direction, face_solid, vanilla)
+        } else {
+            vanilla
+        }
+    }
+    /// `WallBlock.connectsTo` for the wall `wall` at `pos`, then the hook.
+    pub(crate) fn wall_connects_to(
+        &self,
+        pos: BlockPos,
+        wall: BlockStateId,
+        state: BlockStateId,
+        face_solid: bool,
+        direction: Direction,
+    ) -> bool {
+        // `direction` is vanilla's argument: from the neighbour toward the wall.
+        let b = self.b;
         let gate = b.instance_of(state, Class::FenceGate)
             && axis_of(b.facing(state)) == axis_of(clockwise(direction));
-        b.in_set(state, &b.tags.walls)
+        let vanilla = b.in_set(state, &b.tags.walls)
             || (!b.is_exception_for_connection(state) && face_solid)
             || b.instance_of(state, Class::IronBars)
-            || gate
+            || gate;
+        if self.level.has_wall_connection_hook() {
+            // The hook's direction points from the wall to the neighbour.
+            self.level.adjust_wall_connects_to(
+                pos,
+                wall,
+                state,
+                direction.opposite(),
+                face_solid,
+                vanilla,
+            )
+        } else {
+            vanilla
+        }
     }
     /// `WallBlock.updateShape(level, state, topPos, topNeighbour, n, e, s, w)`.
     pub(crate) fn wall_shape(

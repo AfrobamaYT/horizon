@@ -833,6 +833,44 @@ pub trait LevelAccess {
     ) -> bool {
         vanilla
     }
+    /// Whether wall connection queries need the level hook.
+    fn has_wall_connection_hook(&self) -> bool {
+        false
+    }
+    /// `WallBlock.connectsTo` once the library answered `vanilla` for the wall
+    /// `wall` at `pos` and the `neighbour` state beside it, `direction`
+    /// pointing from the wall toward it and `face_solid` its face's
+    /// sturdiness: whether the wall connects a side. The default keeps it.
+    fn adjust_wall_connects_to(
+        &self,
+        _pos: BlockPos,
+        _wall: BlockStateId,
+        _neighbour: BlockStateId,
+        _direction: Direction,
+        _face_solid: bool,
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
+    /// Whether iron bars and pane attachment queries need the level hook.
+    fn has_bars_attachment_hook(&self) -> bool {
+        false
+    }
+    /// `IronBarsBlock.attachsTo` once the library answered `vanilla` for the
+    /// bars or pane `bars` at `pos` and the `neighbour` state beside it,
+    /// `direction` pointing from the bars toward it and `face_solid` its face's
+    /// sturdiness: whether the bars attach an arm. The default keeps it.
+    fn adjust_bars_attach_to(
+        &self,
+        _pos: BlockPos,
+        _bars: BlockStateId,
+        _neighbour: BlockStateId,
+        _direction: Direction,
+        _face_solid: bool,
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
     /// `BlockState.hasAnalogOutputSignal` once the library answered `vanilla`:
     /// whether comparators read the block. The default keeps it.
     fn adjust_has_analog_output(&self, _state: BlockStateId, vanilla: bool) -> bool {

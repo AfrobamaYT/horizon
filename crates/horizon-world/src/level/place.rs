@@ -975,7 +975,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     state = table.set_bool(
                         state,
                         self.direction_prop(direction),
-                        self.bars_attach_to(neighbour, sturdy),
+                        self.bars_attach_to(pos, default, neighbour, sturdy, direction),
                     );
                 }
                 Some(wl(state))
@@ -990,6 +990,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 .map(|direction| {
                     let neighbour = self.rel_state(pos, direction);
                     self.wall_connects_to(
+                        pos,
+                        default,
                         neighbour,
                         b.is_face_sturdy(neighbour, direction.opposite()),
                         direction.opposite(),

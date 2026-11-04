@@ -504,6 +504,12 @@ one, where vanilla gives the `by` one.
 
 - A block part's `fence_connects_to` (`FenceBlock.connectsTo`) says whether a fence of that block connects an arm toward a neighbour state, `event.connected` starting with vanilla's answer; set it to false to deny a connection (a solid face, a fence of the same kind, a gate) as well as to true to make one. Only the fence block's own part is asked, so vanilla fences cost nothing.
 
+- A block part's `wall_connects_to` (`WallBlock.connectsTo`) says the same for a wall of that block: whether it connects a side toward a neighbour state, `event.connected` starting with vanilla's answer (a wall, a solid face, iron bars or a pane, a gate across the side). A connected side is still low or tall from the block above, as vanilla's.
+
+- A block part's `bars_attach_to` (`IronBarsBlock.attachsTo`) does it for iron bars and glass panes, which are the same block class in vanilla: whether they attach an arm toward a neighbour state, `event.connected` starting with vanilla's answer (a solid face, bars or a pane, a wall). Vanilla's rule takes no direction; `event.direction` (from the bars to the neighbour) is there for yours.
+
+- The three connection hooks have the same shape: `pos` and `state` are the fence, wall or bars being shaped, `neighbour` the state beside it, `direction` the way from it to the neighbour and `face_solid` whether the neighbour's face toward it is sturdy. They are asked on placement and on every shape update toward a side, on authoritative servers only, and only the block's own part answers, so vanilla blocks cost nothing.
+
 - A mod block's comparator output, as vanilla's `BlockBehaviour.hasAnalogOutputSignal` and `getAnalogOutputSignal`: `native_has_analog_output` says a block of yours has one,
   and `native_analog_output` gives it (0 to 15) for its state and position. A state change with neighbour updates tells the comparators itself; when the output
   changes otherwise, `level.update_neighbors(host, pos, state, NeighbourUpdate::OutputSignal)` makes them read it again (`Level.updateNeighbourForOutputSignal`).

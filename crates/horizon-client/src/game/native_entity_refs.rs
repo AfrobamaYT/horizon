@@ -1071,6 +1071,52 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn block_part_flips_wall_and_pane_connections_in_a_real_game_level() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::{geometry::Direction, position::BlockPos};
+        use std::sync::Arc;
+
+        mod_api::__private::part_tests::wall_and_pane_game_thread();
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let cobblestone = registry
+                .default_state("minecraft:cobblestone_wall")
+                .unwrap();
+            let brick = registry.default_state("minecraft:brick_wall").unwrap();
+            let pane = registry.default_state("minecraft:glass_pane").unwrap();
+            let bars = registry.default_state("minecraft:iron_bars").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let torch = registry.default_state("minecraft:torch").unwrap();
+            let pos = BlockPos::new(5, 64, 5);
+            let neighbour = BlockPos::new(6, 64, 5);
+            let side = |game: &mut crate::game::Game<'_>, block, beside| {
+                game.world.set(6, 64, 5, beside).unwrap();
+                let shaped = game.with_level(|b, level, ticks| {
+                    b.update_shape(level, ticks, block, pos, Direction::East, neighbour, beside)
+                });
+                registry.state(shaped).unwrap().properties["east"].clone()
+            };
+            game.world.set(5, 63, 5, stone).unwrap();
+            // Vanilla joins a wall, bars and a pane to a sturdy face and not to a
+            // torch; the cobblestone wall's and the glass pane's part flip both
+            // answers, the brick wall and iron bars have no part.
+            assert_eq!(side(game, cobblestone, stone), "none");
+            assert_eq!(side(game, cobblestone, torch), "low");
+            assert_eq!(side(game, brick, stone), "low");
+            assert_eq!(side(game, brick, torch), "none");
+            assert_eq!(side(game, pane, stone), "false");
+            assert_eq!(side(game, pane, torch), "true");
+            assert_eq!(side(game, bars, stone), "true");
+            assert_eq!(side(game, bars, torch), "false");
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn side_guards_agree_across_integrated_dedicated_and_client() {
         use super::super::execution_role::ExecutionRole;
         use horizon_client::chunk::Chunk;

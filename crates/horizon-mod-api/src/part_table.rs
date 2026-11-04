@@ -1654,6 +1654,14 @@ pub mod tests {
         fn fence_connects_to(&self, _: &dyn LevelHost, event: &mut FenceConnectsToEvent) {
             event.connected = false;
         }
+
+        fn wall_connects_to(&self, _: &dyn LevelHost, event: &mut WallConnectsToEvent) {
+            event.connected = false;
+        }
+
+        fn bars_attach_to(&self, _: &dyn LevelHost, event: &mut BarsAttachToEvent) {
+            event.connected = false;
+        }
     }
 
     /// Makes an oak fence flip vanilla's answer toward the east and refuse every other side.
@@ -1661,6 +1669,20 @@ pub mod tests {
     #[mod_api::horizon_part]
     impl BlockPart for FenceRule {
         fn fence_connects_to(&self, _: &dyn LevelHost, event: &mut FenceConnectsToEvent) {
+            event.connected = event.direction == Direction::East && !event.connected;
+        }
+    }
+
+    /// Makes a cobblestone wall and a glass pane flip vanilla's answer toward the
+    /// east and refuse every other side.
+    struct WallAndPaneRule;
+    #[mod_api::horizon_part]
+    impl BlockPart for WallAndPaneRule {
+        fn wall_connects_to(&self, _: &dyn LevelHost, event: &mut WallConnectsToEvent) {
+            event.connected = event.direction == Direction::East && !event.connected;
+        }
+
+        fn bars_attach_to(&self, _: &dyn LevelHost, event: &mut BarsAttachToEvent) {
             event.connected = event.direction == Direction::East && !event.connected;
         }
     }
@@ -3159,6 +3181,23 @@ pub mod tests {
         mark_game_thread();
     }
 
+    /// Install a connection rule on cobblestone walls and glass panes for real-game
+    /// tests: it flips vanilla's answer.
+    pub fn wall_and_pane_game_thread() {
+        struct WallMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for WallMod {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                r.block_part("minecraft:cobblestone_wall", WallAndPaneRule);
+                r.block_part("minecraft:glass_pane", WallAndPaneRule);
+            }
+        }
+        let mods: super::super::Mods = vec![ModEntry::new("wall_test", Box::new(WallMod))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        mark_game_thread();
+    }
+
     std::thread_local! {
         static SIGNAL_READS: std::cell::RefCell<Vec<SignalRead>> = const { std::cell::RefCell::new(Vec::new()) };
     }
@@ -3353,6 +3392,42 @@ pub mod tests {
                 Direction::West,
                 true,
                 &mut connected,
+            );
+            assert_eq!(connected, expected);
+        }
+    }
+
+    #[test]
+    fn wall_and_bars_connections_are_answered_only_by_their_own_part() {
+        game_thread();
+        resolve(&[]).unwrap();
+        for (state, expected) in [(3, false), (2, true)] {
+            let mut connected = true;
+            dispatch_wall_connects_to(
+                &Level,
+                crate::__private::WallConnectsToCall {
+                    dimension: LevelDimension::Overworld,
+                    pos: BlockPos::new(0, 64, 0),
+                    state: BlockStateId(state),
+                    neighbour: BlockStateId(1),
+                    direction: Direction::West,
+                    face_solid: true,
+                    connected: &mut connected,
+                },
+            );
+            assert_eq!(connected, expected);
+            let mut connected = true;
+            dispatch_bars_attach_to(
+                &Level,
+                crate::__private::BarsAttachToCall {
+                    dimension: LevelDimension::Overworld,
+                    pos: BlockPos::new(0, 64, 0),
+                    state: BlockStateId(state),
+                    neighbour: BlockStateId(1),
+                    direction: Direction::West,
+                    face_solid: true,
+                    connected: &mut connected,
+                },
             );
             assert_eq!(connected, expected);
         }

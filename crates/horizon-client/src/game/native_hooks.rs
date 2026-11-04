@@ -1123,6 +1123,34 @@ impl GameLevel<'_> {
         );
     }
 
+    /// `WallBlock.connectsTo`: set `connected` to say whether the wall
+    /// `state` at `pos` connects a side toward `neighbour`, the state beside it,
+    /// `direction` pointing from the wall to that neighbour and `face_solid`
+    /// whether the neighbour's face toward the wall is sturdy. `connected` holds
+    /// vanilla's answer (a wall, a solid face, iron bars or a pane, or a gate
+    /// across the side): change it, to false as well as to true, when the wall is
+    /// your own. Asked whenever the wall settles its shape or is placed, inside
+    /// the level's update. Only the wall block's own part is asked, so vanilla
+    /// walls cost nothing. Authoritative servers only.
+    #[inline(always)]
+    pub(super) fn native_wall_connects_to(&self, call: mod_api::__private::WallConnectsToCall<'_>) {
+        mod_api::dispatch_wall_connects_to(self, call);
+    }
+
+    /// `IronBarsBlock.attachsTo`, for iron bars and glass panes: set `connected`
+    /// to say whether the bars or pane `state` at `pos` attach an arm toward
+    /// `neighbour`, the state beside it, `direction` pointing from the bars to
+    /// that neighbour and `face_solid` whether the neighbour's face toward the
+    /// bars is sturdy. `connected` holds vanilla's answer (a solid face, iron bars
+    /// or a pane, or a wall): change it, to false as well as to true, when the
+    /// bars are your own. Asked whenever the bars settle their shape or are
+    /// placed, inside the level's update. Only the bars block's own part is
+    /// asked, so vanilla bars and panes cost nothing. Authoritative servers only.
+    #[inline(always)]
+    pub(super) fn native_bars_attach_to(&self, call: mod_api::__private::BarsAttachToCall<'_>) {
+        mod_api::dispatch_bars_attach_to(self, call);
+    }
+
     /// `BlockState.hasAnalogOutputSignal`: set `output` for a block of yours
     /// that comparators read (how full or far along it is, as a composter's
     /// level), so they ask `native_analog_output`. Asked from inside the
