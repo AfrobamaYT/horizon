@@ -136,20 +136,40 @@ pub struct DrawContext {
 /// Why the catalog was refused.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CatalogError {
-    Read { path: String, error: String },
-    Declaration { path: String, error: String },
+    Read {
+        path: String,
+        error: String,
+    },
+    Declaration {
+        path: String,
+        error: String,
+    },
     NamelessHook,
     DuplicateHook(String),
     DuplicateHelper(String),
-    InvalidHook { hook: String, error: String },
-    InvalidHelper { helper: String, error: String },
+    InvalidHook {
+        hook: String,
+        error: String,
+    },
+    InvalidHelper {
+        helper: String,
+        error: String,
+    },
     MissingDoc(String),
-    Counterpart { hook: String, key: &'static str },
+    Counterpart {
+        hook: String,
+        key: &'static str,
+    },
     InvalidContract(String),
     AnsweredNeedsGlobalReplace(String),
     ScopeNeedsKey(String),
     ClientTargetNeedsBoth(String),
     NoHooks,
+    Retired(String),
+    ModLines {
+        listed: Vec<String>,
+        files: Vec<String>,
+    },
 }
 
 impl fmt::Display for CatalogError {
@@ -157,6 +177,18 @@ impl fmt::Display for CatalogError {
         match self {
             Self::Read { path, error } => write!(f, "{path}: {error}"),
             Self::Declaration { path, error } => write!(f, "{path}: {error}"),
+            Self::Retired(path) => write!(
+                f,
+                "{path}: hooks are declared in Rust now, in {DECLARATIONS}/<area>.rs; move the entry there as a \
+                 `#[hook(...)]` declaration (the old keys are the attribute's arguments) and delete this file"
+            ),
+            Self::ModLines { listed, files } => write!(
+                f,
+                "{DECLARATIONS}/mod.rs must list exactly the declaration files, in name order (so that the order is \
+                 the directory's): it lists [{}], the directory holds [{}]",
+                listed.join(", "),
+                files.join(", ")
+            ),
             Self::NamelessHook => f.write_str("hook name missing"),
             Self::DuplicateHook(name) => write!(f, "duplicate hook {name}"),
             Self::DuplicateHelper(name) => write!(f, "duplicate helper {name}"),
@@ -341,6 +373,9 @@ pub struct Catalog {
 /// Where the declarations live, relative to the checkout root.
 pub const DECLARATIONS: &str = "crates/horizon-mod-api/src/hooks";
 
+/// What the catalog was declared in before the declarations: a file here is refused, never ignored.
+pub(crate) const RETIRED: &[&str] = &["native-hooks.json", "tools/native-hook-fragments"];
+
 /// The game function a hook or helper named `name` is called from, when its declaration gives no `target`.
 fn default_target(name: &str) -> String {
     format!("horizon_client::game::native_hooks::Game<'_>::native_{name}")
@@ -492,30 +527,70 @@ impl Declared {
 }
 
 impl Catalog {
-    /// The catalog of the checkout at `root`: the declaration files `hooks/mod.rs` lists, in its order.
+    /// The catalog of the checkout at `root`: every file of the declarations directory, `base.rs` first and
+    /// then by name, so the order never depends on a list a PR edits. `mod.rs` only lists the files for rustfmt,
+    /// and must match the directory. The retired JSON catalog is refused wherever it still exists.
     pub fn load(root: &Path) -> Result<Self, CatalogError> {
-        let dir = root.join(DECLARATIONS);
-        let read = |path: &Path| {
-            fs::read_to_string(path).map_err(|e| CatalogError::Read {
-                path: path.display().to_string(),
-                error: e.to_string(),
-            })
+        let read_error = |path: &Path, e: std::io::Error| CatalogError::Read {
+            path: path.display().to_string(),
+            error: e.to_string(),
         };
+        for retired in RETIRED {
+            let path = root.join(retired);
+            if path.is_file() {
+                return Err(CatalogError::Retired((*retired).to_string()));
+            }
+            if path.is_dir() {
+                let mut entries = fs::read_dir(&path).map_err(|e| read_error(&path, e))?;
+                if let Some(entry) = entries.next() {
+                    let entry = entry.map_err(|e| read_error(&path, e))?;
+                    return Err(CatalogError::Retired(format!(
+                        "{retired}/{}",
+                        entry.file_name().to_string_lossy()
+                    )));
+                }
+            }
+        }
+        let dir = root.join(DECLARATIONS);
+        let mut modules = fs::read_dir(&dir)
+            .map_err(|e| read_error(&dir, e))?
+            .map(|entry| entry.map_err(|e| read_error(&dir, e)))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                name.strip_suffix(".rs")
+                    .filter(|module| *module != "mod")
+                    .map(str::to_string)
+            })
+            .collect::<Vec<_>>();
+        modules.sort_by(|a, b| (a != "base", a).cmp(&(b != "base", b)));
         let index = dir.join("mod.rs");
-        let listing = syn::parse_file(&read(&index)?).map_err(|e| CatalogError::Declaration {
+        let index_source = fs::read_to_string(&index).map_err(|e| read_error(&index, e))?;
+        let listing = syn::parse_file(&index_source).map_err(|e| CatalogError::Declaration {
             path: index.display().to_string(),
             error: e.to_string(),
         })?;
-        let files = listing
+        let listed = listing
             .items
             .iter()
             .filter_map(|item| match item {
                 syn::Item::Mod(module) => Some(module.ident.to_string()),
                 _ => None,
             })
+            .collect::<Vec<_>>();
+        if listed != modules {
+            return Err(CatalogError::ModLines {
+                listed,
+                files: modules,
+            });
+        }
+        let files = modules
+            .iter()
             .map(|module| {
                 let path = dir.join(format!("{module}.rs"));
-                Ok((path.display().to_string(), read(&path)?))
+                let text = fs::read_to_string(&path).map_err(|e| read_error(&path, e))?;
+                Ok((path.display().to_string(), text))
             })
             .collect::<Result<Vec<_>, CatalogError>>()?;
         Self::parse(&files)
@@ -625,6 +700,65 @@ mod tests {
                 .any(|h| h.contract == Contract::Replace)
         );
         assert!(!catalog.draw_contexts.is_empty());
+    }
+
+    fn checkout(files: &[(&str, &str)]) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "catalog-load-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let dir = root.join(DECLARATIONS);
+        fs::create_dir_all(&dir).unwrap();
+        for (name, text) in files {
+            let path = root.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        }
+        root
+    }
+
+    const HOOK: &str = "pub trait Hooks { /// Doc.\n #[hook(side = \"server\", contract = \"listen\")] fn one(); }";
+
+    #[test]
+    fn the_retired_json_catalog_is_refused_wherever_it_is() {
+        let base = format!("{DECLARATIONS}/base.rs");
+        let index = format!("{DECLARATIONS}/mod.rs");
+        for retired in ["native-hooks.json", "tools/native-hook-fragments/late.json"] {
+            let root = checkout(&[(&base, HOOK), (&index, "mod base;"), (retired, "{}")]);
+            let error = Catalog::load(&root).unwrap_err().to_string();
+            assert!(error.starts_with(retired), "{error}");
+            assert!(error.contains("declared in Rust now"), "{error}");
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_order_comes_from_the_directory_and_mod_rs_must_match_it() {
+        let second = "pub trait Hooks { /// Doc.\n #[hook(side = \"server\", contract = \"listen\")] fn two(); }";
+        let base = format!("{DECLARATIONS}/base.rs");
+        let alpha = format!("{DECLARATIONS}/alpha.rs");
+        let index = format!("{DECLARATIONS}/mod.rs");
+        let root = checkout(&[
+            (&alpha, second),
+            (&base, HOOK),
+            (&index, "mod base;\nmod alpha;"),
+        ]);
+        let catalog = Catalog::load(&root).unwrap();
+        let names = catalog
+            .hooks
+            .iter()
+            .map(|h| h.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["one", "two"], "base.rs first, then by name");
+        fs::write(root.join(&index), "mod base;").unwrap();
+        let error = Catalog::load(&root).unwrap_err().to_string();
+        assert!(
+            error.contains("mod.rs must list exactly the declaration files"),
+            "{error}"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn file(name: &str, source: &str) -> (String, String) {

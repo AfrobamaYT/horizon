@@ -30,10 +30,13 @@
 //! is also a method of) and `backend = true`.
 //!
 //! Every hook needs `///` lines: they are the rustdoc of its trait method, and a hook without them
-//! is refused. Order matters: the generator reads the files in the order of the `mod` lines below (and each
-//! file in declaration order), and that order is the order of the generated `HookId`, the dispatch
-//! and the WIT. A new hook goes in a file of its own, or the end of the file of its family, with
-//! its `mod` line at the end of the list.
+//! is refused. The generator reads the files in name order, `base.rs` first, and each file in declaration
+//! order; that is the order of the generated `HookId`, the dispatch and the WIT, and it comes from
+//! the directory, so a new hook never edits an existing line to be placed. A new hook goes in a file
+//! of its own (or at the end of the file of its family). The `mod` lines below exist only so that
+//! rustfmt formats the files: keep them in the same order, one per file; the generator refuses a
+//! list that differs from the directory. The JSON catalog (`native-hooks.json`,
+//! `tools/native-hook-fragments/`) is retired and a file there fails the build.
 //!
 //! The game function a hook names starts as `let _ = (every, parameter);`; `cargo run -p xtask --
 //! mod-api` fills in the dispatch call.
@@ -49,8 +52,6 @@ mod anvil_update;
 mod armor_hurt;
 mod arrow_nock;
 mod baby_entity_spawn;
-mod block_use_item_on;
-mod block_use_without_item;
 mod block_drops;
 mod block_entity_refs;
 mod block_grow_feature;
@@ -58,6 +59,8 @@ mod block_landing;
 mod block_render_visibility;
 mod block_state_ids;
 mod block_tool_modification;
+mod block_use_item_on;
+mod block_use_without_item;
 mod bonemeal;
 mod boss_bar_refs;
 mod calculate_player_turn;
@@ -221,8 +224,8 @@ mod render_gui_pre;
 mod render_item_in_frame;
 mod render_name_tag;
 mod render_tooltip_gather_components;
-mod right_click_item;
 mod right_click_empty;
+mod right_click_item;
 mod screen_closing;
 mod screen_exclusion_areas;
 mod screen_hovered_item;
