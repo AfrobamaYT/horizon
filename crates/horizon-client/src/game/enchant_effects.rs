@@ -89,6 +89,16 @@ impl Game<'_> {
     /// `ItemStack.hurtAndBreak` for the player's `stack`: the wear Unbreaking
     /// leaves, and `ItemDurabilityTrigger` when some is left (`applyDamage`).
     pub(super) fn wear(&mut self, stack: &ItemStack, amount: u32) -> u32 {
+        let loss = self.modify_wear(stack, amount);
+        if loss > 0 {
+            self.trigger_item_durability(stack, (stack.damage as i32).wrapping_add(loss as i32));
+        }
+        loss
+    }
+
+    /// Enchantment and mod changes to a positive durability loss, before the
+    /// durability-changed advancement and the stack write.
+    pub(super) fn modify_wear(&mut self, stack: &ItemStack, amount: u32) -> u32 {
         let mut loss = self.durability_loss(stack, amount);
         // The mods hear a server player's wear once Unbreaking has had its say,
         // and may change it or stop it.
@@ -99,9 +109,6 @@ impl Game<'_> {
             let mut cancel = false;
             self.native_item_damaged(uuid, &name, &stack.item, &mut points, &mut cancel);
             loss = if cancel { 0 } else { points.max(0) as u32 };
-        }
-        if loss > 0 {
-            self.trigger_item_durability(stack, stack.damage + loss);
         }
         loss
     }
