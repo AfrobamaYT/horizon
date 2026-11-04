@@ -459,7 +459,7 @@ impl Game<'_> {
                 horizon_client::first_person::item_use_animation,
             );
         let held_arm_pose = self.held_arm_poses(
-            self.own_entity_id(),
+            self.own_entity_id() as u32,
             [self.selected, super::shield::OFFHAND_SLOT].map(|slot| self.stack_in(slot)),
         );
         let charged = self.inventory[self.selected]
@@ -1099,14 +1099,12 @@ impl Game<'_> {
             out,
         );
     }
-    /// The entity id the local player has on its server: the one it was
-    /// given at login on a client, else the acting player's own.
     /// `IClientItemExtensions.getArmPose` for each hand's stack, else the item's declared
     /// `arm_pose`: the pose that replaces the one `AvatarRenderer.getArmPose` derives. An
     /// empty hand keeps vanilla's.
     pub(super) fn held_arm_poses(
         &self,
-        entity_id: i32,
+        entity_id: u32,
         stacks: [Option<&horizon_client::items::ItemStack>; 2],
     ) -> [Option<horizon_core::arm_pose::ArmPose>; 2] {
         let mut poses = [None; 2];
@@ -1125,6 +1123,8 @@ impl Game<'_> {
         }
         poses
     }
+    /// The entity id the local player has on its server: the one it was
+    /// given at login on a client, else the acting player's own.
     pub(super) fn own_entity_id(&self) -> i32 {
         self.remote.as_ref().map_or_else(
             || self.player.as_ref().map_or(0, |p| p.entity_id),

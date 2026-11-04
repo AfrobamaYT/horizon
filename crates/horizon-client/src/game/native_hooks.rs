@@ -3424,7 +3424,7 @@ impl Game<'_> {
     /// `pose` to replace what the item would give. Client-side.
     pub(super) fn native_get_arm_pose(
         &self,
-        entity_id: i32,
+        entity_id: u32,
         hand: Hand,
         stack: &ItemStack,
         pose: &mut Option<mod_api::ArmPose>,

@@ -6504,7 +6504,7 @@ impl Game<'_> {
                 continue;
             }
             let poses = self.held_arm_poses(
-                m.id as i32,
+                m.id,
                 [
                     horizon_items::equipment::MAINHAND,
                     horizon_items::equipment::OFFHAND,

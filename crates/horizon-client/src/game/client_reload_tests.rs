@@ -571,3 +571,38 @@ fn the_lifecycle_moments_fire_once_each_in_order() {
         ]
     );
 }
+
+/// `get_arm_pose`'s answer is the pose of that hand's stack; a hand it does not answer for,
+/// or no listener at all, leaves the item's own (declared) pose, which a vanilla stick lacks.
+#[test]
+#[ignore = "needs prepared resources"]
+fn an_arm_pose_answer_replaces_the_pose_the_item_gives() {
+    use crate::game::native_entity_refs::tests::with_game;
+    use mod_api::testing::with_mods;
+    use mod_api::{ArmPose, ClientHost, GetArmPoseEvent, Hand, Hooks, ModEntry};
+
+    struct Horn;
+    #[mod_api::__subscriptions]
+    impl Hooks for Horn {
+        fn get_arm_pose(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut GetArmPoseEvent<'_>,
+        ) -> Option<ArmPose> {
+            (event.hand == Hand::Main).then_some(ArmPose::TootHorn)
+        }
+    }
+
+    let stick = horizon_client::items::ItemStack::new("minecraft:stick", 1);
+    let stacks = [Some(&stick), Some(&stick)];
+    with_game(|game| {
+        assert_eq!(game.held_arm_poses(1, stacks), [None, None]);
+        let mods = vec![ModEntry::new("horn", Box::new(Horn))].into();
+        with_mods(mods, || {
+            assert_eq!(
+                game.held_arm_poses(1, stacks),
+                [Some(ArmPose::TootHorn), None]
+            );
+        });
+    });
+}

@@ -1,6 +1,7 @@
 //! `HumanoidModel.ArmPose`: how a humanoid model poses an arm, and the names an item declaration gives them.
 
 /// `HumanoidModel.ArmPose`'s constants, the arm poses a humanoid model has.
+// exhaustive: HumanoidModel.ArmPose's constants; NeoForge's enum extensions have no counterpart
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArmPose {
