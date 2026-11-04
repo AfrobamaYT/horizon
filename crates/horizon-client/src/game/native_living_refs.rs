@@ -748,6 +748,7 @@ mod tests {
             // The same record inside a guest's turn: the host's displaced
             // body is out of reach, so the attacker reads None.
             game.lan_acting = Some(7);
+            game.lan_acting_uuid = Some(456);
             assert_eq!(pig_living.last_attacker(game), None);
         });
     }
