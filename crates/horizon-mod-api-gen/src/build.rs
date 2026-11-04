@@ -9,7 +9,10 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     track(root)?;
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
-        Target::Client => vec![("mod_api_host_generated.rs", generated.implementation)],
+        Target::Client => vec![
+            ("mod_api_host_generated.rs", generated.implementation),
+            ("mod_api_fire_generated.rs", generated.fire),
+        ],
         Target::Api => {
             println!("cargo:rerun-if-env-changed=HORIZON_MOD_API_INJECTIONS");
             let hooks = if let Some(path) = std::env::var_os("HORIZON_MOD_API_INJECTIONS") {

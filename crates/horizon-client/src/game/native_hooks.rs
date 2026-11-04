@@ -9,6 +9,8 @@
 //! sites may change; rebuild native mods after game updates.
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
+include!(concat!(env!("OUT_DIR"), "/mod_api_fire_generated.rs"));
+
 use super::native_data_maps::NativeDataMapType;
 use super::{
     Game, GameLevel, LevelDimension, Screen,
@@ -557,7 +559,7 @@ impl GameLevel<'_> {
     /// `newBlockEntity` gets no level.
     #[inline(always)]
     pub(super) fn native_block_entity(&self, block: &str, entity: &mut Option<Compound>) {
-        mod_api::dispatch_block_entity(super::mod_api_host::level_side(self), block, entity);
+        self.fire_block_entity(block, entity);
     }
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side.
     #[inline(always)]
@@ -569,7 +571,7 @@ impl GameLevel<'_> {
         count: u32,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_hopper_pickup_item(self, dimension, pos, item, count, cancel);
+        self.fire_hopper_pickup_item(dimension, pos, item, count, cancel);
     }
     /// `Block.dropResources` built the item entities `drops` for the block
     /// `state` broken at `pos` by `breaker` (a player's UUID, none for a
@@ -604,7 +606,7 @@ impl GameLevel<'_> {
         old: BlockStateId,
         new: BlockStateId,
     ) {
-        mod_api::dispatch_block_changed(self, dimension, pos, old, new);
+        self.fire_block_changed(dimension, pos, old, new);
     }
 
     /// Liquid at `liquid_pos` is about to place `state` at `pos`. Set
@@ -678,7 +680,7 @@ impl GameLevel<'_> {
         state: BlockStateId,
         can_convert: &mut bool,
     ) {
-        mod_api::dispatch_create_fluid_source(self, dimension, pos, state, can_convert);
+        self.fire_create_fluid_source(dimension, pos, state, can_convert);
     }
 
     /// A non-persistent leaf block at distance 7 is about to decay at `pos`.
@@ -690,7 +692,7 @@ impl GameLevel<'_> {
         pos: BlockPos,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_leaves_decay(self, dimension, pos, cancel);
+        self.fire_leaves_decay(dimension, pos, cancel);
     }
 
     /// Farmland at `pos` is about to change moisture from `from` to `to`.
@@ -704,13 +706,13 @@ impl GameLevel<'_> {
         to: i32,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_moisture_change(self, dimension, pos, from, to, cancel);
+        self.fire_moisture_change(dimension, pos, from, to, cancel);
     }
 
     /// A sponge at `pos` absorbed water and became wet. Server-side.
     #[inline(always)]
     pub(super) fn native_sponge_absorb(&self, dimension: LevelDimension, pos: BlockPos) {
-        mod_api::dispatch_sponge_absorb(self, dimension, pos);
+        self.fire_sponge_absorb(dimension, pos);
     }
 
     /// A sapling, azalea, mushroom or fungus at `pos` is about to grow into the
@@ -726,7 +728,7 @@ impl GameLevel<'_> {
         feature: &mut Option<String>,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_block_grow_feature(self, dimension, pos, feature, cancel);
+        self.fire_block_grow_feature(dimension, pos, feature, cancel);
     }
 
     /// A crop-like block at `pos` is about to grow on a random tick
@@ -746,7 +748,7 @@ impl GameLevel<'_> {
         state: BlockStateId,
         result: &mut NativeTriState,
     ) {
-        mod_api::dispatch_crop_grow_pre(self, dimension, pos, state, result);
+        self.fire_crop_grow_pre(dimension, pos, state, result);
     }
 
     /// A crop-like block grew (NeoForge's `CropGrowEvent.Post`).
@@ -761,7 +763,7 @@ impl GameLevel<'_> {
         original_state: BlockStateId,
         state: BlockStateId,
     ) {
-        mod_api::dispatch_crop_grow_post(self, dimension, pos, original_state, state);
+        self.fire_crop_grow_post(dimension, pos, original_state, state);
     }
 
     /// A block at `pos` is about to fade from `from` to `to` because of
