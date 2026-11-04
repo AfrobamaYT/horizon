@@ -16,7 +16,10 @@ use horizon_client::{
     },
     particles::{ParticleOptions, ParticleType},
 };
-use horizon_core::{geometry::Vec3, random::RandomSource};
+use horizon_core::{
+    geometry::Vec3,
+    random::{LegacyRandom, RandomSource},
+};
 use horizon_world::nbt::Tag;
 use std::collections::{HashMap, HashSet};
 
@@ -24,11 +27,12 @@ type Pos = (i32, i32, i32);
 
 /// What a spawner tick decided to add, created once the level is free.
 pub(super) enum Planned {
-    /// `finalizeSpawn` ran on a fresh mob; the spawn data's `equipment`.
+    /// `finalizeSpawn` ran on a fresh mob (its provisional id in `Mob::id`);
+    /// the spawn data's `equipment`.
     Finalized(Mob, Option<Tag>),
     /// A mob loaded from the spawn data (with its passengers) and its
-    /// `equipment`.
-    Loaded(Tag, Option<Tag>),
+    /// `equipment`; the provisional id its events carry.
+    Loaded(Tag, Option<Tag>, u32),
 }
 
 /// What the spawner code keeps between ticks.
@@ -128,50 +132,71 @@ impl Game<'_> {
         let source = cart
             .is_none()
             .then(|| mod_api::NativeSpawner::Block(mod_api::BlockPos::new(key.0, key.1, key.2)));
-        {
+        let extras = {
             let level = self.natural_level();
-            let mut spawn = |l: &super::natural_spawning::GameLevel, r: &SpawnerSpawn| {
-                l.game.plan_spawner_mob(l, r, source, &mut planned)
+            let mut spawn = |l: &super::natural_spawning::GameLevel,
+                             r: &SpawnerSpawn,
+                             rng: &mut LegacyRandom| {
+                l.game.plan_spawner_mob(l, r, source, &mut planned, rng)
             };
             spawner.server_tick(&level, &mut random, pos, &mut spawn, &mut events);
-        }
+            (
+                std::mem::take(&mut *level.spawned.borrow_mut()),
+                std::mem::take(&mut *level.rides.borrow_mut()),
+            )
+        };
         self.world.random = random;
-        let ids = self.add_planned(planned);
+        let (created, rides) = extras;
+        let ids = self.add_planned(planned, created, rides);
         self.apply_spawner_events(key, events, &ids, cart)
     }
     /// Creates the mobs a spawner tick planned; their provisional ids
     /// (counting down from u32::MAX) map to the mobs' ids.
-    pub(super) fn add_planned(&mut self, planned: Vec<Planned>) -> HashMap<u32, u32> {
-        let mut ids = HashMap::new();
-        for (i, plan) in planned.into_iter().enumerate() {
-            let provisional = u32::MAX - i as u32;
-            let id = match plan {
-                Planned::Finalized(mut mob, equipment) => {
-                    self.next_entity += 1;
-                    mob.id = self.next_entity;
-                    let id = mob.id;
-                    self.mobs.push(mob);
-                    self.native_mobs_joined(self.mobs.len() - 1, false);
-                    self.enchant_spawn_equipment(id);
-                    self.halloween_spawn_head(id);
-                    self.spawn_jockeys(
-                        id,
-                        super::creatures::SpawnSite::Finalizing(
-                            horizon_client::mobs::spawn_rules::Reason::Spawner,
-                        ),
-                    );
-                    Some((id, equipment))
+    /// (counting down from `u32::MAX`) map to the mobs' ids.
+    pub(super) fn add_planned(
+        &mut self,
+        planned: Vec<Planned>,
+        mut created: Vec<Mob>,
+        rides: Vec<(u32, u32)>,
+    ) -> HashMap<u32, u32> {
+        let mut finalized: Vec<Mob> = Vec::new();
+        let mut gears: Vec<Option<Tag>> = Vec::new();
+        let mut loads: Vec<(Tag, Option<Tag>, u32)> = Vec::new();
+        for plan in planned {
+            match plan {
+                Planned::Finalized(mob, equipment) => {
+                    finalized.push(mob);
+                    gears.push(equipment);
                 }
-                Planned::Loaded(tag, equipment) => {
-                    self.load_mob(tag, None).map(|id| (id, equipment))
-                }
-            };
-            if let Some((id, equipment)) = id {
+                Planned::Loaded(tag, equipment, key) => loads.push((tag, equipment, key)),
+            }
+        }
+        // Real ids for finalizeSpawn's provisional mobs, in spawn order, the
+        // links that ride by id rewritten after them: the map the spawner's
+        // events resolve their provisional ids with.
+        let mut ids = self.resolve_spawn_ids([&mut finalized, &mut created], &rides);
+        for (mob, equipment) in finalized.into_iter().zip(gears) {
+            let id = mob.id;
+            let i = self.mobs.len();
+            self.mobs.push(mob);
+            self.native_mobs_joined(i, false);
+            // `nextSpawnData.getEquipment().ifPresent(mob::equip)`.
+            if let Some(table) = equipment {
+                self.equip_from_table(id, &table);
+            }
+        }
+        for mob in created {
+            let i = self.mobs.len();
+            self.mobs.push(mob);
+            self.native_mobs_joined(i, false);
+        }
+        for (tag, equipment, key) in loads {
+            if let Some(id) = self.load_mob(tag, None) {
                 // `nextSpawnData.getEquipment().ifPresent(mob::equip)`.
                 if let Some(table) = equipment {
                     self.equip_from_table(id, &table);
                 }
-                ids.insert(provisional, id);
+                ids.insert(key, id);
             }
         }
         ids
@@ -184,12 +209,13 @@ impl Game<'_> {
         r: &SpawnerSpawn,
         source: Option<mod_api::NativeSpawner>,
         planned: &mut Vec<Planned>,
+        random: &mut horizon_core::random::LegacyRandom,
     ) -> Option<SpawnerAdded> {
         let kind = self.res.mob_types().get(r.id)?.clone();
         let [x, y, z] = r.position;
         let at = Vec3::new(x, y, z);
-        let bounds = if r.finalize {
-            let mut mob = Mob::new(0, kind, at, r.yaw);
+        let (bounds, key) = if r.finalize {
+            let mut mob = Mob::new(l.provisional_id(), kind, at, r.yaw);
             let reason = if r.trial {
                 SpawnReason::TrialSpawner
             } else {
@@ -197,13 +223,27 @@ impl Game<'_> {
             };
             // TrialSpawner.spawnMob: setPersistenceRequired.
             mob.persistent = r.trial;
-            match self.finalize_with(&mut mob, reason, source) {
-                Finalized::Cancelled => return None,
-                Finalized::Skipped => {}
-                Finalized::Done => horizon_client::mobs::raider::finalize(
-                    &mut mob,
-                    horizon_client::mobs::raider::Reason::Other,
-                ),
+            match self.finalize_spawn_event(&mob, reason, source) {
+                (Finalized::Cancelled, _) => return None,
+                (outcome, difficulty) => {
+                    if outcome == Finalized::Done {
+                        let mut level = super::natural_spawning::PassLevel::new(l);
+                        let mut cx = horizon_client::mobs::finalize::Ctx {
+                            level: &mut level,
+                            random,
+                            difficulty,
+                            created: Vec::new(),
+                            jockey_rider: None,
+                        };
+                        horizon_client::mobs::finalize::finalize(&mut cx, &mut mob, reason, None);
+                        for m in cx.created {
+                            let bounds = m.bounds();
+                            l.pending.borrow_mut().push(bounds);
+                            l.pending_ids.borrow_mut().push((m.kind.id.clone(), bounds));
+                            l.spawned.borrow_mut().push(m);
+                        }
+                    }
+                }
             }
             // Shulker.finalizeSpawn faces it south.
             if mob.species() == horizon_client::mobs::Species::Shulker {
@@ -215,8 +255,9 @@ impl Game<'_> {
                 mob.previous_head_yaw = 0.0;
             }
             let bounds = mob.bounds();
+            let key = mob.id;
             planned.push(Planned::Finalized(mob, r.equipment.cloned()));
-            bounds
+            (bounds, key)
         } else {
             // A UUID already in the level is refused.
             let mut tag = r.entity.clone();
@@ -251,13 +292,14 @@ impl Game<'_> {
                 Some(self.pack.assets.registry),
             )?;
             let bounds = mob.bounds();
-            planned.push(Planned::Loaded(tag, r.equipment.cloned()));
-            bounds
+            let key = l.provisional_id();
+            planned.push(Planned::Loaded(tag, r.equipment.cloned(), key));
+            (bounds, key)
         };
         l.pending.borrow_mut().push(bounds);
         l.pending_ids.borrow_mut().push((r.id.to_owned(), bounds));
         Some(SpawnerAdded {
-            id: u32::MAX - (planned.len() as u32 - 1),
+            id: key,
             bounds,
             mob: true,
         })

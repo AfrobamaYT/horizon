@@ -808,24 +808,11 @@ impl Mob {
             return false;
         }
         // LivingEntity.getVisibilityPercent
-        let mut visibility = if scale { p.visibility_percent() } else { 1.0 };
-        if let Some(head) = p.head.as_ref().filter(|_| scale) {
-            let skull = match self.species() {
-                Species::Zombie | Species::Husk | Species::Drowned | Species::ZombieVillager => {
-                    "minecraft:zombie_head"
-                }
-                Species::Skeleton | Species::Stray | Species::Bogged => "minecraft:skeleton_head",
-                Species::Creeper => "minecraft:creeper_head",
-                Species::Piglin | Species::PiglinBrute => "minecraft:piglin_head",
-                _ => "",
-            };
-            if &**head == skull {
-                visibility *= 0.5;
-            }
-        }
-        if scale {
-            visibility = w.player_visibility(p, self.id, visibility);
-        }
+        let visibility = if scale {
+            w.player_visibility(p, self.id, p.visibility_percent(self.species()))
+        } else {
+            1.0
+        };
         let dist = (range * visibility).max(2.0);
         if self.distance_sqr(p.position) > dist * dist {
             return false;
@@ -3653,6 +3640,43 @@ mod visibility_hook_tests {
             assert!(far.can_see_player_through_walls(&w, 16.0));
             w.player = Some(test_player(Vec3::new(170.5, 64.0, 0.5)));
             assert!(!far.can_see_player_through_walls(&w, 16.0));
+        });
+    }
+
+    /// A worn head's `mob_visibility` halves the range only for the types
+    /// vanilla names: a zombie head fools a zombie, not a husk, and a
+    /// skeleton skull a skeleton, not a stray.
+    #[test]
+    fn a_worn_head_hides_the_player_only_from_its_own_type() {
+        with_test_world(&[], |w, types| {
+            let mut w = w.clone();
+            let mob = |id, name: &str| {
+                let kind = Arc::new(types.types[name].clone());
+                Mob::new(id, kind, Vec3::new(0.5, 64.0, 0.5), 0.0)
+            };
+            let wearing = |head: &str| {
+                let mut p = test_player(Vec3::new(10.5, 64.0, 0.5));
+                p.head = Some(head.into());
+                p
+            };
+            // 16 blocks, halved to 8: the player 10 blocks away is unseen.
+            for (looking, head, hidden) in [
+                ("minecraft:zombie", "minecraft:zombie_head", true),
+                ("minecraft:husk", "minecraft:zombie_head", false),
+                ("minecraft:skeleton", "minecraft:skeleton_skull", true),
+                ("minecraft:stray", "minecraft:skeleton_skull", false),
+                ("minecraft:creeper", "minecraft:creeper_head", true),
+                ("minecraft:piglin_brute", "minecraft:piglin_head", true),
+                ("minecraft:zombie", "minecraft:skeleton_skull", false),
+            ] {
+                w.player = Some(wearing(head));
+                let mut m = mob(1, looking);
+                assert_eq!(
+                    m.can_see_player_through_walls(&w, 16.0),
+                    !hidden,
+                    "{looking} looking at {head}"
+                );
+            }
         });
     }
 }

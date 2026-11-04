@@ -8,62 +8,15 @@ use crate::blocks::{BlockFacts, Fluid};
 use horizon_core::random::{RandomSource, slime_chunk_random};
 use horizon_world::registry::BlockStateId;
 
-/// `EntitySpawnReason`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Reason {
-    Natural,
-    ChunkGeneration,
-    Spawner,
-    TrialSpawner,
-    Reinforcement,
-    Patrol,
-    Structure,
-    Event,
-    Command,
-    SpawnItemUse,
-    MobSummoned,
-    Conversion,
-    Breeding,
-    Triggered,
-    Jockey,
-    Dispenser,
-    Bucket,
-    Load,
-    DimensionTravel,
+/// `EntitySpawnReason`: the mod API's own enum.
+pub use mod_api::NativeSpawnReason as Reason;
+/// `EntitySpawnReason.isSpawner`.
+pub fn is_spawner(reason: Reason) -> bool {
+    matches!(reason, Reason::Spawner | Reason::TrialSpawner)
 }
-impl From<Reason> for mod_api::NativeSpawnReason {
-    fn from(reason: Reason) -> Self {
-        use mod_api::NativeSpawnReason as N;
-        match reason {
-            Reason::Natural => N::Natural,
-            Reason::ChunkGeneration => N::ChunkGeneration,
-            Reason::Spawner => N::Spawner,
-            Reason::TrialSpawner => N::TrialSpawner,
-            Reason::Reinforcement => N::Reinforcement,
-            Reason::Patrol => N::Patrol,
-            Reason::Structure => N::Structure,
-            Reason::Event => N::Event,
-            Reason::Command => N::Command,
-            Reason::SpawnItemUse => N::SpawnItemUse,
-            Reason::MobSummoned => N::MobSummoned,
-            Reason::Conversion => N::Conversion,
-            Reason::Breeding => N::Breeding,
-            Reason::Triggered => N::Triggered,
-            Reason::Jockey => N::Jockey,
-            Reason::Dispenser => N::Dispenser,
-            Reason::Bucket => N::Bucket,
-            Reason::Load => N::Load,
-            Reason::DimensionTravel => N::DimensionTravel,
-        }
-    }
-}
-impl Reason {
-    pub fn is_spawner(self) -> bool {
-        matches!(self, Self::Spawner | Self::TrialSpawner)
-    }
-    pub fn ignores_light(self) -> bool {
-        self == Self::TrialSpawner
-    }
+/// `EntitySpawnReason.ignoresLightRequirements`.
+pub fn ignores_light(reason: Reason) -> bool {
+    reason == Reason::TrialSpawner
 }
 /// The dimension type's monster spawn light rules.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -322,7 +275,7 @@ fn bright<L: SpawnLevel>(l: &L, x: i32, y: i32, z: i32) -> bool {
 }
 /// `Mob.checkMobSpawnRules`.
 fn mob_rules<L: SpawnLevel>(s: Species, l: &L, reason: Reason, x: i32, y: i32, z: i32) -> bool {
-    reason.is_spawner() || is_valid_spawn(s, l, x, y - 1, z)
+    is_spawner(reason) || is_valid_spawn(s, l, x, y - 1, z)
 }
 /// `Monster.checkMonsterSpawnRules`.
 fn monster_rules<L: SpawnLevel>(
@@ -334,12 +287,12 @@ fn monster_rules<L: SpawnLevel>(
     y: i32,
     z: i32,
 ) -> bool {
-    (reason.ignores_light() || is_dark_enough(l, random, x, y, z))
+    (ignores_light(reason) || is_dark_enough(l, random, x, y, z))
         && mob_rules(s, l, reason, x, y, z)
 }
 /// `Animal.checkAnimalSpawnRules` with the given spawnable-on tag.
 fn animal_rules<L: SpawnLevel>(l: &L, reason: Reason, on: &str, x: i32, y: i32, z: i32) -> bool {
-    let bright = reason.ignores_light() || bright(l, x, y, z);
+    let bright = ignores_light(reason) || bright(l, x, y, z);
     tag(l, on, x, y - 1, z) && bright
 }
 /// `WaterAnimal.checkSurfaceWaterAnimalSpawnRules`.
@@ -385,14 +338,14 @@ fn placement_predicate<L: SpawnLevel>(
         S::Axolotl => tag(l, "minecraft:axolotls_spawnable_on", x, y - 1, z),
         S::Cod | S::Pufferfish | S::Salmon | S::Dolphin | S::Squid => surface_water(l, x, y, z),
         S::Drowned => {
-            if fluid(l, x, y - 1, z) != Fluid::Water && !reason.is_spawner() {
+            if fluid(l, x, y - 1, z) != Fluid::Water && !is_spawner(reason) {
                 return false;
             }
             let frequent = l.biome_tag("minecraft:more_frequent_drowned_spawns", x, y, z);
             let can_spawn = !l.peaceful()
-                && (reason.ignores_light() || is_dark_enough(l, random, x, y, z))
-                && (reason.is_spawner() || fluid(l, x, y, z) == Fluid::Water);
-            if !can_spawn || !reason.is_spawner() && reason != Reason::Reinforcement {
+                && (ignores_light(reason) || is_dark_enough(l, random, x, y, z))
+                && (is_spawner(reason) || fluid(l, x, y, z) == Fluid::Water);
+            if !can_spawn || !is_spawner(reason) && reason != Reason::Reinforcement {
                 if frequent {
                     random.next_int_bound(15).unwrap_or(1) == 0 && can_spawn
                 } else {
@@ -408,7 +361,7 @@ fn placement_predicate<L: SpawnLevel>(
             (random.next_int_bound(20).unwrap_or(1) == 0
                 || !can_see_sky_from_below_water(l, x, y, z))
                 && !l.peaceful()
-                && (reason.is_spawner() || fluid(l, x, y, z) == Fluid::Water)
+                && (is_spawner(reason) || fluid(l, x, y, z) == Fluid::Water)
                 && fluid(l, x, y - 1, z) == Fluid::Water
         }
         S::TropicalFish => {
@@ -437,7 +390,7 @@ fn placement_predicate<L: SpawnLevel>(
         S::Camel => tag(l, "minecraft:camels_spawnable_on", x, y - 1, z) && bright(l, x, y, z),
         S::CamelHusk | S::Husk | S::Parched => {
             monster_rules(s, l, reason, random, x, y, z)
-                && (reason.is_spawner() || can_see_sky(l, x, y, z))
+                && (is_spawner(reason) || can_see_sky(l, x, y, z))
         }
         S::Chicken
         | S::Cow
@@ -455,7 +408,7 @@ fn placement_predicate<L: SpawnLevel>(
             if !mob_rules(s, l, reason, x, y, z) {
                 return false;
             }
-            reason.is_spawner()
+            is_spawner(reason)
                 || !l.player_near(
                     f64::from(x) + 0.5,
                     f64::from(y) + 0.5,
@@ -513,8 +466,8 @@ fn placement_predicate<L: SpawnLevel>(
         }
         S::Rabbit => tag(l, "minecraft:rabbits_spawnable_on", x, y - 1, z) && bright(l, x, y, z),
         S::SkeletonHorse => {
-            if reason.is_spawner() {
-                reason.ignores_light() || bright(l, x, y, z)
+            if is_spawner(reason) {
+                ignores_light(reason) || bright(l, x, y, z)
             } else {
                 animal_rules(l, reason, "minecraft:animals_spawnable_on", x, y, z)
             }
@@ -526,7 +479,7 @@ fn placement_predicate<L: SpawnLevel>(
                 sky += 1;
             }
             monster_rules(s, l, reason, random, x, y, z)
-                && (reason.is_spawner() || can_see_sky(l, x, sky - 1, z))
+                && (is_spawner(reason) || can_see_sky(l, x, sky - 1, z))
         }
         S::Strider => {
             let mut up = y + 1;
@@ -578,7 +531,7 @@ fn slime_rules<L: SpawnLevel>(
     if l.peaceful() {
         return false;
     }
-    if reason.is_spawner() {
+    if is_spawner(reason) {
         return mob_rules(s, l, reason, x, y, z);
     }
     if l.biome_tag("minecraft:allows_surface_slime_spawns", x, y, z) && y > 50 && y < 70 {

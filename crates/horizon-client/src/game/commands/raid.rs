@@ -53,10 +53,9 @@ impl Game<'_> {
             },
             "raid.spawnleader" => {
                 let kind = "minecraft:pillager";
-                match self.spawn_mob_for(
+                match self.spawn_mob(
                     kind,
                     [player.x, player.y, player.z],
-                    true,
                     true,
                     super::super::creatures::SpawnSite::Finalizing(
                         horizon_client::mobs::spawn_rules::Reason::Command,

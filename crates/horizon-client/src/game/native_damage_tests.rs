@@ -46,7 +46,7 @@ impl Hooks for Probe {
             container.set_new_damage(2.0);
         }
         if event.entity == 225010 {
-            level.random().unwrap().next_int();
+            level.with_random(|random| random.next_int()).unwrap();
         }
         let heard = (
             event.entity,
