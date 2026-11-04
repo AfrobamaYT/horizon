@@ -1274,12 +1274,12 @@ pub mod tests {
         }
     }
 
-    /// Makes an oak fence refuse every connection, and a spruce fence accept glass.
+    /// Makes an oak fence flip vanilla's answer toward the east and refuse every other side.
     struct FenceRule;
     #[mod_api::horizon_part]
     impl BlockPart for FenceRule {
         fn fence_connects_to(&self, _: &dyn LevelHost, event: &mut FenceConnectsToEvent) {
-            event.connected = !event.connected;
+            event.connected = event.direction == Direction::East && !event.connected;
         }
     }
 

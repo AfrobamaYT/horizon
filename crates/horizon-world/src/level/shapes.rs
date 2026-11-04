@@ -932,6 +932,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         face_solid: bool,
         direction: Direction,
     ) -> bool {
+        // `direction` is vanilla's argument: from the neighbour toward the fence.
         let b = self.b;
         let t = &b.tags;
         let same_fence = b.in_set(state, &t.fences)
@@ -940,8 +941,15 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             && axis_of(b.facing(state)) == axis_of(clockwise(direction));
         let vanilla = (!b.is_exception_for_connection(state) && face_solid) || same_fence || gate;
         if self.level.has_fence_connection_hook() {
-            self.level
-                .adjust_fence_connects_to(pos, fence, state, direction, face_solid, vanilla)
+            // The hook's direction points from the fence to the neighbour.
+            self.level.adjust_fence_connects_to(
+                pos,
+                fence,
+                state,
+                direction.opposite(),
+                face_solid,
+                vanilla,
+            )
         } else {
             vanilla
         }

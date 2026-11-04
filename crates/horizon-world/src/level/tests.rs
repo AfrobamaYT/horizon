@@ -68,6 +68,8 @@ pub(crate) struct TestLevel {
     /// What `adjust_fence_connects_to` answers for a neighbour state: whether
     /// a fence connects an arm toward it.
     pub fence_connect: HashMap<BlockStateId, bool>,
+    /// The directions `adjust_fence_connects_to` was asked about.
+    pub fence_directions: std::cell::RefCell<Vec<Direction>>,
     /// What `before_fire_odds` answers for a state.
     pub fire_odds: HashMap<BlockStateId, (i32, i32)>,
     /// What `before_smoke_source` answers for a state.
@@ -94,6 +96,7 @@ impl TestLevel {
             signals: HashMap::new(),
             weak_power: HashMap::new(),
             weak_power_directions: std::cell::RefCell::new(Vec::new()),
+            fence_directions: std::cell::RefCell::new(Vec::new()),
             analog: HashMap::new(),
             analog_states: HashSet::new(),
             wire_connect: HashMap::new(),
@@ -155,10 +158,11 @@ impl LevelAccess for TestLevel {
         _pos: BlockPos,
         _fence: BlockStateId,
         neighbour: BlockStateId,
-        _direction: Direction,
+        direction: Direction,
         _face_solid: bool,
         vanilla: bool,
     ) -> bool {
+        self.fence_directions.borrow_mut().push(direction);
         self.fence_connect
             .get(&neighbour)
             .copied()
@@ -1404,6 +1408,12 @@ fn fence_connection_follows_fence_connects_to_both_ways() {
     w.level.fence_connect.insert(glass, true);
     assert!(!connects(&mut w, stone, true));
     assert!(connects(&mut w, glass, false));
+    // Vanilla's argument points from the neighbour to the fence; the hook is
+    // told the way from the fence to the neighbour.
+    assert_eq!(
+        *w.level.fence_directions.borrow().last().unwrap(),
+        Direction::East
+    );
     // A state the hook doesn't answer keeps vanilla's answer.
     let dirt = w.id("dirt", &[]);
     assert!(connects(&mut w, dirt, true));
