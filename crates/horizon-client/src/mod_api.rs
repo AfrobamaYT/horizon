@@ -7,6 +7,11 @@ use std::sync::{Arc, OnceLock};
 
 mod phase;
 pub use phase::{LoadedMods, RegistrationContext, RegistrationPhase};
+mod config_files;
+pub use config_files::{
+    CONFIG_FILE_MAX, CONFIG_LIST_MAX, ConfigEntry, ConfigEntryKind, ConfigFileError, ConfigFiles,
+    ConfigPath, ConfigStat,
+};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod client_reload;

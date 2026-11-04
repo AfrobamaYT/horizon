@@ -8370,13 +8370,11 @@ impl Game<'_> {
         let _ = fs::create_dir_all(&dir).and_then(|()| fs::write(dir.join(key), value));
     }
     /// The game's `config/` folder beside `options.txt`, shared by every mod
-    /// as on Fabric and NeoForge: a mod names its own files in it
-    /// (`config/<id>.json`, or a folder of its own). The same folder on the
-    /// window, its server thread and a LAN host; a dedicated server's is in
-    /// its own folder, beside `server.properties`. Made when missing. No
-    /// `self`, so a mixin helper calls `Game::native_config_dir()` and a trait
-    /// mod `Host::config_dir`.
-    pub(super) fn native_config_dir() -> Result<PathBuf, String> {
+    /// as on Fabric and NeoForge. The same folder on the window, its server
+    /// thread and a LAN host; a dedicated server's is in its own folder,
+    /// beside `server.properties`. Made when missing. Mods reach their own
+    /// files in it through `Host::config_files`.
+    pub(super) fn native_config_dir() -> std::io::Result<PathBuf> {
         config_dir(&Self::game_dir())
     }
     /// Shows the panel beside container screens with these items (at most
@@ -9665,11 +9663,10 @@ fn property_change(
     with_property(registry, state, key, value).filter(|&id| id != state)
 }
 
-/// `config/` beside `options`, made when missing.
-/// `config/` in the game folder, shared by its players.
-fn config_dir(game_dir: &Path) -> Result<PathBuf, String> {
+/// `config/` in the game folder, beside `options.txt`, made when missing.
+fn config_dir(game_dir: &Path) -> std::io::Result<PathBuf> {
     let dir = game_dir.join("config");
-    fs::create_dir_all(&dir).map_err(|e| dir.display().to_string() + ": " + &e.to_string())?;
+    fs::create_dir_all(&dir)?;
     Ok(dir)
 }
 
@@ -10787,8 +10784,6 @@ mod tests {
     /// missing.
     #[test]
     fn config_dir_is_config_in_the_game_folder() {
-        // Callable without a game, from any hook.
-        let _: fn() -> Result<std::path::PathBuf, String> = super::Game::native_config_dir;
         use super::config_dir;
         let root = std::env::temp_dir().join(format!("horizon-config-dir-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
