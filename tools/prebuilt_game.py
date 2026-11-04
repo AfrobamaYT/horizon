@@ -31,6 +31,10 @@ TEMPLATE = "native_main.rs.template"
 CARRIED = {IDENTITY: None, LOCK: ROOT / LOCK, TEMPLATE: ROOT / "crates/horizon-client/src" / TEMPLATE}
 # What the game's build script asks the `horizon-client` executable's link for (Windows' 8 MB main stack).
 LINK_ARG = "cargo:rustc-link-arg-bin=horizon-client="
+# Native libraries the build scripts point the final link at (the `windows` crates' MinGW import libraries):
+# cargo passes their folders to rustc, a plain rustc gets them from here (`-L native=OUT/native`).
+NATIVE = "native"
+NATIVE_SUFFIXES = (".a", ".lib")
 
 
 def run(command: list[str], **kwargs) -> str:
@@ -56,12 +60,16 @@ def build(out: Path, server: bool) -> None:
     # One std for the game, every mod and the executable: the game links std dynamically, as mods will.
     rustflags = "-C prefer-dynamic"
     features = ["--no-default-features"] if server else []
-    run(
+    messages = run(
         ["cargo", "rustc", "--locked", "-p", "horizon-client", "--lib", "--crate-type", "dylib",
-         "--profile", PROFILE, *features],
+         "--profile", PROFILE, "--message-format", "json-render-diagnostics", *features],
         cwd=ROOT,
         env={**os.environ, "RUSTFLAGS": rustflags, "CARGO_TARGET_DIR": str(target_dir)},
     )
+    scripts = [
+        message for message in map(json.loads, messages.splitlines())
+        if message["reason"] == "build-script-executed"
+    ]
     if out.exists():
         shutil.rmtree(out)
     deps = out / "deps"
@@ -70,12 +78,22 @@ def build(out: Path, server: bool) -> None:
         # Metadata, proc macros and the game; the other crates' code is inside the game's dylib.
         if file.name.endswith(SUFFIXES):
             shutil.copy2(file, deps / file.name)
+    native = out / NATIVE
+    native.mkdir()
+    for script in scripts:
+        # A static library a script names is already inside its crate's rlib, so inside the game.
+        bundled = {lib.split("=")[-1] for lib in script["linked_libs"] if lib.startswith("static")}
+        for search in script["linked_paths"]:
+            for file in sorted(Path(search.split("=", 1)[-1]).iterdir()):
+                stem = file.name.removeprefix("lib").split(".")[0]
+                if file.is_file() and file.name.endswith(NATIVE_SUFFIXES) and stem not in bundled:
+                    shutil.copy2(file, native / file.name)
     for name, source in CARRIED.items():
         if source is not None:
             shutil.copy2(source, out / name)
-    # The newest run of the game's build script is this build's.
-    script = max((target_dir / PROFILE / "build").glob("horizon-client-*/output"), key=lambda p: p.stat().st_mtime)
-    link_args = [line[len(LINK_ARG):] for line in script.read_text().splitlines() if line.startswith(LINK_ARG)]
+    game = next(script for script in scripts if script["package_id"].split("#")[0].endswith("/horizon-client"))
+    output = Path(game["out_dir"]).parent / "output"
+    link_args = [line[len(LINK_ARG):] for line in output.read_text().splitlines() if line.startswith(LINK_ARG)]
     files = {str(path.relative_to(out).as_posix()): sha256(path) for path in sorted(out.rglob("*")) if path.is_file()}
     identity = {
         "commit": run(["git", "rev-parse", "HEAD"], cwd=ROOT).strip(),
@@ -103,6 +121,7 @@ def check(out: Path) -> None:
         path for path in out.rglob("*")
         if path.is_file() and not (path.parent == out and path.name in CARRIED)
         and not (path.parent == out / "deps" and path.name.endswith(SUFFIXES))
+        and not (path.parent == out / NATIVE and path.name.endswith(NATIVE_SUFFIXES))
     ]
     if stray:
         sys.exit(f"prebuilt folder holds files that aren't compiler outputs: {stray}")
@@ -119,7 +138,8 @@ def smoke(out: Path) -> None:
         rmeta = next(path for path in deps.iterdir() if path.name.startswith(prefix) and path.suffix == ".rmeta")
         return ["--extern", f"{crate}={rmeta}"]
 
-    common = ["--edition", "2024", "-C", "prefer-dynamic", "-C", "opt-level=1", "-L", f"dependency={deps}"]
+    common = ["--edition", "2024", "-C", "prefer-dynamic", "-C", "opt-level=1", "-L", f"dependency={deps}",
+              "-L", f"native={out / NATIVE}"]
     with tempfile.TemporaryDirectory(dir=out.parent) as scratch:
         scratch = Path(scratch)
         starter = (ROOT / "crates/cargo-horizon-mod/template/native/lib.rs").read_text()

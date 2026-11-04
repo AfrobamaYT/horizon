@@ -307,7 +307,9 @@ fn standard_library(rust: &Toolchain) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("{}: no dynamic standard library", dir.display()))
 }
 
-/// rustc with the prebuilt game's settings, its libraries and `out`'s on the search path.
+/// rustc with the prebuilt game's settings, its libraries and `out`'s on the search path, and the
+/// native libraries the game's build scripts link (`native/`: the `windows` crates' import
+/// libraries).
 fn rustc(rust: &Toolchain, game: &Path, out: &Path, edition: &str) -> Command {
     let mut cmd = rust.command(&rust.rustc());
     rust_toolchain::low_priority(&mut cmd);
@@ -321,6 +323,8 @@ fn rustc(rust: &Toolchain, game: &Path, out: &Path, edition: &str) -> Command {
     ])
     .arg("-L")
     .arg(format!("dependency={}", game.join("deps").display()))
+    .arg("-L")
+    .arg(format!("native={}", game.join("native").display()))
     .arg("-L")
     .arg(format!("dependency={}", out.display()));
     cmd
