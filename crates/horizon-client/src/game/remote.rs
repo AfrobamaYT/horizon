@@ -6757,17 +6757,20 @@ impl Game<'_> {
             // used before this one. Another player's use particles; a mob's
             // drawn bow only needs the count (its pull follows it).
             if player {
-                // AvatarRenderer.getArmPose: the used item's BLOCK animation
-                // (an item with `blocks_attacks`) raises the arm.
+                // AvatarRenderer.getArmPose: the used item's use animation
+                // poses the arm.
                 let used = if m.extra.using_off_hand {
                     m.extra.off_hand_id()
                 } else {
                     m.extra.main_hand_id()
                 };
-                m.extra.blocking = m.extra.using_item > 0
-                    && used
-                        .and_then(|i| world_items!(self).get(i))
-                        .is_some_and(|i| i.blocks_attacks.is_some());
+                m.extra.use_animation = used
+                    .and_then(|i| world_items!(self).get(i))
+                    .filter(|_| m.extra.using_item > 0)
+                    .map_or_else(
+                        Default::default,
+                        horizon_client::first_person::item_use_animation,
+                    );
             }
             if m.extra.using_item > 0 {
                 if player {

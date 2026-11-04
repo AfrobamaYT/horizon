@@ -1000,7 +1000,9 @@ pub struct Extra {
     /// spear stabbed in the current use were stabbed (game time). It exists
     /// only while a kinetic weapon is in use.
     pub stabbed: Option<Vec<(Who, i64)>>,
-    pub blocking: bool,
+    /// `ItemStack.getUseAnimation` of the item in use (`None` when nothing is);
+    /// a player model's arm pose and `isBlocking` follow it.
+    pub use_animation: horizon_world::consumable::UseAnimation,
     pub fall_flying: bool,
     pub fall_fly_ticks: i32,
     /// `Entity.deltaMovementOnPreviousTick`: the velocity before this tick's
