@@ -6,11 +6,9 @@
 
 use crate::{
     admin::{self, Action},
-    backup,
-    engine,
+    backup, engine,
     http::{self, Request, Response},
-    panel, settings,
-    update,
+    panel, settings, update,
 };
 use horizon_server_launch::{
     Install,
@@ -1067,8 +1065,8 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("horizon-server-api-admin-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("backups")).unwrap();
-        let toml = config::TEMPLATE
-            .replace("token = \"\"", "token = \"a-token-for-the-discord-bot\"");
+        let toml =
+            config::TEMPLATE.replace("token = \"\"", "token = \"a-token-for-the-discord-bot\"");
         std::fs::write(dir.join(config::FILE), toml).unwrap();
         std::fs::write(
             dir.join("backups/2026-10-31T12-00-00Z-manual.zip"),
@@ -1137,10 +1135,7 @@ mod tests {
             json!({ "changes": { "world.difficulty": "brutal" } }),
         );
         assert_eq!(status, 400);
-        assert_eq!(
-            config::Config::load(&dir).unwrap().world.difficulty,
-            "hard"
-        );
+        assert_eq!(config::Config::load(&dir).unwrap().world.difficulty, "hard");
 
         let name = "2026-10-31T12-00-00Z-manual.zip";
         let response = route(

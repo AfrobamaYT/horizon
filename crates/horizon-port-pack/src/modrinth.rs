@@ -78,7 +78,9 @@ impl Cache {
 }
 
 /// Resolve the missing manifest jars in one exact-SHA-512 request, after download consent.
-pub fn jar_urls(jars: &[&horizon_mods::manifest::JarRef]) -> Result<BTreeMap<String, String>, String> {
+pub fn jar_urls(
+    jars: &[&horizon_mods::manifest::JarRef],
+) -> Result<BTreeMap<String, String>, String> {
     let hashes: Vec<_> = jars.iter().map(|jar| jar.sha512()).collect();
     jar_file_urls(version_files(hashes, "sha512")?)
 }

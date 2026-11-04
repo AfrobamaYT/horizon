@@ -55,5 +55,4 @@ impl Install {
         let tag = tag.trim();
         (!tag.is_empty() && self.release(tag).is_dir()).then(|| tag.to_owned())
     }
-
 }

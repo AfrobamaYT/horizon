@@ -21,11 +21,7 @@ pub fn destination(dir: &Path) -> PathBuf {
     let configured = config::Config::load(dir)
         .map(|c| c.engine.resources)
         .unwrap_or_default();
-    destination_for(
-        dir,
-        &configured,
-        Install::find().map(|i| i.root),
-    )
+    destination_for(dir, &configured, Install::find().map(|i| i.root))
 }
 
 fn destination_for(dir: &Path, configured: &str, installer: Option<PathBuf>) -> PathBuf {

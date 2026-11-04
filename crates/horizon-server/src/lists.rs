@@ -8,8 +8,8 @@
 //! reloads it (`whitelist reload`), as it would be written while the server is stopped.
 
 use crate::supervisor;
-use horizon_server_launch::config;
 use horizon_server_files::user_lists::{NameAndId, OpEntry, OpList, WhiteEntry, WhiteList};
+use horizon_server_launch::config;
 use std::path::Path;
 
 pub fn run(dir: &Path, command: &str, args: &[String]) -> Result<(), String> {

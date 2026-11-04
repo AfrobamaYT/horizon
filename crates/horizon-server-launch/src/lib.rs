@@ -28,7 +28,11 @@ pub fn program(config: &Config, dir: &Path) -> Result<PathBuf, String> {
 }
 
 /// [`program`], for the install `install`.
-pub fn program_in(config: &Config, dir: &Path, install: Option<&Install>) -> Result<PathBuf, String> {
+pub fn program_in(
+    config: &Config,
+    dir: &Path,
+    install: Option<&Install>,
+) -> Result<PathBuf, String> {
     let executable = std::env::current_exe().ok();
     program_near(config, dir, install, executable.as_deref())
 }
@@ -213,10 +217,8 @@ mod tests {
 
     #[test]
     fn library_command_uses_the_given_supervisor_and_config_without_starting() {
-        let root = std::env::temp_dir().join(format!(
-            "horizon-server-command-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("horizon-server-command-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("horizon-resources.json"), "{}").unwrap();
         let bin = root.join("bin");
