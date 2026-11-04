@@ -1380,6 +1380,8 @@ pub struct Mob {
     pub combat: combat::Tracker,
     /// Set by `remove`: the mob disappears without dying (conversion, despawn, pickup).
     pub removed: bool,
+    /// What `mob_despawn` answered for this tick, read and reset by `check_despawn`.
+    pub despawn: mod_api::NativeDespawn,
     /// Client-side animation clocks (attack swing, eating, shaking...).
     pub anim: anim::AnimState,
     /// Attribute values that differ per mob (slime size, babies, effects).
@@ -2878,6 +2880,10 @@ pub trait ModEffectTicks {
         tick_count: i32,
         amplifier: i32,
     ) -> bool;
+    /// `MobEffectEvent.Expired`: `mob`'s `effect` (`amplifier` from 0)
+    /// counted down to nothing. A mod that cancels refuses the expiry: the
+    /// effect stays at no ticks and asks again next tick.
+    fn effect_expired(&self, mob: u32, effect: &'static str, amplifier: i32, cancel: &mut bool);
 }
 /// Native mod hooks the mob AI asks while it decides.
 pub trait MobHooks {
@@ -3003,6 +3009,7 @@ impl Mob {
             last_direct: None,
             combat: combat::Tracker::default(),
             removed: false,
+            despawn: mod_api::NativeDespawn::Default,
             custom_name: None,
             custom_name_text: None,
             name_visible: false,
@@ -5054,6 +5061,21 @@ mod magic_absorb_tests {
         assert_eq!(m.health, m.attrs.max_health - 1.0);
         m.heal(context, 5.0);
         assert_eq!(m.health, m.attrs.max_health);
+    }
+
+    #[test]
+    fn an_effect_counted_down_leaves_when_no_mod_holds_it() {
+        let mut m = witch();
+        m.add_effect_with("speed", 3, 0, false, true);
+        for _ in 0..4 {
+            ai::tick_effects(
+                &mut m,
+                crate::test_resources::server_loop_context(),
+                &mut crate::health::TestLevel::new(0).level(),
+                None,
+            );
+        }
+        assert!(m.extra.effects.is_empty(), "{:?}", m.extra.effects);
     }
 
     #[test]

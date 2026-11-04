@@ -5,6 +5,7 @@ use horizon_client::command::{Reader, args::Registries, block};
 use horizon_client::items::ItemStack;
 use horizon_world::chunk::BlockState;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
+use mod_api::{BlockSoundType, BlockStateRange};
 use std::sync::{Arc, Mutex};
 
 impl Game<'_> {
@@ -31,6 +32,58 @@ impl Game<'_> {
     /// says. None for an unknown block.
     pub(super) fn native_block_state_default(&self, block: &str) -> Option<BlockStateId> {
         default_state(self.pack.assets.registry, block)
+    }
+    /// `BlockState.canBeReplaced()`: whether placing a block where this state stands
+    /// replaces it (air, grass, water, snow layers). None for an unknown state.
+    pub(super) fn native_block_state_replaceable(&self, state: BlockStateId) -> Option<bool> {
+        self.pack.assets.registry.state(state)?;
+        Some(self.res.facts().get(state).replaceable)
+    }
+    /// `BlockBehaviour.Properties.destroyTime`, as `BlockState.getDestroySpeed` reads it:
+    /// stone 1.5, obsidian 50, bedrock -1 (it can't be broken). None for an unknown state.
+    pub(super) fn native_block_state_destroy_speed(&self, state: BlockStateId) -> Option<f32> {
+        self.pack.assets.registry.state(state)?;
+        Some(self.res.facts().get(state).hardness)
+    }
+    /// `BlockState.getSoundType()`: its volume, pitch and the sound events for breaking,
+    /// stepping on, placing, hitting and falling on it. None for an unknown state.
+    pub(super) fn native_block_state_sound(&self, state: BlockStateId) -> Option<BlockSoundType> {
+        self.pack.assets.registry.state(state)?;
+        let sounds = &self.res.facts().get(state).sounds;
+        Some(BlockSoundType {
+            volume: sounds.volume,
+            pitch: sounds.pitch,
+            break_sound: Arc::clone(&sounds.break_sound),
+            step: Arc::clone(&sounds.step),
+            place: Arc::clone(&sounds.place),
+            hit: Arc::clone(&sounds.hit),
+            fall: Arc::clone(&sounds.fall),
+        })
+    }
+    /// `BlockState.hasBlockEntity()`. None for an unknown state.
+    pub(super) fn native_block_state_has_block_entity(&self, state: BlockStateId) -> Option<bool> {
+        self.pack.assets.registry.state(state)?;
+        Some(self.res.facts().get(state).block_entity)
+    }
+    /// The states of `block` (`StateDefinition.getPossibleStates`), as the consecutive ids the
+    /// registry numbers them with. None for an unknown block.
+    pub(super) fn native_block_states_of(&self, block: &str) -> Option<BlockStateRange> {
+        let registry = self.pack.assets.registry;
+        let default = registry.default_state(block)?;
+        let of_block = |id: u32| {
+            registry
+                .state(BlockStateId(id))
+                .is_some_and(|s| s.name == block)
+        };
+        let mut first = default.0;
+        while first > 0 && of_block(first - 1) {
+            first -= 1;
+        }
+        let mut last = default.0;
+        while of_block(last + 1) {
+            last += 1;
+        }
+        Some(BlockStateRange::new(BlockStateId(first), last - first + 1))
     }
     /// `Item.getCraftingRemainder`: Horizon currently stores the remainder's
     /// item id, so the result is a single plain stack.
@@ -231,5 +284,62 @@ mod tests {
         ] {
             assert_eq!(default_state(registry, block), None, "{block:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod facts_tests {
+    use mod_api::{BlockStateId, HostBlockStates};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn block_state_facts_read_vanillas_tables_through_the_host() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let state = |name: &str| game.pack.assets.registry.default_state(name).unwrap();
+            let (stone, obsidian, bedrock) = (
+                state("minecraft:stone"),
+                state("minecraft:obsidian"),
+                state("minecraft:bedrock"),
+            );
+            let (air, grass, chest) = (
+                state("minecraft:air"),
+                state("minecraft:short_grass"),
+                state("minecraft:chest"),
+            );
+            let stairs = state("minecraft:oak_stairs");
+            let facts = game.block_states();
+            // destroyTime: stone 1.5, obsidian 50, bedrock -1 (unbreakable).
+            assert_eq!(facts.destroy_speed(stone), Some(1.5));
+            assert_eq!(facts.destroy_speed(obsidian), Some(50.0));
+            assert_eq!(facts.destroy_speed(bedrock), Some(-1.0));
+            // canBeReplaced: air and grass, not stone.
+            assert_eq!(facts.replaceable(air), Some(true));
+            assert_eq!(facts.replaceable(grass), Some(true));
+            assert_eq!(facts.replaceable(stone), Some(false));
+            assert_eq!(facts.has_block_entity(chest), Some(true));
+            assert_eq!(facts.has_block_entity(stone), Some(false));
+            // SoundType.STONE: its break event, at volume and pitch 1.
+            let sound = facts.sound(stone).unwrap();
+            assert_eq!(&*sound.break_sound, "minecraft:block.stone.break");
+            assert_eq!((sound.volume, sound.pitch), (1.0, 1.0));
+            // Oak stairs: facing 4 × half 2 × shape 5 × waterlogged 2 = 80 states, its default
+            // among them; stone has one.
+            let range = facts.states_of("minecraft:oak_stairs").unwrap();
+            assert_eq!(range.len(), 80);
+            assert!(range.contains(stairs));
+            assert!(range.iter().all(
+                |s| game.pack.assets.registry.state(s).unwrap().name == "minecraft:oak_stairs"
+            ));
+            assert_eq!(
+                facts
+                    .states_of("minecraft:stone")
+                    .map(|r| (r.first(), r.len())),
+                Some((stone, 1))
+            );
+            // Unknown: None.
+            assert_eq!(facts.states_of("mymod:nothing"), None);
+            assert_eq!(facts.destroy_speed(BlockStateId(u32::MAX)), None);
+            assert_eq!(facts.sound(BlockStateId(u32::MAX)), None);
+        });
     }
 }

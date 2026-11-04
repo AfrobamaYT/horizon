@@ -13,7 +13,7 @@ use horizon_client::{
     blocks::Fluid,
     collisions::SceneCollisions,
     crafting::Recipes,
-    health::{HurtSource, Hurting, Knock},
+    health::{Attack, HurtSource, Hurting, Knock},
     items::ItemStack,
     mesher::Vertex,
     mobs::{
@@ -33,6 +33,29 @@ use horizon_core::{
 };
 use mod_api::{EquipmentSlot, NativeItemDrop, NativeLootDrops};
 use std::sync::Arc;
+
+pub(super) type SpawnReason = horizon_client::mobs::spawn_rules::Reason;
+
+/// Whether vanilla calls `finalizeSpawn` for a mob a spawn site makes, and with
+/// which reason. The reason is vanilla's `EntitySpawnReason` at that site.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SpawnSite {
+    /// Vanilla calls `finalizeSpawn` with this reason: `finalize_spawn` is told.
+    Finalizing(SpawnReason),
+    /// Vanilla creates the mob without `finalizeSpawn` (a breeding, a block's or
+    /// an item's mob): the game finalizes it as before, and no mod is told.
+    Plain,
+}
+
+/// What a spawn site does with a mob after `finalize_spawn` was heard.
+pub(super) enum Finalized {
+    /// Finalized as vanilla does; the site goes on to the class's follow-ups.
+    Done,
+    /// A mod skipped finalization: the mob spawns uninitialised.
+    Skipped,
+    /// A mod stopped the spawn: the mob is not added.
+    Cancelled,
+}
 
 /// Damage types of a projectile: its own entity is the direct one, and
 /// the game keeps no id for it.
@@ -440,17 +463,28 @@ impl Game<'_> {
         }
     }
     /// Create a mob of `kind` at a position, finalized like a natural spawn.
-    pub(super) fn spawn_mob(&mut self, kind: &str, at: [f64; 3], persistent: bool) -> Option<u32> {
-        self.spawn_mob_for(kind, at, persistent, false)
+    pub(super) fn spawn_mob(
+        &mut self,
+        kind: &str,
+        at: [f64; 3],
+        persistent: bool,
+        site: SpawnSite,
+    ) -> Option<u32> {
+        self.spawn_mob_for(kind, at, persistent, false, site)
     }
     /// `SummonCommand` and `SpawnEggItem`: vanilla spawns the mob, but it
     /// never calls `Mob.setPersistenceRequired` for it, so the mob is not
     /// persistent: the despawn rule holds it like any other mob, and only
     /// its NBT can make it persistent.
-    pub(super) fn spawn_mob_spawned(&mut self, kind: &str, at: [f64; 3]) -> Option<u32> {
+    pub(super) fn spawn_mob_spawned(
+        &mut self,
+        kind: &str,
+        at: [f64; 3],
+        site: SpawnSite,
+    ) -> Option<u32> {
         // The spawn is not a natural one (no jockeys, the patrol leader roll
         // stays), but the mob is not persistent.
-        let id = self.spawn_mob_for(kind, at, true, false)?;
+        let id = self.spawn_mob_for(kind, at, true, false, site)?;
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
             m.persistent = false;
         }
@@ -464,22 +498,10 @@ impl Game<'_> {
         at: [f64; 3],
         persistent: bool,
         scripted: bool,
+        site: SpawnSite,
     ) -> Option<u32> {
-        self.spawn_mob_reason(kind, at, persistent, scripted, !persistent)
-    }
-    /// `spawn_mob_for` with the spawn reason's NATURAL flag explicit: only a
-    /// natural spawn rolls the jockey mounts of zombie horses, husks and
-    /// drowned (`reinforcement` and spawner spawns pass `false`).
-    pub(super) fn spawn_mob_reason(
-        &mut self,
-        kind: &str,
-        at: [f64; 3],
-        persistent: bool,
-        scripted: bool,
-        natural: bool,
-    ) -> Option<u32> {
-        let mob = self.create_mob_reason(kind, at, persistent, scripted)?;
-        self.insert_spawned_mob(mob, persistent, scripted, natural)
+        let mob = self.create_mob_reason(kind, at, persistent, scripted, site)?;
+        self.insert_spawned_mob(mob, persistent, scripted, site)
     }
 
     fn create_mob_reason(
@@ -488,6 +510,7 @@ impl Game<'_> {
         at: [f64; 3],
         persistent: bool,
         scripted: bool,
+        site: SpawnSite,
     ) -> Option<Mob> {
         let kind = if kind.contains(':') {
             kind.to_owned()
@@ -499,20 +522,25 @@ impl Game<'_> {
         let yaw = self.world.random.next_float() * 360.0;
         let mut mob = Mob::new(self.next_entity, t, Vec3::new(at[0], at[1], at[2]), yaw);
         mob.persistent = persistent;
-        let facts = self.biome_facts(
-            at[0].floor() as i32,
-            at[1].floor() as i32,
-            at[2].floor() as i32,
-        );
-        let difficulty = self.local_difficulty(at);
-        spawning::finalize(&mut mob, &facts, &difficulty);
+        match site {
+            SpawnSite::Finalizing(reason) => match self.finalize_with(&mut mob, reason, None) {
+                Finalized::Cancelled => return None,
+                Finalized::Skipped => return Some(mob),
+                Finalized::Done => {}
+            },
+            SpawnSite::Plain => {
+                let difficulty =
+                    self.local_difficulty([mob.position.x, mob.position.y, mob.position.z]);
+                self.finalize_plain(&mut mob, &difficulty);
+            }
+        }
         if !scripted {
-            let reason = if persistent {
+            let raider_reason = if persistent {
                 horizon_client::mobs::raider::Reason::Other
             } else {
                 horizon_client::mobs::raider::Reason::Natural
             };
-            horizon_client::mobs::raider::finalize(&mut mob, reason);
+            horizon_client::mobs::raider::finalize(&mut mob, raider_reason);
         }
         Some(mob)
     }
@@ -522,7 +550,7 @@ impl Game<'_> {
         mob: Mob,
         persistent: bool,
         scripted: bool,
-        natural: bool,
+        site: SpawnSite,
     ) -> Option<u32> {
         let id = mob.id;
         self.mobs.push(mob);
@@ -533,7 +561,7 @@ impl Game<'_> {
         self.enchant_spawn_equipment(id);
         self.halloween_spawn_head(id);
         if !persistent && !scripted {
-            self.spawn_jockeys(id, natural);
+            self.spawn_jockeys(id, site);
         }
         Some(id)
     }
@@ -689,14 +717,8 @@ impl Game<'_> {
     }
     /// Finalize a converted frog or witch before it joins the level.
     fn finalize_converted(&self, mob: &mut Mob) {
-        let at = mob.position;
-        let facts = self.biome_facts(
-            at.x.floor() as i32,
-            at.y.floor() as i32,
-            at.z.floor() as i32,
-        );
-        let difficulty = self.local_difficulty([at.x, at.y, at.z]);
-        spawning::finalize(mob, &facts, &difficulty);
+        // A mod that stops a conversion's finalization leaves the mob as converted.
+        self.finalize_with(mob, SpawnReason::Conversion, None);
         mob.persistent = true;
     }
     /// `Mob.convertTo(type, ConversionParams.single(...))`: a new mob of
@@ -801,7 +823,7 @@ impl Game<'_> {
             }
         };
         let id = self
-            .spawn_mob_spawned(kind, at)
+            .spawn_mob_spawned(kind, at, SpawnSite::Finalizing(SpawnReason::Command))
             .ok_or_else(|| format!("unknown or unsupported mob {kind}"))?;
         if baby && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
             m.extra.age = if m.species() == Species::Sniffer {
@@ -810,7 +832,7 @@ impl Game<'_> {
                 -24000
             };
         }
-        self.spawn_jockeys(id, false);
+        self.spawn_jockeys(id, SpawnSite::Finalizing(SpawnReason::Command));
         Ok(id)
     }
     /// The `mobs` command: nearby mobs with position, health and running goals.
@@ -974,6 +996,53 @@ impl Game<'_> {
         if let Some(terrain) = self.end.locator() {
             terrain.set_spawn_conditions(self.difficulty_id() as u8, self.world.day_time);
         }
+    }
+    /// `Mob.finalizeSpawn` behind `FinalizeSpawnEvent`: the one fire point for
+    /// the mobs the game spawns where vanilla calls `finalizeSpawn`. The class's
+    /// follow-ups (raider flags and the like) are part of `finalizeSpawn`, so a
+    /// site skips them on [`Finalized::Skipped`].
+    pub(super) fn finalize_with(
+        &self,
+        mob: &mut Mob,
+        reason: SpawnReason,
+        spawner: Option<mod_api::NativeSpawner>,
+    ) -> Finalized {
+        let at = [mob.position.x, mob.position.y, mob.position.z];
+        let mut difficulty = self.local_difficulty(at);
+        if mod_api::__private::listened(mod_api::HookId::FinalizeSpawn) {
+            let mut heard = mod_api::NativeDifficulty::from(difficulty);
+            let (mut spawn_cancelled, mut skip) = (false, false);
+            self.native_finalize_spawn(
+                self.dim.id(),
+                &mob.kind.id,
+                reason.into(),
+                at,
+                spawner,
+                &mut heard,
+                &mut spawn_cancelled,
+                &mut skip,
+            );
+            if spawn_cancelled {
+                return Finalized::Cancelled;
+            }
+            if skip {
+                return Finalized::Skipped;
+            }
+            difficulty = heard.into();
+        }
+        self.finalize_plain(mob, &difficulty);
+        Finalized::Done
+    }
+    /// The game's own finalization of a mob, with no event: for a mob vanilla
+    /// makes without calling `finalizeSpawn`.
+    fn finalize_plain(&self, mob: &mut Mob, difficulty: &spawning::LocalDifficulty) {
+        let at = mob.position;
+        let facts = self.biome_facts(
+            at.x.floor() as i32,
+            at.y.floor() as i32,
+            at.z.floor() as i32,
+        );
+        spawning::finalize(mob, &facts, difficulty);
     }
     /// `ServerLevel.getCurrentDifficultyAt`.
     pub(super) fn local_difficulty(&self, at: [f64; 3]) -> spawning::LocalDifficulty {
@@ -1204,6 +1273,27 @@ impl Game<'_> {
                     keep.push(!m.hostile() || m.persistent);
                     continue;
                 }
+                // `MobDespawnEvent`, before `checkDespawn`'s own draws; one branch
+                // with no listener. Cleared below: the tick may not reach the check.
+                // The wither overrides `checkDespawn` without `super`, so the
+                // event, patched into `Mob.checkDespawn`, never fires for it;
+                // a mannequin is no `Mob` and never checks despawning.
+                if mod_api::__private::listened(mod_api::HookId::MobDespawn)
+                    && !matches!(
+                        m.species(),
+                        horizon_client::mobs::Species::Wither
+                            | horizon_client::mobs::Species::Mannequin
+                    )
+                    && let Some(epoch) = self.native_lifecycle.epoch()
+                {
+                    self.native_mob_despawn(
+                        self.dim.id(),
+                        mod_api::MobRef::new(mod_api::EntityRef::new(epoch, m.id)),
+                        &m.kind.id,
+                        [m.position.x, m.position.y, m.position.z],
+                        &mut m.despawn,
+                    );
+                }
                 // ServerLevel.tick: every loaded entity checks despawning, but
                 // only those in entity-ticking chunks (within the simulation
                 // distance) tick.
@@ -1218,6 +1308,7 @@ impl Game<'_> {
                 }
                 // A mod canceled its tick: it stays as it is.
                 if round.canceled(m.id) {
+                    m.despawn = mod_api::NativeDespawn::default();
                     keep.push(true);
                     continue;
                 }
@@ -1226,6 +1317,7 @@ impl Game<'_> {
                 let from = events.len();
                 let credit_expiring = m.ai.last_hurt_by_player == 1;
                 let kept = m.tick(&w, &mut level, &mut events);
+                m.despawn = mod_api::NativeDespawn::default();
                 if credit_expiring && m.ai.last_hurt_by_player == 0 {
                     player_credit.remove(&m.id);
                 }
@@ -1929,10 +2021,10 @@ impl Game<'_> {
         let mut infested = false;
         let aim = self.attacker_aim(source.attacker);
         // So `living_knockback` sees who hit and what they hold.
-        let _attacker = self.knockback_scope_for(source.attacker);
+        let attack = self.attack_of_who(source.attacker);
         if let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
             let hit = t.damage_aimed(
-                crate::game::entity::damage_level_of!(self),
+                crate::game::entity::damage_level_of!(self, &attack),
                 amount,
                 source,
                 aim,
@@ -2398,7 +2490,7 @@ impl Game<'_> {
                 } => match target {
                     // A player's source names no melee attacker, as its damage's doesn't.
                     Who::Player => {
-                        let _attacker = self.knockback_scope(match source.attacker {
+                        let attack = self.attack_of(match source.attacker {
                             Some(Who::Mob(id)) => id as i32,
                             _ => 0,
                         });
@@ -2408,11 +2500,12 @@ impl Game<'_> {
                             direct: 0,
                             position: None,
                         };
-                        self.knock_back_player(power, x, z, source);
+                        self.knock_back_player(power, x, z, source, &attack);
                     }
                     Who::Mob(id) => {
+                        let attack = self.attack_of_who(source.attacker);
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                            let level = crate::game::entity::damage_level_of!(self);
+                            let level = crate::game::entity::damage_level_of!(self, &attack);
                             m.knockback(level, power, x, z, &source);
                         }
                     }
@@ -2706,7 +2799,7 @@ impl Game<'_> {
                 MobEvent::HurtSelf { mob, kind, amount } => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
                         m.damage(
-                            crate::game::entity::damage_level_of!(self),
+                            crate::game::entity::damage_level_of!(self, scoped),
                             amount,
                             horizon_client::mobs::Damage::of(kind),
                         );
@@ -2767,7 +2860,14 @@ impl Game<'_> {
                     self.native_mobs_joined(self.mobs.len() - 1, false);
                 }
                 MobEvent::SpawnKind { kind, at, setup } => {
-                    if let Some(id) = self.spawn_mob(&kind, at, setup.persistent) {
+                    if let Some(id) = self.spawn_mob(
+                        &kind,
+                        at,
+                        setup.persistent,
+                        SpawnSite::Finalizing(
+                            horizon_client::mobs::spawn_rules::Reason::MobSummoned,
+                        ),
+                    ) {
                         self.apply_setup(id, &setup);
                     }
                 }
@@ -3027,7 +3127,9 @@ impl Game<'_> {
                             f64::from(pos[1]),
                             f64::from(pos[2]) + 0.5,
                         ];
-                        if let Some(id) = self.spawn_mob("minecraft:silverfish", at, false) {
+                        if let Some(id) =
+                            self.spawn_mob("minecraft:silverfish", at, false, SpawnSite::Plain)
+                        {
                             self.mob_poof(id);
                         }
                     }
@@ -3356,7 +3458,7 @@ impl Game<'_> {
                 f64::from(pos[1]),
                 f64::from(pos[2]) + 0.3,
             ];
-            if let Some(id) = self.spawn_mob("minecraft:turtle", at, true)
+            if let Some(id) = self.spawn_mob("minecraft:turtle", at, true, SpawnSite::Plain)
                 && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
             {
                 m.extra.age = -24000;
@@ -3619,6 +3721,7 @@ impl Game<'_> {
             [p.position.x, p.position.y, p.position.z],
             true,
             false,
+            SpawnSite::Plain,
         )?;
         'offspring: {
             let child = &mut child;
@@ -3795,14 +3898,14 @@ impl Game<'_> {
         let at = [p.position.x, p.position.y, p.position.z];
         match order {
             OrbOrder::AfterChild => {
-                let joined = self.insert_spawned_mob(child, true, false, false);
+                let joined = self.insert_spawned_mob(child, true, false, SpawnSite::Plain);
                 self.mob_event_particles(parent, 18);
                 self.breeding_orb(parent, at, experience);
                 joined
             }
             OrbOrder::BeforeChild => {
                 self.breeding_orb(parent, at, experience);
-                self.insert_spawned_mob(child, true, false, false)
+                self.insert_spawned_mob(child, true, false, SpawnSite::Plain)
             }
         }
     }
@@ -3931,11 +4034,12 @@ impl Game<'_> {
         };
         // The causing entity for the death message.
         let owner = self.combat.projectile_owner.take();
-        let _attacker = self.knockback_scope(
-            attacker
-                .or(owner)
-                .map_or_else(horizon_client::health::knockback_attacker, |id| id as i32),
-        );
+        // The mob that caused the hit, else the attack the caller landed it in (a projectile's
+        // owner, another player's blow): `combat.attack`, read through `current_attack`.
+        let attack = match attacker.or(owner) {
+            Some(id) => self.attack_of(id as i32),
+            None => self.current_attack(),
+        };
         if let Some(a) = attacker.or(owner) {
             self.note_attacker(damage_type, a);
         }
@@ -3962,7 +4066,7 @@ impl Game<'_> {
         if let Some(player) = self.player.as_mut()
             && let Some(id) = self.motion.health.damage.id(damage_type)
             && let Ok(o) = player.hurt_caused_by(
-                crate::game::entity::damage_level_of!(self),
+                crate::game::entity::damage_level_of!(self, &attack),
                 &self.motion.health,
                 rules,
                 id,
@@ -4041,12 +4145,12 @@ impl Game<'_> {
                 direct: 0,
                 position: None,
             };
-            self.after_block(outcome, (attacker, projectile), source);
+            self.after_block(outcome, (attacker, projectile), source, &attack);
         }
         // `LivingEntity.dealDefaultKnockback`: after the item's block push, so
         // a half-blocked hit pushes the defender back the way vanilla does.
         if let Some(([xd, zd], source)) = default_push {
-            self.knock_back_player(f64::from(0.4_f32), xd, zd, source);
+            self.knock_back_player(f64::from(0.4_f32), xd, zd, source, &attack);
             if let Some(p) = self.player.as_mut()
                 && let Some(r) = p.hurt_log.last_mut()
             {
@@ -4066,17 +4170,20 @@ impl Game<'_> {
         xd: f64,
         zd: f64,
         source: HurtSource<'_>,
+        attack: &Attack,
     ) {
-        let credit = match self.player_hurt_by() {
-            Some((Who::Mob(id), _)) => id as i32,
-            _ => 0,
+        // No attacker named: the mob the player was last hurt by.
+        let credited;
+        let attack = if attack.attacker == 0
+            && let Some((Who::Mob(id), _)) = self.player_hurt_by()
+        {
+            credited = self.attack_of(id as i32);
+            &credited
+        } else {
+            attack
         };
-        let _attacker = self.knockback_scope(match horizon_client::health::knockback_attacker() {
-            0 => credit,
-            attacker => attacker,
-        });
         if let Some(p) = self.player.as_mut() {
-            let level = crate::game::entity::damage_level_of!(self);
+            let level = crate::game::entity::damage_level_of!(self, attack);
             knock_back(p, level, power, (xd, zd), source);
         }
     }
@@ -4832,8 +4939,12 @@ impl Game<'_> {
             }
         }
     }
+    /// A projectile's hit, landed in the attack of its owner.
     pub(super) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
-        let _attacker = self.knockback_scope_for(p.owner);
+        let attack = self.attack_of_who(p.owner);
+        self.with_attack(attack, |g| g.projectile_hit_landed(p, hit))
+    }
+    fn projectile_hit_landed(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
         // Projectile.onHitBlock: BlockState.onProjectileHit, for every
         // projectile (a wind charge out of the world's top has no face).
         if let Hit::Block { pos, at, face } = hit
@@ -5028,7 +5139,7 @@ impl Game<'_> {
                     ),
                     Who::Mob(id) => self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                         m.damage_projectile(
-                            crate::game::entity::damage_level_of!(self),
+                            crate::game::entity::damage_level_of!(self, scoped),
                             amount,
                             source,
                             aim,
@@ -5088,7 +5199,7 @@ impl Game<'_> {
                     Who::Mob(id) => {
                         let hurt = self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                             m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self),
+                                crate::game::entity::damage_level_of!(self, scoped),
                                 amount,
                                 source,
                                 aim,
@@ -5244,7 +5355,7 @@ impl Game<'_> {
                         0.0
                     };
                     if m.damage_projectile(
-                        crate::game::entity::damage_level_of!(self),
+                        crate::game::entity::damage_level_of!(self, scoped),
                         amount,
                         source,
                         aim,
@@ -5272,7 +5383,7 @@ impl Game<'_> {
                         let push = [p.velocity.x, p.velocity.z];
                         let hurt = self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                             m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self),
+                                crate::game::entity::damage_level_of!(self, scoped),
                                 t.damage,
                                 source,
                                 aim,
@@ -5315,7 +5426,7 @@ impl Game<'_> {
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
                     if m.damage_projectile(
-                        crate::game::entity::damage_level_of!(self),
+                        crate::game::entity::damage_level_of!(self, scoped),
                         0.0,
                         source,
                         aim,
@@ -5338,7 +5449,8 @@ impl Game<'_> {
                         1
                     };
                     for _ in 0..n {
-                        if let Some(id) = self.spawn_mob("minecraft:chicken", atp, true)
+                        if let Some(id) =
+                            self.spawn_mob("minecraft:chicken", atp, true, SpawnSite::Plain)
                             && let Some(c) = self.mobs.iter_mut().find(|m| m.id == id)
                         {
                             c.extra.age = -24000;
@@ -5355,7 +5467,7 @@ impl Game<'_> {
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
                     if m.damage_projectile(
-                        crate::game::entity::damage_level_of!(self),
+                        crate::game::entity::damage_level_of!(self, scoped),
                         0.0,
                         source,
                         aim,
@@ -5413,7 +5525,12 @@ impl Game<'_> {
                         && let Some(pl) = self.player.as_ref()
                     {
                         let from = pl.position;
-                        self.spawn_mob("minecraft:endermite", [from.x, from.y, from.z], false);
+                        self.spawn_mob(
+                            "minecraft:endermite",
+                            [from.x, from.y, from.z],
+                            false,
+                            SpawnSite::Plain,
+                        );
                     }
                     if let Some(pl) = self.player.as_mut() {
                         pl.position = to;
@@ -5464,7 +5581,7 @@ impl Game<'_> {
                                 m.ignite_for_ticks(100);
                             }
                             let hurt = m.damage_projectile(
-                                crate::game::entity::damage_level_of!(self),
+                                crate::game::entity::damage_level_of!(self, scoped),
                                 5.0,
                                 source,
                                 aim,
@@ -5527,7 +5644,7 @@ impl Game<'_> {
                         Who::Mob(id) => {
                             if self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                                 m.damage_projectile(
-                                    crate::game::entity::damage_level_of!(self),
+                                    crate::game::entity::damage_level_of!(self, scoped),
                                     6.0,
                                     source,
                                     aim,
@@ -5604,7 +5721,7 @@ impl Game<'_> {
                 Who::Mob(id) => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                         m.damage_projectile(
-                            crate::game::entity::damage_level_of!(self),
+                            crate::game::entity::damage_level_of!(self, scoped),
                             1.0,
                             source,
                             aim,
@@ -5630,7 +5747,7 @@ impl Game<'_> {
                 Who::Mob(id) => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                         && m.damage_projectile(
-                            crate::game::entity::damage_level_of!(self),
+                            crate::game::entity::damage_level_of!(self, scoped),
                             4.0,
                             source,
                             aim,
@@ -6871,7 +6988,7 @@ impl Game<'_> {
                 .push(Mob::new(id, mob_type, Vec3::new(at[0], at[1], at[2]), 0.0));
             id
         } else {
-            let Some(id) = self.spawn_mob_spawned(&kind, at) else {
+            let Some(id) = self.spawn_mob_spawned(&kind, at, SpawnSite::Plain) else {
                 return false;
             };
             id
@@ -6969,7 +7086,9 @@ impl Game<'_> {
             f64::from(p[1]),
             f64::from(p[2]) + 0.5,
         ];
-        let Some(id) = self.spawn_mob_spawned(&kind, at) else {
+        let Some(id) =
+            self.spawn_mob_spawned(&kind, at, SpawnSite::Finalizing(SpawnReason::SpawnItemUse))
+        else {
             return Ok(false);
         };
         // SpawnEggItem.spawnMob: `EntityType.create` finalizes the mob, then
@@ -7938,7 +8057,12 @@ impl Game<'_> {
             f64::from(pos[2]) + 0.5,
         ];
         // setPortalCooldown: the new piglin does not travel at once.
-        if let Some(id) = self.spawn_mob("minecraft:zombified_piglin", at, false) {
+        if let Some(id) = self.spawn_mob(
+            "minecraft:zombified_piglin",
+            at,
+            false,
+            SpawnSite::Finalizing(horizon_client::mobs::spawn_rules::Reason::Structure),
+        ) {
             self.set_portal_cooldown(id);
         }
     }
@@ -9477,7 +9601,12 @@ mod armor_destroy_tests {
     fn a_break_effect_follows_only_an_applied_break() {
         with_game(|game| {
             let id = game
-                .spawn_mob("minecraft:ravager", [0.5, 70.0, 0.5], false)
+                .spawn_mob(
+                    "minecraft:ravager",
+                    [0.5, 70.0, 0.5],
+                    false,
+                    super::SpawnSite::Plain,
+                )
                 .unwrap();
             let jump = |game: &mut super::Game<'_>| {
                 game.mobs.iter().find(|m| m.id == id).unwrap().ai.jumping
@@ -9522,7 +9651,12 @@ mod armor_destroy_tests {
     fn an_enderman_does_not_take_a_changed_block() {
         with_game(|game| {
             let id = game
-                .spawn_mob("minecraft:enderman", [0.5, 70.0, 0.5], false)
+                .spawn_mob(
+                    "minecraft:enderman",
+                    [0.5, 70.0, 0.5],
+                    false,
+                    super::SpawnSite::Plain,
+                )
                 .unwrap();
             let stone = game
                 .pack

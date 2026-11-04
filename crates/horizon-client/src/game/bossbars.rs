@@ -822,6 +822,8 @@ pub(super) mod audience_tests {
         );
         real.placed = true;
         host.hub.guests.push(real);
+        // The real guest took entity id 1: the fake made next takes the one after it.
+        game.next_entity = game.next_entity.max(1);
         let level = game.native_level(game.dim.id()).unwrap();
         game.native_fake_player(level, 2, "fake").unwrap();
         game.lan

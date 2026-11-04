@@ -75,7 +75,7 @@ in_shell() { if [ "$(uname)" = Linux ] && ! pkg-config --exists xkbcommon 2>/dev
 
 
 # Build-script inputs outside the crates: catalog-only edits still need to build and test their consumers.
-MOD_API_INPUTS = ("native-hooks.json", "tools/native-hook-fragments/")
+MOD_API_INPUTS = ("crates/horizon-mod-api/src/hooks/",)
 # The generated dispatch surface: edits here change what the dispatch tests compile and run. The registry is its
 # own crate with its own suite; a `--manifest-path` run keeps both out of the workspace selection above.
 DISPATCH_TESTS = "crates/horizon-mod-api-gen/dispatch-tests/Cargo.toml"

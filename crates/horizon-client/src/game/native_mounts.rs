@@ -69,6 +69,10 @@ impl Game<'_> {
 
     /// The acting player is about to board `vehicle`: false when a mod canceled it.
     pub(super) fn native_may_board(&mut self, vehicle: u32) -> bool {
+        // A fake player boards nothing: every boarding path asks here first.
+        if self.fake_blocks(mod_api::FakeEffect::Ride) {
+            return false;
+        }
         self.native_mount_allowed(None, vehicle, true)
     }
 

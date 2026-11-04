@@ -1,0 +1,35 @@
+//! The `tag_fluid_reads` hooks and helpers: declarations the mod API generator reads (see `hooks/mod.rs`).
+
+pub trait Helpers {
+    #[helper(
+        side = "both",
+        target = "horizon_client::game::native_world_read::Game<'_>::native_block_in_tag"
+    )]
+    fn block_in_tag();
+    #[helper(
+        side = "both",
+        target = "horizon_client::game::native_world_read::Game<'_>::native_tag_members"
+    )]
+    fn tag_members();
+    #[helper(
+        side = "both",
+        target = "horizon_client::game::native_world_read::Game<'_>::native_state_outline"
+    )]
+    fn state_outline();
+    #[helper(
+        side = "both",
+        target = "horizon_client::game::native_world_read::Game<'_>::native_state_fluid_state"
+    )]
+    fn state_fluid_state();
+    #[helper(
+        side = "both",
+        target = "horizon_client::game::native_world_read::Game<'_>::native_fluid_in_tag"
+    )]
+    fn fluid_in_tag();
+    #[helper(
+        side = "server",
+        receiver = "level",
+        target = "horizon_client::game::native_world_read::Game<'_>::native_level_fluid_state"
+    )]
+    fn level_fluid_state();
+}

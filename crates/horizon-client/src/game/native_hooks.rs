@@ -37,7 +37,8 @@ use horizon_client::{
     fast_hash::FxHashMap,
     first_person::Hand,
     health::{
-        DamageContainer, DamageHooks, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock, Victim,
+        Attack, DamageContainer, DamageHooks, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock,
+        Victim,
     },
     hud::{HudBatch, rgba},
     item_tooltip::TooltipDisplay,
@@ -80,12 +81,15 @@ use mod_api::{
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, SoundSource,
     Suggestion, TooltipElement, UsePhase,
 };
+use mod_api::{
+    MobRef, NativeDespawn, NativeDifficulty, NativePermissionLevel, NativeSpawnCheck,
+    NativeSpawnReason, NativeSpawner, Recipe,
+};
 pub(crate) use mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
     NativeMinimap, NativeMod, NativeNoteInstrument, NativePanelEvent, NativePortalShape,
     NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
-use mod_api::{NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason, Recipe};
 use std::{
     collections::HashMap,
     fs,
@@ -1033,7 +1037,8 @@ impl GameLevel<'_> {
     /// from inside the level's update, so answer from your own state: check the
     /// block first, and don't read or change the world here. When the answer
     /// changes, and once the block is placed, call
-    /// `native_update_signal_neighbors`. Authoritative servers only.
+    /// `level.update_neighbors(host, pos, state, NeighbourUpdate::Neighbours)`. Authoritative
+    /// servers only.
     #[inline(always)]
     pub(super) fn native_block_signal(
         &self,
@@ -1078,7 +1083,7 @@ impl GameLevel<'_> {
     /// it when the block is yours. Asked whenever wire settles its shape:
     /// answer from `state` and `pos` without touching the world. When the
     /// answer changes, and once the wire is placed, update its neighbours
-    /// (`native_update_signal_neighbors`). Authoritative servers only.
+    /// (`level.update_neighbors`). Authoritative servers only.
     #[inline(always)]
     pub(super) fn native_should_redstone_wire_connect_to(
         &self,
@@ -1134,7 +1139,8 @@ impl GameLevel<'_> {
     /// Asked only for blocks `native_has_analog_output` answered for, from
     /// inside the level's update: don't change the world here. When the
     /// answer changes without the block's state changing, call
-    /// `native_update_output_neighbors`; a change of state through
+    /// `level.update_neighbors(host, pos, state, NeighbourUpdate::OutputSignal)`; a change of
+    /// state through
     /// `native_set_block` or `native_set_block_property` (neighbour updates
     /// on) tells the comparators itself, as vanilla's `Level.setBlock` does.
     /// Authoritative servers only.
@@ -1210,27 +1216,14 @@ impl GameLevel<'_> {
     /// (more for redstone wire's diagonals and knock-on updates): keep it
     /// short.
     #[inline(always)]
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn native_update_shape(
         &self,
         ticks: &mut Ticks,
-        dimension: LevelDimension,
-        pos: BlockPos,
-        state: BlockStateId,
-        direction: Direction,
-        neighbour_pos: BlockPos,
-        neighbour: BlockStateId,
-        new: &mut Option<BlockStateId>,
+        call: mod_api::__private::UpdateShapeCall<'_>,
     ) {
         mod_api::dispatch_update_shape(
             &mut super::mod_api_host::LevelTicks { level: self, ticks },
-            dimension,
-            pos,
-            state,
-            direction,
-            neighbour_pos,
-            neighbour,
-            new,
+            call,
         );
     }
 
@@ -1851,20 +1844,8 @@ impl Game<'_> {
     /// sender alone as system chat, whether or not the message is canceled
     /// (no other player sees them). Commands (`/say`, `/msg`...) are not
     /// chat here. Server-side, with no player's state swapped in.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn native_server_chat(
-        &mut self,
-        player_id: i32,
-        player: u128,
-        username: &str,
-        raw_text: &str,
-        message: &mut Text,
-        replies: &mut Vec<Text>,
-        cancel: &mut bool,
-    ) {
-        mod_api::dispatch_server_chat(
-            self, player_id, player, username, raw_text, message, replies, cancel,
-        );
+    pub(super) fn native_server_chat(&mut self, call: mod_api::__private::ServerChatCall<'_>) {
+        mod_api::dispatch_server_chat(self, call);
     }
     /// NeoForge's `ClientChatEvent`: a client is about to send `message`.
     /// `original_message` is immutable; change `message` or set `cancel` to
@@ -5936,6 +5917,49 @@ impl Game<'_> {
         mod_api::dispatch_mob_spawn_position_check(self, dimension, kind, reason, pos, result);
     }
 
+    /// `Mob.checkDespawn` is about to run for mob `entity` (NeoForge's
+    /// `MobDespawnEvent`): set `result` to force or forbid the despawn. `kind`
+    /// and `pos` are the mob's, given as data because a mob taken out for its
+    /// tick does not resolve through its handle (a #29 follow-up).
+    pub(super) fn native_mob_despawn(
+        &self,
+        dimension: &str,
+        mob: MobRef,
+        kind: &str,
+        pos: [f64; 3],
+        result: &mut NativeDespawn,
+    ) {
+        mod_api::dispatch_mob_despawn(self, dimension, mob, kind, pos, result);
+    }
+
+    /// `FinalizeSpawnEvent`: the mob of type `kind` at `pos` is about to be
+    /// finalized (`Mob.finalizeSpawn`) for `reason`. `cancel` skips the
+    /// finalization (the mob still spawns, uninitialised); `spawn_cancelled`
+    /// stops the spawn. `difficulty` is what finalization will read.
+    /// Server-side.
+    pub(super) fn native_finalize_spawn(
+        &self,
+        dimension: &str,
+        kind: &str,
+        reason: NativeSpawnReason,
+        pos: [f64; 3],
+        spawner: Option<NativeSpawner>,
+        difficulty: &mut NativeDifficulty,
+        spawn_cancelled: &mut bool,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_finalize_spawn(
+            self,
+            dimension,
+            kind,
+            reason,
+            pos,
+            spawner,
+            difficulty,
+            spawn_cancelled,
+            cancel,
+        );
+    }
     /// The world's spawn point changed to `pos` and `angle`.
     pub(super) fn native_spawn_change(&mut self, pos: [i32; 3], angle: [f32; 2]) {
         mod_api::dispatch_spawn_change(self, pos, angle);
@@ -7378,31 +7402,11 @@ impl Game<'_> {
     /// `PlayerRespawnPositionEvent`: where `player` respawns, once the server found it. The
     /// `original_*` arguments are that point; the mods may change `level`, `position`, `yaw`,
     /// `pitch` and `copy_original_spawn_position` (`game/respawn_position.rs` applies them).
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn native_player_respawn_position(
         &mut self,
-        player: PlayerRef,
-        original_level: LevelDimension,
-        original_position: [f64; 3],
-        missing_respawn_block: bool,
-        level: &mut LevelDimension,
-        position: &mut [f64; 3],
-        yaw: &mut f32,
-        pitch: &mut f32,
-        copy_original_spawn_position: &mut bool,
+        call: mod_api::__private::PlayerRespawnPositionCall<'_>,
     ) {
-        mod_api::dispatch_player_respawn_position(
-            self,
-            player,
-            original_level,
-            original_position,
-            missing_respawn_block,
-            level,
-            position,
-            yaw,
-            pitch,
-            copy_original_spawn_position,
-        );
+        mod_api::dispatch_player_respawn_position(self, call);
     }
     /// `player` (`name`) respawned (NeoForge's `PlayerRespawnEvent`): at the
     /// end of `PlayerList.respawn`, once they are placed and their health,
@@ -8088,6 +8092,17 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_on_effect_added(self, effect, entity, amplifier);
     }
+    /// The living entity an effect decision names: `Some(id)` a mob's
+    /// `Entity.getId`, `None` the acting player. `None` when no native
+    /// world runs, and the decision falls back to vanilla's.
+    pub(super) fn effect_living_ref(&self, entity: Option<i32>) -> Option<LivingRef> {
+        let epoch = self.native_lifecycle.epoch()?;
+        let id = match entity {
+            Some(id) => id as u32,
+            None => self.own_entity_id() as u32,
+        };
+        Some(LivingRef::new(EntityRef::new(epoch, id)))
+    }
     /// NeoForge's `MobEffectEvent.Added`, vanilla's `MobEffect.onEffectStarted`:
     /// every `LivingEntity.addEffect` of the content mod's effect `effect`,
     /// new or not, changed or not, after `native_on_effect_added`.
@@ -8099,6 +8114,49 @@ impl Game<'_> {
         amplifier: i32,
     ) {
         mod_api::dispatch_mob_effect_added(self, effect, entity, amplifier);
+    }
+    /// NeoForge's `MobEffectEvent.Applicable`, vanilla's
+    /// `LivingEntity.canBeAffected`: asked wherever the game checks whether
+    /// the effect `effect` can land on the living entity `entity` (a
+    /// `LivingRef`, the player's own included), before `addEffect`
+    /// accepts it. `applicable` starts unanswered: leave it and the vanilla
+    /// tag check decides; `Allow` or `Deny` overrides it. Server-side.
+    pub(super) fn native_mob_effect_applicable(
+        &mut self,
+        entity: LivingRef,
+        effect: &str,
+        applicable: &mut Option<mod_api::EffectApplicable>,
+    ) {
+        mod_api::dispatch_mob_effect_applicable(self, entity, effect, applicable);
+    }
+    /// NeoForge's `MobEffectEvent.Expired`, vanilla `LivingEntity.tickEffects`:
+    /// the effect `effect` (`minecraft:speed`, amplifier `amplifier`) on
+    /// the living entity `entity` counted down to nothing and is about to
+    /// leave. Cancel holds it there, asked again next tick; unanswered, the
+    /// expiry runs. It runs inside the entity's tick, so the game is
+    /// read-only there. Server-side.
+    pub(super) fn native_mob_effect_expired(
+        &self,
+        entity: LivingRef,
+        effect: &str,
+        amplifier: i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_mob_effect_expired(self, entity, effect, amplifier, cancel);
+    }
+    /// NeoForge's `MobEffectEvent.Remove`, vanilla `LivingEntity.removeEffect`:
+    /// the effect `effect` on the living entity `entity` is about to be
+    /// removed by any path that walks the vanilla funnel: a command or milk
+    /// for the player, a cure for a zombie villager, a mod's removal
+    /// helper. Cancel and the effect stays. Server-side.
+    pub(super) fn native_mob_effect_remove(
+        &mut self,
+        entity: LivingRef,
+        effect: &str,
+        amplifier: i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_mob_effect_remove(self, entity, effect, amplifier, cancel);
     }
     /// Whether a mod hears projectiles' impacts (`native_projectile_impact`):
     /// set `hears`. Asked once a server tick before the projectiles fly; only
@@ -8259,7 +8317,7 @@ pub(super) fn use_totem(level: DamageLevel<'_>, hurting: Hurting<'_>, off_hand: 
     if !mod_api::__private::listened(mod_api::HookId::LivingUseTotem) {
         return false;
     }
-    let (entity, kind, source) = hurt_server_args(hurting);
+    let (entity, kind, source) = hurt_server_args(hurting, level.attack());
     let hand = if off_hand { Hand::Off } else { Hand::Main };
     let mut cancel = false;
     HitLevel(level).native_living_use_totem(
@@ -8496,19 +8554,18 @@ pub(super) fn incoming_damage(
     if !mod_api::__private::listened(mod_api::HookId::LivingIncomingDamage) {
         return false;
     }
-    let (entity, kind, source) = hurt_server_args(hurting);
+    let (entity, kind, source) = hurt_server_args(hurting, level.attack());
     let mut canceled = false;
-    horizon_client::health::with_weapon_of(source.direct, |weapon| {
-        HitLevel(level).native_living_incoming_damage(
-            entity,
-            kind,
-            &source,
-            &victim,
-            weapon,
-            container,
-            &mut canceled,
-        );
-    });
+    let attack = level.attack();
+    HitLevel(level).native_living_incoming_damage(
+        entity,
+        kind,
+        &source,
+        &victim,
+        attack.weapon_of(source.direct),
+        container,
+        &mut canceled,
+    );
     canceled
 }
 
@@ -8521,7 +8578,7 @@ pub(super) fn damage_pre(
     if !mod_api::__private::listened(mod_api::HookId::LivingDamagePre) {
         return;
     }
-    let (entity, kind, source) = hurt_server_args(hurting);
+    let (entity, kind, source) = hurt_server_args(hurting, level.attack());
     HitLevel(level).native_living_damage_pre(entity, kind, &source, container);
 }
 
@@ -8534,7 +8591,7 @@ pub(super) fn damage_post(
     if !mod_api::__private::listened(mod_api::HookId::LivingDamagePost) {
         return;
     }
-    let (entity, kind, source) = hurt_server_args(hurting);
+    let (entity, kind, source) = hurt_server_args(hurting, level.attack());
     HitLevel(level).native_living_damage_post(entity, kind, &source, container);
 }
 
@@ -8547,7 +8604,7 @@ pub(super) fn shield_block(
     original_blocked: bool,
     block: &mut ShieldBlock,
 ) {
-    let (entity, kind, source) = hurt_server_args(hurting);
+    let (entity, kind, source) = hurt_server_args(hurting, level.attack());
     HitLevel(level).native_living_shield_block(
         entity,
         kind,
@@ -8559,16 +8616,14 @@ pub(super) fn shield_block(
 }
 
 impl Game<'_> {
-    /// `health::knockback_from` that, while a native mod listens, also records what the attacker
-    /// holds (the player's selected and off-hand stacks, a mob's main hand) for
-    /// `living_knockback`. A nested scope for the same attacker keeps what the outer recorded.
-    pub(super) fn knockback_scope(&self, attacker: i32) -> impl Drop + use<> {
-        use horizon_client::health::{knockback_attacker, knockback_from_holding, knockback_held};
-        if mod_api::__private::mods().is_empty() {
-            return knockback_from_holding(attacker, [None, None]);
-        }
-        let held = if attacker != 0 && attacker == knockback_attacker() {
-            knockback_held()
+    /// The [`Attack`] of `attacker` (an entity id, 0 for none) for the level a hit lands in
+    /// ([`DamageLevel::attacked_by`]). While a native mod listens it also records what the
+    /// attacker holds (the player's selected and off-hand stacks, a mob's main hand) for
+    /// `living_knockback` and the weapon of `living_incoming_damage`; without one it is the
+    /// id alone, two `None`s and no allocation. Taken before the level's borrows of the game.
+    pub(super) fn attack_of(&self, attacker: i32) -> Attack {
+        let held = if mod_api::__private::mods().is_empty() {
+            [None, None]
         } else if self
             .player
             .as_ref()
@@ -8577,19 +8632,28 @@ impl Game<'_> {
             [self.stack_in(self.selected).cloned(), self.offhand.clone()]
         } else if let Some(mob) = self.mobs.iter().find(|m| m.id as i32 == attacker) {
             [mob.extra.main_hand_stack().cloned(), None]
+        } else if let Some(guest) = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.guests.iter().find(|g| g.entity_id == attacker))
+        {
+            [
+                guest.inventory.get(guest.selected).cloned().flatten(),
+                guest.offhand.clone(),
+            ]
         } else {
             [None, None]
         };
-        knockback_from_holding(attacker, held)
+        Attack { attacker, held }
     }
-    /// [`Self::knockback_scope`] for the attacker a damage source names: the player, a mob, or
-    /// (none) whoever the enclosing scope already names.
-    pub(super) fn knockback_scope_for(&self, attacker: Option<Who>) -> impl Drop + use<> {
-        self.knockback_scope(match attacker {
-            Some(Who::Player) => self.player.as_ref().map_or(0, |p| p.entity_id),
-            Some(Who::Mob(id)) => id as i32,
-            None => horizon_client::health::knockback_attacker(),
-        })
+    /// [`Self::attack_of`] for the attacker a damage source names: the player, a mob, or (none)
+    /// the attack the enclosing [`Self::with_attack`] lends.
+    pub(super) fn attack_of_who(&self, attacker: Option<Who>) -> Attack {
+        match attacker {
+            Some(Who::Player) => self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id)),
+            Some(Who::Mob(id)) => self.attack_of(id as i32),
+            None => self.current_attack(),
+        }
     }
 }
 
@@ -8603,7 +8667,7 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
     let attacker = match &pushed {
         Hurting::Mob(mob, damage) => match damage.attacker.or(mob.ai.last_hurt_by) {
             Some(Who::Mob(id)) => id as i32,
-            _ => horizon_client::health::knockback_attacker(),
+            _ => level.attack().attacker,
         },
         Hurting::Player(_, source)
         | Hurting::Dragon(_, source)
@@ -8611,26 +8675,26 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
             if source.causing != 0 {
                 source.causing
             } else {
-                horizon_client::health::knockback_attacker()
+                level.attack().attacker
             }
         }
     };
-    let (entity, kind, source) = hurt_server_args(pushed);
+    let attack = level.attack();
+    let (entity, kind, source) = hurt_server_args(pushed, level.attack());
     let mut canceled = false;
-    horizon_client::health::with_held(|[main, off]| {
-        HitLevel(level).native_living_knockback(
-            entity,
-            kind,
-            &source,
-            attacker,
-            main.as_ref(),
-            off.as_ref(),
-            &mut knock.strength,
-            &mut knock.x,
-            &mut knock.z,
-            &mut canceled,
-        );
-    });
+    let [main, off] = &attack.held;
+    HitLevel(level).native_living_knockback(
+        entity,
+        kind,
+        &source,
+        attacker,
+        main.as_ref(),
+        off.as_ref(),
+        &mut knock.strength,
+        &mut knock.x,
+        &mut knock.z,
+        &mut canceled,
+    );
     canceled
 }
 
@@ -8690,21 +8754,25 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
     };
 
 /// `native_living_incoming_damage`'s entity, entity type and source for a hit.
-fn hurt_server_args(hurting: Hurting<'_>) -> (i32, &str, HurtSource<'_>) {
+fn hurt_server_args<'a>(hurting: Hurting<'a>, attack: &Attack) -> (i32, &'a str, HurtSource<'a>) {
     match hurting {
         Hurting::Player(entity, source) => (entity, "minecraft:player", source),
-        Hurting::Mob(mob, damage) => (mob.id as i32, mob.kind.id.as_str(), mob_source(damage)),
+        Hurting::Mob(mob, damage) => (
+            mob.id as i32,
+            mob.kind.id.as_str(),
+            mob_source(damage, attack),
+        ),
         Hurting::Dragon(entity, source) => (entity, "minecraft:ender_dragon", source),
         Hurting::ArmorStand(entity, source) => (entity, "minecraft:armor_stand", source),
     }
 }
 /// A mob's damage as its `DamageSource`: the causing entity is known when it
-/// is a mob, or the player whose attack scope the hit lands in, and is the direct one too
+/// is a mob, or the player whose attack the level lends, and is the direct one too
 /// when it deals the damage itself.
-fn mob_source(damage: &Damage) -> HurtSource<'static> {
+fn mob_source(damage: &Damage, attack: &Attack) -> HurtSource<'static> {
     let causing = match damage.attacker {
         Some(Who::Mob(id)) => id as i32,
-        Some(Who::Player) => horizon_client::health::knockback_attacker(),
+        Some(Who::Player) => attack.attacker,
         None => 0,
     };
     let melee = super::creatures::melee(damage.kind);
@@ -9388,60 +9456,6 @@ impl Game<'_> {
         };
         let at = BlockPos::new(pos[0], pos[1], pos[2]);
         self.with_level(|b, level, ticks| b.set_block(level, ticks, at, id, flags))
-    }
-    /// The block at `pos` changed its comparator output
-    /// (`native_analog_output`) without changing its state: the comparators
-    /// beside it, or behind a conductor there, read it again
-    /// (`Level.updateNeighbourForOutputSignal`). Acts on the level in place:
-    /// false (and nothing happens) when `dimension` is another, or this
-    /// window isn't a server.
-    pub(super) fn native_update_output_neighbors(
-        &mut self,
-        dimension: &str,
-        pos: [i32; 3],
-    ) -> bool {
-        if (self.serving.is_none() && self.options.dedicated.is_none())
-            || dimension != self.dim.id()
-        {
-            return false;
-        }
-        let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        self.with_level(|b, level, ticks| b.update_neighbour_for_output_signal(level, ticks, at));
-        true
-    }
-    /// The block at `pos` changed the signal it gives: its neighbours, and
-    /// theirs (a block it powers passes the signal on), read it again, as
-    /// around a lever (`Level.updateNeighborsAt`). Call it when the answer
-    /// changes and once the block is placed. Acts on the level in place:
-    /// false (and nothing happens) when `dimension` is another, or this
-    /// window isn't a server.
-    pub(super) fn native_update_signal_neighbors(
-        &mut self,
-        dimension: &str,
-        pos: [i32; 3],
-    ) -> bool {
-        if (self.serving.is_none() && self.options.dedicated.is_none())
-            || dimension != self.dim.id()
-        {
-            return false;
-        }
-        let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        let state = self.world.block(pos[0], pos[1], pos[2]);
-        self.with_level(|b, level, ticks| {
-            let block = b.block(state);
-            b.update_neighbors_at(level, ticks, at, block);
-            for [x, y, z] in [
-                [0, -1, 0],
-                [0, 1, 0],
-                [0, 0, -1],
-                [0, 0, 1],
-                [-1, 0, 0],
-                [1, 0, 0],
-            ] {
-                b.update_neighbors_at(level, ticks, at.offset(x, y, z), block);
-            }
-        });
-        true
     }
     /// Runs `change` on the mod block entity at `pos` (a generator charging
     /// the machine beside it) and returns what it returns; none for any
@@ -12509,205 +12523,22 @@ mod tests {
     }
 
     #[test]
-    fn catalog_matches_hook_points() {
-        use std::collections::BTreeSet;
-
-        let catalog: serde_json::Value =
-            serde_json::from_str(include_str!("../../../../native-hooks.json")).unwrap();
-        let mut hooks = catalog["hooks"].as_array().unwrap().clone();
-        let fragments = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tools/native-hook-fragments");
-        for entry in std::fs::read_dir(fragments).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().is_some_and(|ext| ext == "json") {
-                let fragment: serde_json::Value =
-                    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-                hooks.extend(fragment["hooks"].as_array().unwrap().iter().cloned().map(
-                    |mut hook| {
-                        hook["version"] = 1.into();
-                        hook
-                    },
-                ));
-            }
-        }
-        let source = include_str!("native_hooks.rs");
-        let section = source
-            .split("/// The hook points. Each does nothing in Horizon.")
-            .nth(1)
-            .unwrap()
-            .split("/// Server-level helpers for native mods.")
-            .next()
-            .unwrap();
-        // The hook points of one `impl` block of this file.
-        let impl_hooks = |head: &str| -> BTreeSet<&'static str> {
-            source
-                .split(head)
-                .nth(1)
-                .unwrap()
-                .split("\n}")
-                .next()
-                .unwrap()
-                .lines()
-                .filter_map(|line| {
-                    line.trim()
-                        .strip_prefix("pub(super) fn native_")?
-                        .split('(')
-                        .next()
-                })
-                .collect()
-        };
-        let level_hooks = impl_hooks("impl GameLevel<'_> {");
-        let hit_hooks = impl_hooks("impl HitLevel<'_> {");
-        // Hook points that are free functions in other crates.
-        let free_hooks = |source: &'static str| -> BTreeSet<&'static str> {
-            source
-                .lines()
-                .filter_map(|line| line.strip_prefix("pub fn native_")?.split('(').next())
-                .collect()
-        };
-        // The renderer's (`horizon_client_render::gfx::native_render`).
-        let render_hooks = free_hooks(include_str!("../../../horizon-mod-api/src/render.rs"));
-        // Items' default components (`horizon_world::item_defaults`).
-        let item_hooks = free_hooks(include_str!("../../../horizon-world/src/item_defaults.rs"));
-        // The loot tables' hook point (`horizon_world::loot`).
-        let loot_hooks = free_hooks(include_str!("../../../horizon-world/src/loot.rs"));
-        // The menu engine's (`horizon_client::menu`).
-        let menu_hooks = free_hooks(include_str!("../menu.rs"));
-        // The air supply's (`horizon_client::breathing`).
-        let breath_hooks = free_hooks(include_str!("../breathing.rs"));
-        // The crafting loaders' (`horizon_client_lib::crafting`).
-        let crafting_hooks = free_hooks(include_str!("../../../horizon-mod-api/src/crafting.rs"));
-        let item_attribute_hooks = free_hooks(include_str!(
-            "../../../horizon-mod-api/src/item_attributes.rs"
-        ));
-        let enchantment_hooks =
-            free_hooks(include_str!("../../../horizon-mod-api/src/enchantments.rs"));
-        let hunger_hooks = free_hooks(include_str!("../hunger.rs"));
-        let landing_hooks = free_hooks(include_str!("../landing.rs"));
-        let motion_hooks = free_hooks(include_str!("../motion.rs"));
-        let hub_hooks = free_hooks(include_str!("../lan/hub.rs"));
-        let ender_hooks = free_hooks(include_str!("../mobs/enderman.rs"));
-        let sound_hooks = free_hooks(include_str!(
-            "../../../horizon-client-render/src/sound_engine/hooks.rs"
-        ));
-        let declared: BTreeSet<_> = section
-            .lines()
-            .filter_map(|line| {
-                line.trim()
-                    .strip_prefix("pub(super) fn native_")?
-                    .split('(')
-                    .next()
-            })
-            .chain(level_hooks.iter().copied())
-            .chain(hit_hooks.iter().copied())
-            .chain(render_hooks.iter().copied())
-            .chain(item_hooks.iter().copied())
-            .chain(loot_hooks.iter().copied())
-            .chain(menu_hooks.iter().copied())
-            .chain(breath_hooks.iter().copied())
-            .chain(crafting_hooks.iter().copied())
-            .chain(item_attribute_hooks.iter().copied())
-            .chain(enchantment_hooks.iter().copied())
-            .chain(hunger_hooks.iter().copied())
-            .chain(landing_hooks.iter().copied())
-            .chain(motion_hooks.iter().copied())
-            .chain(hub_hooks.iter().copied())
-            .chain(ender_hooks.iter().copied())
-            .chain(sound_hooks.iter().copied())
-            .collect();
-        let mut names = BTreeSet::new();
-        let mut contracts = BTreeSet::new();
-        for hook in &hooks {
-            let name = hook["name"].as_str().unwrap();
-            let version = hook["version"].as_u64().unwrap();
-            assert!(
-                version > 0 && contracts.insert((name, version)),
-                "invalid or duplicate hook: {name} v{version}"
-            );
-            names.insert(name);
-            let target = if render_hooks.contains(name) {
-                format!("mod_api::render::native_{name}")
-            } else if item_hooks.contains(name) {
-                format!("horizon_world::item_defaults::native_{name}")
-            } else if loot_hooks.contains(name) {
-                format!("horizon_world::loot::native_{name}")
-            } else if crafting_hooks.contains(name) {
-                // crafting.rs compiles into horizon-client-lib (#5446's
-                // split): horizon-mixins resolves the crate by its package.
-                format!("mod_api::crafting::native_{name}")
-            } else if item_attribute_hooks.contains(name) {
-                format!("mod_api::item_attributes::native_{name}")
-            } else if enchantment_hooks.contains(name) {
-                format!("mod_api::enchantments::native_{name}")
-            } else if hunger_hooks.contains(name) {
-                format!("horizon_client_lib::hunger::native_{name}")
-            } else if landing_hooks.contains(name) {
-                format!("horizon_client_lib::landing::native_{name}")
-            } else if motion_hooks.contains(name) {
-                format!("horizon_client_lib::motion::native_{name}")
-            } else if hub_hooks.contains(name) {
-                format!("horizon_client_lib::lan::hub::native_{name}")
-            } else if menu_hooks.contains(name) {
-                // menu.rs compiles into horizon-client-lib (#5446's
-                // split): horizon-mixins resolves the crate by its package.
-                format!("horizon_client_lib::menu::native_{name}")
-            } else if sound_hooks.contains(name) {
-                format!("horizon_client_render::sound_engine::hooks::native_{name}")
-            } else if ender_hooks.contains(name) {
-                format!("horizon_client_lib::mobs::enderman::native_{name}")
-            } else if breath_hooks.contains(name) {
-                // breathing.rs compiles into horizon-client-lib too.
-                format!("horizon_client_lib::breathing::native_{name}")
-            } else if level_hooks.contains(name) {
-                format!("horizon_client::game::native_hooks::GameLevel<'_>::native_{name}")
-            } else if hit_hooks.contains(name) {
-                format!("horizon_client::game::native_hooks::HitLevel<'_>::native_{name}")
-            } else {
-                format!("horizon_client::game::native_hooks::Game<'_>::native_{name}")
-            };
-            assert_eq!(hook["target"].as_str().unwrap(), target);
-        }
-        assert_eq!(names, declared);
-        // Every target's crate really compiles its module: #5446 moved
-        // files between horizon-client and horizon-client-lib, and a
-        // target left on the old crate applies to no bundle — the string
-        // comparison above shares its expectation with the catalog, so it
-        // alone cannot catch a move. The first path segment after the
-        // crate must be a module of that crate's lib root.
-        let client_root = include_str!("../lib.rs");
-        let lib_root = include_str!("../client_lib.rs");
-        for hook in &hooks {
-            let target = hook["target"].as_str().unwrap();
-            let (root, crate_name, rest) =
-                if let Some(rest) = target.strip_prefix("horizon_client::") {
-                    (client_root, "horizon_client", rest)
-                } else if let Some(rest) = target.strip_prefix("horizon_client_lib::") {
-                    (lib_root, "horizon_client_lib", rest)
-                } else {
-                    // The other crates (render, world) are their own packages,
-                    // never split.
-                    continue;
-                };
-            let module = rest.split("::").next().unwrap_or(rest);
-            assert!(
-                root.contains(&format!("mod {module};")),
-                "{crate_name} does not compile module `{module}` (target {target})"
-            );
-        }
-    }
-
-    /// The damage hook gets a mob's source from its damage: the causing mob or attacking
-    /// player, the direct one when it deals the damage itself.
-    #[test]
     fn the_damage_hook_names_the_source() {
-        use super::{HurtSource, Hurting, hurt_server_args, mob_source};
+        use super::{Attack, HurtSource, Hurting, hurt_server_args, mob_source};
+        use horizon_client::health::NO_ATTACK;
         use horizon_client::mobs::{Damage, DamageKind as K, Who};
         let source = |kind, attacker| {
-            let s = mob_source(&Damage {
-                kind,
-                attacker,
-                from: None,
-            });
+            let s = mob_source(
+                &Damage {
+                    kind,
+                    attacker,
+                    from: None,
+                },
+                &Attack {
+                    attacker: 7,
+                    held: Default::default(),
+                },
+            );
             (s.damage_type, s.causing, s.direct)
         };
         let zombie = Some(Who::Mob(3));
@@ -12716,11 +12547,8 @@ mod tests {
         assert_eq!(source(K::Arrow, zombie), ("minecraft:arrow", 3, 0));
         let blast = source(K::Explosion, zombie);
         assert_eq!(blast, ("minecraft:player_explosion", 3, 0));
-        // A player behind a mob's hit is the one whose attack it lands in (none outside one);
-        // a fall has no source.
-        let hit = source(K::PlayerAttack, Some(Who::Player));
-        assert_eq!(hit, ("minecraft:player_attack", 0, 0));
-        let _attack = horizon_client::health::knockback_from(7);
+        // A player behind a mob's hit is the one whose attack the level lends; a fall has no
+        // source.
         let hit = source(K::PlayerAttack, Some(Who::Player));
         assert_eq!(hit, ("minecraft:player_attack", 7, 7));
         assert_eq!(source(K::Fall, None), ("minecraft:fall", 0, 0));
@@ -12731,9 +12559,15 @@ mod tests {
             position: None,
         };
         let player = (2, "minecraft:player", arrow);
-        assert_eq!(hurt_server_args(Hurting::Player(2, arrow)), player);
+        assert_eq!(
+            hurt_server_args(Hurting::Player(2, arrow), &NO_ATTACK),
+            player
+        );
         let dragon = (5, "minecraft:ender_dragon", arrow);
-        assert_eq!(hurt_server_args(Hurting::Dragon(5, arrow)), dragon);
+        assert_eq!(
+            hurt_server_args(Hurting::Dragon(5, arrow), &NO_ATTACK),
+            dragon
+        );
     }
 
     /// A mod container opens a slot grid or a furnace's menu, by its slot

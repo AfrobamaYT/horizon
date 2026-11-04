@@ -53,14 +53,23 @@ impl std::fmt::Display for LoadError {
 
 impl std::error::Error for LoadError {}
 
-/// Run budgets, in wasmtime fuel units (about one per instruction).
+/// How long a call into a group may run, and what it may hold. A call past its limit traps,
+/// which stops its group.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct Budgets {
-    /// What one hook or part call may spend.
-    pub call: u64,
-    /// What a group's start-up (its constructors and `register`) may spend.
-    pub init: u64,
+    /// One hook or part call, by wall clock (epoch interruption). The limit is time, so a slow
+    /// machine reaches it sooner: it is far above what a call should take.
+    pub call: Duration,
+    /// A group's start-up (its constructors and `register`) and a call carrying a load-phase
+    /// context (registration, a data load, a resource reload), which read and parse data.
+    pub load: Duration,
+    /// Count instructions instead of time, for deterministic and debug runs: a mod then stops
+    /// at the same place on every machine. Costs about 15–25% per call; off by default.
+    pub fuel: Option<Fuel>,
+    /// How long a hook call waits for its group while another thread runs it, before it is
+    /// refused as busy. A worldgen call waits as long as it takes.
+    pub wait: Duration,
     /// The most memory one group may grow to, in bytes.
     pub memory: usize,
     /// The most bytes of new names (a `&'static str` the game keeps for good) one group may
@@ -68,11 +77,66 @@ pub struct Budgets {
     pub names: usize,
 }
 
-impl Default for Budgets {
+/// Instruction budgets, in wasmtime fuel units (about one per instruction), for
+/// [`Budgets::fuel`].
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct Fuel {
+    /// One hook or part call.
+    pub call: u64,
+    /// A start-up or a load-phase call.
+    pub load: u64,
+}
+
+impl Default for Fuel {
     fn default() -> Self {
         Self {
             call: 50_000_000,
-            init: 4_000_000_000,
+            load: 4_000_000_000,
+        }
+    }
+}
+
+/// How often the engine's epoch advances: the resolution of [`Budgets`]' time limits.
+pub const EPOCH: Duration = Duration::from_millis(1);
+
+/// What a call into a mod is, for its limits and its wait for the group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Call {
+    /// A hook or part call, on the server or client thread: within `Budgets::call`, and
+    /// refused past `Budgets::wait` for a group another thread runs.
+    Hook,
+    /// Start-up or a load-phase call: within `Budgets::load`.
+    Load,
+    /// A structure type's or piece's call, on a worldgen worker: within `Budgets::call`, and
+    /// queued for its group for as long as that takes. Refusing it would leave the chunk
+    /// without its structure depending on timing; the holder's own deadline bounds the wait.
+    Worldgen,
+}
+
+impl Budgets {
+    /// Arm `store` for one `call`: its fuel, or its deadline in epochs from now.
+    fn arm(&self, store: &mut Store<State>, call: Call) {
+        let load = call == Call::Load;
+        match self.fuel {
+            Some(fuel) => {
+                let _ = store.set_fuel(if load { fuel.load } else { fuel.call });
+            }
+            None => {
+                let limit = if load { self.load } else { self.call };
+                store.set_epoch_deadline((limit.as_nanos() / EPOCH.as_nanos()).max(1) as u64);
+            }
+        }
+    }
+}
+
+impl Default for Budgets {
+    fn default() -> Self {
+        Self {
+            call: Duration::from_millis(100),
+            load: Duration::from_secs(30),
+            fuel: None,
+            wait: Duration::from_secs(5),
             memory: 256 << 20,
             names: 1 << 20,
         }
@@ -133,6 +197,61 @@ fn intern(value: String) -> Result<&'static str, Refused> {
     Ok(leaked)
 }
 
+impl Names {
+    /// `name`'s index, given it first if it has none.
+    fn id(&mut self, name: &'static str) -> Result<u32, Refused> {
+        if let Some(id) = self.index.get(name) {
+            return Ok(*id);
+        }
+        let id = u32::try_from(self.names.len()).map_err(|_| Refused::SHAPE)?;
+        self.names.push(name);
+        self.index.insert(name, id);
+        Ok(id)
+    }
+    /// The name index `id` stands for; refused for an index the table never gave.
+    fn name(&self, id: u32) -> Result<&'static str, Refused> {
+        self.names
+            .get(id as usize)
+            .copied()
+            .ok_or_else(|| Refused::because(format_args!("no name has index {id} in its group")))
+    }
+}
+
+/// `f` on the calling group's name table.
+fn with_names<T>(f: impl FnOnce(&mut Names) -> Result<T, Refused>) -> Result<T, Refused> {
+    let module = CALLER.take().ok_or(Refused::NO_CALLER)?;
+    let value = f(&mut module.group.named.lock().unwrap_or_else(|e| e.into_inner()));
+    CALLER.set(Some(module));
+    value
+}
+
+/// The calling group's index for `name`.
+fn name_id(name: &'static str) -> Result<u32, Refused> {
+    with_names(|names| names.id(name))
+}
+
+/// The name the calling group's index `id` stands for.
+fn name_of(id: u32) -> Result<&'static str, Refused> {
+    with_names(|names| names.name(id))
+}
+
+impl glue::horizon::mod_api::names::Host for State {
+    fn name(&mut self, id: u32) -> wasmtime::Result<String> {
+        Ok(name_of(id)?.to_string())
+    }
+    fn intern(&mut self, name: String) -> wasmtime::Result<u32> {
+        Ok(name_id(intern(name)?)?)
+    }
+}
+
+/// Runs `lower` as `module`'s caller: arguments lowered before the call names its group.
+fn lowering<T>(module: &Arc<Running>, lower: impl FnOnce() -> T) -> T {
+    let previous = CALLER.replace(Some(module.clone()));
+    let value = lower();
+    CALLER.set(previous);
+    value
+}
+
 /// One call's storage for the values its borrowed arguments point into, as on the guest.
 #[derive(Default)]
 pub(crate) struct Keep {
@@ -172,9 +291,6 @@ impl Drop for Keep {
     }
 }
 
-/// How long a call waits for a group another thread is running before it refuses.
-const GROUP_WAIT: Duration = Duration::from_secs(5);
-
 /// One linked dependency group: one store, one memory, one copy of each member's code.
 // exhaustive: its fields are private
 pub struct Group {
@@ -186,7 +302,16 @@ pub struct Group {
     budgets: Budgets,
     /// The bytes of new names it gave the game, against `budgets.names`.
     names: AtomicUsize,
-    wait: Duration,
+    /// The names crossing to and from it, by index: one per name, never reused while the group
+    /// lives, and dropped with it.
+    named: Mutex<Names>,
+}
+
+/// A group's name table: a `&'static str` crosses as its index here, the guest caching each.
+#[derive(Default)]
+struct Names {
+    index: HashMap<&'static str, u32>,
+    names: Vec<&'static str>,
 }
 
 thread_local! {
@@ -227,18 +352,20 @@ impl Drop for Entered<'_> {
 }
 
 impl Group {
-    fn new(store: Store<State>, budgets: Budgets, wait: Duration) -> Self {
+    fn new(store: Store<State>, budgets: Budgets) -> Self {
         Self {
             store: Mutex::new(store),
             running: AtomicU64::new(0),
             poisoned: AtomicBool::new(false),
             budgets,
             names: AtomicUsize::new(0),
-            wait,
+            named: Mutex::default(),
         }
     }
 
-    fn enter(&self) -> Result<Entered<'_>, CallRefused> {
+    /// Enters the group for a `call`: a worldgen call waits for it as long as another thread
+    /// runs it, any other up to `budgets.wait`.
+    fn enter(&self, call: Call) -> Result<Entered<'_>, CallRefused> {
         if self.poisoned.load(Ordering::Relaxed) {
             return Err(CallRefused::Stopped);
         }
@@ -247,13 +374,17 @@ impl Group {
             return Err(CallRefused::Reentered);
         }
         // A thread already inside a group never waits for another one.
+        let inside = INSIDE.with(Cell::get) > 0;
         let deadline = Instant::now()
-            + if INSIDE.with(Cell::get) > 0 {
+            + if inside {
                 Duration::ZERO
             } else {
-                self.wait
+                self.budgets.wait
             };
         let store = loop {
+            if call == Call::Worldgen && !inside {
+                break self.store.lock().unwrap_or_else(|e| e.into_inner());
+            }
             match self.store.try_lock() {
                 Ok(guard) => break guard,
                 Err(TryLockError::Poisoned(e)) => break e.into_inner(),
@@ -263,6 +394,10 @@ impl Group {
                 Err(TryLockError::WouldBlock) => return Err(CallRefused::Busy),
             }
         };
+        // A call that waited may find the group stopped by the trap of the one it waited for.
+        if self.poisoned.load(Ordering::Relaxed) {
+            return Err(CallRefused::Stopped);
+        }
         self.running.store(me, Ordering::Release);
         INSIDE.with(|n| n.set(n.get() + 1));
         Ok(Entered { group: self, store })
@@ -316,15 +451,16 @@ impl NoAnswer for crate::Flow {
 }
 
 impl Running {
-    /// Runs one call with `frame`'s hosts, charging its fuel to this mod. A refused call or a
-    /// trap answers `no_answer()`; a trap stops the whole group.
+    /// Runs one `call` with `frame`'s hosts, within its group's limits for it. A refused call
+    /// or a trap answers `no_answer()`; a trap stops the whole group.
     fn call_or<T>(
         self: &Arc<Self>,
         mut frame: Frame,
+        call: Call,
         no_answer: impl FnOnce() -> T,
         f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
     ) -> T {
-        let mut entered = match self.group.enter() {
+        let mut entered = match self.group.enter(call) {
             Ok(entered) => entered,
             Err(refused) => {
                 log::warn!("wasm mod {}: call refused: {refused:?}", self.id);
@@ -332,8 +468,7 @@ impl Running {
             }
         };
         let store = &mut *entered.store;
-        let budget = self.group.budgets.call;
-        let _ = store.set_fuel(budget);
+        self.group.budgets.arm(store, call);
         let previous = CURRENT.replace(&mut frame);
         let caller = CALLER.replace(Some(self.clone()));
         let released =
@@ -348,11 +483,14 @@ impl Running {
         .and_then(|()| f(&self.exports, store));
         CALLER.set(caller);
         CURRENT.set(previous);
+        // Stopped before the group is let go, so no call waiting for it runs on.
+        if result.is_err() {
+            self.group.poisoned.store(true, Ordering::Relaxed);
+        }
         drop(entered);
         match result {
             Ok(value) => value,
             Err(error) => {
-                self.group.poisoned.store(true, Ordering::Relaxed);
                 log::error!("wasm mod {} stopped its group: {error:#}", self.id);
                 no_answer()
             }
@@ -377,10 +515,11 @@ impl WasmMod {
     fn call_or<T>(
         &self,
         frame: Frame,
+        call: Call,
         no_answer: impl FnOnce() -> T,
         f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
     ) -> T {
-        self.module.call_or(frame, no_answer, f)
+        self.module.call_or(frame, call, no_answer, f)
     }
 }
 
@@ -388,10 +527,11 @@ impl WasmHandler {
     fn call_or<T>(
         &self,
         frame: Frame,
+        call: Call,
         no_answer: impl FnOnce() -> T,
         f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
     ) -> T {
-        self.module.call_or(frame, no_answer, f)
+        self.module.call_or(frame, call, no_answer, f)
     }
 }
 
@@ -641,7 +781,7 @@ pub fn instantiate(
         .build();
     let mut store = Store::new(engine, State { limits });
     store.limiter(|state| &mut state.limits);
-    let _ = store.set_fuel(budgets.init);
+    budgets.arm(&mut store, Call::Load);
     let instance: Instance = linker
         .instantiate(&mut store, component)
         .map_err(refused_import)?;
@@ -650,7 +790,7 @@ pub fn instantiate(
         let exports = glue::ModExports::find(&mut store, &instance, &member.exports)?;
         found.push((member.id, exports));
     }
-    let group = Arc::new(Group::new(store, budgets, GROUP_WAIT));
+    let group = Arc::new(Group::new(store, budgets));
     let mut entries = Vec::new();
     for (id, exports) in found {
         let module = Arc::new(Running {
@@ -659,7 +799,7 @@ pub fn instantiate(
             id,
             released: Mutex::new(Vec::new()),
         });
-        let names = module.call_or(Frame::default(), Vec::new, |m, store| {
+        let names = module.call_or(Frame::default(), Call::Load, Vec::new, |m, store| {
             m.horizon_mod_api_hooks().call_subscribed(store)
         });
         let hooks = WasmMod {
@@ -693,19 +833,34 @@ mod tests {
     fn group(wait: Duration) -> Arc<Group> {
         let engine = wasmtime::Engine::default();
         let limits = wasmtime::StoreLimitsBuilder::new().build();
-        Arc::new(Group::new(
-            Store::new(&engine, State { limits }),
-            Budgets::default(),
+        let budgets = Budgets {
             wait,
-        ))
+            ..Budgets::default()
+        };
+        Arc::new(Group::new(Store::new(&engine, State { limits }), budgets))
+    }
+
+    #[test]
+    fn a_name_keeps_one_index_and_an_index_never_given_is_refused() {
+        let mut names = Names::default();
+        let overworld = names.id("minecraft:overworld").unwrap();
+        let nether = names.id("minecraft:the_nether").unwrap();
+        assert_ne!(overworld, nether);
+        assert_eq!(names.id("minecraft:overworld").unwrap(), overworld);
+        assert_eq!(names.name(nether).unwrap(), "minecraft:the_nether");
+        let refused = names.name(nether + 1).unwrap_err();
+        assert!(
+            refused.to_string().contains("no name has index"),
+            "{refused}"
+        );
     }
 
     #[test]
     fn a_call_back_into_its_own_group_is_refused_at_once() {
         let group = group(Duration::from_secs(60));
-        let _inside = group.enter().unwrap();
+        let _inside = group.enter(Call::Hook).unwrap();
         let started = Instant::now();
-        assert_eq!(group.enter().err(), Some(CallRefused::Reentered));
+        assert_eq!(group.enter(Call::Hook).err(), Some(CallRefused::Reentered));
         assert!(started.elapsed() < Duration::from_millis(100));
     }
 
@@ -718,10 +873,10 @@ mod tests {
         let barrier = Arc::new(std::sync::Barrier::new(2));
         let cross = |mine: Arc<Group>, theirs: Arc<Group>, barrier: Arc<std::sync::Barrier>| {
             std::thread::spawn(move || {
-                let _inside = mine.enter().unwrap();
+                let _inside = mine.enter(Call::Hook).unwrap();
                 barrier.wait();
                 let started = Instant::now();
-                let refused = theirs.enter().err();
+                let refused = theirs.enter(Call::Hook).err();
                 // Hold on until the other thread has tried too.
                 barrier.wait();
                 (refused, started.elapsed())
@@ -739,23 +894,46 @@ mod tests {
     #[test]
     fn a_call_waits_for_another_thread_then_refuses_or_runs() {
         let group = group(Duration::from_millis(200));
-        let inside = group.enter().unwrap();
+        let inside = group.enter(Call::Hook).unwrap();
         let other = group.clone();
-        let refused = std::thread::spawn(move || other.enter().err())
+        let refused = std::thread::spawn(move || other.enter(Call::Hook).err())
             .join()
             .unwrap();
         assert_eq!(refused, Some(CallRefused::Busy));
         let other = group.clone();
-        let waiting = std::thread::spawn(move || other.enter().is_ok());
+        let waiting = std::thread::spawn(move || other.enter(Call::Hook).is_ok());
         std::thread::sleep(Duration::from_millis(20));
         drop(inside);
         assert!(waiting.join().unwrap());
     }
 
     #[test]
+    fn a_worldgen_call_waits_past_the_wait_for_its_group() {
+        let group = group(Duration::from_millis(1));
+        let inside = group.enter(Call::Hook).unwrap();
+        let other = group.clone();
+        let waiting = std::thread::spawn(move || other.enter(Call::Worldgen).is_ok());
+        std::thread::sleep(Duration::from_millis(50));
+        drop(inside);
+        assert!(waiting.join().unwrap());
+    }
+
+    #[test]
+    fn a_worldgen_call_queued_behind_a_trap_finds_the_group_stopped() {
+        let group = group(Duration::from_millis(1));
+        let inside = group.enter(Call::Hook).unwrap();
+        let other = group.clone();
+        let waiting = std::thread::spawn(move || other.enter(Call::Worldgen).err());
+        std::thread::sleep(Duration::from_millis(50));
+        group.poisoned.store(true, Ordering::Relaxed);
+        drop(inside);
+        assert_eq!(waiting.join().unwrap(), Some(CallRefused::Stopped));
+    }
+
+    #[test]
     fn a_stopped_group_runs_nothing() {
         let group = group(Duration::ZERO);
         group.poisoned.store(true, Ordering::Relaxed);
-        assert_eq!(group.enter().err(), Some(CallRefused::Stopped));
+        assert_eq!(group.enter(Call::Hook).err(), Some(CallRefused::Stopped));
     }
 }

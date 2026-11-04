@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 fn checkout() -> Result<PathBuf, String> {
     let root = std::env::current_dir().map_err(|e| e.to_string())?;
     root.ancestors()
-        .find(|path| path.join("native-hooks.json").is_file())
+        .find(|path| path.join("crates/horizon-mod-api/src/hooks").is_dir())
         .map(Path::to_path_buf)
         .ok_or("run xtask from within the Horizon checkout".into())
 }

@@ -500,7 +500,7 @@ impl Game<'_> {
                 && !spectator
                 && hurtable
                 && let Ok(o) = p.hurt_caused_by(
-                    crate::game::entity::damage_level_of!(self),
+                    crate::game::entity::damage_level_of!(self, scoped),
                     &self.motion.health,
                     rules,
                     id,
@@ -544,7 +544,8 @@ impl Game<'_> {
                 direct: 0,
                 position: None,
             };
-            self.after_block(outcome, (None, false), source);
+            let attack = self.current_attack();
+            self.after_block(outcome, (None, false), source, &attack);
         }
         pushed
     }
@@ -711,7 +712,7 @@ impl Game<'_> {
                         // its base is 0 for every mob type, so iron golems and
                         // ravagers are pushed.
                         hurt_mob(
-                            crate::game::entity::damage_level_of!(self),
+                            crate::game::entity::damage_level_of!(self, scoped),
                             m,
                             hurtable,
                             cause,

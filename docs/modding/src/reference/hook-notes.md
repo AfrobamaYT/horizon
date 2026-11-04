@@ -270,8 +270,11 @@ requires a farmer at work and `mob_griefing` enabled.
 
 - Redstone from a mod's block, on authoritative servers. `native_block_signal` may change the signal a block gives on
   a face, weak or direct, and `native_is_signal_source` lets redstone wire connect to it. Both are asked very often, so check the
-  block first and answer from the mod's own state. When the output changes, and once the block is placed (a direct signal past a conductor isn't read before), `native_update_signal_neighbors(dimension, pos)` makes the blocks around
-  it read it again; it acts on the level in place and is refused for another dimension.
+  block first and answer from the mod's own state. When the output changes, and once the block is placed (a direct signal past a conductor isn't read before),
+  `level.update_neighbors(host, pos, state, NeighbourUpdate::Neighbours)` makes the blocks around it read it again
+  (`Level.updateNeighborsAt`; a block that powers what it is attached to, as a lever does, also updates there). A
+  diode's front takes `level.neighbor_changed(host, front, state)` then `NeighbourUpdate::NeighboursExcept(facing)`
+  (`DiodeBlock.updateNeighborsInFront`). Both act on the level in place and are refused elsewhere.
 
 - Item behaviour, on the server for every player: `native_hurt_enemy` hears a player's hit land on a mob with the
   held stack, `native_inventory_tick` runs each tick for every stack a player carries (armour and off hand included), and
@@ -449,6 +452,13 @@ one, where vanilla gives the `by` one.
   entity that didn't have it, and `native_mob_effect_added` (NeoForge's `MobEffectEvent.Added`) every time it is given.
   A mob is its `Entity.getId`; a player is None, with their state swapped in (`native_acting_player`). Vanilla's effects
   never reach them.
+  The three moments around them cover every effect, vanilla's included: `mob_effect_applicable`
+  (NeoForge's `MobEffectEvent.Applicable`, vanilla's `canBeAffected`) answers whether an effect can land — the first
+  mod to answer `Allow` or `Deny` overrides the vanilla tag check, and an unanswered hook falls
+  back to it; `mob_effect_expired` (`.Expired`) hears one count down to nothing — cancelling
+  refuses the expiry, and the effect stays, kept at no ticks and asked again next tick;
+  `mob_effect_remove` (`.Remove`) hears one about to be removed by any path — a command, milk or a
+  mod's removal helper — and cancelling keeps it. All three name their entity as a `LivingRef`, the player's own included.
 
 - Chunks and players coming and going, on the server: `native_chunk_load` (with whether the chunk is new), `native_chunk_unload`, and
   `native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Changes made to the departing chunk in `native_chunk_unload` aren't saved: as in vanilla, the chunk is saved before it unloads.
@@ -496,7 +506,7 @@ one, where vanilla gives the `by` one.
 
 - A mod block's comparator output, as vanilla's `BlockBehaviour.hasAnalogOutputSignal` and `getAnalogOutputSignal`: `native_has_analog_output` says a block of yours has one,
   and `native_analog_output` gives it (0 to 15) for its state and position. A state change with neighbour updates tells the comparators itself; when the output
-  changes otherwise, `native_update_output_neighbors(dimension, pos)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
+  changes otherwise, `level.update_neighbors(host, pos, state, NeighbourUpdate::OutputSignal)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
 
 `Hooks::component_types`, `blocks`, `items` and `standalone_models` take
 `&RegistrationContext` before their event; `Hooks::register` takes it after
@@ -1474,7 +1484,7 @@ mod mixin or use it replaces in its design or PR.
 
 ## Named hook catalog (draft)
 
-`native-hooks.json` maps stable hook names and contract versions to the current
+The declarations under `crates/horizon-mod-api/src/hooks/` map stable hook names and contract versions to the current
 source targets. A contract includes the signature, call timing and behavior.
 Keep an existing contract or add a new version when it changes incompatibly.
 The catalog does not cover helper methods or arbitrary private game code.
@@ -2789,6 +2799,8 @@ The six combat hooks (`living_incoming_damage`, `damage_pre`, `damage_post`, `li
 
 **Migration (`living_use_totem`, `living_shield_block`, now version 2):** both now take the hit's level host as their first argument, as `living_incoming_damage` does: its blocks, random and own attachments, with no writes beyond them. Add the parameter (`level: &mut dyn LevelRandomHost`); the event, its fields, its order and its cancel rules are unchanged. `living_shield_block` fires inside `hurtServer` before the armor and enchantment reductions and sees the hit's `damage` as it came in; `living_use_totem` fires after health reached 0 and before `die`. Tick-time effect: one extra pointer in the hit and the same `listened` early-outs. Diverges from upstream: the two hooks gain the level host that upstream's catalog rows did not have.
 
+**Attacker and held stacks (`living_knockback`, the weapon of `living_incoming_damage`):** the attacker's id and the stacks it holds come from the hit that started the attack, not from process state, so a hit nested inside another (a thorns reply, a guest's attack during the host's) names its own attacker and nothing is left behind afterwards. No event field, order, random draw or cancel rule changes, so neither hook's version does. The game copies the held stacks only while a mod listens; without one the hit carries the attacker id and two empty slots, no allocation.
+
 ## Block drops
 
 - **`block_drops(level, dimension, pos, state, breaker, tool, drops, experience, cancel)`** (NeoForge's `BlockDropsEvent`): `Block.dropResources` built the item entities for a broken block and nothing has spawned yet. Edit `drops` (`NativeItemDrop`: stack, position, velocity, pickup delay) or `experience`, or set `cancel` for no drops, no experience and no `spawnAfterBreak` effects (an infested block's silverfish; a bee nest's bees are `playerDestroy`'s and still come out). `breaker` is the player's UUID, none for a level-side break; `tool` is their stack. It fires on the player's break and on every level-side `Block.dropResources`. Positions and motions are drawn before the event, in vanilla's order, listener or not, and the list is the one that spawns, so a mod that leaves it alone changes nothing. It runs inside a level write, so it gets the level host: reads and the level's random, no writes. Not fired for explosion drops, mob block breaks, dispensers or other loot-table drops; a level-side break is not asked `loot_drops`. Tick-time effect: none beyond one `listened` branch with no listeners. Beyond NeoForge: level-side breaks fire it too. Diverges from upstream: `block_exp` is removed into `experience` (its catalog row named no NeoForge event).
@@ -2796,3 +2808,13 @@ The six combat hooks (`living_incoming_damage`, `damage_pre`, `damage_post`, `li
 ## Spawn checks
 
 - **`mob_spawn_placement_check(dimension, kind, reason, pos, default_result, result)`** (NeoForge's `MobSpawnEvent.SpawnPlacementCheck`) and **`mob_spawn_position_check(dimension, kind, reason, pos, result)`** (`MobSpawnEvent.PositionCheck`): set `result` to `NativeSpawnCheck::Succeed` or `Fail` to force a spawn check; `Default` keeps vanilla's. The placement check runs after the type's spawn predicate (`default_result` is its answer), so its random draws are vanilla's whatever a mod answers. The position check stands in for `Mob.checkSpawnRules` and `checkSpawnObstruction`: with no listener or `Default` they run and draw as vanilla, while `Succeed` and `Fail` skip them and their draws. Fired wherever the game checks a spawn: natural spawning, chunk generation, spawners, trial spawners (obstruction only), patrols, sieges and reinforcements for the placement check. Both get the read-only host and run on replayed ticks, so a listener is a pure function of its inputs. Tick-time effect: one `listened` branch with no listeners, before any `NativeSpawnReason` is built. One `NativeSpawnCheck` serves both (NeoForge's two enums have the same constants).
+
+## Mob despawn
+
+- **`mob_despawn(dimension, mob, kind, pos, result)`** (NeoForge's `MobDespawnEvent`, server): fired once per tick for every loaded mob just before `Mob.checkDespawn`, including persistent mobs and mobs in peaceful. `result` starts as `NativeDespawn::Default`. `Allow` discards the mob now, `Deny` keeps it this tick (a mod can keep a hostile mob in peaceful, as NeoForge's event documents), and `Default` leaves vanilla's rules to decide. An answer other than `Default` skips vanilla's checks, so it also skips the `nextInt(800)` draw of the idle-despawn roll: the hook fires before that draw. A mob whose chunk is not loaded is not checked and the hook does not fire for it; the wither and the ender dragon override `checkDespawn` without `super`, so it does not fire for them either. In vanilla the whole of `Mob.checkDespawn` follows the event, the peaceful-mode discard included, so a `Deny` keeps a hostile mob in peaceful.
+- Listeners run on replayed ticks, so they are pure functions of their inputs. Tick-time effect: one `listened` branch per mob per tick with no listeners; the answer sits in a `Mob` field that costs one byte and is reset after the mob's tick.
+- Beyond NeoForge: none. `NativeDespawn` is plain data, `#[non_exhaustive]`.
+
+## Finalize spawn
+
+- **`finalize_spawn(dimension, kind, reason, pos, spawner, difficulty, spawn_cancelled, cancel)`** (NeoForge's `FinalizeSpawnEvent`): fires where the game calls `Mob.finalizeSpawn` for a mob it made, before it runs. There are two cancels, as in NeoForge: return `Flow::Cancel` to skip finalization (no equipment, attributes or class setup; the mob still spawns uninitialised, and finalization's random draws are skipped), or set `spawn_cancelled` so no mob is added. `difficulty` (`NativeDifficulty`) is settable and is what finalization reads. `spawner` is `NativeSpawner::Block` for a spawner or trial spawner, none otherwise. Fired only where vanilla 26.3 calls `finalizeSpawn`, with vanilla's reason at that call: natural spawning, chunk generation, spawners, trial spawners, patrols, raids and sieges, reinforcements, cat spawners, phantoms, jockeys, `/summon`, `/raid`, spawn eggs, dispensers, the nether portal's piglin (`Structure`), skeleton traps, evoker vexes, wandering traders and conversions. Not fired where vanilla creates the mob without it (breeding, an infested block's silverfish, a thrown egg's chick, a thrown pearl's endermite, hatching eggs, built golems, the oozing effect's slimes, a lightning trap's horse), for loads (`persist.rs` finalizes a placed entity only through its `horizon:finalize` marker, which is a load) or for structure mobs placed by world generation. Group data is left out: it lives only in the worldgen `finalize` path, which has no host. Both new types are plain data (`NativeDifficulty` and `NativeSpawner`, `#[non_exhaustive]`). Read-only host; replayed ticks, so listeners are pure functions of their inputs. Tick-time effect: one `listened` branch with no listeners. Beyond NeoForge: none.

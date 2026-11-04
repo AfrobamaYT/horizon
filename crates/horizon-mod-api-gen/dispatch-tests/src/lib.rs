@@ -61,6 +61,9 @@ mod tests {
         pub(super) struct Compound;
         pub(super) struct NativeSpawnReason;
         pub(super) struct NativeSpawnCheck;
+        pub(super) struct NativeDespawn;
+        pub(super) struct NativeDifficulty;
+        pub(super) struct NativeSpawner;
         pub(super) enum Placement {
             Single,
         }
@@ -231,6 +234,7 @@ mod tests {
         pub(super) struct NativePlayerFood;
         #[derive(Clone, Copy)]
         pub(super) struct LivingRef;
+        pub(super) struct MobRef;
         #[derive(Clone, Copy)]
         pub(super) struct EntityRef;
         #[derive(Clone, Copy)]
@@ -329,6 +333,11 @@ mod tests {
             #[derive(Clone, Copy)]
             pub enum KeyAction {}
             pub struct NativeArmorHurt;
+            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+            pub enum EffectApplicable {
+                Allow,
+                Deny,
+            }
             pub mod menu {
                 pub struct MenuButtonContext {
                     pub player: u128,

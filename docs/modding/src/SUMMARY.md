@@ -15,6 +15,7 @@
 
 - [Making a content mod](how-to/content-mods.md)
 - [Native mods](how-to/native-mods.md)
+- [Controlling spawns](how-to/spawning.md)
 - [Building to `mod.wasm`](how-to/wasm-mods.md)
 - [Injections](injections.md)
 - [Publishing your mod](how-to/publish.md)

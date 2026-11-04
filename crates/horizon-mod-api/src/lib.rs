@@ -5,6 +5,9 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 #![deny(missing_docs)]
 extern crate self as mod_api;
+// Never compiled: the generator reads these declarations to build the `Hooks` trait and its dispatch.
+#[cfg(any())]
+mod hooks;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod biome;
@@ -1497,6 +1500,19 @@ impl NativeActiveEffect {
     }
 }
 
+/// The answer to `mob_effect_applicable`: whether an effect can land on an
+/// entity. An unanswered hook defers to the vanilla tag check; `Allow` and
+/// `Deny` override it, as NeoForge's `MobEffectEvent.Applicable.Result`
+/// does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EffectApplicable {
+    /// The effect lands, whatever the tags say.
+    Allow,
+    /// The effect is refused, whatever the tags say.
+    Deny,
+}
+
 /// A vanilla `Mob`, narrowed from an entity with `host.mob(entity)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
@@ -2547,6 +2563,33 @@ pub enum NativeSpawnReason {
     DimensionTravel,
 }
 
+/// The local difficulty at a spawn (`DifficultyInstance`): what `finalize_spawn` reads and
+/// may change before the mob is finalized.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct NativeDifficulty {
+    /// `Difficulty.getId`: 0 peaceful, 1 easy, 2 normal, 3 hard. A larger value is taken as 3.
+    pub base: u8,
+    /// `DifficultyInstance.getEffectiveDifficulty`: the base scaled by world age, the chunk's
+    /// inhabited time and the moon.
+    pub effective: f32,
+}
+
+impl NativeDifficulty {
+    /// A difficulty of `base` and `effective`.
+    pub fn new(base: u8, effective: f32) -> Self {
+        Self { base, effective }
+    }
+}
+
+/// What spawned a mob, where `EntitySpawnReason` alone does not say (`FinalizeSpawnEvent.getSpawner`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeSpawner {
+    /// A spawner or trial spawner block at this position.
+    Block(BlockPos),
+}
+
 /// What a mod answers a spawn check (`MobSpawnEvent.PositionCheck.Result` and
 /// `MobSpawnEvent.SpawnPlacementCheck.Result`, one type for both).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -2559,6 +2602,19 @@ pub enum NativeSpawnCheck {
     Default,
     /// `FAIL`: the check fails.
     Fail,
+}
+
+/// What a mod answers a despawn check (`MobDespawnEvent.Result`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeDespawn {
+    /// `ALLOW`: the mob despawns now.
+    Allow,
+    /// `DEFAULT`: vanilla's `Mob.checkDespawn` decides.
+    #[default]
+    Default,
+    /// `DENY`: the mob does not despawn.
+    Deny,
 }
 
 /// Block shape used by an empty-context level ray.
@@ -3281,6 +3337,146 @@ pub enum Flow {
     Cancel,
 }
 
+/// A block state's sounds (`BlockState.getSoundType()`, vanilla's `SoundType`): the sound
+/// events, as `LevelRef::play_sound` names them, and the volume and pitch they play at.
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct BlockSoundType {
+    /// `SoundType.getVolume`.
+    pub volume: f32,
+    /// `SoundType.getPitch`.
+    pub pitch: f32,
+    /// `getBreakSound`: the block broken.
+    pub break_sound: std::sync::Arc<str>,
+    /// `getStepSound`: walked on.
+    pub step: std::sync::Arc<str>,
+    /// `getPlaceSound`: placed.
+    pub place: std::sync::Arc<str>,
+    /// `getHitSound`: hit while being mined.
+    pub hit: std::sync::Arc<str>,
+    /// `getFallSound`: landed on.
+    pub fall: std::sync::Arc<str>,
+}
+
+/// The states of one block (`StateDefinition.getPossibleStates`): consecutive ids, as the
+/// registry numbers a block's states.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with `new`; mods read it
+pub struct BlockStateRange {
+    first: BlockStateId,
+    count: u32,
+}
+impl BlockStateRange {
+    /// `count` states from `first`.
+    pub const fn new(first: BlockStateId, count: u32) -> Self {
+        Self { first, count }
+    }
+    /// The first state's id.
+    pub const fn first(self) -> BlockStateId {
+        self.first
+    }
+    /// How many states the block has.
+    pub const fn len(self) -> u32 {
+        self.count
+    }
+    /// Never true: a block has at least one state.
+    pub const fn is_empty(self) -> bool {
+        self.count == 0
+    }
+    /// Whether `state` is one of them.
+    pub const fn contains(self, state: BlockStateId) -> bool {
+        state.0 >= self.first.0 && state.0 - self.first.0 < self.count
+    }
+    /// Each state, in id order.
+    pub fn iter(self) -> impl Iterator<Item = BlockStateId> {
+        (self.first.0..self.first.0 + self.count).map(BlockStateId)
+    }
+}
+
+/// What a fake player does in `PlayerRef::perform_action`: a player's own action, run through
+/// the game's path for it, as a client's packet is. Its answer is an [`ActionOutcome`], or an
+/// [`ActionRefused`] when none of it ran.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: mods build one; the game runs every kind, so a new kind must be handled there
+pub enum PlayerAction {
+    /// Use the item in `hand` on the block at `pos`, clicked at `hit`
+    /// (`ServerPlayerGameMode.useItemOn`): the block's use, then the item's `useOn`, which
+    /// places a block item.
+    UseOn {
+        /// The hand whose item is used.
+        hand: Hand,
+        /// The block clicked (`BlockHitResult.getBlockPos`).
+        pos: [i32; 3],
+        /// Where on it.
+        hit: BlockHit,
+    },
+    /// Use the item in `hand` in the air (`ServerPlayerGameMode.useItem`).
+    UseItem {
+        /// The hand whose item is used.
+        hand: Hand,
+    },
+}
+
+/// Why a fake player's `perform_action` did nothing at all: it was refused before any of the
+/// action ran.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ActionRefused {
+    /// The handle is a real player's.
+    NotFake,
+    /// The handle is stale, or its fake is gone.
+    Stale,
+    /// Another player's turn, an open transaction, or another `perform_action` is running.
+    Busy,
+    /// The block is out of the player's reach, or the hit isn't on it
+    /// (`ServerGamePacketListenerImpl.handleUseItemOn`'s checks).
+    OutOfReach,
+    /// The block is above or below the world, under spawn protection or outside the world
+    /// border (`ServerLevel.mayInteract`): nothing is used there.
+    Protected,
+}
+
+/// An error a handle method answers when its host has no game behind it (a mod's test double):
+/// what a `Result`-returning helper refuses with, as `None` and `false` are for the others.
+pub trait NoBackend {
+    /// The error for a host without a game.
+    fn no_backend() -> Self;
+}
+impl NoBackend for ActionRefused {
+    /// No game: as for a handle whose fake is gone.
+    fn no_backend() -> Self {
+        Self::Stale
+    }
+}
+
+/// What a fake player's action did once it ran.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ActionOutcome {
+    /// Vanilla's `InteractionResult` consumed (a success or a consume), and no effect was
+    /// blocked.
+    Consumed,
+    /// Vanilla's result passed: nothing used the click.
+    Passed,
+    /// The click ran (the swing, the hooks before the use, vanilla's `Success`), but the effect
+    /// it would start was stopped, as a fake can't take part in it.
+    EffectBlocked(FakeEffect),
+}
+
+/// An effect a fake player's action is stopped from starting. Kinds may be added.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FakeEffect {
+    /// A menu or screen: a container, a station, a sign's editor.
+    Menu,
+    /// Sleeping in a bed.
+    Sleep,
+    /// Riding an entity or a vehicle.
+    Ride,
+    /// Going to another dimension.
+    ChangeDimension,
+}
+
 /// Where a block use clicked, as vanilla's `BlockHitResult` says it. Fields
 /// may be added: build one with [`BlockHit::new`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -3918,6 +4114,8 @@ mod entity_capability;
 pub use entity_capability::{
     ENTITY_AUTOMATION, ENTITY_ENERGY, ENTITY_FLUIDS, ENTITY_ITEMS, EntityCapabilityKey,
 };
+mod block_states;
+pub use block_states::{BlockStates, HostBlockStates};
 mod energy_capability;
 pub use energy_capability::{ENERGY, EnergyHandler, ITEM_ENERGY, move_energy};
 mod fluid_capability;

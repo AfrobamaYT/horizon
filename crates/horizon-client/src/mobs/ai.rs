@@ -1949,6 +1949,13 @@ fn check_despawn(m: &mut Mob, w: &MobWorld) -> bool {
     if m.species() == Species::Mannequin {
         return true;
     }
+    // `MobDespawnEvent` comes first in NeoForge's `Mob.checkDespawn`, so an answer
+    // other than `Default` skips vanilla's checks and their `nextInt(800)` draw.
+    match std::mem::take(&mut m.despawn) {
+        mod_api::NativeDespawn::Allow => return false,
+        mod_api::NativeDespawn::Deny => return true,
+        _ => {}
+    }
     // Mob.checkDespawn discards disallowed types even when persistent or NoAI.
     if w.difficulty.effective == 0.0 && !super::spawn_rules::allowed_in_peaceful(m.species()) {
         return false;
@@ -2865,7 +2872,18 @@ pub(crate) fn tick_effects(
         }
         i += 1;
     }
-    m.retain_effects(|e| e.1 > 0 || e.1 == -1);
+    let mob_id = m.id;
+    m.retain_effects(|e| {
+        if e.1 > 0 || e.1 == -1 {
+            return true;
+        }
+        // `MobEffectEvent.Expired`: canceling the expiry keeps the effect.
+        let mut cancel = false;
+        if let Some(mods) = mods {
+            mods.effect_expired(mob_id, e.0, e.2, &mut cancel);
+        }
+        cancel
+    });
     if m.effects_dirty {
         let invisible = m.has_effect("minecraft:invisibility");
         m.needs_sync |= m.invisible != invisible;
