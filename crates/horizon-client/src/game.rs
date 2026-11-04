@@ -287,6 +287,8 @@ mod native_recipes;
 mod native_render_visibility;
 mod native_server;
 mod native_shaders;
+#[cfg(test)]
+mod native_shield_totem_tests;
 mod native_sound_refs;
 mod native_ticks;
 mod native_visuals;
@@ -1269,13 +1271,14 @@ impl LevelAccess for GameLevel<'_> {
     }
     fn observe_neighbor_changed(
         &self,
+        ticks: &mut Ticks,
         pos: BlockPos,
         state: BlockStateId,
         changed: horizon_world::level::BlockId,
         moved: bool,
     ) {
         if self.native_authoritative {
-            self.native_neighbor_changed(self.dimension, pos, state, changed, moved);
+            self.native_neighbor_changed(ticks, self.dimension, pos, state, changed, moved);
         }
     }
     fn affect_neighbors_after_removal(
