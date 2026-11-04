@@ -1,5 +1,5 @@
 //! Generate the typed mod interface from native hook signatures and catalog contracts.
-pub mod catalog;
+mod catalog;
 mod host;
 use catalog::{Catalog, Contract, DrawContext, Hook, HostAccess, PartKind, PhaseContext, Side};
 use heck::ToSnakeCase;

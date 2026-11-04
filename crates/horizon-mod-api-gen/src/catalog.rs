@@ -94,6 +94,9 @@ pub struct Hook {
     pub counterparts: Counterparts,
     /// The contract version an injection's `hook_version` names.
     pub version: u64,
+    /// Whether the NeoForge counterpart event is cancellable, written by the
+    /// stamper from the counterpart's javadoc; documentation metadata, not the
+    /// contract (a hook that listens can still name a cancellable event).
     pub cancellable: Option<bool>,
 }
 
@@ -146,7 +149,6 @@ pub enum CatalogError {
     ScopeNeedsKey(String),
     ClientTargetNeedsBoth(String),
     NoHooks,
-    NoApiVersion(String),
 }
 
 impl fmt::Display for CatalogError {
@@ -176,7 +178,6 @@ impl fmt::Display for CatalogError {
                 write!(f, "helper {name}: client_target requires side both")
             }
             Self::NoHooks => f.write_str("no native hooks"),
-            Self::NoApiVersion(path) => write!(f, "{path}: no package version"),
         }
     }
 }
@@ -443,26 +444,6 @@ impl Catalog {
     }
 }
 
-/// The mod API's version: the `version` of `crates/horizon-mod-api/Cargo.toml`, the one place
-/// it is written by hand. A generated interface stamps it into its package name.
-pub fn api_version(root: &Path) -> Result<String, CatalogError> {
-    let path = root.join("crates/horizon-mod-api/Cargo.toml");
-    let text = fs::read_to_string(&path).map_err(|e| CatalogError::Read {
-        path: path.display().to_string(),
-        error: e.to_string(),
-    })?;
-    text.lines()
-        .map(str::trim)
-        .skip_while(|line| *line != "[package]")
-        .skip(1)
-        .take_while(|line| !line.starts_with('['))
-        .find_map(|line| {
-            let (key, value) = line.split_once('=')?;
-            (key.trim() == "version").then(|| value.trim().trim_matches('"').to_owned())
-        })
-        .ok_or_else(|| CatalogError::NoApiVersion(path.display().to_string()))
-}
-
 #[cfg(test)]
 impl Hook {
     /// A global listener with no counterparts, for tests of what reads a hook.
@@ -682,15 +663,5 @@ mod tests {
             CatalogError::ClientTargetNeedsBoth("h".into())
         );
         assert!(Helper::parse(json!({"name": "h", "target": "t"})).is_err());
-    }
-
-    #[test]
-    fn the_api_version_is_the_mod_api_crates_cargo_version() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let manifest =
-            std::fs::read_to_string(root.join("crates/horizon-mod-api/Cargo.toml")).unwrap();
-        let version = api_version(&root).unwrap();
-        assert!(manifest.contains(&format!("version = \"{version}\"")));
-        assert!(version.split('.').count() == 3);
     }
 }
