@@ -686,6 +686,42 @@ fn complete_hook_constants(
     ))
 }
 
+/// A catalog hook point, as a raw injection's `target` can name it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HookPoint {
+    pub name: String,
+    /// The contract version an injection's `hook_version` names.
+    pub version: u64,
+    /// The function the hook is called from: an injection's `target` for it.
+    pub target: String,
+    /// A scoped hook is a Part method alone and has no `Hooks` method.
+    pub scoped: bool,
+}
+
+/// The catalog's hook points, `native-hooks.json` and the fragments beside it, as the
+/// generator reads them.
+pub fn hook_points(root: &Path) -> Result<Vec<HookPoint>, String> {
+    let catalog = serde_json::from_str(
+        &fs::read_to_string(root.join("native-hooks.json")).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    catalog_hooks(root, &catalog)?
+        .into_iter()
+        .map(|hook| {
+            let name = hook["name"].as_str().ok_or("hook name missing")?;
+            Ok(HookPoint {
+                name: name.to_owned(),
+                version: hook["version"].as_u64().unwrap_or(1),
+                target: hook["target"]
+                    .as_str()
+                    .ok_or_else(|| format!("hook {name}: target missing"))?
+                    .to_owned(),
+                scoped: hook["mod_api"].get("scope").is_some(),
+            })
+        })
+        .collect()
+}
+
 fn catalog_hooks(root: &Path, catalog: &serde_json::Value) -> Result<Vec<CatalogHook>, String> {
     let mut hooks = catalog["hooks"]
         .as_array()
@@ -1076,6 +1112,25 @@ mod tests {
     }
     use quote::ToTokens;
     use serde_json::Value;
+    #[test]
+    fn hook_points_come_from_the_catalog_and_its_fragments() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let points = super::hook_points(&root).unwrap();
+        let frame = points.iter().find(|p| p.name == "frame").unwrap();
+        assert_eq!(frame.version, 1);
+        assert_eq!(
+            frame.target,
+            "horizon_client::game::native_hooks::Game<'_>::native_frame"
+        );
+        assert!(!frame.scoped);
+        let scoped = points
+            .iter()
+            .find(|p| p.name == "pre_remove_side_effects")
+            .unwrap();
+        assert!(scoped.scoped);
+        assert_eq!(scoped.version, 1);
+    }
+
     #[test]
     fn fragment_hooks_generate_and_duplicates_fail() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
