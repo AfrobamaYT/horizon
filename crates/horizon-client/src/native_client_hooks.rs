@@ -20,13 +20,14 @@ pub struct NativeClientHooks {
     pub living_speed: fn(u32, &str, &mut f32),
     pub living_flying_speed: fn(u32, &str, &mut f32),
     pub ender_entity_teleport: fn(u32, &str, [f64; 3], &mut [f64; 3], &mut bool),
+    pub fluid_flow: fn(&str, [i32; 3], &mut [f64; 3]),
 }
 
 static HOOKS: OnceLock<NativeClientHooks> = OnceLock::new();
 
-/// Install the process-wide callbacks once; a second installation keeps the first.
-pub fn install(hooks: NativeClientHooks) -> Result<(), NativeClientHooks> {
-    HOOKS.set(hooks)
+/// Install the process-wide callbacks once; a second installation keeps the first and answers false.
+pub fn install(hooks: NativeClientHooks) -> bool {
+    HOOKS.set(hooks).is_ok()
 }
 
 pub(crate) fn menu_slot_rules(
@@ -172,5 +173,11 @@ pub(crate) fn ender_entity_teleport(
 ) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.ender_entity_teleport)(entity, kind, from, target, cancel);
+    }
+}
+
+pub(crate) fn fluid_flow(fluid: &str, pos: [i32; 3], flow: &mut [f64; 3]) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.fluid_flow)(fluid, pos, flow);
     }
 }

@@ -26,7 +26,7 @@ use horizon_world::{
     },
     entity_fluid_tick::{self, EntityFluidTickWorld},
     fluid::{FluidHeightWorld, FluidKind, FluidState},
-    fluid_flow::{FluidFlowWorld, flow_at},
+    fluid_flow::FluidFlowWorld,
     registry::BlockStateId,
     water_splash::{self, SplashParticle, WaterSplashWorld},
 };
@@ -1422,7 +1422,7 @@ impl FluidInteractionWorld for Ticker<'_, '_, '_, '_> {
         f.camera_height_at(self, [p.x, p.y, p.z])
     }
     fn flow(&mut self, f: FluidState, p: BlockPos) -> Result<Vec3, Error> {
-        flow_at(self, f, p)
+        crate::motion::pushing_flow(self, f, p)
     }
 }
 impl EntityFluidTickWorld for Ticker<'_, '_, '_, '_> {
