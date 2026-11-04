@@ -145,20 +145,10 @@ impl Game<'_> {
         // the event left blocked), then hurtAndBreak.
         let item_damage = outcome.shield_damage;
         if item_damage > 0 && !self.creative {
-            let loss = self.wear(&stack, item_damage as u32);
-            let max = self
-                .res
-                .items()
-                .get(&stack.item)
-                .map_or(0, |i| i.max_damage);
-            let cell = self.stack_in_mut(slot);
-            if let Some(s) = cell.as_mut()
-                && max > 0
-            {
-                s.damage += loss;
-                if s.damage >= max {
-                    let broken = s.clone();
-                    *cell = None;
+            let (updated, broken) = self.damage_stack(&stack, item_damage, true);
+            if self.stack_in(slot) == Some(&stack) {
+                *self.stack_in_mut(slot) = updated;
+                if let Some(broken) = broken {
                     self.using = None;
                     // ItemStack.hurtAndBreak: onEquippedItemBroken for the hand it was used from.
                     let hand = if slot == OFFHAND_SLOT {
@@ -167,6 +157,7 @@ impl Game<'_> {
                         horizon_world::player_inventory::EquipmentSlot::MainHand
                     };
                     self.player_equipment_broke(hand, &broken);
+                    self.award_stat("broken", &broken.item, 1);
                     return;
                 }
             }
@@ -277,5 +268,44 @@ impl Game<'_> {
                 self.audio.play(sound, at, 0.8, pitch);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod durability_tests {
+    use super::*;
+    use horizon_client::motion::PlayerMotion;
+    use horizon_core::geometry::Vec3;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn shield_break_clears_the_active_use() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let mut shield = ItemStack::new("minecraft:shield", 1);
+            shield.damage = game.items().get(&shield.item).unwrap().max_damage - 1;
+            game.offhand = Some(shield);
+            game.using = Some((OFFHAND_SLOT, 20));
+            game.after_block(
+                BlockOutcome {
+                    hurt: false,
+                    blocked: 4.0,
+                    shield_damage: 1,
+                    fully_blocked: true,
+                    sound: false,
+                    knockback: false,
+                    canceled: false,
+                },
+                (None, false),
+                HurtSource {
+                    damage_type: "minecraft:generic",
+                    causing: 0,
+                    direct: 0,
+                    position: None,
+                },
+            );
+            assert!(game.offhand.is_none());
+            assert!(game.using.is_none());
+        });
     }
 }
