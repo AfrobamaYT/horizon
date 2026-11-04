@@ -14,28 +14,7 @@ use std::time::{Duration, Instant};
 use wasmtime::Store;
 use wasmtime::component::{Component, Instance, Linker};
 
-/// A value that can't cross between the game and a mod, and why: the call traps with it.
-#[derive(Debug)]
-pub(crate) struct Refused(std::borrow::Cow<'static, str>);
-
-impl Refused {
-    /// A value of the wrong shape: a list of the wrong length, a case or handler that doesn't
-    /// exist.
-    pub(crate) const SHAPE: Self = Self(std::borrow::Cow::Borrowed("a value of the wrong shape"));
-
-    /// A value its conversion refused, for the reason it gives.
-    pub(crate) fn because(why: impl std::fmt::Display) -> Self {
-        Self(why.to_string().into())
-    }
-}
-
-impl std::fmt::Display for Refused {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for Refused {}
+use crate::wasm_refused::Refused;
 
 /// Why a linked group can't run, named for the Mods page.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,7 +118,7 @@ fn intern(value: String) -> Result<&'static str, Refused> {
     if let Some(existing) = set.get(value.as_str()) {
         return Ok(existing);
     }
-    let module = CALLER.take().ok_or(Refused::SHAPE)?;
+    let module = CALLER.take().ok_or(Refused::NO_CALLER)?;
     let group = &module.group;
     let charged = group.names.fetch_add(value.len(), Ordering::Relaxed) + value.len();
     CALLER.set(Some(module.clone()));
@@ -601,7 +580,7 @@ fn hook_ids(names: Vec<String>) -> &'static [Option<HookId>] {
 /// The game's proxy of a handler the calling mod handed over (a part it registers), which calls
 /// back into it by the index it keeps the handler under.
 fn handler_of(handler: glue::horizon::mod_api::types::Handler) -> Result<WasmHandler, Refused> {
-    let module = CALLER.take().ok_or(Refused::SHAPE)?;
+    let module = CALLER.take().ok_or(Refused::NO_CALLER)?;
     CALLER.set(Some(module.clone()));
     Ok(WasmHandler {
         module,

@@ -574,6 +574,8 @@ pub(super) fn host(
             if sig.params.first().is_some_and(|(n, _)| n == "handler") {
                 args.push("self.index".to_string());
             }
+            // The arguments lowered before the call, by name.
+            let mut sent = Vec::new();
             for (i, (_, ty)) in method.params.iter().enumerate() {
                 frame_objects(types, ty, &format!("p{i}"), &mut frame);
                 if wit::wit(types, ty)?.is_some() {
@@ -583,9 +585,10 @@ pub(super) fn host(
                         lower(types, ty, &format!("(&p{i})"))
                     )
                     .unwrap();
-                    args.push(format!("a{i}"));
+                    sent.push(format!("a{i}"));
                 }
             }
+            args.extend(sent.iter().cloned());
             let (pattern, names) = unpack(&sig);
             let mut back = String::new();
             let mut next = usize::from(wit::wit(types, &method.ret)?.is_some());
@@ -622,13 +625,8 @@ pub(super) fn host(
             };
             // An argument that can't cross (a tag past the limits) isn't sent: the call answers
             // as one that didn't run, and the reason is logged.
-            let sent: Vec<&String> = args.iter().filter(|a| a.starts_with('a')).collect();
             if !sent.is_empty() {
-                let sent = sent
-                    .iter()
-                    .map(|a| a.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let sent = sent.join(", ");
                 prep = format!(
                     "let ({sent},) = match (|| -> Result<_, super::Refused> {{ {prep} Ok(({sent},)) }})() {{ Ok(a) => a, Err(why) => return super::unsent(&self.module, why, {no_answer}) }};"
                 );

@@ -3876,6 +3876,8 @@ pub(crate) use part_table::{InstalledProviders, answered, ask_providers, has_par
 mod wasm;
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
 mod wasm_host;
+#[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+mod wasm_refused;
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
