@@ -4024,12 +4024,13 @@ impl Game<'_> {
         // (`arrive_server_trips`).
         let forced_spawn = host.hub.guests[i].spawn;
         let point_level = level;
-        let (yaw, pitch) = (host.hub.guests[i].yaw, host.hub.guests[i].pitch);
+        // The fresh player faces where `hub.respawn` turns it by default,
+        // not the way the dead one faced.
         let found = super::respawn_position::Respawn {
             dim: level,
             at: horizon_core::geometry::Vec3::new(spawn[0], spawn[1], spawn[2]),
-            yaw,
-            pitch,
+            yaw: 0.0,
+            pitch: 0.0,
         };
         let decision = (server && elsewhere.is_none() && forced_spawn.is_some())
             .then(|| self.respawn_position(conn, found, None))
@@ -7502,6 +7503,58 @@ mod respawn_position_tests {
                 assert_eq!(g.position, [original[0] + 10.0, original[1], original[2]]);
                 assert_eq!(g.yaw, 180.0);
                 assert_eq!((g.spawn, &g.respawn_elsewhere), (None, &None));
+            });
+        });
+    }
+
+    /// Hears each respawn's facing and changes nothing.
+    struct Listen(Arc<Mutex<Vec<([f64; 3], f32, f32)>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Listen {
+        fn player_respawn_position(
+            &self,
+            _: &mut dyn ServerHost,
+            e: &mut PlayerRespawnPositionEvent,
+        ) {
+            self.0.lock().unwrap().push((*e.position, e.yaw, e.pitch));
+        }
+    }
+
+    /// A mod that only listens changes nothing: the guest respawns at its
+    /// point facing the respawn direction, not the way it died, and keeps
+    /// the point.
+    #[test]
+    #[ignore = "requires prepared game resources"]
+    fn a_listening_mod_leaves_the_respawn_as_it_was() {
+        let heard = Arc::default();
+        let mods = vec![ModEntry::new(
+            "listen",
+            Box::new(Listen(Arc::clone(&heard))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                open_to_lan(game);
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let mut player = guest(1);
+                player.dead = true;
+                (player.yaw, player.pitch) = (90.0, 30.0);
+                player.spawn = Some([5.5, 64.0, 5.5]);
+                game.lan.as_mut().unwrap().hub.guests.push(player);
+                game.guest_respawn(1);
+                let heard = heard.lock().unwrap();
+                let [(found, yaw, pitch)] = heard[..] else {
+                    panic!("heard {heard:?}");
+                };
+                assert_eq!((yaw, pitch), (0.0, 0.0), "told the respawn facing");
+                let g = &game.lan.as_ref().unwrap().hub.guests[0];
+                assert!(!g.dead);
+                assert_eq!(g.position, found);
+                assert_eq!((g.yaw, g.pitch), (0.0, 0.0));
+                assert_eq!(g.spawn, Some([5.5, 64.0, 5.5]));
             });
         });
     }
