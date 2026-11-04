@@ -13271,6 +13271,7 @@ impl Game<'_> {
                 damage_type: &name,
                 causing: 0,
                 direct: 0,
+                position: None,
             };
             let mut cancel = false;
             self.native_armor_hurt(
@@ -22186,7 +22187,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     {
         return Ok(());
     }
-    let _ = horizon_client::health::HURT_SERVER.set(native_hooks::hurt_server);
+    let _ = horizon_client::health::HURT_SERVER.set(native_hooks::incoming_damage);
     let _ = horizon_client::block_contact::HOOK.set(native_hooks::block_contact);
     let _ = horizon_client::health::KNOCKBACK.set(native_hooks::knockback);
     let _ = horizon_client::health::SHIELD_BLOCK.set(native_hooks::shield_block);

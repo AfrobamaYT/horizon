@@ -454,16 +454,6 @@ binding names a parameter, and a trait mod's event gains fields; a test that cal
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
 
-### Host-aware weapon damage
-
-`living_incoming_damage_v2` receives a mutable `Host`, attacker/victim network ids, damage type, optional source position, victim position
-and current view vector, and an optional weapon snapshot. `weapon.enchantments()` exposes enchantment ids and
-levels. Change `amount` or return `Flow::Cancel`; the host can read the world and play sounds through its helpers.
-It currently fires for player-to-mob melee, sweep and spear hits (including LAN guests), after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before
-v1. Unless canceled, v1 receives the modified amount. It is not a replacement for v1 on
-projectiles, player victims, dragons, mob attacks or environmental damage. There is no extra per-hit allocation
-without loaded mods.
-
 ### The build's warnings
 
 Before it builds, the launcher reads the mods' `[[native.injection]]` lists and says three things in `native/build.log` that
@@ -692,21 +682,24 @@ Both kinds use `horizon-mod.toml` for their identity. Executable `mod.wasm` file
 
 - Damage a mod can change or cancel through `native_living_incoming_damage` (NeoForge's
   `LivingIncomingDamageEvent`): where `LivingEntity.hurtServer` starts, once its guards passed (invulnerable, dead or
-  dying, fire with fire resistance; Horizon's mobs don't check the fire resistance effect there yet), with the hurt
-  entity's id and type (`minecraft:player` for a player), the damage type (`minecraft:fall`), the source's causing
-  entity (`causing`, vanilla's `DamageSource.getEntity`: a skeleton for its arrow) and direct entity (`direct`,
-  `getDirectEntity`: the arrow; the attacker itself in melee), and the amount. The entity ids are 0 for none, and for
-  the sources listed below that Horizon doesn't track yet. A mod may change the amount, or set `canceled`: nothing of
-  `hurtServer` itself happens then (no damage, hurt sound, knockback, invulnerable time, statistics or criteria), and
-  the caller acts as on a refused hit, so a blast still pushes a mob whose hit was canceled, as vanilla pushes one that
-  refused it. A canceled hit on the ender dragon still counts as landed, as vanilla's `EnderDragon.hurt` returns true
-  whatever `reallyHurt` did: the arrow is spent and the melee effects run. A ghast's canceled hit by a fireball it was
-  sent back counts as landed (`Ghast.hurtServer`). A negative amount hurts by 0 and a NaN or infinite one by
-  `Float.MAX_VALUE`, as vanilla clamps them. It fires for the players, mobs and the ender dragon the game hurts. It has
-  no `self`: the game is in the middle of the hit. It runs on the thread that ticks the world (the server thread), so
-  state a mod shares with its render thread hooks needs synchronising. `/kill` and
+  dying, fire with fire resistance; Horizon's mobs don't check the fire resistance effect there yet), on every damage
+  route, with the hit's level host (its blocks, random and own attachments), the hurt entity's id and type
+  (`minecraft:player` for a player), the hit's source (`HurtSource`: the damage type, `minecraft:fall`; the causing
+  entity, `causing`, vanilla's `DamageSource.getEntity`: a skeleton for its arrow; the direct entity, `direct`,
+  `getDirectEntity`: the arrow, the attacker itself in melee; and `position`, `getSourcePosition`), the `victim`'s
+  position and view vector, the direct entity's `weapon` (`getWeaponItem`) when Horizon knows it (a player's or mob's
+  melee hit inside its attack), and the hit's `DamageContainer` before any reduction. The entity ids are 0 for none,
+  and for the sources listed below that Horizon doesn't track yet. A mod may change the container's new damage or the
+  invulnerability ticks a fresh hit leaves (vanilla's 20), or set `canceled`: nothing of `hurtServer` itself happens
+  then (no damage, hurt sound, knockback, invulnerable time, statistics or criteria), and the caller acts as on a
+  refused hit, so a blast still pushes a mob whose hit was canceled, as vanilla pushes one that refused it. A canceled
+  hit on the ender dragon still counts as landed, as vanilla's `EnderDragon.hurt` returns true whatever `reallyHurt`
+  did: the arrow is spent and the melee effects run. A ghast's canceled hit by a fireball it was sent back counts as
+  landed (`Ghast.hurtServer`). A negative amount hurts by 0 and a NaN or infinite one by `Float.MAX_VALUE`, as vanilla
+  clamps them. It fires for the players, mobs and the ender dragon the game hurts, and runs on the thread that ticks
+  the world (the server thread), so state a mod shares with its render thread hooks needs synchronising. `/kill` and
   `native_kill_mob` don't reach it yet: they set the health to 0 instead of hurting with `minecraft:generic_kill` as
-  vanilla does.
+  vanilla does. NeoForge's reduction modifiers (`addReductionModifier`) aren't there yet.
 
 A player's damage type is the source's own. A mob's and the dragon's come from the kind of damage Horizon keeps for
 the hit, which doesn't tell every vanilla type apart yet:
@@ -728,8 +721,8 @@ The causing and direct entities are 0 for now in these cases:
 - A player's causing entity, except for a mob that shot the projectile, the mob `/damage` names, an evoker that summoned
   the fangs, a slime or magma cube that touched the player, and a mob that exploded (a sulfur cube's is guessed until
   its blast names its source)
-- A mob's causing and direct entities when a player is behind the hit (melee, arrows, tridents, blasts, TNT a player
-  lit)
+- A mob's causing and direct entities when a player is behind the hit outside the player's own attack (arrows,
+  tridents, blasts, TNT a player lit)
 - A mob's direct entity when it isn't the causing one (a projectile, a blast, a potion)
 - A falling block on a mob, whose causing and direct entity is the block in vanilla
 - The dragon's direct entity for a projectile or a blast
@@ -3334,9 +3327,14 @@ For replacement hooks, the first `Some` wins. Collection hooks call every mod. R
 Each hook method takes its host, where it has one, and one event:
 
 ```rust
-fn living_incoming_damage(&self, event: &mut LivingIncomingDamageEvent<'_>) -> Flow {
+fn living_incoming_damage(
+    &self,
+    _level: &mut dyn LevelRandomHost,
+    event: &mut LivingIncomingDamageEvent<'_>,
+) -> Flow {
     if event.kind == "minecraft:pig" {
-        event.amount *= 0.5;
+        let halved = event.container.new_damage() * 0.5;
+        event.container.set_new_damage(halved);
     }
     Flow::Continue
 }

@@ -77,6 +77,7 @@ const PVP_SOURCE: HurtSource<'static> = HurtSource {
     damage_type: "minecraft:player_attack",
     causing: 0,
     direct: 0,
+    position: None,
 };
 
 /// A sweep attack's reach to the other players (`Player.doSweepAttack`),

@@ -33,12 +33,13 @@ pub trait HurtWorld {
     fn dead_or_dying(&mut self, s: &mut HurtState<Self::Source>) -> Result<bool, Self::Error>;
     fn tag(&mut self, s: &mut HurtState<Self::Source>, tag: HurtTag) -> Result<bool, Self::Error>;
     fn fire_resistance(&mut self, s: &mut HurtState<Self::Source>) -> Result<bool, Self::Error>;
-    /// The hit once the guards above passed: it may change `damage`, and
-    /// true refuses the hit. The default does nothing.
+    /// The hit once the guards above passed (`LivingIncomingDamageEvent`): it may change the
+    /// container's new damage and post-attack invulnerability ticks, and true refuses the
+    /// hit. The default does nothing.
     fn hurt_start(
         &mut self,
         _s: &mut HurtState<Self::Source>,
-        _damage: &mut f32,
+        _container: &mut DamageContainer,
     ) -> Result<bool, Self::Error> {
         Ok(false)
     }
@@ -143,9 +144,10 @@ pub fn hurt_server<W: HurtWorld>(
         return Ok(false);
     }
     let mut container = DamageContainer::new(damage);
-    if w.hurt_start(s, &mut damage)? {
+    if w.hurt_start(s, &mut container)? {
         return Ok(false);
     }
+    damage = container.new_damage();
     if w.sleeping(s)? {
         w.stop_sleeping(s)?;
     }
@@ -181,11 +183,12 @@ pub fn hurt_server<W: HurtWorld>(
         after_pre(s, &container, cooldown);
         false
     } else {
+        // A fresh hit's cooldown: vanilla's 20, or what `LivingIncomingDamageEvent` set.
+        let cooldown = container.post_attack_invulnerability_ticks();
         s.last_hurt = damage;
-        s.cooldown = 20;
-        container.set_post_attack_invulnerability_ticks(20);
+        s.cooldown = cooldown;
         w.actually_hurt(s, &mut container, damage)?;
-        after_pre(s, &container, 20);
+        after_pre(s, &container, cooldown);
         s.hurt_duration = 10;
         s.hurt_time = s.hurt_duration;
         true

@@ -3128,17 +3128,20 @@ impl Mob {
         if self.species() == Species::Armadillo {
             amount = armadillo::reduce_damage(self, amount);
         }
-        // LivingEntity.hurtServer, past its guards: the hit's damage sequence starts.
+        // LivingEntity.hurtServer, past its guards: the hit's damage sequence starts, and
+        // `LivingIncomingDamageEvent` may change or cancel it.
         let mut container = DamageContainer::new(amount);
-        // A native mod's hook.
-        if crate::health::hurt_server_canceled(
+        let victim = self.victim();
+        if level.incoming_canceled(
             crate::health::Hurting::Mob(self, &source),
-            &mut amount,
+            victim,
+            &mut container,
         ) {
             // Ghast.hurtServer: true for a reflected fireball whatever
             // super.hurtServer did.
             return reflected;
         }
+        amount = container.new_damage();
         if amount < 0.0 {
             amount = 0.0;
         }
@@ -3248,9 +3251,11 @@ impl Mob {
         } else {
             amount
         };
-        // The cooldown the hit leaves: what is left of it within it, else vanilla's 20.
-        let cooldown = if window { self.invulnerable } else { 20 };
-        container.set_post_attack_invulnerability_ticks(cooldown);
+        // The cooldown the hit leaves: what is left of it within it, else vanilla's 20 or
+        // what `LivingIncomingDamageEvent` set.
+        if window {
+            container.set_post_attack_invulnerability_ticks(self.invulnerable);
+        }
         // Wolf.actuallyHurt keeps a hit its armor takes away from LivingEntity.actuallyHurt.
         if !absorbed {
             container.enter_pre(dealt);

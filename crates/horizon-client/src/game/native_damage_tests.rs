@@ -29,9 +29,13 @@ struct Probe(Arc<Mutex<Heard>>);
 
 #[mod_api::__subscriptions]
 impl Hooks for Probe {
-    fn living_incoming_damage(&self, event: &mut LivingIncomingDamageEvent<'_>) -> mod_api::Flow {
+    fn living_incoming_damage(
+        &self,
+        _: &mut dyn LevelRandomHost,
+        event: &mut LivingIncomingDamageEvent<'_>,
+    ) -> mod_api::Flow {
         if event.entity == 225001 {
-            event.amount = 4.0;
+            event.container.set_new_damage(4.0);
         }
         mod_api::Flow::Continue
     }
@@ -67,7 +71,7 @@ impl Hooks for Probe {
 
 /// Runs `test` in a game with the probe installed, and returns what it heard.
 fn heard(test: impl FnOnce(&mut super::Game<'_>)) -> Heard {
-    let _ = health::HURT_SERVER.set(super::native_hooks::hurt_server);
+    let _ = health::HURT_SERVER.set(super::native_hooks::incoming_damage);
     let _ = health::DAMAGE_PRE.set(super::native_hooks::damage_pre);
     let _ = health::DAMAGE_POST.set(super::native_hooks::damage_post);
     let log = Arc::new(Mutex::new(Heard::default()));

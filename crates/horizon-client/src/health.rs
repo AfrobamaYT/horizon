@@ -27,13 +27,22 @@ pub(crate) type State = HurtState<DamageTypeId>;
 
 pub use crate::world::HealthRules;
 /// A hit's `DamageSource` for [`HURT_SERVER`]: its type (`minecraft:fall`),
-/// and the entity ids of `getEntity` (`causing`) and `getDirectEntity`
-/// (`direct`), 0 for none or not known.
+/// the entity ids of `getEntity` (`causing`) and `getDirectEntity`
+/// (`direct`), 0 for none or not known, and where it comes from
+/// (`getSourcePosition`), none when not known.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HurtSource<'a> {
     pub damage_type: &'a str,
     pub causing: i32,
     pub direct: i32,
+    pub position: Option<[f64; 3]>,
+}
+/// Where the entity a hit lands on stands and looks (`getViewVector`), for
+/// [`HURT_SERVER`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Victim {
+    pub position: [f64; 3],
+    pub view: [f64; 3],
 }
 /// What `LivingEntity.hurtServer` is about to hurt, for [`HURT_SERVER`], or
 /// `LivingEntity.knockback` to push, for [`KNOCKBACK`]: the entity and the
@@ -49,13 +58,12 @@ pub enum Hurting<'a> {
     ArmorStand(i32, HurtSource<'a>),
 }
 /// The game's native damage hook (`native_living_incoming_damage`), set once by the
-/// game: `LivingEntity.hurtServer` once its guards passed. It may change the
-/// amount; true cancels the hit.
-pub static HURT_SERVER: OnceLock<fn(Hurting<'_>, &mut f32) -> bool> = OnceLock::new();
-/// Whether [`HURT_SERVER`] canceled the hit (never while it is unset).
-pub fn hurt_server_canceled(hurting: Hurting<'_>, amount: &mut f32) -> bool {
-    HURT_SERVER.get().is_some_and(|hook| hook(hurting, amount))
-}
+/// game: `LivingEntity.hurtServer` once its guards passed, in the hit's level. It may
+/// change the container's new damage and post-attack invulnerability ticks; true cancels
+/// the hit.
+pub static HURT_SERVER: OnceLock<
+    fn(DamageLevel<'_>, Hurting<'_>, Victim, &mut DamageContainer) -> bool,
+> = OnceLock::new();
 pub use horizon_world::living_damage::{DamageContainer, Reduction};
 /// The game's native damage-pre hook (`native_living_damage_pre`), set once by the game:
 /// `LivingEntity.actuallyHurt` once armor and magic took their share of a hit, before the
@@ -169,6 +177,19 @@ impl<'a> DamageLevel<'a> {
         }
         self.attachment_syncs.insert(holder);
         Ok(self.attachments)
+    }
+    /// Whether `LivingIncomingDamageEvent` canceled the hit on `hurting`, standing as
+    /// `victim` says ([`HURT_SERVER`]; never while it is unset).
+    pub fn incoming_canceled(
+        &mut self,
+        hurting: Hurting<'_>,
+        victim: Victim,
+        container: &mut DamageContainer,
+    ) -> bool {
+        HURT_SERVER
+            .get()
+            .filter(|_| self.hooks)
+            .is_some_and(|hook| hook(self.reborrow(), hurting, victim, container))
     }
     /// `LivingDamageEvent.Pre` of the hit on `hurting` ([`DAMAGE_PRE`]; nothing while it is
     /// unset).
@@ -317,6 +338,14 @@ pub fn knockback_attacker() -> i32 {
 /// native mod listens: the game only records it then).
 pub fn knockback_held() -> [Option<crate::items::ItemStack>; 2] {
     KNOCKBACK_HELD.with(|held| held.borrow().clone())
+}
+
+/// `f` of the main-hand stack of `direct`, a hit's direct entity, when it is the attacker
+/// the enclosing attack scope recorded (`DamageSource.getWeaponItem`: the direct entity's
+/// weapon), else of none. Borrowed, not cloned.
+pub fn with_weapon_of<R>(direct: i32, f: impl FnOnce(Option<&crate::items::ItemStack>) -> R) -> R {
+    let known = direct != 0 && direct == KNOCKBACK_ATTACKER.get();
+    KNOCKBACK_HELD.with_borrow(|held| f(held[0].as_ref().filter(|_| known)))
 }
 
 /// Restore the previous attacker on return or unwind, including nested guest actions.
@@ -632,6 +661,14 @@ impl PlayerHealth {
     }
 }
 impl PlayerMotion {
+    /// Where the player stands and looks (`getViewVector`), as a hit's [`Victim`].
+    pub(crate) fn victim(&self) -> Victim {
+        let view = horizon_world::view_direction::view_vector(self.pitch, self.yaw);
+        Victim {
+            position: [self.position.x, self.position.y, self.position.z],
+            view: [view.x, view.y, view.z],
+        }
+    }
     /// `hurtServer` of `amount` from `source` in `level`.
     pub fn hurt(
         &mut self,
@@ -684,10 +721,12 @@ impl PlayerMotion {
         let totem_ready = self.health.totem_ready;
         let totem_off_hand = self.health.totem_off_hand;
         let invulnerable = self.invulnerable;
+        let victim = self.victim();
         let h = &mut self.health;
         let mut environment = Environment {
             level: level.reborrow(),
             entity: self.entity_id,
+            victim,
             causing,
             invulnerable,
             client_loaded: self.client_loaded,
@@ -799,6 +838,8 @@ pub(crate) struct Environment<'a> {
     pub(crate) level: DamageLevel<'a>,
     /// The player's entity id, and the causing entity's (0: none or not known).
     pub(crate) entity: i32,
+    /// Where the player stands and looks, for the incoming-damage hook.
+    pub(crate) victim: Victim,
     pub(crate) causing: i32,
     /// Abilities.invulnerable.
     pub(crate) invulnerable: bool,
@@ -1021,6 +1062,7 @@ impl ServerDamageEnvironment<Attributes> for Environment<'_> {
             damage_type: &self.source.definition().name,
             causing: self.causing,
             direct: 0,
+            position: None,
         };
         self.level
             .damage_pre(Hurting::Player(self.entity, source), container);
@@ -1031,6 +1073,7 @@ impl ServerDamageEnvironment<Attributes> for Environment<'_> {
             damage_type: &self.source.definition().name,
             causing: self.causing,
             direct: 0,
+            position: None,
         };
         self.level
             .damage_post(Hurting::Player(self.entity, source), container);
@@ -1110,13 +1153,18 @@ impl HurtWorld for Environment<'_> {
     fn fire_resistance(&mut self, _: &mut State) -> io::Result<bool> {
         Ok(self.status.fire_resistance)
     }
-    fn hurt_start(&mut self, _: &mut State, damage: &mut f32) -> io::Result<bool> {
+    fn hurt_start(&mut self, _: &mut State, container: &mut DamageContainer) -> io::Result<bool> {
         let source = HurtSource {
             damage_type: &self.source.definition().name,
             causing: self.causing,
             direct: 0,
+            position: None,
         };
-        let canceled = hurt_server_canceled(Hurting::Player(self.entity, source), damage);
+        let canceled = self.level.incoming_canceled(
+            Hurting::Player(self.entity, source),
+            self.victim,
+            container,
+        );
         self.canceled |= canceled;
         Ok(canceled)
     }
@@ -1161,6 +1209,7 @@ impl HurtWorld for Environment<'_> {
             damage_type: &self.source.definition().name,
             causing: self.causing,
             direct: 0,
+            position: None,
         };
         let Some(block) = shield_block(Hurting::Player(self.entity, source), damage, block) else {
             return Ok(0.0);
@@ -1232,6 +1281,7 @@ impl HurtWorld for Environment<'_> {
             damage_type: &self.source.definition().name,
             causing: self.causing,
             direct: 0,
+            position: None,
         };
         // A native mod may cancel the totem: the player dies.
         if USE_TOTEM
@@ -1517,8 +1567,13 @@ mod tests {
     /// the process): for entities 9001 to 9004 and 9011 to 9013 it records the
     /// hit, cancels x1's, doubles x2's, makes 9003's -5 and 9004's NaN.
     fn set_hook() -> fn(i32) -> Vec<(String, f32)> {
-        use super::Hurting;
-        fn hook(hurting: Hurting<'_>, amount: &mut f32) -> bool {
+        use super::{DamageContainer, DamageLevel, Hurting, Victim};
+        fn hook(
+            _: DamageLevel<'_>,
+            hurting: Hurting<'_>,
+            _: Victim,
+            container: &mut DamageContainer,
+        ) -> bool {
             let (entity, seen) = match hurting {
                 Hurting::Player(e, s) | Hurting::Dragon(e, s) | Hurting::ArmorStand(e, s) => {
                     (e, format!("{} {}", s.damage_type, s.causing))
@@ -1528,20 +1583,19 @@ mod tests {
             if !matches!(entity, 9001..=9004 | 9011..=9013) {
                 return false;
             }
-            SEEN.lock().unwrap().push((entity, seen, *amount));
+            let amount = container.new_damage();
+            SEEN.lock().unwrap().push((entity, seen, amount));
             match entity {
-                9002 | 9012 => *amount *= 2.0,
-                9003 => *amount = -5.0,
-                9004 => *amount = f32::NAN,
+                9002 | 9012 => container.set_new_damage(amount * 2.0),
+                9003 => container.set_new_damage(-5.0),
+                9004 => container.set_new_damage(f32::NAN),
                 _ => {}
             }
             entity % 10 == 1
         }
+        type Hook = fn(DamageLevel<'_>, Hurting<'_>, Victim, &mut DamageContainer) -> bool;
         let installed = *super::HURT_SERVER.get_or_init(|| hook);
-        assert!(std::ptr::fn_addr_eq(
-            installed,
-            hook as fn(Hurting<'_>, &mut f32) -> bool
-        ));
+        assert!(std::ptr::fn_addr_eq(installed, hook as Hook));
         |entity| {
             let seen = SEEN.lock().unwrap();
             let hits = seen.iter().filter(|s| s.0 == entity);

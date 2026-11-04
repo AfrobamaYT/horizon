@@ -186,31 +186,6 @@ impl Game<'_> {
         let held = self.held().cloned();
         let aim = self.attacker_aim(source.attacker);
         let kind = self.mobs[index].kind.id.clone();
-        let mut amount = amount;
-        // After the invulnerability guard, as `LivingIncomingDamageEvent` fires.
-        if crate::mod_api::listened(crate::mod_api::HookId::LivingIncomingDamageV2)
-            && !self.mobs[index].refuses_damage(&source)
-        {
-            let victim = &self.mobs[index];
-            let position = victim.position;
-            let view = super::view_vector(victim.head_yaw, victim.head_pitch);
-            let mut canceled = false;
-            self.native_living_incoming_damage_v2(
-                victim.id as i32,
-                &kind,
-                super::creatures::source_damage_type(source),
-                self.player.as_ref().map_or(0, |player| player.entity_id),
-                source.from,
-                [position.x, position.y, position.z],
-                view,
-                held.as_ref(),
-                &mut amount,
-                &mut canceled,
-            );
-            if canceled {
-                return false;
-            }
-        }
         let ctx = EffectContext {
             this: Some(&kind),
             attacker: Some("minecraft:player"),
@@ -570,6 +545,7 @@ impl Game<'_> {
                     damage_type: "minecraft:player_attack",
                     causing: horizon_client::health::knockback_attacker(),
                     direct: horizon_client::health::knockback_attacker(),
+                    position: None,
                 };
                 if horizon_client::health::knockback_canceled(
                     horizon_client::health::Hurting::ArmorStand(id as i32, source),
