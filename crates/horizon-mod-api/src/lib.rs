@@ -3248,11 +3248,9 @@ pub(crate) use part_table::{
 #[macro_use]
 mod wasm_codec;
 #[cfg(target_arch = "wasm32")]
-#[doc(hidden)]
-pub mod wasm;
+mod wasm;
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
-#[doc(hidden)]
-pub mod wasm_host;
+mod wasm_host;
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));

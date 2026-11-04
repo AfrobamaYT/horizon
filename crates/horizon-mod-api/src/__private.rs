@@ -19,6 +19,11 @@ pub use crate::part_table::{
     install_parts, mark_game_thread, parts, resolve_parts,
 };
 pub use crate::phase::install_packages;
+/// The game's side of wasm mods, for `horizon-mod-wasm`.
+#[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
+pub mod wasm_host {
+    pub use crate::wasm_host::{Budgets, CallRefused, LoadError, Member, instantiate};
+}
 #[cfg(any(test, feature = "testing"))]
 pub use crate::{part_table::tests as part_tests, phase::with_test_packages};
 

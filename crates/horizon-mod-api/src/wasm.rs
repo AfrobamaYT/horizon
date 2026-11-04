@@ -143,4 +143,3 @@ mod glue {
     include!(concat!(env!("OUT_DIR"), "/wasm_guest_generated.rs"));
 }
 
-pub use glue::Guest;

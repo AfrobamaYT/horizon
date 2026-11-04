@@ -454,7 +454,6 @@ pub struct WasmMod {
     exports: glue::ModExports,
     id: &'static str,
     subscribed: &'static [Option<HookId>],
-    fuel: AtomicU64,
 }
 
 /// One of a wasm mod's registered parts or handlers, by the index the mod keeps it under.
@@ -483,11 +482,6 @@ impl NoAnswer for crate::Flow {
 }
 
 impl WasmMod {
-    /// The fuel this mod's calls have spent.
-    pub fn fuel_spent(&self) -> u64 {
-        self.fuel.load(Ordering::Relaxed)
-    }
-
     /// Runs one call with `frame`'s hosts, charging its fuel to this mod. A refused call or a
     /// trap answers `T::default()`, as no mod answering; a trap stops the whole group.
     fn call<T: NoAnswer>(
@@ -508,8 +502,6 @@ impl WasmMod {
         let previous = CURRENT.replace(&mut frame);
         let result = f(&self.exports, store);
         CURRENT.set(previous);
-        self.fuel
-            .fetch_add(budget - store.get_fuel().unwrap_or(0), Ordering::Relaxed);
         drop(entered);
         match result {
             Ok(value) => value,
@@ -534,7 +526,9 @@ impl WasmHandler {
 
 /// A member of a group: its mod id, and the prefix of its exports, `<prefix>-<interface>`.
 pub struct Member {
+    /// The mod's id.
     pub id: &'static str,
+    /// The prefix of its exports (`horizon_mods::manifest::export_prefix`).
     pub exports: String,
 }
 
@@ -570,7 +564,6 @@ pub fn instantiate(
             exports,
             id,
             subscribed: &[],
-            fuel: AtomicU64::new(0),
         };
         let names = module.call(Frame::default(), |m, store| {
             m.horizon_mod_api_hooks().call_subscribed(store)
