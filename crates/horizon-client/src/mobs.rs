@@ -2795,8 +2795,10 @@ pub struct Vehicle {
     pub velocity: Vec3,
 }
 impl PlayerView {
-    /// `LivingEntity.getVisibilityPercent` without the worn-skull scaling.
-    pub fn visibility_percent(&self) -> f64 {
+    /// `LivingEntity.getVisibilityPercent(level, looking)` before NeoForge's
+    /// event and the clamp: sneaking, invisibility by armour cover, and the
+    /// worn head's `mob_visibility` for the `looking` mob's type.
+    pub fn visibility_percent(&self, looking: Species) -> f64 {
         let mut visibility = 1.0;
         if self.sneaking {
             visibility *= 0.8;
@@ -2804,12 +2806,31 @@ impl PlayerView {
         if self.invisible {
             visibility *= 0.7 * f64::from(self.armor_cover).max(0.1);
         }
+        if let Some(head) = self.head.as_deref() {
+            visibility *= f64::from(mob_visibility(head, looking));
+        }
         visibility
     }
     /// `LivingEntity.hasEffect`, by id without namespace.
     pub fn has_effect(&self, effect: &str) -> bool {
         self.effects.contains(&effect)
     }
+}
+/// The `mob_visibility` component vanilla gives an item by default
+/// (`Item.Properties.loweredMobVisibility`): how visible its wearer is to a
+/// mob of type `looking`, 1 for every other item and mob. Only the mob
+/// heads have one, each for exactly the types named (a skeleton skull fools
+/// a skeleton, not a stray or a bogged), and all four are head equipment,
+/// the slot `PlayerView::head` holds.
+pub fn mob_visibility(item: &str, looking: Species) -> f32 {
+    let lowered = match item {
+        "minecraft:skeleton_skull" => looking == Species::Skeleton,
+        "minecraft:zombie_head" => looking == Species::Zombie,
+        "minecraft:creeper_head" => looking == Species::Creeper,
+        "minecraft:piglin_head" => matches!(looking, Species::Piglin | Species::PiglinBrute),
+        _ => false,
+    };
+    if lowered { 0.5 } else { 1.0 }
 }
 /// `Animal.finalizeSpawnChildFromBreeding`: draw only when mob drops are enabled.
 pub fn breeding_experience(parent: &mut Mob, mob_drops: bool) -> Option<u32> {
