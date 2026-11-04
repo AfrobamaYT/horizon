@@ -94,9 +94,18 @@ fn read(root: &Path, file: &ConfigPath) -> Result<Vec<u8>, ConfigFileError> {
     Ok(bytes)
 }
 
+/// Whether `name` is the temporary file of a write, `<name>.<pid>-<n>.tmp`.
+fn is_write_temp(name: &str) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    name.strip_suffix(".tmp")
+        .and_then(|rest| rest.rsplit_once('.'))
+        .and_then(|(_, tail)| tail.split_once('-'))
+        .is_some_and(|(pid, n)| digits(pid) && digits(n))
+}
+
 /// Written beside the file, then renamed over it. The temporary name starts
-/// with the file's own, so it stays the mod's own, and `list` shows it, if a
-/// crash leaves it behind.
+/// with the file's own, so it stays the mod's own; `list` leaves it out, so a
+/// scan never meets a half-written file, nor one a crash left behind.
 fn write(root: &Path, file: &ConfigPath, bytes: &[u8]) -> Result<(), ConfigFileError> {
     static WRITES: AtomicU64 = AtomicU64::new(0);
     if bytes.len() as u64 > CONFIG_FILE_MAX {
@@ -137,11 +146,12 @@ fn list(root: &Path, folder: &ConfigPath) -> Result<Vec<ConfigEntry>, ConfigFile
         }
         // A link is left out, never followed (`DirEntry::metadata` doesn't).
         let meta = entry.metadata().map_err(io)?;
-        if meta.file_type().is_symlink() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if meta.file_type().is_symlink() || is_write_temp(&name) {
             continue;
         }
         entries.push(ConfigEntry {
-            name: entry.file_name().to_string_lossy().into_owned(),
+            name,
             stat: stat_of(&meta),
         });
     }
@@ -247,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn a_file_named_for_the_mod_cant_block_its_folder_and_a_leftover_temp_is_its_own() {
+    fn a_file_named_for_the_mod_cant_block_its_folder_and_list_hides_write_temps() {
         let root = Root::new("folder-name");
         let root = &root.0;
         as_mod("fd", || {
@@ -259,8 +269,16 @@ mod tests {
             write(root, &path("fd/state.json"), b"{}").unwrap();
             // What a crash between the temp file and the rename leaves behind.
             fs::write(root.join("fd.json.1-0.tmp"), b"half").unwrap();
-            assert!(path("fd.json.1-0.tmp").owned_by("fd"));
+            fs::write(root.join("fd/state.json.1-0.tmp"), b"half").unwrap();
+            fs::write(root.join("fd/notes.tmp"), b"mine").unwrap();
             assert_eq!(read(root, &path("fd.json.1-0.tmp")).unwrap(), b"half");
+            // `list` leaves out a write's temporary file, not a mod's own `.tmp`.
+            let names: Vec<_> = list(root, &path("fd"))
+                .unwrap()
+                .into_iter()
+                .map(|e| e.name)
+                .collect();
+            assert_eq!(names, ["notes.tmp", "state.json"]);
         });
     }
 
