@@ -489,6 +489,16 @@ pub(crate) fn answered<T: ?Sized>(
     }
 }
 
+/// Whether any mod registered a provider of entity capability `key`, for any entity type: one
+/// table lookup, no allocation, so the game's own lookups skip all their work where none did.
+pub fn has_entity_providers<T: ?Sized + 'static, C: 'static>(
+    key: &EntityCapabilityKey<T, C>,
+) -> bool {
+    installed()
+        .and_then(|installed| installed.keys.entity_capabilities.get(key.name))
+        .is_some_and(|by_kind| !by_kind.is_empty())
+}
+
 /// The providers mods registered for capability `name`, of the things `by` names, for the id
 /// `id` works out, in registration order. With none registered for `name`, `id` isn't asked.
 pub(crate) fn providers<'h, S: AsRef<str>>(
@@ -579,6 +589,50 @@ impl<T: ?Sized + 'static> BlockEntityProviders<T> {
             |_| game,
         );
         match answer {
+            Answer::Mod(found) => Some(found),
+            Answer::Game | Answer::Nobody => None,
+        }
+    }
+}
+
+/// The providers mods registered for `key` and the type of `entity`, for the game's own
+/// lookups (a hopper's): none where no mod registered one, so a vanilla container entity's
+/// lookup costs one table check and allocates nothing, and the game needn't work out its own
+/// answer. [`EntityProviders::ask`] then asks them, as the game's lookups for block entities do.
+pub fn entity_providers<T: ?Sized + 'static, C: Copy + 'static>(
+    key: &EntityCapabilityKey<T, C>,
+    host: &dyn Host,
+    entity: EntityRef,
+    context: C,
+) -> Option<EntityProviders<T, C>> {
+    let parts = providers(ProvidedBy::Entity, key.name, host, |host| entity.kind(host));
+    (!parts.is_empty()).then_some(EntityProviders {
+        parts,
+        entity,
+        context,
+        handler: PhantomData,
+    })
+}
+
+/// An entity's providers of one capability ([`entity_providers`]).
+pub struct EntityProviders<T: ?Sized + 'static, C: 'static> {
+    parts: &'static [CapabilityPart],
+    entity: EntityRef,
+    context: C,
+    handler: PhantomData<fn() -> Box<T>>,
+}
+
+impl<T: ?Sized + 'static, C: Copy + 'static> EntityProviders<T, C> {
+    /// A mod's handler where the game would answer with its own unless a mod comes first: one
+    /// registered `before_game`, else, where the game has no answer (`game`), the first mod's.
+    pub fn ask(self, host: &mut dyn ServerHost, game: bool) -> Option<Capability<T>> {
+        let (entity, context) = (self.entity, self.context);
+        match ask_providers::<EntityProvider<T, C>, T>(
+            self.parts,
+            host,
+            |provider, host| provider(host, entity, context),
+            |_| game,
+        ) {
             Answer::Mod(found) => Some(found),
             Answer::Game | Answer::Nobody => None,
         }
@@ -1824,6 +1878,9 @@ pub(crate) mod tests {
             })
         }
         fn entity_container_size(&self, _: u32) -> Option<usize> {
+            None
+        }
+        fn entity_automation_size(&self, _: u32) -> Option<usize> {
             None
         }
         // The player holds hotbar slot 5.
