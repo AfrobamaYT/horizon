@@ -259,6 +259,27 @@ impl Game<'_> {
         }
     }
 
+    /// `LivingEntity.getKillCredit`: the remembered player takes precedence,
+    /// even if the player cannot be resolved; otherwise the last hurting mob.
+    /// Unlike vanilla, a mob that changed dimension cannot be resolved.
+    pub(super) fn native_living_kill_credit(&self, living: LivingRef) -> Option<EntityRef> {
+        let credit = match self.native_living_target(living)? {
+            Target::Player => self.combat.player_credit(self.world.game_time),
+            Target::Guest(conn) => self
+                .guest_combat
+                .get(&conn)
+                .and_then(|combat| combat.player_credit(self.world.game_time)),
+            Target::Mob(id) => self.last_hurt_by_player.get(&id).copied(),
+            _ => None,
+        };
+        if let Some(credit) = credit {
+            let conn = self.resolve_player_credit(credit)?;
+            let id = self.player_entity_id_by_connection(conn)?;
+            return self.native_entity(u32::try_from(id).ok()?);
+        }
+        self.native_living_last_attacker(living)
+    }
+
     /// `LivingEntity.getLastHurtByMob`: the entity that last hurt this one,
     /// within a hundred ticks of the hurt (the window of
     /// `CombatTracker.getKiller`'s credit and a mob's hurt-by memory, as
@@ -738,6 +759,51 @@ mod tests {
             assert_eq!(dragon_handle.health(game), None);
             assert_eq!(dragon_handle.max_health(game), None);
             assert_eq!(dragon_handle.alive(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn kill_credit_prefers_the_player_reference_and_never_falls_back_when_unresolved() {
+        use horizon_client::mobs::{Damage, Mob};
+        use horizon_core::geometry::Vec3;
+
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            let wolf = game.res.mob_types().get("minecraft:wolf").unwrap().clone();
+            game.mobs.push(Mob::new(100, pig, Vec3::ZERO, 0.0));
+            let mut wolf = Mob::new(101, wolf, Vec3::ZERO, 0.0);
+            wolf.extra.tame = true;
+            wolf.extra.owner = Some(horizon_client::lan::playerdata::uuid_ints(12));
+            game.mobs.push(wolf);
+            game.mobs[0].ai.last_hurt_by = Some(Who::Mob(101));
+            game.mobs[0].ai.last_hurt_by_time = game.mobs[0].age as i32;
+            let living = game
+                .native_living(game.native_entity(100).unwrap())
+                .unwrap();
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(101));
+
+            // A player hit followed by a mob hit keeps the player credit.
+            game.as_guest(12, |game| game.remember_mob_player_credit(100))
+                .unwrap();
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
+            // A tame wolf's hit also records its owner's reference.
+            game.resolve_player_responsible(100, Damage::mob(101, [0.0; 3]));
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
+            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
+            game.lan.as_mut().unwrap().hub.guests[0].placed = false;
+            assert_eq!(living.kill_credit(game), None);
+
+            // Once the player reference expires, the mob can be credited.
+            game.last_hurt_by_player.remove(&100);
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(101));
+            // A mob that has left this level is no longer resolvable by its old ID.
+            game.mobs[1].removed = true;
+            assert_eq!(living.kill_credit(game), None);
+            game.mobs[1].removed = false;
+            game.mobs[0].age += 101;
+            assert_eq!(living.kill_credit(game), None);
         });
     }
 

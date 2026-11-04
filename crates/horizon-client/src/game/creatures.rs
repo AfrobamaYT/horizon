@@ -1628,7 +1628,7 @@ impl Game<'_> {
     /// connection `conn` (None once they left), else the player in place
     /// (None on a server, which has none of its own).
     /// The entity id of the player `killer_uuid` names for `conn`.
-    fn love_cause_entity_id(&self, conn: Option<u32>) -> Option<i32> {
+    pub(super) fn player_entity_id_by_connection(&self, conn: Option<u32>) -> Option<i32> {
         match conn {
             Some(conn) if self.lan_acting != Some(conn) => {
                 Some(self.lan.as_ref()?.hub.guest(conn)?.entity_id)
@@ -3511,7 +3511,7 @@ impl Game<'_> {
                 .or(self.love_cause.get(&partner))
                 .copied();
             let player = conn.and_then(|c| self.killer_uuid(c));
-            let player_entity_id = conn.and_then(|c| self.love_cause_entity_id(c));
+            let player_entity_id = conn.and_then(|c| self.player_entity_id_by_connection(c));
             let mut cancel = false;
             self.native_baby_entity_spawn(
                 parent,
