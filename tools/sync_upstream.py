@@ -5,17 +5,22 @@ Pass the full SHA of an upstream commit whose own ci.yml passed:
     python3 tools/sync_upstream.py <sha>
 Run from a clean fork checkout. On a conflict, resolve it by hand, then run
     python3 tools/sync_upstream.py --continue
-Review converted declarations and duplicate moments before committing the sync.
+Review converted declarations and duplicate moments, and run rustfmt --edition
+2024 on the generated Rust files before committing the sync.
 The script does not decide which upstream CI run is eligible.
 """
 import argparse
+import importlib.util
 from collections import defaultdict
 from pathlib import Path
 import re
 import subprocess
 import sys
 
-from convert_sync_fragment import convert
+spec = importlib.util.spec_from_file_location(
+    'convert_sync_fragment', Path(__file__).with_name('convert_sync_fragment.py'))
+converter = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(converter)
 
 ROOT = Path(__file__).resolve().parent.parent
 HOOKS = Path('crates/horizon-mod-api/src/hooks')
@@ -45,7 +50,7 @@ def finish():
     index = out / 'mod.rs'
     for path in sorted(fragments.glob('*.json')):
         try:
-            stem = convert(path, out)
+            stem = converter.convert(path, out)
         except (ValueError, KeyError, TypeError, OSError) as error:
             raise ValueError(f'cannot convert {path.relative_to(ROOT)}: {error}') from error
         lines = index.read_text().splitlines(keepends=True)

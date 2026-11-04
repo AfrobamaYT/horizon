@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Convert retired fragments to hooks/<name>.rs, touching nothing else.
+"""Convert one retired fragment with convert(path, out).
 
-Usage, from a checkout root: python3 convert-fragment.py tools/native-hook-fragments/a.json [b.json ...]
-Writes crates/horizon-mod-api/src/hooks/<stem>.rs for each (rustfmt it after), prints the `mod <stem>;` lines
-to insert in hooks/mod.rs in alphabetical order, and does not delete the JSON (git rm it).
+The sync tool inserts the module line and removes the JSON. Run rustfmt
+--edition 2024 on the generated Rust files before committing the sync.
 """
 import json, re
 from pathlib import Path

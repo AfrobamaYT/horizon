@@ -2,13 +2,11 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 TOOLS = Path(__file__).resolve().parents[1] / 'tools'
-sys.path.insert(0, str(TOOLS))
 spec = importlib.util.spec_from_file_location('sync_upstream', TOOLS / 'sync_upstream.py')
 sync = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sync)
@@ -41,8 +39,7 @@ class SyncTests(unittest.TestCase):
         sync.finish()
         text = (self.hooks / 'example.rs').read_text()
         lines = [line.strip() for line in text.splitlines() if line.strip().startswith('///')]
-        from convert_sync_fragment import decode
-        self.assertEqual(decode(lines), doc)
+        self.assertEqual(sync.converter.decode(lines), doc)
         self.assertEqual((self.hooks / 'mod.rs').read_text(), 'mod base;\nmod example;\nmod zebra;\n')
         self.assertFalse((self.fragments / 'example.json').exists())
         staged = subprocess.check_output(['git', 'diff', '--cached', '--name-only'], cwd=self.root, text=True)
