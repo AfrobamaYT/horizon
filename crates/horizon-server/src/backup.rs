@@ -3,7 +3,7 @@
 //! (`save-off`, `save-all`), and writes again once the zip is done (`save-on`), so players stay online.
 //! A restore puts the backup's world in place of the current one, which is moved aside, never deleted.
 
-use horizon_server_launch::config::{self, Config};
+use horizon_server_launch::config::Config;
 use std::{
     fs::File,
     io::{BufWriter, Write},
@@ -351,6 +351,7 @@ pub fn restore_dimension(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horizon_server_launch::config;
 
     #[test]
     fn names_sort_by_time() {
