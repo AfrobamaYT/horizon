@@ -2125,6 +2125,11 @@ handle, an entity the client doesn't track and a level it doesn't show:
   the world's height reads as `None`. `level.brightness(host, LightLayer::Block | Sky, pos)` reads the stored light
   (`getBrightness`) the same way, as the game's own light query holds it, and is `None` where the block read is.
   `level.fluid_state(host, pos)` reads the fluid there the same way.
+  `level.fluid_flow(host, pos)` (`FluidState.getFlow`) reads its current as a `Vec3`, through the function that pushes
+  entities, so a `fluid_flow` listener's change is what it reads: zero where no fluid flows, `None` where the block read
+  is. It reads on a client too, from the client's own copy of the level. It costs what one entity's push by that block
+  does: up to twelve block reads around `pos` (the four neighbours and below them; falling fluid also checks
+  their faces), with no allocation, plus the `fluid_flow` listeners.
 - `level.seed(host)`, `difficulty` (`"normal"`, as `/difficulty` names it), `game_rule(host, "keep_inventory")` (a
   `GameRuleValue`, `Bool` or `Int`; None for an unknown rule), `weather` (rain and thunder levels, 0.0 to 1.0; both 0
   where the level has no weather), `is_raining` and `is_thundering` read its world settings.
@@ -2780,7 +2785,7 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 
 ## Fluid flow
 
-- **`native_fluid_flow(fluid, pos, flow)`**: edit the current (`FlowingFluid.getFlow`) of the fluid block at `pos` as it pushes an entity: the player, mobs, dropped items, experience orbs, armor stands and arrows all read it through the one shared helper. It runs for each fluid block the entity touches in a tick, before the vanilla scale for shallow fluid, so keep the listener short. The renderer's own flow vector (a fluid texture's rotation) is not changed. It fires on both sides and on the client's replayed ticks, so a mod registers on both and keeps the listener a pure function of its inputs. With no listener the cost is one `listened` branch per fluid block. Beyond NeoForge (no counterpart); Diverges from upstream: new hook.
+- **`native_fluid_flow(fluid, pos, flow)`**: edit the current (`FlowingFluid.getFlow`) of the fluid block at `pos` as it pushes an entity: the player, mobs, dropped items, experience orbs, armor stands and arrows all read it through the one shared helper. It runs for each fluid block the entity touches in a tick, before the vanilla scale for shallow fluid, so keep the listener short. The renderer's own flow vector (a fluid texture's rotation) is not changed. `level.fluid_flow(host, pos)` reads the edited current. It fires on both sides and on the client's replayed ticks, so a mod registers on both and keeps the listener a pure function of its inputs. With no listener the cost is one `listened` branch per fluid block. Beyond NeoForge (no counterpart); Diverges from upstream: new hook.
 
 ## Minecart pass
 
