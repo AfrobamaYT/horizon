@@ -3677,6 +3677,64 @@ pub(crate) mod tests {
         });
     }
 
+    struct AppleSets;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for AppleSets {
+        fn recipe_property_sets(
+            &self,
+            _: &mod_api::DataLoadContext<'_>,
+            event: &mut mod_api::RecipePropertySetsEvent<'_>,
+        ) {
+            for set in ["furnace_input", "brewing_reagent", "smithing_addition"] {
+                event.additions.push(mod_api::RecipePropertyAddition::new(
+                    set,
+                    vec!["minecraft:apple".to_owned()],
+                ));
+            }
+        }
+    }
+
+    /// What a mod adds to the recipe property sets is what the furnace's
+    /// shift-click, the brewing stand's reagent slot and the smithing
+    /// table's addition slot take, against the real recipes: with no mod
+    /// an apple goes to none of them.
+    #[test]
+    fn mod_additions_to_the_property_sets_reach_every_reader() {
+        let check = |added: bool| {
+            with_menu(Kind::Furnace("smelting"), |env, menu| {
+                menu.creative = false;
+                menu.set_slot(env, 30, stack("apple", 5));
+                let to = menu.quick_move_landing(env, 30);
+                assert_eq!(to, if added { vec![0] } else { vec![3] });
+                let apple = stack("apple", 1).unwrap();
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client")
+                    .join(horizon_core::VANILLA_VERSION);
+                let defaults = horizon_world::item_defaults::read(&root).unwrap();
+                let stations = crate::stations::StationData::load(
+                    &root,
+                    env.items,
+                    &PackOverlay::NONE,
+                    &defaults,
+                    &crate::test_resources::server_load(),
+                );
+                assert_eq!(stations.brewing.is_reagent(&apple), added);
+                assert_eq!(env.station_recipes.smithing_accepts(2, &apple), added);
+                // Vanilla's own entries stay.
+                assert!(
+                    stations
+                        .brewing
+                        .is_reagent(&stack("nether_wart", 1).unwrap())
+                );
+            })
+        };
+        check(false);
+        mod_api::testing::with_mods(
+            vec![mod_api::ModEntry::new("apples", Box::new(AppleSets))].into(),
+            || check(true),
+        );
+    }
+
     /// `FurnaceResultSlot.checkTakeAchievements` as `ItemSmeltedEvent` sees
     /// it: a pickup passes the taken stack and its count; a shift-click with
     /// room for 2 of 64 passes the 64 with 2 removed (`onQuickCraft`), then
