@@ -58,6 +58,42 @@ Top-level `[dependencies]` declares other code mods by id: a semver requirement 
 Content-only mods cannot declare nonempty dependencies yet
 ([Dependencies between trait mods](../concepts/trait-mods.md#dependencies-between-trait-mods)).
 
+## Original Java jar layers
+
+Content and code mods can list ordered `[[jar]]` references. Use
+[`cargo horizon-mod use-jar`](../how-to/content-mods.md#java-jars-as-external-assets) to record the
+original `id`, `version` and exact file's `sha512`, without copying it into the mod.
+
+**Pack order.** From bottom to top, assets use vanilla, then each mod's jars in
+`[[jar]]` order, then that mod's own files, with later mods above earlier ones and
+player resource packs above all mods. The mod's own files win over its jars for
+the same path (the log lists each duplicate asset path once at load). Files every
+resource pack stacks (atlases, lang, sounds, blockstates) merge in that same order
+through the normal pack merger.
+
+Data uses vanilla, then each mod's jars in `[[jar]]` order and that mod's own
+`data/`, then the world's enabled datapacks. Later mods override earlier ones,
+tags merge with their normal replacement rules, and a later recipe replaces an
+earlier recipe at the same id. A jar may use any namespace. Only its passive
+`assets/` and `data/` participate: Java classes and the jar's own pack metadata are
+not loaded.
+
+Original jars stay in `<game home>/jars/<sha512>.jar`; no bytes are copied into a
+mod. The launcher checks and supplies exact files, and the existing ZIP readers
+write only the decoded resource cache. The complete ordered reference list,
+including version, contributes to the composed root's stamp, so changing it
+rebuilds on the next resource load. Server `/reload` uses the accepted inputs of
+that composed root, not another package scan.
+
+**Unavailable originals.** Launcher preparation refuses before a native build or
+game launch and names all requiring mods, the original jar and its expected
+cache path. Direct game resource or world loading with a missing native
+requirement fails as a whole; it never publishes code without the matching data.
+A missing input during `/reload` reports the typed failure to the command source
+and keeps the previous data and composed root. Content-only mods have no code to
+strand: each whole mod can instead be refused on its Mods page row, including
+every owner of a shared missing file. The game never downloads jars.
+
 ## Source paths
 
 A code package contains root `Cargo.toml`, optional `build.rs`, `.rs` and `.toml` files under `src/`,
