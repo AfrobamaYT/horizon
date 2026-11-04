@@ -112,7 +112,7 @@ pub(super) fn wanted(
                     })?,
                     None => key,
                 };
-                if package == "horizon-client" && path == "../../crates/horizon-client" {
+                if package == "horizon-mod-api" && path == "../../crates/horizon-mod-api" {
                     continue;
                 }
                 validate_sibling_path(
@@ -438,7 +438,7 @@ mod tests {
 version = 4
 
 [[package]]
-name = "horizon-client"
+name = "horizon-mod-api"
 version = "0.1.0"
 
 [[package]]
@@ -661,10 +661,10 @@ checksum = "def"
         assert!(super::wanted(stage.root(), &declared).is_ok());
         let root = stage.root().join(DIR).join("bake/Cargo.toml");
         for (path, valid) in [
-            ("../../crates/horizon-client", true),
-            ("../../other/horizon-client", false),
+            ("../../crates/horizon-mod-api", true),
+            ("../../other/horizon-mod-api", false),
         ] {
-            fs::write(&root, format!("[package]\nname='bake'\nversion='1'\n[dependencies]\nclient={{package='horizon-client',path='{path}'}}\n")).unwrap();
+            fs::write(&root, format!("[package]\nname='bake'\nversion='1'\n[dependencies]\napi={{package='horizon-mod-api',path='{path}'}}\n")).unwrap();
             assert_eq!(super::wanted(stage.root(), &BTreeMap::new()).is_ok(), valid);
         }
     }

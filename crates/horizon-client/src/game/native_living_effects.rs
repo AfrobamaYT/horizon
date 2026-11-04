@@ -13,29 +13,29 @@ use super::potions::mob_can_be_affected;
 use horizon_client::brewing;
 use horizon_client::effects::{EffectInstance, PlayerEffects};
 use horizon_client::mobs::Mob;
-use horizon_client::mod_api::{LivingRef, NativeActiveEffect};
+use mod_api::{LivingRef, NativeActiveEffect};
 
 /// A player's effect as the API's: the id namespaced as the registry has it.
 fn active_effect(e: &EffectInstance) -> NativeActiveEffect {
-    NativeActiveEffect {
+    NativeActiveEffect::from(mod_api::__private::built::NativeActiveEffect {
         id: brewing::namespaced(e.id),
         duration: e.duration,
         amplifier: e.amplifier,
         ambient: e.ambient,
         visible: e.visible,
-    }
+    })
 }
 
 /// A mob's effect as the API's: mobs keep the effect itself as
 /// (id, ticks, amplifier), the ambient and particle flags in their own lists.
 fn mob_effect(m: &Mob, e: &(&'static str, i32, i32)) -> NativeActiveEffect {
-    NativeActiveEffect {
+    NativeActiveEffect::from(mod_api::__private::built::NativeActiveEffect {
         id: e.0,
         duration: e.1,
         amplifier: e.2,
         ambient: m.extra.ambient_effects.contains(&e.0),
         visible: !m.extra.hidden_effects.contains(&e.0),
-    }
+    })
 }
 
 impl Game<'_> {
@@ -228,17 +228,17 @@ impl Game<'_> {
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::mobs::Mob;
-    use horizon_client::mod_api::{EntityRef, LivingRef, NativeActiveEffect, NativeWorldEpoch};
     use horizon_core::geometry::Vec3;
+    use mod_api::{EntityRef, LivingRef, NativeActiveEffect, NativeWorldEpoch};
 
     fn effect(id: &'static str, duration: i32, amplifier: i32) -> NativeActiveEffect {
-        NativeActiveEffect {
+        NativeActiveEffect::from(mod_api::__private::built::NativeActiveEffect {
             id,
             duration,
             amplifier,
             ambient: false,
             visible: true,
-        }
+        })
     }
 
     #[test]

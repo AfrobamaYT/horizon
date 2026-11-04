@@ -90,7 +90,7 @@ impl TraitInjection {
         let hook = name.to_string();
         let call = quote! {
             let _call = owner.enter(#hook);
-            let mut event = crate::mod_api::#event { #(#inits),* };
+            let mut event = mod_api::#event { #(#inits),* };
             let _flow = owner.hooks.#name(&mut event);
             #(#write_back)*
         };
@@ -102,7 +102,7 @@ impl TraitInjection {
                 quote!(-> core::ops::ControlFlow<()>),
                 quote! {
                     #call
-                    if _flow == crate::mod_api::Flow::Cancel {
+                    if _flow == mod_api::Flow::Cancel {
                         return core::ops::ControlFlow::Break(());
                     }
                     core::ops::ControlFlow::Continue(())
@@ -120,10 +120,10 @@ impl TraitInjection {
         };
         quote! {
             fn horizon_trait_dispatch(#(#params),*) #output {
-                let Some(owner) = crate::mod_api::mods().get(#owner) else {
+                let Some(owner) = mod_api::mods().get(#owner) else {
                     return #absent;
                 };
-                if !crate::mod_api::subscribed_by(#owner, crate::mod_api::hook_ids::#name) {
+                if !mod_api::subscribed_by(#owner, mod_api::hook_ids::#name) {
                     return #absent;
                 }
                 #result
@@ -182,12 +182,9 @@ impl TraitInjection {
             (false, false) => quote!(),
         };
         let names = self.parameters.iter().map(|(n, _)| n);
-        let doc = format!(
-            " What [`Hooks::{name}`] is told. Fields may be added: the struct is `#[non_exhaustive]`."
-        );
+        let doc = format!(" What [`Hooks::{name}`] is told.");
         quote! {
             #[doc = #doc]
-            #[non_exhaustive]
             pub struct #event #generics { #(pub #names: #types),* }
         }
         .to_string()

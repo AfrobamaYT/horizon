@@ -2,19 +2,17 @@
 //! any assets, and apply them on the thread that owns the game. The initial
 //! load runs the same three steps: the loader thread registers and stages,
 //! and the game applies once it exists (`start_game`).
+use mod_api::__private::game::*;
 
 #[cfg(test)]
 #[path = "client_reload_tests.rs"]
 mod tests;
 use super::Game;
-use horizon_client::{
-    datapack::DataPack,
-    mod_api::{
-        ClientHost, ClientReloadContext, ClientReloadListener, ClientReloadListeners, HookId, Host,
-        reload::{
-            PreparedStep, ReloadStageError, apply_listeners, prepare_listeners, reload_files,
-        },
-    },
+use super::packs::reload_files;
+use horizon_client::datapack::DataPack;
+use mod_api::{
+    __private::reload::{PreparedStep, ReloadStageError, apply_listeners, prepare_listeners},
+    ClientHost, ClientReloadContext, ClientReloadListener, ClientReloadListeners, HookId, Host,
 };
 
 /// One client reload step to run later on the game-owning thread: a mod
@@ -34,7 +32,7 @@ impl Game<'_> {
     /// listened to.
     pub(super) fn register_client_reload_listeners(&self) -> ClientReloadListeners {
         let mut listeners = ClientReloadListeners::new();
-        if crate::mod_api::listened(HookId::AddClientReloadListeners) {
+        if mod_api::__private::listened(HookId::AddClientReloadListeners) {
             self.native_add_client_reload_listeners(&mut listeners);
         }
         listeners
@@ -46,8 +44,8 @@ impl Game<'_> {
 /// fires on a client whose resources are not loaded either.
 pub(super) fn register_startup_client_reload_listeners() -> ClientReloadListeners {
     let mut listeners = ClientReloadListeners::new();
-    if crate::mod_api::listened(HookId::AddClientReloadListeners) {
-        crate::mod_api::dispatch_add_client_reload_listeners(&StartupClientHost, &mut listeners);
+    if mod_api::__private::listened(HookId::AddClientReloadListeners) {
+        mod_api::dispatch_add_client_reload_listeners(&StartupClientHost, &mut listeners);
     }
     listeners
 }

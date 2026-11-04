@@ -4,7 +4,7 @@ use super::{
     commands::Target,
     minecarts::{CartKind, Minecart},
 };
-use horizon_client::mod_api::{EntityRef, MinecartRef, NativeMinecartKind};
+use mod_api::{EntityRef, MinecartRef, NativeMinecartKind};
 
 impl Game<'_> {
     fn native_minecart_index(&self, cart: MinecartRef) -> Option<usize> {
@@ -155,9 +155,10 @@ impl Game<'_> {
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use super::*;
-    use horizon_client::{entities::ArmorStand, mod_api::NativeWorldEpoch};
+    use horizon_client::entities::ArmorStand;
     use horizon_core::geometry::Vec3;
     use horizon_world::nbt::Tag;
+    use mod_api::NativeWorldEpoch;
 
     fn spawn(game: &mut Game<'_>, id: u32, kind: CartKind) -> MinecartRef {
         game.carts.push(Minecart::new(id, kind, Vec3::ZERO));

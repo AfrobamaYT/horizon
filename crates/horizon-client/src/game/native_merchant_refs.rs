@@ -7,9 +7,9 @@ use horizon_client::{
         render::{PROFESSIONS, VILLAGER_TYPES},
         villager,
     },
-    mod_api::{EntityRef, MerchantRef, PlayerRef},
 };
 use horizon_world::identifier::Identifier;
+use mod_api::{EntityRef, MerchantRef, PlayerRef};
 
 /// The index of a `minecraft:` registry id in a table of bare names.
 fn registry_index(id: &str, names: &[&str]) -> Option<u8> {
@@ -312,10 +312,9 @@ impl Game<'_> {
 pub(super) mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use super::*;
-    use horizon_client::{
-        items::ItemStack, merchant::ItemCost, mobs::Mob, mod_api::NativeWorldEpoch,
-    };
+    use horizon_client::{items::ItemStack, merchant::ItemCost, mobs::Mob};
     use horizon_core::geometry::Vec3;
+    use mod_api::NativeWorldEpoch;
 
     pub(in crate::game) fn offer(cost: &str, result: &str) -> MerchantOffer {
         MerchantOffer {

@@ -1,5 +1,4 @@
 use super::*;
-use crate::mod_api;
 
 #[test]
 #[ignore = "optimized hot-hook microbenchmark"]
@@ -14,16 +13,16 @@ fn subscriber_tick_benchmark() {
     struct Listener;
     #[mod_api::__subscriptions]
     impl Hooks for Listener {
-        fn tick(&self, _: crate::mod_api::HostSide, event: &mut TickEvent) {
+        fn tick(&self, _: crate::HostSide, event: &mut TickEvent) {
             black_box(event);
         }
     }
     trait Before {
-        fn tick(&self, _: crate::mod_api::HostSide, _: &mut TickEvent) {}
+        fn tick(&self, _: crate::HostSide, _: &mut TickEvent) {}
     }
     impl Before for Quiet {}
     impl Before for Listener {
-        fn tick(&self, _: crate::mod_api::HostSide, event: &mut TickEvent) {
+        fn tick(&self, _: crate::HostSide, event: &mut TickEvent) {
             black_box(event);
         }
     }
@@ -129,7 +128,7 @@ fn scoped_mods_dispatch_and_restore_after_panic() {
     struct Counter(Arc<AtomicUsize>);
     #[mod_api::__subscriptions]
     impl Hooks for Counter {
-        fn tick(&self, _: crate::mod_api::HostSide, _: &mut TickEvent) {
+        fn tick(&self, _: crate::HostSide, _: &mut TickEvent) {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -191,9 +190,7 @@ fn movement_input_writes_back_all_fields() {
 
 #[test]
 fn recipe_book_categories_accept_mod_declarations() {
-    use horizon_client::mod_api::{
-        RecipeBookCategoriesEvent, RecipeBookCategory, dispatch_recipe_book_categories,
-    };
+    use mod_api::{RecipeBookCategoriesEvent, RecipeBookCategory, dispatch_recipe_book_categories};
     struct TestHost;
     impl Host for TestHost {}
     impl ServerHost for TestHost {}
@@ -202,7 +199,7 @@ fn recipe_book_categories_accept_mod_declarations() {
     impl Hooks for Categories {
         fn recipe_book_categories(
             &self,
-            _host: crate::mod_api::HostSide,
+            _host: crate::HostSide,
             event: &mut RecipeBookCategoriesEvent<'_>,
         ) {
             event.categories.push(RecipeBookCategory {

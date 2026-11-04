@@ -37,7 +37,7 @@ fn item_model_property(
 }
 ```
 
-`ClientHost`, `ItemModelPropertyEvent`, and `StackView` are exported by `horizon_client::mod_api`. The stack is borrowed,
+`ClientHost`, `ItemModelPropertyEvent`, and `StackView` are exported by `mod_api`. The stack is borrowed,
 including for nested bundle items: `item`, `count`, explicit component `patch` (not merged
 defaults), and the runtime bundle selection. Listeners run in mod order; later answers win.
 Use `"property": "example:charged"` with both `on_true` and `on_false` in the item's
@@ -505,10 +505,11 @@ The hook may be called many times a craft; the answer must be the same for the s
 
 ### The mod's crate
 
-The root `Cargo.toml` and `src/` form the mod's one crate. It depends on `horizon-client` for
-`mod_api`; the launcher links it into the generated game executable, rather than making the game
-library depend on the mod. The launcher stages the crate as `native-api/<mod>/`, rewrites its game
-dependency to the staged game and resolves [mod dependencies](#dependencies-between-trait-mods).
+The root `Cargo.toml` and `src/` form the mod's one crate. It depends on `horizon-mod-api` (lib
+`mod_api`) and never on the game, so the same crate builds native or to `mod.wasm`; the launcher
+links it into the generated game executable, rather than making the game library depend on the
+mod. The launcher stages the crate as `native-api/<mod>/`, rewrites its mod API dependency to the
+staged one and resolves [mod dependencies](#dependencies-between-trait-mods).
 A project has no separate workspace or lock file. Arbitrary path and git dependencies are refused;
 the launcher supplies the checked paths needed for the game and declared mod dependencies.
 
@@ -602,7 +603,7 @@ mob's death loot; on other rolls `place` is `None`.
 ### Recipe book category declarations (first slice of #5501)
 
 The `recipe_book_categories` hook declares recipe book categories. Trait mods import
-`RecipeBookCategory` from `horizon_client::mod_api` and append declarations in
+`RecipeBookCategory` from `mod_api` and append declarations in
 `Hooks::recipe_book_categories`:
 
 ```rust,ignore
@@ -1087,7 +1088,7 @@ for a key whose id or type does not match a registration, `listener` gives `None
 
 ```rust,ignore
 use std::sync::{Arc, RwLock};
-use horizon_client::mod_api::{
+use mod_api::{
     self, AddServerReloadListenersEvent, FileToIdConverter, Host, Hooks, Identifier,
     ReloadApply, ServerReloadContext, ReloadResourceError, ServerReloadListener,
 };
@@ -1165,7 +1166,7 @@ own live state.
 
 ```rust,ignore
 use std::sync::{Arc, RwLock};
-use horizon_client::mod_api::{
+use mod_api::{
     self, AddClientReloadListenersEvent, ClientHost, ClientReloadContext, ClientReloadListener,
     FileToIdConverter, Hooks, Identifier, ReloadApply, ReloadResourceError,
 };
@@ -1234,7 +1235,7 @@ registration path.
 
 - A server's recipes reach its Horizon clients, as NeoForge's `OnDatapackSyncEvent.sendRecipes` and `RecipesReceivedEvent`: on the server, `native_datapack_sync(recipe_types)` takes the recipe types (`minecraft:smelting`, `mymod:crusher`) a mod's client half needs, asked once per load, the same types for every player (NeoForge asks per joining player); Horizon sends their final recipes (data packs merged, load conditions held) to every Horizon client when it joins and after each `/reload`, in payloads within the clientbound cap, and nothing to a vanilla client. On the client the recipe helpers (`native_recipes`, `native_recipes_of_type`) then give the server's recipes of those types in place of the window's own, single player included, and `native_recipes_received(recipe_types)` says they came. No type asked: nothing is sent and nothing changes; none asked after a load that asked some: the clients go back to their own recipes and `native_recipes_received` comes with no types.
 
-- `native_input_key(event, modifiers)` runs after a real window keyboard event finishes handling, including shortcuts, screen consumption and repeats. event is the original winit::event::KeyEvent with physical/logical key, location, text, state and repeat; modifiers use the screen hooks' GLFW bits, captured before handling. Not cancellable. Foreign-window and OS synthetic focus events skip it. Window callback only: pad, focus and control-socket input are not window key events.
+- `native_input_key(key, action, modifiers)` runs after a real window keyboard event finishes handling, including shortcuts, screen consumption and repeats (`InputEvent.Key`). key is vanilla's name for the physical key (`key.keyboard.a`; `key.keyboard.unknown` for one it doesn't name), action is `KeyAction::Press`, `Repeat` or `Release`, and modifiers use the screen hooks' GLFW bits, captured before handling. Not cancellable. Foreign-window and OS synthetic focus events skip it. Window callback only: pad, focus and control-socket input are not window key events.
 
 - `native_mouse_scrolling(scroll, accumulated, buttons, cursor, modifiers, canceled)` fires with a player in gameplay and no open screen/prompt/sleeping UI, after accumulation and before hotbar/spectator handling, including when no whole step has accumulated. scroll is x/y after discrete/sensitivity scaling (touchpad pixels normalized by 30), accumulated is the whole x/y pair, buttons are physical left/middle/right, cursor is the GUI position, and modifiers use GLFW bits. Cancel skips gameplay scrolling; accumulated whole steps remain consumed. Synthetic input follows the same gameplay scroll path; screen-scroll hooks are unchanged.
 
@@ -2007,11 +2008,9 @@ the canonical `horizon-native-mods/<id>/` projects and the provenance `native-mo
 host only (no cross compilation), needs a prepared installed launcher base release, and survives cache pruning
 because it is copied outside the managed folders. On Windows use the printed `horizon-engine.exe` path.
 
-Server projects must not request `horizon-client`'s `default-features = true` or any dependency
-`features` field, even an empty array. This covers aliases, target-specific declarations and SDK
-feature requests through Cargo feature tables. Omit `default-features` or set it to `false`; the
-launcher stages the server SDK dependencies with defaults disabled. Refusals name the mod and the
-requested fields, before toolchain work. Client build behavior is unchanged.
+A mod's crate depends on `horizon-mod-api` and never on the game: a `horizon-client` dependency,
+under any name or target, is refused naming the mod and the key, before toolchain work. The mod API
+has no sound or controller features, so server and client builds stage the same crate.
 
 Declared jars use the same exact-hash preparation as ordinary launches. A server export refuses
 missing jars by default and never asks interactively; `--allow-jar-downloads` permits the shared
@@ -3098,8 +3097,8 @@ stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is insta
 
 ### Render hook points
 
-`crates/horizon-client-render/src/gfx/native_render.rs`: the renderer's own hook points, free functions rather than
-`Game` methods, which a bundle targets as `horizon_client_render::gfx::native_render::native_<name>`. They run on the
+`crates/horizon-mod-api/src/render.rs`: the renderer's own hook points, free functions rather than
+`Game` methods, which a bundle targets as `mod_api::render::native_<name>`. They run on the
 render thread with the frame's wgpu objects; what a mod draws there shows in that frame.
 
 - `native_world_drawn(world)`: the world is drawn (sky, terrain, entities, particles, weather and the world post pass),
@@ -3231,11 +3230,11 @@ and `data/` directories. The template greets each player who joins. Build it wit
 `horizon-launcher native-build <path> --trust-native-code`; `cargo horizon-mod build` packages the same
 project into a `.hmod` without compiling it ([api/mod-files.md](api/mod-files.md)).
 
-The root Rust package depends on `horizon-client` for `mod_api`. Its root `src/lib.rs` marks one
+The root Rust package depends on `horizon-mod-api` (lib `mod_api`), never on the game. Its root `src/lib.rs` marks one
 `impl Hooks` with the attribute:
 
 ```rust,ignore
-use horizon_client::mod_api::{self, Hooks};
+use mod_api::{self, Hooks};
 
 #[derive(Default)]
 struct Mod;
@@ -3309,7 +3308,7 @@ The generated trait method is `inject_<mod_id>_<trait_method>`. Its event, as a 
 is that name in CamelCase plus `Event`
 (`InjectExampleBeforeTickEvent`), with the bindings as fields under the same rules. Implement it on the object
 returned by that mod's generated factory; it is called only for that mod's object. Types must be
-public and available from both the target and `horizon_client::mod_api`. The kinds are HEAD listen,
+public and available from both the target and `mod_api`. The kinds are HEAD listen,
 or HEAD with `cancellable = true` for a unit-returning target (that method returns `Flow`, and
 `Flow::Cancel` returns early from the target), and RETURN, MODIFY_ARG and MODIFY_EXPRESSION_VALUE.
 For those three, the binding whose `value` is `$value` (its type is the returned, argument or
@@ -3348,7 +3347,7 @@ The launcher stages declarations in `.horizon-mod-api-injections.json`; Cargo co
 `HORIZON_MOD_API_INJECTIONS`. The declarations stay with cached mixin output, and generated Rust lives
 only in Cargo's `OUT_DIR`. A player build does not edit generated Rust in the source tree or run rustfmt.
 
-A linked trait mod implements `horizon_client::mod_api::Hooks`. Mixin injections run first.
+A linked trait mod implements `mod_api::Hooks`. Mixin injections run first.
 An injection that returns early skips trait mods. A claimed cancellation also skips trait mods.
 Otherwise, trait mods run in their supplied order. The first `Cancel` stops dispatch.
 For replacement hooks, the first `Some` wins. Collection hooks call every mod. Receiverless hooks have no `Host`.
@@ -3369,7 +3368,7 @@ fn living_incoming_damage(
 }
 ```
 
-The event is a generated `#[non_exhaustive]` struct named after the catalog hook, in CamelCase plus `Event`, with
+The event is a generated struct named after the catalog hook, in CamelCase plus `Event`, with
 the hook point's arguments as public fields: values as values and borrowed ones as references (`event.kind`). A
 number or `bool` a mod may change is a plain field, written back once every mod has run, even after a `Cancel`;
 anything else a mod may change, a game struct or a list, is a `&mut` field. A cancellation or replacement is still
@@ -3436,8 +3435,8 @@ With the `COUNTER` declaration from [Server attachments](#server-attachments) in
 
 ```rust
 fn count(game: &mut crate::game::Game<'_>) {
-    let host: &mut dyn horizon_client::mod_api::Host = game;
-    let holder = horizon_client::mod_api::Holder::Level;
+    let host: &mut dyn mod_api::Host = game;
+    let holder = mod_api::Holder::Level;
     if let Ok(old) = COUNTER.get(&mut *host, holder) {
         let _ = COUNTER.set(host, holder, old + 1);
     }
@@ -3448,12 +3447,12 @@ fn count(game: &mut crate::game::Game<'_>) {
 the same host exposes typed helpers.
 
 On a `GameLevel` method that takes `&mut self` (`native_random_tick`, `native_tick_block`, `native_perform_bonemeal`,
-`native_is_bonemeal_success`), bind `{ name = "level", ty = "&mut dyn crate::mod_api::LevelRandomHost", value = "&mut *self" }`
+`native_is_bonemeal_success`), bind `{ name = "level", ty = "&mut dyn mod_api::LevelRandomHost", value = "&mut *self" }`
 for attachments and `random()`. Scheduling and `set_block_property` stay on the `LevelTicksHost` and `LevelWriteHost` the
 hook points pass; `is_bonemeal_success` gets only a `LevelRandomHost`.
 
 A trait injection gives the mod's root crate the same `Host` at that method. It depends on
-horizon-client's library, not on the game executable. For example, with `COUNTER` declared as the
+`horizon-mod-api`, not on the game. For example, with `COUNTER` declared as the
 `AttachmentType<i32>` in [Server attachments](#server-attachments):
 
 ```toml
@@ -3462,7 +3461,7 @@ id = "count"
 target = "horizon_client::game::Game<'_>::tick_mobs"
 kind = "HEAD"
 trait_method = "count"
-bindings = [{ name = "host", ty = "&mut dyn crate::mod_api::Host", value = "&mut *self" }]
+bindings = [{ name = "host", ty = "&mut dyn mod_api::Host", value = "&mut *self" }]
 ```
 
 ```rust
@@ -3825,13 +3824,13 @@ namespace. Both checks run once, when the mods register.
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it, so a test double implements only what its hook calls, and an
-unexpected call fails loudly. Enable the `testing` feature on the mod's `horizon-client` test dependency. Then
+unexpected call fails loudly. Enable the `testing` feature on the mod's `horizon-mod-api` test dependency. Then
 `testing::with_mods` takes an owned `Mods` list and runs a closure with it installed on the current thread.
 It restores the previous list even if the closure panics. The test allocation is retained because dispatch exposes
 a static slice. Call `dispatch_<hook>(&mut host, args…)` inside the closure to build the event as the game does:
 
 ```rust
-use horizon_client::mod_api::{self, Hooks, Host, HostSide, ServerHost, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
+use mod_api::{self, Hooks, Host, HostSide, ServerHost, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 struct HostDouble;
@@ -3896,7 +3895,7 @@ keeps a copy for any holder it is asked about (see the sync paragraph below).
 without a codec) and `InvalidSyncPolicy` (sync without a codec).
 
 ```rust
-use horizon_client::mod_api::{AttachmentCodec, AttachmentError, AttachmentType, Compound, Holder, Tag};
+use mod_api::{AttachmentCodec, AttachmentError, AttachmentType, Compound, Holder, Tag};
 
 static COUNTER: AttachmentType<i32> = AttachmentType {
     namespace: "example", name: "counter", default: || 0,

@@ -13,7 +13,6 @@ use horizon_client::{
     hud_layout, hud_overlays,
     mesher::Vertex,
     mobs::{Damage, DamageKind, Who},
-    mod_api::NativeDragonPhase,
     particles::{ParticleOptions, ParticleType},
     projectiles::ProjectileKind,
     text::Text,
@@ -25,6 +24,7 @@ use horizon_core::{
 };
 use horizon_protocol::entity_data::Value;
 use horizon_world::nbt::Tag;
+use mod_api::NativeDragonPhase;
 
 /// `HealOrHarmMobEffect.applyInstantaneousEffect` at an `AreaEffectCloud`'s
 /// 0.5 scale: `(int) (scale * (6 << amplifier) + 0.5)`.
@@ -641,7 +641,7 @@ impl Dragon {
         let hurting = horizon_client::health::Hurting::Dragon(self.id as i32, source);
         // The dragon's head turns with its body and never pitches.
         let view = horizon_world::view_direction::view_vector(0.0, self.yaw);
-        let victim = horizon_client::health::Victim {
+        let victim = mod_api::health::Victim {
             position: [self.position.x, self.position.y, self.position.z],
             view: [view.x, view.y, view.z],
         };
@@ -2446,7 +2446,7 @@ impl Game<'_> {
             }
         }
         // LivingDestroyBlockEvent: a block a mod keeps is still in the wall.
-        if !horizon_client::mod_api::mods().is_empty() {
+        if !mod_api::mods().is_empty() {
             removed.retain(|p| {
                 let kept = !self.may_destroy(dragon_id, "minecraft:ender_dragon", *p);
                 in_wall |= kept;
