@@ -234,6 +234,7 @@ impl Game<'_> {
 
     /// `LivingEntity.getKillCredit`: the remembered player takes precedence,
     /// even if the player cannot be resolved; otherwise the last hurting mob.
+    /// Unlike vanilla, a mob that changed dimension cannot be resolved.
     pub(super) fn native_living_kill_credit(&self, living: LivingRef) -> Option<EntityRef> {
         let credit = match self.native_living_target(living)? {
             Target::Player => self.combat.player_credit(self.world.game_time),
@@ -249,10 +250,7 @@ impl Game<'_> {
             let id = self.player_entity_id_by_connection(conn)?;
             return self.native_entity(u32::try_from(id).ok()?);
         }
-        let attacker = self.native_living_last_attacker(living)?;
-        let attacker_living = self.native_living(attacker)?;
-        self.native_living_alive(attacker_living)?
-            .then_some(attacker)
+        self.native_living_last_attacker(living)
     }
 
     /// `LivingEntity.getLastHurtByMob`: the entity that last hurt this one,
@@ -762,6 +760,9 @@ mod tests {
             assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
             // A tame wolf's hit also records its owner's reference.
             game.resolve_player_responsible(100, Damage::mob(101, [0.0; 3]));
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
+            game.lan.as_mut().unwrap().hub.guests[0].dimension =
+                "minecraft:the_nether".into();
             assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
             game.lan.as_mut().unwrap().hub.guests[0].placed = false;
             assert_eq!(living.kill_credit(game), None);
