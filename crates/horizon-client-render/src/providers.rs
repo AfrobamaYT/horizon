@@ -141,3 +141,27 @@ impl Providers {
             })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_compost_chance_is_the_weight_of_the_non_zero_layers() {
+        let providers = Providers::empty();
+        assert_eq!(providers.layer_chance(&json!(0.3)), 0.3);
+        let layers = json!({"default": {"distribution": [
+            {"data": 0, "weight": 1}, {"data": 1, "weight": 3}]}});
+        assert_eq!(providers.layer_chance(&layers), 0.75);
+        assert_eq!(providers.layer_chance(&json!("minecraft:missing")), 0.0);
+    }
+
+    #[test]
+    fn a_burn_time_is_the_provider_resolved() {
+        let providers = Providers::empty();
+        assert_eq!(providers.int_value(&json!(200)), 200);
+        let sum = json!({"type": "minecraft:add", "left": 100, "right": 50});
+        assert_eq!(providers.int_value(&sum), 150);
+    }
+}
