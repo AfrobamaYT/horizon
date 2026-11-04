@@ -212,6 +212,7 @@ mod native_boss_bar_refs;
 mod native_chunk_save;
 mod native_claimed_items;
 mod native_components;
+mod native_config_files;
 mod native_configs;
 mod native_criteria;
 mod native_data_maps;

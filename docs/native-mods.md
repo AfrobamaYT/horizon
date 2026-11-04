@@ -240,9 +240,13 @@ validates identity against its embedded inventory.
   was queued, not whether a player heard it. The server discards unknown sound events when it dispatches
   the queue.
 
-- `Game::native_config_dir()`: the game's shared `config/` folder beside `options.txt` (beside
-  `server.properties` on a dedicated server), where a mod names its own files, made when missing. It takes no `self`, so
-  it works from any hook ([mods.md](mods.md#native-mods)).
+- `Host::config_files()`: the calling mod's own files in the game's shared `config/` folder beside `options.txt` (beside
+  `server.properties` on a dedicated server): its folder `config/<mod id>/` and the files beside it named
+  `<mod id>.<ext>` or `<mod id>-<rest>`. `ConfigFiles` reads, writes, lists and stats them through `&dyn Host` on
+  either side, at most 4 MiB a file; a write replaces the file at once. The service is bound to the mod whose hook or
+  part is running (a mod never names its id), so another mod's path, a symbolic link on the way or a call outside any
+  mod's hook is refused with a typed `ConfigFileError`. A path is a `ConfigPath`, checked once when it is made. A
+  world's `serverconfig/` copy is read only through `native_config_loading` ([mods.md](mods.md#native-mods)).
 
 - The player-health HUD rows through `native_health_hud`: every frame the HUD draws them, the
   hook hears the layout's inputs (`HealthInputs`) and the screen's GUI size, and a mod that answers with
@@ -3902,7 +3906,7 @@ custom copy handler, conditional serialization, the `sendToPlayer` predicate,
 
 `Host` exposes the documented `Game` helpers listed under `helpers` in
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's
-receiver and documentation; a helper without `self` (`config_dir`) takes
+receiver and documentation; a helper without `self` (`config_files`) takes
 `&self` in `Host`. Level services stay on the level hosts above.
 A helper's `receiver` also exposes it on that handle. Receivers come from public
 `*Ref` structs in `mod_api.rs`: `BlockEntityRef` gives `block_entity`, for example.

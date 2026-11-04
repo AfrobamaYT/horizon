@@ -519,8 +519,8 @@ Rust files are build output, not files to regenerate or commit. Engine contribut
 
 A native mod's config files go in the game's shared `config/` folder, beside `options.txt` (on a dedicated server,
 beside `server.properties`), as Fabric and NeoForge mods' do: the mod picks its own file names, such as
-`config/<mod id>.json`. It asks for the folder with `Game::native_config_dir()` , which needs no
-game, so it works from any hook, and makes the folder when missing. A mod that lists its files with
+`config/<mod id>.json` or a folder `config/<mod id>/`. It reads and writes them with `Host::config_files()`, which is
+bound to the calling mod and refuses any other mod's files. A mod that lists its files with
 `native_register_configs` gets them read for it, written from their defaults when missing, and handed over again
 when edited (`native_config_loading`, `native_config_reloading`, as NeoForge's `ModConfigEvent`), and a world can
 keep its own server config in `serverconfig/` ([native-mods.md](native-mods.md)). Settings kept with `native_set_setting` stay where they were, in `horizon-mods/.horizon-mod-data/<id>/`.
