@@ -2786,6 +2786,94 @@ impl Game<'_> {
             screen,
         );
     }
+    /// Before the open screen draws itself (`ScreenEvent.Render.Pre`): draw
+    /// here to put something under it, or set `canceled` and the screen is not
+    /// drawn (nor its `native_screen_render_background`).
+    pub(super) fn native_screen_render_pre(
+        &self,
+        draw: &mut HudBatch,
+        screen: &NativeScreenView<'_>,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_screen_render_pre(
+            self,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+            screen,
+            canceled,
+        );
+    }
+    /// Before the open screen's contents (`ScreenEvent.Render.Background`).
+    pub(super) fn native_screen_render_background(
+        &self,
+        draw: &mut HudBatch,
+        screen: &NativeScreenView<'_>,
+    ) {
+        mod_api::dispatch_screen_render_background(
+            self,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+            screen,
+        );
+    }
+    /// After the open screen's contents (`ScreenEvent.Render.Foreground`).
+    pub(super) fn native_screen_render_foreground(
+        &self,
+        draw: &mut HudBatch,
+        screen: &NativeScreenView<'_>,
+    ) {
+        mod_api::dispatch_screen_render_foreground(
+            self,
+            &mut super::mod_api_host::generated::GameDrawContext {
+                game: self,
+                surface: draw,
+            },
+            screen,
+        );
+    }
+    /// Whether a mod listens to one of the four screen render hooks; nothing
+    /// is built to fire them otherwise.
+    pub(super) fn screen_render_listened(&self) -> bool {
+        use mod_api::HookId;
+        [
+            HookId::ScreenRenderPre,
+            HookId::ScreenRenderBackground,
+            HookId::ScreenRenderForeground,
+            HookId::ScreenRenderPost,
+        ]
+        .into_iter()
+        .any(mod_api::__private::listened)
+    }
+    /// `Render.Pre`, then `Render.Background` unless it cancelled: whether the
+    /// screen draws.
+    pub(super) fn screen_render_begin(
+        &self,
+        draw: &mut HudBatch,
+        screen: &NativeScreenView<'_>,
+    ) -> bool {
+        let mut canceled = false;
+        self.native_screen_render_pre(draw, screen, &mut canceled);
+        if !canceled {
+            self.native_screen_render_background(draw, screen);
+        }
+        !canceled
+    }
+    /// `Render.Foreground` when the screen `drawn`, then `Render.Post`.
+    pub(super) fn screen_render_end(
+        &self,
+        draw: &mut HudBatch,
+        screen: &NativeScreenView<'_>,
+        drawn: bool,
+    ) {
+        if drawn {
+            self.native_screen_render_foreground(draw, screen);
+        }
+        self.native_screen_render_post(draw, screen);
+    }
     /// A mouse button went down over the open screen
     /// (`ScreenEvent.MouseButtonPressed.Pre`, vanilla's
     /// `Screen.mouseClicked`): `screen` is the screen it is, `screen.mouse`
