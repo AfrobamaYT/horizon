@@ -1321,7 +1321,7 @@ registration path.
 
 - A server player's trade with a villager or a wandering trader, as NeoForge's `TradeWithVillagerEvent`: `native_trade_with_villager(merchant, kind, offer)` is heard once per trade made, after its statistic and `villager_trade` trigger, with the trader's entity id and type and the `MerchantOffer` as it is after the trade. Listen only; the player's state is swapped in.
 
-- A server player's `teleport_randomly` consume effect (chorus fruit) is about to try a spot: `native_chorus_fruit_teleport(player, name, from, target, cancel)`, once per attempt (up to 16). A mod may move `target`; the game still looks down from it for ground to land on. `cancel` ends the effect with no teleport and no more attempts. Foxes are not heard.
+- A server player's `teleport_randomly` consume effect (chorus fruit) is about to try a spot: `native_item_consumption_teleport(player, name, from, target, cancel)`, once per attempt (up to 16). A mod may move `target`; the game still looks down from it for ground to land on. `cancel` ends the effect with no teleport and no more attempts. Foxes are not heard.
 
 - A server player's ender pearl landed: `native_ender_pearl_teleport(player, name, pearl, from, target, damage, cancel)` runs before the endermite roll and the teleport. A mod may move `target` or change the fall `damage` (5; 0 or less is none); `cancel` keeps the player where they are, without the endermite roll, damage or sound, and the pearl is used up either way.
 
@@ -1582,8 +1582,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   fall damage they then take (5). A mod may move `target` or change `damage` (0 or less: none). Canceling keeps the
   player where they are: no endermite roll, no teleport, no damage, no sound; the pearl is used up either way. Mobs'
   pearls are not heard.
-- **`native_chorus_fruit_teleport(player, name, from, target, cancel)`**: a server player whose `teleport_randomly`
-  consume effect (chorus fruit) is about to try a spot (NeoForge's `EntityTeleportEvent.ChorusFruit`,
+- **`native_item_consumption_teleport(player, name, from, target, cancel)`**: a server player whose `teleport_randomly`
+  consume effect (chorus fruit) is about to try a spot (NeoForge's `EntityTeleportEvent.ItemConsumption`,
   `TeleportRandomlyConsumeEffect.apply`): once per attempt, up to 16, after they stopped riding. A mod may move
   `target` (its y is kept inside the level's height); the game still looks down from it for ground to land on, inside
   the border. Canceling ends the effect: no
