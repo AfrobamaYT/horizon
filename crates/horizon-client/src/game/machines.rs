@@ -1978,9 +1978,9 @@ mod capacity_tests {
 
 #[cfg(test)]
 mod part_front_tests {
-    use super::super::native_entity_refs::tests::with_game;
+    use super::super::native_entity_refs::tests::{declared_part_root, with_game_at};
     use horizon_client::chunk::Chunk;
-    use horizon_client::containers::{BlockEntity, ModBlockEntity};
+    use horizon_client::containers::BlockEntity;
     use horizon_client::items::ItemStack;
     use horizon_client::mod_api::NativeBlockUpdateFlags;
     use horizon_core::position::BlockPos;
@@ -2000,8 +2000,12 @@ mod part_front_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_part_handing_a_crafters_output_back_into_its_grid_loses_none() {
-        with_game(|game| {
-            let _mods = horizon_client::mod_api::part_tests::game_thread();
+        let Some(root) = declared_part_root(
+            "game::machines::part_front_tests::a_part_handing_a_crafters_output_back_into_its_grid_loses_none",
+        ) else {
+            return;
+        };
+        with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
@@ -2020,13 +2024,18 @@ mod part_front_tests {
                 crafter,
                 NativeBlockUpdateFlags::NEIGHBORS
             ));
-            game.world.block_entities.insert(
-                (1, 64, 8),
-                BlockEntity::Mod(Box::new(ModBlockEntity::new(
-                    "test:pipe".into(),
-                    Default::default(),
-                ))),
-            );
+            let pipe = game
+                .pack
+                .assets
+                .registry
+                .default_state("test:pipe")
+                .unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [1, 64, 8],
+                pipe,
+                NativeBlockUpdateFlags::NONE
+            ));
             if let Some(BlockEntity::Crafter(c)) = game.world.block_entities.get_mut(&(2, 64, 8)) {
                 c.items[3] = Some(stack("minecraft:oak_planks", 1));
                 c.items[6] = Some(stack("minecraft:oak_planks", 1));
@@ -2056,8 +2065,12 @@ mod part_front_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_part_handing_a_droppers_item_back_into_it_loses_none() {
-        with_game(|game| {
-            let _mods = horizon_client::mod_api::part_tests::game_thread();
+        let Some(root) = declared_part_root(
+            "game::machines::part_front_tests::a_part_handing_a_droppers_item_back_into_it_loses_none",
+        ) else {
+            return;
+        };
+        with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
@@ -2074,13 +2087,18 @@ mod part_front_tests {
                 dropper,
                 NativeBlockUpdateFlags::NEIGHBORS
             ));
-            game.world.block_entities.insert(
-                (1, 64, 8),
-                BlockEntity::Mod(Box::new(ModBlockEntity::new(
-                    "test:pipe".into(),
-                    Default::default(),
-                ))),
-            );
+            let pipe = game
+                .pack
+                .assets
+                .registry
+                .default_state("test:pipe")
+                .unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [1, 64, 8],
+                pipe,
+                NativeBlockUpdateFlags::NONE
+            ));
             if let Some(BlockEntity::Chest(items)) = game.world.block_entities.get_mut(&(2, 64, 8))
             {
                 items[0] = Some(stack("minecraft:stick", 2));
@@ -2109,8 +2127,12 @@ mod part_front_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_dropper_and_a_crafter_put_into_a_mod_part_in_front_of_them() {
-        with_game(|game| {
-            let _mods = horizon_client::mod_api::part_tests::game_thread();
+        let Some(root) = declared_part_root(
+            "game::machines::part_front_tests::a_dropper_and_a_crafter_put_into_a_mod_part_in_front_of_them",
+        ) else {
+            return;
+        };
+        with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
@@ -2134,9 +2156,6 @@ mod part_front_tests {
                 .default_state("minecraft:chest")
                 .unwrap();
             let flags = NativeBlockUpdateFlags::NEIGHBORS;
-            let mod_part = |id: &str| {
-                BlockEntity::Mod(Box::new(ModBlockEntity::new(id.into(), Default::default())))
-            };
             let chest_items =
                 |game: &super::Game<'_>, z| match game.world.block_entities.get(&(2, 64, z)) {
                     Some(BlockEntity::Chest(items)) => {
@@ -2148,7 +2167,13 @@ mod part_front_tests {
                 for (x, block) in [(0, dropper), (2, chest)] {
                     assert!(game.native_level_set_block(level, [x, 64, z], block, flags));
                 }
-                game.world.block_entities.insert((1, 64, z), mod_part(part));
+                let state = game.pack.assets.registry.default_state(part).unwrap();
+                assert!(game.native_level_set_block(
+                    level,
+                    [1, 64, z],
+                    state,
+                    NativeBlockUpdateFlags::NONE
+                ));
                 if let Some(BlockEntity::Chest(items)) =
                     game.world.block_entities.get_mut(&(0, 64, z))
                 {
@@ -2171,7 +2196,13 @@ mod part_front_tests {
                 for (x, block) in [(0, crafter), (2, chest)] {
                     assert!(game.native_level_set_block(level, [x, 64, z], block, flags));
                 }
-                game.world.block_entities.insert((1, 64, z), mod_part(part));
+                let state = game.pack.assets.registry.default_state(part).unwrap();
+                assert!(game.native_level_set_block(
+                    level,
+                    [1, 64, z],
+                    state,
+                    NativeBlockUpdateFlags::NONE
+                ));
                 if let Some(BlockEntity::Crafter(c)) =
                     game.world.block_entities.get_mut(&(0, 64, z))
                 {

@@ -1026,7 +1026,7 @@ impl Game<'_> {
             && let Some(eye) = self.eye_position()
         {
             // Inventory.placeItemBackInInventory: `player.drop(stack, false)`.
-            self.throw_from_eyes(rest, eye, false);
+            self.throw_from_eyes(rest, eye, false, false);
         }
     }
     /// `Player.giveExperienceLevels`, and the level change reported to the mods.
