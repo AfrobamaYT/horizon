@@ -31,6 +31,8 @@ mod tests {
         #[derive(Clone, Copy)]
         pub(super) struct PlayerRef;
         #[derive(Clone, Copy)]
+        pub(super) enum SoundSource {}
+        #[derive(Clone, Copy)]
         pub(super) struct ChunkRef;
         pub(super) struct NeighbourUpdate;
         #[derive(Clone, Copy)]

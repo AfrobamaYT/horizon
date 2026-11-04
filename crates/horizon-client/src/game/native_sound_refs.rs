@@ -110,7 +110,7 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::super::lan::LanSettings;
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::lan::{Joined, NetConfig, Out, PlayerSender, guest::Guest, hub::HubConfig};
@@ -125,7 +125,7 @@ mod tests {
         mpsc::Receiver,
     };
 
-    fn guest(conn: u32, uuid: u128, at: [f64; 3]) -> (Guest, Receiver<Out>) {
+    pub(in crate::game) fn guest(conn: u32, uuid: u128, at: [f64; 3]) -> (Guest, Receiver<Out>) {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut g = Guest::new(
             Joined {
@@ -147,7 +147,7 @@ mod tests {
         (g, rx)
     }
 
-    fn packets(rx: &Receiver<Out>) -> Vec<Clientbound> {
+    pub(in crate::game) fn packets(rx: &Receiver<Out>) -> Vec<Clientbound> {
         let mut out = Vec::new();
         while let Ok(Out::Packet(body)) = rx.try_recv() {
             let mut reader = horizon_protocol::buf::Reader::new(&body);

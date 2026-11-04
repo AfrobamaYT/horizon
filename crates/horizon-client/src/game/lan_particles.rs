@@ -620,23 +620,40 @@ impl Game<'_> {
 
     /// Native sounds wait until the server host is available. An unknown
     /// `minecraft:` event is dropped; a mod's goes by name (`sound_packet`).
+    /// Each is asked of the mods first (`play_level_sound_at_entity` when
+    /// bound to an entity, `_at_position` otherwise).
     pub(super) fn flush_native_sounds(&mut self) {
-        let Some(host) = &self.lan else { return };
+        if self.lan.is_none() {
+            return;
+        }
         for sound in std::mem::take(&mut self.creatures.lan_sounds) {
-            if sound.sound.starts_with("minecraft:")
+            let emitter = sound.entity.and_then(|id| u32::try_from(id).ok());
+            let Some(heard) = self.ask_level_sound(
+                sound.dimension,
+                &sound.sound,
+                sound.at,
+                sound.source as usize,
+                sound.volume,
+                sound.pitch,
+                emitter,
+            ) else {
+                continue;
+            };
+            let Some(host) = &self.lan else { return };
+            if heard.name.starts_with("minecraft:")
                 && host
                     .hub
-                    .registry_id("minecraft:sound_event", &sound.sound)
+                    .registry_id("minecraft:sound_event", &heard.name)
                     .is_none()
             {
                 continue;
             }
             let packet = host.hub.sound_packet(
-                &sound.sound,
+                &heard.name,
                 sound.at,
-                sound.volume,
-                sound.pitch,
-                sound.source,
+                heard.volume,
+                heard.pitch,
+                heard.source as i32,
                 sound.seed,
             );
             // `Level.playSound(except, entity, ...)`: the same sound and
@@ -653,7 +670,7 @@ impl Game<'_> {
                 (packet, _) => packet,
             }
             .encode();
-            let range = f64::from(sound.volume.max(1.0)) * 16.0;
+            let range = f64::from(heard.volume.max(1.0)) * 16.0;
             send_native_nearby(
                 host,
                 sound.dimension,

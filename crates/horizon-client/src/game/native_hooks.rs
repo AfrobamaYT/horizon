@@ -77,8 +77,8 @@ use mod_api::{
 use mod_api::{
     AttachmentStore, BlockHit, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite,
     LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeBlockUpdateFlags,
-    NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
-    TooltipElement, UsePhase,
+    NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, SoundSource,
+    Suggestion, TooltipElement, UsePhase,
 };
 pub(crate) use mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -7254,6 +7254,72 @@ impl Game<'_> {
     /// Server-side.
     pub(super) fn native_chunk_unload(&mut self, dimension: &str, chunk: [i32; 2]) {
         mod_api::dispatch_chunk_unload(self, dimension, chunk);
+    }
+    /// A sound is about to play at `position` in `level` (NeoForge's
+    /// `PlayLevelSoundEvent.AtPosition`, in `ServerLevel.playSeededSound`):
+    /// every server sound not bound to an entity, mobs' own sounds included
+    /// (`Entity.playSound` plays at the entity's position). A mod may change
+    /// `sound`, `source`, `volume` and `pitch`, or set `cancel` and no player
+    /// hears it; `original_volume` and `original_pitch` are as asked. A
+    /// sound left unplayable (not a namespaced id, or a volume or pitch that
+    /// isn't finite and at least 0) is dropped. Sounds the server's level
+    /// plays during the tick are asked as they go out, at the end of the
+    /// tick, with the state then. `/playsound` sends its packet directly and
+    /// isn't asked, as in vanilla. Server-side.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn native_play_level_sound_at_position(
+        &mut self,
+        level: LevelRef,
+        position: [f64; 3],
+        sound: &mut String,
+        source: &mut SoundSource,
+        volume: &mut f32,
+        pitch: &mut f32,
+        original_volume: f32,
+        original_pitch: f32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_play_level_sound_at_position(
+            self,
+            level,
+            position,
+            sound,
+            source,
+            volume,
+            pitch,
+            original_volume,
+            original_pitch,
+            cancel,
+        );
+    }
+    /// A sound bound to `entity` is about to play (NeoForge's
+    /// `PlayLevelSoundEvent.AtEntity`, in `ServerLevel.playSeededSound`'s
+    /// entity overload, `playSound(except, sourceEntity, ...)`): a goat horn
+    /// and a mod's sound bound to an entity. The fields and their rules are
+    /// `native_play_level_sound_at_position`'s. Server-side.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn native_play_level_sound_at_entity(
+        &mut self,
+        entity: EntityRef,
+        sound: &mut String,
+        source: &mut SoundSource,
+        volume: &mut f32,
+        pitch: &mut f32,
+        original_volume: f32,
+        original_pitch: f32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_play_level_sound_at_entity(
+            self,
+            entity,
+            sound,
+            source,
+            volume,
+            pitch,
+            original_volume,
+            original_pitch,
+            cancel,
+        );
     }
     /// `player` started watching `chunk` (NeoForge's `ChunkWatchEvent.Watch`):
     /// the chunk came into their view and goes to their client, once until
