@@ -736,7 +736,12 @@ impl ItemRenderer {
         drawn: bool,
         item_data: &horizon_world::item_defaults::ItemData,
     ) -> crate::Result<Self> {
-        let prototypes = Arc::clone(item_data.prototypes()?);
+        let prototypes: BTreeMap<String, Components> = horizon_world::item_defaults::shared(root)?
+            .iter()
+            .map(|(item, components)| {
+                Ok((item.clone(), serde::Deserialize::deserialize(components)?))
+            })
+            .collect::<serde_json::Result<_>>()?;
         let models = ItemModels {
             definitions: if drawn {
                 load_definitions(root)
@@ -745,7 +750,13 @@ impl ItemRenderer {
             },
             prototypes,
         };
-        let (library, cit) = cit::load(root, library?);
+        // CIT models and glint textures only affect drawing. A server still
+        // needs item prototypes and ids, but never these resource-pack assets.
+        let (library, cit) = if drawn {
+            cit::load(root, library?)
+        } else {
+            (library?, None)
+        };
         let permutations = PalettedPermutations::from_atlas(
             &fs::read_to_string(root.join("assets/minecraft/atlases/items.json"))
                 .unwrap_or_default(),
@@ -1251,6 +1262,9 @@ mod tests {
             root.join("items.json"),
             r#"{"horizon:top":{"minecraft:max_stack_size":16}}"#,
         )?;
+        let cit = root.join("assets/minecraft/optifine");
+        fs::create_dir_all(&cit)?;
+        fs::write(cit.join("cit.properties"), "useGlint=false\n")?;
         let library = crate::model_library::ParsedModels::load(&root).into_item_library();
         let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload)?;
         let client = ItemRenderer::load_with_library(&root, library.clone(), &data)?;
@@ -1258,6 +1272,8 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         assert!(client.models.definitions.contains_key("horizon:top"));
         assert!(server.models.definitions.is_empty());
+        assert!(client.cit.is_some());
+        assert!(server.cit.is_none());
         assert_eq!(server.models.prototypes, client.models.prototypes);
         Ok(())
     }
