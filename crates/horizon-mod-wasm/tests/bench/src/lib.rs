@@ -31,6 +31,14 @@ impl Hooks for Mod {
                     .count();
                 *event.message = Text::literal(found.to_string());
             }
+            "entities" => {
+                let found = (0..n).filter(|i| host.entity(*i).is_some()).count();
+                *event.message = Text::literal(found.to_string());
+            }
+            "tickstats" => {
+                let found = (0..n).filter(|_| host.tick_stats().0 >= 0.0).count();
+                *event.message = Text::literal(found.to_string());
+            }
             "compute" => *event.message = Text::literal(compute(n).to_string()),
             _ => {}
         }

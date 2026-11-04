@@ -43,8 +43,12 @@ load, and `if_installed!` keeps the mod from calling it.
 ## In the game
 
 The game loads every `mod.wasm` turned on in the Mods page (or passed with `--dev-mod`) at start,
-after the native mods. Each runs sandboxed with a fuel budget per call and a memory limit; a mod
-that traps stops its group, not the game. `--wasm-interpreter` runs them interpreted, for hosts
+after the native mods. Each runs sandboxed with a memory limit and a time limit per call: 100 ms
+for a hook or part call, 30 s for start-up and a call of the load phase (registration, a data
+load, a resource reload). A mod that traps or runs past its limit stops its group, not the game.
+The limit is wall-clock time, so a slow machine reaches it sooner; `--wasm-fuel` counts
+instructions instead, so a mod stops at the same place on every machine, at some cost per call
+(for debugging and deterministic runs). `--wasm-interpreter` runs mods interpreted, for hosts
 that can't compile code at run time; it is much slower.
 A mod refused at load is named on the Mods page with its reason. A `mod.wasm` built against
 hooks this game doesn't have, or has with another type, names the first such import
