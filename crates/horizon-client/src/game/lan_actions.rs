@@ -5085,6 +5085,7 @@ impl Game<'_> {
                 collision_binding: game.collision,
                 resources: game.motion,
                 loop_context: &game.loop_context,
+                damage_hooks: &game.damage_hooks,
                 tag_items: Some(world_items!(game)),
                 block_registries: Some(&game.pack.block_registries),
             };
@@ -5229,6 +5230,7 @@ impl Game<'_> {
                 collision_binding: game.collision,
                 resources: game.motion,
                 loop_context: &game.loop_context,
+                damage_hooks: &game.damage_hooks,
                 tag_items: Some(world_items!(game)),
                 block_registries: Some(&game.pack.block_registries),
             }

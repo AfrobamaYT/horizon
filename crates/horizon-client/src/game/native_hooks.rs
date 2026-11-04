@@ -36,7 +36,9 @@ use horizon_client::{
     extras_hud::Corners,
     fast_hash::FxHashMap,
     first_person::Hand,
-    health::{DamageContainer, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock, Victim},
+    health::{
+        DamageContainer, DamageHooks, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock, Victim,
+    },
     hud::{HudBatch, rgba},
     item_tooltip::TooltipDisplay,
     items::ItemStack,
@@ -8448,6 +8450,15 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
 
 /// The contacts of a simulating entity with a block, as the simulation's own code (client-lib)
 /// reports them.
+/// The damage hooks every level of the game lends to its hits (`Game.damage_hooks`).
+pub(super) const DAMAGE_HOOKS: DamageHooks = DamageHooks {
+    incoming: Some(incoming_damage),
+    pre: Some(damage_pre),
+    post: Some(damage_post),
+    knockback: Some(knockback),
+    totem: Some(use_totem),
+    shield: Some(shield_block),
+};
 pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
     horizon_client::block_contact::Hooks {
         step_on: |dimension, c| {

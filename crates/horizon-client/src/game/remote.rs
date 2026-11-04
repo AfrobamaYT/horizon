@@ -6159,6 +6159,7 @@ impl Game<'_> {
                 collision_binding: self.collision,
                 resources: self.motion,
                 loop_context: &self.loop_context,
+                damage_hooks: &self.damage_hooks,
                 tag_items: None,
                 block_registries: None,
             }
@@ -6177,6 +6178,7 @@ impl Game<'_> {
                     collision_binding: self.collision,
                     resources: self.motion,
                     loop_context: &self.loop_context,
+                    damage_hooks: &self.damage_hooks,
                     tag_items: None,
                     block_registries: None,
                 }

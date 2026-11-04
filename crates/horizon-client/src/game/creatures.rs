@@ -13,7 +13,7 @@ use horizon_client::{
     blocks::Fluid,
     collisions::SceneCollisions,
     crafting::Recipes,
-    health::{HurtSource, Hurting, Knock, knockback_canceled},
+    health::{HurtSource, Hurting, Knock},
     items::ItemStack,
     mesher::Vertex,
     mobs::{
@@ -1133,6 +1133,7 @@ impl Game<'_> {
                 &mut lent,
                 Some(world_items!(self)),
                 Some(&self.pack.block_registries),
+                &self.damage_hooks,
             );
             let path_changes = horizon_client::mobs::collision_changes(&base, &path_writes);
             // Each mob keeps its snapshot slot all tick; the first slot of an
@@ -7900,11 +7901,7 @@ fn knock_back(
         x: xd,
         z: zd,
     };
-    if knockback_canceled(
-        level.reborrow(),
-        Hurting::Player(p.entity_id, source),
-        &mut knock,
-    ) {
+    if level.knockback_canceled(Hurting::Player(p.entity_id, source), &mut knock) {
         return;
     }
     let Knock {
@@ -8815,15 +8812,14 @@ mod pearl_tests {
 #[cfg(test)]
 mod knockback_tests {
     use super::*;
-    use horizon_client::health::{DamageLevel, KNOCKBACK};
+    use horizon_client::health::{DamageHooks, DamageLevel};
 
     /// What the hook of these tests saw: the player, its source (as damage
     /// type, causing, direct) and the push.
     type Pushes = std::sync::Mutex<Vec<(i32, (String, i32, i32), Knock)>>;
     static PUSHES: Pushes = std::sync::Mutex::new(Vec::new());
 
-    /// Sets the native knockback hook of these tests (global: it stays set for
-    /// the process) for players 9201 to 9203: it records the push, cancels
+    /// Sets the native knockback hook of these tests for players 9201 to 9203: it records the push, cancels
     /// 9201's and doubles 9202's strength and turns its direction around.
     fn hook(_: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
         let Hurting::Player(entity @ 9201..=9203, s) = pushed else {
@@ -8855,12 +8851,13 @@ mod knockback_tests {
         if !root.join("movement-properties.nbt").exists() {
             return;
         }
-        let installed = *KNOCKBACK.get_or_init(|| hook);
-        type Hook = fn(DamageLevel<'_>, Hurting<'_>, &mut Knock) -> bool;
-        assert!(std::ptr::fn_addr_eq(installed, hook as Hook));
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
         let resources = horizon_client::motion::MotionResources::load(&root, &assets).unwrap();
-        let mut test_level = horizon_client::health::TestLevel::new(1);
+        let hooks = DamageHooks {
+            knockback: Some(hook),
+            ..DamageHooks::NONE
+        };
+        let mut test_level = horizon_client::health::TestLevel::with_hooks(1, hooks);
         let hit = HurtSource {
             damage_type: "minecraft:player_attack",
             causing: 5,

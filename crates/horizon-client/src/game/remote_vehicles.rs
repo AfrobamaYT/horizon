@@ -472,6 +472,7 @@ impl Game<'_> {
                 &mut lent,
                 None,
                 None,
+                &self.damage_hooks,
             )
             .predicted();
             mob.tick(&world, &mut level, &mut events);
