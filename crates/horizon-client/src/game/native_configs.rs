@@ -14,7 +14,7 @@ use mod_api::ConfigPath;
 pub use mod_api::game::{NativeConfig, NativeConfigFile, NativeConfigKind};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 /// How often the files' modification times are read.
 const CHECK_EVERY: Duration = Duration::from_secs(1);
@@ -23,7 +23,6 @@ const CHECK_EVERY: Duration = Duration::from_secs(1);
 struct Tracked {
     config: NativeConfigFile,
     path: PathBuf,
-    modified: Option<SystemTime>,
 }
 
 /// One game's configs: the window's, a server thread's or a dedicated
@@ -59,10 +58,6 @@ fn locate(
         fs::write(&path, &config.default)?;
     }
     Ok(path)
-}
-
-fn modified(path: &Path) -> Option<SystemTime> {
-    fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
 impl NativeConfigs {
@@ -102,7 +97,6 @@ impl NativeConfigs {
                 );
                 continue;
             }
-            let modified = modified(&path);
             let text = match fs::read_to_string(&path) {
                 Ok(text) => text,
                 Err(e) => {
@@ -121,28 +115,22 @@ impl NativeConfigs {
                 text,
             });
             loaded.push(file.clone());
-            self.files.push(Tracked {
-                config: file,
-                path,
-                modified,
-            });
+            self.files.push(Tracked { config: file, path });
         }
         loaded
     }
 
     /// The files whose text changed since they were read, read again; a
-    /// file that is gone or unreadable keeps its last text.
+    /// file that is gone or unreadable keeps its last text. The text is
+    /// compared, not the file's modification time: a save inside the same
+    /// timestamp tick as the load (a mod writing its config from
+    /// `config_loading`) keeps the time and the length and still changed.
     fn changed(&mut self) -> Vec<NativeConfigFile> {
         let mut changed = Vec::new();
         for tracked in &mut self.files {
-            let now = modified(&tracked.path);
-            if now.is_none() || now == tracked.modified {
-                continue;
-            }
             let Ok(text) = fs::read_to_string(&tracked.path) else {
                 continue;
             };
-            tracked.modified = now;
             if text != tracked.config.text {
                 tracked.config.text = text;
                 changed.push(tracked.config.clone());
@@ -262,15 +250,6 @@ mod tests {
         }
     }
 
-    /// A time after `path`'s, so the next look sees a change even on a file
-    /// system that keeps whole seconds.
-    fn touch_later(path: &Path, text: &str) {
-        let before = modified(path).unwrap();
-        fs::write(path, text).unwrap();
-        let file = fs::File::options().write(true).open(path).unwrap();
-        file.set_modified(before + Duration::from_secs(2)).unwrap();
-    }
-
     #[test]
     fn a_missing_file_gets_its_default_and_an_edited_one_is_read() {
         let root = Folder::new("default");
@@ -382,7 +361,7 @@ mod tests {
         );
         let path = config.join("gt-common.toml");
         assert!(configs.changed().is_empty());
-        touch_later(&path, "a = 2\n");
+        fs::write(&path, "a = 2\n").unwrap();
         let changed = configs.changed();
         assert_eq!(
             changed.iter().map(|f| f.text.as_str()).collect::<Vec<_>>(),
@@ -390,8 +369,14 @@ mod tests {
         );
         assert!(configs.changed().is_empty());
         // Saved again with the same text: nothing to reload.
-        touch_later(&path, "a = 2\n");
+        fs::write(&path, "a = 2\n").unwrap();
         assert!(configs.changed().is_empty());
+        // Same length, written at once after the load, as a mod's own save
+        // from `config_loading` is: still a change.
+        fs::write(&path, "a = 3\n").unwrap();
+        assert_eq!(configs.changed().len(), 1);
+        fs::write(&path, "a = 2\n").unwrap();
+        configs.changed();
         // Gone: the last text stays, and nothing fires.
         fs::remove_file(&path).unwrap();
         assert!(configs.changed().is_empty());
@@ -411,7 +396,6 @@ mod tests {
                 text: String::new(),
             }),
             path: PathBuf::new(),
-            modified: None,
         });
         assert!(configs.due(start));
         assert!(!configs.due(start + Duration::from_millis(999)));
