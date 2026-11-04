@@ -1167,7 +1167,7 @@ fn mod_list_unreadable(error: &horizon_protocol::Error) -> crate::text::Text {
     Text::translate_with_fallback(
         "horizon.mods.unreadable",
         english.get("horizon.mods.unreadable").unwrap(),
-        &[Text::literal(&error.to_string())],
+        &[Text::literal(error.to_string())],
     )
 }
 
