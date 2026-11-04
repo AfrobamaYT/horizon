@@ -1,8 +1,8 @@
 use super::{BlockEntity, Game};
 use crate::game::native_entity_refs::tests::{run_fresh_cases, with_game_at};
 use horizon_client::{chunk::Chunk, items::ItemStack};
-use mod_api::*;
 use horizon_core::{geometry::Vec3, position::BlockPos, random::RandomSource};
+use mod_api::*;
 use std::sync::{Arc, Mutex};
 
 const DEPOT: &str = "contents_changed:depot";
