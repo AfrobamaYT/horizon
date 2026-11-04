@@ -748,9 +748,10 @@
       }
     },
     {
-      "name": "destroy_block", "doc": "A player breaks the block `state` at `pos`, once the game allowed it\n(the held item can break blocks, the debug stick didn't take the\nclick): where `ServerPlayerGameMode.destroyBlock` starts. Set\n`canceled` to keep the block: nothing is destroyed or dropped, and a\nguest sees it back. Server-side, for every player of the world (the\nhelpers read the acting one).", "side": "server",
+      "name": "break_block", "doc": "A player breaks the block `state` at `pos`, once the game allowed it\n(the held item can break blocks, the debug stick didn't take the\nclick): where `ServerPlayerGameMode.destroyBlock` starts. Set\n`canceled` to keep the block: nothing is destroyed or dropped, and a\nguest sees it back. Server-side, for every player of the world (the\nhelpers read the acting one). Diverges from upstream: renamed from\n`destroy_block`, to NeoForge's `BlockEvent.BreakEvent`.", "neoforge": "BlockEvent.BreakEvent",
+      "side": "server",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_destroy_block",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_break_block",
       "mod_api": {
         "contract": "cancel",
         "out": "canceled"

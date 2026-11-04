@@ -6380,7 +6380,7 @@ impl Game<'_> {
         // Native mods, once the game allowed the break: a canceled one keeps
         // the block, and a guest's acknowledgement puts it back in its world.
         let mut canceled = false;
-        self.native_destroy_block(pos, state, &mut canceled);
+        self.native_break_block(pos, state, &mut canceled);
         if canceled {
             return Ok(());
         }

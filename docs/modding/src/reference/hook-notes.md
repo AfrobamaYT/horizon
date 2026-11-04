@@ -120,7 +120,7 @@ requires a farmer at work and `mob_griefing` enabled.
   `Pass`, `Fail` and `TryWithEmptyHand` continue to the item; the empty method is never
   retried. Dispatch visits only the clicked state's parts.
 
-- Breaking and placing a block, on the server for every player: `native_destroy_block` hears a player break a
+- Breaking and placing a block, on the server for every player: `native_break_block` hears a player break a
   block once the game allowed it (`ServerPlayerGameMode.destroyBlock`) and may cancel it, which keeps the block and its
   drops; `native_entity_place` (`EntityPlaceEvent`, `EntityMultiPlaceEvent`) hears a block placed from an item
   (`BlockItem.place`), an enderman putting its block down or a snow golem's trail, before it is written, and may cancel it:
@@ -1826,7 +1826,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   mod is asked, so a mod cannot veto it. The player's state is swapped in, so `native_acting_player`, `native_tell` and the
   item helpers reach them. Not heard: the host of a LAN world.
 - `native_acting_player()`, the player whose state is swapped in (inside `native_perform_command`,
-  `native_right_click_block`, `native_use_on`, `native_destroy_block`...; None elsewhere);
+  `native_right_click_block`, `native_use_on`, `native_break_block`...; None elsewhere);
   `native_run_command(line)`, a command run as the server's console (level 4, no output), including during a guest's
   turn. The acting player and other live guests are reachable; displaced outer players are excluded only on this
   native path, without changing ordinary player or console command resolution. A teleport to another level
@@ -1844,7 +1844,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   and `use_item` (`NativeTriState`) force the block's use or the item's `useOn` off, or on (the block even while
   sneaking with something in hand, the item even while it cools down). Cancelling skips both and answers
   `cancellation_result` (`NativeInteractionResult`, default `Pass`, which goes on to the item's own use and the other
-  hand); with `native_destroy_block`, a cancel with `Fail` keeps players out of claimed land, and the player's client is
+  hand); with `native_break_block`, a cancel with `Fail` keeps players out of claimed land, and the player's client is
   sent the block back.
 - **`native_use_item_on_block(click, phase, cancellation_result, canceled)`**: NeoForge's
   `UseItemOnBlockEvent`, on both sides, immediately before the selected block or item-on-block phase.
