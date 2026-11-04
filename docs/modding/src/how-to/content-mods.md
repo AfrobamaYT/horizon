@@ -118,6 +118,13 @@ A block names its template and what differs from it:
   "item": true }
 ```
 
+A fence gate needs no kind of its own: a block whose template is a vanilla `minecraft:*_fence_gate` is a
+`FenceGateBlock`, with the template wood's open and close sounds. `"open_sound"` and `"close_sound"` (sound event ids,
+such as `"minecraft:block.chain.break"` or a sound of the mod's own `sounds.json`) replace them, as a gate built with its
+own `WoodType` has, and they are what opening by hand, a redstone signal and a wind-charge or other explosion toggle all
+play. Either key needs a `*_fence_gate` template and a `namespace:path` id, or the load fails naming the file; leaving
+both out keeps the wood's sounds.
+
 `push_reaction` sets vanilla's `BlockBehaviour.Properties.pushReaction` to `"PUSH_PULL"`, `"PUSH"`, `"POPPED"`, `"IMMOVEABLE"`, or `"IGNORE_ENTITY"`.
 
 `random_ticks` makes a block tick randomly whatever its template does, as vanilla's

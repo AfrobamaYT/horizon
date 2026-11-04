@@ -313,6 +313,10 @@ struct BlockFile {
     #[serde(default = "yes")]
     item: bool,
     #[serde(default)]
+    open_sound: Option<String>,
+    #[serde(default)]
+    close_sound: Option<String>,
+    #[serde(default)]
     components: BTreeMap<String, serde_json::Value>,
 }
 fn yes() -> bool {
@@ -338,6 +342,11 @@ pub struct Block {
     pub default_state: BTreeMap<String, String>,
     /// Also add a block item with the same id.
     pub item: bool,
+    /// The sound event a fence gate plays opening, instead of its wood's
+    /// (`WoodType.fenceGateOpen`); needs a `*_fence_gate` template.
+    pub open_sound: Option<String>,
+    /// The sound event a fence gate plays closing (`WoodType.fenceGateClose`).
+    pub close_sound: Option<String>,
     /// Its item's component patch, as an [`Item`]'s.
     pub components: BTreeMap<String, serde_json::Value>,
     /// A connecting block (template `minecraft:chorus_plant`, a `PipeBlock`
@@ -858,6 +867,8 @@ impl Content {
                 state_properties: file.state_properties,
                 default_state: file.default_state,
                 item: file.item,
+                open_sound: file.open_sound,
+                close_sound: file.close_sound,
                 components: file.components,
                 connects_to: file
                     .connects_to
@@ -1201,6 +1212,23 @@ fn check_block(file: &Block) -> Result<(), String> {
     if file.sign_text_glow.is_some() && !sign {
         return Err("sign_text_glow needs a vanilla sign template".into());
     }
+    for (key, sound) in [
+        ("open_sound", &file.open_sound),
+        ("close_sound", &file.close_sound),
+    ] {
+        let Some(sound) = sound else { continue };
+        if !file.template.ends_with("_fence_gate") {
+            return Err(format!(
+                "{key} needs a fence gate template (minecraft:*_fence_gate), not {}",
+                file.template
+            ));
+        }
+        if !namespaced_id(sound) {
+            return Err(format!(
+                "{key} {sound:?} is a sound event id, namespace:path"
+            ));
+        }
+    }
     if let Some(wall) = &file.wall_block {
         if !sign || file.template.contains("_wall_") {
             return Err("wall_block needs a standing or ceiling sign template".into());
@@ -1507,6 +1535,8 @@ capabilities = ["registries"]
                     ..BlockProperties::default()
                 },
                 item: true,
+                open_sound: None,
+                close_sound: None,
                 components: BTreeMap::new(),
                 connects_to: None,
                 thickness: None,
@@ -1940,6 +1970,47 @@ capabilities = ["registries"]
                 format!(r#"{{"template": "minecraft:chorus_plant", "connects_to": "{tag}"}}"#);
             let e = block(&json).unwrap_err();
             assert!(e.contains("block tag"), "{tag}: {e}");
+        }
+    }
+
+    #[test]
+    fn gate_sounds_need_a_fence_gate_and_sound_ids() {
+        let block = |json: &str| {
+            hmod(
+                "gate",
+                MANIFEST_TEXT,
+                &[("data/ruby/horizon/block/gate.json", json.as_bytes())],
+            )
+        };
+        let parsed = block(
+            r#"{"template": "minecraft:oak_fence_gate", "open_sound": "ruby:gate.open", "close_sound": "minecraft:block.chain.break"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.blocks[0].open_sound.as_deref(),
+            Some("ruby:gate.open")
+        );
+        assert_eq!(
+            parsed.blocks[0].close_sound.as_deref(),
+            Some("minecraft:block.chain.break")
+        );
+        let plain = block(r#"{"template": "minecraft:oak_fence_gate"}"#).unwrap();
+        assert_eq!(
+            (&plain.blocks[0].open_sound, &plain.blocks[0].close_sound),
+            (&None, &None)
+        );
+        for (bad, word) in [
+            (
+                r#"{"template": "minecraft:oak_fence", "open_sound": "ruby:gate.open"}"#,
+                "minecraft:oak_fence",
+            ),
+            (
+                r#"{"template": "minecraft:oak_fence_gate", "close_sound": "gate"}"#,
+                "namespace:path",
+            ),
+        ] {
+            let e = block(bad).unwrap_err();
+            assert!(e.contains(word), "{bad}: {e}");
         }
     }
 
