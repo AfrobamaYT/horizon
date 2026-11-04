@@ -44,6 +44,8 @@ jobs:
       self_hosted: ${{ steps.runner.outputs.self_hosted }}
       # The ignored-tests shard matrix: every shard on main, the affected ones on a pull request (empty: none).
       ignored_matrix: ${{ steps.matrix.outputs.matrix || '{"shard":[]}' }}
+      # Whether the wasm runtime, the mod API or its generator changed: on main, always.
+      wasm: ${{ steps.wasm.outputs.wasm }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,6 +69,19 @@ jobs:
             python3 tools/ci/ignored_shards.py --matrix --all >> "$GITHUB_OUTPUT"
           else
             python3 tools/ci/ignored_shards.py --matrix "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Does this change touch wasm mods?
+        id: wasm
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = push ] || git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -qE '^(crates/(horizon-mod-api|horizon-mod-api-gen|horizon-mod-wasm|horizon-mods)/|Cargo\.lock$)'; then
+            echo wasm=true >> "$GITHUB_OUTPUT"
+          else
+            echo wasm=false >> "$GITHUB_OUTPUT"
           fi
 
   pool-watch:
@@ -194,8 +209,10 @@ jobs:
 
   wasm-bench:
     # What a wasm mod costs against the same mod built native, in release: a table in the job
-    # summary (a report, never a failure; timings on shared runners are indicative).
-    if: github.event_name != 'schedule'
+    # summary (a report, never a failure; timings on shared runners are indicative). Only when
+    # the wasm runtime, the mod API or its generator changed.
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.wasm == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

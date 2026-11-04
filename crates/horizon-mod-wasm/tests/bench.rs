@@ -65,7 +65,7 @@ fn shown(time: Duration) -> String {
 }
 
 #[test]
-#[ignore = "needs tests/bench built to mod.wasm and a release build (CI's wasm-mods job)"]
+#[ignore = "needs tests/bench built to mod.wasm and a release build (CI's wasm-bench job)"]
 fn a_wasm_mod_against_the_same_mod_native() {
     let path = |var: &str| std::path::PathBuf::from(std::env::var(var).expect(var));
     let package = path("HORIZON_WASM_BENCH");
@@ -79,7 +79,7 @@ fn a_wasm_mod_against_the_same_mod_native() {
         }],
     );
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
-    let wasm = &*loaded.mods[0].fields().hooks;
+    let wasm = loaded.mods[0].fields().hooks;
     let native = &*bench_mod::hooks();
 
     let cases = [
