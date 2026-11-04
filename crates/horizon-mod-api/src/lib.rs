@@ -678,15 +678,15 @@ pub struct NativeColoredLight {
 /// turning with the player or north up, round or square.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeMinimap {
-    /// The corner.
+    /// The screen corner the map sits in.
     pub corner: Corner,
-    /// The size.
+    /// The map's side length in GUI pixels.
     pub size: f32,
-    /// The blocks per pixel.
+    /// How many blocks one pixel covers; larger zooms out.
     pub blocks_per_pixel: f32,
-    /// The rotate.
+    /// Turn the map with the player's facing instead of keeping north up.
     pub rotate: bool,
-    /// The round.
+    /// Draw the map as a circle instead of a square.
     pub round: bool,
 }
 
@@ -866,13 +866,13 @@ impl NativeCommand {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeAuthority {
-    /// Local authoritative.
+    /// A single-player game with no server thread; never fires today.
     LocalAuthoritative,
-    /// Integrated server.
+    /// The server thread of a single-player or LAN world.
     IntegratedServer,
-    /// Dedicated server.
+    /// A dedicated server.
     DedicatedServer,
-    /// Remote client.
+    /// A client of someone else's server; never fires today.
     RemoteClient,
 }
 
@@ -2005,17 +2005,17 @@ pub enum NativeClipFluid {
 /// Result of a block ray, including the vanilla miss result.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeClipHit {
-    /// The miss.
+    /// Whether the ray hit nothing; the other fields are then the vanilla miss values.
     pub miss: bool,
-    /// The block.
+    /// The hit block's position.
     pub block: [i32; 3],
-    /// The face.
+    /// The face the ray entered.
     pub face: NativeBlockFace,
-    /// The location.
+    /// The exact hit point in blocks.
     pub location: [f64; 3],
-    /// The inside.
+    /// Whether the ray started inside the block.
     pub inside: bool,
-    /// The world border.
+    /// Whether the hit is the world border.
     pub world_border: bool,
 }
 
@@ -2025,20 +2025,20 @@ pub struct NativeClipHit {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum NativeCrosshairTarget {
-    /// Block.
+    /// The crosshair is on a block.
     Block {
-        /// The pos.
+        /// The block's position.
         pos: BlockPos,
-        /// The state.
+        /// The block's state.
         state: BlockStateId,
-        /// The hit.
+        /// Where on the block the ray hit.
         hit: BlockHit,
     },
-    /// Entity.
+    /// The crosshair is on an entity.
     Entity {
-        /// The entity.
+        /// The entity under the crosshair.
         entity: EntityRef,
-        /// The point.
+        /// The hit point in blocks.
         point: [f64; 3],
     },
 }
@@ -2373,14 +2373,14 @@ pub enum WorldPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ServerTickPhase {
-    /// Server tick start.
+    /// The server tick is about to begin.
     ServerTickStart {
-        /// The world running.
+        /// False for a frozen step, when the world does not advance.
         world_running: bool,
     },
-    /// Server tick end.
+    /// The server tick has finished.
     ServerTickEnd {
-        /// The world running.
+        /// False for a frozen step, when the world does not advance.
         world_running: bool,
     },
 }
