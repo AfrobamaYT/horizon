@@ -1321,6 +1321,8 @@
       "name": "screen_mouse_button_pressed_pre", "doc": "A mouse button went down over the open screen\n(`ScreenEvent.MouseButtonPressed.Pre`, vanilla's\n`Screen.mouseClicked`): `screen` is the screen it is, `screen.mouse`\nwhere the pointer is (so there is no position of its own), `button` the\nbutton's GLFW index (0 left, 1 right, 2 middle, 3 back, 4 forward; a\nbutton past those is the platform's own number, which differs between\nsystems) and `modifiers` GLFW's bits (shift 1, control 2,\nalt 4, super 8). Set `canceled` and the press goes no further: no slot,\nno screen button, no drag, no hotbar key, no sort or header button.\n\nIt fires before anything the screen does with the press, on the window\nonly, and while a screen of the game's or the title's is open (Options\nand the pack list opened from the title screen count, with no player\nand no `menu`; the title's own screens, their\n`screen.id` from the title state machine). It does not fire on the\nconnect and loading screens, nor for a server\ndialog, the server pack, link and code-of-conduct prompts, a book or a\nsign editor drawn over gameplay, nor while a world loads or saves: the\nclick there stays the game's own. A gamepad click or a click the\nkeyboard's focus sends is not the mouse and fires nothing.", "side": "client",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_mouse_button_pressed_pre",
+      "neoforge": "ScreenEvent.MouseButtonPressed.Pre",
+      "cancellable": true,
       "mod_api": {
         "contract": "cancel",
         "out": "canceled"
@@ -1330,6 +1332,8 @@
       "name": "screen_mouse_button_released_pre", "doc": "A mouse button went up over the open screen\n(`ScreenEvent.MouseButtonReleased.Pre`, vanilla's\n`Screen.mouseReleased`), with the same `screen`, `button` and\n`modifiers` as `native_screen_mouse_button_pressed_pre` and fired at\nthe same point. Set `canceled` and the release goes no further: a\npressed slot keeps what it took and no drag, slider or scrollbar lets\ngo.\n\nCancel a release only when the press it ends was cancelled too: a\nrelease the screen took ends the drag or the scroll it began, as it\ndoes in vanilla, and no guard here un-cancels it. Same screens as the\npress; a press that opened another screen ends on that one.", "side": "client",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_mouse_button_released_pre",
+      "neoforge": "ScreenEvent.MouseButtonReleased.Pre",
+      "cancellable": true,
       "mod_api": {
         "contract": "cancel",
         "out": "canceled"
@@ -1455,6 +1459,8 @@
       "name": "screen_mouse_scrolled_pre", "doc": "The wheel turned over the open screen (`ScreenEvent.MouseScrolled.Pre`,\nvanilla's `Screen.mouseScrolled`): `screen` is the screen it is,\n`screen.mouse` where the pointer is (so there is no position of its\nown), `scroll` the wheel's movement in x and y as the game's own scroll\nhandler scales it (a line times the wheel sensitivity: with Discrete\nScrolling on, a notch is ±1, its sign only; a touchpad's pixels are\ndivided by 30), and\n`modifiers` GLFW's bits (shift 1, control 2, alt 4, super 8). Set\n`canceled` and nothing the screen would scroll moves: not the bundle\nunder the pointer, nor a list, slider, scrollbar or map. Nothing else\nreads the wheel while a screen of the game's is open, so no hotbar slot\nchanges either.\n\nIt fires before the screen scrolls anything, for the window's wheel\n(horizon-ctl's `scroll-at` sends it through the window too), and\nwhile a screen of the game's or the title's is open (Options and the\npack list opened from the title screen count, with no player and no\n`menu`; the title's own). It\ndoes not fire on the connect and loading\nscreens, nor for a server dialog, the server pack, link and\ncode-of-conduct prompts, a book or a sign editor drawn over gameplay,\nnor while a world loads or saves: the scroll there stays the game's\nown. A wheel a gamepad or the keyboard's focus sends is not the mouse\nand fires nothing.", "side": "client",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_mouse_scrolled_pre",
+      "neoforge": "ScreenEvent.MouseScrolled.Pre",
+      "cancellable": true,
       "mod_api": {
         "contract": "cancel",
         "out": "canceled"
@@ -1486,6 +1492,8 @@
       "name": "screen_key_pressed_pre", "doc": "A key went down over the open screen (`ScreenEvent.KeyPressed.Pre`,\nvanilla's `Screen.keyPressed`): `screen` is the screen it is, `key`\nvanilla's name for the key (`key.keyboard.e`) — a key with no name\nfires nothing — `repeat` whether it is\nthe keyboard's auto-repeat of a held press (Horizon's extra; NeoForge\nfolds repeats into the event), and `modifiers` GLFW's bits (shift 1,\ncontrol 2, alt 4, super 8). Set `canceled` and the press goes no\nfurther: no focus move, no Escape-close, no inventory or hotbar key, no\ntyping by the key itself.\n\nIt fires for the window's presses and their repeats, and for the\ncontrol socket's `key` (a release fires nothing), after the window's\nown shortcuts have run — the fullscreen and screenshot keys, the debug\nkeys and the narrator — and while a screen of the game's or the title's\nis open (Options and the pack list opened from the title screen count,\nwith no player and no `menu`; the title's own). It does\nnot fire on the connect and loading screens, nor for a server dialog, the server pack,\nlink and code-of-conduct prompts, a book or a sign editor drawn over\ngameplay, nor while a world loads or saves: the key there stays the\ngame's own. A cancelled press's release still runs, and its characters\nare GLFW's separate char callback and still come; see\n`native_screen_char_typed_pre`.", "side": "client",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_key_pressed_pre",
+      "neoforge": "ScreenEvent.KeyPressed.Pre",
+      "cancellable": true,
       "mod_api": {
         "contract": "cancel",
         "out": "canceled"
@@ -1495,6 +1503,8 @@
       "name": "screen_char_typed_pre", "doc": "A character was typed at the open screen\n(`ScreenEvent.CharacterTyped.Pre`, vanilla's `Screen.charTyped`):\n`screen` is the screen it is, `c` the character, and `modifiers` GLFW's\nbits (shift 1, control 2, alt 4, super 8). Set `canceled` and that one\ncharacter never reaches a text box.\n\nIt fires once per printable character of a key press's text and once\nper character of the input method's committed text, never for a control\ncharacter (Enter, Backspace, Tab, Delete, Escape, a Control letter):\nthose are keys, and the game reads them as keys, not as text. A key's\ncharacters fire after the key has acted, as GLFW's char callback comes\nafter its key callback (`KeyboardHandler.charTyped`): `screen` is the\nscreen open then, so a key that closes the screen (the inventory key)\nleaves none to hear its character, where vanilla's closed screen hears\nnothing, and one that moves the focus types into the box it moved to.\nThey fire even when `native_screen_key_pressed_pre` cancelled the press\nthat carried the text, as NeoForge delivers `CharacterTyped.Pre` for a\ncancelled `KeyPressed.Pre`: the characters left reach the text box\nwithout the key's own effects. Cancelling one character drops only that\none. The control socket's `type` fires it too, but not for its `\\b`\nbackspace. Same screens as the key press, and it fires with no text box\nfocused (there is nothing to take the character then).", "side": "client",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_char_typed_pre",
+      "neoforge": "ScreenEvent.CharacterTyped.Pre",
+      "cancellable": true,
       "mod_api": {
         "contract": "cancel",
         "out": "canceled"

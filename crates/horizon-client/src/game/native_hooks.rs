@@ -1491,6 +1491,22 @@ const MAPPINGS: [(&str, Option<KeyCode>); 9] = [
     ("key.use", None),
 ];
 
+/// The Post a mouse input owes once the screen has handled it, built when
+/// its Pre let the input through (`Game::screen_mouse_post`).
+pub(super) enum ScreenMousePost {
+    Button { button: i32, pressed: bool },
+    Scroll([f64; 2]),
+    Drag { button: i32, delta: [f32; 2] },
+}
+
+/// What a drag's Pre decided (`Game::screen_mouse_dragged`).
+pub(super) enum ScreenMousePre {
+    /// No screen hook ran: no drag, a synthetic move or no screen open.
+    NotFired,
+    Canceled,
+    Passed(ScreenMousePost),
+}
+
 /// What a `ScreenEvent.CharacterTyped.Pre` leaves of `text`, given `canceled`
 /// (whether a hook cancelled character `c`): the cancelled printable
 /// characters are gone and every other character stays, control characters
@@ -2962,6 +2978,74 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_screen_char_typed_pre(self, screen, c, modifiers, canceled);
     }
+    /// A mouse press after the open screen's arms ran (`ScreenEvent.MouseButtonPressed.Post`).
+    pub(super) fn native_screen_mouse_button_pressed_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        button: i32,
+        modifiers: u32,
+    ) {
+        mod_api::dispatch_screen_mouse_button_pressed_post(self, screen, button, modifiers);
+    }
+    /// A mouse release after the open screen's arms ran (`ScreenEvent.MouseButtonReleased.Post`).
+    pub(super) fn native_screen_mouse_button_released_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        button: i32,
+        modifiers: u32,
+    ) {
+        mod_api::dispatch_screen_mouse_button_released_post(self, screen, button, modifiers);
+    }
+    /// A drag the open screen's handlers have seen (`ScreenEvent.MouseDragged.Post`).
+    pub(super) fn native_screen_mouse_dragged_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        button: i32,
+        delta: [f32; 2],
+        modifiers: u32,
+    ) {
+        mod_api::dispatch_screen_mouse_dragged_post(self, screen, button, delta, modifiers);
+    }
+    /// A wheel turn the open screen has scrolled by (`ScreenEvent.MouseScrolled.Post`).
+    pub(super) fn native_screen_mouse_scrolled_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        scroll: [f64; 2],
+        modifiers: u32,
+    ) {
+        mod_api::dispatch_screen_mouse_scrolled_post(self, screen, scroll, modifiers);
+    }
+    /// A key press no screen took (`ScreenEvent.KeyPressed.Post`).
+    pub(super) fn native_screen_key_pressed_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        key: &str,
+        repeat: bool,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_screen_key_pressed_post(self, screen, key, repeat, modifiers, canceled);
+    }
+    /// A key release no screen took (`ScreenEvent.KeyReleased.Post`).
+    pub(super) fn native_screen_key_released_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        key: &str,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_screen_key_released_post(self, screen, key, modifiers, canceled);
+    }
+    /// A character no text box took (`ScreenEvent.CharacterTyped.Post`).
+    pub(super) fn native_screen_char_typed_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        c: char,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_screen_char_typed_post(self, screen, c, modifiers, canceled);
+    }
     /// The open screen as a native mod sees it (`NativeScreenView`): its id,
     /// the open menu's type and title, its slot count, and its panel's
     /// rectangle, with the mouse and the partial tick. `screen` is the screen
@@ -3032,28 +3116,109 @@ impl Game<'_> {
         // left down, right down, left up sends no drag while right is still held.
         self.drag_button = pressed.then_some(button);
     }
-    pub(super) fn screen_mouse_dragged(&self, previous: (f32, f32)) -> bool {
+    pub(super) fn screen_mouse_dragged(&self, previous: (f32, f32)) -> ScreenMousePre {
         if self.pad_synthetic_input() || self.cursor == previous {
-            return false;
+            return ScreenMousePre::NotFired;
         }
         let Some(button) = self
             .drag_button
             .filter(|b| self.physical_buttons.contains(b))
         else {
-            return false;
+            return ScreenMousePre::NotFired;
         };
         let Some(screen) = self.screen_view_now() else {
-            return false;
+            return ScreenMousePre::NotFired;
         };
+        let button = super::glfw_button(button);
+        let delta = [self.cursor.0 - previous.0, self.cursor.1 - previous.1];
         let mut canceled = false;
         self.native_screen_mouse_dragged_pre(
             &screen,
-            super::glfw_button(button),
-            [self.cursor.0 - previous.0, self.cursor.1 - previous.1],
+            button,
+            delta,
             super::glfw_modifiers(self.modifiers),
             &mut canceled,
         );
+        if canceled {
+            ScreenMousePre::Canceled
+        } else {
+            ScreenMousePre::Passed(ScreenMousePost::Drag { button, delta })
+        }
+    }
+    /// The Post of a mouse input whose Pre let it through, once the screen's
+    /// own handling has run. The screen is the one open then (none, and no
+    /// Post, when the input closed it). Nothing is built with no subscriber.
+    pub(super) fn screen_mouse_post(&self, post: ScreenMousePost) {
+        use mod_api::HookId;
+        let hook = match post {
+            ScreenMousePost::Button { pressed: true, .. } => HookId::ScreenMouseButtonPressedPost,
+            ScreenMousePost::Button { pressed: false, .. } => HookId::ScreenMouseButtonReleasedPost,
+            ScreenMousePost::Scroll(_) => HookId::ScreenMouseScrolledPost,
+            ScreenMousePost::Drag { .. } => HookId::ScreenMouseDraggedPost,
+        };
+        if !mod_api::__private::listened(hook) {
+            return;
+        }
+        let Some(screen) = self.screen_view_now() else {
+            return;
+        };
+        let modifiers = super::glfw_modifiers(self.modifiers);
+        match post {
+            ScreenMousePost::Button {
+                button,
+                pressed: true,
+            } => self.native_screen_mouse_button_pressed_post(&screen, button, modifiers),
+            ScreenMousePost::Button {
+                button,
+                pressed: false,
+            } => self.native_screen_mouse_button_released_post(&screen, button, modifiers),
+            ScreenMousePost::Scroll(scroll) => {
+                self.native_screen_mouse_scrolled_post(&screen, scroll, modifiers)
+            }
+            ScreenMousePost::Drag { button, delta } => {
+                self.native_screen_mouse_dragged_post(&screen, button, delta, modifiers)
+            }
+        }
+    }
+    /// Whether a Post of the key `key` over the open screen cancelled it
+    /// (`ScreenEvent.KeyPressed.Post` / `KeyReleased.Post`): asked where the
+    /// key no screen arm took reaches the game's own key handling, which a
+    /// cancel then skips. False with no subscriber, no screen of the hooks'
+    /// open, or a key with no vanilla name.
+    pub(super) fn screen_key_post(&self, key: KeyCode, pressed: bool, repeat: bool) -> bool {
+        let hook = if pressed {
+            mod_api::HookId::ScreenKeyPressedPost
+        } else {
+            mod_api::HookId::ScreenKeyReleasedPost
+        };
+        if !mod_api::__private::listened(hook) {
+            return false;
+        }
+        let (Some(name), Some(screen)) = (keybinds::key_name(key), self.screen_view_now()) else {
+            return false;
+        };
+        let modifiers = super::glfw_modifiers(self.modifiers);
+        let mut canceled = false;
+        if pressed {
+            self.native_screen_key_pressed_post(&screen, name, repeat, modifiers, &mut canceled);
+        } else {
+            self.native_screen_key_released_post(&screen, name, modifiers, &mut canceled);
+        }
         canceled
+    }
+    /// `ScreenEvent.CharacterTyped.Post` for each character of `text` that no
+    /// text box took.
+    fn screen_chars_post(&self, text: &str) {
+        if !mod_api::__private::listened(mod_api::HookId::ScreenCharTypedPost) {
+            return;
+        }
+        let Some(screen) = self.screen_view_now() else {
+            return;
+        };
+        let modifiers = super::glfw_modifiers(self.modifiers);
+        for c in text.chars() {
+            self.native_screen_char_typed_post(&screen, c, modifiers, &mut false);
+        }
     }
     /// A screen the native mods' input hooks are for is open: the window has a
     /// renderer, either the title's own (`title`, `world_select`,
@@ -3162,11 +3327,10 @@ impl Game<'_> {
             return;
         };
         // A held edit modifier makes a shortcut of the key, not text.
-        if !self.types_text() {
-            return;
-        }
         // `Err` only says no text box of the screen takes the characters.
-        let _ = self.type_chars_into_screen(&text);
+        if !self.types_text() || self.type_chars_into_screen(&text).is_err() {
+            self.screen_chars_post(&text);
+        }
     }
     /// A left or right (`right`) press at `at` (GUI pixels from the screen's
     /// top left, so outside it too) on block `block`'s screen, a mod's, over
