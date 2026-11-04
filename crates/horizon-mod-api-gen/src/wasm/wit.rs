@@ -18,6 +18,8 @@ pub(super) fn wit(types: &Types<'_>, ty: &Ty) -> Result<Option<String>, String> 
         Ty::Prim(_, wit) => (*wit).into(),
         Ty::Wide(_) => "tuple<u64, u64>".into(),
         Ty::Duration => "u64".into(),
+        // A name the game keeps: its index in the group's name table.
+        Ty::Str(super::ty::Str::Static) => "u32".into(),
         Ty::Str(_) => "string".into(),
         Ty::List(item, _) | Ty::Array(item, _) => format!("list<{}>", value(types, item)?),
         Ty::Option(item) => format!("option<{}>", value(types, item)?),
@@ -500,7 +502,8 @@ pub(super) fn package(
         }
     }
     text.push_str("\ninterface held-handles {\n  release: func(handle: u32);\n}\n");
-    world.push_str("  import held-handles;\n}\n");
+    text.push_str("\ninterface names {\n  name: func(id: u32) -> string;\n  intern: func(name: string) -> u32;\n}\n");
+    world.push_str("  import held-handles;\n  import names;\n}\n");
     text.push_str(&world);
     Ok(text)
 }

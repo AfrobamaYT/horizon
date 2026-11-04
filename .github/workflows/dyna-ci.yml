@@ -192,7 +192,9 @@ jobs:
           target/debug/xtask mod-api wit target/wit-head
           if git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
             git worktree add -q ../wit-base "$BASE_SHA"
-            (cd ../wit-base && "$GITHUB_WORKSPACE/target/debug/xtask" mod-api wit "$GITHUB_WORKSPACE/target/wit-base") || true
+            # The base's own generator reads the base's catalog: the head's xtask doesn't know
+            # the base's layout. A base that can't build its WIT fails the step.
+            (cd ../wit-base && cargo +stable run -q -p xtask -- mod-api wit "$GITHUB_WORKSPACE/target/wit-base")
           fi
           if [ -f target/wit-base/mod-api.wit ]; then
             python3 tools/ci/wit_report.py target/wit-base/mod-api.wit target/wit-head/mod-api.wit >> "$GITHUB_STEP_SUMMARY"

@@ -3159,6 +3159,72 @@ pub mod tests {
         mark_game_thread();
     }
 
+    std::thread_local! {
+        static SIGNAL_READS: std::cell::RefCell<Vec<SignalRead>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// What the signal-reading glass saw: in `neighbor_changed`, whether it is powered and
+    /// how strongly, and whether its tick was scheduled; or that its tick ran.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    // exhaustive: a test fixture's record, matched whole by the game's test
+    pub enum SignalRead {
+        /// `neighbor_changed`: `has_neighbor_signal`, `best_neighbor_signal`, the scheduling's answer.
+        Changed([i32; 3], bool, i32, bool),
+        /// `tick_block` ran at this position, reading the signal from its south side.
+        Ticked([i32; 3], i32),
+    }
+
+    /// The reads the signal-reading glass recorded on this thread, taken.
+    pub fn signal_reads() -> Vec<SignalRead> {
+        SIGNAL_READS.with(|r| std::mem::take(&mut *r.borrow_mut()))
+    }
+
+    /// Install a part on glass that, when a neighbour changes, reads its inputs and
+    /// schedules its own tick 2 ticks later, as a diode does, for real-game tests.
+    pub fn signal_reader_game_thread() {
+        struct Reader;
+        #[mod_api::horizon_part]
+        impl BlockPart for Reader {
+            fn neighbor_changed(
+                &self,
+                level: &mut dyn crate::LevelTicksHost,
+                event: &mut crate::NeighborChangedEvent,
+            ) {
+                let pos = [event.pos.x, event.pos.y, event.pos.z];
+                let read = SignalRead::Changed(
+                    pos,
+                    level.has_neighbor_signal(pos),
+                    level.best_neighbor_signal(pos),
+                    level.schedule_block_tick(pos, "minecraft:glass", 2),
+                );
+                SIGNAL_READS.with(|r| r.borrow_mut().push(read));
+            }
+            fn tick_block(
+                &self,
+                level: &mut dyn crate::LevelWriteHost,
+                event: &mut crate::TickBlockEvent,
+            ) -> Flow {
+                let pos = [event.pos.x, event.pos.y, event.pos.z];
+                let south = [pos[0], pos[1], pos[2] + 1];
+                let read = SignalRead::Ticked(pos, level.signal(south, Direction::South));
+                SIGNAL_READS.with(|r| r.borrow_mut().push(read));
+                Flow::Continue
+            }
+        }
+        struct ReaderMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for ReaderMod {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                r.block_part("minecraft:glass", Reader);
+            }
+        }
+        let mods: super::super::Mods =
+            vec![ModEntry::new("signal_reader_test", Box::new(ReaderMod))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        mark_game_thread();
+    }
+
     /// Install a redstone connector on glass for real-game tests.
     pub fn redstone_game_thread() {
         struct RedstoneMod;

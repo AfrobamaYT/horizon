@@ -389,6 +389,15 @@ pub fn apply_deprecated(map: &mut HashMap<String, String>, json: &[u8]) {
 }
 
 impl Language {
+    /// A language holding only `entries` (key, template), as `code`: the part of the current
+    /// language a text needs, carried where no language is loaded.
+    pub fn of(code: &str, entries: impl IntoIterator<Item = (String, String)>) -> Self {
+        Self {
+            code: code.to_owned(),
+            bidirectional: false,
+            map: entries.into_iter().collect(),
+        }
+    }
     /// ClientLanguage.loadFrom: en_us first, then the selected language, each
     /// from every namespace and every source in priority order (later sources
     /// override).

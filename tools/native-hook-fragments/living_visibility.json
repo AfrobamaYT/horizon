@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "living_visibility",
+      "doc": "How visible `entity` is to `looking` (NeoForge's\n`LivingVisibilityEvent`, last in `LivingEntity.getVisibilityPercent`):\nthe range a mob's targeting check sees it from is scaled by\n`visibility`. It comes in as vanilla's percent (sneaking 0.8,\ninvisibility by armour cover, a matching mob head 0.5); multiply it\nto scale. Values below 0 count as 0, and the result is clamped to\n10. Asked for a player, by the mobs whose targeting checks scale by\nvisibility (hostile targeting, sensors, the happy ghast's tempt).\nServer-side.",
+      "host": "read",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_visibility",
+      "side": "server",
+      "neoforge": "LivingEvent.LivingVisibilityEvent",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

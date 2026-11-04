@@ -197,6 +197,61 @@ fn intern(value: String) -> Result<&'static str, Refused> {
     Ok(leaked)
 }
 
+impl Names {
+    /// `name`'s index, given it first if it has none.
+    fn id(&mut self, name: &'static str) -> Result<u32, Refused> {
+        if let Some(id) = self.index.get(name) {
+            return Ok(*id);
+        }
+        let id = u32::try_from(self.names.len()).map_err(|_| Refused::SHAPE)?;
+        self.names.push(name);
+        self.index.insert(name, id);
+        Ok(id)
+    }
+    /// The name index `id` stands for; refused for an index the table never gave.
+    fn name(&self, id: u32) -> Result<&'static str, Refused> {
+        self.names
+            .get(id as usize)
+            .copied()
+            .ok_or_else(|| Refused::because(format_args!("no name has index {id} in its group")))
+    }
+}
+
+/// `f` on the calling group's name table.
+fn with_names<T>(f: impl FnOnce(&mut Names) -> Result<T, Refused>) -> Result<T, Refused> {
+    let module = CALLER.take().ok_or(Refused::NO_CALLER)?;
+    let value = f(&mut module.group.named.lock().unwrap_or_else(|e| e.into_inner()));
+    CALLER.set(Some(module));
+    value
+}
+
+/// The calling group's index for `name`.
+fn name_id(name: &'static str) -> Result<u32, Refused> {
+    with_names(|names| names.id(name))
+}
+
+/// The name the calling group's index `id` stands for.
+fn name_of(id: u32) -> Result<&'static str, Refused> {
+    with_names(|names| names.name(id))
+}
+
+impl glue::horizon::mod_api::names::Host for State {
+    fn name(&mut self, id: u32) -> wasmtime::Result<String> {
+        Ok(name_of(id)?.to_string())
+    }
+    fn intern(&mut self, name: String) -> wasmtime::Result<u32> {
+        Ok(name_id(intern(name)?)?)
+    }
+}
+
+/// Runs `lower` as `module`'s caller: arguments lowered before the call names its group.
+fn lowering<T>(module: &Arc<Running>, lower: impl FnOnce() -> T) -> T {
+    let previous = CALLER.replace(Some(module.clone()));
+    let value = lower();
+    CALLER.set(previous);
+    value
+}
+
 /// One call's storage for the values its borrowed arguments point into, as on the guest.
 #[derive(Default)]
 pub(crate) struct Keep {
@@ -247,6 +302,16 @@ pub struct Group {
     budgets: Budgets,
     /// The bytes of new names it gave the game, against `budgets.names`.
     names: AtomicUsize,
+    /// The names crossing to and from it, by index: one per name, never reused while the group
+    /// lives, and dropped with it.
+    named: Mutex<Names>,
+}
+
+/// A group's name table: a `&'static str` crosses as its index here, the guest caching each.
+#[derive(Default)]
+struct Names {
+    index: HashMap<&'static str, u32>,
+    names: Vec<&'static str>,
 }
 
 thread_local! {
@@ -294,6 +359,7 @@ impl Group {
             poisoned: AtomicBool::new(false),
             budgets,
             names: AtomicUsize::new(0),
+            named: Mutex::default(),
         }
     }
 
@@ -763,6 +829,21 @@ mod tests {
         let mut budgets = Budgets::default();
         budgets.wait = wait;
         Arc::new(Group::new(Store::new(&engine, State { limits }), budgets))
+    }
+
+    #[test]
+    fn a_name_keeps_one_index_and_an_index_never_given_is_refused() {
+        let mut names = Names::default();
+        let overworld = names.id("minecraft:overworld").unwrap();
+        let nether = names.id("minecraft:the_nether").unwrap();
+        assert_ne!(overworld, nether);
+        assert_eq!(names.id("minecraft:overworld").unwrap(), overworld);
+        assert_eq!(names.name(nether).unwrap(), "minecraft:the_nether");
+        let refused = names.name(nether + 1).unwrap_err();
+        assert!(
+            refused.to_string().contains("no name has index"),
+            "{refused}"
+        );
     }
 
     #[test]

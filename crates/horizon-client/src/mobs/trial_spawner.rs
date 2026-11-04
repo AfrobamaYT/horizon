@@ -1069,15 +1069,7 @@ impl TrialSpawnerExt for TrialSpawner {
             return None;
         }
         let block = at.map(|v| v.floor() as i32);
-        if !spawn_rules::check_spawn_rules(
-            species,
-            l,
-            Reason::TrialSpawner,
-            random,
-            block[0],
-            block[1],
-            block[2],
-        ) {
+        if !spawn_rules::check_spawn_rules(&id, species, l, Reason::TrialSpawner, random, block) {
             return None;
         }
         if let Some(rules) = data.custom_spawn_rules
@@ -1096,15 +1088,17 @@ impl TrialSpawnerExt for TrialSpawner {
             width * scale,
             height * scale,
         );
-        if !spawn_selection::spawn_obstruction(
-            species,
-            l,
-            bounds,
-            Some(&[]),
-            own[0],
-            own[1],
-            own[2],
-        ) {
+        if !spawn_selection::position_ok(l, &id, Reason::TrialSpawner, placed, || {
+            spawn_selection::spawn_obstruction(
+                species,
+                l,
+                bounds,
+                Some(&[]),
+                own[0],
+                own[1],
+                own[2],
+            )
+        }) {
             return None;
         }
         let request = SpawnerSpawn {

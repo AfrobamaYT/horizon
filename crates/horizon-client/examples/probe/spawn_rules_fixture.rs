@@ -219,13 +219,12 @@ pub fn main() -> horizon_client::Result<()> {
         let s = kind.species;
         let ok = spawn_rules::is_spawn_position_ok(s, &level, x0, y, z0);
         let rules = spawn_rules::check_spawn_rules(
+            c["type"],
             s,
             &level,
             reason(&get("reason", "natural")),
             &mut random,
-            x0,
-            y,
-            z0,
+            [x0, y, z0],
         );
         let next = random.next_int_bound(1000).unwrap_or(0);
         let _ = writeln!(out, "{name} {ok} {rules} {next}");

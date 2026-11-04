@@ -30,6 +30,8 @@ mod tests {
         pub(super) struct LevelDimension;
         #[derive(Clone, Copy)]
         pub(super) struct PlayerRef;
+        #[derive(Clone, Copy)]
+        pub(super) struct ChunkRef;
         pub(super) struct NeighbourUpdate;
         #[derive(Clone, Copy)]
         pub(super) struct PathComputationType;
@@ -55,6 +57,8 @@ mod tests {
         pub(super) trait LevelRandomHost: LevelHost {}
         pub(super) trait LevelWriteHost: LevelTicksHost + LevelRandomHost {}
         pub(super) struct Compound;
+        pub(super) struct NativeSpawnReason;
+        pub(super) struct NativeSpawnCheck;
         pub(super) enum Placement {
             Single,
         }
