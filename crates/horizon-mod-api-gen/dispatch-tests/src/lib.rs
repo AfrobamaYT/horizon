@@ -1028,11 +1028,16 @@ mod tests {
         struct Weapon;
         #[mod_api::__subscriptions]
         impl Hooks for Weapon {
-            fn living_knockback_v2(&self, event: &mut LivingKnockbackV2Event<'_>) -> Flow {
+            fn living_knockback(
+                &self,
+                _: &mut dyn LevelRandomHost,
+                event: &mut LivingKnockbackEvent<'_>,
+            ) -> Flow {
                 assert_eq!(
                     (event.entity, event.kind, event.attacker),
                     (12, "minecraft:armor_stand", 7)
                 );
+                assert_eq!(event.source.damage_type, "minecraft:player_attack");
                 assert!(event.attacker_main.is_none() && event.attacker_off.is_none());
                 assert_eq!(event.strength, 0.4);
                 event.strength *= 2.0;
@@ -1044,9 +1049,15 @@ mod tests {
         let weapon_mods: Arc<[ModEntry]> = weapon_mods.into();
         install(weapon_mods.clone());
         let (mut strength, mut x, mut z, mut canceled) = (0.4, 1.0, 0.0, false);
-        dispatch_living_knockback_v2(
+        let source = HurtSource {
+            damage_type: "minecraft:player_attack",
+            position: None,
+        };
+        dispatch_living_knockback(
+            &mut TestLevel,
             12,
             "minecraft:armor_stand",
+            &source,
             7,
             None,
             None,

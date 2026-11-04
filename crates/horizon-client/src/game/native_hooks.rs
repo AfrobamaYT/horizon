@@ -6966,82 +6966,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_living_use_totem(entity, kind, source, hand, item, cancel);
     }
-    /// `LivingEntity.knockback` is about to push entity `entity` of type `kind`
-    /// (`minecraft:zombie`, `minecraft:player`) `strength` away from the direction (`x`, `z`),
-    /// on the raw strength, before the entity's knockback resistance takes its share and its motion
-    /// changes
-    /// (docs/native-mods.md). Vanilla's direction points at the
-    /// source of a hit (the attacker's side), and the entity is pushed the other way. Change
-    /// `strength`, `x` or `z`, or set `canceled`, and the push follows them: canceled, the
-    /// entity's motion is left alone. A `strength` of 0 or less after the hook is no push, and a
-    /// direction too short to tell draws a random one after it, as in vanilla. A value a mod
-    /// leaves that is not a finite number is put back as it was. `damage_type`
-    /// (`minecraft:player_attack`), `causing` (`DamageSource.getEntity`) and `direct`
-    /// (`getDirectEntity`) are the push's `DamageSource`, named as `native_living_incoming_damage`
-    /// names a hit's, with the same entity ids left at 0. It fires for the players and mobs the
-    /// game knocks back: a hit's own push, a sprinting or Knockback hit, a sweep, a spear, a
-    /// shield's push on its holder and a goat's ram. It does not fire for a sulfur cube with a
-    /// block that a hit with a causing entity knocks back (`SulfurCube.knockback` does not call
-    /// `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the
-    /// ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a
-    /// hoglin's throw), nor yet for the ones Horizon makes another way: a mob's melee push from
-    /// its attack knockback or a Knockback weapon, an armor stand's, the ender dragon's. It runs
-    /// on the thread that ticks the world (the server thread): state
-    /// shared with render thread hooks needs synchronising. No `self`: the game is in the middle
-    /// of the hit.
-    pub(super) fn native_living_knockback(
-        entity: i32,
-        kind: &str,
-        damage_type: &str,
-        causing: i32,
-        direct: i32,
-        strength: &mut f64,
-        x: &mut f64,
-        z: &mut f64,
-        canceled: &mut bool,
-    ) {
-        mod_api::dispatch_living_knockback(
-            entity,
-            kind,
-            damage_type,
-            causing,
-            direct,
-            strength,
-            x,
-            z,
-            canceled,
-        );
-    }
-    /// LivingEntity.knockback before resistance and motion, after the unchanged v1 hook.
-    /// Cancellation from either hook wins. Attacker is the attacking entity's network id,
-    /// falling back to the victim's last hurt-by mob, or 0 when unknown; `attacker_main` and
-    /// `attacker_off` are what it holds (a player's selected and off-hand stacks, a mob's main hand), none when unknown. Player attackers
-    /// include the guest whose action runs. Includes mob melee and armor-stand sweeps, not
-    /// direct velocity pushes (explosions, Punch arrows, hoglin throws). Non-finite changes
-    /// are restored before resistance. Server-side, without self: damage borrows the victim.
-    pub(super) fn native_living_knockback_v2(
-        entity: i32,
-        kind: &str,
-        attacker: i32,
-        attacker_main: Option<&ItemStack>,
-        attacker_off: Option<&ItemStack>,
-        strength: &mut f64,
-        x: &mut f64,
-        z: &mut f64,
-        canceled: &mut bool,
-    ) {
-        mod_api::dispatch_living_knockback_v2(
-            entity,
-            kind,
-            attacker,
-            attacker_main,
-            attacker_off,
-            strength,
-            x,
-            z,
-            canceled,
-        );
-    }
     /// Whether a mod hears projectiles' impacts (`native_projectile_impact`):
     /// set `hears`. Asked once a server tick before the projectiles fly; only
     /// then does the tick keep the copy of each flying projectile that a
@@ -7191,6 +7115,53 @@ impl HitLevel<'_> {
             self, entity, kind, source, victim, weapon, container, canceled,
         );
     }
+    /// NeoForge's `LivingKnockBackEvent`: `LivingEntity.knockback` is about to push entity
+    /// `entity` of type `kind` (`minecraft:zombie`, `minecraft:player`) `strength` away from the
+    /// direction (`x`, `z`), on the raw strength, before the entity's knockback resistance takes
+    /// its share and its motion changes. Vanilla's direction points at the source of a hit (the
+    /// attacker's side), and the entity is pushed the other way. `source` is the push's
+    /// `DamageSource`, named as `native_living_incoming_damage` names a hit's. `attacker` is the
+    /// attacking entity's network id, falling back to the victim's last hurt-by mob, or 0 when
+    /// unknown; `attacker_main` and `attacker_off` are what it holds (a player's selected and
+    /// off-hand stacks, a mob's main hand), none when unknown. Change `strength`, `x` or `z`, or
+    /// set `canceled`, and the push follows them: canceled, the entity's motion is left alone. A
+    /// `strength` of 0 or less after the hook is no push, and a direction too short to tell
+    /// draws a random one after it, as in vanilla. A value a mod leaves that is not a finite
+    /// number is put back as it was. It fires for the players, mobs and armor stands the game
+    /// knocks back: a hit's own push, a sprinting or Knockback hit, a sweep, a spear, a
+    /// shield's push on its holder, a goat's ram and a mob's melee push. It does not fire for a
+    /// sulfur cube with a block that a hit with a causing entity knocks back
+    /// (`SulfurCube.knockback` does not call `super` there), for the pushes vanilla doesn't make
+    /// with `LivingEntity.knockback` (the ender dragon's wings, Punch arrows, explosions, wind
+    /// charges, a mace smash's area, a hoglin's throw), nor for the ones Horizon makes another
+    /// way (the ender dragon's). The level is the hit's: its blocks, random and own attachments.
+    pub(super) fn native_living_knockback(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        attacker: i32,
+        attacker_main: Option<&ItemStack>,
+        attacker_off: Option<&ItemStack>,
+        strength: &mut f64,
+        x: &mut f64,
+        z: &mut f64,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_living_knockback(
+            self,
+            entity,
+            kind,
+            source,
+            attacker,
+            attacker_main,
+            attacker_off,
+            strength,
+            x,
+            z,
+            canceled,
+        );
+    }
     /// NeoForge's `LivingDamageEvent.Pre`: `LivingEntity.actuallyHurt` of entity `entity` of
     /// type `kind` (`minecraft:player`, `minecraft:zombie`) by `source` (named as
     /// `native_living_incoming_damage` names it) has taken armor and magic, and the absorption
@@ -7306,7 +7277,7 @@ pub(super) fn shield_block(
 impl Game<'_> {
     /// `health::knockback_from` that, while a native mod listens, also records what the attacker
     /// holds (the player's selected and off-hand stacks, a mob's main hand) for
-    /// `living_knockback_v2`. A nested scope for the same attacker keeps what the outer recorded.
+    /// `living_knockback`. A nested scope for the same attacker keeps what the outer recorded.
     pub(super) fn knockback_scope(&self, attacker: i32) -> impl Drop + use<> {
         use horizon_client::health::{knockback_attacker, knockback_from_holding, knockback_held};
         if mod_api::mods().is_empty() {
@@ -7341,8 +7312,8 @@ impl Game<'_> {
 /// `native_living_knockback` for the knockback code (`health::KNOCKBACK`): whether it
 /// canceled the push. Its one caller. The pushed entity and the source are named as the
 /// damage hook names them.
-pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
-    if mod_api::mods().is_empty() {
+pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
+    if !mod_api::listened(mod_api::HookId::LivingKnockback) {
         return false;
     }
     let attacker = match &pushed {
@@ -7360,48 +7331,23 @@ pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
             }
         }
     };
-    // No `matches!`: horizon-mixins refuses macros in a hook point's body.
-    #[allow(clippy::match_like_matches_macro)]
-    let stand = if let Hurting::ArmorStand(..) = &pushed {
-        true
-    } else {
-        false
-    };
     let (entity, kind, source) = hurt_server_args(pushed);
-    let HurtSource {
-        damage_type,
-        causing,
-        direct,
-        ..
-    } = source;
     let mut canceled = false;
-    if !stand {
-        Game::native_living_knockback(
+    horizon_client::health::with_held(|[main, off]| {
+        HitLevel(level).native_living_knockback(
             entity,
             kind,
-            damage_type,
-            causing,
-            direct,
+            &source,
+            attacker,
+            main.as_ref(),
+            off.as_ref(),
             &mut knock.strength,
             &mut knock.x,
             &mut knock.z,
             &mut canceled,
         );
-    }
-    let mut canceled_v2 = false;
-    let held = horizon_client::health::knockback_held();
-    Game::native_living_knockback_v2(
-        entity,
-        kind,
-        attacker,
-        held[0].as_ref(),
-        held[1].as_ref(),
-        &mut knock.strength,
-        &mut knock.x,
-        &mut knock.z,
-        &mut canceled_v2,
-    );
-    canceled || canceled_v2
+    });
+    canceled
 }
 
 pub(super) fn block_contact(

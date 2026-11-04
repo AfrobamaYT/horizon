@@ -12326,7 +12326,15 @@ impl Game<'_> {
         if landed {
             if knockback > 0.0 {
                 let (xd, zd) = self.extra_knockback_direction();
-                self.mobs[index].knockback_effect(f64::from(knockback), xd, zd, &source, amount);
+                let level = crate::game::entity::damage_level_of!(self);
+                self.mobs[index].knockback_effect(
+                    level,
+                    f64::from(knockback),
+                    xd,
+                    zd,
+                    &source,
+                    amount,
+                );
                 self.stop_sprint_after_extra_knockback();
             }
             let mob = &self.mobs[index];

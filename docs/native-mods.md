@@ -1223,24 +1223,26 @@ registration path.
 - `native_mod_container_viewers(dimension, pos, viewers, previous)` is heard once each time the number of players with the mod container at `pos` open changes (vanilla's `ContainerOpenersCounter`, as a barrel keeps it): `previous` 0 is `onOpen`, `viewers` 0 is `onClose`, so a block can show itself open while `viewers` is not 0. It is counted every tick from the players' open menus, so a player who leaves without closing (a lost connection, death, another dimension, out of reach, the block gone) is heard too. On a server, with no player's state swapped in.
 
 - Knockback a mod can change or cancel through `native_living_knockback` (NeoForge's
-  `LivingKnockBackEvent`): at the start of `LivingEntity.knockback`, on the raw strength, before the entity's knockback resistance takes its
-  share and its motion changes, with the pushed entity's id and type (`minecraft:player` for a player), the `strength`, the direction
-  (`x`, `z`; vanilla points it at the source of a hit, the attacker's side, and the entity is pushed the other way) and a
-  `canceled` flag. A mod may change the three numbers or set `canceled`, and the push follows: canceled, the entity's motion is
-  left alone. A `strength` of 0 or less after the hook is no push, and a direction too short to tell draws a random one
-  after it, as in vanilla; the resistance scales the strength the hook leaves, so a full knockback resistance still stops the push. A value a mod
-  leaves that is not a finite number is put back as it was. `damage_type` (`minecraft:player_attack`), `causing`
-  (`DamageSource.getEntity`) and `direct` (`getDirectEntity`) are the push's damage source, named as
-  `native_living_incoming_damage` names a hit's, with the same entity ids left at 0 (a goat's ram pushes with
-  `minecraft:mob_attack` and hurts with `minecraft:mob_attack_no_aggro`, as in vanilla). It fires for the players and mobs the
-  game knocks back: a hit's own push, a sprinting or Knockback hit, a sweep, a spear, a shield's push on its holder and a
-  goat's ram. It does not fire for a sulfur cube with a block that a hit with a causing entity knocks back
-  (`SulfurCube.knockback` does not call `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the
-  ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a hoglin's throw), nor yet for the ones
-  Horizon makes another way: a mob's melee push from its attack knockback or a Knockback weapon, an armor stand's and the
-  ender dragon's. It has no `self`: the game is in the middle of the hit. It runs on the thread that ticks the world (the
-  server thread), so state a mod shares with its render thread hooks needs
-  synchronising.
+  `LivingKnockBackEvent`): at the start of `LivingEntity.knockback`, on the raw strength, before the entity's knockback
+  resistance takes its share and its motion changes, with the hit's level host (its blocks, random and own attachments),
+  the pushed entity's id and type (`minecraft:player` for a player), the push's `source` (`HurtSource`, named as
+  `native_living_incoming_damage` names a hit's, with the same entity ids left at 0; a goat's ram pushes with
+  `minecraft:mob_attack` and hurts with `minecraft:mob_attack_no_aggro`, as in vanilla), the `attacker` (the attacking
+  entity's network id, falling back to a known last hurt-by mob, or 0 when unknown) and what it holds (`attacker_main`
+  and `attacker_off`: a player's selected and off-hand stacks, a mob's main hand; none when unknown, recorded only
+  while a native mod is loaded), the `strength`, the direction (`x`, `z`; vanilla points it at the source of a hit, the
+  attacker's side, and the entity is pushed the other way) and a `canceled` flag. A mod may change the three numbers or
+  set `canceled`, and the push follows: canceled, the entity's motion is left alone. A `strength` of 0 or less after the
+  hook is no push, and a direction too short to tell draws a random one after it, as in vanilla; the resistance scales
+  the strength the hook leaves, so a full knockback resistance still stops the push. A value a mod leaves that is not
+  a finite number is put back as it was. It fires for the players, mobs and armor stands the game knocks back: a hit's
+  own push, a sprinting or Knockback hit, a sweep, a spear, a shield's push on its holder and a goat's ram. It does not
+  fire for a sulfur cube with a block that a hit with a causing entity knocks back (`SulfurCube.knockback` does not
+  call `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the ender dragon's wings,
+  Punch arrows, explosions, wind charges, a mace smash's area, a hoglin's throw), nor yet for the ones Horizon makes
+  another way: the ender dragon's. The hit is in the middle of its work: the level host reads and draws random but
+  can't write the entity or the world. It runs on the thread that ticks the world (the server thread), so state a
+  mod shares with its render thread hooks needs synchronising.
 
 
 - `native_edit_blocks(dimension, edit)` for server mods: runs up columns, from a height or a heightmap's, of block states and filters written as commands write them, made at once straight into the chunks of the level being ticked with what `fill ... strict` does for block entities; the chunks changed go to the players whole.
@@ -2053,18 +2055,6 @@ source targets. A contract includes the signature, call timing and behavior.
 Keep an existing contract or add a new version when it changes incompatibly.
 The catalog does not cover helper methods or arbitrary private game code.
 Injections name them with `hook` and `hook_version` ("Named hook points" above).
-
-### Knockback hook versions
-
-`living_knockback` and `living_knockback_v2` receive the raw strength before knockback resistance.
-V2 also supplies the attacker's network entity id (falling back to a known
-last hurt-by mob, or 0 when unknown), what the attacker holds (`attacker_main` and
-`attacker_off`: a player's selected and off-hand stacks, a mob's main hand; none when unknown,
-recorded only while a native mod is loaded), and armor-stand sweeps. V2 runs after v1 on
-their shared paths; cancellation from either prevents motion, so a trait mod that listens to
-both sees each hit twice and should pick one. Mob melee, player hits, sweeps and spears use the
-shared knockback path; direct velocity pushes (explosions, Punch arrows, hoglin throws) are not
-`LivingEntity.knockback` and do not fire it.
 
 ### Reading server blocks (draft)
 
