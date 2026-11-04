@@ -48,6 +48,7 @@ pub(super) enum SpawnSite {
 }
 
 /// What a spawn site does with a mob after `finalize_spawn` was heard.
+#[derive(Debug, PartialEq)]
 pub(super) enum Finalized {
     /// Finalized as vanilla does; the site goes on to the class's follow-ups.
     Done,
@@ -509,7 +510,7 @@ impl Game<'_> {
         kind: &str,
         at: [f64; 3],
         persistent: bool,
-        scripted: bool,
+        _scripted: bool,
         site: SpawnSite,
     ) -> Option<Mob> {
         let kind = if kind.contains(':') {
@@ -528,19 +529,17 @@ impl Game<'_> {
                 Finalized::Skipped => return Some(mob),
                 Finalized::Done => {}
             },
+            // A plain spawn finalizes as a summoned one (vanilla's /summon
+            // and egg path): its few reason-gated arms behave the same.
             SpawnSite::Plain => {
                 let difficulty =
                     self.local_difficulty([mob.position.x, mob.position.y, mob.position.z]);
-                self.finalize_plain(&mut mob, &difficulty);
+                self.finalize_plain(
+                    &mut mob,
+                    &difficulty,
+                    horizon_client::mobs::finalize::Reason::MobSummoned,
+                );
             }
-        }
-        if !scripted {
-            let raider_reason = if persistent {
-                horizon_client::mobs::raider::Reason::Other
-            } else {
-                horizon_client::mobs::raider::Reason::Natural
-            };
-            horizon_client::mobs::raider::finalize(&mut mob, raider_reason);
         }
         Some(mob)
     }
@@ -548,20 +547,15 @@ impl Game<'_> {
     fn insert_spawned_mob(
         &mut self,
         mob: Mob,
-        persistent: bool,
-        scripted: bool,
-        site: SpawnSite,
+        _persistent: bool,
+        _scripted: bool,
+        _site: SpawnSite,
     ) -> Option<u32> {
         let id = mob.id;
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
         if !self.mobs.iter().any(|m| m.id == id) {
             return None;
-        }
-        self.enchant_spawn_equipment(id);
-        self.halloween_spawn_head(id);
-        if !persistent && !scripted {
-            self.spawn_jockeys(id, site);
         }
         Some(id)
     }
@@ -716,7 +710,7 @@ impl Game<'_> {
         }
     }
     /// Finalize a converted frog or witch before it joins the level.
-    fn finalize_converted(&self, mob: &mut Mob) {
+    fn finalize_converted(&mut self, mob: &mut Mob) {
         // A mod that stops a conversion's finalization leaves the mob as converted.
         self.finalize_with(mob, SpawnReason::Conversion, None);
         mob.persistent = true;
@@ -832,7 +826,6 @@ impl Game<'_> {
                 -24000
             };
         }
-        self.spawn_jockeys(id, SpawnSite::Finalizing(SpawnReason::Command));
         Ok(id)
     }
     /// The `mobs` command: nearby mobs with position, health and running goals.
@@ -1002,11 +995,26 @@ impl Game<'_> {
     /// follow-ups (raider flags and the like) are part of `finalizeSpawn`, so a
     /// site skips them on [`Finalized::Skipped`].
     pub(super) fn finalize_with(
-        &self,
+        &mut self,
         mob: &mut Mob,
         reason: SpawnReason,
         spawner: Option<mod_api::NativeSpawner>,
     ) -> Finalized {
+        let (outcome, difficulty) = self.finalize_spawn_event(mob, reason, spawner);
+        if outcome == Finalized::Done {
+            self.finalize_plain(mob, &difficulty, reason.into());
+        }
+        outcome
+    }
+    /// `Mob.finalizeSpawn`'s event, the half listeners own: they hear the
+    /// spawn, cancel it, take it over, or set its difficulty. The decision
+    /// and the difficulty the spawn finalizes with come back together.
+    pub(super) fn finalize_spawn_event(
+        &self,
+        mob: &Mob,
+        reason: SpawnReason,
+        spawner: Option<mod_api::NativeSpawner>,
+    ) -> (Finalized, spawning::LocalDifficulty) {
         let at = [mob.position.x, mob.position.y, mob.position.z];
         let mut difficulty = self.local_difficulty(at);
         if mod_api::__private::listened(mod_api::HookId::FinalizeSpawn) {
@@ -1023,26 +1031,14 @@ impl Game<'_> {
                 &mut skip,
             );
             if spawn_cancelled {
-                return Finalized::Cancelled;
+                return (Finalized::Cancelled, difficulty);
             }
             if skip {
-                return Finalized::Skipped;
+                return (Finalized::Skipped, difficulty);
             }
             difficulty = heard.into();
         }
-        self.finalize_plain(mob, &difficulty);
-        Finalized::Done
-    }
-    /// The game's own finalization of a mob, with no event: for a mob vanilla
-    /// makes without calling `finalizeSpawn`.
-    fn finalize_plain(&self, mob: &mut Mob, difficulty: &spawning::LocalDifficulty) {
-        let at = mob.position;
-        let facts = self.biome_facts(
-            at.x.floor() as i32,
-            at.y.floor() as i32,
-            at.z.floor() as i32,
-        );
-        spawning::finalize(mob, &facts, difficulty);
+        (Finalized::Done, difficulty)
     }
     /// `ServerLevel.getCurrentDifficultyAt`.
     pub(super) fn local_difficulty(&self, at: [f64; 3]) -> spawning::LocalDifficulty {

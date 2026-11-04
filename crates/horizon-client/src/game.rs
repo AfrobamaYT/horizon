@@ -134,6 +134,7 @@ mod explosion;
 mod extras;
 mod falling_damage;
 mod fangs;
+mod finalize_spawn;
 mod fireworks;
 mod fishing;
 mod fov;
@@ -2250,6 +2251,7 @@ struct WorldCore {
     environment: Environment,
     collision: BlockCollisionRegistry<'static>,
     motion: MotionResources,
+    spawn_registries: horizon_client::mobs::finalize::SpawnRegistries,
     threads: usize,
 }
 
@@ -2359,6 +2361,11 @@ impl Resources {
     }
     fn motion(&self) -> &MotionResources {
         &self.core.motion
+    }
+    /// The variant registries finalizeSpawn selects from
+    /// (`data/minecraft/<registry>`), shared with world generation.
+    pub fn spawn_registries(&self) -> &horizon_client::mobs::finalize::SpawnRegistries {
+        &self.core.spawn_registries
     }
     fn threads(&self) -> usize {
         self.core.threads
@@ -21364,6 +21371,7 @@ fn load_resources(
             environment,
             collision,
             motion,
+            spawn_registries: horizon_client::mobs::finalize::SpawnRegistries::load(&root),
             threads,
         },
         rest: std::sync::OnceLock::new(),

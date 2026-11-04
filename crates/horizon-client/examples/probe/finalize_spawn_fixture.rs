@@ -29,6 +29,10 @@ use std::{collections::HashMap, fmt::Write as _, fs, path::Path, sync::Arc};
 struct Level<'a> {
     types: &'a MobTypes,
     data: &'a MobData,
+    registries: &'a SpawnRegistries,
+    enchantments: &'a Enchantments,
+    items: &'a Items,
+    camel_husk_size: (f32, f32),
     biome: String,
     structure: Option<(String, [i32; 6])>,
     phase: usize,
@@ -110,6 +114,14 @@ impl FinalizeLevel for Level<'_> {
         let mut m = Mob::new(index as u32 + 1, t, Vec3::ZERO, 0.0);
         m.random = LegacyRandom::new(self.eseed.wrapping_add(index as i64));
         Some(m)
+    }
+    fn spawn_data(&self) -> SpawnData<'_> {
+        SpawnData {
+            registries: self.registries,
+            enchantments: self.enchantments,
+            items: self.items,
+            camel_husk_size: self.camel_husk_size,
+        }
     }
 }
 
@@ -406,12 +418,7 @@ pub fn main() -> horizon_client::Result<()> {
     let types = MobTypes::load(root)?;
     let registries = SpawnRegistries::load(root);
     let camel = &types.types["minecraft:camel_husk"];
-    let data = SpawnData {
-        registries: &registries,
-        enchantments: &enchantments,
-        items: &items,
-        camel_husk_size: (camel.width as f32, camel.height as f32),
-    };
+    let camel_husk_size = (camel.width as f32, camel.height as f32);
     let mut out = format!("halloween {halloween}\n");
     for line in input.lines().filter(|l| !l.trim().is_empty()) {
         let mut c: HashMap<&str, &str> = HashMap::new();
@@ -454,6 +461,10 @@ pub fn main() -> horizon_client::Result<()> {
         let mut level = Level {
             types: &types,
             data: &mob_data,
+            registries: &registries,
+            enchantments: &enchantments,
+            items: &items,
+            camel_husk_size,
             biome: get("biome", "minecraft:plains"),
             structure: c.get("structure").map(|s| {
                 (
@@ -506,7 +517,6 @@ pub fn main() -> horizon_client::Result<()> {
                 level: &mut level,
                 random: &mut random,
                 difficulty,
-                data: &data,
                 created: Vec::new(),
                 jockey_rider: None,
             };
