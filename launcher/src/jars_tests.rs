@@ -256,12 +256,75 @@ fn declined_consent_and_missing_or_failed_lookup_never_download() {
             |_, _, _| panic!("lookup failed"),
         )
         .unwrap_err();
-        let PrepareError::Download { reason, .. } = error else {
-            panic!("lookup failure must remain typed as Download");
+        let reason = match (&result, error) {
+            (Ok(_), PrepareError::Download { reason, .. })
+            | (Err(_), PrepareError::Lookup { reason, .. }) => reason,
+            _ => panic!("metadata and per-file lookup failures must remain distinct"),
         };
         assert!(reason.contains(expected));
     }
     assert!(!home.0.join("jars").exists());
+}
+
+#[test]
+fn failed_metadata_lookup_names_every_missing_jar_but_not_cache_hits() {
+    let first = JarRef::new("first".into(), "2".into(), "a".repeat(128)).unwrap();
+    let second = JarRef::new("second".into(), "3".into(), "b".repeat(128)).unwrap();
+    for with_cache_hit in [false, true] {
+        let home = Scratch::new();
+        let cache = home.0.join("jars");
+        let (cached, bytes) = source(b"already cached");
+        let cached_path = cache.join(format!("{}.jar", cached.sha512()));
+        let mut jars = vec![first.clone(), second.clone()];
+        if with_cache_hit {
+            fs::create_dir_all(&cache).unwrap();
+            fs::write(&cached_path, &bytes).unwrap();
+            jars.insert(0, cached);
+        }
+        let prompts = Cell::new(0);
+        let ask = |missing: &[&JarRef]| {
+            prompts.set(prompts.get() + 1);
+            assert_eq!(missing, &[&first, &second]);
+            true
+        };
+        let lookups = Cell::new(0);
+        let error = prepare_with(
+            &home.0,
+            &jars,
+            Permission::Ask(&ask),
+            |missing| {
+                assert_eq!(prompts.get(), 1);
+                assert_eq!(missing, &[&first, &second]);
+                lookups.set(lookups.get() + 1);
+                Err("transport failed".into())
+            },
+            |_, _, _| panic!("failed metadata must not download any file"),
+        )
+        .unwrap_err();
+        let display = error.to_string();
+        let PrepareError::Lookup { missing, reason } = error else {
+            panic!("a failed batch must not be attributed to a single jar");
+        };
+        assert_eq!(prompts.get(), 1);
+        assert_eq!(lookups.get(), 1);
+        assert_eq!(reason, "transport failed");
+        assert_eq!(display.lines().next(), Some("transport failed"));
+        assert_eq!(missing.len(), 2);
+        for (entry, jar) in missing.iter().zip([&first, &second]) {
+            let path = cache.join(format!("{}.jar", jar.sha512()));
+            assert_eq!(&entry.jar, jar);
+            assert_eq!(entry.path, path);
+            let line = format!("{} {}: {}", jar.id(), jar.version(), path.display());
+            assert!(display.lines().any(|actual| actual == line));
+        }
+        assert!(!display.contains(&cached_path.display().to_string()));
+        if with_cache_hit {
+            assert_eq!(fs::read_dir(&cache).unwrap().count(), 1);
+            assert_eq!(fs::read(cached_path).unwrap(), bytes);
+        } else {
+            assert!(!cache.exists());
+        }
+    }
 }
 
 #[test]

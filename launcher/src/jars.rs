@@ -78,6 +78,11 @@ pub enum PrepareError {
     Refused {
         missing: Vec<MissingJar>,
     },
+    /// One metadata request failed for this complete missing set.
+    Lookup {
+        missing: Vec<MissingJar>,
+        reason: String,
+    },
     Download {
         jar: Box<JarRef>,
         path: PathBuf,
@@ -99,10 +104,11 @@ impl fmt::Display for PrepareError {
         match self {
             Self::Refused { missing } => {
                 f.write_str(tr("Jar downloads were not allowed. Supply the original files at these exact cache paths, or pass --allow-jar-downloads:\n"))?;
-                for entry in missing {
-                    writeln!(f, "{} {}: {}", entry.jar.id(), entry.jar.version(), entry.path.display())?;
-                }
-                Ok(())
+                write_missing_jars(f, missing)
+            }
+            Self::Lookup { missing, reason } => {
+                writeln!(f, "{reason}")?;
+                write_missing_jars(f, missing)
             }
             Self::Download { jar, path, reason } => f.write_str(&trf(
                 "Jar {id} {version}: {reason}. Put the original file with this exact SHA-512 at {path}, then retry.",
@@ -119,6 +125,19 @@ impl fmt::Display for PrepareError {
         }
     }
 }
+fn write_missing_jars(f: &mut fmt::Formatter<'_>, missing: &[MissingJar]) -> fmt::Result {
+    for entry in missing {
+        writeln!(
+            f,
+            "{} {}: {}",
+            entry.jar.id(),
+            entry.jar.version(),
+            entry.path.display()
+        )?;
+    }
+    Ok(())
+}
+
 impl std::error::Error for PrepareError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -180,26 +199,29 @@ fn prepare_with(
     if missing.is_empty() {
         return Ok(());
     }
-    let refused = || PrepareError::Refused {
-        missing: missing
+    let missing_entries = || {
+        missing
             .iter()
             .map(|jar| MissingJar {
                 jar: (*jar).clone(),
                 path: cache.join(format!("{}.jar", jar.sha512())),
             })
-            .collect(),
+            .collect()
     };
     if matches!(permission, Permission::Refuse) {
-        return Err(refused());
+        return Err(PrepareError::Refused {
+            missing: missing_entries(),
+        });
     }
     if let Permission::Ask(ask) = permission {
         if !ask(&missing) {
-            return Err(refused());
+            return Err(PrepareError::Refused {
+                missing: missing_entries(),
+            });
         }
     }
-    let urls = lookup(&missing).map_err(|reason| PrepareError::Download {
-        jar: Box::new(missing[0].clone()),
-        path: cache.join(format!("{}.jar", missing[0].sha512())),
+    let urls = lookup(&missing).map_err(|reason| PrepareError::Lookup {
+        missing: missing_entries(),
         reason,
     })?;
     let urls: Vec<_> = missing
