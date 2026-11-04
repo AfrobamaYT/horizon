@@ -5,9 +5,10 @@
 macro_rules! codecs {
     ($w:path) => {
         use crate::{
-            BlockEntityRef, BossBarRef, ChunkRef, DisplayRef, DragonRef, EntityRef, ItemEntityRef,
-            LevelRef, LivingRef, MerchantRef, MinecartRef, MobRef, NativeBlockUpdateFlags,
-            NativeTickId, NativeWorldEpoch, PlayerRef, ProjectileRef, RaidRef,
+            BlockEntityRef, BlockPos, BossBarRef, ChunkRef, DisplayRef, DragonRef, EntityRef,
+            FluidState, GlobalPos, ItemEntityRef, LevelRef, LivingRef, MenuRef, MerchantRef,
+            MinecartRef, MobRef, NativeBlockUpdateFlags, NativeTickId, NativeWorldEpoch,
+            ParticleType, PlayerRef, ProjectileRef, RaidRef,
         };
         use horizon_client_core::text::Text;
         use horizon_items::items::ItemStack;
@@ -180,6 +181,48 @@ macro_rules! codecs {
                 level: lift_level_ref(v.level)?,
                 id: v.id,
             })
+        }
+        pub(super) fn lower_menu_ref(v: &MenuRef) -> w::MenuRef {
+            w::MenuRef {
+                player: lower_player_ref(&v.player),
+                window: v.window,
+                generation: v.generation,
+            }
+        }
+        pub(super) fn lift_menu_ref(v: w::MenuRef) -> Result<MenuRef, Refused> {
+            Ok(MenuRef {
+                player: lift_player_ref(v.player)?,
+                window: v.window,
+                generation: v.generation,
+            })
+        }
+        pub(super) fn lower_global_pos(v: &GlobalPos) -> w::GlobalPos {
+            let pos = v.pos();
+            w::GlobalPos {
+                dimension: v.dimension().to_string(),
+                pos: (pos.x, pos.y, pos.z),
+            }
+        }
+        pub(super) fn lift_global_pos(v: w::GlobalPos) -> Result<GlobalPos, Refused> {
+            let (x, y, z) = v.pos;
+            Ok(GlobalPos::new(
+                lift_identifier(v.dimension)?,
+                BlockPos { x, y, z },
+            ))
+        }
+        /// A fluid state as its JSON form (`FluidState::to_json`), as data packs write it.
+        pub(super) fn lower_fluid_state(v: &FluidState) -> String {
+            v.to_json().unwrap_or_default()
+        }
+        pub(super) fn lift_fluid_state(v: String) -> Result<FluidState, Refused> {
+            FluidState::from_json(&v).map_err(|_| Refused)
+        }
+        /// A particle type as its registry name.
+        pub(super) fn lower_particle_type(v: &ParticleType) -> String {
+            v.name().to_owned()
+        }
+        pub(super) fn lift_particle_type(v: String) -> Result<ParticleType, Refused> {
+            ParticleType::from_name(&v).ok_or(Refused)
         }
         pub(super) fn lower_tag(v: &Tag) -> Vec<u8> {
             horizon_world::nbt::write_network(v, Limits::default()).unwrap_or_default()

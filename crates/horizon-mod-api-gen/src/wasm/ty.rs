@@ -99,35 +99,45 @@ pub(crate) enum Payload {
     Record(String, Vec<Field>),
 }
 
-/// Types crossing through hand-written codecs: Rust name and the WIT type of their wire form.
-/// Their `Lower`/`Lift` impls are in `codecs.rs`.
-pub(super) const CODECS: &[(&str, &str)] = &[
-    ("Tag", "list<u8>"),
-    ("Compound", "list<u8>"),
-    ("ItemStack", "list<u8>"),
-    ("Text", "string"),
-    ("Identifier", "string"),
-    ("Duration", "u64"),
-    ("NativeWorldEpoch", "u64"),
-    ("EntityRef", "entity-ref"),
-    ("LivingRef", "entity-ref"),
-    ("MobRef", "entity-ref"),
-    ("DisplayRef", "entity-ref"),
-    ("ItemEntityRef", "entity-ref"),
-    ("ProjectileRef", "entity-ref"),
-    ("MinecartRef", "entity-ref"),
-    ("DragonRef", "entity-ref"),
-    ("MerchantRef", "entity-ref"),
-    ("RaidRef", "raid-ref"),
-    ("PlayerRef", "player-ref"),
-    ("LevelRef", "level-ref"),
-    ("ChunkRef", "chunk-ref"),
-    ("BlockEntityRef", "block-entity-ref"),
-    ("BossBarRef", "boss-bar-ref"),
-    ("NativeTickId", "u64"),
-    ("NativeBlockUpdateFlags", "u32"),
-    ("ConfigPath", "string"),
-    ("ConfigFileError", "config-file-error"),
+/// Whether a codec's wire form holds a string or a list, which a guest passes to an import
+/// borrowed.
+pub(super) fn codec_heap(wire: &str) -> bool {
+    CODECS.iter().any(|(_, w, heap)| *w == wire && *heap)
+}
+
+/// Types crossing through hand-written codecs: Rust name, the WIT type of their wire form, and
+/// whether that form holds a string or list. Their codecs are in `mod_api`'s `wasm_codec.rs`.
+pub(super) const CODECS: &[(&str, &str, bool)] = &[
+    ("Tag", "list<u8>", true),
+    ("Compound", "list<u8>", true),
+    ("ItemStack", "list<u8>", true),
+    ("Text", "string", true),
+    ("Identifier", "string", true),
+    ("Duration", "u64", false),
+    ("NativeWorldEpoch", "u64", false),
+    ("EntityRef", "entity-ref", false),
+    ("LivingRef", "entity-ref", false),
+    ("MobRef", "entity-ref", false),
+    ("DisplayRef", "entity-ref", false),
+    ("ItemEntityRef", "entity-ref", false),
+    ("ProjectileRef", "entity-ref", false),
+    ("MinecartRef", "entity-ref", false),
+    ("DragonRef", "entity-ref", false),
+    ("MerchantRef", "entity-ref", false),
+    ("RaidRef", "raid-ref", true),
+    ("PlayerRef", "player-ref", false),
+    ("LevelRef", "level-ref", true),
+    ("ChunkRef", "chunk-ref", true),
+    ("BlockEntityRef", "block-entity-ref", true),
+    ("BossBarRef", "boss-bar-ref", false),
+    ("NativeTickId", "u64", false),
+    ("NativeBlockUpdateFlags", "u32", false),
+    ("ConfigPath", "string", true),
+    ("ConfigFileError", "config-file-error", true),
+    ("MenuRef", "menu-ref", false),
+    ("GlobalPos", "global-pos", true),
+    ("FluidState", "string", true),
+    ("ParticleType", "string", true),
 ];
 
 /// The resolved types, by definition.
@@ -322,7 +332,7 @@ impl<'a> Types<'a> {
         if let Some(&id) = self.wit_names.get(&wit) {
             return Ok(id);
         }
-        let codec = CODECS.iter().find(|(n, _)| *n == name).unwrap().1;
+        let codec = CODECS.iter().find(|(n, ..)| *n == name).unwrap().1;
         Ok(self.push(Def {
             rust: rust.into(),
             wit,
@@ -373,7 +383,7 @@ impl<'a> Types<'a> {
     }
 
     fn kind(&mut self, id: ItemId, item: &Item, name: &str, wit: &str) -> Result<Kind, String> {
-        if let Some((_, codec)) = CODECS.iter().find(|(n, _)| *n == name) {
+        if let Some((_, codec, _)) = CODECS.iter().find(|(n, ..)| *n == name) {
             return Ok(Kind::Codec(codec));
         }
         let serde = derives(item, "Serialize") && derives(item, "Deserialize");

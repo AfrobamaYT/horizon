@@ -773,10 +773,7 @@ fn heap(types: &Types<'_>, ty: &Ty) -> bool {
         Ty::Named(def) => {
             let def = &types.defs[*def];
             match &def.kind {
-                super::ty::Kind::Codec(wire) => !matches!(
-                    *wire,
-                    "u64" | "u32" | "entity-ref" | "player-ref" | "boss-bar-ref"
-                ),
+                super::ty::Kind::Codec(wire) => super::ty::codec_heap(wire),
                 super::ty::Kind::Json => true,
                 _ => wit::def_fields(def).into_iter().any(|t| heap(types, t)),
             }
