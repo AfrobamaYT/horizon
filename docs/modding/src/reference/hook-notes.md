@@ -2718,7 +2718,7 @@ clicks already.
 `dyn LoopContext` is the read-only view for a hook fired inside a menu, recipe or
 player-list loop, where no game is at hand (a catalog entry names it with
 `"context": "loop"`; `menu_slot_rules`, `item_stacked_on_other`, `player_name_format`,
-`player_tab_list_name_format`, `living_jump_power`, `living_speed`, `living_flying_speed`, `living_heal`, `living_breathe`, `living_drown`, `living_fall`, `farmland_trample`, `living_jump`, `ender_entity_teleport`, `ingredient_test` and the sound hooks below take it). `side()` is `LoopSide::Server` or
+`player_tab_list_name_format`, `living_jump_power`, `living_speed`, `living_flying_speed`, `living_heal`, `living_breathe`, `living_drown`, `living_fall`, `farmland_trample`, `living_jump`, `ender_entity_teleport`, `fluid_flow`, `player_stays_on_ground_surface`, `block_jump_factor`, `block_speed_factor`, `ingredient_test` and the sound hooks below take it). `side()` is `LoopSide::Server` or
 `LoopSide::Client`, `registry(name)` borrows names in registry ID order,
 `setting(mod_id, key)` returns a loaded mod's setting captured when the context was
 built, and `mods()` is the `LoadedMods` view of registration. It has no game Host,
@@ -2789,7 +2789,7 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 
 ## Player edge backoff
 
-- **`native_player_stays_on_ground_surface(entity, staying)`**: edit whether the player counts as staying on the ground surface (`Player.isStayingOnGroundSurface`, vanilla: the shift key is down) where `maybeBackOffFromEdge` asks, so a mod can make the player hold to an edge without crouching, or walk off one while crouching. It fires on both sides and on the client's replayed ticks, so a mod registers on both and keeps the listener a pure function of its inputs. With no listener the cost is one `listened` branch per movement. Beyond NeoForge (no counterpart); Diverges from upstream: new hook. Mobs never back off an edge, so there is no mob call site.
+- **`native_player_stays_on_ground_surface(context, entity, staying)`**: edit whether the player counts as staying on the ground surface (`Player.isStayingOnGroundSurface`, vanilla: the shift key is down) where `maybeBackOffFromEdge` asks, so a mod can make the player hold to an edge without crouching, or walk off one while crouching. It fires on both sides and on the client's replayed ticks, with the loop `context` of the side that ticks the player (see [The loop context](#the-loop-context)), so a mod registers on both and keeps the listener a pure function of its inputs. With no listener the cost is one `listened` branch per movement. Beyond NeoForge (no counterpart); Diverges from upstream: new hook. Mobs never back off an edge, so there is no mob call site.
 
 ## Block jump and speed factors
 
@@ -2797,7 +2797,7 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 
 ## Fluid flow
 
-- **`native_fluid_flow(fluid, pos, flow)`**: edit the current (`FlowingFluid.getFlow`) of the fluid block at `pos` as it pushes an entity: the player, mobs, dropped items, experience orbs, armor stands and arrows all read it through the one shared helper. It runs for each fluid block the entity touches in a tick, before the vanilla scale for shallow fluid, so keep the listener short. The renderer's own flow vector (a fluid texture's rotation) is not changed. `level.fluid_flow(host, pos)` reads the edited current. It fires on both sides and on the client's replayed ticks, so a mod registers on both and keeps the listener a pure function of its inputs. With no listener the cost is one `listened` branch per fluid block. Beyond NeoForge (no counterpart); Diverges from upstream: new hook.
+- **`native_fluid_flow(context, fluid, pos, flow)`**: edit the current (`FlowingFluid.getFlow`) of the fluid block at `pos` as it pushes an entity: the player, mobs, dropped items, experience orbs, armor stands and arrows all read it through the one shared helper. It runs for each fluid block the entity touches in a tick, before the vanilla scale for shallow fluid, so keep the listener short. The renderer's own flow vector (a fluid texture's rotation) is not changed. `level.fluid_flow(host, pos)` reads the edited current. It fires on both sides and on the client's replayed ticks, with the loop `context` of the side that ticks the entity, so a mod registers on both and keeps the listener a pure function of its inputs. With no listener the cost is one `listened` branch per fluid block. Beyond NeoForge (no counterpart); Diverges from upstream: new hook.
 
 ## Minecart pass
 

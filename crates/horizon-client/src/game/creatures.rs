@@ -4874,6 +4874,7 @@ impl Game<'_> {
             facts: self.res.facts(),
             collision: self.collision,
             fluids: &self.motion.fluids,
+            loop_context: &self.loop_context,
             raining: rain,
             mob_griefing: self.ui.rules.bool("mob_griefing"),
             tnt_explodes: self.ui.rules.bool("tnt_explodes"),
