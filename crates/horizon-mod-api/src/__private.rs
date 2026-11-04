@@ -3,6 +3,8 @@
 //! (`game`). None of it is part of the API a mod is written against.
 use crate::*;
 
+pub mod point;
+
 /// Install the process-wide ordered list of mods.
 pub fn install(mods: Mods) {
     crate::install(mods);

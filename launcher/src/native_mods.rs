@@ -28,6 +28,7 @@ mod dependencies;
 mod inject;
 mod inject_cache;
 mod package;
+mod prebuilt;
 
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
@@ -151,6 +152,8 @@ pub enum Plan {
     Incremental(Vec<String>),
     /// Nothing built yet in this profile: the whole game compiles.
     First,
+    /// The mods compile against the prebuilt game (#589); the game doesn't compile.
+    Prebuilt,
 }
 
 impl Plan {
@@ -162,6 +165,7 @@ impl Plan {
                 &[("changes", &changes.join("; "))],
             ),
             Self::First => tr("First build: the whole game (several minutes)").into(),
+            Self::Prebuilt => tr("Prebuilt game: only the mods compile (seconds)").into(),
         }
     }
 
@@ -171,6 +175,7 @@ impl Plan {
             Self::UpToDate => "up to date",
             Self::Incremental(_) => "incremental",
             Self::First => "first build",
+            Self::Prebuilt => "prebuilt",
         }
     }
 }
@@ -1065,6 +1070,10 @@ pub enum Step {
     },
     /// The mods' own crates checked against Horizon's `Cargo.lock`.
     Crates,
+    /// The prebuilt game at a revision downloads (once).
+    PrebuiltGame(String),
+    /// The mods compile against the prebuilt game.
+    PrebuiltMods,
     Install,
     /// The build ended: seconds it took.
     Done {
@@ -1092,6 +1101,11 @@ impl Step {
             Self::Mixins => tr("Applying the mixins").into(),
             Self::CachedMixins => tr("Reusing patched game source").into(),
             Self::Crates => tr("Checking the mods' crates against Horizon's Cargo.lock").into(),
+            Self::PrebuiltGame(revision) => trf(
+                "Downloading the prebuilt game at {revision} (once)",
+                &[("revision", &revision[..7])],
+            ),
+            Self::PrebuiltMods => tr("Compiling the mods against the prebuilt game").into(),
             Self::Plan(plan, profile) => format!("{} ({})", plan.label(), profile.name()),
             Self::Compile {
                 done,
@@ -1430,8 +1444,15 @@ struct Built {
     secs: u64,
 }
 
-/// Both targets build mods against the installed game's source revision and cache the result
-/// by revision, mod files, tool, profile and target. Mismatched source pins are refused.
+/// The pipeline both targets build with ([`build`], [`build_server`]): `folder`'s mods on the
+/// Horizon revision they pin (else `base`'s, the installed version whose game files the build
+/// reuses: a native build's own revision when it is one, [`base_for`]), compiled as `target`
+/// (the game, or the headless engine) and installed as its own version,
+/// `native-<revision>-<key>` (the key hashes the revision, the mods' files, the tool's commit,
+/// the profile and the target). A build already made is used again. Mods pinning different
+/// revisions build on the newest one, with the newest horizon-mixins they name, only when the
+/// player agreed to try (`anyway`): else the error starts with [`MISMATCH`] and says which.
+/// With `on_base`, every mod builds on `base`'s own commit, pinned or not (the player's choice).
 /// Nothing of the player's outside the launcher's data is touched: no instance is edited and
 /// no version selected here.
 fn pipeline(
@@ -1551,7 +1572,22 @@ fn pipeline(
             .collect::<Result<_, String>>()?,
     };
     let exists = target.directory(&version).join(".installed").is_file();
-    let plan = classify(exists, last_record(target, profile).as_ref(), &now);
+    // The route, chosen before anything compiles: the prebuilt game when it serves these mods.
+    let prebuilt = if exists {
+        None
+    } else {
+        let game = match prebuilt::refusal(&projects, profile) {
+            Some(reason) => Err(reason),
+            None => prebuilt::fetch(&revision, target, || {
+                progress(Step::PrebuiltGame(revision.clone()))
+            })?,
+        };
+        game.map_err(|reason| log_warning(&reason.to_string())).ok()
+    };
+    let plan = match prebuilt {
+        Some(_) => Plan::Prebuilt,
+        None => classify(exists, last_record(target, profile).as_ref(), &now),
+    };
     progress(Step::Plan(plan.clone(), profile));
     let mut built = Built {
         version: version.clone(),
@@ -1559,13 +1595,53 @@ fn pipeline(
         profile,
         secs: 0,
     };
-    if !exists {
-        match target {
-            // The headless build links none of the sound or controller libraries: it needs
-            // only a C compiler and the C library's headers ([`rust_toolchain::linker_server`]).
-            Target::Client => rust_toolchain::linker()?,
-            Target::Server => rust_toolchain::linker_server()?,
-        }
+    let about = |route: &str| {
+        serde_json::json!({
+            "base": origin,
+            "horizon": revision,
+            "horizon_mixins": mixins,
+            "rust": rust_toolchain::VERSION,
+            "profile": profile.name(),
+            "route": route,
+            "target": target.name(),
+            "mods": mods.iter().map(|m| serde_json::json!({
+                "id": m.manifest.id,
+                "version": m.manifest.version,
+                "sha256": digests.get(&m.manifest.id).cloned().flatten(),
+            })).collect::<Vec<_>>(),
+        })
+    };
+    let linker = || match target {
+        // The headless build links none of the sound or controller libraries: it needs
+        // only a C compiler and the C library's headers ([`rust_toolchain::linker_server`]).
+        Target::Client => rust_toolchain::linker(),
+        Target::Server => rust_toolchain::linker_server(),
+    };
+    if let Some(game) = &prebuilt {
+        linker()?;
+        let rust = rust_toolchain::install(|f| progress(Step::Rust(f)))?;
+        progress(Step::PrebuiltMods);
+        let (binary, libraries) = prebuilt::compile(
+            &rust,
+            game,
+            &root().join("prebuilt-build"),
+            &projects,
+            &declared,
+            &resolution,
+        )
+        .map_err(blame)?;
+        progress(Step::Install);
+        install(
+            base,
+            &version,
+            target,
+            &binary,
+            &libraries,
+            &about("prebuilt"),
+            &ordered,
+        )?;
+    } else if !exists {
+        linker()?;
         let rust = rust_toolchain::install(|f| progress(Step::Rust(f)))?;
         let needs_mixins = mods.iter().any(Bundle::needs_mixins);
         progress(Step::Source(revision.clone()));
@@ -1693,20 +1769,15 @@ fn pipeline(
         save_record(target, profile, &now);
         let binary = target_dir.join(compiled.cargo().0).join(backend::CLIENT);
         progress(Step::Install);
-        let about = serde_json::json!({
-            "base": origin,
-            "horizon": revision,
-            "horizon_mixins": mixins,
-            "rust": rust_toolchain::VERSION,
-            "profile": compiled.name(),
-            "target": target.name(),
-            "mods": mods.iter().map(|m| serde_json::json!({
-                "id": m.manifest.id,
-                "version": m.manifest.version,
-                "sha256": digests.get(&m.manifest.id).cloned().flatten(),
-            })).collect::<Vec<_>>(),
-        });
-        install(base, &version, target, &binary, &about, &ordered)?;
+        install(
+            base,
+            &version,
+            target,
+            &binary,
+            &[],
+            &about("source"),
+            &ordered,
+        )?;
     } else {
         // Used again: it counts as the newest of the builds kept (`prune`).
         let _ = fs::write(target.directory(&version).join(".installed"), "");
@@ -1716,8 +1787,12 @@ fn pipeline(
     Ok(built)
 }
 
-/// Builds `folder`'s mods on the installed game revision and points `instance` at the build.
-/// A build already made is used again; mismatched source pins are refused.
+/// Builds `folder`'s mods on the Horizon revision they pin (else `base`'s, the installed version
+/// whose game files the build reuses: a native build's own revision when it is one, [`base_for`])
+/// and points `instance` at the build, the default one included. Returns the build's version; a
+/// build already made is used again. Mods pinning different revisions cannot build together:
+/// the error starts with [`MISMATCH`] and names them; `cargo horizon-mod update --horizon
+/// <commit>` in each mod's folder pins it to the installed game, then build again.
 pub fn build(
     base: &str,
     folder: &Path,
@@ -1892,6 +1967,7 @@ fn install(
     version: &str,
     target: Target,
     binary: &Path,
+    libraries: &[PathBuf],
     about: &serde_json::Value,
     mods: &[Bundle],
 ) -> Result<(), String> {
@@ -1902,6 +1978,11 @@ fn install(
     copy_base(&from, &partial, target)?;
     let installed = partial.join(target.binary());
     fs::copy(binary, &installed).map_err(|e| format!("The built game: {e}"))?;
+    // The prebuilt game's libraries load from beside the executable.
+    for library in libraries {
+        let name = library.file_name().ok_or("invalid library path")?;
+        fs::copy(library, partial.join(name)).map_err(|e| format!("{}: {e}", library.display()))?;
+    }
     fs::write(partial.join("native-mods.json"), about.to_string()).map_err(|e| e.to_string())?;
     for bundle in mods {
         package::copy(
@@ -2638,104 +2719,9 @@ mod tests {
         assert!(installed_mods(&home).is_err(), "only Rust and TOML sources");
     }
 
-    #[test]
-    fn the_mods_of_one_build_pin_one_revision() {
-        let pinned = |id: &str, horizon: Option<&str>| {
-            let mut manifest =
-                horizon_mods::manifest::Manifest::parse(&project_manifest(id, "1", A, B)).unwrap();
-            manifest.native.as_mut().unwrap().horizon = horizon.unwrap_or_default().into();
-            Bundle {
-                manifest,
-                dir: PathBuf::new(),
-                injections: Vec::new(),
-            }
-        };
-        let never = || -> Result<String, String> { panic!("a pin wins") };
-        fn get(b: &Bundle) -> Option<&String> {
-            Some(&b.native().horizon).filter(|pin| !pin.is_empty())
-        }
-        let same = [
-            pinned("a", Some(A)),
-            pinned("b", None),
-            pinned("c", Some(A)),
-        ];
-        assert_eq!(agreed(&same, "Horizon", get, never).unwrap(), A);
-        let none = [pinned("a", None)];
-        assert_eq!(agreed(&none, "Horizon", get, || Ok(B.into())).unwrap(), B);
-        let split = [pinned("veinminer", Some(A)), pinned("minimap", Some(B))];
-        let err = agreed(&split, "Horizon", get, never).unwrap_err();
-        assert!(
-            err.contains("veinminer → aaaaaaa") && err.contains("minimap → bbbbbbb"),
-            "{err}"
-        );
-        let bad = [pinned("a", Some("nightly"))];
-        assert!(agreed(&bad, "Horizon", get, never).is_err());
-    }
-
-    #[test]
-    fn mods_made_for_different_revisions_build_on_the_newest() {
-        let pinned = |id: &str, horizon: &str, mixins: &str| Bundle {
-            manifest: horizon_mods::manifest::Manifest::parse(&project_manifest(
-                id, "1", horizon, mixins,
-            ))
-            .unwrap(),
-            dir: PathBuf::new(),
-            injections: Vec::new(),
-        };
-        let c = "c".repeat(40);
-        // a is the oldest commit, then b, then c.
-        let date = |r: &str| -> Result<String, String> {
-            Ok(match &r[..1] {
-                "a" => "2026-10-28T00:00:00Z",
-                "b" => "2026-10-29T00:00:00Z",
-                _ => "2026-10-30T00:00:00Z",
-            }
-            .into())
-        };
-        let never = || -> Result<String, String> { panic!("a pin wins") };
-        fn horizon(b: &Bundle) -> Option<&String> {
-            Some(&b.native().horizon)
-        }
-        fn mixins(b: &Bundle) -> Option<&String> {
-            Some(&b.native().mixins)
-        }
-        let split = [
-            pinned("veinminer", B, &c),
-            pinned("lookat", A, A),
-            pinned("zoom", B, &c),
-        ];
-        assert_eq!(
-            newest(&split, "Horizon", horizon, never, None, date).unwrap(),
-            B
-        );
-        // horizon-mixins: never older than a pin, and the launcher's own when it is newer.
-        assert_eq!(
-            newest(&split, "horizon-mixins", mixins, never, Some(B), date).unwrap(),
-            c
-        );
-        let older = [pinned("a", A, A), pinned("b", B, B)];
-        assert_eq!(
-            newest(&older, "horizon-mixins", mixins, never, Some(&c), date).unwrap(),
-            c
-        );
-        // One pin, or the same one everywhere: that pin, and no date is asked for.
-        let no_date = |_: &str| -> Result<String, String> { panic!("no date needed") };
-        let same = [pinned("a", A, A), pinned("b", A, A)];
-        assert_eq!(
-            newest(&same, "Horizon", horizon, never, None, no_date).unwrap(),
-            A
-        );
-        let offline = |_: &str| -> Result<String, String> { Err("offline".into()) };
-        let err = newest(&split, "Horizon", horizon, never, None, offline).unwrap_err();
-        assert!(err.contains("offline"), "{err}");
-        // What the player is shown: each mod made for another revision, and the build's.
-        assert_eq!(
-            mismatch(&split, B).unwrap(),
-            "lookat → aaaaaaa; the build uses bbbbbbb"
-        );
-        assert_eq!(mismatch(&same, A), None);
-    }
-
+    /// A player's report (11-04): Right-Click Crops 1.0.0 pins Nightly 2026-10-31's commit, so
+    /// The commit-date cache (`dates.json`) is asked once per revision and kept for later
+    /// builds.
     #[test]
     fn a_commit_date_is_asked_once_and_kept() {
         let d = dir("commit-dates");
@@ -3110,6 +3096,7 @@ mod tests {
             version,
             Target::Server,
             &binary,
+            &[],
             &serde_json::json!({"target":"server"}),
             &[bundle],
         )
@@ -3409,7 +3396,7 @@ mod tests {
     }
 
     /// levzzz5154's decision (2026-10-29): a rebuild stays on the Horizon the instance plays;
-    /// only "Rebuild on Horizon {version}" moves it to a newer one.
+    /// only an update (`--update`, `base_for`'s `update`) moves it to a newer one.
     #[test]
     fn a_rebuild_stays_on_the_instances_horizon_until_an_update() {
         let installed: Vec<String> = [

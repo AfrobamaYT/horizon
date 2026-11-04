@@ -2,8 +2,8 @@
 
 ## Trait mods (draft)
 
-`cargo horizon-mod new <path> --template native --horizon <commit>` requires an exact Horizon commit and
-writes a flat project: `horizon-mod.toml` with `[native]`, `Cargo.toml`, `src/lib.rs`, and empty `assets/`
+`cargo horizon-mod new <path> --template native` pins an exact Horizon commit (the newest prebuilt game's,
+or `--horizon <commit>`'s; `cargo horizon-mod update` repins) and writes a flat project: `horizon-mod.toml` with `[native]`, `Cargo.toml`, `src/lib.rs`, and empty `assets/`
 and `data/` directories. The template greets each player who joins. Build it with
 `horizon-launcher native-build <path> --trust-native-code`; `cargo horizon-mod build` packages the same
 project into a `.hmod` without compiling it ([the manifest](../reference/manifest.md)).

@@ -565,6 +565,7 @@ impl Game<'_> {
     /// effect grows this tick. Entering a portal closes screens other than
     /// the chat and death screens and plays `block.portal.trigger` when the
     /// effect starts from nothing.
+    #[horizon_mod_api_macros::point(side = "client")]
     pub(super) fn client_portal_effect(&mut self) -> bool {
         if !std::mem::take(&mut self.portals.client_inside) {
             return false;
@@ -962,6 +963,7 @@ impl Game<'_> {
                 t.on_ground,
                 t.fuse,
                 t.power,
+                t.block_state_nbt(self.pack.assets.registry),
                 uuid,
                 self.persist_raw(id),
             );

@@ -107,7 +107,9 @@ pub(super) struct Mods {
     native_notice: Option<(SourceId, String, Option<Project>)>,
     /// The selected instance's native build state, and the `native_status::fingerprint` it was
     /// read for: read again only when that changes.
-    native_state: std::cell::RefCell<Option<(String, native_status::State)>>,
+    /// With it, the mods turned on that pin the commit an older build compiled
+    /// (`native_status::pinning`, for builds that didn't record it).
+    native_state: std::cell::RefCell<Option<(String, native_status::State, Vec<String>)>>,
     native_files: std::cell::RefCell<Option<(String, Vec<native_status::Installed>)>>,
     /// Java mods' checks, by source and project.
     pub(super) checks: HashMap<(SourceId, String), Checking>,
@@ -1512,21 +1514,25 @@ impl Launcher {
         let version = self.version_of(instance).cloned();
         let home = self.mods.home();
         let key = native_status::fingerprint(&home, version.as_deref());
+        let build = version.as_deref().and_then(|v| self.native_build_of(v));
         let mut memo = self.mods.native_state.borrow_mut();
-        let state = match memo.as_ref() {
-            Some((k, state)) if *k == key => *state,
+        let (state, pinned) = match memo.as_ref() {
+            Some((k, state, pinned)) if *k == key => (*state, pinned.clone()),
             _ => {
                 let built = version.as_deref().and_then(native_status::built);
                 let state = native_status::state(&native_status::enabled(&home), built.as_deref());
-                *memo = Some((key, state));
-                state
+                let pinned = match &build {
+                    Some(b) if b.pinned_unknown => native_status::pinning(&home, &b.horizon),
+                    _ => Vec::new(),
+                };
+                *memo = Some((key, state, pinned.clone()));
+                (state, pinned)
             }
         };
-        let build = version.as_deref().and_then(|v| self.native_build_of(v));
-        let update = build
-            .as_ref()
-            .filter(|_| state != State::NoMods)
-            .and_then(|b| native_mods::newer_than(&b.base, &self.installed));
+        let pinned = match &build {
+            Some(b) if !b.pinned_by.is_empty() => b.pinned_by.clone(),
+            _ => pinned,
+        };
         let mine = self.native_for.as_deref() == Some(instance.id.as_str());
         let step = self.native_step.as_ref().filter(|_| mine);
         let error = self.native_error.as_ref().filter(|_| mine);
@@ -1537,7 +1543,8 @@ impl Launcher {
                 line(format!(
                     "{step} - {}",
                     native_mods::duration_label(
-                        self.native_started.map_or(0, |(s, _)| s.elapsed().as_secs())
+                        self.native_started
+                            .map_or(0, |(s, _)| s.elapsed().as_secs())
                     )
                 ))
                 .text_color(t.accent),
@@ -1569,10 +1576,22 @@ impl Launcher {
             detail = detail.child(div().text_color(t.muted).child(done.clone()));
         }
         if let (Some(tag), Some(build)) = (&version, &build) {
-            detail = detail.child(div().text_color(t.muted).child(trf(
-                "Plays {build}, built on Horizon {version}.",
-                &[("build", tag), ("version", &build.horizon())],
-            )));
+            let said = match pinned.is_empty() {
+                true => trf(
+                    "Plays {build}, built on Horizon {version}.",
+                    &[("build", tag), ("version", &build.horizon())],
+                ),
+                false => trf(
+                    "Plays {build}, built on Horizon {commit}, the commit pinned by {mods}, not on {version}.",
+                    &[
+                        ("build", tag),
+                        ("commit", &build.horizon[..build.horizon.len().min(7)]),
+                        ("mods", &pinned.join(", ")),
+                        ("version", &build.horizon()),
+                    ],
+                ),
+            };
+            detail = detail.child(div().text_color(t.muted).child(said));
         }
         if self.native_step.is_some() && !mine {
             let other = self
@@ -1592,28 +1611,9 @@ impl Launcher {
             .items_center()
             .gap(px(8.))
             .children(badge.map(|(label, color)| blocks::badge(label.to_string(), color, &t)));
-        if let Some(newer) = update.filter(|_| idle) {
-            right = right.child(
-                button(
-                    "native-update",
-                    trf(
-                        "Rebuild on Horizon {version}",
-                        &[("version", &native_status::horizon_label(&newer))],
-                    ),
-                    Kind::Secondary,
-                    &t,
-                )
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    this.native_update = Some(newer.clone());
-                    this.native_confirm = Some(this.native_mods_to_build().map(|(_, b)| b));
-                    cx.notify();
-                })),
-            );
-        }
         if can_build {
             right = right.child(button("native-build", "Build", Kind::Primary, &t).on_click(
                 cx.listener(|this, _: &ClickEvent, _, cx| {
-                    this.native_update = None;
                     this.native_confirm = Some(this.native_mods_to_build().map(|(_, b)| b));
                     cx.notify();
                 }),
@@ -1643,9 +1643,9 @@ impl Launcher {
         );
         let said = match profile {
             native_mods::Profile::Performance => tr("The everyday build for playing with mods"),
-            native_mods::Profile::Dev => {
-                tr("For developing a mod: about 6× faster to rebuild a mod edit, game logic up to about twice as slow")
-            }
+            native_mods::Profile::Dev => tr(
+                "For developing a mod: about 6× faster to rebuild a mod edit, game logic up to about twice as slow",
+            ),
             native_mods::Profile::Release => {
                 tr("Release build: slower to build, slightly faster game")
             }

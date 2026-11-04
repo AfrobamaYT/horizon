@@ -1684,6 +1684,8 @@ fn a_superflat_world_runs_its_structure_sets_on_flat_ground() {
             "minecraft:strongholds".into(),
             "minecraft:villages".into(),
         ]),
+        features: false,
+        lakes: false,
     };
     let terrain = crate::vanillagen::VanillaTerrain::for_flat(
         terrain_resources,
@@ -1727,6 +1729,78 @@ fn a_superflat_world_runs_its_structure_sets_on_flat_ground() {
     );
 }
 
+/// `adjustGenerationSettings`: the Overworld preset decorates its plains with grass,
+/// flowers and trees even with no structure set (`structure_overrides: []`, or
+/// `generate_structures` off), and without `features` the same layers stay bare.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn a_decorated_superflat_world_without_structures_grows_its_features() {
+    use crate::streaming::ChunkGenerator;
+    let Some(base) = prepared() else {
+        return;
+    };
+    let assets = Assets::load(&base).unwrap();
+    let biomes = crate::biome::Biomes::load(&base).unwrap();
+    let item_data = crate::test_resources::item_data(
+        &base,
+        horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
+    )
+    .unwrap();
+    // Blocks above the grass (the top layer is at the level's minimum Y + 63) in the
+    // chunk at 4, 4 once its 3×3 region is decorated.
+    let above_ground = |features| {
+        let flat = horizon_world::worldgen::generator::FlatSettings {
+            layers: vec![
+                ("minecraft:bedrock".into(), 1),
+                ("minecraft:stone".into(), 59),
+                ("minecraft:dirt".into(), 3),
+                ("minecraft:grass_block".into(), 1),
+            ],
+            biome: "minecraft:plains".into(),
+            structure_overrides: Some(vec![]),
+            features,
+            lakes: false,
+        };
+        let terrain = crate::vanillagen::VanillaTerrain::for_flat(
+            crate::vanillagen::TerrainResources {
+                dir: &base.join("worldgen"),
+                registry: assets.registry,
+                biomes: &biomes,
+                item_data: &item_data,
+            },
+            &Default::default(),
+            1234,
+            &flat,
+            false,
+        )
+        .unwrap();
+        let mut worker = terrain.worker();
+        let mut region: [_; 9] =
+            std::array::from_fn(|i| terrain.proto(&mut worker, 3 + i as i32 % 3, 3 + i as i32 / 3));
+        terrain.decorate(&mut worker, &mut region);
+        let [_, _, _, _, center, ..] = region;
+        let chunk = terrain.finish(center);
+        let mut found = Vec::new();
+        for y in 0..16 {
+            for z in 64..80 {
+                for x in 64..80 {
+                    let name = &assets.registry.state(chunk.block(x, y, z)).unwrap().name;
+                    if name != "minecraft:air" {
+                        found.push(name.clone());
+                    }
+                }
+            }
+        }
+        found
+    };
+    let decorated = above_ground(true);
+    assert!(
+        decorated.iter().any(|n| n == "minecraft:short_grass"),
+        "{decorated:?}"
+    );
+    assert_eq!(above_ground(false), Vec::<String>::new());
+}
+
 /// `createForFlat` searches the stronghold rings with seed 0, so a superflat world's
 /// strongholds are in the same place on every seed; a layer that is not opaque to
 /// `MOTION_BLOCKING` is `null`, left out of `buildTerrain` for the fill after the structures.
@@ -1755,6 +1829,8 @@ fn a_superflat_world_keeps_its_strongholds_on_every_seed_and_leaves_null_layers_
         ],
         biome: "minecraft:plains".into(),
         structure_overrides: Some(vec!["minecraft:strongholds".into()]),
+        features: false,
+        lakes: false,
     };
     let make = |seed| {
         crate::vanillagen::VanillaTerrain::for_flat(
@@ -1833,6 +1909,8 @@ fn a_superflat_structure_override_naming_no_set_lets_every_set_generate() {
         ],
         biome: "minecraft:plains".into(),
         structure_overrides: Some(vec!["minecraft:village".into()]),
+        features: false,
+        lakes: false,
     };
     let terrain = crate::vanillagen::VanillaTerrain::for_flat(
         terrain_resources,
@@ -4807,6 +4885,172 @@ fn signs_take_their_form_wood_and_wall_block_from_their_declaration() {
     // Vanilla's pair stays as it was.
     let oak = behaviours.item_binding("minecraft:oak_sign").unwrap();
     assert_eq!(oak.wall_block, id("minecraft:oak_wall_sign"));
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// A fence gate of a mod is a vanilla `FenceGateBlock` through its template, with
+/// its wood's sounds unless the file names its own: `open_sound` and
+/// `close_sound` replace `WoodType.fenceGateOpen` and `fenceGateClose`, the one
+/// value a use, a redstone change and an explosion all read.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn a_content_fence_gate_plays_its_own_sounds_or_its_woods() {
+    use horizon_world::level::Behaviours;
+
+    let Some(base) = prepared() else {
+        return;
+    };
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-gates-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let m = folder_mod(
+        &scratch.join("gates"),
+        &[
+            ("horizon-mod.toml", &manifest("gates", "")),
+            (
+                "data/gates/horizon/block/oak.json",
+                r#"{"template": "minecraft:oak_fence_gate"}"#,
+            ),
+            (
+                "data/gates/horizon/block/rope.json",
+                r#"{"template": "minecraft:oak_fence_gate", "open_sound": "gates:rope.open", "close_sound": "minecraft:block.chain.break"}"#,
+            ),
+            (
+                "data/gates/horizon/block/half.json",
+                r#"{"template": "minecraft:birch_fence_gate", "open_sound": "gates:half.open"}"#,
+            ),
+        ],
+    );
+    let root = resource_root(
+        &base,
+        Path::new(""),
+        std::slice::from_ref(&m),
+        &scratch.join("cache"),
+    )
+    .unwrap();
+    let registry = Assets::load(&root).unwrap().registry;
+    let behaviours = Behaviours::load(registry, &root).unwrap();
+    let sounds = |name: &str| {
+        let state = registry.default_state(name).unwrap();
+        let data = behaviours.data(state);
+        (
+            data.gate_open.as_deref().map(str::to_owned),
+            data.gate_close.as_deref().map(str::to_owned),
+        )
+    };
+    let gate = |open: Option<&str>, close: Option<&str>| {
+        (open.map(str::to_owned), close.map(str::to_owned))
+    };
+    assert_eq!(
+        sounds("gates:oak"),
+        gate(
+            Some("minecraft:block.fence_gate.open"),
+            Some("minecraft:block.fence_gate.close")
+        )
+    );
+    assert_eq!(
+        sounds("gates:rope"),
+        gate(Some("gates:rope.open"), Some("minecraft:block.chain.break"))
+    );
+    assert_eq!(
+        sounds("gates:half"),
+        gate(
+            Some("gates:half.open"),
+            Some("minecraft:block.fence_gate.close")
+        )
+    );
+    assert_eq!(
+        sounds("minecraft:oak_fence_gate"),
+        sounds("gates:oak"),
+        "the vanilla gate keeps its sounds"
+    );
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// A block's item is one value in its gameplay row: its own id by default, the
+/// `block_item` it names (a mod's own item or a vanilla one), or none with
+/// `item` false. A `block_item` that is no item refuses the load.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn a_block_yields_the_item_it_names_or_its_own_or_none() {
+    use horizon_world::level::Behaviours;
+
+    let Some(base) = prepared() else {
+        return;
+    };
+    let scratch =
+        std::env::temp_dir().join(format!("horizon-mod-blockitem-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let m = folder_mod(
+        &scratch.join("pick"),
+        &[
+            ("horizon-mod.toml", &manifest("pick", "")),
+            (
+                "data/pick/horizon/block/plain.json",
+                r#"{"template": "minecraft:stone"}"#,
+            ),
+            (
+                "data/pick/horizon/block/pillar.json",
+                r#"{"template": "minecraft:stone", "item": false, "block_item": "pick:rod"}"#,
+            ),
+            (
+                "data/pick/horizon/block/gem_ore.json",
+                r#"{"template": "minecraft:stone", "item": false, "block_item": "minecraft:diamond"}"#,
+            ),
+            (
+                "data/pick/horizon/block/ghost.json",
+                r#"{"template": "minecraft:stone", "item": false}"#,
+            ),
+            (
+                "data/pick/horizon/item/rod.json",
+                r#"{"template": "minecraft:stick"}"#,
+            ),
+        ],
+    );
+    let root = resource_root(
+        &base,
+        Path::new(""),
+        std::slice::from_ref(&m),
+        &scratch.join("cache"),
+    )
+    .unwrap();
+    let registry = Assets::load(&root).unwrap().registry;
+    let facts = BlockFacts::load(&root, registry).unwrap();
+    let behaviours = Behaviours::load(registry, &root).unwrap();
+    let item = |name: &str| {
+        let state = registry.default_state(name).unwrap();
+        facts.get(state).item.to_string()
+    };
+    assert_eq!(item("pick:plain"), "pick:plain");
+    assert_eq!(item("pick:pillar"), "pick:rod");
+    assert_eq!(item("pick:gem_ore"), "minecraft:diamond");
+    assert_eq!(item("pick:ghost"), "minecraft:air");
+    let id = |name: &str| behaviours.table.block_by_name(name).unwrap();
+    assert_eq!(&*behaviours.block_data(id("pick:pillar")).item, "pick:rod");
+    assert_eq!(
+        &*behaviours.block_data(id("pick:ghost")).item,
+        "minecraft:air"
+    );
+
+    let missing = folder_mod(
+        &scratch.join("lost"),
+        &[
+            ("horizon-mod.toml", &manifest("lost", "")),
+            (
+                "data/lost/horizon/block/pillar.json",
+                r#"{"template": "minecraft:stone", "item": false, "block_item": "lost:rod"}"#,
+            ),
+        ],
+    );
+    let e = resource_root(
+        &base,
+        Path::new(""),
+        std::slice::from_ref(&missing),
+        &scratch.join("cache2"),
+    )
+    .err()
+    .unwrap()
+    .to_string();
+    assert!(e.contains("lost:pillar") && e.contains("lost:rod"), "{e}");
     let _ = fs::remove_dir_all(&scratch);
 }
 

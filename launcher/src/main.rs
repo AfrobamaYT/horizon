@@ -128,7 +128,7 @@ impl Page {
         match std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() {
             Ok("mods" | "modpacks" | "resourcepacks" | "shaders" | "datapacks") => Page::Mods,
             Ok("servers") => Page::Servers,
-            Ok("wardrobe") if horizon_cosmetics::enabled() => Page::Wardrobe,
+            Ok("wardrobe") if horizon_cosmetics::forced() => Page::Wardrobe,
             Ok("versions") => Page::Versions,
             Ok("notes") => Page::Notes,
             Ok("settings") => Page::Settings,
@@ -260,9 +260,6 @@ struct Launcher {
     native_confirm: Option<Result<Vec<native_mods::Bundle>, String>>,
     /// The instance (id) the build under way, or the last one's error, is for.
     native_for: Option<String>,
-    /// The newer Horizon the open warning's build moves to (Update), else None: a build stays
-    /// on the Horizon the instance plays.
-    native_update: Option<String>,
     /// What each installed native build was made from, by version. A build's version names its
     /// contents, so an entry never goes stale.
     native_builds:
@@ -303,6 +300,8 @@ struct Launcher {
     /// The selected account's own answer on it from its last Wardrobe visit, kept on disk (a
     /// preview the service grants it, its claim).
     shop_kept: Option<horizon_launcher::wardrobe::Claim>,
+    /// The Wardrobe page's Shop tab (`wardrobe_page/shop.rs`).
+    shop: wardrobe_page::Shop,
     /// Work the look out again on the next frame (a launcher theme put on or taken off).
     restyle: bool,
     /// Why the last picture for Home's background was refused.
@@ -495,26 +494,29 @@ impl Launcher {
         })
         .detach();
         // Counts the time a partner banner is on screen, until it may be hidden.
-        cx.spawn(async move |this, cx| loop {
-            cx.background_executor()
-                .timer(Duration::from_secs(10))
-                .await;
-            let counting = this.update(cx, |this, cx| {
-                let s = &mut this.settings;
-                if s.partner_hidden || s.partner_seen_secs >= partner::SEEN_BEFORE_HIDE {
-                    return false;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_secs(10))
+                    .await;
+                let counting = this.update(cx, |this, cx| {
+                    let s = &mut this.settings;
+                    if s.partner_hidden || s.partner_seen_secs >= partner::SEEN_BEFORE_HIDE {
+                        return false;
+                    }
+                    // On screen on every page: the card in the sidebar, the banner on Servers.
+                    s.partner_seen_secs += 10;
+                    if s.partner_seen_secs % 60 == 0
+                        || s.partner_seen_secs >= partner::SEEN_BEFORE_HIDE
+                    {
+                        this.save_settings();
+                        cx.notify();
+                    }
+                    true
+                });
+                if !matches!(counting, Ok(true)) {
+                    break;
                 }
-                // On screen on every page: the card in the sidebar, the banner on Servers.
-                s.partner_seen_secs += 10;
-                if s.partner_seen_secs % 60 == 0 || s.partner_seen_secs >= partner::SEEN_BEFORE_HIDE
-                {
-                    this.save_settings();
-                    cx.notify();
-                }
-                true
-            });
-            if !matches!(counting, Ok(true)) {
-                break;
             }
         })
         .detach();
@@ -588,7 +590,6 @@ impl Launcher {
             native_error: None,
             native_confirm: None,
             native_for: None,
-            native_update: None,
             native_builds: Default::default(),
             native_log: Default::default(),
             confirm_remove: None,
@@ -607,7 +608,9 @@ impl Launcher {
             wardrobe_reload: false,
             shop_status: None,
             shop_kept: None,
-            restyle: horizon_cosmetics::enabled(),
+            shop: Default::default(),
+            // The first draw takes the launcher theme from Settings.
+            restyle: true,
             background_error: None,
             args_input: line_edit::LineEdit::new(settings.game_args.clone(), 1024, 38),
             args_focused: false,
@@ -933,10 +936,7 @@ impl Launcher {
         let instance = instances::selected();
         self.native_for = Some(instance.id.clone());
         let plays = self.version_of(&instance).cloned();
-        let base = match self.native_update.take() {
-            Some(newer) => Some(newer),
-            None => native_mods::base_for(plays.as_deref(), &self.installed, false),
-        };
+        let base = native_mods::base_for(plays.as_deref(), &self.installed, false);
         let Some(base) = base else {
             let error = tr("Install Horizon first.").to_string();
             self.native_log_preflight(&error);
@@ -3879,13 +3879,7 @@ impl Launcher {
             .child(div().text_color(t.danger).child(tr("These mods will run with full access to your computer").to_string()))
             .child(tr("They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.").to_string())
             .child(trf("Mods: {mods}", &[("mods", &list)]))
-            .child(tr("The build compiles the game: 20 to 30 minutes and a few GB of disk the first time (it downloads Rust), a few minutes after that.").to_string())
-            .children(self.native_update.as_ref().map(|newer| {
-                div().text_color(t.warn).child(trf(
-                    "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.",
-                    &[("version", &native_status::horizon_label(newer))],
-                ))
-            }));
+            .child(tr("The build compiles the game: 20 to 30 minutes and a few GB of disk the first time (it downloads Rust), a few minutes after that.").to_string());
         let mut buttons = div().flex().gap(px(8.)).mt(px(4.));
         if mods.is_ok() {
             buttons = buttons.child(
@@ -3905,7 +3899,6 @@ impl Launcher {
             button("native-cancel", "Cancel", Kind::Secondary, &t).on_click(cx.listener(
                 |this, _: &ClickEvent, _, cx| {
                     this.native_confirm = None;
-                    this.native_update = None;
                     cx.notify();
                 },
             )),
@@ -4623,7 +4616,7 @@ impl Launcher {
                             },
                         )),
                     ),
-                )
+                );
             }
             Load::Ready(r) if r.is_empty() => {
                 return page.child(centered(tr("No releases yet."), &t));
@@ -4839,7 +4832,7 @@ impl Launcher {
                             }),
                         ),
                     ),
-                )
+                );
             }
             Load::Ready(r) => r,
         };

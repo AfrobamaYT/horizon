@@ -1569,6 +1569,66 @@ fn repeater_delays_and_torch_inverts() {
     assert_eq!(w.prop(BlockPos::new(5, 2, 0), "lit"), "false");
 }
 
+/// A fence gate plays its wood's open and close sound at all three sites
+/// that read it (`FenceGateBlock.useWithoutItem`, `neighborChanged` and
+/// `onExplosionHit`), once each.
+#[test]
+fn a_fence_gate_plays_the_open_and_close_sound_of_its_data() {
+    let mut w = world!();
+    w.floor(0, 10, "stone");
+    let gate = w.id("oak_fence_gate", &[("facing", "north")]);
+    let sounds = |w: &World| {
+        w.level
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                LevelEvent::Sound { sound, .. } => Some(sound.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let open = "minecraft:block.fence_gate.open";
+    let close = "minecraft:block.fence_gate.close";
+
+    let used = BlockPos::new(0, 1, 0);
+    w.put(used, gate);
+    w.use_block(used);
+    assert_eq!(sounds(&w), [open]);
+    w.level.events.clear();
+    w.use_block(used);
+    assert_eq!(sounds(&w), [close]);
+
+    w.level.events.clear();
+    let wired = BlockPos::new(4, 1, 0);
+    w.set(wired, gate);
+    w.set(BlockPos::new(5, 1, 0), w.id("redstone_block", &[]));
+    assert_eq!(w.prop(wired, "open"), "true");
+    assert_eq!(sounds(&w), [open], "neighborChanged opens the powered gate");
+    w.level.events.clear();
+    w.set(BlockPos::new(5, 1, 0), w.b().air());
+    assert_eq!(w.prop(wired, "open"), "false");
+    assert_eq!(sounds(&w), [close]);
+
+    w.level.events.clear();
+    let blasted = BlockPos::new(8, 1, 0);
+    w.put(blasted, gate);
+    assert!(
+        w.f.behaviours
+            .fence_gate_exploded(&mut w.level, &mut w.ticks, blasted)
+    );
+    assert_eq!(
+        sounds(&w),
+        [open],
+        "onExplosionHit toggles an unpowered gate"
+    );
+    w.level.events.clear();
+    assert!(
+        w.f.behaviours
+            .fence_gate_exploded(&mut w.level, &mut w.ticks, blasted)
+    );
+    assert_eq!(sounds(&w), [close]);
+}
+
 #[test]
 fn crops_grow_and_leaves_decay() {
     let mut w = world!();
@@ -4281,6 +4341,61 @@ fn a_refused_portal_leaves_the_fire_in_its_frame() {
             ],
             expected
         );
+    }
+}
+
+/// #8490 carpet duplication machine: four slime blocks, a sticky piston, a dead
+/// wall coral fan and three carpets on the slime column's far side.
+#[test]
+fn carpet_duplication_machine_8490() {
+    let mut w = world!();
+    w.floor(0, 10, "stone");
+    let slime = w.id("slime_block", &[]);
+    let air = w.b().air();
+    let piston = w.id("sticky_piston", &[("facing", "west")]);
+    let power = w.id("redstone_block", &[]);
+    let fan = w.id(
+        "dead_tube_coral_wall_fan",
+        &[("facing", "west"), ("waterlogged", "false")],
+    );
+    let carpet = w.id("white_carpet", &[]);
+    w.set(
+        BlockPos::new(4, 1, 0),
+        w.id("grass_block", &[("snowy", "false")]),
+    );
+    for y in 2..6 {
+        w.set(BlockPos::new(3, y, 0), slime);
+    }
+    w.set(BlockPos::new(4, 2, 0), piston);
+    w.set(BlockPos::new(2, 2, 0), fan);
+    for y in 3..6 {
+        w.set(BlockPos::new(2, y, 0), carpet);
+    }
+    w.set(BlockPos::new(5, 2, 0), power);
+    let fan_name = |w: &mut World, x: i32, y: i32| w.name(BlockPos::new(x, y, 0));
+    for _ in 0..6 {
+        w.full_tick();
+    }
+    // Pushed one block west: the column lands with its fan and carpets (the
+    // fan reads the slime block still shown as a finished moving piston).
+    for y in 2..6 {
+        assert_eq!(w.get(BlockPos::new(2, y, 0)), slime, "slime y={y}");
+    }
+    assert!(fan_name(&mut w, 1, 2).starts_with("dead_tube_coral_wall_fan"));
+    for y in 3..6 {
+        assert_eq!(w.get(BlockPos::new(1, y, 0)), carpet, "carpet y={y}");
+    }
+    w.set(BlockPos::new(5, 2, 0), air);
+    for _ in 0..6 {
+        w.full_tick();
+    }
+    // Pulled back: the machine is whole again at its start.
+    for y in 2..6 {
+        assert_eq!(w.get(BlockPos::new(3, y, 0)), slime, "pulled slime y={y}");
+    }
+    assert!(fan_name(&mut w, 2, 2).starts_with("dead_tube_coral_wall_fan"));
+    for y in 3..6 {
+        assert_eq!(w.get(BlockPos::new(2, y, 0)), carpet, "pulled carpet y={y}");
     }
 }
 
