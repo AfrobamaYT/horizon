@@ -76,7 +76,8 @@ or startup input. The launcher retains it for build/status displays. The separat
 supervisor may report the adjacent record as a provenance snapshot, not a query of the running engine.
 Its SHA-256 values and revision describe the built binary's inputs, not the running mod set.
 The launcher prepares jar data from canonical manifests as non-authoritative candidates; the engine
-validates identity against its embedded inventory.
+validates identity against its embedded inventory. Original-jar pack order and
+whole-package refusal rules are in [Original Java jar layers](../reference/manifest.md#original-java-jar-layers).
 
 ## A bundle
 

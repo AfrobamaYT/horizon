@@ -723,6 +723,7 @@ impl Mob {
                 &mut MobRestitution {
                     mob: self,
                     world: w,
+                    level,
                 },
                 input,
             );
@@ -1089,16 +1090,17 @@ impl Mob {
     }
     fn mod_block_fall(
         &self,
+        level: &mut DamageLevel<'_>,
         contact: Option<(&MobWorld, [i32; 3])>,
         distance: f64,
         damage: f32,
     ) -> f32 {
         contact.map_or(damage, |(w, p)| {
             crate::block_contact::fall(
+                level,
                 crate::block_contact::Contact {
                     entity: self.id as i32,
                     kind: &self.kind.id,
-                    block: w.block_name(p[0], p[1], p[2]),
                     state: w.world.block(p[0], p[1], p[2]),
                     position: horizon_core::position::BlockPos::new(p[0], p[1], p[2]),
                 },
@@ -1178,14 +1180,14 @@ impl Mob {
                 &mut cancel,
             );
             if cancel {
-                self.mod_block_fall(contact, landed, 0.0);
+                self.mod_block_fall(level, contact, landed, 0.0);
                 return false;
             }
         }
         // Entity.causeFallDamage: nothing happens to a fall immune entity, nor
         // to those on it.
         if self.kind.flags.fall_immune {
-            self.mod_block_fall(contact, landed, 0.0);
+            self.mod_block_fall(level, contact, landed, 0.0);
             return false;
         }
         let power = distance + 1.0e-6 - self.kind.safe_fall_distance;
@@ -1197,7 +1199,7 @@ impl Mob {
             super::Species::Goat => damage -= 10.0,
             _ => {}
         }
-        let damage = f64::from(self.mod_block_fall(contact, landed, damage as f32));
+        let damage = f64::from(self.mod_block_fall(level, contact, landed, damage as f32));
         // LivingEntity.causeFallDamage lets the riders fall first.
         if !horse {
             self.fall_to_passengers(distance, modifier, events);
@@ -1817,11 +1819,12 @@ impl horizon_world::water_splash::WaterSplashWorld for Splash<'_> {
 /// mob that never sneaks. The phases themselves are
 /// `movement_restitution::restitute_movement`, the same port the player and
 /// dropped items use.
-struct MobRestitution<'a, 'w> {
+struct MobRestitution<'a, 'w, 'l> {
     mob: &'a mut Mob,
     world: &'a MobWorld<'w>,
+    level: &'a mut DamageLevel<'l>,
 }
-impl<'a, 'w> MobRestitution<'a, 'w> {
+impl<'a, 'w, 'l> MobRestitution<'a, 'w, 'l> {
     /// The block's movement data: its coefficients and its bounce tag.
     fn movement(
         &self,
@@ -1830,7 +1833,7 @@ impl<'a, 'w> MobRestitution<'a, 'w> {
         self.world.movement.get(state).map_err(|_| ())
     }
 }
-impl RestitutionWorld for MobRestitution<'_, '_> {
+impl RestitutionWorld for MobRestitution<'_, '_, '_> {
     // The block data cannot fail here: a state the registry does not know
     // reads as a block with no bounce, never as an error.
     type Error = ();
@@ -1889,8 +1892,24 @@ impl RestitutionWorld for MobRestitution<'_, '_> {
     /// `BlockLandingRegistry.bounce_on`'s only case is the shelf mushroom's
     /// bounce sound, which no path plays yet (`landing.rs` binds it for the
     /// player too and the game's sound code resolves neither).
-    fn bounce_on(&mut self, _: BlockStateId, _: BlockPos, _: f64) -> Result<(), ()> {
-        Ok(())
+    fn bounce_on(
+        &mut self,
+        state: BlockStateId,
+        position: BlockPos,
+        fall_distance: f64,
+        movement: Vec3,
+    ) -> Result<Vec3, ()> {
+        Ok(crate::block_contact::bounce(
+            self.level,
+            crate::block_contact::Contact {
+                entity: self.mob.id as i32,
+                kind: &self.mob.kind.id,
+                state,
+                position,
+            },
+            fall_distance,
+            movement,
+        ))
     }
     fn bounce_event(&mut self) -> Result<(), ()> {
         Ok(())

@@ -165,7 +165,9 @@ pub use horizon_world::{
         AttachmentCodec, AttachmentError, AttachmentHost, AttachmentType, Attachments, Holder,
     },
     fluid::FluidState,
-    level::{BlockId, Dimension as LevelDimension, NeighbourUpdate, PlacementContext},
+    level::{
+        BlockId, Dimension as LevelDimension, LandingWrite, NeighbourUpdate, PlacementContext,
+    },
     loot::{LootStack, NativeLootContext},
     nbt::{Compound, Tag},
     registry::BlockStateId,
@@ -3193,6 +3195,18 @@ pub struct NativeBlockClick<'a> {
     pub player_entity_id: i32,
 }
 
+/// The key of `InteractionKeyMappingTriggered`: what the player's click was about to do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InteractionKey {
+    /// `key.attack`: an attack, or a held key digging on.
+    Attack,
+    /// `key.use`: once for each hand tried, the main hand first.
+    Use,
+    /// `key.pickItem`: only with a block or entity aimed at.
+    PickBlock,
+}
+
 /// The behaviour about to run in `UseItemOnBlockEvent`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -3542,6 +3556,13 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
 }
 pub use generated::Hooks;
+impl FallOnEvent<'_> {
+    /// Ask for a write at the block the entity landed on. It is applied once the entity's
+    /// batch has ticked, in the order asked, if the block is still the state it landed on.
+    pub fn request(&mut self, write: LandingWrite) {
+        self.writes.push(write);
+    }
+}
 // hidden: a game-side re-export, not part of the mod surface
 #[doc(hidden)]
 pub use generated::*;

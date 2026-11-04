@@ -541,15 +541,15 @@ impl ItemEntity {
                     0.0,
                 )));
                 let state = world.block(p.x, p.y, p.z);
-                crate::block_contact::emit(crate::block_contact::Event::StepOn(
+                crate::block_contact::step_on(
+                    &facts.get(state).name,
                     crate::block_contact::Contact {
                         entity: self.id as i32,
                         kind: "minecraft:item",
-                        block: &facts.get(state).name,
                         state,
                         position: p,
                     },
-                ));
+                );
             }
             crate::block_contact::swept_inside(
                 self.id as i32,

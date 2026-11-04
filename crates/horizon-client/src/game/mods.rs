@@ -3,6 +3,7 @@
 //! (`native_hooks.rs`); executable components in content packages are refused.
 use super::{Game, execution_role::ExecutionRole};
 use horizon_client::mod_list::{self, Installed};
+use horizon_mods::manifest::{MissingJar, collect_jar_requirements, missing_jars};
 use horizon_world::{
     item_defaults::ItemData,
     native_load_context::{LoadContext, LoadInputs},
@@ -12,7 +13,7 @@ use mod_api::RegistrationContext;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 #[derive(Clone, Default)]
@@ -21,6 +22,8 @@ pub(super) struct ModsState {
     pub(super) dev: Vec<PathBuf>,
     pub(super) native: std::sync::Arc<horizon_mods::runtime::Runtime>,
     pub(super) selected: std::sync::Arc<[horizon_mods::selection::SelectedPackage]>,
+    /// Structured load refusals, rendered only at the existing Mods-page boundary.
+    pub(super) refused: Arc<Mutex<Vec<MissingJar>>>,
 }
 
 impl ModsState {
@@ -38,6 +41,21 @@ impl ModsState {
                     .any(|built| built.id == selected.package.manifest.id)
             })
             .collect();
+        self.refused = Default::default();
+    }
+
+    fn report_refusals(&self, rows: &mut [Installed]) {
+        let refused = self.refused.lock().unwrap();
+        for row in rows {
+            let problems: Vec<_> = refused
+                .iter()
+                .filter(|missing| missing.owners.contains(&row.id))
+                .map(ToString::to_string)
+                .collect();
+            if !problems.is_empty() {
+                row.problem = Some(problems.join("\n"));
+            }
+        }
     }
 }
 
@@ -149,10 +167,31 @@ pub(super) struct ContentOverlay {
 pub(super) fn content_overlay(
     root: &std::path::Path,
     sources: &ModsState,
+    jar_store: &std::path::Path,
 ) -> horizon_client::Result<ContentOverlay> {
     use horizon_client::mod_content::{self, ContentMod};
     use horizon_mods::Content;
     let here = std::env::current_dir().unwrap_or_default();
+
+    let requirements = collect_jar_requirements(
+        sources
+            .native
+            .packages()
+            .iter()
+            .map(|p| &p.manifest)
+            .chain(sources.selected.iter().map(|p| &p.package.manifest))
+            .map(|m| (m.id.as_str(), m.jar.as_slice())),
+    )?;
+    let refused = missing_jars(jar_store, &requirements)?;
+    *sources.refused.lock().unwrap() = refused.clone();
+    if let Some(missing) = refused.iter().find(|missing| {
+        missing
+            .owners
+            .iter()
+            .any(|id| sources.native.built().iter().any(|built| built.id == id))
+    }) {
+        return Err(missing.clone().into());
+    }
 
     let mut known = None;
     let mut mods: Vec<ContentMod> = Vec::new();
@@ -184,6 +223,10 @@ pub(super) fn content_overlay(
     });
     for source in native.chain(content) {
         let m = source.manifest;
+        // Only content packages can be omitted independently: none has code.
+        if refused.iter().any(|missing| missing.owners.contains(&m.id)) {
+            continue;
+        }
         if mods.iter().any(|c| c.id == m.id) {
             continue;
         }
@@ -214,6 +257,7 @@ pub(super) fn content_overlay(
         let candidate = ContentMod {
             id: m.id.clone(),
             content,
+            jars: m.jar.clone(),
         };
         match mod_content::accept_mod(&mut mods, candidate, known) {
             Ok(_) if announce && source.content_only => {
@@ -243,7 +287,7 @@ pub(super) fn content_overlay(
             log::warn!("Horizon: {e}");
         }
     }
-    let root = mod_content::resource_root(root, &mods, &here.join(".horizon-cache"))?;
+    let root = mod_content::resource_root(root, jar_store, &mods, &here.join(".horizon-cache"))?;
     Ok(ContentOverlay {
         root,
         mods,
@@ -259,7 +303,8 @@ pub(super) fn content_root(
     root: &std::path::Path,
     sources: &ModsState,
 ) -> horizon_client::Result<std::path::PathBuf> {
-    let overlay = content_overlay(root, sources)?;
+    let jar_store = horizon_client::logging::game_home().join("jars");
+    let overlay = content_overlay(root, sources, &jar_store)?;
     register_block_entity_types(&overlay.root, &overlay.mods)?;
     if overlay.announce {
         horizon_protocol::mod_list::set_local(overlay.announced);
@@ -485,6 +530,7 @@ impl Game<'_> {
         let native_dir = Self::game_dir().join(mod_list::NATIVE_DIR);
         let unbuilt = not_built(&native_dir, built, &self.settings.mods.installed);
         self.settings.mods.installed.extend(unbuilt);
+        self.mods.report_refusals(&mut self.settings.mods.installed);
     }
 }
 
@@ -644,6 +690,112 @@ mod tests {
             assert_eq!(ids, ["plain"]);
         }
         std::env::set_current_dir(&f.0).unwrap();
+    }
+
+    #[test]
+    fn a_shared_missing_jar_stops_native_load_and_refuses_each_content_mod_row() {
+        const MODE: &str = "HORIZON_JAR_REFUSAL_TEST";
+        if std::env::var_os(MODE).is_none() {
+            // Native declarations, like the real startup, belong to one process.
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "game::mods::tests::a_shared_missing_jar_stops_native_load_and_refuses_each_content_mod_row", "--nocapture"])
+                .env(MODE, "1").status().unwrap();
+            assert!(status.success());
+            return;
+        }
+        let f = Fixture::new("shared-jar-refusal");
+        let jar =
+            horizon_mods::manifest::JarRef::new("original".into(), "1".into(), "9".repeat(128))
+                .unwrap();
+        for id in ["machine_sample", "alpha", "beta", "gamma"] {
+            let native = id == "machine_sample";
+            let mut text = format!(
+                "id='{id}'\nname='{id}'\nversion='0.3.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\n"
+            );
+            if native {
+                text.push_str(&format!(
+                    "[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+                    "a".repeat(40),
+                    "b".repeat(40)
+                ));
+            }
+            if id != "gamma" {
+                text.push_str(&format!(
+                    "[[jar]]\nid='original'\nversion='1'\nsha512='{}'\n",
+                    jar.sha512()
+                ));
+            }
+            let code: &[(&str, &[u8])] = if native {
+                &[
+                    ("Cargo.toml", b"[package]\nname='example'\nversion='1'\n"),
+                    ("src/lib.rs", b"pub fn hooks() {}"),
+                ]
+            } else {
+                &[]
+            };
+            std::fs::write(
+                f.0.join(format!("{id}.hmod")),
+                horizon_mods::Package::write_files(&text, code).unwrap(),
+            )
+            .unwrap();
+        }
+        let selected: Arc<[horizon_mods::selection::SelectedPackage]> = ["alpha", "beta", "gamma"]
+            .into_iter()
+            .map(|id| {
+                let path = f.0.join(format!("{id}.hmod"));
+                horizon_mods::selection::SelectedPackage {
+                    package: horizon_mods::Package::read(&path).unwrap(),
+                    path,
+                }
+            })
+            .collect();
+        let native = ModsState {
+            native: Arc::new(f.runtime()),
+            selected: selected.clone(),
+            ..Default::default()
+        };
+        let base = f.0.join("vanilla");
+        let store = f.0.join("jars");
+        std::fs::create_dir_all(&base).unwrap();
+        let error = content_overlay(&base, &native, &store).err().unwrap();
+        let missing = error.downcast_ref::<MissingJar>().unwrap();
+        assert_eq!(missing.owners, ["machine_sample", "alpha", "beta"]);
+        assert_eq!(missing.jar, jar);
+        assert_eq!(missing.path, jar.cache_path(&store));
+        assert!(!store.exists());
+
+        let content = ModsState {
+            selected,
+            ..Default::default()
+        };
+        let overlay = content_overlay(&base, &content, &store).unwrap();
+        assert_eq!(overlay.root, base);
+        assert_eq!(
+            overlay
+                .mods
+                .iter()
+                .map(|m| m.id.as_str())
+                .collect::<Vec<_>>(),
+            ["gamma"]
+        );
+        let mut rows: Vec<_> = ["alpha", "beta", "gamma"]
+            .into_iter()
+            .map(|id| Installed {
+                id: id.into(),
+                title: id.into(),
+                description: String::new(),
+                problem: None,
+                dev: false,
+                native: None,
+            })
+            .collect();
+        content.report_refusals(&mut rows);
+        for row in &rows[..2] {
+            let problem = row.problem.as_deref().unwrap();
+            assert!(problem.contains("alpha, beta: original 1:"));
+            assert!(problem.contains(&jar.cache_path(&store).display().to_string()));
+        }
+        assert!(rows[2].problem.is_none());
     }
 
     #[test]

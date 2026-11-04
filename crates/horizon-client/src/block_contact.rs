@@ -1,6 +1,7 @@
 //! Synchronous mod-block contacts from the server's simulation code.
+use crate::health::DamageLevel;
 use horizon_core::position::BlockPos;
-use horizon_world::registry::BlockStateId;
+use horizon_world::{level::LandingWrite, registry::BlockStateId};
 use std::{
     cell::{Cell, RefCell},
     sync::OnceLock,
@@ -10,19 +11,46 @@ use std::{
 pub struct Contact<'a> {
     pub entity: i32,
     pub kind: &'a str,
-    pub block: &'a str,
     pub state: BlockStateId,
     pub position: BlockPos,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum Event<'a> {
-    StepOn(Contact<'a>),
-    FallOn(Contact<'a>, f64),
+/// Where the contacts are answered: the game binds these to the hooks of the block
+/// parts, and says which block states have a part for each.
+pub struct Hooks {
+    /// `Block.stepOn` for a mod block, in the dimension.
+    pub step_on: fn(&str, Contact<'_>),
+    pub any_inside: fn() -> bool,
+    pub inside_listens: fn(BlockStateId) -> bool,
+    pub fall_listens: fn(BlockStateId) -> bool,
+    pub bounce_listens: fn(BlockStateId) -> bool,
+    /// `Block.fallOn`: change `damage`, the fall damage `causeFallDamage` calculated, and
+    /// push the writes the part asks for.
+    pub fall_on: fn(&str, &mut DamageLevel<'_>, Contact<'_>, f64, &mut f32, &mut Vec<LandingWrite>),
+    /// `Block.bounceOn`: change `movement`, the movement the bounce leaves the entity.
+    pub bounce_on:
+        fn(&str, &mut DamageLevel<'_>, Contact<'_>, f64, &mut horizon_core::geometry::Vec3),
+}
+
+pub static HOOKS: OnceLock<Hooks> = OnceLock::new();
+
+/// A contact kept until the entity's batch ends, delivered in the order it happened.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Pending {
+    Inside(Inside),
+    Landed(Landed),
+}
+
+/// An entity that landed on a block whose Part asked for writes (`Block.fallOn`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Landed {
+    pub state: BlockStateId,
+    pub position: BlockPos,
+    pub writes: Vec<LandingWrite>,
 }
 
 /// An entity inside a block whose Part listens to `entity_inside`
-/// (`Block.entityInside`), kept until the entity's batch ends.
+/// (`Block.entityInside`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Inside {
     pub entity: i32,
@@ -33,14 +61,9 @@ pub struct Inside {
     pub precise: bool,
 }
 
-pub static HOOK: OnceLock<fn(&str, Event<'_>, &mut f32)> = OnceLock::new();
-/// Whether any part listens to `entity_inside`, and whether one does for a block
-/// state; the game sets them from the part table.
-pub static ANY_INSIDE: OnceLock<fn() -> bool> = OnceLock::new();
-pub static INSIDE_LISTENS: OnceLock<fn(BlockStateId) -> bool> = OnceLock::new();
 thread_local! {
     static LEVEL: Cell<Option<&'static str>> = const { Cell::new(None) };
-    static PENDING: RefCell<Vec<Inside>> = const { RefCell::new(Vec::new()) };
+    static PENDING: RefCell<Vec<Pending>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Scope authority to this thread and restore it even on an error or panic.
@@ -56,33 +79,123 @@ pub fn in_level<R>(dimension: Option<&'static str>, f: impl FnOnce() -> R) -> R 
     f()
 }
 
-pub fn emit(event: Event<'_>) {
-    dispatch(event, &mut 0.0);
+/// `Block.stepOn` for a mod block: the entity stands on `contact`'s block.
+pub fn step_on(block: &str, contact: Contact<'_>) {
+    if block.starts_with("minecraft:") {
+        return;
+    }
+    if let Some(dimension) = LEVEL.get()
+        && let Some(hooks) = HOOKS.get()
+    {
+        (hooks.step_on)(dimension, contact);
+    }
 }
 
-/// Damage is the calculated fall damage, before hurt handling and fall sounds.
-pub fn fall(contact: Contact<'_>, distance: f64, mut damage: f32) -> f32 {
-    dispatch(Event::FallOn(contact, distance), &mut damage);
-    damage
+/// Whether a part of the block `state` answers `fall_on`.
+pub fn fall_listens(state: BlockStateId) -> bool {
+    HOOKS.get().is_some_and(|hooks| (hooks.fall_listens)(state))
+}
+
+/// `Block.fallOn`: the fall damage `damage` calculated for the entity that landed on
+/// `contact`'s block, after any part of that block changed it. A non-finite answer is
+/// ignored and a negative one is zero. The writes the part asked for are kept until the
+/// entity's batch ends. Nothing runs off the server or without a part.
+pub fn fall(level: &mut DamageLevel<'_>, contact: Contact<'_>, distance: f64, damage: f32) -> f32 {
+    let (Some(dimension), Some(hooks)) = (LEVEL.get(), HOOKS.get()) else {
+        return damage;
+    };
+    if !(hooks.fall_listens)(contact.state) {
+        return damage;
+    }
+    let mut answer = damage;
+    let mut writes = Vec::new();
+    (hooks.fall_on)(
+        dimension,
+        level,
+        contact,
+        distance,
+        &mut answer,
+        &mut writes,
+    );
+    landed(contact.state, contact.position, writes);
+    accepted_damage(answer, damage)
+}
+
+/// A part's fall damage answer: negative is zero, and a non-finite one is ignored.
+fn accepted_damage(answer: f32, kept: f32) -> f32 {
+    if answer.is_finite() {
+        answer.max(0.0)
+    } else {
+        kept
+    }
+}
+
+/// A part's bounce answer, ignored unless every component is finite.
+fn accepted_movement(
+    answer: horizon_core::geometry::Vec3,
+    kept: horizon_core::geometry::Vec3,
+) -> horizon_core::geometry::Vec3 {
+    if answer.x.is_finite() && answer.y.is_finite() && answer.z.is_finite() {
+        answer
+    } else {
+        kept
+    }
+}
+
+/// `Block.bounceOn`: the movement a bounce off `contact`'s block leaves, after any part of
+/// that block changed it. A non-finite answer is ignored.
+pub fn bounce(
+    level: &mut DamageLevel<'_>,
+    contact: Contact<'_>,
+    fall_distance: f64,
+    movement: horizon_core::geometry::Vec3,
+) -> horizon_core::geometry::Vec3 {
+    let (Some(dimension), Some(hooks)) = (LEVEL.get(), HOOKS.get()) else {
+        return movement;
+    };
+    if !(hooks.bounce_listens)(contact.state) {
+        return movement;
+    }
+    let mut answer = movement;
+    (hooks.bounce_on)(dimension, level, contact, fall_distance, &mut answer);
+    accepted_movement(answer, movement)
+}
+
+/// Keep the writes a landing on the block `state` at `position` asked for until the
+/// entity's batch ends; nothing is kept when none were asked.
+pub fn landed(state: BlockStateId, position: BlockPos, writes: Vec<LandingWrite>) {
+    if !writes.is_empty() {
+        PENDING.with_borrow_mut(|pending| {
+            pending.push(Pending::Landed(Landed {
+                state,
+                position,
+                writes,
+            }));
+        });
+    }
 }
 
 /// Note an entity inside a block, if a part there listens; nothing is kept
 /// otherwise, so a world without such a part pays one test per block.
 pub fn inside(entity: i32, state: BlockStateId, position: BlockPos, precise: bool) {
-    if LEVEL.get().is_some() && INSIDE_LISTENS.get().is_some_and(|listens| listens(state)) {
+    if LEVEL.get().is_some()
+        && HOOKS
+            .get()
+            .is_some_and(|hooks| (hooks.inside_listens)(state))
+    {
         PENDING.with_borrow_mut(|pending| {
-            pending.push(Inside {
+            pending.push(Pending::Inside(Inside {
                 entity,
                 state,
                 position,
                 precise,
-            });
+            }));
         });
     }
 }
 
 /// The contacts noted since the last call, in the order they happened.
-pub fn take_inside() -> Vec<Inside> {
+pub fn take_pending() -> Vec<Pending> {
     PENDING.with_borrow_mut(std::mem::take)
 }
 
@@ -99,25 +212,6 @@ pub fn is_precise(
         || at_target.intersects(horizon_core::geometry::Aabb::block(position))
 }
 
-fn dispatch(event: Event<'_>, damage: &mut f32) {
-    let contact = match event {
-        Event::StepOn(c) | Event::FallOn(c, _) => c,
-    };
-    if contact.block.starts_with("minecraft:") {
-        return;
-    }
-    if let Some(dimension) = LEVEL.get()
-        && let Some(hook) = HOOK.get()
-    {
-        let original = *damage;
-        hook(dimension, event, damage);
-        if !damage.is_finite() {
-            *damage = original;
-        }
-        *damage = damage.max(0.0);
-    }
-}
-
 /// Reuse the entity block sweep for item and projectile ticks without an effect collector.
 pub fn swept_inside(
     entity: i32,
@@ -126,7 +220,7 @@ pub fn swept_inside(
     bounds: horizon_core::geometry::Aabb,
     mut block: impl FnMut(BlockPos) -> BlockStateId,
 ) {
-    if LEVEL.get().is_none() || !ANY_INSIDE.get().is_some_and(|any| any()) {
+    if LEVEL.get().is_none() || !HOOKS.get().is_some_and(|hooks| (hooks.any_inside)()) {
         return;
     }
     let bounds = bounds.deflate(horizon_core::geometry::Vec3::new(1e-5, 1e-5, 1e-5));
@@ -146,66 +240,6 @@ pub fn swept_inside(
 #[cfg(test)]
 mod tests {
     use super::*;
-    thread_local! {
-        static SEEN: Cell<usize> = const { Cell::new(0) };
-    }
-    fn hook(dimension: &str, event: Event<'_>, damage: &mut f32) {
-        assert_eq!(dimension, "minecraft:the_nether");
-        let c = match event {
-            Event::FallOn(c, distance) => {
-                assert_eq!(distance, 12.0);
-                *damage = match *damage {
-                    99.0 => f32::NAN,
-                    98.0 => -1.0,
-                    _ => *damage * 0.2,
-                };
-                c
-            }
-            Event::StepOn(c) => c,
-        };
-        assert_eq!(
-            (c.entity, c.kind, c.state, c.position),
-            (
-                17,
-                "minecraft:zombie",
-                BlockStateId(9),
-                BlockPos::new(1, 2, 3)
-            )
-        );
-        SEEN.set(SEEN.get() + 1);
-    }
-    #[test]
-    fn contacts_require_server_scope_and_mod_blocks_and_restore_nested_levels() {
-        HOOK.set(hook).unwrap();
-        let c = Contact {
-            entity: 17,
-            kind: "minecraft:zombie",
-            block: "test:hay",
-            state: BlockStateId(9),
-            position: BlockPos::new(1, 2, 3),
-        };
-        assert_eq!(fall(c, 12.0, 10.0), 10.0);
-        in_level(Some("minecraft:the_nether"), || {
-            emit(Event::StepOn(c));
-            assert_eq!(fall(c, 12.0, 10.0), 2.0);
-            in_level(None, || assert_eq!(fall(c, 12.0, 10.0), 10.0));
-            assert_eq!(fall(c, 12.0, 0.0), 0.0);
-            emit(Event::StepOn(Contact {
-                block: "minecraft:hay_block",
-                ..c
-            }));
-        });
-        assert_eq!(fall(c, 12.0, 10.0), 10.0);
-        assert_eq!(SEEN.get(), 3);
-        in_level(Some("minecraft:the_nether"), || {
-            assert_eq!(fall(c, 12.0, 99.0), 99.0);
-            assert_eq!(fall(c, 12.0, 98.0), 0.0);
-        });
-        let _ =
-            std::panic::catch_unwind(|| in_level(Some("minecraft:the_nether"), || panic!("test")));
-        assert_eq!(fall(c, 12.0, 10.0), 10.0);
-    }
-
     /// `checkInsideBlocks`' `isPrecise`: a long move, or the box at the target
     /// touching the block.
     #[test]
@@ -222,5 +256,24 @@ mod tests {
             at,
             BlockPos::new(1, 2, 3)
         ));
+    }
+
+    /// A fall answer is clamped at zero and a non-finite one ignored; a bounce answer is
+    /// used unless one component is non-finite.
+    #[test]
+    fn landing_answers_are_checked() {
+        use horizon_core::geometry::Vec3;
+        assert_eq!(accepted_damage(-2.0, 3.0), 0.0);
+        assert_eq!(accepted_damage(5.0, 3.0), 5.0);
+        assert_eq!(accepted_damage(f32::NAN, 3.0), 3.0);
+        let kept = Vec3::new(0.0, 0.8, 0.0);
+        assert_eq!(
+            accepted_movement(Vec3::new(0.0, 0.4, 0.0), kept),
+            Vec3::new(0.0, 0.4, 0.0)
+        );
+        assert_eq!(
+            accepted_movement(Vec3::new(0.0, f64::INFINITY, 0.0), kept),
+            kept
+        );
     }
 }

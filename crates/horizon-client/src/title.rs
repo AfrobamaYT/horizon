@@ -3476,7 +3476,9 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 crate::multiplayer::Outcome::Connect { address, lan } => {
                     Action::Connect { address, lan }
                 }
-                crate::multiplayer::Outcome::None => Action::None,
+                crate::multiplayer::Outcome::None | crate::multiplayer::Outcome::Open(_) => {
+                    Action::None
+                }
             },
             (Mode::Main, Some(5)) => {
                 self.set_mode(Mode::Multiplayer(crate::multiplayer::Screen::friend()));
@@ -4324,13 +4326,16 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         let Mode::Multiplayer(screen) = &mut self.mode else {
             return crate::multiplayer::Outcome::None;
         };
-        let outcome = screen.click(hit, x, y, size, &self.saves);
-        if hit == Some(41)
-            && let crate::multiplayer::Screen::Direct { address } = screen
-        {
-            address.clone_from(&self.last_server);
+        match screen.click(hit, x, y, size, &self.saves) {
+            crate::multiplayer::Outcome::Open(mut next) => {
+                if let crate::multiplayer::Screen::Direct { address } = &mut *next {
+                    address.clone_from(&self.last_server);
+                }
+                self.set_mode(Mode::Multiplayer(*next));
+                crate::multiplayer::Outcome::None
+            }
+            outcome => outcome,
         }
-        outcome
     }
     /// A left press on the game rules (they need the atlas for text): whether
     /// it lands on a button, for its sound.
@@ -4529,9 +4534,10 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             return;
         }
         self.remember_direct_address();
-        if let Mode::Multiplayer(screen) = &mut self.mode
-            && !screen.escape(&self.saves)
+        if let Mode::Multiplayer(screen) = &self.mode
+            && let crate::multiplayer::Outcome::Open(next) = screen.escape(&self.saves)
         {
+            self.set_mode(Mode::Multiplayer(*next));
             return;
         }
         match &self.mode {

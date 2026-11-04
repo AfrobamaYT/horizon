@@ -1242,17 +1242,6 @@
       }
     },
     {
-      "name": "block_fall_on",
-      "doc": "`Block.fallOn` for a mod block. Change calculated damage before generic fall sounds\nand hurt handling; zero prevents both. Creative and fall-immune entities\nnotify with zero damage and retain their immunity. Server-side only.",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_fall_on",
-      "side": "server",
-      "mod_api": {
-        "contract": "collect",
-        "out": "damage"
-      }
-    },
-    {
       "name": "consume_effect", "doc": "A consumable's effect of a mod's own kind: the item's `on_consume_effects`\nentry is of a type in a namespace of its own, and the loader kept it\nfor this call. The kind and the JSON the file wrote are here; the acting\nplayer is the one consuming, and the game's own effects,\nsounds, teleports and drops are open. An unclaimed kind does\nnothing.", "side": "server",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_consume_effect",
@@ -1302,6 +1291,8 @@
       "name": "screen_render_post", "doc": "The open screen has drawn itself and its tooltips (`Screen.render`,\nthe point of `ScreenEvent.Render.Post`): draw over it with\n`native_fill`, `native_sprite` and `native_text`, `screen.rect` being\nits container panel (or the whole window) and `screen.id` the screen\nit is. Once a frame on the window, never while playing with no screen;\n`&self`, so it reads and draws only. The Win and Options screens call\nit on their own path, after their drawing.\n\nIt does not fire for the screens drawn over gameplay after it (a\nserver dialog, the server pack, link and code-of-conduct prompts, a\nbook, a sign editor): those keep `Screen::Playing`, which it skips (the\nserver pack prompt hides an open screen too, and that screen does not\nfire under it), and draw over what it drew, while vanilla's\n`ScreenEvent.Render.Post` fires for them. The title's own screens\n(`title`, `world_select`, `world_create`, `multiplayer`…) fire it too,\ntheir `screen.id` from the title state machine and the whole window\ntheir `rect`, and no dialog or prompt over them.", "side": "client",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_render_post",
+      "neoforge": "ScreenEvent.Render.Post",
+      "cancellable": false,
       "mod_api": {
         "contract": "listen"
       }
@@ -1925,11 +1916,11 @@
       }
     },
     {
-      "name": "interaction_key",
-      "doc": "An interaction key acts on what the crosshair points at\n(`InputEvent.InteractionKeyMappingTriggered`), while playing: `button` 0 is\nthe attack key (`key_mapping` `key.attack`), 1 the use key (`key.use`, once\nfor each hand it tries, the main hand first), 2 pick block (`key.pickItem`,\nonly with something aimed at). The attack fires when an attack is allowed\nand again each tick a held attack key keeps digging a block. Set `canceled`\nto skip the action: a cancelled use also skips the other hand. A cancelled\nattack or use still swings `hand` unless the mod clears `swing_hand` (it\nstarts true). A server's player and a single player's window only; a mod\nthat claims an item's use (`mod_use_start`) sees the event first.",
+      "name": "interaction_key_mapping_triggered",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_interaction_key",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_interaction_key_mapping_triggered",
       "neoforge": "InputEvent.InteractionKeyMappingTriggered",
+      "doc": "A player's click is about to act on what the crosshair points at. `event.key` says which: `Attack` (when an attack is allowed, and each tick a held key keeps digging a block), `Use` (once for each hand tried, main hand first, before the hand's target and item) or `PickBlock` (only with a block or entity aimed at). Cancel to skip the action; a cancelled use also gives the other hand no turn. A cancelled attack or use still swings `event.hand` unless the listener clears `event.swing_hand`. Client side: a single player's window and a server's player.",
       "side": "client",
       "cancellable": true,
       "mod_api": {

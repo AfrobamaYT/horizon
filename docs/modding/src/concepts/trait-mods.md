@@ -466,6 +466,13 @@ move undone, in its transaction, and is warned once naming the mod, and `move_re
 neither end keeps any of it: a broken handler can't make a move overflow, duplicate or lose items, fluid or energy, or
 panic the game.
 
+A `LivingRef` on the server can apply one effect from an item's loaded consumable with
+`living.apply_consume_effect(host, &stack, index)`. The index is zero-based in component
+order; this does not eat food, shrink the stack or run consume triggers. `Some(true)` or
+`Some(false)` is the effect's result; `None` means the item, index or target is unavailable
+or the effect is unsupported. Mod-defined effects, mob random teleport, armor stands and
+dragons are not supported. Player random teleport uses the level random as normal.
+
 On a `ServerHost`, import `HostTransaction` to call `host.transaction(|host, tx| …)` (NeoForge 26.3's `Transaction`). It runs a closure whose `Ok` commits and whose
 `Err` aborts, nested in the open transaction if any. `tx`, a `&Transaction` (NeoForge's `TransactionContext`), is
 what every handler and place write takes, so none happens outside one. Inside, a capability write applies at once, so later steps see it,
