@@ -467,7 +467,11 @@ mod tests {
         struct TestMod;
         #[mod_api::__subscriptions]
         impl Hooks for TestMod {
-            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+            fn register(
+                &self,
+                registrar: &mut dyn Registrar,
+                _: &mod_api::RegistrationContext<'_>,
+            ) {
                 let kind = registrar
                     .block_entity_type("crate")
                     .blocks(&[CRATE])

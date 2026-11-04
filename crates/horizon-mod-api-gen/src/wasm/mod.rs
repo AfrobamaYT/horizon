@@ -27,6 +27,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "LevelWriteHost",
     "ConfigFiles",
     "menu::SlotView",
+    "Registrar",
 ];
 
 /// Imported traits a call never hands over, each reached through another's method instead.
@@ -45,7 +46,7 @@ pub(super) const REACHED: &[(&str, &str, &str)] = &[
 ];
 
 /// Traits a mod implements: their methods are the world's exports.
-const EXPORTS: &[&str] = &[
+pub(super) const EXPORTS: &[&str] = &[
     "Hooks",
     "BlockPart",
     "BlockEntityPart",
@@ -53,15 +54,11 @@ const EXPORTS: &[&str] = &[
     "MenuPart",
     "ServerReloadListener",
     "ClientReloadListener",
-    "registration::Registration",
 ];
 
 /// The exported traits the mod itself answers, with no handler index, and the guest's
 /// expression for its implementation of each; every other export is a registered handler's.
-pub(super) const MOD_EXPORTS: &[(&str, &str)] = &[
-    ("Hooks", "super::hooks()"),
-    ("registration::Registration", "super::Registrations"),
-];
+pub(super) const MOD_EXPORTS: &[(&str, &str)] = &[("Hooks", "super::hooks()")];
 
 /// The guest's receiver of `owner`'s exports, if the mod itself answers them.
 pub(super) fn mod_receiver(owner: &str) -> Option<&'static str> {
@@ -71,17 +68,8 @@ pub(super) fn mod_receiver(owner: &str) -> Option<&'static str> {
         .map(|(_, r)| *r)
 }
 
-/// Methods of the mod's traits that cross by hand rather than through their types, each with
-/// the game's proxy method, which calls `super::<name>` (`mod_api::wasm_host`). `register`
-/// crosses as the `Registration` export.
-pub(super) const HAND_WRITTEN: &[(&str, &str, &str)] = &[(
-    "Hooks",
-    "register",
-    "fn register(&self, r: &mut crate::Registrar, cx: &crate::RegistrationContext<'_>) { super::register(self, r, cx) }",
-)];
-
 /// The exported traits that list the hooks they subscribe to, and the method listing them.
-const SUBSCRIBED: &[(&str, &str)] = &[
+pub(super) const SUBSCRIBED: &[(&str, &str)] = &[
     ("Hooks", "subscribed"),
     ("BlockPart", "block_subscribed"),
     ("BlockEntityPart", "block_entity_subscribed"),
@@ -137,12 +125,7 @@ pub(super) fn surface<'a>(
                 continue;
             };
             let name = function.sig.ident.to_string();
-            if hidden(&function.attrs)
-                || name.ends_with("subscribed")
-                || HAND_WRITTEN
-                    .iter()
-                    .any(|(o, n, _)| o == owner && *n == name)
-            {
+            if hidden(&function.attrs) || name.ends_with("subscribed") {
                 continue;
             }
             match method(&mut types, id.module, owner, function) {
@@ -200,6 +183,7 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Wasm, String> 
     let mut surface = surface(root, included)?;
     let hooks = hook_ids(&mut surface.types)?;
     let servers = servers(&mut surface.types)?;
+    surface.types.views = views(&mut surface.types)?;
     let methods: Vec<&Method> = surface.methods.iter().collect();
     let wit = wit::package(&surface.types, &methods, &api_version(root)?)?;
     Ok(Wasm {
@@ -279,6 +263,31 @@ fn servers(types: &mut Types<'_>) -> Result<Vec<(&'static str, Vec<&'static str>
             (*of, list)
         })
         .collect())
+}
+
+/// Each exported trait with the exported traits a handler of it also answers as: itself, then its
+/// exported supertraits (a block entity part is a block part too).
+fn views(types: &mut Types<'_>) -> Result<Vec<(String, Vec<String>)>, String> {
+    let api = types.index.module("mod_api", &[])?;
+    let mut out = Vec::new();
+    for owner in EXPORTS {
+        let Found::Item(id) = types.index.resolve_path(api, &[owner.to_string()])? else {
+            return Err(format!("{owner} is not a mod_api trait"));
+        };
+        let Item::Trait(item) = types.index.item(id) else {
+            return Err(format!("{owner} is not a trait"));
+        };
+        let mut list = vec![owner.to_string()];
+        list.extend(item.supertraits.iter().filter_map(|bound| match bound {
+            syn::TypeParamBound::Trait(t) => {
+                let name = t.path.segments.last()?.ident.to_string();
+                EXPORTS.contains(&name.as_str()).then_some(name)
+            }
+            _ => None,
+        }));
+        out.push((owner.to_string(), list));
+    }
+    Ok(out)
 }
 
 /// The variants of the generated `HookId`, each with its hook's name.

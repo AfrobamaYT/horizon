@@ -10770,7 +10770,11 @@ mod tests {
         }
         #[mod_api::__subscriptions]
         impl Hooks for User {
-            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+            fn register(
+                &self,
+                registrar: &mut dyn Registrar,
+                _: &mod_api::RegistrationContext<'_>,
+            ) {
                 let kind = registrar.block_entity_type_key("be_test:shared");
                 registrar
                     .block_entity_part(&kind, Press)
@@ -10793,7 +10797,11 @@ mod tests {
         }
         #[mod_api::__subscriptions]
         impl Hooks for TestMod {
-            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+            fn register(
+                &self,
+                registrar: &mut dyn Registrar,
+                _: &mod_api::RegistrationContext<'_>,
+            ) {
                 let kind = registrar
                     .block_entity_type("shared")
                     .blocks(if self.invalid {
@@ -12354,7 +12362,7 @@ mod entity_inside_tests {
     struct Mod(Stone);
     #[mod_api::__subscriptions]
     impl Hooks for Mod {
-        fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext<'_>) {
             r.block_part("minecraft:stone", self.0.clone());
         }
     }

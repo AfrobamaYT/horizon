@@ -105,7 +105,7 @@ impl BlockPart for Observed {
 
 #[mod_api::__subscriptions]
 impl Hooks for Observed {
-    fn register(&self, r: &mut Registrar, _: &RegistrationContext<'_>) {
+    fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext<'_>) {
         // An unbacked vehicle coordinate would select air if it were dispatched as a block.
         for block in ["minecraft:air", "minecraft:chest", "minecraft:crafter"] {
             r.block_part(block, self.clone());

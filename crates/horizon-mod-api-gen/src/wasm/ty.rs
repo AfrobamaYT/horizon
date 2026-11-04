@@ -29,6 +29,8 @@ pub(crate) enum Ty {
     Named(usize),
     /// `&dyn Trait` or `&mut dyn Trait` (the reference is part of it): a frame resource.
     Dyn(String, bool),
+    /// `Arc<dyn Trait>` of an exported trait: a handler the mod keeps, crossing as its index.
+    Handler(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -116,6 +118,8 @@ pub(crate) struct Types<'a> {
     exported_via: HashMap<ItemId, Type>,
     /// The same for re-exports of types the index can't read (made by a macro), by name.
     exported_via_names: HashMap<String, Type>,
+    /// Each exported trait with the exported traits its handlers answer as (`super::views`).
+    pub(super) views: Vec<(String, Vec<String>)>,
 }
 
 impl<'a> Types<'a> {
@@ -145,6 +149,7 @@ impl<'a> Types<'a> {
             index,
             exported_via,
             exported_via_names,
+            views: Vec::new(),
             defs: Vec::new(),
             refused: Vec::new(),
             by_item: HashMap::new(),
@@ -220,6 +225,12 @@ impl<'a> Types<'a> {
             && let Some((_, ty)) = subst.iter().find(|(param, _)| *param == name)
         {
             return Ok(ty.clone());
+        }
+        if name == "Arc"
+            && let PathArguments::AngleBracketed(args) = &last.arguments
+            && let Some(GenericArgument::Type(Type::TraitObject(object))) = args.args.first()
+        {
+            return Ok(Ty::Handler(trait_name(object)?));
         }
         let args = match &last.arguments {
             PathArguments::AngleBracketed(args) => args
@@ -570,13 +581,19 @@ fn derives(item: &Item, name: &str) -> bool {
 
 impl Types<'_> {
     /// Whether the generated glue, inside `mod_api`, can reach a field of item `id` with
-    /// visibility `vis`: a public one, a crate-visible one of `mod_api`'s, or any of a type
+    /// visibility `vis`: a public one, a crate-visible one of `mod_api`'s (`pub(crate)`, or
+    /// `pub(super)` in a module at its root), or any of a type
     /// defined at `mod_api`'s root, which the glue is a descendant of.
     fn reachable(&self, id: ItemId, vis: &syn::Visibility) -> bool {
         let in_api = self.index.modules[id.module].krate == "mod_api";
         match vis {
             syn::Visibility::Public(_) => true,
-            syn::Visibility::Restricted(r) => in_api && r.path.is_ident("crate"),
+            syn::Visibility::Restricted(r) => {
+                in_api
+                    && (r.path.is_ident("crate")
+                        || (r.path.is_ident("super")
+                            && self.index.modules[id.module].path.len() == 1))
+            }
             syn::Visibility::Inherited => id.module == self.api_root,
         }
     }

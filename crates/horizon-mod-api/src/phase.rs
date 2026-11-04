@@ -15,18 +15,37 @@ pub enum PackageKind {
 /// Read-only package metadata available during registration.
 #[non_exhaustive]
 pub struct PackageInfo {
-    kind: PackageKind,
-    manifest: horizon_mods::Manifest,
+    pub(crate) id: String,
+    pub(crate) version: String,
+    pub(crate) kind: PackageKind,
+    pub(crate) side: horizon_mods::Side,
+    /// Its own namespace, then the others it declares.
+    pub(crate) namespaces: Vec<String>,
+    /// The ids it declares dependencies on.
+    pub(crate) dependencies: Vec<String>,
 }
 
 impl PackageInfo {
+    fn new(kind: PackageKind, manifest: &horizon_mods::Manifest) -> Self {
+        Self {
+            id: manifest.id.clone(),
+            version: manifest.version.clone(),
+            kind,
+            side: manifest.side,
+            namespaces: std::iter::once(&manifest.id)
+                .chain(&manifest.namespaces)
+                .cloned()
+                .collect(),
+            dependencies: manifest.dependencies.keys().cloned().collect(),
+        }
+    }
     /// Package identifier.
     pub fn id(&self) -> &str {
-        &self.manifest.id
+        &self.id
     }
     /// The package's version.
     pub fn version(&self) -> &str {
-        &self.manifest.version
+        &self.version
     }
     /// Whether this package contains code.
     pub fn kind(&self) -> PackageKind {
@@ -34,15 +53,15 @@ impl PackageInfo {
     }
     /// The package's declared side.
     pub fn side(&self) -> horizon_mods::Side {
-        self.manifest.side
+        self.side
     }
     /// The package's own namespace followed by any additional namespaces.
     pub fn namespaces(&self) -> impl Iterator<Item = &str> {
-        std::iter::once(self.id()).chain(self.manifest.namespaces.iter().map(String::as_str))
+        self.namespaces.iter().map(String::as_str)
     }
     /// Whether this package declares a dependency on `id`.
     pub fn depends_on(&self, id: &str) -> bool {
-        self.manifest.dependencies.contains_key(id)
+        self.dependencies.iter().any(|d| d == id)
     }
 }
 
@@ -57,12 +76,12 @@ thread_local! {
 pub fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
     let packages: Vec<_> = ids
         .iter()
-        .map(|id| PackageInfo {
-            kind: PackageKind::Code,
-            manifest: horizon_mods::Manifest::parse(&format!(
+        .map(|id| {
+            let manifest = horizon_mods::Manifest::parse(&format!(
                 "id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n"
             ))
-            .unwrap(),
+            .unwrap();
+            PackageInfo::new(PackageKind::Code, &manifest)
         })
         .collect();
     let packages = Box::leak(packages.into_boxed_slice());
@@ -78,18 +97,12 @@ fn inventory(
 ) -> Vec<PackageInfo> {
     let mut packages: Vec<_> = native
         .iter()
-        .map(|p| PackageInfo {
-            kind: PackageKind::Code,
-            manifest: p.manifest.clone(),
-        })
+        .map(|p| PackageInfo::new(PackageKind::Code, &p.manifest))
         .collect();
     for selected in content {
         let manifest = &selected.package.manifest;
         if !packages.iter().any(|p| p.id() == manifest.id) {
-            packages.push(PackageInfo {
-                kind: PackageKind::Content,
-                manifest: manifest.clone(),
-            });
+            packages.push(PackageInfo::new(PackageKind::Content, manifest));
         }
     }
     packages
@@ -109,7 +122,7 @@ pub fn install_packages(
 /// Read-only view of the startup package inventory.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct LoadedMods<'a> {
-    entries: &'a [PackageInfo],
+    pub(crate) entries: &'a [PackageInfo],
 }
 
 impl LoadedMods<'_> {
@@ -161,7 +174,7 @@ impl LoadedMods<'_> {
 /// ```
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct RegistrationContext<'a> {
-    mods: LoadedMods<'a>,
+    pub(crate) mods: LoadedMods<'a>,
 }
 
 impl RegistrationContext<'_> {

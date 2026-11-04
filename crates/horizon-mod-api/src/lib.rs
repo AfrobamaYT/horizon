@@ -3409,7 +3409,6 @@ pub(crate) use part_table::{
     ProvidedBy, answered, ask_providers, has_part_hook, parts, place_provider, providers,
 };
 
-mod registration;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
@@ -3618,7 +3617,7 @@ mod tests {
         struct StickMod<P>(P);
         #[mod_api::__subscriptions]
         impl<P: ItemPart + Clone> Hooks for StickMod<P> {
-            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext<'_>) {
                 r.item_part("minecraft:stick", self.0.clone());
             }
         }
@@ -3952,7 +3951,7 @@ mod tests {
 
     #[mod_api::__subscriptions]
     impl Hooks for OffHandTop {
-        fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext<'_>) {
             r.item_part("minecraft:stick", HeardStick);
         }
 

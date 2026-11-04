@@ -397,7 +397,7 @@ mod tests {
             Self { id, hooks }
         }
     }
-    struct Registrar;
+    trait Registrar {}
     /// The parts every thing in a scope has, whatever its key: a test's own, or none.
     #[derive(Default)]
     struct Parts {

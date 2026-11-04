@@ -80,6 +80,8 @@ pub(crate) struct State {
 thread_local! {
     /// The frame of the innermost call into a mod on this thread.
     static CURRENT: Cell<*mut Frame> = const { Cell::new(std::ptr::null_mut()) };
+    /// The mod that call runs in, whose handlers an import hands over.
+    static CALLER: Cell<Option<Arc<Running>>> = const { Cell::new(None) };
 }
 
 /// The objects of the call in progress on this thread (`glue::Frame`).
@@ -292,7 +294,7 @@ impl Running {
     /// Runs one call with `frame`'s hosts, charging its fuel to this mod. A refused call or a
     /// trap answers `T::default()`, as no mod answering; a trap stops the whole group.
     fn call<T: NoAnswer>(
-        &self,
+        self: &Arc<Self>,
         mut frame: Frame,
         f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
     ) -> T {
@@ -307,7 +309,9 @@ impl Running {
         let budget = self.group.budgets.call;
         let _ = store.set_fuel(budget);
         let previous = CURRENT.replace(&mut frame);
+        let caller = CALLER.replace(Some(self.clone()));
         let result = f(&self.exports, store);
+        CALLER.set(caller);
         CURRENT.set(previous);
         drop(entered);
         match result {
@@ -352,38 +356,18 @@ fn hook_ids(names: Vec<String>) -> &'static [Option<HookId>] {
     )
 }
 
-/// [`Hooks::register`](crate::Hooks::register) of a wasm mod: the mod runs its own and hands
-/// over what it attached (`registration`), and this replays it on the game's registrar, each
-/// part a proxy calling back into the mod.
-fn register(module: &WasmMod, r: &mut crate::Registrar, _: &crate::RegistrationContext<'_>) {
-    use crate::part_table::ForeignPart;
-    use crate::registration::{PartAt, Registration};
-    let registered = module.registered(module.module.id.to_owned());
-    r.replay(registered, |at, index| {
-        let names = module.call(Frame::default(), |m, s| match at {
-            PartAt::Block | PartAt::BlockTag => {
-                m.horizon_mod_api_block_part().call_subscribed(s, index)
-            }
-            PartAt::BlockEntity => m
-                .horizon_mod_api_block_entity_part()
-                .call_subscribed(s, index),
-            PartAt::Item | PartAt::ItemTag => {
-                m.horizon_mod_api_item_part().call_subscribed(s, index)
-            }
-            PartAt::Menu => m.horizon_mod_api_menu_part().call_subscribed(s, index),
-        });
-        let part = Arc::new(WasmHandler {
-            module: module.module.clone(),
-            index,
-            subscribed: hook_ids(names),
-        });
-        match at {
-            PartAt::Block | PartAt::BlockTag => ForeignPart::Block(part),
-            PartAt::BlockEntity => ForeignPart::BlockEntity(part),
-            PartAt::Item | PartAt::ItemTag => ForeignPart::Item(part),
-            PartAt::Menu => ForeignPart::Menu(part),
-        }
-    });
+/// The game's proxy of a handler the calling mod handed over (a part it registers), which calls
+/// back into it by the index it keeps the handler under.
+fn handler_of(
+    handler: glue::horizon::mod_api::types::Handler,
+) -> Result<Arc<WasmHandler>, Refused> {
+    let module = CALLER.take().ok_or(Refused)?;
+    CALLER.set(Some(module.clone()));
+    Ok(Arc::new(WasmHandler {
+        module,
+        index: handler.index,
+        subscribed: hook_ids(handler.subscribed),
+    }))
 }
 
 /// A member of a group: its mod id, and the prefix of its exports, `<prefix>-<interface>`.

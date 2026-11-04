@@ -13,6 +13,7 @@ pub(super) fn rust_ty(types: &Types<'_>, ty: &Ty, ret: bool) -> String {
         Ty::Unit => "()".into(),
         Ty::Prim(rust, _) | Ty::Wide(rust) => (*rust).into(),
         Ty::Duration => "std::time::Duration".into(),
+        Ty::Handler(name) => format!("std::sync::Arc<dyn {}>", trait_path(name)),
         Ty::Str(Str::Owned) => "String".into(),
         Ty::Str(Str::Borrowed) => "&str".into(),
         Ty::Str(Str::Static) => "&'static str".into(),
@@ -371,6 +372,7 @@ fn wire_type(types: &Types<'_>, ty: &Ty) -> String {
         .into(),
         Ty::Wide(_) => "(u64, u64)".into(),
         Ty::Duration => "u64".into(),
+        Ty::Handler(_) => format!("{}::Handler", super::glue::WIRE),
         Ty::Str(_) => "String".into(),
         Ty::List(item, _) | Ty::Array(item, _) => format!("Vec<{}>", wire_type(types, item)),
         Ty::Option(item) => format!("Option<{}>", wire_type(types, item)),
@@ -523,9 +525,6 @@ pub(super) fn host(
             "super::WasmHandler"
         };
         writeln!(code, "impl {} for {proxy} {{", trait_path(owner)).unwrap();
-        for (_, _, method) in super::HAND_WRITTEN.iter().filter(|(o, ..)| o == owner) {
-            writeln!(code, "{method}").unwrap();
-        }
         if let Some((_, list)) = super::SUBSCRIBED.iter().find(|(o, _)| o == owner) {
             writeln!(
                 code,
@@ -772,7 +771,7 @@ fn arg(types: &Types<'_>, ty: &Ty, e: &str) -> String {
 /// Whether a type's wire value holds a string or list.
 fn heap(types: &Types<'_>, ty: &Ty) -> bool {
     match ty {
-        Ty::Str(_) | Ty::List(..) | Ty::Array(..) => true,
+        Ty::Str(_) | Ty::List(..) | Ty::Array(..) | Ty::Handler(_) => true,
         Ty::Option(item) | Ty::Ref(item, _) | Ty::Boxed(item) => heap(types, item),
         Ty::Result(a, b) => heap(types, a) || heap(types, b),
         Ty::Tuple(items) => items.iter().any(|i| heap(types, i)),

@@ -6,7 +6,7 @@ use crate::Hooks;
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// A value from the game that the mod API can't hold (a stack that doesn't decode, a list
 /// of the wrong length): the game broke the interface, so the call traps.
@@ -102,20 +102,21 @@ fn hooks() -> &'static dyn Hooks {
 /// trait the game may call it through (a block entity part is a block part too).
 static HANDLERS: Mutex<Vec<Vec<Box<dyn Any + Send>>>> = Mutex::new(Vec::new());
 
-/// Keeps a registered part or handler, by its views, for the game's calls; gives its index.
+/// Keeps a part or handler the mod hands the game, by its views, for the game's calls; gives
+/// its index.
 fn add_handler(views: Vec<Box<dyn Any + Send>>) -> u32 {
     let mut handlers = HANDLERS.lock().unwrap_or_else(|e| e.into_inner());
     handlers.push(views);
     (handlers.len() - 1) as u32
 }
 
-/// One view of a handler: it as the trait `T`.
+/// One view of a handler: it as the trait `T`. Handlers live as long as the mod.
 struct Handler<T: ?Sized + 'static>(&'static T);
 // SAFETY: wasm32 mods run on one thread.
 unsafe impl<T: ?Sized> Send for Handler<T> {}
 
-fn view<T: ?Sized + 'static>(handler: &'static T) -> Box<dyn Any + Send> {
-    Box::new(Handler(handler))
+fn view<T: ?Sized + 'static>(handler: Arc<T>) -> Box<dyn Any + Send> {
+    Box::new(Handler::<T>(&**Box::leak(Box::new(handler))))
 }
 
 fn handler<T: ?Sized + 'static>(index: u32) -> &'static T {
@@ -129,35 +130,6 @@ fn handler<T: ?Sized + 'static>(index: u32) -> &'static T {
     }
 }
 
-/// The mod's `register`, run against its own registrar; each part it attached is kept for the
-/// game's calls, which reach it by index.
-struct Registrations;
-
-impl crate::registration::Registration for Registrations {
-    fn registered(&self, mod_id: String) -> crate::registration::Registered {
-        use crate::part_table::ForeignPart;
-        let mut registrar = crate::Registrar::of_mod(Box::leak(mod_id.into_boxed_str()));
-        hooks().register(&mut registrar, &crate::RegistrationContext::new());
-        registrar.drain(|_, part| {
-            add_handler(match part {
-                ForeignPart::Block(p) => {
-                    vec![view::<dyn crate::BlockPart>(&**Box::leak(Box::new(p)))]
-                }
-                ForeignPart::BlockEntity(p) => {
-                    let p: &'static dyn crate::BlockEntityPart = &**Box::leak(Box::new(p));
-                    vec![view(p), view::<dyn crate::BlockPart>(p)]
-                }
-                ForeignPart::Item(p) => {
-                    vec![view::<dyn crate::ItemPart>(&**Box::leak(Box::new(p)))]
-                }
-                ForeignPart::Menu(p) => {
-                    vec![view::<dyn crate::MenuPart>(&**Box::leak(Box::new(p)))]
-                }
-            })
-        })
-    }
-}
-
 #[allow(
     clippy::all,
     unused_imports,
@@ -168,6 +140,5 @@ impl crate::registration::Registration for Registrations {
 )]
 mod glue {
     use super::{array, expect, intern};
-    use crate::registration::Registration as _;
     include!(concat!(env!("OUT_DIR"), "/wasm_guest_generated.rs"));
 }

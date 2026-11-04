@@ -20,6 +20,7 @@ const EVERY_CASE: &str = r#"_ => unreachable!("every case was read from the enum
 
 /// The wire module of the shared types, as both bindings generators lay it out.
 const W: &str = "horizon::mod_api::types";
+pub(super) const WIRE: &str = W;
 
 /// `def`'s Rust path, as code inside `mod_api` names it.
 pub(super) fn rust_path(def: &Def) -> String {
@@ -78,6 +79,37 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         Ty::Prim(_, wire) => format!("(*{e} as {})", wire_prim(wire)),
         Ty::Wide(_) => format!("{{ let v = *{e} as u128; ((v >> 64) as u64, v as u64) }}"),
         Ty::Duration => format!("u64::try_from({e}.as_nanos()).unwrap_or(u64::MAX)"),
+        // Only a mod hands one over: the guest keeps it under its views and sends its index.
+        Ty::Handler(name) => {
+            let views = types
+                .views
+                .iter()
+                .find(|(owner, _)| owner == name)
+                .map_or(&[][..], |(_, list)| list.as_slice());
+            let kept: Vec<String> = views
+                .iter()
+                .map(|view| format!("super::view::<dyn crate::{view}>({e}.clone())"))
+                .collect();
+            // The hooks it listens to as any of its views.
+            let lists: Vec<String> = views
+                .iter()
+                .filter_map(|view| super::SUBSCRIBED.iter().find(|(owner, _)| owner == view))
+                .map(|(_, list)| format!("{e}.{list}().iter()"))
+                .collect();
+            let subscribed = match lists.split_first() {
+                None => "Vec::new()".to_string(),
+                Some((first, rest)) => format!(
+                    "{first}{}.flatten().map(|h| hook_name(*h).to_string()).collect()",
+                    rest.iter()
+                        .map(|l| format!(".chain({l})"))
+                        .collect::<String>()
+                ),
+            };
+            format!(
+                "{W}::Handler {{ index: super::add_handler(vec![{}]), subscribed: {subscribed} }}",
+                kept.join(", ")
+            )
+        }
         Ty::Str(_) => format!("{e}.to_string()"),
         Ty::List(item, _) | Ty::Array(item, _) => {
             format!(
@@ -147,6 +179,10 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
             format!("{{ let (h, l) = {e}; ((h as u128) << 64 | l as u128) as {rust} }}")
         }
         Ty::Duration => format!("std::time::Duration::from_nanos({e})"),
+        // Only the game takes one: its proxy, calling back into the mod that handed it over.
+        Ty::Handler(name) => {
+            format!("(super::handler_of({e})? as std::sync::Arc<dyn crate::{name}>)")
+        }
         Ty::Str(Str::Owned) => e.into(),
         Ty::Str(Str::Static) => format!("super::intern({e})"),
         Ty::Str(_) => format!("{e}.into()"),

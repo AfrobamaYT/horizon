@@ -171,7 +171,7 @@ mod tests {
     struct EventsMod;
     #[mod_api::__subscriptions]
     impl Hooks for EventsMod {
-        fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext<'_>) {
             r.block_part("minecraft:stone", Events);
         }
     }
