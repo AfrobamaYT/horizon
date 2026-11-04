@@ -4308,8 +4308,18 @@ pub(crate) mod tests {
                 item_stacked_on_other: |context, _, canceled| {
                     *canceled = context.setting("rules_mod", "stack").is_some();
                 },
-                living_heal: |_, _, _| {},
-                living_breathe: |_, _, _, _, _| {},
+                living_heal: |context, _, amount, cancel| {
+                    if context.setting("rules_mod", "stack").is_some() {
+                        *cancel = true;
+                        *amount += 1.0;
+                    }
+                },
+                living_breathe: |context, _, _, can_breathe, consume, _| {
+                    if context.setting("rules_mod", "stack").is_some() {
+                        *can_breathe = false;
+                        *consume += 4;
+                    }
+                },
                 farmland_trample: |_, _, _, _, _| {},
                 has_mods: || false,
                 player_name_format: |context, _, displayname| {
@@ -4322,7 +4332,12 @@ pub(crate) mod tests {
                         .setting("rules_mod", "stack")
                         .map(|value| crate::text::Text::literal(&value));
                 },
-                living_drown: |_, _, _, _, _, _| {},
+                living_drown: |context, _, _, drowning, damage, _, _| {
+                    if context.setting("rules_mod", "stack").is_some() {
+                        *drowning = true;
+                        *damage += 1.0;
+                    }
+                },
                 living_fall: |_, _, _, _, _| {},
                 living_jump: |_, _| {},
                 living_jump_power: |context, _, _, power| {
@@ -4426,6 +4441,33 @@ pub(crate) mod tests {
         };
         assert_eq!(values(&before), (0.5, 0.1, 0.02));
         assert_eq!(values(&after), (1.5, 2.1, 3.02));
+        // Heal, breathe and drown read it as well.
+        let health = |context: &LoopContext| {
+            let (mut amount, mut cancel) = (2.0, false);
+            crate::hunger::native_living_heal(context, 1, &mut amount, &mut cancel);
+            let (mut can_breathe, mut consume, mut refill) = (true, 1, 4);
+            crate::breathing::native_living_breathe(
+                context,
+                1,
+                "minecraft:zombie",
+                &mut can_breathe,
+                &mut consume,
+                &mut refill,
+            );
+            let (mut drowning, mut damage, mut cancel_drown) = (false, 2.0, false);
+            crate::breathing::native_living_drown(
+                context,
+                1,
+                "minecraft:zombie",
+                &mut drowning,
+                &mut damage,
+                8,
+                &mut cancel_drown,
+            );
+            (amount, cancel, can_breathe, consume, drowning, damage)
+        };
+        assert_eq!(health(&before), (2.0, false, true, 1, false, 2.0));
+        assert_eq!(health(&after), (3.0, true, false, 5, true, 3.0));
         std::fs::remove_dir_all(&settings).unwrap();
     }
 

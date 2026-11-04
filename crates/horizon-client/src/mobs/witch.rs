@@ -11,6 +11,7 @@ use super::{
 use crate::projectiles::{Projectile, ProjectileKind};
 use horizon_core::geometry::trig::Mth;
 use horizon_core::{geometry::Vec3, random::RandomSource};
+use horizon_world::native_load_context::LoopContext;
 
 pub fn register(m: &mut Mob) {
     let g = &mut m.ai.goals;
@@ -257,13 +258,18 @@ pub fn speed(m: &Mob, base: f64) -> f64 {
 }
 /// Witch.aiStep before `super.aiStep()`: the healing cooldown, then drink
 /// water breathing, fire resistance, healing or swiftness.
-pub fn ai_step(m: &mut Mob, cx_events: &mut Vec<MobEvent>, target_far: bool) {
+pub fn ai_step(
+    m: &mut Mob,
+    context: &LoopContext,
+    cx_events: &mut Vec<MobEvent>,
+    target_far: bool,
+) {
     if !m.alive() {
         return;
     }
     // healRaidersGoal.decrementCooldown (the attack goal's canAttack reads it).
     m.extra.counter2 -= 1;
-    drink(m, cx_events, target_far);
+    drink(m, context, cx_events, target_far);
     // `broadcastEntityEvent(this, 15)`: the magic puffs over its hat on every client.
     if m.random.next_float() < 7.5E-4 {
         cx_events.push(MobEvent::EntityEvent {
@@ -273,7 +279,7 @@ pub fn ai_step(m: &mut Mob, cx_events: &mut Vec<MobEvent>, target_far: bool) {
         });
     }
 }
-fn drink(m: &mut Mob, cx_events: &mut Vec<MobEvent>, target_far: bool) {
+fn drink(m: &mut Mob, context: &LoopContext, cx_events: &mut Vec<MobEvent>, target_far: bool) {
     if m.extra.flag {
         // `usingTime-- <= 0`
         m.extra.using_item -= 1;
@@ -287,7 +293,7 @@ fn drink(m: &mut Mob, cx_events: &mut Vec<MobEvent>, target_far: bool) {
                     "minecraft:fire_resistance" => {
                         m.add_effect("minecraft:fire_resistance", 3600, 0)
                     }
-                    "minecraft:healing" => m.heal(4.0),
+                    "minecraft:healing" => m.heal(context, 4.0),
                     "minecraft:swiftness" => m.add_effect("minecraft:speed", 3600, 0),
                     _ => {}
                 }

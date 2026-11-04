@@ -117,6 +117,7 @@ use horizon_core::{
     random::{LegacyRandom, RandomSource},
 };
 use horizon_world::block_collision::BlockCollisionRegistry;
+use horizon_world::native_load_context::LoopContext;
 use serde_json::Value;
 use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
@@ -3808,9 +3809,9 @@ impl Mob {
         true
     }
     /// `LivingEntity.heal`, with the native heal hook.
-    pub fn heal(&mut self, mut amount: f32) {
+    pub fn heal(&mut self, context: &LoopContext, mut amount: f32) {
         let mut cancel = false;
-        crate::hunger::native_living_heal(self.id, &mut amount, &mut cancel);
+        crate::hunger::native_living_heal(context, self.id, &mut amount, &mut cancel);
         if !cancel && self.health > 0.0 {
             self.health = (self.health + amount).clamp(0.0, self.attrs.max_health);
         }
@@ -3820,6 +3821,7 @@ impl Mob {
     /// the reverse (4 << amplifier), both scaled by `scale`.
     pub fn apply_heal_or_harm(
         &mut self,
+        context: &LoopContext,
         level: &mut DamageLevel<'_>,
         harm: bool,
         inverted: bool,
@@ -3835,7 +3837,7 @@ impl Mob {
             );
         } else {
             let heal = (scale * f64::from(4i32 << amp)) as i32 as f32;
-            self.heal(heal);
+            self.heal(context, heal);
         }
     }
     /// `LivingEntity.canBeAffected`: whether an effect of this kind may be added at
@@ -4969,10 +4971,26 @@ mod magic_absorb_tests {
         assert_eq!(m.absorption, 8.0);
         m.absorption = 2.0;
         for _ in 0..90 {
-            ai::tick_effects(&mut m, &mut crate::health::TestLevel::new(0).level(), None);
+            ai::tick_effects(
+                &mut m,
+                crate::test_resources::server_loop_context(),
+                &mut crate::health::TestLevel::new(0).level(),
+                None,
+            );
         }
         assert_eq!(m.extra.effects, vec![("minecraft:absorption", 110, 0)]);
         assert_eq!(m.absorption, 2.0);
+    }
+
+    #[test]
+    fn heal_without_a_mod_adds_the_amount_up_to_the_maximum() {
+        let context = crate::test_resources::server_loop_context();
+        let mut m = witch();
+        m.health = m.attrs.max_health - 3.0;
+        m.heal(context, 2.0);
+        assert_eq!(m.health, m.attrs.max_health - 1.0);
+        m.heal(context, 5.0);
+        assert_eq!(m.health, m.attrs.max_health);
     }
 
     #[test]
@@ -4981,7 +4999,12 @@ mod magic_absorb_tests {
         m.add_effect_with("speed", 200, 0, false, true);
         m.add_effect_with("speed", 90, 1, false, true);
         for _ in 0..90 {
-            ai::tick_effects(&mut m, &mut crate::health::TestLevel::new(0).level(), None);
+            ai::tick_effects(
+                &mut m,
+                crate::test_resources::server_loop_context(),
+                &mut crate::health::TestLevel::new(0).level(),
+                None,
+            );
         }
         assert_eq!(m.extra.effects, vec![("minecraft:speed", 110, 0)]);
     }
@@ -4992,7 +5015,12 @@ mod magic_absorb_tests {
         assert!(m.add_effect_with("speed", 2, 1, false, false));
         assert!(!m.add_effect_with("speed", 5, 0, true, false));
         for _ in 0..2 {
-            ai::tick_effects(&mut m, &mut crate::health::TestLevel::new(0).level(), None);
+            ai::tick_effects(
+                &mut m,
+                crate::test_resources::server_loop_context(),
+                &mut crate::health::TestLevel::new(0).level(),
+                None,
+            );
         }
         assert_eq!(m.extra.effects, vec![("minecraft:speed", 3, 0)]);
         assert!(m.extra.ambient_effects.contains(&"minecraft:speed"));

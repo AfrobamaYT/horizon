@@ -1062,7 +1062,8 @@ impl MotionWorld<'_, '_, '_> {
         if self.player.jump_trigger_time > 0 {
             self.player.jump_trigger_time -= 1;
         }
-        self.player.peaceful_regeneration(self.scene.health_rules)?;
+        self.player
+            .peaceful_regeneration(self.loop_context, self.scene.health_rules)?;
         // LocalPlayer.aiStep: double-tap jump toggles creative flight.
         let was_jumping = std::mem::replace(&mut self.player.was_jumping, jumping);
         let flying_before = self.player.flying;
@@ -1200,6 +1201,7 @@ impl MotionWorld<'_, '_, '_> {
         self.check_movement_statistics(previous.vector_to(self.player.position))?;
         let rules = self.scene.health_rules;
         self.player.food_tick(
+            self.loop_context,
             &mut crate::health::DamageLevel::of(
                 self.scene,
                 self.assets.registry,
@@ -3936,7 +3938,12 @@ mod tests {
                 for _ in 0..160 {
                     player.cause_food_exhaustion(0.2);
                     player
-                        .food_tick(level, &resources.health, Default::default())
+                        .food_tick(
+                            crate::test_resources::server_loop_context(),
+                            level,
+                            &resources.health,
+                            Default::default(),
+                        )
                         .unwrap();
                 }
                 assert_eq!(player.health.food.food, food);
@@ -3951,7 +3958,12 @@ mod tests {
                 player.health.food.exhaustion = 5.0;
                 player.health.food.timer = 79;
                 player
-                    .food_tick(level, &resources.health, Default::default())
+                    .food_tick(
+                        crate::test_resources::server_loop_context(),
+                        level,
+                        &resources.health,
+                        Default::default(),
+                    )
                     .unwrap();
                 assert_eq!(player.health.food.food, (food - 1).max(0));
                 assert_eq!(player.health.food.exhaustion, 1.0);
@@ -3968,7 +3980,12 @@ mod tests {
                 player.health.food.exhaustion = 5.0;
                 player.health.food.timer = 79;
                 player
-                    .food_tick(level, &resources.health, Default::default())
+                    .food_tick(
+                        crate::test_resources::server_loop_context(),
+                        level,
+                        &resources.health,
+                        Default::default(),
+                    )
                     .unwrap();
                 assert_eq!(player.health.food.food, (food - 1).max(0));
                 assert_eq!(player.health.health(), if food <= 1 { 19.0 } else { 20.0 });
@@ -4171,7 +4188,12 @@ mod tests {
         starving.health.food.food = 0;
         starving.health.food.timer = 79;
         starving
-            .food_tick(level, &resources.health, Default::default())
+            .food_tick(
+                crate::test_resources::server_loop_context(),
+                level,
+                &resources.health,
+                Default::default(),
+            )
             .unwrap();
         assert_eq!(starving.health.health(), 19.0);
         assert_eq!(

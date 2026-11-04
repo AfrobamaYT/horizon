@@ -15,6 +15,7 @@ use crate::blocks::Fluid;
 use crate::breathing::{Breath, breathe, drown};
 use crate::health::DamageLevel;
 use horizon_core::{geometry::Vec3, random::RandomSource};
+use horizon_world::native_load_context::LoopContext;
 
 use crate::powder_snow::particle_velocity as powder_snow_particle_velocity;
 
@@ -1145,8 +1146,10 @@ fn base_tick(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mu
                 consume: 1,
                 refill: if drowns { 0 } else { 4 },
             };
-            let breath = breathe(m.id, &m.kind.id, vanilla);
-            if let Some(drowning) = drown(m.id, &m.kind.id, &mut m.air, breath, true) {
+            let breath = breathe(w.loop_context, m.id, &m.kind.id, vanilla);
+            if let Some(drowning) =
+                drown(w.loop_context, m.id, &m.kind.id, &mut m.air, breath, true)
+            {
                 events.push(MobEvent::Drown {
                     mob: m.id,
                     at: [m.position.x, m.position.y, m.position.z],
@@ -1175,7 +1178,7 @@ fn base_tick(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mu
         m.invulnerable -= 1;
     }
     // LivingEntity.baseTick runs tickEffects after the timers count down.
-    tick_effects(m, level, w.mod_effects);
+    tick_effects(m, w.loop_context, level, w.mod_effects);
     // Entity.applyEffectsFromBlocks runs in LivingEntity.aiStep, after
     // baseTick has counted the fire and the hurt timers down: a fire block or
     // lava ignites to the full 160 / 300 ticks and its hit lands after the
@@ -1447,7 +1450,7 @@ fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut 
         let far = m
             .target_info(w)
             .is_some_and(|t| t.position.distance_squared(m.position) > 121.0);
-        super::witch::ai_step(m, events, far);
+        super::witch::ai_step(m, w.loop_context, events, far);
     }
     if m.species() == Species::Fox {
         super::fox::pre_ai_step(m);
@@ -1872,7 +1875,7 @@ fn species_ai_step(
         Species::Vex => super::vex::ai_step(m, w, level),
         Species::Ravager => super::ravager::ai_step(m, w, events),
         Species::Wither => super::wither::ai_step(m, w, events),
-        Species::Allay => super::allay::ai_step(m),
+        Species::Allay => super::allay::ai_step(m, w),
         Species::Bee => super::bee::ai_step(m, w),
         Species::PolarBear => super::polar_bear::ai_step(m, w),
         Species::Breeze => super::breeze::ai_step(m),
@@ -2741,6 +2744,7 @@ fn flower_contact_effects(m: &mut Mob, w: &MobWorld) {
 /// regeneration), and a content mod's on a server.
 pub(crate) fn tick_effects(
     m: &mut Mob,
+    context: &LoopContext,
     level: &mut DamageLevel<'_>,
     mods: Option<&dyn super::ModEffectTicks>,
 ) {
@@ -2779,6 +2783,7 @@ pub(crate) fn tick_effects(
             // frames let a harming one through once).
             "minecraft:instant_damage" | "minecraft:instant_health" if count >= 1 => {
                 m.apply_heal_or_harm(
+                    context,
                     level,
                     effect == "minecraft:instant_damage",
                     m.kind.flags.undead,
@@ -2789,7 +2794,7 @@ pub(crate) fn tick_effects(
             "minecraft:regeneration"
                 if count % interval(50) == 0 && !m.kind.flags.undead && m.alive() =>
             {
-                m.heal(1.0);
+                m.heal(context, 1.0);
             }
             id if horizon_client_core::potions::is_mod_effect(id) => {
                 // tickServer: one with no ticks left goes unasked.
@@ -3120,7 +3125,12 @@ mod poison_effect_tests {
         pig.add_effect("poison", 100, 0);
         assert_eq!(pig.extra.effects[0].0, "minecraft:poison");
         let initial_pig_health = pig.health;
-        tick_effects(&mut pig, level, None);
+        tick_effects(
+            &mut pig,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert_eq!(
             pig.health,
             initial_pig_health - 1.0,
@@ -3132,7 +3142,12 @@ mod poison_effect_tests {
         let mut zombie = Mob::new(2, zombie_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         zombie.add_effect("poison", 100, 0);
         let initial_zombie_health = zombie.health;
-        tick_effects(&mut zombie, level, None);
+        tick_effects(
+            &mut zombie,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert_eq!(
             zombie.health, initial_zombie_health,
             "undead mobs are immune to poison"
@@ -3164,16 +3179,31 @@ mod poison_effect_tests {
         // instant_health 1 heals 8 a tick, instant_damage 0 hurts 6 once (hit frames).
         let mut golem = make("minecraft:iron_golem");
         golem.add_effect("instant_health", 6, 1);
-        tick_effects(&mut golem, level, None);
+        tick_effects(
+            &mut golem,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert_eq!(golem.health, 68.0);
         let mut golem = make("minecraft:iron_golem");
         golem.add_effect("instant_damage", 6, 0);
-        tick_effects(&mut golem, level, None);
+        tick_effects(
+            &mut golem,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert_eq!(golem.health, 54.0);
         // The undead are healed by harm.
         let mut zombie = make("minecraft:zombie");
         zombie.add_effect("instant_damage", 6, 0);
-        tick_effects(&mut zombie, level, None);
+        tick_effects(
+            &mut zombie,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert_eq!(zombie.health, 64.0);
         // Resistance V (amplifier 4) takes it all, III takes 80%.
         let mut golem = make("minecraft:iron_golem");
@@ -3217,15 +3247,35 @@ mod poison_effect_tests {
         let kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.add_effect("invisibility", 4, 0);
-        tick_effects(&mut pig, level, None);
+        tick_effects(
+            &mut pig,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert!(pig.is_invisible());
         pig.invisible = false;
-        tick_effects(&mut pig, level, None);
+        tick_effects(
+            &mut pig,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert!(!pig.is_invisible());
         pig.add_effect("speed", 10, 0);
-        tick_effects(&mut pig, level, None);
+        tick_effects(
+            &mut pig,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert!(pig.is_invisible());
-        tick_effects(&mut pig, level, None);
+        tick_effects(
+            &mut pig,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert!(!pig.is_invisible());
     }
 
@@ -3243,10 +3293,20 @@ mod poison_effect_tests {
         let kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.add_effect("speed", 602, 0);
-        tick_effects(&mut pig, level, None);
+        tick_effects(
+            &mut pig,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert!(!pig.is_invisible());
         pig.invisible = true;
-        tick_effects(&mut pig, level, None);
+        tick_effects(
+            &mut pig,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert_eq!(pig.extra.effects[0].1, 600);
         assert!(
             !pig.is_invisible(),
@@ -3272,14 +3332,24 @@ mod poison_effect_tests {
         pig.health = 20.0;
         pig.extra.effects.push(("minecraft:poison", 25, 0));
         pig.extra.effects.push(("minecraft:resistance", -1, 0));
-        tick_effects(&mut pig, level, None);
+        tick_effects(
+            &mut pig,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert_eq!(pig.health, 19.2);
         // `onMobHurt` finds Infested in the same in-place list: the hurt mob
         // leaves a silverfish call in the outbox.
         let mut pig = Mob::new(2, pig_kind.clone(), Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.extra.effects.push(("minecraft:poison", 25, 0));
         pig.extra.effects.push(("minecraft:infested", -1, 0));
-        tick_effects(&mut pig, level, None);
+        tick_effects(
+            &mut pig,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert!(
             pig.outbox
                 .iter()
@@ -3306,7 +3376,12 @@ mod poison_effect_tests {
         pig.extra
             .set_main_hand(Some("minecraft:totem_of_undying".into()));
         pig.extra.effects.push(("minecraft:instant_damage", 5, 4));
-        tick_effects(&mut pig, level, None);
+        tick_effects(
+            &mut pig,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert_eq!(pig.health, 1.0);
         for effect in [
             "minecraft:regeneration",
@@ -3336,7 +3411,12 @@ mod poison_effect_tests {
         let pig_kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, pig_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.extra.effects.push(("minecraft:wither", 40, 0));
-        tick_effects(&mut pig, level, None);
+        tick_effects(
+            &mut pig,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         assert_eq!(
             pig.last_damage.map(|(d, _)| d.kind),
             Some(DamageKind::Wither)
