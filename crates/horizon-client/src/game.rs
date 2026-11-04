@@ -22922,12 +22922,12 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     // Someone is playing: the official server in their list (servers.dat in the game folder, the
     // working directory). Not for a server, a benchmark, a run that quits by itself, a harness's fixture or a run that
     // horizon-ctl drives: those start in a source checkout and wrote the list there.
-    if !options.offscreen && !synchronous_startup(&options) {
-        if let Err(e) =
+    if !options.offscreen
+        && !synchronous_startup(&options)
+        && let Err(e) =
             horizon_client::multiplayer::add_official_server(&horizon_client::logging::player_dir())
-        {
-            log::warn!("could not add the official server to servers.dat: {e}");
-        }
+    {
+        log::warn!("could not add the official server to servers.dat: {e}");
     }
     let mut early_settings = Settings::load(&Game::options_path());
     options
