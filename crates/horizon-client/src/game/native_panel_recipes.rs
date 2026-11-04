@@ -1,5 +1,5 @@
 //! A mod's recipes shown in its item panel's place (`native_panel_recipes`,
-//! or `browser.set-recipes` of a WebAssembly mod, docs/mods.md), laid out by the game with its own slots, arrows and
+//! or `browser.set-recipes` of a WebAssembly mod, docs/modding/src/how-to/content-mods.md), laid out by the game with its own slots, arrows and
 //! buttons, paged to the panel's height, under a title and a back button.
 //! The mod hears clicks on their slots, their action buttons, the back
 //! button and page turns.
@@ -300,7 +300,7 @@ struct Well {
 }
 
 impl Well {
-    fn new(fluid: &crate::mod_api::FluidStack) -> Self {
+    fn new(fluid: &mod_api::FluidStack) -> Self {
         let look = horizon_client::mod_content::fluid_look(&fluid.fluid);
         let tint = look
             .as_ref()
@@ -826,7 +826,7 @@ mod tests {
     }
 
     fn fluid(amount: u32) -> Well {
-        Well::new(&crate::mod_api::FluidStack::new("minecraft:water", amount))
+        Well::new(&mod_api::FluidStack::new("minecraft:water", amount))
     }
 
     /// Inputs past the grid continue in rows under it, and the block grows with them.
@@ -909,7 +909,7 @@ mod tests {
     /// to the prettified path.
     #[test]
     fn a_well_names_its_fluid_and_amount() {
-        let well = Well::new(&crate::mod_api::FluidStack::new("ruby:formic_acid", 250));
+        let well = Well::new(&mod_api::FluidStack::new("ruby:formic_acid", 250));
         assert_eq!(well.amount, "250 mB");
         assert_eq!(well.label, "Formic Acid 250 mB");
         assert_eq!(well.tint, 0xFF9A9A9A);

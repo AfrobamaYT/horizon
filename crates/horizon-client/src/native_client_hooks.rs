@@ -1,6 +1,5 @@
 //! Callbacks into the executable for native trait mods' client-library hooks.
 use crate::items::ItemStack;
-use serde_json::{Map, Value};
 use std::sync::OnceLock;
 
 /// Client-library hooks, installed before any menu, entity or recipe is used.
@@ -17,8 +16,6 @@ pub struct NativeClientHooks {
     pub living_fall: fn(u32, &str, &mut f64, &mut f32, &mut bool),
     pub living_jump: fn(u32, &str),
     pub ender_entity_teleport: fn(u32, &str, [f64; 3], &mut [f64; 3], &mut bool),
-    pub ingredient: fn(&str, &Map<String, Value>, &mut Vec<String>),
-    pub ingredient_test: fn(&str, &Map<String, Value>, &ItemStack, &mut bool),
 }
 
 static HOOKS: OnceLock<NativeClientHooks> = OnceLock::new();
@@ -149,22 +146,5 @@ pub(crate) fn ender_entity_teleport(
 ) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.ender_entity_teleport)(entity, kind, from, target, cancel);
-    }
-}
-
-pub(crate) fn ingredient(kind: &str, data: &Map<String, Value>, items: &mut Vec<String>) {
-    if let Some(hooks) = HOOKS.get() {
-        (hooks.ingredient)(kind, data, items);
-    }
-}
-
-pub(crate) fn ingredient_test(
-    kind: &str,
-    data: &Map<String, Value>,
-    stack: &ItemStack,
-    accept: &mut bool,
-) {
-    if let Some(hooks) = HOOKS.get() {
-        (hooks.ingredient_test)(kind, data, stack, accept);
     }
 }

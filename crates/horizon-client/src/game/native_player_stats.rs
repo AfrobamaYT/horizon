@@ -1,10 +1,10 @@
 //! A player's statistics and recipe book for native server mods, through a
-//! `PlayerRef` (docs/native-mods.md): `ServerStatsCounter` and
+//! `PlayerRef` (docs/modding/src/how-to/native-mods.md): `ServerStatsCounter` and
 //! `ServerRecipeBook`. Reads return None for a stale handle or a player who
 //! isn't online here. Writes return false (or None) for those, for a dead
 //! player, and, inside another player's turn, for anyone but that player.
 use super::{Game, stats::Stats};
-use horizon_client::mod_api::{NativeStatType, PlayerRef};
+use mod_api::{NativeStatType, PlayerRef};
 
 /// An id with its namespace: `stone` is `minecraft:stone`.
 fn qualified(id: &str) -> String {
@@ -150,7 +150,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
-    use horizon_client::mod_api::NativeStatType;
+    use mod_api::NativeStatType;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

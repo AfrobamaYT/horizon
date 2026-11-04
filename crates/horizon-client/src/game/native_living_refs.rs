@@ -1,5 +1,5 @@
 //! Living entities for native server mods, through a `LivingRef`
-//! (docs/native-mods.md, "Entity and level handles", #7387): the equipment
+//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): the equipment
 //! of mobs, players and armor stands, throwing a stack, and whether a mob
 //! is tamed. Reads return `None`, writes false, for a stale handle or on a
 //! client; the exception is the reads marked side `both` (`living`, `equipment`,
@@ -8,10 +8,10 @@
 use super::Game;
 use super::commands::{Target, items::Owner};
 use crate::mobs::Who;
-use horizon_client::first_person::Hand;
 use horizon_client::items::ItemStack;
 use horizon_client::mobs::Mob;
-use horizon_client::mod_api::{EntityRef, EquipmentSlot, LivingRef};
+use mod_api::first_person::Hand;
+use mod_api::{EntityRef, EquipmentSlot, LivingRef};
 
 /// A player's armour slots (`armor`, head first) by equipment slot.
 fn armor_index(slot: EquipmentSlot) -> Option<usize> {
@@ -675,9 +675,10 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn immutable_host_attribute_read_refreshes_live_cache() {
-        use horizon_client::{mod_api::Host, motion::PlayerMotion};
+        use horizon_client::motion::PlayerMotion;
         use horizon_core::geometry::Vec3;
         use horizon_world::attributes::{Modifier, Operation};
+        use mod_api::Host;
         super::super::native_entity_refs::tests::with_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.lan_acting_uuid = Some(123);
@@ -974,7 +975,7 @@ mod tests {
                 game.record_combat(&events);
                 let living = game.native_living(game.native_entity(20).unwrap()).unwrap();
                 health.push(living.health(game));
-                let host: &dyn crate::mod_api::Host = game;
+                let host: &dyn mod_api::Host = game;
                 attackers.push(living.last_attacker(host).map(|attacker| attacker.id()));
             }
             assert_eq!(
@@ -1358,7 +1359,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn armor_stand_first_tick_equipment_change_fires_after_base_tick() {
-        use crate::mod_api::{self, Hooks, LivingEquipmentChangeEvent, ModEntry, ServerHost};
+        use mod_api::{self, Hooks, LivingEquipmentChangeEvent, ModEntry, ServerHost};
         struct Reequip;
         #[mod_api::__subscriptions]
         impl Hooks for Reequip {
@@ -1463,8 +1464,9 @@ mod tests {
         use super::super::{
             Audio, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
         };
-        use horizon_client::{chunk::Chunk, entities::ArmorStand, mod_api::NativeAuthority};
+        use horizon_client::{chunk::Chunk, entities::ArmorStand};
         use horizon_core::geometry::Vec3;
+        use mod_api::NativeAuthority;
 
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();

@@ -6,12 +6,12 @@ use horizon_client::{
     advancements::{self as adv, EntityView, Frame, ItemView, Progress, Tree},
     hud::{HudBatch, rgba},
     items::ItemStack,
-    mod_api::NativeProgressType,
     text::{self, Style, Text},
     toasts::Slide,
 };
 use horizon_core::geometry::Vec3;
 use horizon_protocol::packets::play::Clientbound as C;
+use mod_api::NativeProgressType;
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -616,7 +616,7 @@ impl Game<'_> {
         criterion: &str,
         progress_type: NativeProgressType,
     ) {
-        if !crate::mod_api::listened(crate::mod_api::HookId::PlayerAdvancementProgress) {
+        if !mod_api::__private::listened(mod_api::HookId::PlayerAdvancementProgress) {
             return;
         }
         if let (Some(uuid), Some(entity_id), Some(name)) = (

@@ -1,13 +1,13 @@
 //! An entity's sounds, game events, entity events and spectator state for
-//! native server mods, through an `EntityRef` (docs/native-mods.md, "Entity
+//! native server mods, through an `EntityRef` (docs/modding/src/how-to/native-mods.md, "Entity
 //! and level handles"): `Entity.playSound`, `gameEvent`,
 //! `Level.broadcastEntityEvent`, `getSoundSource` and `isSpectator`. They
 //! return None or false for a stale handle, on a client, and for an entity
 //! that is not in the level in place (a player in a parked level).
 use super::{Game, commands::Target};
 use horizon_client::mobs::Species;
-use horizon_client::mod_api::{EntityRef, NativeSoundSource};
 use horizon_client::sculk::Context;
+use mod_api::{EntityRef, NativeSoundSource};
 
 /// `Monster`'s sound source is hostile, and so are a few mobs that are not
 /// `Monster`s: `Hoglin`, `Ghast`, `Phantom`, `Shulker` and the slimes
@@ -185,9 +185,9 @@ mod tests {
     use horizon_client::command::args::GameMode;
     use horizon_client::lan::{NetConfig, hub::HubConfig};
     use horizon_client::mobs::Mob;
-    use horizon_client::mod_api::{EntityRef, NativeSoundSource, NativeWorldEpoch};
     use horizon_client::motion::PlayerMotion;
     use horizon_core::geometry::Vec3;
+    use mod_api::{EntityRef, NativeSoundSource, NativeWorldEpoch};
 
     fn spawn(game: &mut super::Game<'_>, id: u32, kind: &str) -> EntityRef {
         let kind = game.res.mob_types().get(kind).unwrap().clone();

@@ -19,6 +19,9 @@ jobs:
         run: mdbook build docs/modding
       - if: steps.book.outputs.present == 'true'
         run: RUSTDOCFLAGS="-D warnings" cargo doc -p horizon-mod-api --no-deps
+      # The game's constructors live in the hidden `mod_api::__private`; no rustdoc page or link may name it.
+      - if: steps.book.outputs.present == 'true'
+        run: "! grep -rl __private target/doc/mod_api docs/modding/src"
       - if: steps.book.outputs.present == 'true'
         run: cargo test -p horizon-modding-examples
       # book.toml sets build-dir = "../../target/modding-book", relative to docs/modding.

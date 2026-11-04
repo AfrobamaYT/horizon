@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "explosion_start",
+      "doc": "A server explosion is about to happen (`ExplosionEvent.Start`, in\n`ServerLevel.explode` before `ServerExplosion.explode`): every one,\nTNT, creepers, beds and anchors, fireballs, withers, end crystals and\nwind bursts. Set `cancel` and nothing of it happens: no blocks, no\ndamage or knockback, no sound, particles or game event. Before\n`explosion_prime`, which a cancel skips. Server-side.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_explosion_start",
       "neoforge": "ExplosionEvent.Start",
       "side": "server",

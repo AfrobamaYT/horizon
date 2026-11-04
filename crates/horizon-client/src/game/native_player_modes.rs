@@ -1,9 +1,9 @@
 //! A player's permission level for native server mods, through a
-//! `PlayerRef` (docs/native-mods.md): the `Player` reads the handle's game
+//! `PlayerRef` (docs/modding/src/how-to/native-mods.md): the `Player` reads the handle's game
 //! mode reads don't give. They return None for a stale handle or a player
 //! who isn't online here.
 use super::Game;
-use horizon_client::mod_api::PlayerRef;
+use mod_api::PlayerRef;
 
 impl Game<'_> {
     /// The player's permission level, 0 to 4 (`Player.permissions()`,

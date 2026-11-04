@@ -7,6 +7,7 @@
 //! `continueDestroyBlock`, `stopDestroyBlock`).
 //!
 //! What those read and do in the world is behind [`HandWorld`].
+pub use mod_api::first_person::Hand;
 
 /// The ranged item state read by the first-person hand renderer.
 #[derive(Clone, Copy, Debug)]
@@ -337,16 +338,6 @@ pub fn hands_to_render(held: [Option<(&str, bool)>; 2], using: Option<(Hand, &st
         Some((hand, id)) if bow_like(id) => [hand == Hand::Main, hand == Hand::Off],
         Some((hand, _)) => [true, !(hand == Hand::Main && charged_crossbow(held[1]))],
     }
-}
-
-/// `InteractionHand`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Hand {
-    Main,
-    Off,
-}
-impl Hand {
-    pub const BOTH: [Hand; 2] = [Hand::Main, Hand::Off];
 }
 
 /// `SwingAnimation`: its type (`SwingAnimationType` ordinal) and duration.

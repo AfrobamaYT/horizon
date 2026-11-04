@@ -14,7 +14,7 @@ Horizon's own format.
 | Templates | `crates/horizon-shader-api/templates/` | post, sky, material |
 | Example pack | `crates/horizon-shader-api/packs/golden_hour` | a warm sky and two post passes |
 | In the game: every stage | Options > Horizon Settings > Shader Packs | sky, material, post passes, hot reload |
-| The registry and the launcher | `shader` kind ([api/mod-index.md](api/mod-index.md)); the Mods page's Shader packs tab | checked, then installed into `shaderpacks/` |
+| The registry and the launcher | `shader` kind ([modding/src/reference/registry-index.md](modding/src/reference/registry-index.md)); the Mods page's Shader packs tab | checked, then installed into `shaderpacks/` |
 
 ## Quick start
 
@@ -235,4 +235,5 @@ without the pack.
 
 ## Next
 
-The overlay and lighting stages, and option values other than the defaults.
+An overlay showing what each pass draws (F3 already shows what each costs), and stages for entities, block entities
+and particles (the material stage covers terrain only).

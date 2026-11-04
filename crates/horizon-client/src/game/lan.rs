@@ -1352,7 +1352,7 @@ impl Game<'_> {
             .then(|| horizon_client::lod_net::Service::new(net.lod_distance, biome_names.clone()));
         let lan = Lan::start_with(sync.clone(), net)?;
         let mut hub = Hub::new(lan, sync, encoder, config);
-        hub.sync_attachments = !crate::mod_api::mods().is_empty();
+        hub.sync_attachments = !mod_api::mods().is_empty();
         hub.flat_world = self.world_flat;
         hub.debug_world = self.world_debug;
         let port = hub.lan.port;
@@ -2163,7 +2163,7 @@ impl Game<'_> {
                     self.lan_flight_toggled(conn, flying);
                 }
                 HostEvent::Sneak { conn, sneaking } => {
-                    if !crate::mod_api::listened(crate::mod_api::HookId::PlayerToggleSneak) {
+                    if !mod_api::__private::listened(mod_api::HookId::PlayerToggleSneak) {
                         continue;
                     }
                     if let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) {
@@ -2179,7 +2179,7 @@ impl Game<'_> {
                     name,
                     reason,
                 } => {
-                    if !crate::mod_api::listened(crate::mod_api::HookId::PlayerKicked) {
+                    if !mod_api::__private::listened(mod_api::HookId::PlayerKicked) {
                         continue;
                     }
                     // The same poll can have removed the guest (their `Left`): the mods hear the
@@ -2197,7 +2197,7 @@ impl Game<'_> {
                     }
                 }
                 HostEvent::Input { conn, flags } => {
-                    if !crate::mod_api::listened(crate::mod_api::HookId::PlayerInput) {
+                    if !mod_api::__private::listened(mod_api::HookId::PlayerInput) {
                         continue;
                     }
                     if let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) {
@@ -2211,8 +2211,8 @@ impl Game<'_> {
                     if let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) {
                         let (uuid, entity_id, name) = (g.uuid, g.entity_id, g.name.clone());
                         // The packet's raw ids become the enums once, here.
-                        let old = horizon_client::mod_api::NativeClientInfo::from(&*old);
-                        let new = horizon_client::mod_api::NativeClientInfo::from(&*new);
+                        let old = client_info(&old);
+                        let new = client_info(&new);
                         self.native_client_information_updated(uuid, entity_id, &name, &old, &new);
                     }
                 }
@@ -2291,7 +2291,7 @@ impl Game<'_> {
                 self.ui.rules.bool("player_movement_check"),
                 self.ui.rules.bool("elytra_movement_check"),
             );
-            host.hub.mods_loaded = !horizon_client::mod_api::mods().is_empty();
+            host.hub.mods_loaded = !mod_api::mods().is_empty();
             let pass = self.level_pass;
             let mut events = if pass.first {
                 horizon_client::spans::time("lan_poll", || host.hub.poll(&mut ctx))
@@ -2585,7 +2585,7 @@ impl Game<'_> {
                 // (`tick_server`): the network is read once, before the first.
                 // Player packets may already have been drained before
                 // scheduled block ticks (`tick_lan_packets`).
-                host.hub.mods_loaded = !horizon_client::mod_api::mods().is_empty();
+                host.hub.mods_loaded = !mod_api::mods().is_empty();
                 let pass = self.level_pass;
                 let mut events = if pass.first && !pass.packets_drained {
                     host.hub.poll(&mut ctx)
@@ -2809,44 +2809,20 @@ impl Game<'_> {
         if self.audio.capture.is_none() {
             return;
         }
-        // The acting guest's own break: `Block.playerWillDestroy` excludes the
-        // player from the destroy events up to the broken block's. What a
-        // break sets off after that (a torch popping off, a stalk falling) is
-        // `destroyBlock` with no player, which the breaker hears and sees too.
-        let mut own_break = self.lan_break_pos.is_some();
         for e in events {
             match e {
-                horizon_world::level::LevelEvent::LevelEvent { id, pos, data } => {
-                    let own = *id == 2001 && own_break;
-                    if own && self.lan_break_pos == Some([pos.x, pos.y, pos.z]) {
-                        own_break = false;
-                    }
-                    // The acting guest does not predict the egg's teleport
-                    // particles, bone meal's growth, anvil result sounds, or a
-                    // finished brushing or an eye inserted in a portal frame (these calls name no
-                    // excluded player), nor the digger's own crack and hit
-                    // sound (2019, 2020).
-                    let except = if matches!(
-                        *id,
-                        2015 | 1501
-                            | 1503
-                            | 1505
-                            | 1029
-                            | 1030
-                            | 1045
-                            | 1052
-                            | 2019
-                            | 2020
-                            | 3000
-                            | 3008
-                    ) || (*id == 2001 && self.lan_break_pos.is_some() && !own)
-                    {
-                        None
-                    } else {
-                        self.lan_acting
-                    };
-                    self.lan_events
-                        .push((*id, [pos.x, pos.y, pos.z], *data, except));
+                horizon_world::level::LevelEvent::LevelEvent {
+                    id,
+                    pos,
+                    data,
+                    source,
+                } => {
+                    self.lan_events.push(super::QueuedLevelEvent {
+                        kind: *id,
+                        pos: [pos.x, pos.y, pos.z],
+                        data: *data,
+                        source: *source,
+                    });
                 }
                 // `ServerLevel.runBlockEvents` broadcasts a handled block
                 // event (`ClientboundBlockEventPacket`): the guest re-runs
@@ -3002,12 +2978,25 @@ impl Game<'_> {
                 );
             }
         }
-        for (kind, pos, data, acting) in std::mem::take(&mut self.lan_events) {
+        for super::QueuedLevelEvent {
+            kind,
+            pos,
+            data,
+            source,
+        } in std::mem::take(&mut self.lan_events)
+        {
             if kind == 2001 {
                 host.broken
                     .push([f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2])]);
             }
-            host.hub.level_event(kind, pos, data, acting);
+            let except = source.and_then(|player| {
+                host.hub
+                    .guests
+                    .iter()
+                    .find(|guest| guest.uuid == player.0)
+                    .map(|guest| guest.conn)
+            });
+            host.hub.level_event(kind, pos, data, except);
         }
         // Level events 1010 and 1011: the guests' parrots dance or stop.
         for (pos, song) in std::mem::take(&mut self.lan_songs) {
@@ -3173,7 +3162,7 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        if !crate::mod_api::listened(crate::mod_api::HookId::EntityPoseChange) {
+        if !mod_api::__private::listened(mod_api::HookId::EntityPoseChange) {
             host.poses.clear();
             return;
         }
@@ -3317,6 +3306,35 @@ fn note_event(host: &LanHost, started: Option<(Instant, EventKind)>) {
     });
 }
 
+/// A client's settings as the mod API names them.
+fn client_info(
+    i: &horizon_protocol::packets::configuration::ClientInformation,
+) -> mod_api::NativeClientInfo {
+    mod_api::NativeClientInfo {
+        language: i.language.clone(),
+        view_distance: i.view_distance,
+        chat_visibility: match i.chat_visibility.rem_euclid(3) {
+            0 => mod_api::NativeChatVisibility::Full,
+            1 => mod_api::NativeChatVisibility::System,
+            _ => mod_api::NativeChatVisibility::Hidden,
+        },
+        chat_colors: i.chat_colors,
+        model_customisation: i.model_customisation,
+        main_hand: if i.main_hand == 1 {
+            mod_api::NativeMainHand::Right
+        } else {
+            mod_api::NativeMainHand::Left
+        },
+        text_filtering: i.text_filtering,
+        allows_listing: i.allows_listing,
+        particle_status: match i.particle_status.rem_euclid(3) {
+            0 => mod_api::NativeParticleStatus::All,
+            1 => mod_api::NativeParticleStatus::Decreased,
+            _ => mod_api::NativeParticleStatus::Minimal,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{OFFHAND_SLOT, equipment_slot_name, living_flags, mob_freeze_meta};
@@ -3400,9 +3418,9 @@ mod tests {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::lan::hub::{HostEvent, HubConfig, chat::ChatMessage};
         use horizon_client::lan::{Joined, NetConfig, Out, PlayerSender, guest::Guest};
-        use horizon_client::mod_api::{self, Flow, Hooks, ServerChatEvent, ServerHost};
         use horizon_client::text::Text;
         use horizon_protocol::packets::{configuration::ClientInformation, play};
+        use mod_api::{Flow, Hooks, ServerChatEvent, ServerHost};
         use std::sync::{Arc, atomic::AtomicI32, mpsc};
 
         struct Replier;

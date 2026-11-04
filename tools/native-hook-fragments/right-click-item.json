@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "right_click_item",
+      "doc": "`PlayerInteractEvent.RightClickItem`, immediately before `Item.use`.\nCancel skips its Part and vanilla behaviour; its result defaults to\n`Pass`. On the client only `Success` ends the hand loop.",
       "side": "both",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_right_click_item",

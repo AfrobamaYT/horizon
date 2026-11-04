@@ -4,10 +4,8 @@
 //! a client's copy, and only on the level in place.
 use super::{Game, Kind, View};
 use crate::game::transactions::After;
-use horizon_client::{
-    items::ItemStack,
-    mod_api::{BlockSide, LevelRef, Transaction},
-};
+use horizon_client::items::ItemStack;
+use mod_api::{BlockSide, LevelRef, Transaction};
 
 /// Whether the item capability reaches this container's slots: not a composter's, nor a block
 /// entity's without slots.

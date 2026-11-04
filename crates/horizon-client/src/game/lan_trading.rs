@@ -263,7 +263,7 @@ impl Game<'_> {
         let env = Env {
             player: Some(player_uuid),
             player_entity_id: Some(player_entity_id),
-            side: horizon_client::menu::LogicalSide::Server,
+            side: mod_api::menu::LogicalSide::Server,
             items: self.items(),
             recipes: self.recipes(),
             brewing: &self.stations().brewing,
@@ -610,12 +610,12 @@ mod tests {
     use super::super::native_merchant_refs::tests::{offer, spawn};
     use super::*;
     use crate::game::lan::LanSettings;
-    use crate::mod_api::ServerHost;
     use horizon_client::{
         lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
         merchant::{MerchantOffer, Trader},
     };
     use horizon_protocol::packets::configuration::ClientInformation;
+    use mod_api::ServerHost;
     use std::sync::{
         Arc,
         atomic::{AtomicI32, AtomicUsize},
@@ -627,7 +627,7 @@ mod tests {
         game: &mut Game<'_>,
         level: i32,
     ) -> (
-        horizon_client::mod_api::MerchantRef,
+        mod_api::MerchantRef,
         std::sync::mpsc::Receiver<horizon_client::lan::Out>,
         MerchantOffer,
     ) {
@@ -874,7 +874,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_trade_hook_fired_by_a_real_select_can_write_the_open_trade() {
-        use horizon_client::mod_api::{self, Hooks, TradeSelectEvent};
+        use mod_api::{self, Hooks, TradeSelectEvent};
         struct Observer(Seen);
         #[mod_api::__subscriptions]
         impl Hooks for Observer {

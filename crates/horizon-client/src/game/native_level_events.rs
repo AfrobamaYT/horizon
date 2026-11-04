@@ -1,14 +1,14 @@
 //! Events, explosions and lightning in a level for native server mods,
-//! through a `LevelRef` (docs/native-mods.md, "Entity and level handles"):
+//! through a `LevelRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles"):
 //! `Level.levelEvent`, `Level.gameEvent`, `Level.explode` and a summoned
 //! lightning bolt. Like the level's block writes, they act on the level in
 //! place, the one the hook runs in; a parked level, a stale handle or a
 //! client returns false. Reaching a parked level, as `play_sound` and the
 //! reads do through `native_level_world`, is a follow-up.
 use super::{Game, GameLevel, native_explosions::NativeBlast};
-use horizon_client::mod_api::{LevelRef, NativeExplosionInteraction};
 use horizon_client::sculk::Context;
 use horizon_world::level::LevelEvent;
+use mod_api::{LevelRef, NativeExplosionInteraction};
 
 /// A position inside the world's horizontal and vertical bounds.
 fn in_bounds(at: [f64; 3]) -> bool {
@@ -40,6 +40,7 @@ impl GameLevel<'_> {
             id,
             pos: horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]),
             data,
+            source: None,
         });
         true
     }
@@ -65,14 +66,7 @@ impl Game<'_> {
         if !level_event_data_ok(id, data, self.res.facts().states.len()) {
             return false;
         }
-        let sent = self.lan_events.len();
         self.level_event_at(id, pos, data);
-        // `levelEvent(null, ...)`: the guests' copies name no excluded
-        // player, though `lan_record_events` leaves out the acting one for
-        // the events a player's own action plays.
-        for event in &mut self.lan_events[sent..] {
-            event.3 = None;
-        }
         true
     }
     /// Sends game event `event` (`minecraft:block_change`...) from `at`, as
@@ -115,6 +109,7 @@ impl Game<'_> {
             NativeExplosionInteraction::None => NativeBlast::Keep,
             NativeExplosionInteraction::Block => NativeBlast::Block,
             NativeExplosionInteraction::Tnt => NativeBlast::Tnt,
+            _ => unreachable!("NativeExplosionInteraction: unhandled variant"),
         };
         self.native_explode(level.dimension(), center, radius, fire, blast)
     }
@@ -153,8 +148,8 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use crate::game::LevelDimension;
-    use horizon_client::mod_api::{self, BlockPart, Flow, Hooks, RandomTickEvent, Registrar};
     use horizon_world::level::LevelEvent;
+    use mod_api::{self, BlockPart, Flow, Hooks, RandomTickEvent, Registrar};
 
     /// A stone part whose random tick plays level events through the write host.
     struct Events;
@@ -176,7 +171,7 @@ mod tests {
     struct EventsMod;
     #[mod_api::__subscriptions]
     impl Hooks for EventsMod {
-        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
             r.block_part("minecraft:stone", Events);
         }
     }
@@ -186,9 +181,9 @@ mod tests {
     fn a_level_event_in_a_write_hook_joins_the_events_in_order() {
         let mods: mod_api::Mods =
             vec![mod_api::ModEntry::new("level-events", Box::new(EventsMod))].into();
-        mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
-            super::super::native_entity_refs::tests::with_game(|game| {
+            super::super::native_guest_turn_tests::with_guests(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.world.chunks.insert(
                     (0, 0),
@@ -205,23 +200,49 @@ mod tests {
                     id: 1000,
                     pos: horizon_core::position::BlockPos::new(0, 64, 0),
                     data: 0,
+                    source: None,
                 };
                 game.level_events.push(before.clone());
                 let state = game.world.block(0, 64, 0);
                 let mut handled = false;
-                game.with_level(|_, level, ticks| {
-                    level.native_random_tick(
-                        ticks,
-                        LevelDimension::Overworld,
-                        horizon_core::position::BlockPos::new(0, 64, 0),
-                        state,
-                        &mut handled,
+                game.as_guest(12, |game| {
+                    game.audio.capture = Some(Vec::new());
+                    game.with_level(|_, level, ticks| {
+                        level.native_random_tick(
+                            ticks,
+                            LevelDimension::Overworld,
+                            horizon_core::position::BlockPos::new(0, 64, 0),
+                            state,
+                            &mut handled,
+                        );
+                    });
+                    let events = game.level_events.clone();
+                    game.lan_record_events(&events);
+                    assert_eq!(
+                        game.lan_events[1],
+                        super::super::QueuedLevelEvent {
+                            kind: 1500,
+                            pos: [1, 64, 1],
+                            data: 0,
+                            source: None,
+                        }
                     );
-                });
+                    assert_eq!(
+                        game.lan_events[2],
+                        super::super::QueuedLevelEvent {
+                            kind: 2005,
+                            pos: [2, 64, 2],
+                            data: 7,
+                            source: None,
+                        }
+                    );
+                })
+                .unwrap();
                 let at = |id, x, z, data| LevelEvent::LevelEvent {
                     id,
                     pos: horizon_core::position::BlockPos::new(x, 64, z),
                     data,
+                    source: None,
                 };
                 assert_eq!(
                     game.level_events,

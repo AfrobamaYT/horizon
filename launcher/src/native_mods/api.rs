@@ -43,22 +43,16 @@ pub(super) struct Project<'a> {
     bundle: &'a Bundle,
     cargo: toml::Table,
     package: String,
-    client_deps: Vec<ClientDependency>,
+    api_deps: Vec<ApiDependency>,
 }
 
-struct ClientDependency {
+/// A `horizon-mod-api` dependency, under `[dependencies]` or a `[target.*]` table.
+struct ApiDependency {
     target: Option<String>,
     key: String,
 }
 
-impl ClientDependency {
-    fn value<'a>(&self, cargo: &'a toml::Table) -> &'a toml::Value {
-        match &self.target {
-            Some(target) => &cargo["target"][target.as_str()]["dependencies"][self.key.as_str()],
-            None => &cargo["dependencies"][self.key.as_str()],
-        }
-    }
-
+impl ApiDependency {
     fn value_mut<'a>(&self, cargo: &'a mut toml::Table) -> &'a mut toml::Value {
         match &self.target {
             Some(target) => {
@@ -70,28 +64,12 @@ impl ClientDependency {
 }
 
 #[derive(Debug)]
-pub(super) struct ClientFeatureRequest {
-    field: &'static str,
-    value: toml::Value,
-}
-
-#[derive(Debug)]
 #[non_exhaustive]
 pub(super) enum ProjectError {
-    Cargo {
-        mod_id: String,
-        reason: String,
-    },
-    PackageName {
-        mod_id: String,
-    },
-    ClientDependency {
-        mod_id: String,
-    },
-    ClientFeatures {
-        mod_id: String,
-        requested: Vec<ClientFeatureRequest>,
-    },
+    Cargo { mod_id: String, reason: String },
+    PackageName { mod_id: String },
+    ApiDependency { mod_id: String },
+    GameDependency { mod_id: String, key: String },
 }
 
 impl std::fmt::Display for ProjectError {
@@ -104,19 +82,14 @@ impl std::fmt::Display for ProjectError {
             Self::PackageName { mod_id } => {
                 trf("{mod}: Cargo.toml has no package name.", &[("mod", mod_id)])
             }
-            Self::ClientDependency { mod_id } => trf(
-                "{mod}: Cargo.toml has no horizon-client dependency.",
+            Self::ApiDependency { mod_id } => trf(
+                "{mod}: Cargo.toml has no horizon-mod-api dependency.",
                 &[("mod", mod_id)],
             ),
-            Self::ClientFeatures { mod_id, requested } => {
-                let fields = requested
-                    .iter()
-                    .map(|r| format!("{} = {}", r.field, r.value))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                trf("{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.",
-                    &[("mod", mod_id), ("fields", &fields)])
-            }
+            Self::GameDependency { mod_id, key } => trf(
+                "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.",
+                &[("mod", mod_id), ("key", key)],
+            ),
         };
         f.write_str(&message)
     }
@@ -124,116 +97,59 @@ impl std::fmt::Display for ProjectError {
 impl std::error::Error for ProjectError {}
 
 impl<'a> Project<'a> {
-    pub(super) fn read(bundle: &'a Bundle, target: super::Target) -> Result<Self, ProjectError> {
+    pub(super) fn read(bundle: &'a Bundle) -> Result<Self, ProjectError> {
+        let mod_id = || bundle.manifest.id.clone();
         let cargo = read(&bundle.dir.join("Cargo.toml")).map_err(|reason| ProjectError::Cargo {
-            mod_id: bundle.manifest.id.clone(),
+            mod_id: mod_id(),
             reason,
         })?;
         let package = cargo
             .get("package")
             .and_then(|p| p.get("name"))
             .and_then(toml::Value::as_str)
-            .ok_or_else(|| ProjectError::PackageName {
-                mod_id: bundle.manifest.id.clone(),
-            })?
+            .ok_or_else(|| ProjectError::PackageName { mod_id: mod_id() })?
             .to_owned();
-        let dependencies = cargo
-            .get("dependencies")
+        let targets = cargo
+            .get("target")
             .and_then(toml::Value::as_table)
-            .ok_or_else(|| ProjectError::ClientDependency {
-                mod_id: bundle.manifest.id.clone(),
-            })?;
-        let is_client = |key: &str, value: &toml::Value| {
-            key == "horizon-client"
-                || value.get("package").and_then(toml::Value::as_str) == Some("horizon-client")
-        };
-        let mut client_deps: Vec<_> = dependencies
-            .iter()
-            .filter(|(key, value)| is_client(key, value))
-            .map(|(key, _)| ClientDependency {
-                target: None,
-                key: key.clone(),
-            })
-            .collect();
-        if client_deps.is_empty() {
-            return Err(ProjectError::ClientDependency {
-                mod_id: bundle.manifest.id.clone(),
-            });
-        }
-        if target == super::Target::Server {
-            if let Some(targets) = cargo.get("target").and_then(toml::Value::as_table) {
-                for (target, config) in targets {
-                    if let Some(dependencies) =
-                        config.get("dependencies").and_then(toml::Value::as_table)
-                    {
-                        client_deps.extend(
-                            dependencies
-                                .iter()
-                                .filter(|(key, value)| is_client(key, value))
-                                .map(|(key, _)| ClientDependency {
-                                    target: Some(target.clone()),
-                                    key: key.clone(),
-                                }),
-                        );
-                    }
-                }
-            }
-        } else {
-            client_deps.truncate(1);
-        }
-        if target == super::Target::Server {
-            let mut requested = Vec::new();
-            for client in &client_deps {
-                let dependency = client.value(&cargo);
-                if let Some(value) = dependency
-                    .get("default-features")
-                    .filter(|value| value.as_bool() != Some(false))
-                {
-                    requested.push(ClientFeatureRequest {
-                        field: "default-features",
-                        value: value.clone(),
-                    });
-                }
-                if let Some(value) = dependency.get("features") {
-                    requested.push(ClientFeatureRequest {
-                        field: "features",
-                        value: value.clone(),
-                    });
-                }
-            }
-            if let Some(features) = cargo.get("features").and_then(toml::Value::as_table) {
-                for value in features.values() {
-                    if value.as_array().is_some_and(|values| {
-                        values.iter().any(|value| {
-                            value
-                                .as_str()
-                                .and_then(|value| value.split_once('/'))
-                                .is_some_and(|(name, _)| {
-                                    client_deps
-                                        .iter()
-                                        .any(|client| client.key == name.trim_end_matches('?'))
-                                })
-                        })
-                    }) {
-                        requested.push(ClientFeatureRequest {
-                            field: "features",
-                            value: value.clone(),
+            .into_iter()
+            .flatten()
+            .map(|(target, config)| (Some(target.clone()), config.get("dependencies")));
+        let tables = std::iter::once((None, cargo.get("dependencies"))).chain(targets);
+        let mut api_deps = Vec::new();
+        for (target, dependencies) in tables {
+            for (key, value) in dependencies
+                .and_then(toml::Value::as_table)
+                .into_iter()
+                .flatten()
+            {
+                let package = value
+                    .get("package")
+                    .and_then(toml::Value::as_str)
+                    .unwrap_or(key);
+                match package {
+                    "horizon-mod-api" => api_deps.push(ApiDependency {
+                        target: target.clone(),
+                        key: key.clone(),
+                    }),
+                    "horizon-client" => {
+                        return Err(ProjectError::GameDependency {
+                            mod_id: mod_id(),
+                            key: key.clone(),
                         });
                     }
+                    _ => {}
                 }
             }
-            if !requested.is_empty() {
-                return Err(ProjectError::ClientFeatures {
-                    mod_id: bundle.manifest.id.clone(),
-                    requested,
-                });
-            }
+        }
+        if !api_deps.iter().any(|api| api.target.is_none()) {
+            return Err(ProjectError::ApiDependency { mod_id: mod_id() });
         }
         Ok(Self {
             bundle,
             cargo,
             package,
-            client_deps,
+            api_deps,
         })
     }
 }
@@ -264,7 +180,12 @@ pub(super) fn stage(
     let mut deps = toml::Table::new();
     // The generated game's features own sound/controllers, including the server's
     // `--no-default-features`; its client dependency never enables them independently.
-    for name in ["horizon-client", "horizon-threads", "horizon-mods"] {
+    for name in [
+        "horizon-client",
+        "horizon-mod-api",
+        "horizon-threads",
+        "horizon-mods",
+    ] {
         let mut dependency = path_dep(&format!("../{name}"));
         if name == "horizon-client" {
             dependency.insert("default-features".into(), false.into());
@@ -280,9 +201,9 @@ pub(super) fn stage(
         let path = dest.join("Cargo.toml");
         let mut manifest = project.cargo.clone();
         let package = project.package.clone();
-        for client in &project.client_deps {
-            let dependency = client.value_mut(&mut manifest);
-            let mut rewritten = path_dep("../../crates/horizon-client");
+        for api in &project.api_deps {
+            let dependency = api.value_mut(&mut manifest);
+            let mut rewritten = path_dep("../../crates/horizon-mod-api");
             if let Some(old) = dependency.as_table() {
                 // A renamed dependency also needs its package name.
                 for key in ["package", "features"] {
@@ -291,7 +212,6 @@ pub(super) fn stage(
                     }
                 }
             }
-            rewritten.insert("default-features".into(), false.into());
             *dependency = toml::Value::Table(rewritten);
         }
         let targets: Vec<_> = declared[*index]
@@ -394,77 +314,30 @@ mod tests {
         let name = std::thread::current().name().unwrap().replace(':', "-");
         let dir = super::super::tests::dir(&name);
         super::super::tests::write_bundle(&dir, "example", "");
-        fs::write(dir.join("Cargo.toml"), "[package]\nname='example-mod'\nversion='9.0.0'\nedition='2024'\n[dependencies]\nhorizon-client='0.1'\n").unwrap();
+        fs::write(dir.join("Cargo.toml"), "[package]\nname='example-mod'\nversion='9.0.0'\nedition='2024'\n[dependencies]\nhorizon-mod-api='0.1'\n").unwrap();
         dir
     }
 
     #[test]
-    fn server_projects_refuse_explicit_client_features_by_mod_and_field() {
+    fn projects_refuse_a_game_dependency_and_need_the_mod_api() {
         let dir = fixture();
-        for (field, setting) in [
-            ("default-features", "default-features = true"),
-            ("features", "features = ['audio']"),
-            ("features", "features = []"),
-            ("features", "default-features = false\n[target.'cfg(unix)'.dependencies.platform_client]\npackage='horizon-client'\nversion='0.1'\nfeatures=[]"),
-            ("default-features", "default-features = false\n[target.'cfg(unix)'.dependencies.platform_client]\npackage='horizon-client'\nversion='0.1'\ndefault-features=true"),
-            ("features", "default-features = false\n[dependencies.z_alias]\npackage='horizon-client'\nversion='0.1'\nfeatures=['audio']"),
+        for (dependencies, game) in [
+            ("[dependencies]\nhorizon-mod-api='0.1'\nhorizon-client='0.1'", Some("horizon-client")),
+            ("[dependencies.api]\npackage='horizon-mod-api'\nversion='0.1'\n[target.'cfg(unix)'.dependencies.game]\npackage='horizon-client'\nversion='0.1'", Some("game")),
+            ("[dependencies]\nserde='1'", None),
+            ("[target.'cfg(unix)'.dependencies]\nhorizon-mod-api='0.1'", None),
         ] {
-            for dependency in ["horizon-client", "client_alias"] {
-                let text = format!("[package]\nname='different_crate'\nversion='9.9.9'\n[dependencies.{dependency}]\npackage='horizon-client'\nversion='0.1'\n{setting}\n");
-                fs::write(dir.join("Cargo.toml"), text).unwrap();
-                let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
-                let error = Project::read(&bundle, super::super::Target::Server)
-                    .err()
-                    .unwrap();
-                assert!(
-                    matches!(&error, ProjectError::ClientFeatures { mod_id, requested } if mod_id == "example" && requested.len() == 1 && requested[0].field == field)
-                );
-                let message = error.to_string();
-                for expected in ["example", field, "headless"] {
-                    assert!(message.contains(expected), "{message}");
-                }
-                assert!(Project::read(&bundle, super::super::Target::Client).is_ok());
-            }
-        }
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn server_projects_refuse_sdk_requests_through_features_tables() {
-        let dir = fixture();
-        for request in ["client_alias/audio", "client_alias?/controllers"] {
-            fs::write(dir.join("Cargo.toml"), format!("[package]\nname='example-mod'\nversion='1.0.0'\n[dependencies.client_alias]\npackage='horizon-client'\nversion='0.1'\ndefault-features=false\n[features]\noptional_graphics=['{request}']\n")).unwrap();
+            let text = format!("[package]\nname='example-mod'\nversion='1.0.0'\n{dependencies}\n");
+            fs::write(dir.join("Cargo.toml"), text).unwrap();
             let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
-            let error = match Project::read(&bundle, super::super::Target::Server) {
-                Err(error) => error,
-                Ok(_) => {
-                    panic!("SDK feature requests must not enable client libraries on a server")
-                }
-            };
-            assert!(matches!(&error, ProjectError::ClientFeatures { .. }));
-            assert!(error.to_string().contains(request));
-            assert!(Project::read(&bundle, super::super::Target::Client).is_ok());
-        }
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn server_projects_accept_false_or_absent_default_features() {
-        let dir = fixture();
-        for dependency in [
-            "horizon-client = '0.1'",
-            "horizon-client = { version='0.1' }",
-            "horizon-client = { version='0.1', default-features=false }",
-        ] {
-            fs::write(
-                dir.join("Cargo.toml"),
-                format!(
-                    "[package]\nname='example'\nversion='1.0.0'\n[dependencies]\n{dependency}\n"
+            let error = Project::read(&bundle).err().unwrap();
+            match game {
+                Some(game) => assert!(
+                    matches!(&error, ProjectError::GameDependency { mod_id, key } if mod_id == "example" && key == game),
+                    "{error}"
                 ),
-            )
-            .unwrap();
-            let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
-            assert!(Project::read(&bundle, super::super::Target::Server).is_ok());
+                None => assert!(matches!(&error, ProjectError::ApiDependency { .. }), "{error}"),
+            }
         }
         fs::remove_dir_all(dir).unwrap();
     }
@@ -530,7 +403,7 @@ mod tests {
     fn stages_api_without_a_dependency_cycle() {
         let dir = fixture();
         let cargo = fs::read_to_string(dir.join("Cargo.toml")).unwrap()
-            + "[target.'cfg(unix)'.dependencies]\nhorizon-client = '0.1'\n";
+            + "[target.'cfg(unix)'.dependencies.api]\npackage = 'horizon-mod-api'\nversion = '0.1'\nfeatures = ['testing']\n";
         fs::write(dir.join("Cargo.toml"), cargo).unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
         let stage_dir = dir.with_extension("workspace");
@@ -543,7 +416,7 @@ mod tests {
         )
         .unwrap();
         let resolution = super::super::dependencies::Resolution { order: vec![0] };
-        let project = Project::read(&bundle, super::super::Target::Server).unwrap();
+        let project = Project::read(&bundle).unwrap();
         let err = stage(
             &stage_dir,
             std::slice::from_ref(&project),
@@ -585,15 +458,16 @@ mod tests {
         assert!(members.iter().any(|v| v.as_str() == Some(GAME)));
         let engine = read(&stage_dir.join("native-api/example/Cargo.toml")).unwrap();
         assert_eq!(
-            engine["dependencies"]["horizon-client"]["path"].as_str(),
-            Some("../../crates/horizon-client")
+            engine["dependencies"]["horizon-mod-api"]["path"].as_str(),
+            Some("../../crates/horizon-mod-api")
         );
-        let platform = &engine["target"]["cfg(unix)"]["dependencies"]["horizon-client"];
+        let platform = &engine["target"]["cfg(unix)"]["dependencies"]["api"];
         assert_eq!(
             platform["path"].as_str(),
-            Some("../../crates/horizon-client")
+            Some("../../crates/horizon-mod-api")
         );
-        assert_eq!(platform["default-features"].as_bool(), Some(false));
+        assert_eq!(platform["package"].as_str(), Some("horizon-mod-api"));
+        assert_eq!(platform["features"][0].as_str(), Some("testing"));
         let game = read(&stage_dir.join(GAME).join("Cargo.toml")).unwrap();
         assert_eq!(
             game["dependencies"]["mod_0"]["package"].as_str(),
@@ -618,10 +492,6 @@ mod tests {
         // The game's default features are the generated package's alone, so a server build's
         // `--no-default-features` reaches horizon-client.
         assert_eq!(
-            engine["dependencies"]["horizon-client"]["default-features"].as_bool(),
-            Some(false)
-        );
-        assert_eq!(
             game["dependencies"]["horizon-client"]["default-features"].as_bool(),
             Some(false)
         );
@@ -633,7 +503,7 @@ mod tests {
         assert!(main().contains(r#""example" => mod_0::hooks,"#));
         fs::write(stage_dir.join("crates/horizon-client/Cargo.toml"), "[package]\nname = 'horizon-client'\nversion = '0.1.0'\n[build-dependencies]\nhorizon-mod-api-gen = { path = '../horizon-mod-api-gen' }\n").unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
-        let project = Project::read(&bundle, super::super::Target::Client).unwrap();
+        let project = Project::read(&bundle).unwrap();
         stage(&stage_dir, &[project], &[vec![]], &resolution).unwrap();
         assert!(main().contains(r#""example" => mod_0::hooks,"#));
         let game = read(&stage_dir.join(GAME).join("Cargo.toml")).unwrap();
@@ -655,7 +525,7 @@ mod tests {
         for text in ["", "pub struct ModEntry { id: &'static str }"] {
             fs::write(source.join("mod_api.rs"), text).unwrap();
             let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
-            let project = Project::read(&bundle, super::super::Target::Client).unwrap();
+            let project = Project::read(&bundle).unwrap();
             let error = stage(&stage_dir, &[project], &[vec![]], &resolution).unwrap_err();
             assert!(error.contains("Update Horizon and rebuild"), "{error}");
             assert!(!stage_dir.join(GAME).exists());

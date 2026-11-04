@@ -3,9 +3,10 @@
 //! an empty stack, or one `getEquipmentSlotForItem` puts in that slot. A stand's
 //! `canUseSlot` refuses body and saddle, so only clearing works there. A mod's
 //! `set_equipment` is not asked.
-use horizon_client::{entities::ArmorStand, items::ItemStack, mod_api::EquipmentSlot};
+use horizon_client::{entities::ArmorStand, items::ItemStack};
 use horizon_core::geometry::Vec3;
 use horizon_items::equipment::{BODY, CHEST, SADDLE};
+use mod_api::EquipmentSlot;
 
 use super::native_entity_refs::tests::with_game;
 

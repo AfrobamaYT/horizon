@@ -1,12 +1,12 @@
 //! An entity's motion and shape for native server mods, through an
-//! `EntityRef` (docs/native-mods.md, "Entity and level handles", #7387):
+//! `EntityRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387):
 //! velocity, ground, box, eyes and view. They read the entity a handle names
 //! as `native_entity_refs.rs` finds it, and return `None` (or `false`) for a
 //! stale handle or on a client.
 use super::entity::{Entity as _, EntityHandle, with_entity, with_entity_mut};
 use super::{Game, commands::Target};
-use horizon_client::mod_api::EntityRef;
 use horizon_core::geometry::{Aabb, Axis, Vec3};
+use mod_api::EntityRef;
 
 fn corners(b: Aabb) -> [[f64; 3]; 2] {
     let axes = [Axis::X, Axis::Y, Axis::Z];

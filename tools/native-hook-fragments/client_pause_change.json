@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "client_pause_change_pre",
+      "doc": "NeoForge's `ClientPauseChangeEvent.Pre`: cancel a proposed pause change.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_client_pause_change_pre",
       "neoforge": "ClientPauseChangeEvent.Pre",
       "side": "client",
@@ -13,6 +14,7 @@
     },
     {
       "name": "client_pause_change_post",
+      "doc": "NeoForge's `ClientPauseChangeEvent.Post`: the pause state changed.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_client_pause_change_post",
       "neoforge": "ClientPauseChangeEvent.Post",
       "side": "client",

@@ -1,12 +1,12 @@
 //! Sounds and particles in a level for native server mods, through a
-//! `LevelRef` (docs/native-mods.md, "Entity and level handles", #7387).
+//! `LevelRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387).
 //! Every player in range hears or sees them, as `ServerLevel.playSound` and
 //! `sendParticles` send them. They return false on a client, for a handle of
 //! an earlier open, or for arguments the network can't carry.
 use super::native_hooks::{mod_particles_ok, mod_sound_ok};
 use super::{Dim, Game, creatures::NativeSound, lan_particles::QueuedParticle};
-use horizon_client::mod_api::{LevelRef, NativeSoundSource, ParticleOptions};
 use horizon_world::registry::BlockStateId;
+use mod_api::{LevelRef, NativeSoundSource, ParticleOptions};
 
 impl Game<'_> {
     /// The level's dimension id, for a handle of this open on the server.

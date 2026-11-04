@@ -2,6 +2,7 @@
 exclude = ["launcher", "crates/horizon-telemetry-server", "crates/horizon-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys"]
 members = [
     "crates/horizon-core",
+    "docs/modding/examples",
     "crates/horizon-dualsense",
     "crates/horizon-narrator",
     "crates/horizon-threads",
@@ -33,6 +34,7 @@ members = [
     "crates/horizon-relay",
     "crates/horizon-mods",
     "crates/horizon-mod-api-gen",
+    "crates/horizon-mod-api",
     "crates/horizon-mod-api-macros",
     "crates/horizon-mod-api-gen/dispatch-tests",
     "crates/cargo-horizon-mod",

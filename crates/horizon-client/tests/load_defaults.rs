@@ -90,6 +90,7 @@ fn default_components_reader_baseline() -> client::Result<()> {
             BTreeMap::from([("minecraft:item".into(), vec!["probe:token".into()])]),
             root.join("settings"),
         )),
+        [],
     );
     let item_data = ItemData::load(&root, context)?;
     let defaults = item_data.defaults();

@@ -1752,8 +1752,14 @@ impl Game<'_> {
             let Some(i) = cart_at(&self.carts, id, i) else {
                 continue;
             };
+            // The ticked copy takes the loot roll instead of copying it: only
+            // opening the cart, a command or a save reads it, never a tick, and
+            // a mineshaft's chest cart carries its whole roll as NBT. The
+            // stored cart keeps its slots for whatever reads them meanwhile.
             let due = self.with_entity_held_out(id, |game| {
+                let loot = game.carts[i].loot.take();
                 let mut c = game.carts[i].clone();
+                c.loot = loot;
                 let alive = game.tick_cart(&mut c, [0.0; 2]);
                 if c.kind == CartKind::Hopper && c.enabled {
                     game.hopper_cart_suck(&mut c);

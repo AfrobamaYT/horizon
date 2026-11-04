@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "living_damage_post",
+      "doc": "NeoForge's `LivingDamageEvent.Post`: the health of entity `entity` of type `kind` has\njust lost the hit `container` describes, with its final values (health damage, the\nreductions, the post-attack invulnerability ticks). It only listens, and fires where\n`native_living_damage_pre` does once the health took more than 0. It can't write the\nentity or the world's blocks: the level host gives the hit's random and level attachments.",
       "target": "horizon_client::game::native_hooks::HitLevel<'_>::native_living_damage_post",
       "neoforge": "LivingDamageEvent.Post",
       "side": "server",

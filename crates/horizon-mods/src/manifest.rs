@@ -19,7 +19,7 @@ pub const WASM: &str = "mod.wasm";
 /// The content manifest API this build loads.
 pub const API: &str = "0.2";
 /// Namespaces no mod may claim: vanilla's, the convention tags' (mods add
-/// to those, docs/mods.md) and the game's own.
+/// to those, docs/modding/src/how-to/content-mods.md) and the game's own.
 const RESERVED_NAMESPACES: [&str; 3] = ["minecraft", "c", "horizon"];
 /// A mod's saved settings, shared by native mods and modpack overrides.
 pub const STORAGE_DIR: &str = ".horizon-mod-data";

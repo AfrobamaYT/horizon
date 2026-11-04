@@ -1,7 +1,7 @@
 //! `Host::config_files`: the calling mod's own files in the game's `config/`
 //! folder, for every mod (native or wasm) without a file system of its own.
 use super::Game;
-use horizon_client::mod_api::{
+use mod_api::{
     CONFIG_FILE_MAX, CONFIG_LIST_MAX, ConfigEntry, ConfigEntryKind, ConfigFileError, ConfigFiles,
     ConfigPath, ConfigStat,
 };
@@ -41,8 +41,7 @@ fn io(error: std::io::Error) -> ConfigFileError {
 /// another mod's path, and where a symbolic link is on the way (`root`
 /// itself may be one, as the player set it up).
 fn resolve(root: &Path, path: &ConfigPath) -> Result<PathBuf, ConfigFileError> {
-    let mod_id =
-        horizon_client::crash::current_native_mod().ok_or(ConfigFileError::NoCallingMod)?;
+    let mod_id = mod_api::crash::current_native_mod().ok_or(ConfigFileError::NoCallingMod)?;
     if !path.owned_by(mod_id) {
         return Err(ConfigFileError::NotOwned);
     }
@@ -70,11 +69,11 @@ fn stat_of(meta: &fs::Metadata) -> ConfigStat {
     } else {
         (ConfigEntryKind::File, meta.len())
     };
-    ConfigStat {
+    ConfigStat::from(mod_api::__private::built::ConfigStat {
         kind,
         len,
         modified_millis,
-    }
+    })
 }
 
 fn read(root: &Path, file: &ConfigPath) -> Result<Vec<u8>, ConfigFileError> {
@@ -113,7 +112,7 @@ fn write(root: &Path, file: &ConfigPath, bytes: &[u8]) -> Result<(), ConfigFileE
     }
     let path = resolve(root, file)?;
     // `config/<mod id>` is the mod's folder, so it can't be a file.
-    if path.is_dir() || Some(file.as_str()) == horizon_client::crash::current_native_mod() {
+    if path.is_dir() || Some(file.as_str()) == mod_api::crash::current_native_mod() {
         return Err(ConfigFileError::NotAFile);
     }
     let folder = path.parent().unwrap_or(root);
@@ -150,10 +149,10 @@ fn list(root: &Path, folder: &ConfigPath) -> Result<Vec<ConfigEntry>, ConfigFile
         if meta.file_type().is_symlink() || is_write_temp(&name) {
             continue;
         }
-        entries.push(ConfigEntry {
+        entries.push(ConfigEntry::from(mod_api::__private::built::ConfigEntry {
             name,
             stat: stat_of(&meta),
-        });
+        }));
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(entries)
@@ -312,7 +311,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn a_mod_saves_its_config_through_the_game_and_the_reload_hears_it() {
-        use crate::mod_api::{
+        use mod_api::{
             self, ConfigLoadingEvent, ConfigReloadingEvent, Hooks, HostSide, ModEntry, Mods,
             NativeConfig, NativeConfigKind, RegisterConfigsEvent,
         };

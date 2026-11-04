@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "register_configs",
+      "doc": "The config files native mods keep (NeoForge's `registerConfig`):\npush yours, each of a kind, with the text written to `config/` when\nthe file is missing. Asked by the window when the game starts (its\n`Client` and `Common` configs), by a dedicated server when it starts\n(`Common` and `Server`) and by a server before each world it opens\n(`Server`); a game reads only its own kinds, so push them all every\ntime. A file outside `config/`, or one already registered, is skipped.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_register_configs",
       "neoforge": "ModContainer.registerConfig",
       "side": "both",
@@ -12,6 +13,7 @@
     },
     {
       "name": "config_loading",
+      "doc": "A registered config was read (`ModConfigEvent.Loading`): `config`\nsays whose, which file and its text, which the mod parses (TOML by\nconvention). Every mod hears every config, so check `mod_id`. Fired\nwhere the config's kind loads (`native_register_configs`), a `Server`\none before `native_server_about_to_start`.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_config_loading",
       "neoforge": "ModConfigEvent.Loading",
       "side": "both",
@@ -22,6 +24,7 @@
     },
     {
       "name": "config_reloading",
+      "doc": "A loaded config's file changed on disk (`ModConfigEvent.Reloading`):\nits new text. The game looks at the files' modification times once a\nsecond, on the window and on the server's tick; a file saved with the\nsame text, removed or unreadable fires nothing and keeps its last\ntext.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_config_reloading",
       "neoforge": "ModConfigEvent.Reloading",
       "side": "both",
@@ -32,6 +35,7 @@
     },
     {
       "name": "config_unloading",
+      "doc": "A `Server` config is dropped as its server stops\n(`ModConfigEvent.Unloading`), after `native_server_stopping`; the next\nworld reads it again. `Client` and `Common` configs stay until the\ngame quits.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_config_unloading",
       "neoforge": "ModConfigEvent.Unloading",
       "side": "server",

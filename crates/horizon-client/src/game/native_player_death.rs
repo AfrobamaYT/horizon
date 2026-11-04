@@ -1,5 +1,5 @@
 //! A server player's last death location for native mods, through a
-//! `PlayerRef` (docs/native-mods.md): `Player.getLastDeathLocation` and
+//! `PlayerRef` (docs/modding/src/how-to/native-mods.md): `Player.getLastDeathLocation` and
 //! `setLastDeathLocation`, as a `GlobalPos` (the dimension's key and the
 //! block), so a death in a dimension that is not open still reads. It is kept
 //! in the player's record (swapped into `level.last_death` for the player's
@@ -11,8 +11,8 @@
 //! player (`native_as_player`), so it is refused inside `player_died`, where
 //! the read still works.
 use super::Game;
-use horizon_client::mod_api::{GlobalPos, Identifier, PlayerRef};
 use horizon_core::position::BlockPos;
+use mod_api::{GlobalPos, Identifier, PlayerRef};
 
 impl Game<'_> {
     /// The dimension and block of the player's last death
@@ -49,10 +49,11 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
+    use mod_api::__private::game::*;
 
     use super::super::Game;
-    use horizon_client::mod_api::{GlobalPos, Identifier, PlayerRef};
     use horizon_core::position::BlockPos;
+    use mod_api::{GlobalPos, Identifier, PlayerRef};
 
     /// A block of the overworld.
     fn at([x, y, z]: [i32; 3]) -> GlobalPos {
@@ -147,10 +148,12 @@ mod tests {
 
             // A player who is not online here, and a handle of another
             // player's id, read nothing.
-            let mut stale = player;
-            stale.entity = horizon_client::mod_api::EntityRef::new(
-                player.entity.epoch(),
-                player.entity.id() + 1,
+            let stale = mod_api::__private::game::player_ref(
+                mod_api::EntityRef::new(
+                    player.fields().entity.epoch(),
+                    player.fields().entity.id() + 1,
+                ),
+                player.uuid(),
             );
             game.lan.as_mut().unwrap().hub.guests[0].last_death =
                 Some(("minecraft:overworld".into(), [1, 2, 3]));

@@ -1,6 +1,6 @@
 //! Every item and recipe the game knows, made once for the mods that read
 //! them (native mods' `native_recipes`, capability `recipes` of WebAssembly
-//! mods, docs/mods.md), and the recipe book's known displays; placing a
+//! mods, docs/modding/src/how-to/content-mods.md), and the recipe book's known displays; placing a
 //! recipe and creative gifts. The recipes are the window's own data — the
 //! content root's — with the server's recipes of the types its native mods
 //! had it send (`horizon:recipe_content`) in their place, while the known
@@ -28,7 +28,7 @@ const MAX_SYNCED_RECIPES: usize = 1_000_000;
 #[derive(Default)]
 pub(super) struct RecipeTables {
     tables: Option<Arc<Recipes>>,
-    pub(super) categories: Option<HashMap<String, horizon_client::recipe_book::RecipeBookCategory>>,
+    pub(super) categories: Option<HashMap<String, mod_api::recipe_book::RecipeBookCategory>>,
     known: (Option<u64>, Arc<[i32]>),
     /// The server's recipes of the types its native mods sent (`horizon:
     /// recipe_content`) over the window's own: what `Game::recipes` reads on
@@ -102,7 +102,7 @@ impl Game<'_> {
     pub(super) fn registered_recipe_book_category(
         &mut self,
         kind: &str,
-    ) -> Option<horizon_client::recipe_book::RecipeBookCategory> {
+    ) -> Option<mod_api::recipe_book::RecipeBookCategory> {
         if self.recipe_tables.categories.is_none() {
             let mut declarations = Vec::new();
             self.native_recipe_book_categories(&mut declarations);

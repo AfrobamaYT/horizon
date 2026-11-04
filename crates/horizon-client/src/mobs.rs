@@ -595,6 +595,15 @@ impl MobTypes {
     }
 }
 pub use horizon_client_core::who::Who;
+impl From<mod_api::NativeEffectDamage> for DamageKind {
+    fn from(damage: mod_api::NativeEffectDamage) -> Self {
+        match damage {
+            mod_api::NativeEffectDamage::Magic => Self::Magic,
+            mod_api::NativeEffectDamage::Wither => Self::Wither,
+            _ => unreachable!("NativeEffectDamage: unhandled variant"),
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DamageKind {
     PlayerAttack,

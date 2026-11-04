@@ -227,10 +227,7 @@ impl Game<'_> {
         };
         let situation = Situation {
             // WinScreen.getBackgroundMusic.
-            screen_music: self
-                .win
-                .is_some()
-                .then(horizon_client::music::Music::credits),
+            screen_music: self.win.is_some().then(mod_api::music::Music::credits),
             in_world: eye.is_some(),
             in_end: self.dim == super::Dim::End,
             boss_music: self.boss_music(),

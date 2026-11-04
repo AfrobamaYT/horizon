@@ -1,12 +1,12 @@
-//! The game's own answer to the fluid capability (`FLUIDS`, docs/native-mods.md): the tanks a
+//! The game's own answer to the fluid capability (`FLUIDS`, docs/modding/src/how-to/native-mods.md): the tanks a
 //! mod block declared through `native_block_entity_fluids`, and a cauldron, read through a
 //! side, filled and drained in millibuckets. They act where the world is simulated, never on a
 //! client's copy, and only on the level in place.
 use super::Game;
 use horizon_client::containers::{BlockEntity, ModFluidTanks};
-use horizon_client::mod_api::{BlockSide, FluidStack, Transaction};
 use horizon_core::geometry::Direction;
 use horizon_world::nbt::{Compound, JavaString, Tag};
+use mod_api::{BlockSide, FluidStack, Transaction};
 use std::sync::Arc;
 
 /// A cauldron level's contents: level `level` holds `level * 1000 / 3`
@@ -398,8 +398,8 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mod_api::HostTransaction;
-    use crate::mod_api::ServerHost;
+    use mod_api::HostTransaction;
+    use mod_api::ServerHost;
 
     #[test]
     fn a_cauldron_level_holds_a_third_of_a_bucket() {
@@ -482,7 +482,7 @@ mod tests {
     fn a_cauldron_move_the_target_takes_part_of_gives_the_whole_levels_that_fit() {
         use super::super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
-        use horizon_client::mod_api::{FLUIDS, NativeBlockUpdateFlags, move_resources};
+        use mod_api::{FLUIDS, NativeBlockUpdateFlags, move_resources};
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
