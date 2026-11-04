@@ -222,7 +222,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(o.fullscreen && o.session_stdin);
-        assert_eq!(o.game_dir, std::env::current_dir().unwrap().join("g"));
+        assert_eq!(o.game_dir, Some(std::env::current_dir().unwrap().join("g")));
         assert!(parse(&["--launch-api"]).unwrap().is_none());
         assert!(parse(&["--no-such-option"]).is_err());
     }
@@ -310,7 +310,8 @@ mod tests {
             .unwrap();
             assert_eq!(launch.context.home, root.join(case.home));
             let game = super::super::Options::from_launch(launch).unwrap().unwrap();
-            let selected: Vec<_> = content_packages(&game.game_dir, &enabled, &game.mods.dev)
+            let selected: Vec<_> =
+                content_packages(game.game_dir.as_deref().unwrap(), &enabled, &game.mods.dev)
                 .map(|p| p.package.manifest.id)
                 .collect();
             assert_eq!(selected, case.ids);
