@@ -335,7 +335,7 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::super::BlockEntity;
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::{
@@ -350,7 +350,7 @@ mod tests {
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
 
     /// A world open to LAN on a dedicated server, as a guest's actions run.
-    fn open_to_lan(game: &mut super::Game<'_>) {
+    pub(in crate::game) fn open_to_lan(game: &mut super::Game<'_>) {
         game.options.dedicated = Some(Vec::new());
         let settings = super::super::lan::LanSettings {
             port: 0,
@@ -380,7 +380,7 @@ mod tests {
 
     /// A placed guest on connection `conn`, with UUID and entity id `conn + 122` and
     /// `conn + 19`.
-    fn guest(conn: u32) -> Guest {
+    pub(in crate::game) fn guest(conn: u32) -> Guest {
         let (tx, _rx) = mpsc::channel();
         let mut guest = Guest::new(
             Joined {
