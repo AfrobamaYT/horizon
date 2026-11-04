@@ -2,17 +2,17 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "player_needs_food", "side": "server",
+      "name": "player_needs_food", "side": "both",
       "target": "horizon_client::game::native_player_food::Game<'_>::native_player_needs_food",
       "receiver": "player"
     },
     {
-      "name": "player_has_enough_food", "side": "server",
+      "name": "player_has_enough_food", "side": "both",
       "target": "horizon_client::game::native_player_food::Game<'_>::native_player_has_enough_food",
       "receiver": "player"
     },
     {
-      "name": "player_can_eat", "side": "server",
+      "name": "player_can_eat", "side": "both",
       "target": "horizon_client::game::native_player_food::Game<'_>::native_player_can_eat",
       "receiver": "player"
     },
@@ -42,12 +42,12 @@
       "receiver": "player"
     },
     {
-      "name": "player_experience", "side": "server",
+      "name": "player_experience", "side": "both",
       "target": "horizon_client::game::native_player_food::Game<'_>::native_player_experience",
       "receiver": "player"
     },
     {
-      "name": "player_xp_needed_for_next_level", "side": "server",
+      "name": "player_xp_needed_for_next_level", "side": "both",
       "target": "horizon_client::game::native_player_food::Game<'_>::native_player_xp_needed_for_next_level",
       "receiver": "player"
     },

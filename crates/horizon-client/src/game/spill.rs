@@ -627,6 +627,7 @@ impl GameLevel<'_> {
             id: 1011,
             pos,
             data: 0,
+            source: None,
         });
     }
     /// A block entity Horizon keeps as it was loaded (campfires, decorated
