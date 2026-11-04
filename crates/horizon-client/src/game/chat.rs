@@ -633,6 +633,13 @@ impl Game<'_> {
             }
         }
         let reg = &mut self.ui.registries;
+        // Native component names were validated and frozen before resources loaded.
+        // The same inventory supplies both wire IDs and command components.
+        for (_, name) in horizon_protocol::item::custom::entries() {
+            if !reg.persistent_components.iter().any(|entry| entry == name) {
+                reg.persistent_components.push(name.to_owned());
+            }
+        }
         reg.timelines = self.ui.timelines.keys().cloned().collect();
         reg.time_markers = self
             .ui
@@ -1580,6 +1587,57 @@ const LINK_COPY: usize = 1;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn native_persistent_components_are_available_to_give() {
+        horizon_protocol::item::custom::install(1000, vec!["example:marker".into()]).unwrap();
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::ZERO,
+                )
+                .unwrap(),
+            );
+            game.build_registries();
+            game.build_registries();
+            game.ui.registries.permission = 4;
+            assert_eq!(
+                game.ui
+                    .registries
+                    .persistent_components
+                    .iter()
+                    .filter(|id| *id == "example:marker")
+                    .count(),
+                1
+            );
+            let mut suggestions =
+                horizon_command::SuggestionsBuilder::new("minecraft:apple[example:", 0);
+            horizon_command::item::suggest_stack(&mut suggestions, &game.ui.registries);
+            assert!(
+                suggestions
+                    .out
+                    .iter()
+                    .any(|entry| entry.text == "example:marker=")
+            );
+            assert!(game.run_command("give @s minecraft:apple[example:marker={probe:1}]"));
+            let item = game
+                .inventory
+                .iter()
+                .flatten()
+                .find(|item| &*item.item == "minecraft:apple")
+                .unwrap();
+            assert_eq!(
+                item.data().and_then(|data| data.other("example:marker")),
+                Some(&horizon_world::nbt::Tag::compound([(
+                    "probe",
+                    horizon_world::nbt::Tag::Int(1)
+                )]))
+            );
+            assert!(!game.run_command("give @s minecraft:apple[minecraft:creative_slot_lock={}]"));
+        });
+    }
 
     /// `ChatScreen.shouldDiscardDraft`.
     #[test]

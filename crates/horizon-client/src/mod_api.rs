@@ -9,13 +9,19 @@ mod phase;
 pub use phase::{LoadedMods, RegistrationContext, RegistrationPhase};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
+mod client_reload;
+pub(crate) mod reload;
 mod reload_order;
 pub(crate) mod server_reload;
+pub use client_reload::{
+    ClientReloadContext, ClientReloadListener, ClientReloadListeners, VanillaClientListeners,
+};
 pub use horizon_world::identifier::Identifier;
+pub use reload::{ReloadApply, ReloadResourceError};
 pub use reload_order::ReloadOrderError;
 pub use server_reload::{
-    ListenerKey, ServerReloadApply, ServerReloadContext, ServerReloadError, ServerReloadListener,
-    ServerReloadListeners, ServerReloadResources, VanillaServerListeners,
+    ListenerKey, ServerReloadContext, ServerReloadListener, ServerReloadListeners,
+    ServerReloadResources, VanillaServerListeners,
 };
 
 pub use crate::biome::{BiomeColors, SpawnEntry};
@@ -2543,6 +2549,32 @@ pub struct NativeBlockClick<'a> {
     pub player_entity_id: i32,
 }
 
+/// The behaviour about to run in `UseItemOnBlockEvent`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UsePhase {
+    /// `onItemUseFirst`; reserved until that behaviour has a firing point.
+    ItemBeforeBlock,
+    /// `BlockBehaviour.useItemOn`, before the block's Part and template.
+    Block,
+    /// `Item.useOn`, after the block passed and before the item's Part.
+    ItemAfterBlock,
+}
+
+/// A player's item use without a block or entity target (`RightClickItem`).
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct NativeItemClick<'a> {
+    pub side: LogicalSide,
+    pub dimension: LevelDimension,
+    /// The block containing the clicking player's feet (`getPos`).
+    pub pos: [i32; 3],
+    pub hand: Hand,
+    pub stack: &'a ItemStack,
+    pub player: u128,
+    pub player_entity_id: i32,
+}
+
 /// Vanilla's `InteractionResult`, as a hook answers it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -2822,7 +2854,8 @@ pub use resource::{
 };
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
 mod block_entity_type;
-pub use block_entity_type::{BlockEntityTypeBuilder, BlockEntityTypeKey};
+pub(crate) use block_entity_type::validate_block_entity_type_keys;
+pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
 mod part_table;

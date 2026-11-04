@@ -97,14 +97,15 @@ fn duplicate_objects_cannot_make_the_reverse_lookup_ambiguous() {
 fn retained_listeners_read_back_typed_from_the_resources() {
     struct OtherListener;
     impl ServerReloadListener for OtherListener {
-        fn prepare(&self, _: &ServerReloadContext) -> Result<ServerReloadApply, ServerReloadError> {
-            Ok(ServerReloadApply::new(|| {}))
+        fn prepare(&self, _: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+            Ok(ReloadApply::new(|| {}))
         }
     }
     let mut listeners = ServerReloadListeners::new();
     let original = Arc::new(Boundary);
-    let key = listeners
-        .add_retained_listener(id("test_mod:kept"), files(), original.clone())
+    let key = ListenerKey::new(id("test_mod:kept"));
+    listeners
+        .add_retained_listener(&key, files(), original.clone())
         .unwrap();
     assert_eq!(key.id(), &id("test_mod:kept"));
     let ordered = listeners.finish().unwrap();
@@ -127,8 +128,9 @@ fn retained_listeners_read_back_typed_from_the_resources() {
 #[test]
 fn reload_replaces_the_retained_store_whole() {
     let mut listeners = ServerReloadListeners::new();
-    let first = listeners
-        .add_retained_listener(id("test_mod:first"), files(), Arc::new(Boundary))
+    let first = ListenerKey::<Boundary>::new(id("test_mod:first"));
+    listeners
+        .add_retained_listener(&first, files(), Arc::new(Boundary))
         .unwrap();
     let mut resources = ServerReloadResources::default();
     resources.install(listeners.finish().unwrap().retained);
@@ -147,18 +149,23 @@ fn retained_registration_follows_the_same_rules_as_plain_listeners() {
         .add_listener(id("one:listener"), files(), listener.clone())
         .unwrap();
     assert_eq!(
-        listeners.add_retained_listener(id("two:listener"), files(), listener),
+        listeners.add_retained_listener(&ListenerKey::new(id("two:listener")), files(), listener),
         Err(ReloadOrderError::DuplicateObject {
             id: id("two:listener"),
             registered_as: id("one:listener"),
         })
     );
-    let key = listeners
-        .add_retained_listener(id("one:kept"), files(), Arc::new(Boundary))
+    let key = ListenerKey::<Boundary>::new(id("one:kept"));
+    listeners
+        .add_retained_listener(&key, files(), Arc::new(Boundary))
         .unwrap();
     assert!(
         listeners
-            .add_retained_listener(id("one:kept"), files(), Arc::new(Boundary))
+            .add_retained_listener(
+                &ListenerKey::<Boundary>::new(id("one:kept")),
+                files(),
+                Arc::new(Boundary)
+            )
             .is_err()
     );
     assert!(matches!(
@@ -172,8 +179,8 @@ fn retained_registration_follows_the_same_rules_as_plain_listeners() {
 fn add_listener_attributes_its_calls_to_the_registering_mod() {
     struct Noop;
     impl ServerReloadListener for Noop {
-        fn prepare(&self, _: &ServerReloadContext) -> Result<ServerReloadApply, ServerReloadError> {
-            Ok(ServerReloadApply::new(|| {}))
+        fn prepare(&self, _: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+            Ok(ReloadApply::new(|| {}))
         }
     }
     let guard = crate::crash::enter_native_mod(crate::crash::NativeModCall {

@@ -21,16 +21,16 @@ use super::{
 };
 use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
-    self, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef, NativeCamera, NativeCommand,
-    NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
-    NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
-    RecipeBookCategory, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse,
-    WorldPhase,
+    self, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef,
+    NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
+    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
+    NativeServerPlayer, RecipeBookCategory, ServerReloadListeners, ServerTickPhase,
+    TicketController, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
-    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult, NativeTriState,
-    Suggestion,
+    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult,
+    NativeItemClick, NativeTriState, Suggestion, UsePhase,
 };
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -1506,6 +1506,20 @@ impl Game<'_> {
     /// `AddServerReloadListenersEvent.getRegistryAccess` does.
     pub(super) fn native_add_server_reload_listeners(&self, listeners: &mut ServerReloadListeners) {
         mod_api::dispatch_add_server_reload_listeners(self, listeners);
+    }
+    /// Register client asset reload listeners before a reload stages its
+    /// assets (NeoForge's `AddClientReloadListenersEvent`, the client's
+    /// counterpart of `native_add_server_reload_listeners`): the first load
+    /// before the loader thread runs, then every later reload — the player
+    /// changed resource packs, F3+T was pressed, or a server sent its packs.
+    /// The listener's `prepare` then reads the merged asset view with
+    /// resource-pack overrides resolved, and its returned apply publishes the
+    /// parsed state, all applies after all prepares, before
+    /// `native_client_resources_reloaded`. A listener that returns an error
+    /// aborts the reload and keeps every listener's previous assets.
+    /// Client-side.
+    pub(super) fn native_add_client_reload_listeners(&self, listeners: &mut ClientReloadListeners) {
+        mod_api::dispatch_add_client_reload_listeners(self, listeners);
     }
     /// The server is assembling its data tables, as for
     /// `native_data_pack_files` (a world's first open and every `/reload`):
@@ -5770,6 +5784,40 @@ impl Game<'_> {
             canceled,
         );
     }
+    /// `UseItemOnBlockEvent`: after a phase was chosen, before its Part or
+    /// vanilla behaviour. Cancel skips that behaviour and returns
+    /// `cancellation_result` (initially `TryWithEmptyHand`).
+    pub(super) fn native_use_item_on_block(
+        &mut self,
+        click: &NativeBlockClick<'_>,
+        phase: UsePhase,
+        cancellation_result: &mut NativeInteractionResult,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_use_item_on_block(
+            mod_api::HostSide::of(self),
+            click,
+            phase,
+            cancellation_result,
+            canceled,
+        );
+    }
+    /// `PlayerInteractEvent.RightClickItem`, immediately before `Item.use`.
+    /// Cancel skips its Part and vanilla behaviour; its result defaults to
+    /// `Pass`. On the client only `Success` ends the hand loop.
+    pub(super) fn native_right_click_item(
+        &mut self,
+        click: &NativeItemClick<'_>,
+        cancellation_result: &mut NativeInteractionResult,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_right_click_item(
+            mod_api::HostSide::of(self),
+            click,
+            cancellation_result,
+            canceled,
+        );
+    }
     /// `BonemealEvent`: bone meal from `stack` used on the block `state` at
     /// `pos` (`BoneMealItem.growCrop`), by `player` or, when it is `None`, by
     /// a dispenser or a villager. `valid_bonemeal_target` is the block's
@@ -8132,16 +8180,6 @@ impl Game<'_> {
     pub(super) fn native_screen_title(&self) -> Option<String> {
         self.remote_menu_title().map(|t| t.plain())
     }
-    /// A data file of the game's resources, content mods' included
-    /// (`data/mymod/machines.json`), when there is one: what a mod's content
-    /// says, read at runtime. Only relative paths of plain names.
-    pub(super) fn native_data(&self, path: &str) -> Option<Vec<u8>> {
-        let plain = |p: &str| !p.is_empty() && p != "." && p != ".." && !p.contains('\\');
-        if !path.starts_with("data/") || !path.split('/').all(plain) {
-            return None;
-        }
-        fs::read(self.options.resources.join(path)).ok()
-    }
     /// The block at `pos` (`mymod:cable`; air where nothing is loaded).
     pub(super) fn native_block(&self, pos: [i32; 3]) -> String {
         let state = self.world.block(pos[0], pos[1], pos[2]);
@@ -8585,6 +8623,74 @@ impl Game<'_> {
                 use_item,
             }
         }
+    }
+    /// The chosen phase's broadcast event, before its scoped behaviour.
+    pub(super) fn use_item_on_block(
+        &mut self,
+        hit: &super::Hit,
+        hand: Hand,
+        stack: Option<&ItemStack>,
+        phase: UsePhase,
+    ) -> Option<NativeInteractionResult> {
+        if !mod_api::listened(mod_api::HookId::UseItemOnBlock) {
+            return None;
+        }
+        let click = self.block_click(hit, hand, stack);
+        let (mut result, mut canceled) = (NativeInteractionResult::TryWithEmptyHand, false);
+        self.native_use_item_on_block(&click, phase, &mut result, &mut canceled);
+        if !canceled {
+            return None;
+        }
+        if phase == UsePhase::ItemAfterBlock
+            && result.consumes_action()
+            && let Some(stack) = stack
+        {
+            self.with_hand(hand, |game| {
+                if game.remote.is_none() {
+                    game.award_stat("used", &stack.item, 1);
+                }
+                game.apply_after_use_components(stack);
+            });
+        }
+        Some(result)
+    }
+    /// Air use only: a passing block or entity keeps its target, rather than
+    /// becoming a `RightClickItem` interaction.
+    pub(super) fn right_click_item(
+        &mut self,
+        hand: Hand,
+        stack: &ItemStack,
+    ) -> Option<NativeInteractionResult> {
+        if !mod_api::listened(mod_api::HookId::RightClickItem)
+            || self.entity_targeted()
+            || self.pick().is_some()
+        {
+            return None;
+        }
+        let pos = self
+            .target_position(super::commands::Target::Player)?
+            .map(|v| v.floor() as i32);
+        let (player, player_entity_id) = self.native_clicker();
+        let click = NativeItemClick {
+            side: if self.remote.is_some() {
+                LogicalSide::Client
+            } else {
+                LogicalSide::Server
+            },
+            dimension: self.dim.level(),
+            pos,
+            hand,
+            stack,
+            player,
+            player_entity_id,
+        };
+        let instant = self.use_duration(stack) <= 0;
+        let (mut result, mut canceled) = (NativeInteractionResult::Pass, false);
+        self.native_right_click_item(&click, &mut result, &mut canceled);
+        if canceled && instant && result.consumes_action() {
+            self.with_hand(hand, |game| game.apply_after_use_components(stack));
+        }
+        canceled.then_some(result)
     }
     /// The shared context for a block's behaviour and the click event.
     pub(super) fn block_click<'a>(
@@ -9618,7 +9724,7 @@ mod tests {
         if run_fresh_cases(
             "game::native_hooks::tests::declared_types_create_tick_and_reload_through_game",
             CHILD,
-            &["valid", "unknown_block"],
+            &["valid", "unknown_block", "unknown_type", "block_not_type"],
         ) {
             return;
         }
@@ -9627,6 +9733,22 @@ mod tests {
         const SECOND: &str = "be_test:ornate_banner";
         const EMPTY: &str = "be_test:blank";
         const PLAIN: &str = "be_test:plain_banner";
+        #[derive(Default)]
+        struct Keys {
+            own: std::sync::OnceLock<BlockEntityTypeKey>,
+            shared: std::sync::OnceLock<BlockEntityTypeKey>,
+            vanilla: std::sync::OnceLock<BlockEntityTypeKey>,
+        }
+        trait Probe {
+            fn value(&self) -> u32;
+        }
+        struct Marker(u32);
+        impl Probe for Marker {
+            fn value(&self) -> u32 {
+                self.0
+            }
+        }
+        const PROBE: CapabilityKey<dyn Probe> = CapabilityKey::new("be_test:probe");
         struct Press;
         #[mod_api::horizon_part]
         impl BlockPart for Press {}
@@ -9650,8 +9772,32 @@ mod tests {
                 *energy += 1;
             }
         }
+        struct User {
+            keys: Arc<Keys>,
+            unknown: Option<&'static str>,
+        }
+        #[horizon_client::mod_api::__subscriptions]
+        impl Hooks for User {
+            fn register(&self, registrar: &mut Registrar) {
+                let kind = registrar.block_entity_type_key("be_test:shared");
+                registrar
+                    .block_entity_part(&kind, Press)
+                    .expect("native type");
+                registrar
+                    .block_entity_capability(&PROBE, &kind, |_, _| Some(Box::new(Marker(6300))));
+                self.keys.shared.set(kind).unwrap();
+                let vanilla = registrar.block_entity_type_key("minecraft:chest");
+                registrar
+                    .block_entity_capability(&PROBE, &vanilla, |_, _| Some(Box::new(Marker(26))));
+                self.keys.vanilla.set(vanilla).unwrap();
+                if let Some(id) = self.unknown {
+                    registrar.block_entity_type_key(id);
+                }
+            }
+        }
         struct TestMod {
             invalid: bool,
+            keys: Arc<Keys>,
         }
         #[horizon_client::mod_api::__subscriptions]
         impl Hooks for TestMod {
@@ -9664,7 +9810,7 @@ mod tests {
                         &[FIRST, SECOND]
                     })
                     .build();
-                registrar.block_entity_part(&kind, Press);
+                self.keys.own.set(kind).unwrap();
                 registrar
                     .block_entity_type("empty")
                     .blocks(&[EMPTY])
@@ -9684,8 +9830,30 @@ mod tests {
                 }));
             }
         }
-        let invalid = std::env::var(CHILD).unwrap() == "unknown_block";
-        let mods: Mods = Arc::from([ModEntry::new("be_test", Box::new(TestMod { invalid }))]);
+        let case = std::env::var(CHILD).unwrap();
+        let invalid = case == "unknown_block";
+        let unknown = match case.as_str() {
+            "unknown_type" => Some("other:missing"),
+            "block_not_type" => Some("minecraft:red_shulker_box"),
+            _ => None,
+        };
+        let keys = Arc::new(Keys::default());
+        let mods: Mods = Arc::from([
+            ModEntry::new(
+                "be_user",
+                Box::new(User {
+                    keys: keys.clone(),
+                    unknown,
+                }),
+            ),
+            ModEntry::new(
+                "be_test",
+                Box::new(TestMod {
+                    invalid,
+                    keys: keys.clone(),
+                }),
+            ),
+        ]);
         horizon_client::mod_api::install(mods.clone());
         horizon_client::mod_api::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -9697,6 +9865,15 @@ mod tests {
             assert!(!std::path::Path::new(".horizon-cache").exists());
             return;
         }
+        if let Some(id) = unknown {
+            let error = root.unwrap_err().to_string();
+            assert!(error.contains("be_user"), "{error}");
+            assert!(error.contains("unknown block entity type"), "{error}");
+            assert!(error.contains(id), "{error}");
+            assert!(horizon_client::containers::block_entity_types::current().is_none());
+            return;
+        }
+        assert_eq!(keys.shared.get(), keys.own.get());
         with_game_at(root.unwrap(), |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -9709,7 +9886,13 @@ mod tests {
                 .registry
                 .default_state("minecraft:stone")
                 .unwrap();
-            for (x, block) in [(1, FIRST), (2, SECOND), (3, EMPTY), (4, PLAIN)] {
+            for (x, block) in [
+                (1, FIRST),
+                (2, SECOND),
+                (3, EMPTY),
+                (4, PLAIN),
+                (5, "minecraft:chest"),
+            ] {
                 let state = game.pack.assets.registry.default_state(block).unwrap();
                 assert!(game.native_level_set_block(
                     level,
@@ -9724,6 +9907,13 @@ mod tests {
                     NativeBlockUpdateFlags::NONE
                 ));
                 let pos = (x, 64, 0);
+                let handle = game.native_block_entity_ref(level, [x, 64, 0]).unwrap();
+                if block == "minecraft:chest" {
+                    assert_eq!(handle.kind(game).as_ref(), keys.vanilla.get());
+                    let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
+                    assert_eq!((probe.value(), probe.owner()), (26, "be_user".into()));
+                    continue;
+                }
                 if block == PLAIN {
                     assert!(matches!(
                         game.world.block_entities.get(&pos),
@@ -9741,6 +9931,9 @@ mod tests {
                 }
                 assert_eq!(entity.id(), "be_test:shared");
                 assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
+                assert_eq!(handle.kind(game).as_ref(), keys.shared.get());
+                let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
+                assert_eq!((probe.value(), probe.owner()), (6300, "be_user".into()));
                 game.tick_mod_block_entity(pos);
                 let saved = save::encode_block_entity(
                     pos,
