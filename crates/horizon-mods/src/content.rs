@@ -313,6 +313,8 @@ struct BlockFile {
     #[serde(default = "yes")]
     item: bool,
     #[serde(default)]
+    block_item: Option<String>,
+    #[serde(default)]
     components: BTreeMap<String, serde_json::Value>,
 }
 fn yes() -> bool {
@@ -338,6 +340,10 @@ pub struct Block {
     pub default_state: BTreeMap<String, String>,
     /// Also add a block item with the same id.
     pub item: bool,
+    /// The item this block is, for pick-block, drops and `Block.asItem`, when
+    /// it is not a block item of its own: an item of this mod or a vanilla
+    /// one, checked to exist when the content loads. Needs `item` false.
+    pub block_item: Option<String>,
     /// Its item's component patch, as an [`Item`]'s.
     pub components: BTreeMap<String, serde_json::Value>,
     /// A connecting block (template `minecraft:chorus_plant`, a `PipeBlock`
@@ -858,6 +864,7 @@ impl Content {
                 state_properties: file.state_properties,
                 default_state: file.default_state,
                 item: file.item,
+                block_item: file.block_item,
                 components: file.components,
                 connects_to: file
                     .connects_to
@@ -1201,6 +1208,20 @@ fn check_block(file: &Block) -> Result<(), String> {
     if file.sign_text_glow.is_some() && !sign {
         return Err("sign_text_glow needs a vanilla sign template".into());
     }
+    if let Some(item) = &file.block_item {
+        if item == "none" {
+            return Err("block_item is an item id; a block with no item is \"item\": false".into());
+        }
+        if file.item {
+            return Err(
+                "block_item is the item this block yields instead of its own, and item is true"
+                    .into(),
+            );
+        }
+        if !namespaced_id(item) {
+            return Err("block_item is an item id, namespace:path".into());
+        }
+    }
     if let Some(wall) = &file.wall_block {
         if !sign || file.template.contains("_wall_") {
             return Err("wall_block needs a standing or ceiling sign template".into());
@@ -1238,6 +1259,11 @@ fn check_sign_walls(blocks: &[&Block]) -> Result<(), String> {
         if !block.template.ends_with(form) {
             return Err(format!(
                 "{id}: wall_block {wall} needs a template ending in {form}"
+            ));
+        }
+        if block.block_item.is_some() {
+            return Err(format!(
+                "{id}: wall_block {wall} has this sign's item, so it declares no block_item"
             ));
         }
         if block.item {
@@ -1507,6 +1533,7 @@ capabilities = ["registries"]
                     ..BlockProperties::default()
                 },
                 item: true,
+                block_item: None,
                 components: BTreeMap::new(),
                 connects_to: None,
                 thickness: None,
@@ -1940,6 +1967,46 @@ capabilities = ["registries"]
                 format!(r#"{{"template": "minecraft:chorus_plant", "connects_to": "{tag}"}}"#);
             let e = block(&json).unwrap_err();
             assert!(e.contains("block tag"), "{tag}: {e}");
+        }
+    }
+
+    #[test]
+    fn block_item_names_an_item_and_needs_item_false() {
+        let block = |json: &str| {
+            hmod(
+                "blockitem",
+                MANIFEST_TEXT,
+                &[("data/ruby/horizon/block/slab.json", json.as_bytes())],
+            )
+        };
+        let parsed = block(
+            r#"{"template": "minecraft:stone", "item": false, "block_item": "ruby:slab_item"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.blocks[0].block_item.as_deref(),
+            Some("ruby:slab_item")
+        );
+        assert_eq!(
+            block(r#"{"template": "minecraft:stone"}"#).unwrap().blocks[0].block_item,
+            None
+        );
+        for (bad, word) in [
+            (
+                r#"{"template": "minecraft:stone", "block_item": "ruby:slab_item"}"#,
+                "item is true",
+            ),
+            (
+                r#"{"template": "minecraft:stone", "item": false, "block_item": "none"}"#,
+                "\"item\": false",
+            ),
+            (
+                r#"{"template": "minecraft:stone", "item": false, "block_item": "slab"}"#,
+                "namespace:path",
+            ),
+        ] {
+            let e = block(bad).unwrap_err();
+            assert!(e.contains(word), "{bad}: {e}");
         }
     }
 

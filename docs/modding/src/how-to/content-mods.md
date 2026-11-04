@@ -118,6 +118,12 @@ A block names its template and what differs from it:
   "item": true }
 ```
 
+A block gets a block item of its own id by default. `"item": false` gives it none: pick-block takes nothing and
+`Block.asItem` is air (what a block drops comes from its loot table). `"block_item": "<item id>"` (with `"item": false`) makes the block
+that other item instead, an item of the mod or a vanilla one, such as `"minecraft:diamond"`: pick-block and
+`Block.asItem` both read it, and the load fails naming the block when no such item exists. `"none"` is not an item id;
+write `"item": false`. A sign's wall form takes its sign's item through `wall_block`, not `block_item`.
+
 `push_reaction` sets vanilla's `BlockBehaviour.Properties.pushReaction` to `"PUSH_PULL"`, `"PUSH"`, `"POPPED"`, `"IMMOVEABLE"`, or `"IGNORE_ENTITY"`.
 
 `random_ticks` makes a block tick randomly whatever its template does, as vanilla's

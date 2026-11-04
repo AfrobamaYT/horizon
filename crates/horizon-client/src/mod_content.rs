@@ -713,6 +713,17 @@ struct NewBlock<'a> {
     wall_of: Option<String>,
 }
 impl NewBlock<'_> {
+    /// The item its gameplay row names when that is not the template's item
+    /// renamed: `block_item`, or `minecraft:air` for a block with no item
+    /// (a sign's wall form keeps the paired sign's). Pick-block, drops and
+    /// `Block.asItem` all read this one value.
+    fn item_row(&self) -> Option<&str> {
+        match &self.decl.block_item {
+            Some(item) => Some(item),
+            None => (!self.decl.item && self.wall_of.is_none()).then_some("minecraft:air"),
+        }
+    }
+
     /// Template states and declared combinations in registry order.
     fn state_combinations(&self) -> impl Iterator<Item = (u32, &[(String, String)])> {
         let start = self.rename.states.start;
@@ -1396,8 +1407,8 @@ impl<'a> Plan<'a> {
                 }
                 if gameplay {
                     row.set("id", J::Num(next.into()));
-                    if !b.decl.item && b.wall_of.is_none() {
-                        row.set("item", J::Str("minecraft:air".into()));
+                    if let Some(item) = b.item_row() {
+                        row.set("item", J::Str(item.into()));
                     }
                     self.override_gameplay(b, combo, &mut row);
                     if let Some(shapes) = &b.shapes {
@@ -1553,6 +1564,13 @@ impl<'a> Plan<'a> {
             map.set(&i.rename.to, v);
         }
         if components {
+            for b in &self.blocks {
+                if let Some(item) = &b.decl.block_item
+                    && map.get(item).is_none()
+                {
+                    return Err(format!("{}: block_item {item:?} is not an item", b.decl.id).into());
+                }
+            }
             for i in &self.items {
                 if let Some(rest) = &i.crafting_remainder
                     && map.get(rest).is_none()
@@ -1601,8 +1619,8 @@ impl<'a> Plan<'a> {
                         for r in &self.renames(b) {
                             v.rename(r, false);
                         }
-                        if !b.decl.item && b.wall_of.is_none() {
-                            v.set("item", J::Str("minecraft:air".into()));
+                        if let Some(item) = b.item_row() {
+                            v.set("item", J::Str(item.into()));
                         }
                         // `SignBlock.getWoodType`: the wood's name is what
                         // the editor reads of it.
