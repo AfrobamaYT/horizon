@@ -196,7 +196,7 @@ mod mob_index;
 mod mob_looting;
 mod mob_sounds;
 mod mod_api_host;
-mod mods;
+pub(crate) mod mods;
 mod mount_menu;
 mod mounts;
 mod moving_pistons;
@@ -563,8 +563,9 @@ struct Options {
     /// `--fullscreen` (vanilla's): the window opens fullscreen whatever options.txt says,
     /// as vanilla's DisplayData does, without saving it there.
     fullscreen: bool,
-    /// `--game-dir DIR`: the folder `read` makes the working directory (saves, options.txt...).
-    game_dir: PathBuf,
+    /// `--game-dir DIR`: the folder `read` makes the working directory (saves, options.txt...);
+    /// none for a splitscreen player's game, which shares P1's working directory.
+    game_dir: Option<PathBuf>,
     /// `--quickPlaySingleplayer`, checked once the game folder is known.
     quick_play: Option<String>,
     session_file: Option<String>,
@@ -619,13 +620,16 @@ impl Options {
             Ok(None) => {}
             Err(e) => eprintln!("Horizon: not signed in: {e}"),
         }
-        // Paths given on the command line stay relative to where the game was started.
-        o.resources = std::path::absolute(&o.resources)?;
-        o.report = o.report.map(std::path::absolute).transpose()?;
-        o.control = o.control.map(std::path::absolute).transpose()?;
-        std::fs::create_dir_all(&o.game_dir)
-            .and_then(|()| std::env::set_current_dir(&o.game_dir))
-            .map_err(|e| format!("game folder {}: {e}", o.game_dir.display()))?;
+        split::launcher::read_now();
+        if let Some(dir) = o.game_dir.take() {
+            // Paths given on the command line stay relative to where the game was started.
+            o.resources = std::path::absolute(&o.resources)?;
+            o.report = o.report.map(std::path::absolute).transpose()?;
+            o.control = o.control.map(std::path::absolute).transpose()?;
+            std::fs::create_dir_all(&dir)
+                .and_then(|()| std::env::set_current_dir(&dir))
+                .map_err(|e| format!("game folder {}: {e}", dir.display()))?;
+        }
         // Vanilla's quick play (Main, QuickPlay.joinSingleplayerWorld): only a
         // world that exists opens; else the title screen. --world also creates one.
         if let Some(world) = o.quick_play.take() {
@@ -699,11 +703,11 @@ impl Options {
             benchmark: None,
             mods: mods::ModsState {
                 dev: context.dev_mods,
-                native: Default::default(),
+                ..Default::default()
             },
             execution_role: execution_role::ExecutionRole::Client,
             fullscreen: false,
-            game_dir: context.game_dir,
+            game_dir: Some(context.game_dir),
             quick_play: None,
             session_file: std::env::var("HORIZON_SESSION_FILE").ok(),
             session_stdin: false,
@@ -837,7 +841,7 @@ impl Options {
         Ok(Some(o))
     }
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Screen {
     Playing,
     GameModeSwitcher,
@@ -2687,6 +2691,9 @@ struct Game<'a> {
     view_at: [u32; 2],
     /// Splitscreen: what it draws over this player's view (its badge, questions, notices).
     split_hud: split::Hud,
+    /// Splitscreen: this player's own Microsoft account session (one of the launcher's other
+    /// accounts), in place of the process's (P1's) for its connections and skin.
+    split_auth: Option<std::sync::Arc<horizon_client::auth::AuthSession>>,
     focused: bool,
     /// Whether the window currently accepts input method events.
     ime_allowed: bool,
@@ -2857,9 +2864,8 @@ struct Game<'a> {
     /// swap just before an attack keeps them, with the new item's enchantments
     /// (attribute swapping).
     attack_item: Option<Arc<str>>,
-    /// Mobs a player hurt (`LivingEntity.lastHurtByPlayer`), with the guest
-    /// it was by connection (None: the host).
-    last_hurt_by_player: HashMap<u32, Option<u32>>,
+    /// Mobs a player hurt (`LivingEntity.lastHurtByPlayer`), by player UUID.
+    last_hurt_by_player: HashMap<u32, combat::PlayerCredit>,
     /// Leashed mobs a player killed, with the killer's UUID: the lead drops
     /// on the corpse's next tick (`Leashable.tickLeash`), for the mods. With
     /// the corpse's dimension: each level's tick prunes only its own.
@@ -6058,7 +6064,7 @@ impl Game<'_> {
             ));
             return;
         }
-        self.screen = Screen::Inventory;
+        self.set_screen(Screen::Inventory);
         self.capture(false);
         self.right = false;
     }
@@ -7894,7 +7900,7 @@ impl Game<'_> {
         player.glider = self.glider_worn();
         // A saved death already dropped inventory/XP and counted the death.
         if player.health.dead_or_dying() {
-            self.screen = Screen::Dead;
+            self.set_screen(Screen::Dead);
             self.death_focus = None;
             self.ui.died_at = Some(Instant::now());
             self.ui.death_text = None;
@@ -7966,7 +7972,7 @@ impl Game<'_> {
                 if let Some(c) = self.carried.take() {
                     let _ = self.give(c);
                 }
-                self.screen = Screen::Inventory;
+                self.set_screen(Screen::Inventory);
             }
         }
         if self.remote.is_some() {
@@ -8464,7 +8470,7 @@ impl Game<'_> {
             && !self.dialog_open()
         {
             self.pause_focus = None;
-            self.screen = Screen::Paused;
+            self.set_screen(Screen::Paused);
         }
     }
     /// `KeyMapping.setAll`: every key physically held is held again, as the
@@ -12383,8 +12389,7 @@ impl Game<'_> {
                     randomization: 0,
                 });
             }
-            self.last_hurt_by_player
-                .insert(self.mobs[index].id, self.lan_acting);
+            self.remember_mob_player_credit(self.mobs[index].id);
             let sound = if crit {
                 "minecraft:entity.player.attack.crit"
             } else if scale > 0.9 {
@@ -12605,7 +12610,7 @@ impl Game<'_> {
             }
             Action::DataPacks { dir, selected } => {
                 self.keys.clear();
-                self.screen = Screen::Options;
+                self.set_screen(Screen::Options);
                 self.options_from_title = true;
                 let resources = self.vanilla_root();
                 self.ui.options.open_data_packs(dir, selected, resources);
@@ -12858,7 +12863,7 @@ impl Game<'_> {
         };
         self.carried = None;
         self.using = None;
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         self.title = None;
         self.clear_lod();
         self.pending_uploads.clear();
@@ -13100,7 +13105,7 @@ impl Game<'_> {
         self.sleep_timer = 0;
         self.player_beds.clear();
         self.clear_entities();
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         self.clear_lod();
         self.pending_uploads.clear();
         if let Some(r) = self.renderer.as_mut() {
@@ -13272,6 +13277,7 @@ impl Game<'_> {
                 damage_type: &name,
                 causing: 0,
                 direct: 0,
+                position: None,
             };
             let mut cancel = false;
             self.native_armor_hurt(
@@ -16947,20 +16953,20 @@ impl Game<'_> {
                 Screen::Options => self.options_key(KeyCode::Escape, None)?,
                 Screen::Playing => {
                     self.pause_focus = None;
-                    self.screen = Screen::Paused;
+                    self.set_screen(Screen::Paused);
                     self.pause_menu = true;
                     self.capture(false);
                 }
                 Screen::Creative => {
                     self.pad_clear_focus();
                     self.carried = None;
-                    self.screen = Screen::Playing;
+                    self.set_screen(Screen::Playing);
                     self.capture(true);
                 }
                 Screen::Paused | Screen::Inventory => {
                     self.close_container();
                     self.pause_focus = None;
-                    self.screen = Screen::Playing;
+                    self.set_screen(Screen::Playing);
                     self.pause_menu = true;
                     self.capture(true);
                 }
@@ -16970,13 +16976,13 @@ impl Game<'_> {
                         self.death_confirm_answer(false)?;
                     }
                 }
-                Screen::Stats | Screen::Friends => self.screen = Screen::Paused,
+                Screen::Stats | Screen::Friends => self.set_screen(Screen::Paused),
                 Screen::Social => self.close_social(),
-                Screen::ServerLinks => self.screen = Screen::Paused,
+                Screen::ServerLinks => self.set_screen(Screen::Paused),
                 // ConfirmScreen.keyPressed: Escape answers no; both return to
                 // the Server Links screen they came from.
-                Screen::ConfirmLink => self.screen = self.confirm_link_back(),
-                Screen::DialogWarning => self.screen = Screen::ServerLinks,
+                Screen::ConfirmLink => self.set_screen(self.confirm_link_back()),
+                Screen::DialogWarning => self.set_screen(Screen::ServerLinks),
                 Screen::Advancements => self.close_advancements(),
                 Screen::WorldOptions => self.world_options_escape(),
                 Screen::CommandBlock => self.close_command_block(),
@@ -17058,12 +17064,12 @@ impl Game<'_> {
                             self.persist_tutorial_step();
                         }
                         if self.creative {
-                            self.screen = Screen::Creative;
+                            self.set_screen(Screen::Creative);
                             self.refresh_creative_tabs();
                             self.creative_screen.reopen();
                             self.refresh_saved_hotbars();
                         } else {
-                            self.screen = Screen::Inventory;
+                            self.set_screen(Screen::Inventory);
                         }
                         self.capture(false);
                     }
@@ -17073,12 +17079,12 @@ impl Game<'_> {
                     if let Some(c) = self.carried.take() {
                         let _ = self.give(c);
                     }
-                    self.screen = Screen::Playing;
+                    self.set_screen(Screen::Playing);
                     self.capture(true);
                 }
                 Screen::Inventory => {
                     self.close_container();
-                    self.screen = Screen::Playing;
+                    self.set_screen(Screen::Playing);
                     self.capture(true);
                 }
                 _ => {}
@@ -19530,6 +19536,7 @@ impl<'a> Game<'a> {
             split_window: false,
             view_at: [0, 0],
             split_hud: Default::default(),
+            split_auth: None,
             focused: true,
             ime_allowed: false,
             ime_area: None,
@@ -22244,7 +22251,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     {
         return Ok(());
     }
-    let _ = horizon_client::health::HURT_SERVER.set(native_hooks::hurt_server);
+    let _ = horizon_client::health::HURT_SERVER.set(native_hooks::incoming_damage);
     let _ = horizon_client::block_contact::HOOK.set(native_hooks::block_contact);
     let _ = horizon_client::health::KNOCKBACK.set(native_hooks::knockback);
     let _ = horizon_client::health::SHIELD_BLOCK.set(native_hooks::shield_block);
@@ -22307,9 +22314,16 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
             log::warn!("could not add the official server to servers.dat: {e}");
         }
     }
+    let mut early_settings = Settings::load(&Game::options_path());
+    options
+        .mods
+        .select(&std::env::current_dir()?, &early_settings.mods.enabled);
+    crate::mod_api::install_packages(options.mods.native.packages(), &options.mods.selected);
+    if let Err(refused) = crate::mod_api::install_parts(crate::mod_api::mods()) {
+        panic!("Mod parts refused:\n{}", refused.join("\n"));
+    }
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models(options.execution_role);
-    let mut early_settings = Settings::load(&Game::options_path());
     // Minecraft.<init>: read the last start's flag, then mark this one as not
     // finished until onGameLoadFinished. A dedicated server has no options.txt.
     if options.execution_role.is_client() {
@@ -22347,13 +22361,12 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         &vanilla_root,
         &early_settings.resource_packs,
         &[],
-        &early_settings.mods.enabled,
         &options.mods,
     )
     .or_else(|e| {
         log::warn!("Horizon: resource packs not applied: {e}");
         pack_error = Some(e.to_string());
-        mods::content_root(&vanilla_root, &early_settings.mods.enabled, &options.mods)
+        mods::content_root(&vanilla_root, &options.mods)
     })?;
     let mut loaded = load_resources(
         options.resources.clone(),
@@ -22703,7 +22716,11 @@ mod tests {
         struct ReloadMod;
         #[mod_api::__subscriptions]
         impl Hooks for ReloadMod {
-            fn register(&self, registrar: &mut Registrar) {
+            fn register(
+                &self,
+                registrar: &mut Registrar,
+                _: &crate::mod_api::RegistrationContext<'_>,
+            ) {
                 registrar.block_part_tag("test:reload", TagPart);
             }
             fn data_pack_files(&self, _: &mut dyn ServerHost, event: &mut DataPackFilesEvent<'_>) {

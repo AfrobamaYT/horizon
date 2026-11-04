@@ -1045,15 +1045,8 @@
     "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: у Cargo.toml немає залежності horizon-client.",
     "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client вимагає {fields}. Серверні збірки працюють без інтерфейсу; можливостями horizon-client керує лаунчер. Вилучіть features і використовуйте default-features = false або приберіть його.",
     "{mod}: {error}": "{mod}: {error}",
-    "Building {name}'s post-build step": "Збирання кроку після збирання мода {name}",
-    "These mods were made for different Horizon versions": "Ці моди зроблено для різних версій Horizon",
-    "They often still work together. If the build fails, install versions made for the same Nightly.": "Часто вони все одно працюють разом. Якщо збірка не вдасться, встановіть версії, зроблені для однієї й тієї ж Nightly.",
     "{mode} · stopped": "{mode} · зупинено",
     "{online} of {max}": "{online} з {max}",
-    "Running {name}'s post-build step": "Виконання кроку після збирання мода {name}",
-    "The source of {source}. Its release ships {file}, a content mod: installing those from GitHub is not supported yet.": "Вихідний код {source}. Його реліз містить контентний мод {file}: встановлення таких модів із GitHub поки не підтримується.",
-    "Build anyway": "Все одно зібрати",
-    "{error} They often still build: pass --allow-version-mismatch to try.": "{error} Вони часто все одно збираються: передайте --allow-version-mismatch, щоб спробувати.",
     "Accent colour, glass, blur, language and the options above go back to how Horizon ships.": "Колір акценту, скло, розмиття, мова та параметри вище повернуться до початкових у Horizon.",
     "Reset the launcher's look": "Скинути вигляд лаунчера",
     "Reset to defaults": "Скинути до типових",
@@ -1108,6 +1101,5 @@
     "Save changes switches it. Nothing in its folder is deleted.": "«Зберегти зміни» перемкне її. З її теки нічого не видаляється.",
     "Its mods made for {loader} stay in its folder but won't load.": "Її моди для {loader} залишаться в її теці, але не завантажаться.",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Її моди для Minecraft {from} залишаться в її теці; деякі можуть не завантажитися в {to}.",
-    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Її світи збережено в Minecraft {from}: {to} оновить їх назавжди, а якщо він старіший — не зможе відкрити.",
-    "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "Цей вихідний код гри не має читабельного шаблону нативної точки входу. Оновіть Horizon і перебудуйте моди для цієї гри."
+    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Її світи збережено в Minecraft {from}: {to} оновить їх назавжди, а якщо він старіший — не зможе відкрити."
 }

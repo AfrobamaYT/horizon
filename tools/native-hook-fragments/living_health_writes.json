@@ -14,6 +14,13 @@
       "receiver": "living"
     },
     {
+      "name": "living_kill_credit",
+      "side": "server",
+      "host": "read",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_kill_credit",
+      "receiver": "living"
+    },
+    {
       "name": "living_last_attacker",
       "side": "server",
       "host": "read",

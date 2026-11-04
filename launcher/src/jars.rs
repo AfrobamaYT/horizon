@@ -139,7 +139,7 @@ pub fn prepare(
         home,
         jars,
         permission,
-        modrinth::jar_url,
+        modrinth::jar_urls,
         fetch::download_jar,
     )
 }
@@ -148,7 +148,7 @@ fn prepare_with(
     home: &Path,
     jars: &[JarRef],
     permission: Permission<'_>,
-    mut lookup: impl FnMut(&JarRef) -> Result<Option<String>, String>,
+    mut lookup: impl FnMut(&[&JarRef]) -> Result<BTreeMap<String, String>, String>,
     mut download: impl FnMut(&str, &JarRef, &Path) -> Result<(), String>,
 ) -> Result<(), PrepareError> {
     let cache = home.join("jars");
@@ -192,31 +192,34 @@ fn prepare_with(
     if matches!(permission, Permission::Refuse) {
         return Err(refused());
     }
-    let urls: Vec<String> = missing
-        .iter()
-        .map(|jar| {
-            let failure = |reason| PrepareError::Download {
-                jar: Box::new((*jar).clone()),
-                path: cache.join(format!("{}.jar", jar.sha512())),
-                reason,
-            };
-            lookup(jar)
-                .map_err(failure)?
-                .ok_or_else(|| failure(tr("no exact file on Modrinth").into()))
-        })
-        .collect::<Result<_, _>>()?;
     if let Permission::Ask(ask) = permission {
         if !ask(&missing) {
             return Err(refused());
         }
     }
+    let urls = lookup(&missing).map_err(|reason| PrepareError::Download {
+        jar: Box::new(missing[0].clone()),
+        path: cache.join(format!("{}.jar", missing[0].sha512())),
+        reason,
+    })?;
+    let urls: Vec<_> = missing
+        .iter()
+        .map(|jar| {
+            urls.get(jar.sha512())
+                .ok_or_else(|| PrepareError::Download {
+                    jar: Box::new((*jar).clone()),
+                    path: cache.join(format!("{}.jar", jar.sha512())),
+                    reason: tr("no exact file on Modrinth").into(),
+                })
+        })
+        .collect::<Result<_, _>>()?;
     fs::create_dir_all(&cache).map_err(|source| PrepareError::Io {
         path: cache.clone(),
         source,
     })?;
     for (jar, url) in missing.into_iter().zip(urls) {
         let path = cache.join(format!("{}.jar", jar.sha512()));
-        download(&url, jar, &path).map_err(|reason| PrepareError::Download {
+        download(url, jar, &path).map_err(|reason| PrepareError::Download {
             jar: Box::new(jar.clone()),
             path,
             reason,

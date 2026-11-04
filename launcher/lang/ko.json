@@ -1045,15 +1045,8 @@
     "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml에 horizon-client 의존성이 없습니다.",
     "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client가 {fields}을(를) 요청합니다. 서버 빌드는 헤드리스이며 horizon-client 기능은 런처가 관리합니다. features를 제거하고 default-features = false를 사용하거나 생략하세요.",
     "{mod}: {error}": "{mod}: {error}",
-    "Building {name}'s post-build step": "{name}의 빌드 후 단계 빌드 중",
-    "These mods were made for different Horizon versions": "이 모드들은 다른 Horizon 버전을 위해 만들어졌습니다.",
-    "They often still work together. If the build fails, install versions made for the same Nightly.": "대체로 함께 작동합니다. 빌드가 실패하는 경우 동일한 나이트리(Nightly) 버전을 위해 만들어진 버전을 설치하세요.",
     "{mode} · stopped": "{mode} · 중지됨",
     "{online} of {max}": "{online}/{max}",
-    "Running {name}'s post-build step": "{name}의 빌드 후 단계 실행 중",
-    "The source of {source}. Its release ships {file}, a content mod: installing those from GitHub is not supported yet.": "{source}의 소스입니다. 해당 릴리스에는 콘텐츠 모드인 {file}이(가) 포함되어 있으나, GitHub에서 이러한 모드를 설치하는 기능은 아직 지원되지 않습니다.",
-    "Build anyway": "계속 빌드",
-    "{error} They often still build: pass --allow-version-mismatch to try.": "{error} 버전이 달라도 빌드되는 경우가 많습니다. 시도하려면 --allow-version-mismatch 인수를 전달하세요.",
     "Accent colour, glass, blur, language and the options above go back to how Horizon ships.": "강조 색, 유리, 흐림, 언어와 위의 옵션이 Horizon 기본값으로 돌아갑니다.",
     "Reset the launcher's look": "런처 모양 초기화",
     "Reset to defaults": "기본값으로 초기화",
@@ -1108,6 +1101,5 @@
     "Save changes switches it. Nothing in its folder is deleted.": "변경 사항 저장을 누르면 전환됩니다. 폴더의 어떤 것도 삭제되지 않습니다.",
     "Its mods made for {loader} stay in its folder but won't load.": "{loader}용 모드는 폴더에 남지만 로드되지 않습니다.",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Minecraft {from}용 모드는 폴더에 남습니다. 일부는 {to}에서 로드되지 않을 수 있습니다.",
-    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "월드는 Minecraft {from}에서 저장되었습니다: {to}은(는) 이를 영구적으로 업그레이드하며, 더 오래된 버전이면 열 수 없습니다.",
-    "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "이 게임 소스에는 읽을 수 있는 네이티브 진입점 템플릿이 없습니다. Horizon을 업데이트하고 이 게임에 맞게 모드를 다시 빌드하세요."
+    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "월드는 Minecraft {from}에서 저장되었습니다: {to}은(는) 이를 영구적으로 업그레이드하며, 더 오래된 버전이면 열 수 없습니다."
 }

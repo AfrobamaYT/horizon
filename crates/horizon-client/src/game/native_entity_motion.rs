@@ -35,7 +35,19 @@ impl Game<'_> {
     /// entity Horizon doesn't simulate (a display, a painting) has none, so
     /// zero.
     pub(super) fn native_entity_velocity(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        let t = self.native_entity_target(entity)?;
+        let t = self.native_entity_read_target(entity)?;
+        if !self.is_logical_server() {
+            // The client's copy: its own player's motion, and the motion the
+            // server sent for an entity it tracks.
+            let v = match t {
+                Target::Player => self.player.as_ref()?.velocity,
+                _ => match self.native_walk_entity(entity.id()) {
+                    Some(h) => with_entity!(self, h, e => e.velocity()),
+                    None => Vec3::ZERO,
+                },
+            };
+            return Some([v.x, v.y, v.z]);
+        }
         if let Some(g) = self.native_target_guest(t) {
             return Some(std::array::from_fn(|i| {
                 g.position[i] - g.previous_position[i]

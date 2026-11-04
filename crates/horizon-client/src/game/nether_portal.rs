@@ -574,11 +574,11 @@ impl Game<'_> {
             Screen::Inventory | Screen::Creative => {
                 self.close_container();
                 self.carried = None;
-                self.screen = Screen::Playing;
+                self.set_screen(Screen::Playing);
                 self.capture(true);
             }
             _ => {
-                self.screen = Screen::Playing;
+                self.set_screen(Screen::Playing);
                 self.capture(true);
             }
         }

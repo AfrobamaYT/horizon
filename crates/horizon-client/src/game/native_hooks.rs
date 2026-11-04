@@ -24,13 +24,13 @@ use horizon_client::mod_api::{
     self, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef,
     NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
     NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
-    NativeServerPlayer, RecipeBookCategory, ServerReloadListeners, ServerTickPhase,
+    NativeServerPlayer, RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase,
     TicketController, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
     LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult,
-    NativeItemClick, NativeTriState, Suggestion, UsePhase,
+    NativeItemClick, NativeTriState, Suggestion, TooltipElement, UsePhase,
 };
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -51,7 +51,7 @@ use horizon_client::{
     extras_hud::Corners,
     fast_hash::FxHashMap,
     first_person::Hand,
-    health::{DamageContainer, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock},
+    health::{DamageContainer, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock, Victim},
     hud::{HudBatch, rgba},
     item_tooltip::TooltipDisplay,
     items::ItemStack,
@@ -88,6 +88,10 @@ use winit::{event::MouseButton, keyboard::KeyCode};
 
 pub(super) struct ObservedScreen {
     id: &'static str,
+    /// Not a `Screen` value: the title's own screen or an overlay drawn over
+    /// gameplay (sign editor, book, dialog, prompt). `set_screen` never sees
+    /// it open or close.
+    overlay: bool,
     menu: Option<String>,
     title: Option<Text>,
     rect: [f32; 4],
@@ -150,13 +154,122 @@ impl Game<'_> {
         })
     }
 
+    /// Opens `screen` (`Gui.setScreen`; `Screen::Playing` is vanilla's null):
+    /// the one place the game's screen changes. A different screen runs
+    /// `screen_opening` first (`ScreenEvent.Opening`: a mod may keep the
+    /// current screen or open its own), then `screen_closing` for the screen
+    /// it replaces, as NeoForge's `Minecraft.setScreen` does. The same screen
+    /// again, a game with no native mod, and a server's or a guest's `Game`
+    /// are a plain assignment.
+    pub(super) fn set_screen(&mut self, screen: Screen) {
+        if self.screen == screen {
+            return;
+        }
+        if mod_api::mods().is_empty()
+            || !self.options.execution_role.is_client()
+            || self.lan_acting.is_some()
+        {
+            self.screen = screen;
+            return;
+        }
+        let outcome = {
+            let current = self.screen_change_view(self.screen);
+            let new = self.screen_change_view(screen);
+            self.screen_change(&current, &new, true, self.screen != Screen::Playing)
+        };
+        let mut screen = screen;
+        let mut owner = None;
+        match outcome {
+            Some(ScreenOpening::Cancel) => return,
+            Some(ScreenOpening::ModScreen(mod_id)) if !self.mod_screen_blocked() => {
+                screen = Screen::Mod;
+                owner = Some(mod_id);
+            }
+            _ => {}
+        }
+        if self.screen == screen && owner.is_none() {
+            return;
+        }
+        self.screen = screen;
+        if let Some(owner) = owner {
+            self.native_mod_screen = Some(owner);
+        }
+        if screen == Screen::Mod {
+            self.keys.clear();
+            self.left = false;
+            self.right = false;
+            self.mining = None;
+            self.capture(false);
+        }
+    }
+    /// The events of one change of screen, in NeoForge's order, for
+    /// `set_screen` and for the overlays `observe_screen` announces: `opens`
+    /// fires `screen_opening` (`ScreenEvent.Opening`) from `current` to `new`
+    /// (a screen of `playing` is vanilla's null) and returns a mod's answer;
+    /// then, unless it cancelled, `closes` fires `screen_closing` for
+    /// `current`.
+    fn screen_change(
+        &self,
+        current: &NativeScreenView<'_>,
+        new: &NativeScreenView<'_>,
+        opens: bool,
+        closes: bool,
+    ) -> Option<ScreenOpening> {
+        let mut outcome = None;
+        if opens {
+            self.native_screen_opening(current, new, &mut outcome);
+        }
+        if closes && outcome != Some(ScreenOpening::Cancel) {
+            self.native_screen_closing(current);
+        }
+        outcome
+    }
+    /// `screen` as the screen hooks see it while it opens or closes: no
+    /// renderer (a test, a window not yet up) leaves its rectangle empty.
+    fn screen_change_view(&self, screen: Screen) -> NativeScreenView<'_> {
+        let rect = match &self.renderer {
+            Some(renderer) => self.screen_rect(
+                &HudBatch::new([renderer.config.width, renderer.config.height]),
+                screen,
+            ),
+            None => [0.0; 4],
+        };
+        let none = screen == Screen::Playing;
+        NativeScreenView {
+            id: screen.id(),
+            menu: self.remote_menu_type().filter(|m| !none && !m.is_empty()),
+            title: self
+                .remote
+                .as_ref()
+                .and_then(|r| r.menu_title.as_ref())
+                .filter(|_| !none),
+            rect,
+            slots: if none { 0 } else { self.slot_count() },
+            mouse: self.native_cursor(),
+            partial_tick: self.clock.fraction() as f32,
+        }
+    }
+    /// A mod's own screen cannot open now: over the title screen, a book, a
+    /// sign editor, a dialog or a prompt, with no player or a
+    /// world loading, or on a guest's behalf.
+    fn mod_screen_blocked(&self) -> bool {
+        self.title.is_some()
+            || self.lan_acting.is_some()
+            || self.player.is_none()
+            || self.screen_over_playing()
+            || self.remote_loading()
+    }
+
     pub(super) fn observe_screen(&mut self) {
         // Free with no native mod: the snapshot clones the title and menu.
         if mod_api::mods().is_empty() {
             return;
         }
+        // Only the title's screens and the overlays show over `Screen::Playing`.
+        let overlay = self.screen == Screen::Playing;
         let current = self.observed_screen_view().map(|view| ObservedScreen {
             id: view.id,
+            overlay,
             menu: view.menu.map(str::to_owned),
             title: view.title.cloned(),
             rect: view.rect,
@@ -164,17 +277,37 @@ impl Game<'_> {
             mouse: view.mouse,
             partial_tick: view.partial_tick,
         });
+        self.observe_change(current);
+    }
+    /// What the frame's screen changed since the last one. The `Screen` list
+    /// announces its own changes in `set_screen`; the title's screens and the
+    /// overlays have no single place they open or close, so they are
+    /// announced here, through the same `screen_change` and in the same order,
+    /// but after the change: a mod's answer to `screen_opening` cannot keep
+    /// them shut. `screen_init_post` follows for every kind, on opening and on
+    /// a resize.
+    fn observe_change(&mut self, current: Option<ObservedScreen>) {
         let changed = match (&self.observed_screen, &current) {
             (Some(old), Some(new)) => old.id != new.id || old.menu != new.menu,
             (None, None) => false,
             _ => true,
         };
         if changed {
-            if let Some(old) = &self.observed_screen {
-                self.native_screen_closing(&old.view());
+            let old = self.observed_screen.as_ref().filter(|old| old.overlay);
+            let opens = current.as_ref().is_some_and(|new| new.overlay)
+                || (current.is_none() && old.is_some());
+            if old.is_some() || opens {
+                let none = self.screen_change_view(Screen::Playing);
+                let from = old.map(ObservedScreen::view);
+                let to = current.as_ref().map(ObservedScreen::view);
+                self.screen_change(
+                    from.as_ref().unwrap_or(&none),
+                    to.as_ref().unwrap_or(&none),
+                    opens,
+                    from.is_some(),
+                );
             }
             if let Some(new) = &current {
-                self.native_screen_opening(&new.view());
                 self.native_screen_init_post(&new.view());
             }
         } else if let (Some(old), Some(new)) = (&self.observed_screen, &current)
@@ -2342,17 +2475,26 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_screen_draw(self, block, data, batch, origin);
     }
-    /// A screen was observed opening, at most once per frame.
-    pub(super) fn native_screen_opening(&self, screen: &NativeScreenView<'_>) {
-        mod_api::dispatch_screen_opening(self, screen);
+    /// `Gui.setScreen` is about to replace the `current` screen with `new`
+    /// (`ScreenEvent.Opening`; the screen `playing` is none: vanilla's null).
+    /// Answer `ScreenOpening::Cancel` to keep the current one, or
+    /// `ScreenOpening::ModScreen` to open a mod's own screen instead.
+    pub(super) fn native_screen_opening(
+        &self,
+        current: &NativeScreenView<'_>,
+        new: &NativeScreenView<'_>,
+        outcome: &mut Option<ScreenOpening>,
+    ) {
+        mod_api::dispatch_screen_opening(self, current, new, outcome);
     }
 
-    /// A screen was observed opening or changing rectangle, at most once per frame.
+    /// A screen was observed opening or changing rectangle, at most once per frame
+    /// (`ScreenEvent.Init.Post`).
     pub(super) fn native_screen_init_post(&self, screen: &NativeScreenView<'_>) {
         mod_api::dispatch_screen_init_post(self, screen);
     }
 
-    /// A screen was observed closing, at most once per frame.
+    /// The `screen` that was open is being replaced (`ScreenEvent.Closing`), after `native_screen_opening` let it.
     pub(super) fn native_screen_closing(&self, screen: &NativeScreenView<'_>) {
         mod_api::dispatch_screen_closing(self, screen);
     }
@@ -5366,6 +5508,35 @@ impl Game<'_> {
             lines,
         );
     }
+    /// `RenderTooltipEvent.GatherComponents`: the elements of `stack`'s
+    /// tooltip (`ItemStack.getTooltipLines` as text lines, then the image
+    /// component its item's `tooltip_component` part answered), once
+    /// `item_tooltip` has run and before any wrapping or measuring. Add,
+    /// change, reorder or remove elements; the lines draw in order, then the
+    /// images in order, under any bundle's contents. `max_width` starts at -1,
+    /// no limit, which leaves the lines as they are; a mod that sets it
+    /// wraps every line wider than that, in GUI pixels. Set `cancel` and
+    /// nothing is drawn, and no `tooltip_color` is asked. Asked each frame
+    /// the tooltip shows, never for one the stack hides. Client-side.
+    pub(super) fn native_render_tooltip_gather_components(
+        &self,
+        stack: &ItemStack,
+        screen_width: i32,
+        screen_height: i32,
+        elements: &mut Vec<TooltipElement>,
+        max_width: &mut i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_render_tooltip_gather_components(
+            self,
+            stack,
+            screen_width,
+            screen_height,
+            elements,
+            max_width,
+            cancel,
+        );
+    }
     /// Change a tooltip box's background and border gradient colors, as ARGB.
     /// Stack is None for tooltips not associated with an item.
     pub(super) fn native_tooltip_color(
@@ -6747,73 +6918,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_mob_effect_added(self, effect, entity, amplifier);
     }
-    /// `LivingEntity.hurtServer`, past its guards (invulnerable, dead, fire
-    /// with fire resistance), is about to hurt entity `entity` of type `kind`
-    /// (`minecraft:zombie`, `minecraft:player`) by `amount` of `damage_type`
-    /// (`minecraft:fall`), from the source's `causing` entity
-    /// (`DamageSource.getEntity`: the shooter of an arrow) and `direct` one
-    /// (`getDirectEntity`: the arrow), 0 for none or not known yet
-    /// (docs/native-mods.md). Change `amount`, or set `canceled`,
-    /// and nothing of `hurtServer` itself happens (no damage, hurt sound,
-    /// knockback, invulnerable time, statistics or criteria); the caller acts
-    /// as on a refused hit, except that a canceled hit on the ender dragon
-    /// still counts as landed (`EnderDragon.hurt` returns true whatever
-    /// `reallyHurt` did: the arrow is spent, the melee effects run). It runs
-    /// on the thread that ticks the world (the server thread): state shared with render thread hooks needs synchronising.
-    /// No `self`: the game is in the middle of the hit.
-    pub(super) fn native_living_incoming_damage(
-        entity: i32,
-        kind: &str,
-        damage_type: &str,
-        causing: i32,
-        direct: i32,
-        amount: &mut f32,
-        canceled: &mut bool,
-    ) {
-        mod_api::dispatch_living_incoming_damage(
-            entity,
-            kind,
-            damage_type,
-            causing,
-            direct,
-            amount,
-            canceled,
-        );
-    }
-    /// A player's weapon hit on a mob, before `Mob::damage_with` borrows the
-    /// victim: melee, sweep and spear hits, including LAN guests. Unlike v1,
-    /// this has a host and snapshots of the weapon, victim position/view and
-    /// DamageSource position. The acting player's network id is `causing`
-    /// (also the direct entity). Weapon enchantments include their levels.
-    /// Runs after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before v1; cancellation refuses
-    /// delivery. Other damage routes still only fire v1.
-    pub(super) fn native_living_incoming_damage_v2(
-        &mut self,
-        entity: i32,
-        kind: &str,
-        damage_type: &str,
-        causing: i32,
-        source_position: Option<[f64; 3]>,
-        victim_position: [f64; 3],
-        victim_view: [f64; 3],
-        weapon: Option<&ItemStack>,
-        amount: &mut f32,
-        canceled: &mut bool,
-    ) {
-        mod_api::dispatch_living_incoming_damage_v2(
-            self,
-            entity,
-            kind,
-            damage_type,
-            causing,
-            source_position,
-            victim_position,
-            victim_view,
-            weapon,
-            amount,
-            canceled,
-        );
-    }
     /// NeoForge's `LivingShieldBlockEvent`: entity `entity` of type `kind`
     /// (`minecraft:player`, `minecraft:zombie`) is hit for `damage` from `source` (its
     /// type and entities, as `native_living_incoming_damage` names them), and
@@ -7059,6 +7163,34 @@ pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
 pub(super) struct HitLevel<'a>(pub(super) DamageLevel<'a>);
 
 impl HitLevel<'_> {
+    /// NeoForge's `LivingIncomingDamageEvent`: `LivingEntity.hurtServer`, past its guards (an
+    /// invulnerable or dead entity, fire on a fire-resistant one), is about to hurt entity
+    /// `entity` of type `kind` (`minecraft:zombie`, `minecraft:player`) by `source`: its damage
+    /// type (`minecraft:fall`), causing entity (`DamageSource.getEntity`: the shooter of an
+    /// arrow), direct entity (`getDirectEntity`: the arrow), 0 for none or not known, and
+    /// where it comes from (`getSourcePosition`). `victim` is where the entity stands and
+    /// looks, and `weapon` the direct entity's weapon (`getWeaponItem`) when it is known.
+    /// `container` holds the damage before any reduction: change its `new_damage`, or the
+    /// invulnerability ticks a fresh hit leaves (vanilla's 20), or set `canceled` and nothing
+    /// of `hurtServer` happens (no damage, hurt sound, knockback, cooldown, statistics or
+    /// criteria); a canceled hit on the ender dragon still counts as landed (`EnderDragon.hurt`
+    /// returns true whatever `reallyHurt` did). It fires on every damage route, for players,
+    /// mobs and the ender dragon. The level is the hit's: its blocks, random and own
+    /// attachments; the hurt entity is in the middle of its hit.
+    pub(super) fn native_living_incoming_damage(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        victim: &Victim,
+        weapon: Option<&ItemStack>,
+        container: &mut DamageContainer,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_living_incoming_damage(
+            self, entity, kind, source, victim, weapon, container, canceled,
+        );
+    }
     /// NeoForge's `LivingDamageEvent.Pre`: `LivingEntity.actuallyHurt` of entity `entity` of
     /// type `kind` (`minecraft:player`, `minecraft:zombie`) by `source` (named as
     /// `native_living_incoming_damage` names it) has taken armor and magic, and the absorption
@@ -7093,6 +7225,33 @@ impl HitLevel<'_> {
     ) {
         mod_api::dispatch_living_damage_post(self, entity, kind, source, container);
     }
+}
+
+/// `native_living_incoming_damage` for the damage code (`health::HURT_SERVER`): whether it
+/// canceled the hit.
+pub(super) fn incoming_damage(
+    level: DamageLevel<'_>,
+    hurting: Hurting<'_>,
+    victim: Victim,
+    container: &mut DamageContainer,
+) -> bool {
+    if !mod_api::listened(mod_api::HookId::LivingIncomingDamage) {
+        return false;
+    }
+    let (entity, kind, source) = hurt_server_args(hurting);
+    let mut canceled = false;
+    horizon_client::health::with_weapon_of(source.direct, |weapon| {
+        HitLevel(level).native_living_incoming_damage(
+            entity,
+            kind,
+            &source,
+            &victim,
+            weapon,
+            container,
+            &mut canceled,
+        );
+    });
+    canceled
 }
 
 /// `native_living_damage_pre` for the damage code (`health::DAMAGE_PRE`).
@@ -7213,6 +7372,7 @@ pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
         damage_type,
         causing,
         direct,
+        ..
     } = source;
     let mut canceled = false;
     if !stand {
@@ -7277,27 +7437,6 @@ pub(super) fn block_contact(
     }
 }
 
-/// `native_living_incoming_damage` for the damage code (`health::HURT_SERVER`): whether
-/// it canceled the hit. Its one caller.
-pub(super) fn hurt_server(hurting: Hurting<'_>, amount: &mut f32) -> bool {
-    let (entity, kind, source) = hurt_server_args(hurting);
-    let HurtSource {
-        damage_type,
-        causing,
-        direct,
-    } = source;
-    let mut canceled = false;
-    Game::native_living_incoming_damage(
-        entity,
-        kind,
-        damage_type,
-        causing,
-        direct,
-        amount,
-        &mut canceled,
-    );
-    canceled
-}
 /// `native_living_incoming_damage`'s entity, entity type and source for a hit.
 fn hurt_server_args(hurting: Hurting<'_>) -> (i32, &str, HurtSource<'_>) {
     match hurting {
@@ -7308,17 +7447,20 @@ fn hurt_server_args(hurting: Hurting<'_>) -> (i32, &str, HurtSource<'_>) {
     }
 }
 /// A mob's damage as its `DamageSource`: the causing entity is known when it
-/// is a mob, and is the direct one too when it deals the damage itself.
+/// is a mob, or the player whose attack scope the hit lands in, and is the direct one too
+/// when it deals the damage itself.
 fn mob_source(damage: &Damage) -> HurtSource<'static> {
     let causing = match damage.attacker {
         Some(Who::Mob(id)) => id as i32,
-        _ => 0,
+        Some(Who::Player) => horizon_client::health::knockback_attacker(),
+        None => 0,
     };
     let melee = super::creatures::melee(damage.kind);
     HurtSource {
         damage_type: super::creatures::source_damage_type(*damage),
         causing,
         direct: if melee { causing } else { 0 },
+        position: damage.from,
     }
 }
 
@@ -8259,24 +8401,19 @@ impl Game<'_> {
     pub(super) fn native_mod_screen_open(&mut self, mod_id: &str) -> bool {
         // What `screen_hooks_open` would refuse over the world: the mod's
         // screen would be up with no hook to draw or click it.
-        let blocked = self.title.is_some()
-            || self.renderer.is_none()
-            || self.lan_acting.is_some()
-            || self.player.is_none()
-            || self.screen_over_playing()
-            || self.remote_loading();
+        let blocked = self.renderer.is_none() || self.mod_screen_blocked();
         let owner = self.native_mod_screen();
         if let Some(open) = mod_screen_opens(self.screen, blocked, owner, mod_id) {
             return open;
         }
         self.native_mod_screen = Some(mod_id.to_owned());
-        self.screen = Screen::Mod;
-        self.keys.clear();
-        self.left = false;
-        self.right = false;
-        self.mining = None;
-        self.capture(false);
-        true
+        self.set_screen(Screen::Mod);
+        if self.screen != Screen::Mod {
+            // `screen_opening` kept the world.
+            self.native_mod_screen = None;
+            return false;
+        }
+        self.native_mod_screen() == Some(mod_id)
     }
     /// Closes mod `mod_id`'s own screen, if it is open.
     pub(super) fn native_mod_screen_close(&mut self, mod_id: &str) {
@@ -8293,11 +8430,15 @@ impl Game<'_> {
     }
     /// A mod's own screen closes (Escape, or `native_mod_screen_close`).
     pub(super) fn close_mod_screen(&mut self) {
-        self.native_mod_screen = None;
         if self.screen == Screen::Mod {
-            self.screen = Screen::Playing;
+            self.set_screen(Screen::Playing);
+            if self.screen == Screen::Mod {
+                // `screen_opening` kept it open.
+                return;
+            }
             self.capture(true);
         }
+        self.native_mod_screen = None;
     }
     /// The open menu's title (the block's name, or the one it was given),
     /// as plain text.
@@ -9907,7 +10048,7 @@ mod tests {
         }
         #[horizon_client::mod_api::__subscriptions]
         impl Hooks for User {
-            fn register(&self, registrar: &mut Registrar) {
+            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 let kind = registrar.block_entity_type_key("be_test:shared");
                 registrar
                     .block_entity_part(&kind, Press)
@@ -9930,7 +10071,7 @@ mod tests {
         }
         #[horizon_client::mod_api::__subscriptions]
         impl Hooks for TestMod {
-            fn register(&self, registrar: &mut Registrar) {
+            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 let kind = registrar
                     .block_entity_type("shared")
                     .blocks(if self.invalid {
@@ -9986,8 +10127,7 @@ mod tests {
         horizon_client::mod_api::install(mods.clone());
         horizon_client::mod_api::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root =
-            super::super::mods::content_root(&base, &Default::default(), &Default::default());
+        let root = super::super::mods::content_root(&base, &Default::default());
         if invalid {
             let error = root.unwrap_err().to_string();
             assert!(error.contains("be_test:shared"), "{error}");
@@ -10755,8 +10895,7 @@ mod tests {
         let hunger_hooks = free_hooks(include_str!("../hunger.rs"));
         let landing_hooks = free_hooks(include_str!("../landing.rs"));
         let motion_hooks = free_hooks(include_str!("../motion.rs"));
-        // The chat relay's (`horizon_client_lib::lan::hub::chat`).
-        let chat_hooks = free_hooks(include_str!("../lan/hub/chat.rs"));
+        let hub_hooks = free_hooks(include_str!("../lan/hub.rs"));
         let ender_hooks = free_hooks(include_str!("../mobs/enderman.rs"));
         let declared: BTreeSet<_> = section
             .lines()
@@ -10777,7 +10916,7 @@ mod tests {
             .chain(hunger_hooks.iter().copied())
             .chain(landing_hooks.iter().copied())
             .chain(motion_hooks.iter().copied())
-            .chain(chat_hooks.iter().copied())
+            .chain(hub_hooks.iter().copied())
             .chain(ender_hooks.iter().copied())
             .collect();
         let mut names = BTreeSet::new();
@@ -10806,8 +10945,8 @@ mod tests {
                 format!("horizon_client_lib::landing::native_{name}")
             } else if motion_hooks.contains(name) {
                 format!("horizon_client_lib::motion::native_{name}")
-            } else if chat_hooks.contains(name) {
-                format!("horizon_client_lib::lan::hub::chat::native_{name}")
+            } else if hub_hooks.contains(name) {
+                format!("horizon_client_lib::lan::hub::native_{name}")
             } else if menu_hooks.contains(name) {
                 // menu.rs compiles into horizon-client-lib (#5446's
                 // split): horizon-mixins resolves the crate by its package.
@@ -10855,8 +10994,8 @@ mod tests {
         }
     }
 
-    /// The damage hook gets a mob's source from its damage: the causing mob,
-    /// the direct one when it deals the damage itself.
+    /// The damage hook gets a mob's source from its damage: the causing mob or attacking
+    /// player, the direct one when it deals the damage itself.
     #[test]
     fn the_damage_hook_names_the_source() {
         use super::{HurtSource, Hurting, hurt_server_args, mob_source};
@@ -10875,14 +11014,19 @@ mod tests {
         assert_eq!(source(K::Arrow, zombie), ("minecraft:arrow", 3, 0));
         let blast = source(K::Explosion, zombie);
         assert_eq!(blast, ("minecraft:player_explosion", 3, 0));
-        // A player behind a mob's hit isn't known yet, nor is a fall's source.
+        // A player behind a mob's hit is the one whose attack it lands in (none outside one);
+        // a fall has no source.
         let hit = source(K::PlayerAttack, Some(Who::Player));
         assert_eq!(hit, ("minecraft:player_attack", 0, 0));
+        let _attack = horizon_client::health::knockback_from(7);
+        let hit = source(K::PlayerAttack, Some(Who::Player));
+        assert_eq!(hit, ("minecraft:player_attack", 7, 7));
         assert_eq!(source(K::Fall, None), ("minecraft:fall", 0, 0));
         let arrow = HurtSource {
             damage_type: "minecraft:arrow",
             causing: 4,
             direct: 0,
+            position: None,
         };
         let player = (2, "minecraft:player", arrow);
         assert_eq!(hurt_server_args(Hurting::Player(2, arrow)), player);
@@ -10944,5 +11088,187 @@ mod tests {
         assert!(!mod_image_fits(4, 2, 31, 1024, 1024));
         assert!(!mod_image_fits(4, 2, 33, 1024, 1024));
         assert!(!mod_image_fits(2048, 1, 2048 * 4, 1024, 1024));
+    }
+}
+
+#[cfg(test)]
+mod screen_open_tests {
+    use super::*;
+    use crate::mod_api::{
+        ClientHost, Hooks, ModEntry, ScreenClosingEvent, ScreenOpeningEvent, testing::with_mods,
+    };
+    use std::sync::{Arc, Mutex};
+
+    struct Probe {
+        log: Arc<Mutex<Vec<String>>>,
+        answer: Arc<Mutex<Option<ScreenOpening>>>,
+    }
+    #[mod_api::__subscriptions]
+    impl Hooks for Probe {
+        fn screen_opening(
+            &self,
+            _host: &dyn ClientHost,
+            event: &mut ScreenOpeningEvent<'_>,
+        ) -> Option<ScreenOpening> {
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("opening {}->{}", event.current.id, event.new.id));
+            self.answer.lock().unwrap().clone()
+        }
+        fn screen_closing(&self, _host: &dyn ClientHost, event: &mut ScreenClosingEvent<'_>) {
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("closing {}", event.screen.id));
+        }
+    }
+
+    /// Runs `test` on a client game with one probe mod; the probe's log and answer.
+    fn run(
+        test: impl FnOnce(&mut Game<'_>, &Arc<Mutex<Vec<String>>>, &Arc<Mutex<Option<ScreenOpening>>>),
+    ) {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let answer = Arc::new(Mutex::new(None));
+        let mods = vec![ModEntry::new(
+            "screens",
+            Box::new(Probe {
+                log: log.clone(),
+                answer: answer.clone(),
+            }),
+        )]
+        .into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.execution_role = ExecutionRole::Client;
+                game.player = Some(
+                    horizon_client::motion::PlayerMotion::new(
+                        game.motion,
+                        horizon_core::geometry::Vec3::ZERO,
+                    )
+                    .unwrap(),
+                );
+                test(game, &log, &answer);
+            });
+        });
+    }
+    fn take(log: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
+        std::mem::take(&mut *log.lock().unwrap())
+    }
+
+    /// Opening fires once, before the change, and the old screen's closing
+    /// follows it (`ScreenEvent.Opening`, then `.Closing`): none for the null
+    /// screen the game plays on, one for each screen it leaves.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_new_screen_fires_opening_then_closing_of_the_old_one() {
+        run(|game, log, _| {
+            game.set_screen(Screen::Inventory);
+            assert_eq!(game.screen, Screen::Inventory);
+            assert_eq!(take(log), ["opening playing->inventory"]);
+            game.set_screen(Screen::Playing);
+            assert_eq!(game.screen, Screen::Playing);
+            assert_eq!(
+                take(log),
+                ["opening inventory->playing", "closing inventory"]
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn cancelling_opening_keeps_the_current_screen() {
+        run(|game, log, answer| {
+            game.set_screen(Screen::Paused);
+            take(log);
+            *answer.lock().unwrap() = Some(ScreenOpening::Cancel);
+            game.set_screen(Screen::Options);
+            assert_eq!(game.screen, Screen::Paused);
+            assert_eq!(take(log), ["opening paused->options"]);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn replacing_opening_opens_the_mods_screen_instead() {
+        run(|game, log, answer| {
+            game.set_screen(Screen::Paused);
+            take(log);
+            *answer.lock().unwrap() = Some(ScreenOpening::ModScreen("screens".into()));
+            game.set_screen(Screen::Options);
+            assert_eq!(game.screen, Screen::Mod);
+            assert_eq!(game.native_mod_screen(), Some("screens"));
+            // One Opening, for the screen asked for: the replacement does not fire it again.
+            assert_eq!(take(log), ["opening paused->options", "closing paused"]);
+            *answer.lock().unwrap() = None;
+            game.close_mod_screen();
+            assert_eq!(game.screen, Screen::Playing);
+            assert_eq!(game.native_mod_screen(), None);
+            assert_eq!(take(log), ["opening mod->playing", "closing mod"]);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn the_same_screen_again_fires_nothing() {
+        run(|game, log, _| {
+            game.set_screen(Screen::Playing);
+            assert!(take(log).is_empty());
+            game.set_screen(Screen::Inventory);
+            take(log);
+            game.set_screen(Screen::Inventory);
+            assert!(take(log).is_empty());
+        });
+    }
+
+    fn observed(id: &'static str, overlay: bool) -> Option<ObservedScreen> {
+        Some(ObservedScreen {
+            id,
+            overlay,
+            menu: None,
+            title: None,
+            rect: [0.0; 4],
+            slots: 0,
+            mouse: [0.0; 2],
+            partial_tick: 0.0,
+        })
+    }
+
+    /// An overlay (here a sign editor) is announced as a screen is: Opening
+    /// when it shows, Opening back to `playing` and Closing when it goes. A
+    /// `Screen` the observer sees change was announced by `set_screen`, so it
+    /// is not announced twice.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn an_overlay_fires_opening_then_closing_through_the_observer() {
+        run(|game, log, _| {
+            game.observe_change(observed("sign_editor", true));
+            assert_eq!(take(log), ["opening playing->sign_editor"]);
+            game.observe_change(observed("sign_editor", true));
+            assert!(take(log).is_empty());
+            game.observe_change(None);
+            assert_eq!(
+                take(log),
+                ["opening sign_editor->playing", "closing sign_editor"]
+            );
+            game.observe_change(observed("inventory", false));
+            game.observe_change(None);
+            assert!(take(log).is_empty());
+            game.observe_change(observed("inventory", false));
+            game.observe_change(observed("sign_editor", true));
+            assert_eq!(take(log), ["opening playing->sign_editor"]);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn no_mods_is_a_plain_assignment() {
+        with_mods(Vec::new().into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.execution_role = ExecutionRole::Client;
+                game.set_screen(Screen::Inventory);
+                assert_eq!(game.screen, Screen::Inventory);
+            });
+        });
     }
 }

@@ -129,7 +129,7 @@ impl StartupMenu {
             game.ui.options = std::mem::take(&mut self.options);
             game.ui.options.resource_error =
                 game.ui.options.resource_error.take().or(resource_error);
-            game.screen = Screen::Options;
+            game.set_screen(Screen::Options);
             game.options_from_title = true;
             game.dragging = self.dragging;
         }
@@ -360,17 +360,12 @@ pub(super) fn spawn_loader(
         .name("resource-loader".into())
         .spawn(move || {
             let mut pack_error = None;
-            let root = packs::startup_root(
-                &vanilla_root,
-                &settings.resource_packs,
-                &[],
-                &settings.mods.enabled,
-                &mod_sources,
-            )
-            .or_else(|error| {
-                pack_error = Some(error.to_string());
-                mods::content_root(&vanilla_root, &settings.mods.enabled, &mod_sources)
-            });
+            let root =
+                packs::startup_root(&vanilla_root, &settings.resource_packs, &[], &mod_sources)
+                    .or_else(|error| {
+                        pack_error = Some(error.to_string());
+                        mods::content_root(&vanilla_root, &mod_sources)
+                    });
             let result = root
                 .and_then(|root| {
                     load_resources(

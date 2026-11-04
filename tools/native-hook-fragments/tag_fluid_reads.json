@@ -2,6 +2,7 @@
   "hooks": [],
   "helpers": [
     {"name": "block_state_in_tag", "side": "server", "target": "horizon_client::game::native_world_read::Game<'_>::native_block_state_in_tag"},
+    {"name": "state_outline", "side": "both", "target": "horizon_client::game::native_world_read::Game<'_>::native_state_outline"},
     {"name": "state_fluid_state", "side": "both", "target": "horizon_client::game::native_world_read::Game<'_>::native_state_fluid_state"},
     {"name": "fluid_in_tag", "side": "server", "target": "horizon_client::game::native_world_read::Game<'_>::native_fluid_in_tag"},
     {

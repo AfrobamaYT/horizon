@@ -54,7 +54,7 @@ impl Game<'_> {
         };
         self.world.block_entities.get_or_insert_with(key, || entity);
         self.container = Some(key);
-        self.screen = super::Screen::Inventory;
+        self.set_screen(super::Screen::Inventory);
         self.capture(false);
         self.right = false;
     }
@@ -301,7 +301,7 @@ impl Game<'_> {
         });
         if !near {
             self.close_container();
-            self.screen = super::Screen::Playing;
+            self.set_screen(super::Screen::Playing);
             self.capture(true);
         }
     }
@@ -321,7 +321,7 @@ impl Game<'_> {
         let range = self.reach() + 4.0;
         if !(table && horizon_client::lan::guest::within_block_range(eye, range, pos)) {
             self.close_container();
-            self.screen = super::Screen::Playing;
+            self.set_screen(super::Screen::Playing);
             self.capture(true);
         }
     }

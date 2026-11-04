@@ -627,12 +627,12 @@ impl Game<'_> {
         };
         options.initial = options.snapshot();
         self.world_options = Some(options);
-        self.screen = Screen::WorldOptions;
+        self.set_screen(Screen::WorldOptions);
     }
 
     pub(super) fn close_world_options(&mut self) {
         self.world_options = None;
-        self.screen = Screen::Paused;
+        self.set_screen(Screen::Paused);
     }
 
     /// Escape: the question and RestrictionsScreen return to the options

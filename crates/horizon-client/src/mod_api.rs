@@ -6,14 +6,20 @@
 use std::sync::{Arc, OnceLock};
 
 mod phase;
+pub use horizon_mods::Side;
+pub(crate) use phase::install_packages;
+#[cfg(test)]
+pub(crate) use phase::with_test_packages;
 pub use phase::{
-    DataLoadContext, DataLoadOrigin, LoadedMods, RegistrationContext, RegistrationPhase,
+    DataLoadContext, DataLoadOrigin, LoadedMods, PackageInfo, PackageKind, RegistrationContext,
 };
 mod config_files;
 pub use config_files::{
     CONFIG_FILE_MAX, CONFIG_LIST_MAX, ConfigEntry, ConfigEntryKind, ConfigFileError, ConfigFiles,
     ConfigPath, ConfigStat,
 };
+mod tooltip_element;
+pub use tooltip_element::{TooltipElement, TooltipImage};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod client_reload;
@@ -54,7 +60,7 @@ pub use crate::gfx::native_render::{
     BlockSpriteArrays, RenderHookId, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn,
     WorldDrawnEvent, render_hook_ids, wgpu,
 };
-pub use crate::health::{DamageContainer, HurtSource, Reduction, ShieldBlock};
+pub use crate::health::{DamageContainer, HurtSource, Reduction, ShieldBlock, Victim};
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::item_tooltip::TooltipDisplay;
@@ -448,6 +454,19 @@ pub struct NativeItemFished<'a> {
     /// The items the fishing loot table rolled, which the player receives
     /// (`getDrops`: they can't be changed here; loot tables change them).
     pub drops: &'a [ItemStack],
+}
+
+/// What a mod answers to `screen_opening` (`ScreenEvent.Opening`): the screen
+/// that was about to open does not. The first mod to answer wins.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScreenOpening {
+    /// `Opening.setCanceled(true)`: the current screen stays open.
+    Cancel,
+    /// `Opening.setNewScreen(..)`: the mod's own screen
+    /// (`Host::mod_screen_open`) opens instead, if it can open there (not over
+    /// the title screen, a book, a prompt or while a world loads; the
+    /// screen that was about to open does then).
+    ModScreen(String),
 }
 
 /// The open screen, for the screen hooks (`native_screen_render_post`, the
@@ -3090,7 +3109,7 @@ mod tests {
         struct StickMod<P>(P);
         #[mod_api::__subscriptions]
         impl<P: ItemPart + Clone> Hooks for StickMod<P> {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 r.item_part("minecraft:stick", self.0.clone());
             }
         }
@@ -3248,10 +3267,7 @@ mod tests {
     #[test]
     fn dispatch_before_installation_is_empty() {
         let mut components = Vec::new();
-        dispatch_component_types(
-            &RegistrationContext::new(RegistrationPhase::Components),
-            &mut components,
-        );
+        dispatch_component_types(&RegistrationContext::new(), &mut components);
         assert!(mods().is_empty());
         assert!(components.is_empty());
     }
@@ -3279,10 +3295,7 @@ mod tests {
             }
         }));
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            dispatch_component_types(
-                &RegistrationContext::new(RegistrationPhase::Components),
-                &mut Vec::new(),
-            )
+            dispatch_component_types(&RegistrationContext::new(), &mut Vec::new())
         }));
         // Once the dispatch has unwound, the thread is in no mod.
         let _ = std::panic::catch_unwind(|| panic!("a broken mod's caller"));
@@ -3359,85 +3372,6 @@ mod tests {
             let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
             assert_eq!(told, [block], "{block}");
         }
-    }
-
-    struct Backstab;
-
-    #[mod_api::__subscriptions]
-    impl Hooks for Backstab {
-        fn living_incoming_damage_v2(
-            &self,
-            host: &mut dyn ServerHost,
-            event: &mut LivingIncomingDamageV2Event<'_>,
-        ) -> Flow {
-            assert_eq!(event.causing, 7);
-            assert_eq!(event.kind, "minecraft:zombie");
-            assert_eq!(event.damage_type, "minecraft:player_attack");
-            if event.entity == 0 {
-                return Flow::Cancel;
-            }
-            let from = event.source_position.unwrap();
-            let behind = (0..3)
-                .map(|axis| (from[axis] - event.victim_position[axis]) * event.victim_view[axis])
-                .sum::<f64>()
-                < 0.0;
-            if behind {
-                let weapon = event.weapon.unwrap();
-                let level = weapon.enchantment_level("probe:backstab");
-                assert_eq!(weapon.enchantments().len(), 1);
-                event.amount *= level as f32;
-                let player = host.acting_player().unwrap();
-                host.action_bar(player.uuid, Text::literal("backstab"));
-            }
-            Flow::Continue
-        }
-    }
-
-    #[test]
-    fn damage_v2_exposes_weapon_geometry_and_host_without_changing_v1() {
-        let mods = [ModEntry::new("backstab", Box::new(Backstab))];
-        install(mods.into());
-        let mut weapon = stick();
-        weapon.enchant("probe:backstab", 3);
-        for (entity, source_z, expected, canceled_expected) in [
-            (1, -1.0, 12.0, false),
-            (1, 1.0, 4.0, false),
-            (0, -1.0, 4.0, true),
-        ] {
-            let mut host = Reader {
-                block: "minecraft:air",
-                lines: Vec::new(),
-            };
-            let mut amount = 4.0;
-            let mut canceled = false;
-            dispatch_living_incoming_damage_v2(
-                &mut host,
-                entity,
-                "minecraft:zombie",
-                "minecraft:player_attack",
-                7,
-                Some([0.0, 0.0, source_z]),
-                [0.0; 3],
-                [0.0, 0.0, 1.0],
-                Some(&weapon),
-                &mut amount,
-                &mut canceled,
-            );
-            assert_eq!((amount, canceled), (expected, canceled_expected));
-            assert_eq!(host.lines.len(), usize::from(expected == 12.0));
-        }
-        let mut amount = 4.0;
-        let mut canceled = false;
-        dispatch_living_incoming_damage(
-            1,
-            "minecraft:zombie",
-            "minecraft:player_attack",
-            7,
-            7,
-            &mut amount,
-            &mut canceled,
-        );
-        assert_eq!((amount, canceled), (4.0, false));
     }
 
     #[test]
@@ -3543,7 +3477,7 @@ mod tests {
 
     #[mod_api::__subscriptions]
     impl Hooks for OffHandTop {
-        fn register(&self, r: &mut Registrar) {
+        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
             r.item_part("minecraft:stick", HeardStick);
         }
 

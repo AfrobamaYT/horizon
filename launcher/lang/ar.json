@@ -1045,15 +1045,8 @@
     "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: لا يحتوي Cargo.toml على تبعية horizon-client.",
     "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: يطلب horizon-client {fields}. بناءات الخادم بلا واجهة؛ والمشغّل هو من يتحكم في ميزات horizon-client. أزل features واستخدم default-features = false أو احذفه.",
     "{mod}: {error}": "{mod}: {error}",
-    "Building {name}'s post-build step": "خطوة ما بعد البناء لـ {name}",
-    "These mods were made for different Horizon versions": "تم صنع هذه التعديلات لإصدارات مختلفة من هورايزون",
-    "They often still work together. If the build fails, install versions made for the same Nightly.": "غالبًا ما تستمر في العمل معًا. إذا فشل البناء، قم بتثبيت الإصدارات المصنوعة لنفس نسخة Nightly.",
     "{mode} · stopped": "{mode} · متوقف",
     "{online} of {max}": "{online} من {max}",
-    "Running {name}'s post-build step": "جاري تنفيذ خطوة ما بعد البناء لـ {name}",
-    "The source of {source}. Its release ships {file}, a content mod: installing those from GitHub is not supported yet.": "مصدر {source}. يحتوي إصداره على {file}، وهو تعديل محتوى: تثبيت هذه التعديلات من جيت هاب غير مدعوم بعد.",
-    "Build anyway": "البناء على أي حال",
-    "{error} They often still build: pass --allow-version-mismatch to try.": "{error} غالبًا ما يتم بناؤها بنجاح: مرر الوسيط --allow-version-mismatch للمحاولة.",
     "Accent colour, glass, blur, language and the options above go back to how Horizon ships.": "يعود لون التمييز والزجاج والتمويه واللغة والخيارات أعلاه إلى ما يأتي به Horizon.",
     "Reset the launcher's look": "إعادة تعيين مظهر المشغّل",
     "Reset to defaults": "استعادة الإعدادات الافتراضية",
@@ -1108,6 +1101,5 @@
     "Save changes switches it. Nothing in its folder is deleted.": "«حفظ التغييرات» يطبّق التبديل. لا يُحذف شيء من مجلده.",
     "Its mods made for {loader} stay in its folder but won't load.": "تبقى إضافاته المصنوعة لـ {loader} في مجلده لكنها لن تعمل.",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "تبقى إضافاته المصنوعة لـ Minecraft {from} في مجلده؛ قد لا يعمل بعضها في {to}.",
-    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "حُفظت عوالمه بـ Minecraft {from}: يرقّيها {to} نهائيًا، ولا يستطيع فتحها إن كان أقدم.",
-    "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "لا يحتوي مصدر اللعبة هذا على قالب دخول أصلي قابل للقراءة. حدّث Horizon وأعد بناء المودات لهذه اللعبة."
+    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "حُفظت عوالمه بـ Minecraft {from}: يرقّيها {to} نهائيًا، ولا يستطيع فتحها إن كان أقدم."
 }

@@ -95,7 +95,7 @@ enabled = true               # false pauses it and keeps the webhook
 "##;
 
 /// Each typed setting: its section, its name, and the vanilla key it writes.
-pub(crate) const TYPED: [(&str, &str, &str); 16] = [
+pub const TYPED: [(&str, &str, &str); 16] = [
     ("server", "motd", "motd"),
     ("server", "port", "server-port"),
     ("server", "bind", "server-ip"),
@@ -139,7 +139,7 @@ pub struct Config {
     pub api: Api,
     /// Chat and players posted to a Discord channel (discord.rs).
     #[serde(default)]
-    pub discord: crate::discord::Settings,
+    pub discord: Discord,
     /// The game reads this section itself (docs/anticheat.md); written only when it isn't the default.
     #[serde(default, skip_serializing_if = "anticheat_default")]
     pub anticheat: horizon_anticheat::Config,
@@ -155,6 +155,55 @@ fn chat_filter_default(c: &horizon_chat_filter::Config) -> bool {
 
 fn anticheat_default(c: &horizon_anticheat::Config) -> bool {
     *c == horizon_anticheat::Config::default()
+}
+
+const EVENTS: [&str; 6] = ["chat", "join", "leave", "death", "kick", "announce"];
+
+/// The `[discord]` table of server.toml.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Discord {
+    pub enabled: bool,
+    pub webhook: String,
+    pub events: Vec<String>,
+}
+
+impl Default for Discord {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            webhook: String::new(),
+            events: ["chat", "join", "leave", "death"].map(String::from).into(),
+        }
+    }
+}
+
+impl Discord {
+    pub fn check(&self) -> Result<(), String> {
+        let hook = self.webhook.trim();
+        let discord = [
+            "discord.com",
+            "discordapp.com",
+            "ptb.discord.com",
+            "canary.discord.com",
+        ];
+        if !hook.is_empty()
+            && !discord.iter().any(|host| {
+                hook.strip_prefix("https://")
+                    .and_then(|h| h.strip_prefix(host))
+                    .is_some_and(|path| path.starts_with("/api/webhooks/"))
+            })
+        {
+            return Err("discord.webhook must be a Discord webhook URL (https://discord.com/api/webhooks/...)".into());
+        }
+        match self.events.iter().find(|e| !EVENTS.contains(&e.as_str())) {
+            Some(e) => Err(format!(
+                "discord.events has \"{e}\": use {}",
+                EVENTS.join(", ")
+            )),
+            None => Ok(()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -294,11 +343,36 @@ pub struct Backups {
     pub keep: u32,
 }
 
+impl Backups {
+    /// The automatic backup period, or `None` when disabled.
+    pub fn interval(&self) -> Result<Option<std::time::Duration>, String> {
+        let every = self.every.trim();
+        if every == "0" || every.is_empty() {
+            return Ok(None);
+        }
+        let (number, unit) = every.split_at(every.len() - 1);
+        let n: u64 = number.trim().parse().map_err(|_| {
+            format!("backups.every is {every:?}: use a number and m, h or d, like \"6h\"")
+        })?;
+        let secs = match unit {
+            "m" => 60,
+            "h" => 3600,
+            "d" => 86_400,
+            _ => {
+                return Err(format!(
+                    "backups.every is {every:?}: use a number and m, h or d, like \"6h\""
+                ));
+            }
+        };
+        Ok((n > 0).then(|| std::time::Duration::from_secs(n * secs)))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Updates {
     /// Releases kept in `releases/` after an update besides the one in use and the one `rollback` goes
-    /// back to (crate::update::Install::prune).
+    /// back to (the supervisor's update pruning policy).
     pub keep: u32,
 }
 
@@ -405,7 +479,7 @@ impl Config {
                 w.name
             ));
         }
-        crate::backup::interval(&self.backups.every)?;
+        self.backups.interval()?;
         self.panel.address()?;
         self.api.check()?;
         self.discord.check()?;
@@ -660,6 +734,27 @@ mod tests {
             p.put(k, (*v).to_owned());
         }
         p
+    }
+
+    #[test]
+    fn intervals() {
+        let interval = |every: &str| {
+            Backups {
+                every: every.into(),
+                ..Backups::default()
+            }
+            .interval()
+        };
+        assert_eq!(
+            interval("6h").unwrap(),
+            Some(std::time::Duration::from_secs(21_600))
+        );
+        assert_eq!(
+            interval("30m").unwrap(),
+            Some(std::time::Duration::from_secs(1800))
+        );
+        assert_eq!(interval("0").unwrap(), None);
+        assert!(interval("6 hours").is_err());
     }
 
     #[test]

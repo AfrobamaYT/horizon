@@ -50,12 +50,17 @@ mod tests {
         pub(super) struct NativeExplosionStart<'a>(pub &'a ());
         pub(super) struct NativeItemFished<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
+        pub(super) enum ScreenOpening {
+            Cancel,
+            ModScreen(String),
+        }
         pub(super) struct StackedOnOther<'a> {
             pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
         }
         pub(super) struct Corners;
         pub(super) struct Suggestion;
         pub(super) struct HudBatch;
+        pub(super) struct TooltipElement;
         pub(super) struct BiomeColors;
         pub(super) struct SpawnEntry;
         pub(super) struct UseAnimation;
@@ -81,8 +86,15 @@ mod tests {
         pub(super) struct NativeMobRender<'a>(pub &'a ());
         pub(super) struct NativeShake;
         pub(super) struct ShieldBlock;
-        pub(super) struct HurtSource<'a>(pub &'a ());
-        pub(super) struct DamageContainer;
+        pub(super) struct HurtSource<'a> {
+            pub(super) damage_type: &'a str,
+            pub(super) position: Option<[f64; 3]>,
+        }
+        pub(super) struct Victim {
+            pub(super) position: [f64; 3],
+            pub(super) view: [f64; 3],
+        }
+        pub(super) struct DamageContainer(pub(super) f32);
         #[derive(Clone, Copy)]
         pub(super) struct PhantomSpawnResult;
         #[derive(Clone, Copy)]
@@ -222,6 +234,9 @@ mod tests {
         fn block_entity_draw(&self, _: &dyn Host, _: &mut BlockEntityDraw) {}
     }
     struct TestHost;
+    struct TestLevel;
+    impl LevelHost for TestLevel {}
+    impl LevelRandomHost for TestLevel {}
     impl Host for TestHost {}
     impl ServerHost for TestHost {}
     impl ClientHost for TestHost {}
@@ -718,8 +733,12 @@ mod tests {
             event.apply = !event.apply;
             self.calls.lock().unwrap().push(self.id);
         }
-        fn living_incoming_damage(&self, event: &mut LivingIncomingDamageEvent<'_>) -> Flow {
-            event.amount = event.amount * 2.0 + self.id as f32;
+        fn living_incoming_damage(
+            &self,
+            _: &mut dyn LevelRandomHost,
+            event: &mut LivingIncomingDamageEvent<'_>,
+        ) -> Flow {
+            event.container.0 = event.container.0 * 2.0 + self.id as f32;
             if self.id == 2 {
                 Flow::Cancel
             } else {
@@ -962,22 +981,22 @@ mod tests {
         struct Backstab;
         #[mod_api::__subscriptions]
         impl Hooks for Backstab {
-            fn living_incoming_damage_v2(
+            fn living_incoming_damage(
                 &self,
-                _: &mut dyn ServerHost,
-                event: &mut LivingIncomingDamageV2Event<'_>,
+                _: &mut dyn LevelRandomHost,
+                event: &mut LivingIncomingDamageEvent<'_>,
             ) -> Flow {
-                assert_eq!(event.causing, 7);
+                assert_eq!(event.source.damage_type, "minecraft:player_attack");
                 let (from, at, look) = (
-                    event.source_position.unwrap(),
-                    event.victim_position,
-                    event.victim_view,
+                    event.source.position.unwrap(),
+                    event.victim.position,
+                    event.victim.view,
                 );
                 let behind = (0..3)
                     .map(|axis| (from[axis] - at[axis]) * look[axis])
                     .sum::<f64>();
                 if behind < 0.0 && event.weapon.is_some() {
-                    event.amount *= 3.0;
+                    event.container.0 *= 3.0;
                 }
                 Flow::Continue
             }
@@ -991,21 +1010,26 @@ mod tests {
             (1.0, Some(&held), 4.0),
             (-1.0, None, 4.0),
         ] {
-            let (mut amount, mut canceled) = (4.0, false);
-            dispatch_living_incoming_damage_v2(
-                &mut TestHost,
+            let source = HurtSource {
+                damage_type: "minecraft:player_attack",
+                position: Some([0.0, 0.0, source_z]),
+            };
+            let victim = Victim {
+                position: [0.0; 3],
+                view: [0.0, 0.0, 1.0],
+            };
+            let (mut container, mut canceled) = (DamageContainer(4.0), false);
+            dispatch_living_incoming_damage(
+                &mut TestLevel,
                 1,
                 "minecraft:zombie",
-                "minecraft:player_attack",
-                7,
-                Some([0.0, 0.0, source_z]),
-                [0.0; 3],
-                [0.0, 0.0, 1.0],
+                &source,
+                &victim,
                 weapon,
-                &mut amount,
+                &mut container,
                 &mut canceled,
             );
-            assert_eq!((amount, canceled), (expected, false));
+            assert_eq!((container.0, canceled), (expected, false));
         }
     }
 
@@ -1086,11 +1110,28 @@ mod tests {
         dispatch_should_apply_effect_tick_this_tick(&host, "effect", 0, 0, &mut apply);
         assert!(!apply);
         assert_eq!(*calls.lock().unwrap(), [1, 2]);
-        let mut amount = 1.0;
+        let source = HurtSource {
+            damage_type: "damage",
+            position: None,
+        };
+        let victim = Victim {
+            position: [0.0; 3],
+            view: [0.0; 3],
+        };
+        let mut container = DamageContainer(1.0);
         let mut canceled = false;
-        dispatch_living_incoming_damage(0, "kind", "damage", 0, 0, &mut amount, &mut canceled);
+        dispatch_living_incoming_damage(
+            &mut TestLevel,
+            0,
+            "kind",
+            &source,
+            &victim,
+            None,
+            &mut container,
+            &mut canceled,
+        );
         // Each mod sees the one before: (1 × 2 + 1) × 2 + 2, kept though mod 2 cancels.
-        assert_eq!(amount, 8.0);
+        assert_eq!(container.0, 8.0);
         assert!(canceled);
         let chained: Vec<ModEntry> = [1, 3]
             .map(|id| {
@@ -1105,10 +1146,19 @@ mod tests {
             .into();
         let chained: Arc<[ModEntry]> = chained.into();
         install(chained.clone());
-        let mut amount = 1.0;
+        let mut container = DamageContainer(1.0);
         let mut canceled = false;
-        dispatch_living_incoming_damage(0, "kind", "damage", 0, 0, &mut amount, &mut canceled);
-        assert_eq!(amount, 9.0);
+        dispatch_living_incoming_damage(
+            &mut TestLevel,
+            0,
+            "kind",
+            &source,
+            &victim,
+            None,
+            &mut container,
+            &mut canceled,
+        );
+        assert_eq!(container.0, 9.0);
         assert!(!canceled);
         install(mods.clone());
         calls.lock().unwrap().clear();

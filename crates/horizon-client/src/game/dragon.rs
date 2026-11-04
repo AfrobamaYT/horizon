@@ -631,12 +631,20 @@ impl Dragon {
         };
         let before = self.health;
         // reallyHurt: LivingEntity.hurtServer, past its guards: the hit's damage sequence
-        // starts, then a native mod's hook. A canceled hit still returns true.
+        // starts, and `LivingIncomingDamageEvent` may change or cancel it. A canceled hit
+        // still returns true.
         let mut container = DamageContainer::new(damage);
         let hurting = horizon_client::health::Hurting::Dragon(self.id as i32, source);
-        if horizon_client::health::hurt_server_canceled(hurting, &mut damage) {
+        // The dragon's head turns with its body and never pitches.
+        let view = horizon_world::view_direction::view_vector(0.0, self.yaw);
+        let victim = horizon_client::health::Victim {
+            position: [self.position.x, self.position.y, self.position.z],
+            view: [view.x, view.y, view.z],
+        };
+        if level.incoming_canceled(hurting, victim, &mut container) {
             return Hurt::Landed { full: false };
         }
+        damage = container.new_damage();
         if damage < 0.0 {
             damage = 0.0;
         }
@@ -664,11 +672,9 @@ impl Dragon {
         } else {
             damage
         };
-        container.set_post_attack_invulnerability_ticks(if window {
-            self.invulnerable
-        } else {
-            20
-        });
+        if window {
+            container.set_post_attack_invulnerability_ticks(self.invulnerable);
+        }
         // LivingEntity.actuallyHurt: the dragon wears no armor and takes no effects, so
         // nothing reduces the hit before Pre.
         let hurting = horizon_client::health::Hurting::Dragon(self.id as i32, source);
@@ -833,6 +839,7 @@ fn hurt_source(
         damage_type: super::creatures::damage_type(kind, by.is_some()),
         causing,
         direct: if melee { causing } else { 0 },
+        position: None,
     }
 }
 fn wrap(d: f32) -> f32 {
@@ -4556,6 +4563,7 @@ mod tests {
         damage_type: "minecraft:player_attack",
         causing: 0,
         direct: 0,
+        position: None,
     });
     fn dragon(phase: Phase) -> Dragon {
         let mut d = Dragon::new(Vec3::new(0.0, 70.0, 0.0), 0.0, 1);
@@ -4831,23 +4839,30 @@ mod tests {
     /// 9003's -5 and 9004's NaN. `HURT_SERVER` is global, so it stays set for
     /// every test of the process; the other tests' dragons are entity 0.
     fn set_hook() {
-        use horizon_client::health::{HURT_SERVER, Hurting};
-        fn hook(hurting: Hurting<'_>, amount: &mut f32) -> bool {
+        use horizon_client::health::{DamageContainer, DamageLevel, HURT_SERVER, Hurting, Victim};
+        fn hook(
+            _: DamageLevel<'_>,
+            hurting: Hurting<'_>,
+            _: Victim,
+            container: &mut DamageContainer,
+        ) -> bool {
             let Hurting::Dragon(entity @ 9001..=9005, s) = hurting else {
                 return false;
             };
-            let hit = (s.damage_type.to_owned(), s.causing, s.direct, *amount);
+            let amount = container.new_damage();
+            let hit = (s.damage_type.to_owned(), s.causing, s.direct, amount);
             SEEN.lock().unwrap().push((entity, hit));
             match entity {
-                9002 => *amount *= 2.0,
-                9003 => *amount = -5.0,
-                9004 => *amount = f32::NAN,
+                9002 => container.set_new_damage(amount * 2.0),
+                9003 => container.set_new_damage(-5.0),
+                9004 => container.set_new_damage(f32::NAN),
                 _ => {}
             }
             entity == 9001
         }
+        type Hook = fn(DamageLevel<'_>, Hurting<'_>, Victim, &mut DamageContainer) -> bool;
         let installed = *HURT_SERVER.get_or_init(|| hook);
-        let ours: fn(Hurting<'_>, &mut f32) -> bool = hook;
+        let ours: Hook = hook;
         assert!(
             std::ptr::fn_addr_eq(installed, ours),
             "another native damage hook is set"
@@ -4872,6 +4887,7 @@ mod tests {
             damage_type: "minecraft:arrow",
             causing: 12,
             direct: 0,
+            position: None,
         };
         let hurt = d.hurt(level, 0, 9.0, Some(arrow), false);
         assert_eq!(hurt, Hurt::Landed { full: false });
