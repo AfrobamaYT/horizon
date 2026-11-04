@@ -811,7 +811,7 @@ impl From<TextForm> for Text {
 /// Text from its JSON component, its translations left as their keys.
 impl From<serde_json::Value> for Text {
     fn from(component: serde_json::Value) -> Self {
-        crate::component::to_text(&component, &mut |s| Text::literal(s)).with_component(component)
+        crate::component::spans_of(component)
     }
 }
 
