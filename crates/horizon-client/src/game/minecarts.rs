@@ -121,7 +121,7 @@ pub(super) struct Minecart {
     /// rail keeps (`AbstractMinecart.moveAlongTrack` re-applies the track's
     /// velocity), so a cart that ran into a block still counts as moving.
     collision_speed: f64,
-    fall_distance: f64,
+    pub(super) fall_distance: f64,
     /// The squared speed `MinecartTNT.causeFallDamage` blows up with, set by
     /// a landing of three blocks or more and taken by the cart's next tick
     /// step (vanilla explodes inside the move itself).

@@ -65,6 +65,9 @@ pub(super) trait Entity: EntityRules {
     /// `Entity.getDeltaMovement`.
     fn velocity(&self) -> Vec3;
     fn velocity_mut(&mut self) -> &mut Vec3;
+    /// `Entity.resetFallDistance`: how far it has fallen is forgotten, so its next landing
+    /// hurts it as a step does. Required, so a new kind states whether it keeps a fall distance.
+    fn reset_fall_distance(&mut self);
     fn bounds(&self) -> Aabb;
     /// What a selector finds this entity as (`@e`), or `None` for one it cannot
     /// name yet. Required, so a new kind states which.
@@ -739,6 +742,9 @@ impl Game<'_> {
 }
 
 impl Entity for Mob {
+    fn reset_fall_distance(&mut self) {
+        self.fall_distance = 0.0;
+    }
     fn native_type(&self) -> Cow<'static, str> {
         super::native_hooks::mob_kind(self).into()
     }
@@ -837,6 +843,9 @@ impl Entity for Mob {
 }
 
 impl Entity for ItemEntity {
+    fn reset_fall_distance(&mut self) {
+        // An item keeps no fall distance here.
+    }
     fn fluid_eye_y(&self) -> f64 {
         ItemEntity::fluid_eye_y(self)
     }
@@ -898,6 +907,9 @@ impl Entity for ItemEntity {
 }
 
 impl Entity for ExperienceOrb {
+    fn reset_fall_distance(&mut self) {
+        // An orb keeps no fall distance here.
+    }
     fn ticks_after_projectiles(&self) -> bool {
         true
     }
@@ -956,6 +968,9 @@ impl Entity for ExperienceOrb {
 }
 
 impl Entity for Boat {
+    fn reset_fall_distance(&mut self) {
+        // A boat keeps no fall distance here.
+    }
     fn native_type(&self) -> Cow<'static, str> {
         self.entity_type().into()
     }
@@ -1017,6 +1032,9 @@ impl Entity for Boat {
 }
 
 impl Entity for Minecart {
+    fn reset_fall_distance(&mut self) {
+        self.fall_distance = 0.0;
+    }
     fn native_type(&self) -> Cow<'static, str> {
         self.kind.id().into()
     }
@@ -1086,6 +1104,9 @@ fn armor_stand_size(stand: &ArmorStand) -> (f64, f64) {
 }
 
 impl Entity for ArmorStand {
+    fn reset_fall_distance(&mut self) {
+        self.enchantment_fall_distance = 0.0;
+    }
     fn fluid_eye_y(&self) -> f64 {
         ArmorStand::fluid_eye_y(self)
     }
@@ -1177,6 +1198,9 @@ impl Entity for ArmorStand {
 }
 
 impl Entity for PrimedTnt {
+    fn reset_fall_distance(&mut self) {
+        // Primed TNT keeps no fall distance here.
+    }
     fn ticks_after_projectiles(&self) -> bool {
         true
     }
@@ -1237,6 +1261,9 @@ impl Entity for PrimedTnt {
 }
 
 impl Entity for FallingBlock {
+    fn reset_fall_distance(&mut self) {
+        self.fall_distance = 0.0;
+    }
     fn ticks_after_projectiles(&self) -> bool {
         true
     }
@@ -1273,6 +1300,11 @@ impl Entity for FallingBlock {
 }
 
 impl Entity for Projectile {
+    fn reset_fall_distance(&mut self) {
+        if let Some(arrow) = self.arrow.as_deref_mut() {
+            arrow.fall_distance = 0.0;
+        }
+    }
     fn native_type(&self) -> Cow<'static, str> {
         self.kind.id().into()
     }
@@ -1361,6 +1393,9 @@ impl Entity for Projectile {
 }
 
 impl Entity for Rocket {
+    fn reset_fall_distance(&mut self) {
+        // A firework rocket keeps no fall distance here.
+    }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:firework_rocket".into()
     }
@@ -1409,6 +1444,9 @@ impl Entity for Rocket {
 }
 
 impl Entity for ThrownTrident {
+    fn reset_fall_distance(&mut self) {
+        // A thrown trident keeps no fall distance here.
+    }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:trident".into()
     }
