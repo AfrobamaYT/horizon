@@ -1629,6 +1629,15 @@ impl<'a> Plan<'a> {
                         {
                             *name = J::Str(wood.clone());
                         }
+                        // `new FenceGateBlock(woodType, ..)`: the gate's own sounds replace its wood's.
+                        if let Some(fields) = v.at("fields/type") {
+                            if let Some(sound) = &b.decl.open_sound {
+                                fields.set("fenceGateOpen", J::Str(sound.clone()));
+                            }
+                            if let Some(sound) = &b.decl.close_sound {
+                                fields.set("fenceGateClose", J::Str(sound.clone()));
+                            }
+                        }
                         // `createDefaultSignText`: the colour and glow a new sign's text starts with.
                         if (b.decl.sign_text_color.is_some() || b.decl.sign_text_glow.is_some())
                             && let Some(fields) = v.at("fields")

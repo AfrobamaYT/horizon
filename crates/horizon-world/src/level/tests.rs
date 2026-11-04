@@ -1569,6 +1569,66 @@ fn repeater_delays_and_torch_inverts() {
     assert_eq!(w.prop(BlockPos::new(5, 2, 0), "lit"), "false");
 }
 
+/// A fence gate plays its wood's open and close sound at all three sites
+/// that read it (`FenceGateBlock.useWithoutItem`, `neighborChanged` and
+/// `onExplosionHit`), once each.
+#[test]
+fn a_fence_gate_plays_the_open_and_close_sound_of_its_data() {
+    let mut w = world!();
+    w.floor(0, 10, "stone");
+    let gate = w.id("oak_fence_gate", &[("facing", "north")]);
+    let sounds = |w: &World| {
+        w.level
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                LevelEvent::Sound { sound, .. } => Some(sound.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let open = "minecraft:block.fence_gate.open";
+    let close = "minecraft:block.fence_gate.close";
+
+    let used = BlockPos::new(0, 1, 0);
+    w.put(used, gate);
+    w.use_block(used);
+    assert_eq!(sounds(&w), [open]);
+    w.level.events.clear();
+    w.use_block(used);
+    assert_eq!(sounds(&w), [close]);
+
+    w.level.events.clear();
+    let wired = BlockPos::new(4, 1, 0);
+    w.set(wired, gate);
+    w.set(BlockPos::new(5, 1, 0), w.id("redstone_block", &[]));
+    assert_eq!(w.prop(wired, "open"), "true");
+    assert_eq!(sounds(&w), [open], "neighborChanged opens the powered gate");
+    w.level.events.clear();
+    w.set(BlockPos::new(5, 1, 0), w.b().air());
+    assert_eq!(w.prop(wired, "open"), "false");
+    assert_eq!(sounds(&w), [close]);
+
+    w.level.events.clear();
+    let blasted = BlockPos::new(8, 1, 0);
+    w.put(blasted, gate);
+    assert!(
+        w.f.behaviours
+            .fence_gate_exploded(&mut w.level, &mut w.ticks, blasted)
+    );
+    assert_eq!(
+        sounds(&w),
+        [open],
+        "onExplosionHit toggles an unpowered gate"
+    );
+    w.level.events.clear();
+    assert!(
+        w.f.behaviours
+            .fence_gate_exploded(&mut w.level, &mut w.ticks, blasted)
+    );
+    assert_eq!(sounds(&w), [close]);
+}
+
 #[test]
 fn crops_grow_and_leaves_decay() {
     let mut w = world!();
