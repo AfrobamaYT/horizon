@@ -111,6 +111,16 @@ fn header(wit_text: &str, macro_call: &str, options: &str) -> String {
     )
 }
 
+/// A copy of what `local`, a `&mut` record argument, holds before the call, so only what the
+/// call changed is sent back.
+fn before(types: &Types<'_>, sig: &Signature, ty: &Ty, local: &str, out: &mut String) {
+    if let Ty::Named(def) = ty
+        && sig.results.contains(&wit::out_name(&types.defs[*def]))
+    {
+        writeln!(out, "let b_{local} = before_{def}(&{local});").unwrap();
+    }
+}
+
 /// The function returning what the method's results tuple holds, after the call.
 fn results(
     types: &Types<'_>,
@@ -126,7 +136,7 @@ fn results(
     for (_, local, ty) in outs {
         match ty {
             Ty::Named(def) if sig.results.contains(&wit::out_name(&types.defs[*def])) => {
-                parts.push(format!("lower_out_{def}(&{local})?"))
+                parts.push(format!("lower_out_{def}(&{local}, &b_{local})?"))
             }
             Ty::Named(def) if matches!(types.defs[*def].kind, Kind::Record(_)) => {}
             ty => parts.push(lower(types, ty, &format!("(&{local})"))),
@@ -267,6 +277,7 @@ pub(super) fn guest(
                         let value = place.value(inner, &source)?;
                         let local = format!("m{}", mut_locals.len());
                         writeln!(out, "let mut {local} = {value};").unwrap();
+                        before(types, &sig, inner, &local, &mut out);
                         call_args.push(format!("&mut {local}"));
                         mut_locals.push((0, local, (**inner).clone()));
                     }
@@ -793,6 +804,7 @@ fn host_import(
                 let value = place.value(inner, &source)?;
                 let local = format!("m{}", mut_locals.len());
                 writeln!(out, "let mut {local} = {value};").unwrap();
+                before(types, &sig, inner, &local, &mut out);
                 call_args.push(format!("&mut {local}"));
                 mut_locals.push((0, local, (**inner).clone()));
             }
