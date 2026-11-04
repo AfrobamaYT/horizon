@@ -814,6 +814,65 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn neighbor_changed_reads_its_inputs_and_its_tick_fires_at_its_delay() {
+        use mod_api::__private::part_tests::{SignalRead, signal_reader_game_thread, signal_reads};
+
+        // The fixture's part on glass reads its inputs in `neighbor_changed` and schedules
+        // its own tick 2 ticks later, as a diode does.
+        signal_reader_game_thread();
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let registry = game.pack.assets.registry;
+            let glass = registry.default_state("minecraft:glass").unwrap();
+            let lever = |powered: &str| {
+                registry
+                    .resolve(&horizon_world::chunk::BlockState {
+                        name: "minecraft:lever".into(),
+                        properties: [("face", "wall"), ("facing", "east"), ("powered", powered)]
+                            .into_iter()
+                            .map(|(key, value)| (key.into(), value.into()))
+                            .collect(),
+                    })
+                    .unwrap()
+            };
+            // A block-ticking chunk: lit, its neighbours loaded, with its tick list, as
+            // loading gives one.
+            for (x, z) in (-1..=1).flat_map(|x| (-1..=1).map(move |z| (x, z))) {
+                let mut chunk = horizon_client::chunk::Chunk::empty(x, z);
+                chunk.lit = true;
+                game.world.chunks.insert((x, z), std::sync::Arc::new(chunk));
+            }
+            game.block_ticks
+                .add_empty_chunk(horizon_core::position::ChunkPos::new(0, 0))
+                .unwrap();
+            // A lever on the east face of stone, and glass north of the lever: the lever's
+            // weak power reaches it from the south.
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            game.world.set(5, 64, 5, stone).unwrap();
+            game.world.set(6, 64, 4, glass).unwrap();
+            game.world.set(6, 64, 5, lever("false")).unwrap();
+            let dimension = game.dim.id().to_owned();
+            let start = game.world.game_time;
+            assert!(signal_reads().is_empty());
+
+            // Pulling the lever updates its neighbours (`Block.UPDATE_ALL`), the glass among them.
+            assert!(game.native_set_block(&dimension, [6, 64, 5], lever("true"), 3));
+            assert_eq!(
+                signal_reads(),
+                [SignalRead::Changed([6, 64, 4], true, 15, true)]
+            );
+            // The tick it scheduled runs through the level's own queue, 2 ticks later, and
+            // reads the lever south of it from `tick_block` (`LevelWriteHost: LevelTicksHost`).
+            for (elapsed, reads) in [(1, vec![]), (2, vec![SignalRead::Ticked([6, 64, 4], 15)])] {
+                game.world.game_time = start + elapsed;
+                game.tick_scheduled().unwrap();
+                assert_eq!(signal_reads(), reads, "after {elapsed} ticks");
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_level_handle_reads_redstone_through_should_check_weak_power() {
         use horizon_core::geometry::Direction::West;
 

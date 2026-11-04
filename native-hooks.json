@@ -429,8 +429,8 @@
       }
     },
     {
-      "name": "neighbor_changed", "doc": "An authoritative server is about to deliver `neighborChanged`.\nState and block IDs are valid in this level's registries for this call.", "side": "server",
-      "version": 1,
+      "name": "neighbor_changed", "doc": "An authoritative server is about to deliver `neighborChanged`.\nState and block IDs are valid in this level's registries for this call.\nThe host is the level with its ticks, as vanilla's `neighborChanged` gets the\nlevel: a part may read its inputs (`signal`, `has_neighbor_signal`) and\nschedule its tick here, as a diode does (`DiodeBlock.checkTickOnNeighbor`).", "side": "server",
+      "version": 2,
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_neighbor_changed",
       "mod_api": {
         "contract": "listen",

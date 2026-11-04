@@ -5,7 +5,8 @@ pub use mod_api::render::EntitySpan;
 
 use horizon_shaders::{RENDER_STAGES, render_stage};
 
-/// `HzDraw`'s size: `renderStage`, `entityId`, `blockEntityId`, a pad, `entityColor`.
+/// `HzDraw`'s size: `renderStage`, `entityId`, `blockEntityId`, `currentRenderedItemId`,
+/// `entityColor`.
 const SIZE: u32 = 32;
 
 pub(super) struct DrawUniforms {
@@ -20,8 +21,10 @@ impl DrawUniforms {
         let mut contents = vec![0u8; stride as usize * RENDER_STAGES.len()];
         for (i, slot) in contents.chunks_mut(stride as usize).enumerate() {
             slot[..4].copy_from_slice(&(i as i32).to_le_bytes());
-            // `blockEntityId` outside block entities, as Iris has it.
+            // `blockEntityId` outside block entities, as Iris has it; `currentRenderedItemId`
+            // outside items, as Iris 1.11.7 gives it to terrain, water and the sky (observed).
             slot[8..12].copy_from_slice(&(-1i32).to_le_bytes());
+            slot[12..16].copy_from_slice(&(-1i32).to_le_bytes());
         }
         let buffer = wgpu::util::DeviceExt::create_buffer_init(
             device,

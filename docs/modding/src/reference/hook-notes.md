@@ -455,6 +455,13 @@ one, where vanilla gives the `by` one.
 
 - Chunks and players coming and going, on the server: `native_chunk_load` (with whether the chunk is new), `native_chunk_unload`, and
   `native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Changes made to the departing chunk in `native_chunk_unload` aren't saved: as in vanilla, the chunk is saved before it unloads.
+- Chunks a player watches, on the server: `native_chunk_watch(player, chunk)`, `native_chunk_sent(player, chunk)` and
+  `native_chunk_unwatch(player, chunk)` (NeoForge's `ChunkWatchEvent.Watch`, `Sent` and `UnWatch`). Each chunk that comes into a
+  player's view is watched, then sent; it's unwatched when it leaves the view, when the player leaves the level (a portal, a
+  teleport, a respawn) and when they disconnect, in the level it was watched in. Vanilla watches a chunk when it queues it; Horizon
+  picks a chunk only as it sends it, so the watch comes just before the send. The hub records them only while a mod listens and
+  the game tells them after the hub's network step for that level, so a handler sees the state after that step; the order per
+  player and chunk is vanilla's. The far ring's columns past the view distance aren't told, and the server stopping doesn't unwatch.
 
 - [the renderer's hook points](#render-hook-points): `native_world_drawn`, called once the world is drawn with its colour, depth, matrices and entity geometry, and
   `native_render_needs`, where a mod asks for the entity runs and the world's depth without a shader pack.
@@ -1475,7 +1482,7 @@ A native server tick hook can call `native_server_block` with its context, a dim
 
 ### Neighbour observations (draft)
 
-`native_neighbor_changed` observes each authoritative server `neighborChanged` before the block handles it. It supplies the dimension, position, current state ID, changed block ID and moved flag. Resolve IDs with the level's registries during the hook; the hook does not load chunks or change the update queue.
+`native_neighbor_changed` observes each authoritative server `neighborChanged` before the block handles it. It supplies the dimension, position, current state ID, changed block ID and moved flag. Resolve IDs with the level's registries during the hook; the hook does not load chunks or change the update queue. Its host is the level with its ticks (`&mut dyn LevelTicksHost`), as vanilla's `neighborChanged` gets the level: a `BlockPart::neighbor_changed` can read its inputs there with `level.signal(pos, direction)`, `direct_signal`, `direct_signal_to`, `best_neighbor_signal` and `has_neighbor_signal`, the same reads as `LevelRef`'s (mods' parts included), and schedule its own tick with `level.schedule_block_tick`, as a diode does (`DiodeBlock.checkTickOnNeighbor`). The reads write nothing and draw nothing, so they leave the update as it was, and cost what the game's own call does. `tick_block` and the other hooks with a `LevelWriteHost` have them too. Contract version `2`: version `1` handed the hook a plain `&dyn LevelHost`. Diverges from upstream.
 
 ### Server block changes (draft)
 
@@ -1737,6 +1744,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_entity_change_block(entity, kind, pos, from, to)`**: a mob changed a block, after the new state was applied.
 - **`native_entity_break_door(entity, kind, pos)`**: a mob finished breaking a door at `pos`, after the block was removed.
 - **`native_creeper_power(entity, lightning)`**: a lightning strike charged the creeper.
+- **`native_living_visibility(entity, looking, visibility)`**: how visible `entity` is to `looking` (NeoForge's `LivingVisibilityEvent`, last in `LivingEntity.getVisibilityPercent`). `visibility` comes in as vanilla's percent: sneaking 0.8, invisibility scaled by armour cover, a matching mob head 0.5. Multiply it to scale the range a targeting check sees the entity from. A negative answer counts as 0, and the result is clamped to 10, as vanilla clamps. Horizon computes visibility only for players, so it asks for a player seen by a mob whose targeting check scales by visibility (`TargetingConditions.testInvisible`): hostile targeting, the sensors, the happy ghast's tempt. It asks after the alive, spectator and selector checks, as `TargetingConditions.test` does. With no listener, `MobWorld::mob_hooks` is `None` and nothing is asked.
 - **`native_entity_mob_griefing(entity, can_grief)`**: may `entity` change the world (NeoForge's `EntityMobGriefingEvent`, `EventHooks.canEntityGrief`)? `can_grief` comes in as the `mob_griefing` rule. Horizon asks at each site where NeoForge 26.3 calls `canEntityGrief`, with the same entity: the exploding entity for a mob explosion, the owner for a mob's arrow or small fireball, the wither for its rose, otherwise the mob itself. Where NeoForge keeps the plain rule read (door breaking, the dragon's walls, pitcher crops, weaving, and the explosion's decorations, items and vehicles), the rule decides. The game asks through `Game::can_entity_grief` and the mob AI through `MobWorld::can_grief`. With no listener both read the rule: one `listened` check, no dispatch. A ghast fireball's fire is not placed by Horizon yet, so its `canEntityGrief(owner)` ask is missing with it.
 - **`native_enderman_anger(enderman, player, cancel)`**: `player` stares at `enderman` (NeoForge's `EnderManAngerEvent`, last in `Enderman.isBeingStaredBy`, once the look cone, line of sight and carved pumpkin checks passed). It is asked each time the enderman's goals check the stare: to get angry, to freeze while looked at, and to teleport away up close. Set `cancel` and that stare doesn't count. The mob AI asks through `MobWorld::mob_hooks`, which is set only on the server while a mod listens: with no listener the stare check costs nothing more.
 

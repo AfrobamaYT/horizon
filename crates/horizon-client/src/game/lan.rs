@@ -2758,6 +2758,13 @@ impl Game<'_> {
         {
             self.run_native_menu_events();
         }
+        if self
+            .lan
+            .as_ref()
+            .is_some_and(|host| !host.hub.chunk_watches.is_empty())
+        {
+            self.run_chunk_watches();
+        }
         if let Some(host) = self.lan.as_mut() {
             host.hub.collect_tracking();
         }
