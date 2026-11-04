@@ -1289,7 +1289,8 @@
     {
       "name": "modify_default_components", "side": "both",
       "context": "data_load",
-      "version": 1,
+      "version": 2,
+      "doc": "NeoForge 26.3's ModifyDefaultComponentsEvent: once per item after registries freeze, before the owning load publishes immutable defaults. Receives a read-only DataLoadContext with the actual ServerDataLoad or ClientPreload origin, frozen registry names, settings captured once for loaded packages at this load boundary, and the shared LoadedMods view. Readers and datapack reloads do not replay this event. No runtime Host, world handles or transaction access.",
       "target": "horizon_world::item_defaults::native_modify_default_components",
       "mod_api": {
         "contract": "collect",
