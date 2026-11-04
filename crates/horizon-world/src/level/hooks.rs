@@ -505,7 +505,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
         // BaseFireBlock emits extinguish and suppresses generic destroy particles/sound.
         if data.is(Class::BaseFire) {
-            self.level_event_from(source, 1009, pos, 0);
+            self.level_event(1009, pos, 0);
         } else {
             self.level_event_from(source, 2001, pos, state.0 as i32);
         }

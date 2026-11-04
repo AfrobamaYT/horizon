@@ -2913,10 +2913,11 @@ fn player_breaks_fire_with_extinguish_not_generic_break_event() {
             Some(player)
         ));
         let is_fire = name != "white_wool";
+        let expected_source = if is_fire { None } else { Some(player) };
         assert!(w.level.events.iter().any(|event| matches!(
             event,
-            LevelEvent::LevelEvent { id: 1009 | 2001, pos: at, source: Some(source), .. }
-                if *at == pos && *source == player
+            LevelEvent::LevelEvent { id: 1009 | 2001, pos: at, source, .. }
+                if *at == pos && *source == expected_source
         )));
         assert_eq!(
             w.level
