@@ -505,10 +505,11 @@ The hook may be called many times a craft; the answer must be the same for the s
 
 ### The mod's crate
 
-The root `Cargo.toml` and `src/` form the mod's one crate. It depends on `horizon-client` for
-`mod_api`; the launcher links it into the generated game executable, rather than making the game
-library depend on the mod. The launcher stages the crate as `native-api/<mod>/`, rewrites its game
-dependency to the staged game and resolves [mod dependencies](#dependencies-between-trait-mods).
+The root `Cargo.toml` and `src/` form the mod's one crate. It depends on `horizon-mod-api` (lib
+`mod_api`) and never on the game, so the same crate builds native or to `mod.wasm`; the launcher
+links it into the generated game executable, rather than making the game library depend on the
+mod. The launcher stages the crate as `native-api/<mod>/`, rewrites its mod API dependency to the
+staged one and resolves [mod dependencies](#dependencies-between-trait-mods).
 A project has no separate workspace or lock file. Arbitrary path and git dependencies are refused;
 the launcher supplies the checked paths needed for the game and declared mod dependencies.
 
@@ -2007,11 +2008,9 @@ the canonical `horizon-native-mods/<id>/` projects and the provenance `native-mo
 host only (no cross compilation), needs a prepared installed launcher base release, and survives cache pruning
 because it is copied outside the managed folders. On Windows use the printed `horizon-engine.exe` path.
 
-Server projects must not request `horizon-client`'s `default-features = true` or any dependency
-`features` field, even an empty array. This covers aliases, target-specific declarations and SDK
-feature requests through Cargo feature tables. Omit `default-features` or set it to `false`; the
-launcher stages the server SDK dependencies with defaults disabled. Refusals name the mod and the
-requested fields, before toolchain work. Client build behavior is unchanged.
+A mod's crate depends on `horizon-mod-api` and never on the game: a `horizon-client` dependency,
+under any name or target, is refused naming the mod and the key, before toolchain work. The mod API
+has no sound or controller features, so server and client builds stage the same crate.
 
 Declared jars use the same exact-hash preparation as ordinary launches. A server export refuses
 missing jars by default and never asks interactively; `--allow-jar-downloads` permits the shared
@@ -3098,8 +3097,8 @@ stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is insta
 
 ### Render hook points
 
-`crates/horizon-client-render/src/gfx/native_render.rs`: the renderer's own hook points, free functions rather than
-`Game` methods, which a bundle targets as `horizon_client_render::gfx::native_render::native_<name>`. They run on the
+`crates/horizon-mod-api/src/render.rs`: the renderer's own hook points, free functions rather than
+`Game` methods, which a bundle targets as `mod_api::render::native_<name>`. They run on the
 render thread with the frame's wgpu objects; what a mod draws there shows in that frame.
 
 - `native_world_drawn(world)`: the world is drawn (sky, terrain, entities, particles, weather and the world post pass),
@@ -3231,7 +3230,7 @@ and `data/` directories. The template greets each player who joins. Build it wit
 `horizon-launcher native-build <path> --trust-native-code`; `cargo horizon-mod build` packages the same
 project into a `.hmod` without compiling it ([api/mod-files.md](api/mod-files.md)).
 
-The root Rust package depends on `horizon-client` for `mod_api`. Its root `src/lib.rs` marks one
+The root Rust package depends on `horizon-mod-api` (lib `mod_api`), never on the game. Its root `src/lib.rs` marks one
 `impl Hooks` with the attribute:
 
 ```rust,ignore
@@ -3453,7 +3452,7 @@ for attachments and `random()`. Scheduling and `set_block_property` stay on the 
 hook points pass; `is_bonemeal_success` gets only a `LevelRandomHost`.
 
 A trait injection gives the mod's root crate the same `Host` at that method. It depends on
-horizon-client's library, not on the game executable. For example, with `COUNTER` declared as the
+`horizon-mod-api`, not on the game. For example, with `COUNTER` declared as the
 `AttachmentType<i32>` in [Server attachments](#server-attachments):
 
 ```toml
@@ -3825,7 +3824,7 @@ namespace. Both checks run once, when the mods register.
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it, so a test double implements only what its hook calls, and an
-unexpected call fails loudly. Enable the `testing` feature on the mod's `horizon-client` test dependency. Then
+unexpected call fails loudly. Enable the `testing` feature on the mod's `horizon-mod-api` test dependency. Then
 `testing::with_mods` takes an owned `Mods` list and runs a closure with it installed on the current thread.
 It restores the previous list even if the closure panics. The test allocation is retained because dispatch exposes
 a static slice. Call `dispatch_<hook>(&mut host, args…)` inside the closure to build the event as the game does:
