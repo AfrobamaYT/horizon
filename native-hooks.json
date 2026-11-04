@@ -1291,6 +1291,8 @@
       "name": "screen_render_post", "doc": "The open screen has drawn itself and its tooltips (`Screen.render`,\nthe point of `ScreenEvent.Render.Post`): draw over it with\n`native_fill`, `native_sprite` and `native_text`, `screen.rect` being\nits container panel (or the whole window) and `screen.id` the screen\nit is. Once a frame on the window, never while playing with no screen;\n`&self`, so it reads and draws only. The Win and Options screens call\nit on their own path, after their drawing.\n\nIt does not fire for the screens drawn over gameplay after it (a\nserver dialog, the server pack, link and code-of-conduct prompts, a\nbook, a sign editor): those keep `Screen::Playing`, which it skips (the\nserver pack prompt hides an open screen too, and that screen does not\nfire under it), and draw over what it drew, while vanilla's\n`ScreenEvent.Render.Post` fires for them. The title's own screens\n(`title`, `world_select`, `world_create`, `multiplayer`…) fire it too,\ntheir `screen.id` from the title state machine and the whole window\ntheir `rect`, and no dialog or prompt over them.", "side": "client",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_render_post",
+      "neoforge": "ScreenEvent.Render.Post",
+      "cancellable": false,
       "mod_api": {
         "contract": "listen"
       }

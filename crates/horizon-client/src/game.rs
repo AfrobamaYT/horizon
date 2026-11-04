@@ -8954,10 +8954,13 @@ impl Game<'_> {
             self.show_calibration(h);
         }
         if self.screen == Screen::Win {
-            self.draw_win_screen(&mut batch);
-            // The early return skips the match below: the hook still sees the
+            let drawn = self.fire_screen_render_pre(&mut batch);
+            if drawn {
+                self.draw_win_screen(&mut batch);
+            }
+            // The early return skips the match below: the hooks still see the
             // screen, after its own drawing.
-            self.fire_screen_render_post(&mut batch);
+            self.fire_screen_render_post(&mut batch, drawn);
             return batch;
         }
         if self.screen == Screen::Options {
@@ -8965,8 +8968,11 @@ impl Game<'_> {
                 self.flush_skin_slots();
                 self.update_remote_skins();
             }
-            self.draw_options(&mut batch);
-            self.fire_screen_render_post(&mut batch);
+            let drawn = self.fire_screen_render_pre(&mut batch);
+            if drawn {
+                self.draw_options(&mut batch);
+            }
+            self.fire_screen_render_post(&mut batch, drawn);
             self.draw_split_hud(&mut batch, true);
             return batch;
         }
@@ -8993,7 +8999,8 @@ impl Game<'_> {
             // TitleScreen.extractRenderState, then ToastManager over it: vanilla
             // draws the toast manager on every screen, so a pack download or a
             // resource-reload failure still shows on the title (#4428).
-            if let Some(title) = &self.title {
+            let drawn = self.fire_title_screen_render_pre(&mut batch);
+            if drawn && let Some(title) = &self.title {
                 title.draw_with_items(
                     &self.gui.atlas,
                     Some(&self.pack.item_renderer),
@@ -9006,7 +9013,7 @@ impl Game<'_> {
             // ScreenEvent.Render.Post over the title's own screens: a mod draws
             // over them here (a pack browser over Create New World, say), and the
             // toasts still come after, as over any screen.
-            self.fire_title_screen_render_post(&mut batch);
+            self.fire_title_screen_render_post(&mut batch, drawn);
             self.draw_toasts(&mut batch, false);
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
@@ -9276,7 +9283,9 @@ impl Game<'_> {
         } else {
             self.screen
         };
+        let drawn = self.fire_screen_render_pre(&mut batch);
         match screen {
+            _ if !drawn => {}
             Screen::Paused if self.pause_menu => self.draw_pause_menu(&mut batch),
             // PauseScreen(false): only its title, at the top.
             Screen::Paused => {
@@ -9322,7 +9331,7 @@ impl Game<'_> {
         // tooltips, so a native mod draws over it here. Never `Playing`: the
         // prompts, books and sign editors drawn over gameplay keep it, draw
         // after this point and so over what a mod drew.
-        self.fire_screen_render_post(&mut batch);
+        self.fire_screen_render_post(&mut batch, drawn);
         self.draw_saving_indicator(&mut batch);
         // ToastManager.extractRenderState: F1 hides the toasts too.
         self.draw_toasts(&mut batch, !show_hud);
@@ -9336,36 +9345,70 @@ impl Game<'_> {
         }
         batch
     }
-    /// `native_screen_render_post` (`ScreenEvent.Render.Post`) for the open
-    /// screen, once a frame; the Win and Options screens call this on their
-    /// own path. Reads `self.screen`, the one `hud_layers` drew. Not while
-    /// playing with no screen, nor while the server pack prompt hides the
-    /// open screen (`hud_layers` draws `Playing` then). Client only,
-    /// read-only: what a mod draws is its own.
-    fn fire_screen_render_post(&self, batch: &mut HudBatch) {
+    /// The open screen as the render hooks see it, once a frame: not while
+    /// playing with no screen, nor while the server pack prompt or a book
+    /// hides the open screen (`hud_layers` draws `Playing` then), and None
+    /// with no mod listening to a render hook, so nothing is built then.
+    fn screen_render_view(&self, batch: &HudBatch) -> Option<mod_api::NativeScreenView<'_>> {
         let screen = self.screen;
-        if screen == Screen::Playing || self.server_packs.prompt.is_some() || self.book.is_some() {
-            return;
+        if screen == Screen::Playing
+            || self.server_packs.prompt.is_some()
+            || self.book.is_some()
+            || !self.screen_render_listened()
+        {
+            return None;
         }
         // slot_count mirrors slots() without allocating; keep them in step.
         debug_assert_eq!(self.slot_count(), self.slots().len());
-        let view = self.screen_view(batch, screen);
-        self.native_screen_render_post(batch, &view);
+        Some(self.screen_view(batch, screen))
     }
-    /// `native_screen_render_post` (`ScreenEvent.Render.Post`) for the title's
-    /// own screen (`title`, `world_select`, `world_create`, `multiplayer`…),
-    /// once a frame, after it has drawn and before the toasts. Not when a
-    /// screen of the game's own is over the title (Options draws and fires
-    /// its own), nor while a dialog, a prompt or a connect or load hides it.
-    /// Client only, read-only: what a mod draws is its own.
-    fn fire_title_screen_render_post(&self, batch: &mut HudBatch) {
-        if self.screen != Screen::Playing || self.screen_over_playing() || self.remote_loading() {
-            return;
+    /// The title's own screen as the render hooks see it, once a frame: not
+    /// when a screen of the game's own is over the title (Options draws and
+    /// fires its own), nor while a dialog, a prompt or a connect or load
+    /// hides it, and None with no mod listening to a render hook.
+    fn title_screen_render_view(&self, batch: &HudBatch) -> Option<mod_api::NativeScreenView<'_>> {
+        if self.screen != Screen::Playing
+            || self.screen_over_playing()
+            || self.remote_loading()
+            || !self.screen_render_listened()
+        {
+            return None;
         }
-        let Some(view) = self.title_screen_view(batch) else {
-            return;
-        };
-        self.native_screen_render_post(batch, &view);
+        self.title_screen_view(batch)
+    }
+    /// `ScreenEvent.Render.Pre` then `Render.Background` for the open screen,
+    /// once a frame, before it draws itself: whether it is drawn (a cancelled
+    /// `Render.Pre` skips it and its Background). The Win and Options screens
+    /// call this on their own path. Client only: what a mod draws is its own.
+    fn fire_screen_render_pre(&self, batch: &mut HudBatch) -> bool {
+        match self.screen_render_view(batch) {
+            Some(view) => self.screen_render_begin(batch, &view),
+            None => true,
+        }
+    }
+    /// `fire_screen_render_pre` for the title's own screens.
+    fn fire_title_screen_render_pre(&self, batch: &mut HudBatch) -> bool {
+        match self.title_screen_render_view(batch) {
+            Some(view) => self.screen_render_begin(batch, &view),
+            None => true,
+        }
+    }
+    /// `ScreenEvent.Render.Foreground` (only when the screen `drawn`) and
+    /// `Render.Post` for the open screen, once a frame, after it has drawn
+    /// itself and its tooltips, so a native mod draws over it here. Never
+    /// `Playing`: the prompts, books and sign editors drawn over gameplay keep
+    /// it, draw after this point and so over what a mod drew.
+    fn fire_screen_render_post(&self, batch: &mut HudBatch, drawn: bool) {
+        if let Some(view) = self.screen_render_view(batch) {
+            self.screen_render_end(batch, &view, drawn);
+        }
+    }
+    /// `fire_screen_render_post` for the title's own screen, once a frame,
+    /// after it has drawn and before the toasts.
+    fn fire_title_screen_render_post(&self, batch: &mut HudBatch, drawn: bool) {
+        if let Some(view) = self.title_screen_render_view(batch) {
+            self.screen_render_end(batch, &view, drawn);
+        }
     }
     /// `CreativeModeInventoryScreen.hasPermissions` (`canUseGameMasterBlocks`
     /// and the Operator Items Tab option) given to `tryRefreshInvalidatedTabs`,
