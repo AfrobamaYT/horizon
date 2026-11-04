@@ -340,7 +340,7 @@ pub struct Block {
     pub default_state: BTreeMap<String, String>,
     /// Also add a block item with the same id.
     pub item: bool,
-    /// The item this block is, for pick-block, drops and `Block.asItem`, when
+    /// The item this block is, for pick-block and `Block.asItem`, when
     /// it is not a block item of its own: an item of this mod or a vanilla
     /// one, checked to exist when the content loads. Needs `item` false.
     pub block_item: Option<String>,

@@ -715,8 +715,8 @@ struct NewBlock<'a> {
 impl NewBlock<'_> {
     /// The item its gameplay row names when that is not the template's item
     /// renamed: `block_item`, or `minecraft:air` for a block with no item
-    /// (a sign's wall form keeps the paired sign's). Pick-block, drops and
-    /// `Block.asItem` all read this one value.
+    /// (a sign's wall form keeps the paired sign's). Pick-block and
+    /// `Block.asItem` both read this one value.
     fn item_row(&self) -> Option<&str> {
         match &self.decl.block_item {
             Some(item) => Some(item),
