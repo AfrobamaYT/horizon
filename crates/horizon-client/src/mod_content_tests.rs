@@ -835,7 +835,7 @@ fn content_root_loads_with_every_table() {
     let iron_sword = &items.items["minecraft:iron_sword"];
     assert_eq!((sword.max_damage, iron_sword.max_damage), (900, 250));
     assert_eq!(sword.modifiers.len(), 1);
-    assert_eq!(sword.modifiers[0].2, 7.0);
+    assert_eq!(sword.modifiers[0].amount, 7.0);
     assert_eq!(sword.tool.len(), iron_sword.tool.len());
     // The stew leaves its bowl in the grid; vanilla's stew leaves none.
     let stew = &items.items["ruby:ruby_stew"];

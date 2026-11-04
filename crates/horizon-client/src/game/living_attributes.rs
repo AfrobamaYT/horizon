@@ -530,6 +530,78 @@ mod tests {
         });
     }
 
+    /// The live map takes a held stack's own `attribute_modifiers`, and
+    /// another stack of the same item with other components is a change.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_stacks_own_modifiers_replace_its_items() {
+        use horizon_world::nbt::Tag;
+        with_game(|game| {
+            spawn(game);
+            let damage = "minecraft:attack_damage";
+            let mut own = ItemStack::new("minecraft:diamond_sword", 1);
+            own.data_mut().set_other(
+                "minecraft:attribute_modifiers",
+                Some(Tag::List(vec![Tag::compound([
+                    ("type", Tag::String(damage.into())),
+                    ("id", Tag::String("test:dull".into())),
+                    ("amount", Tag::Double(1.0f64.to_bits())),
+                    ("operation", Tag::String("add_value".into())),
+                    ("slot", Tag::String("mainhand".into())),
+                ])])),
+            );
+            game.mobs[0].set_equipment_stack(MAINHAND, Some(own));
+            game.tick_equipment_attributes();
+            // +1 from its own list, not the sword's +6.
+            assert_eq!(read(game, 12, damage), (Some(4.0), Some(3.0)));
+            game.mobs[0].set_equipment_stack(MAINHAND, stack("minecraft:diamond_sword"));
+            game.tick_equipment_attributes();
+            assert_eq!(read(game, 12, damage), (Some(9.0), Some(3.0)));
+        });
+    }
+
+    /// A mob's gear knockback resistance reads its stacks once, keeps what it
+    /// read while the same stacks are worn, and reads them again when one
+    /// changes: here a chestplate with its own list.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn gear_knockback_is_read_again_only_when_the_gear_changes() {
+        use horizon_world::nbt::Tag;
+        with_game(|game| {
+            spawn(game);
+            let read_at = |game: &Game<'_>| {
+                let m = &game.mobs[0];
+                let gear = m.extra.gear_knockback.as_deref();
+                (gear.map(std::ptr::from_ref), m.gear_knockback_resistance)
+            };
+            let close = |value: Option<f64>, to: f64| value.is_some_and(|v| (v - to).abs() < 1e-6);
+            game.mobs[0].set_equipment_stack(CHEST, stack("minecraft:netherite_chestplate"));
+            game.refresh_gear_knockback_resistance();
+            let (first, value) = read_at(game);
+            assert!(first.is_some() && close(value, 0.1), "{value:?}");
+            game.refresh_gear_knockback_resistance();
+            assert_eq!(read_at(game).0, first, "the same gear is not read again");
+            let mut own = ItemStack::new("minecraft:netherite_chestplate", 1);
+            own.data_mut().set_other(
+                "minecraft:attribute_modifiers",
+                Some(Tag::List(vec![Tag::compound([
+                    ("type", Tag::String("minecraft:knockback_resistance".into())),
+                    ("id", Tag::String("test:anchor".into())),
+                    ("amount", Tag::Double(0.5f64.to_bits())),
+                    ("operation", Tag::String("add_value".into())),
+                    ("slot", Tag::String("chest".into())),
+                ])])),
+            );
+            game.mobs[0].set_equipment_stack(CHEST, Some(own));
+            game.refresh_gear_knockback_resistance();
+            let (second, value) = read_at(game);
+            assert!(second != first && close(value, 0.5), "{value:?}");
+            game.mobs[0].set_equipment_stack(CHEST, None);
+            game.refresh_gear_knockback_resistance();
+            assert_eq!(read_at(game), (None, None));
+        });
+    }
+
     fn modifier(id: &str, amount: f64, operation: AttributeOperation) -> AttributeModifier {
         AttributeModifier::new(Identifier::parse(id).unwrap(), amount, operation)
     }

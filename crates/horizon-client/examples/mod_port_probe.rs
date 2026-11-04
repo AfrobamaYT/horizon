@@ -238,8 +238,8 @@ fn main() -> Result<()> {
                         "max_stack_size": i.max_stack,
                         "block": i.block.map(|b| b.0),
                         "max_damage": i.max_damage,
-                        "modifiers": i.modifiers.iter().map(|(attribute, id, amount, operation, slot)| {
-                            json!({"type": attribute, "id": id, "amount": amount, "operation": operation, "slot": slot})
+                        "modifiers": i.modifiers.iter().map(|m| {
+                            json!({"type": m.attribute, "id": m.id, "amount": m.amount, "operation": m.operation, "slot": m.slot})
                         }).collect::<Vec<_>>(),
                         "tool": i.tool_damage_per_block.map(|per_block| json!({
                             "rules": i.tool.iter().map(|r| json!({"blocks": r.blocks, "speed": r.speed, "correct_for_drops": r.correct})).collect::<Vec<_>>(),
