@@ -944,6 +944,7 @@ impl Game<'_> {
             leash_boats: &self.leash_boats,
             others_grid: None,
             others_index: None,
+            others_villagers: None,
             daylight: self.dim != Dim::Nether && self.sky_darken() < 4,
             // day.json: false from tick 12542, true from 23460 (a step track).
             monsters_burn: self.dim == Dim::Overworld
@@ -1161,14 +1162,19 @@ impl Game<'_> {
             // Each mob keeps its snapshot slot all tick; the first slot of an
             // id answers, as a scan would.
             let mut index = horizon_client::fast_hash::FxHashMap::<u32, u32>::default();
+            let mut villager_slots = Vec::new();
             for (i, s) in snapshot.iter().enumerate() {
                 index.entry(s.id).or_insert(i as u32);
+                if s.species == horizon_client::mobs::Species::Villager {
+                    villager_slots.push(i as u32);
+                }
             }
             for i in 0..mobs.len() {
                 let mut w = MobWorld {
                     others: &snapshot,
                     others_grid: Some(&grid),
                     others_index: Some(&index),
+                    others_villagers: Some(&villager_slots),
                     ..base.clone()
                 };
                 let m = &mut mobs[i];
@@ -1923,7 +1929,7 @@ impl Game<'_> {
         let mut hurt = false;
         let mut infested = false;
         let aim = self.attacker_aim(source.attacker);
-        // So `living_knockback_v2` sees who hit and what they hold.
+        // So `living_knockback` sees who hit and what they hold.
         let _attacker = self.knockback_scope_for(source.attacker);
         if let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
             let hit = t.damage_aimed(
@@ -2407,7 +2413,8 @@ impl Game<'_> {
                     }
                     Who::Mob(id) => {
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                            m.knockback(power, x, z, &source);
+                            let level = crate::game::entity::damage_level_of!(self);
+                            m.knockback(level, power, x, z, &source);
                         }
                     }
                 },
@@ -4063,7 +4070,8 @@ impl Game<'_> {
             attacker => attacker,
         });
         if let Some(p) = self.player.as_mut() {
-            knock_back(p, &mut self.world.random, power, (xd, zd), source);
+            let level = crate::game::entity::damage_level_of!(self);
+            knock_back(p, level, power, (xd, zd), source);
         }
     }
     /// A status effect from a mob, arrow or splash potion (`addEffect`).
@@ -7899,7 +7907,7 @@ impl Game<'_> {
 /// `LivingEntity.knockback` on `p`: [`Game::knock_back_player`].
 fn knock_back(
     p: &mut horizon_client::motion::PlayerMotion,
-    random: &mut horizon_core::random::LegacyRandom,
+    level: &mut horizon_client::health::DamageLevel<'_>,
     power: f64,
     (xd, zd): (f64, f64),
     source: HurtSource<'_>,
@@ -7912,7 +7920,11 @@ fn knock_back(
         x: xd,
         z: zd,
     };
-    if knockback_canceled(Hurting::Player(p.entity_id, source), &mut knock) {
+    if knockback_canceled(
+        level.reborrow(),
+        Hurting::Player(p.entity_id, source),
+        &mut knock,
+    ) {
         return;
     }
     let Knock {
@@ -7925,6 +7937,7 @@ fn knock_back(
         return;
     }
     while xd * xd + zd * zd < f64::from(1.0e-5_f32) {
+        let random = level.random();
         xd = (random.next_double() - random.next_double()) * 0.01;
         zd = (random.next_double() - random.next_double()) * 0.01;
     }
@@ -8601,6 +8614,7 @@ mod pearl_tests {
             leash_boats: &[],
             others_grid: None,
             others_index: None,
+            others_villagers: None,
             daylight: true,
             monsters_burn: false,
             game_time: 1000,
@@ -8680,7 +8694,7 @@ mod pearl_tests {
 #[cfg(test)]
 mod knockback_tests {
     use super::*;
-    use horizon_client::health::KNOCKBACK;
+    use horizon_client::health::{DamageLevel, KNOCKBACK};
 
     /// What the hook of these tests saw: the player, its source (as damage
     /// type, causing, direct) and the push.
@@ -8690,7 +8704,7 @@ mod knockback_tests {
     /// Sets the native knockback hook of these tests (global: it stays set for
     /// the process) for players 9201 to 9203: it records the push, cancels
     /// 9201's and doubles 9202's strength and turns its direction around.
-    fn hook(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
+    fn hook(_: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
         let Hurting::Player(entity @ 9201..=9203, s) = pushed else {
             return false;
         };
@@ -8721,13 +8735,11 @@ mod knockback_tests {
             return;
         }
         let installed = *KNOCKBACK.get_or_init(|| hook);
-        assert!(std::ptr::fn_addr_eq(
-            installed,
-            hook as fn(Hurting<'_>, &mut Knock) -> bool
-        ));
+        type Hook = fn(DamageLevel<'_>, Hurting<'_>, &mut Knock) -> bool;
+        assert!(std::ptr::fn_addr_eq(installed, hook as Hook));
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
         let resources = horizon_client::motion::MotionResources::load(&root, &assets).unwrap();
-        let mut random = horizon_core::random::LegacyRandom::new(1);
+        let mut test_level = horizon_client::health::TestLevel::new(1);
         let hit = HurtSource {
             damage_type: "minecraft:player_attack",
             causing: 5,
@@ -8743,7 +8755,7 @@ mod knockback_tests {
                 let set = p.set_modifier(attribute, "horizon:test", resistance, "add_value", true);
                 set.unwrap();
             }
-            knock_back(&mut p, &mut random, 0.4, (0.0, 3.0), hit);
+            knock_back(&mut p, &mut test_level.level(), 0.4, (0.0, 3.0), hit);
             (p.velocity.x, p.velocity.y, p.velocity.z)
         };
         // No mod in the way: vanilla's push, away from z = 3.

@@ -283,7 +283,11 @@ mod tests {
                 impl Hooks for Other {{
                     fn inject_example_tick(&self, _: &mut InjectExampleTickEvent) -> Flow {{ panic!("wrong owner") }}
                 }}
+                pub static ENTERED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
                 pub struct ModEntry {{ pub id: &'static str, pub hooks: Box<dyn Hooks> }}
+                impl ModEntry {{
+                    pub fn enter(&self, hook: &'static str) {{ ENTERED.lock().unwrap().push(format!("{{}}:{{hook}}", self.id)); }}
+                }}
                 pub fn mods() -> &'static [ModEntry] {{
                     static MODS: OnceLock<Vec<ModEntry>> = OnceLock::new();
                     MODS.get_or_init(|| vec![ModEntry {{ id: "plain", hooks: Box::new(Other) }}, ModEntry {{ id: "example", hooks: Box::new(Owner) }}, ModEntry {{ id: "other", hooks: Box::new(Other) }}])
@@ -297,6 +301,7 @@ mod tests {
                 mod_api::SUBSCRIBED.store(true, std::sync::atomic::Ordering::Relaxed);
                 assert!(matches!(horizon_trait_dispatch(&mut value), core::ops::ControlFlow::Break(())));
                 assert_eq!(value, 42);
+                assert_eq!(*mod_api::ENTERED.lock().unwrap(), ["example:inject_example_tick"]);
             }}
         "#
         );
@@ -342,6 +347,9 @@ mod tests {
                 }}
                 pub static INSTALLED: AtomicBool = AtomicBool::new(false);
                 pub struct ModEntry {{ pub id: &'static str, pub hooks: Box<dyn Hooks> }}
+                impl ModEntry {{
+                    pub fn enter(&self, _: &'static str) {{}}
+                }}
                 pub fn mods() -> &'static [ModEntry] {{
                     static MODS: OnceLock<Vec<ModEntry>> = OnceLock::new();
                     if !INSTALLED.load(Ordering::SeqCst) {{

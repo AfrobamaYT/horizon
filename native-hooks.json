@@ -1681,7 +1681,9 @@
     {
       "name": "living_knockback", "side": "server",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_knockback",
+      "target": "horizon_client::game::native_hooks::HitLevel<'_>::native_living_knockback",
+      "neoforge": "LivingKnockBackEvent",
+      "host": "level",
       "mod_api": {
         "contract": "cancel",
         "out": "canceled"

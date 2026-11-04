@@ -30,7 +30,7 @@ use horizon_client::mod_api::{
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
     LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult,
-    NativeItemClick, NativeTriState, Suggestion, TooltipElement, UsePhase,
+    NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion, TooltipElement, UsePhase,
 };
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -46,7 +46,7 @@ use horizon_client::{
         BlockEntity, MOD_MENUS, ModBlockEntity, ModBlockEntityFields, ModContainer,
         ModEnergyBuffer, ModFluidTanks,
     },
-    crafting::{CustomRecipe, Ingredient, recipe_result},
+    crafting::{Ingredient, RecipeFile, recipe_result},
     extras::Corner,
     extras_hud::Corners,
     fast_hash::FxHashMap,
@@ -495,6 +495,27 @@ impl GameLevel<'_> {
         cancel: &mut bool,
     ) {
         mod_api::dispatch_dragon_egg_form(self, dimension, pos, cancel);
+    }
+
+    /// `Block.affectNeighborsAfterRemoval` for a mod's block: an authoritative server removed the
+    /// block `state` from `pos` (`moved`: a piston pushed it) and has run its template class's own
+    /// updates. Push onto `updates` the neighbour updates it wants, in order: `OutputSignal`
+    /// (`updateNeighbourForOutputSignal`), `Neighbours` (`updateNeighborsAt`) and
+    /// `NeighboursExcept(direction)` (`updateNeighborsAtExceptFromFacing`); the level runs each
+    /// at once, as the block's own override would. Answered from inside the level's write: it
+    /// reads, and cannot write blocks or spawn entities.
+    #[inline(always)]
+    pub(super) fn native_affect_neighbors_after_removal(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        moved: bool,
+        updates: &mut Vec<NeighbourUpdate>,
+    ) {
+        mod_api::dispatch_affect_neighbors_after_removal(
+            self, dimension, pos, state, moved, updates,
+        );
     }
 
     /// An authoritative server is about to deliver `neighborChanged`.
@@ -2747,6 +2768,19 @@ impl Game<'_> {
             image.width as f32,
             image.height as f32,
         ]
+    }
+    /// The hook `native_screen_exclusion` asks: a mod adds the rectangles it
+    /// draws over `screen` (a side panel, a button column) to `areas`, in GUI
+    /// pixels, `[x, y, width, height]`. NeoForge has no counterpart in the
+    /// game; recipe viewers ask for it through their own API
+    /// (`EmiExclusionArea`, JEI's `IGuiContainerHandler.getGuiExtraAreas`).
+    /// Client-side.
+    pub(super) fn native_screen_exclusion_areas(
+        &self,
+        screen: &NativeScreenView<'_>,
+        areas: &mut Vec<[f32; 4]>,
+    ) {
+        mod_api::dispatch_screen_exclusion_areas(self, screen, areas);
     }
     pub(super) fn track_drag_button(&mut self, button: MouseButton, pressed: bool) {
         // Any release ends the drag, as vanilla's `MouseHandler.onButton` clears `activeButton`:
@@ -6966,82 +7000,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_living_use_totem(entity, kind, source, hand, item, cancel);
     }
-    /// `LivingEntity.knockback` is about to push entity `entity` of type `kind`
-    /// (`minecraft:zombie`, `minecraft:player`) `strength` away from the direction (`x`, `z`),
-    /// on the raw strength, before the entity's knockback resistance takes its share and its motion
-    /// changes
-    /// (docs/native-mods.md). Vanilla's direction points at the
-    /// source of a hit (the attacker's side), and the entity is pushed the other way. Change
-    /// `strength`, `x` or `z`, or set `canceled`, and the push follows them: canceled, the
-    /// entity's motion is left alone. A `strength` of 0 or less after the hook is no push, and a
-    /// direction too short to tell draws a random one after it, as in vanilla. A value a mod
-    /// leaves that is not a finite number is put back as it was. `damage_type`
-    /// (`minecraft:player_attack`), `causing` (`DamageSource.getEntity`) and `direct`
-    /// (`getDirectEntity`) are the push's `DamageSource`, named as `native_living_incoming_damage`
-    /// names a hit's, with the same entity ids left at 0. It fires for the players and mobs the
-    /// game knocks back: a hit's own push, a sprinting or Knockback hit, a sweep, a spear, a
-    /// shield's push on its holder and a goat's ram. It does not fire for a sulfur cube with a
-    /// block that a hit with a causing entity knocks back (`SulfurCube.knockback` does not call
-    /// `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the
-    /// ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a
-    /// hoglin's throw), nor yet for the ones Horizon makes another way: a mob's melee push from
-    /// its attack knockback or a Knockback weapon, an armor stand's, the ender dragon's. It runs
-    /// on the thread that ticks the world (the server thread): state
-    /// shared with render thread hooks needs synchronising. No `self`: the game is in the middle
-    /// of the hit.
-    pub(super) fn native_living_knockback(
-        entity: i32,
-        kind: &str,
-        damage_type: &str,
-        causing: i32,
-        direct: i32,
-        strength: &mut f64,
-        x: &mut f64,
-        z: &mut f64,
-        canceled: &mut bool,
-    ) {
-        mod_api::dispatch_living_knockback(
-            entity,
-            kind,
-            damage_type,
-            causing,
-            direct,
-            strength,
-            x,
-            z,
-            canceled,
-        );
-    }
-    /// LivingEntity.knockback before resistance and motion, after the unchanged v1 hook.
-    /// Cancellation from either hook wins. Attacker is the attacking entity's network id,
-    /// falling back to the victim's last hurt-by mob, or 0 when unknown; `attacker_main` and
-    /// `attacker_off` are what it holds (a player's selected and off-hand stacks, a mob's main hand), none when unknown. Player attackers
-    /// include the guest whose action runs. Includes mob melee and armor-stand sweeps, not
-    /// direct velocity pushes (explosions, Punch arrows, hoglin throws). Non-finite changes
-    /// are restored before resistance. Server-side, without self: damage borrows the victim.
-    pub(super) fn native_living_knockback_v2(
-        entity: i32,
-        kind: &str,
-        attacker: i32,
-        attacker_main: Option<&ItemStack>,
-        attacker_off: Option<&ItemStack>,
-        strength: &mut f64,
-        x: &mut f64,
-        z: &mut f64,
-        canceled: &mut bool,
-    ) {
-        mod_api::dispatch_living_knockback_v2(
-            entity,
-            kind,
-            attacker,
-            attacker_main,
-            attacker_off,
-            strength,
-            x,
-            z,
-            canceled,
-        );
-    }
     /// Whether a mod hears projectiles' impacts (`native_projectile_impact`):
     /// set `hears`. Asked once a server tick before the projectiles fly; only
     /// then does the tick keep the copy of each flying projectile that a
@@ -7191,6 +7149,53 @@ impl HitLevel<'_> {
             self, entity, kind, source, victim, weapon, container, canceled,
         );
     }
+    /// NeoForge's `LivingKnockBackEvent`: `LivingEntity.knockback` is about to push entity
+    /// `entity` of type `kind` (`minecraft:zombie`, `minecraft:player`) `strength` away from the
+    /// direction (`x`, `z`), on the raw strength, before the entity's knockback resistance takes
+    /// its share and its motion changes. Vanilla's direction points at the source of a hit (the
+    /// attacker's side), and the entity is pushed the other way. `source` is the push's
+    /// `DamageSource`, named as `native_living_incoming_damage` names a hit's. `attacker` is the
+    /// attacking entity's network id, falling back to the victim's last hurt-by mob, or 0 when
+    /// unknown; `attacker_main` and `attacker_off` are what it holds (a player's selected and
+    /// off-hand stacks, a mob's main hand), none when unknown. Change `strength`, `x` or `z`, or
+    /// set `canceled`, and the push follows them: canceled, the entity's motion is left alone. A
+    /// `strength` of 0 or less after the hook is no push, and a direction too short to tell
+    /// draws a random one after it, as in vanilla. A value a mod leaves that is not a finite
+    /// number is put back as it was. It fires for the players, mobs and armor stands the game
+    /// knocks back: a hit's own push, a sprinting or Knockback hit, a sweep, a spear, a
+    /// shield's push on its holder, a goat's ram and a mob's melee push. It does not fire for a
+    /// sulfur cube with a block that a hit with a causing entity knocks back
+    /// (`SulfurCube.knockback` does not call `super` there), for the pushes vanilla doesn't make
+    /// with `LivingEntity.knockback` (the ender dragon's wings, Punch arrows, explosions, wind
+    /// charges, a mace smash's area, a hoglin's throw), nor for the ones Horizon makes another
+    /// way (the ender dragon's). The level is the hit's: its blocks, random and own attachments.
+    pub(super) fn native_living_knockback(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        attacker: i32,
+        attacker_main: Option<&ItemStack>,
+        attacker_off: Option<&ItemStack>,
+        strength: &mut f64,
+        x: &mut f64,
+        z: &mut f64,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_living_knockback(
+            self,
+            entity,
+            kind,
+            source,
+            attacker,
+            attacker_main,
+            attacker_off,
+            strength,
+            x,
+            z,
+            canceled,
+        );
+    }
     /// NeoForge's `LivingDamageEvent.Pre`: `LivingEntity.actuallyHurt` of entity `entity` of
     /// type `kind` (`minecraft:player`, `minecraft:zombie`) by `source` (named as
     /// `native_living_incoming_damage` names it) has taken armor and magic, and the absorption
@@ -7306,7 +7311,7 @@ pub(super) fn shield_block(
 impl Game<'_> {
     /// `health::knockback_from` that, while a native mod listens, also records what the attacker
     /// holds (the player's selected and off-hand stacks, a mob's main hand) for
-    /// `living_knockback_v2`. A nested scope for the same attacker keeps what the outer recorded.
+    /// `living_knockback`. A nested scope for the same attacker keeps what the outer recorded.
     pub(super) fn knockback_scope(&self, attacker: i32) -> impl Drop + use<> {
         use horizon_client::health::{knockback_attacker, knockback_from_holding, knockback_held};
         if mod_api::mods().is_empty() {
@@ -7341,8 +7346,8 @@ impl Game<'_> {
 /// `native_living_knockback` for the knockback code (`health::KNOCKBACK`): whether it
 /// canceled the push. Its one caller. The pushed entity and the source are named as the
 /// damage hook names them.
-pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
-    if mod_api::mods().is_empty() {
+pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
+    if !mod_api::listened(mod_api::HookId::LivingKnockback) {
         return false;
     }
     let attacker = match &pushed {
@@ -7360,48 +7365,23 @@ pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
             }
         }
     };
-    // No `matches!`: horizon-mixins refuses macros in a hook point's body.
-    #[allow(clippy::match_like_matches_macro)]
-    let stand = if let Hurting::ArmorStand(..) = &pushed {
-        true
-    } else {
-        false
-    };
     let (entity, kind, source) = hurt_server_args(pushed);
-    let HurtSource {
-        damage_type,
-        causing,
-        direct,
-        ..
-    } = source;
     let mut canceled = false;
-    if !stand {
-        Game::native_living_knockback(
+    horizon_client::health::with_held(|[main, off]| {
+        HitLevel(level).native_living_knockback(
             entity,
             kind,
-            damage_type,
-            causing,
-            direct,
+            &source,
+            attacker,
+            main.as_ref(),
+            off.as_ref(),
             &mut knock.strength,
             &mut knock.x,
             &mut knock.z,
             &mut canceled,
         );
-    }
-    let mut canceled_v2 = false;
-    let held = horizon_client::health::knockback_held();
-    Game::native_living_knockback_v2(
-        entity,
-        kind,
-        attacker,
-        held[0].as_ref(),
-        held[1].as_ref(),
-        &mut knock.strength,
-        &mut knock.x,
-        &mut knock.z,
-        &mut canceled_v2,
-    );
-    canceled || canceled_v2
+    });
+    canceled
 }
 
 pub(super) fn block_contact(
@@ -8491,6 +8471,53 @@ impl Game<'_> {
         let size = self.window.as_ref()?.inner_size();
         Some([size.width, size.height])
     }
+    /// Where the open screen draws outside its `rect`, and where mods draw
+    /// over it: the recipe book's panel, the creative tab rows, the active
+    /// effects beside the inventory, then whatever `native_screen_exclusion_areas`
+    /// adds. Each is `[x, y, width, height]` in GUI pixels; an empty or
+    /// non-finite one is dropped. A mod that lays out its own panels
+    /// (a recipe viewer) keeps them clear of these. Client-side; empty with
+    /// no screen up.
+    pub(super) fn native_screen_exclusion(&self) -> Vec<[f32; 4]> {
+        let Some(view) = self.observed_screen_view() else {
+            return Vec::new();
+        };
+        let Some(renderer) = self.renderer.as_ref() else {
+            return Vec::new();
+        };
+        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+        let mut areas = self.screen_own_exclusion(&batch);
+        self.native_screen_exclusion_areas(&view, &mut areas);
+        areas.retain(|a| a.iter().all(|v| v.is_finite()) && a[2] > 0.0 && a[3] > 0.0);
+        areas
+    }
+    /// The areas the game itself draws beside the open screen's window.
+    fn screen_own_exclusion(&self, batch: &HudBatch) -> Vec<[f32; 4]> {
+        let mut areas = Vec::new();
+        match self.screen {
+            Screen::Creative => {
+                let image = self.container_image(batch);
+                let (x, y, w, h) = (
+                    image.left as f32,
+                    image.top as f32,
+                    image.width as f32,
+                    image.height as f32,
+                );
+                areas.push([x, y - 28.0, w, 28.0]);
+                areas.push([x, y + h, w, 28.0]);
+                areas.extend(self.inventory_effects_rect(batch, [x, y], w));
+            }
+            Screen::Inventory if self.title.is_none() => {
+                areas.extend(self.recipe_book_rect(batch));
+                if self.container.is_none() && self.craft_size == 2 && !self.mount_active() {
+                    let (x, y) = self.inventory_origin(batch);
+                    areas.extend(self.inventory_effects_rect(batch, [x, y], 176.0));
+                }
+            }
+            _ => {}
+        }
+        areas
+    }
     /// Where the mouse is, in GUI pixels.
     pub(super) fn native_cursor(&self) -> [f32; 2] {
         [self.cursor.0, self.cursor.1]
@@ -8638,21 +8665,23 @@ impl Game<'_> {
         let page = RecipePage::new(title, tabs, tab, views);
         self.panel.show_recipes(mod_id, page);
     }
-    /// The recipes of type `kind` (`mymod:crusher`), a type outside `minecraft`,
-    /// from `data/<namespace>/recipe/*.json` of the content mods (`.hmod`) and
-    /// the world's data packs, in file order: each one's id and its file as
-    /// JSON, for the mod to read as it likes. A data pack changes them on
-    /// `/reload`, so look them up again when you need them. Empty for a type
-    /// nobody uses and outside a world. These are the server's table on the
-    /// server thread, a dedicated server or a LAN host; a client, the
-    /// single-player window included, sees only the content mods' recipes, not
-    /// the world's data packs', unless a mod had the server send it the type
+    /// The recipes of type `kind` (`minecraft:smelting`, `mymod:crusher`), vanilla's
+    /// types and mods' own alike, from `data/<namespace>/recipe/*.json` of vanilla,
+    /// the content mods (`.hmod`) and the world's data packs, in file order: each
+    /// one's id and its file as JSON, for the mod to read as it likes. These are the
+    /// recipes in force (`RecipeManager.getAllRecipesFor`): data packs merged and
+    /// load conditions held, so a pack's override or removal shows. A data pack
+    /// changes them on `/reload`, so look them up again when you need them. Empty
+    /// for a type nobody uses and outside a world. These are the server's table on
+    /// the server thread, a dedicated server or a LAN host; a client, the
+    /// single-player window included, sees vanilla's and the content mods' recipes,
+    /// not the world's data packs', unless a mod had the server send it the type
     /// (`native_datapack_sync`).
-    pub(super) fn native_recipes_of_type(&self, kind: &str) -> &[CustomRecipe] {
+    pub(super) fn native_recipes_of_type(&self, kind: &str) -> &[RecipeFile] {
         if self.outside_world() {
             return &[];
         }
-        self.recipes().custom.get(kind).map_or(&[], Vec::as_slice)
+        self.recipes().by_type.get(kind).map_or(&[], Vec::as_slice)
     }
     /// The validated category and icon of a custom recipe type, or None for
     /// an undeclared/invalid type, before resources load, or outside a world.

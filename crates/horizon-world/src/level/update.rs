@@ -524,6 +524,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             index: 0,
         });
     }
+    pub fn update_neighbors_at_except(&mut self, pos: BlockPos, block: BlockId, skip: Direction) {
+        let orientation = self.initial_orientation(None, None);
+        self.update_neighbors_at_except_oriented(pos, block, skip, orientation);
+    }
     pub fn update_neighbors_at_except_oriented(
         &mut self,
         pos: BlockPos,

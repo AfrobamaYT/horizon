@@ -1249,6 +1249,17 @@ impl LevelAccess for GameLevel<'_> {
             self.native_neighbor_changed(self.dimension, pos, state, changed, moved);
         }
     }
+    fn affect_neighbors_after_removal(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        moved: bool,
+        updates: &mut Vec<horizon_world::level::NeighbourUpdate>,
+    ) {
+        if self.native_authoritative {
+            self.native_affect_neighbors_after_removal(self.dimension, pos, state, moved, updates);
+        }
+    }
     fn allow_spread(
         &self,
         kind: horizon_world::level::Spread,
@@ -12332,7 +12343,15 @@ impl Game<'_> {
         if landed {
             if knockback > 0.0 {
                 let (xd, zd) = self.extra_knockback_direction();
-                self.mobs[index].knockback_effect(f64::from(knockback), xd, zd, &source, amount);
+                let level = crate::game::entity::damage_level_of!(self);
+                self.mobs[index].knockback_effect(
+                    level,
+                    f64::from(knockback),
+                    xd,
+                    zd,
+                    &source,
+                    amount,
+                );
                 self.stop_sprint_after_extra_knockback();
             }
             let mob = &self.mobs[index];
@@ -22268,7 +22287,11 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         // 10 to 200 ms to get one back.
         horizon_threads::favour_current();
     }
-    if options.execution_role.is_client() {
+    // A dedicated server too: vanilla's "Server Shutdown Thread" (`DedicatedServer.initServer`'s
+    // shutdown hook) halts the server and saves its players and levels on SIGTERM, SIGINT or SIGHUP.
+    if options.execution_role.is_client()
+        || options.execution_role == execution_role::ExecutionRole::DedicatedServer
+    {
         horizon_threads::catch_stop_signals();
     }
     let started = Instant::now();
