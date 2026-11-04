@@ -2,6 +2,7 @@
 //! (`Biome.getGrassColor`/`getFoliageColor`/..., `BlockTintSources`).
 use crate::Result;
 use horizon_core::{noise::SimplexNoise, position::BlockPos, random::LegacyRandom};
+pub use mod_api::biome::{BiomeColors, SpawnEntry};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -14,15 +15,6 @@ pub enum GrassModifier {
     None,
     DarkForest,
     Swamp,
-}
-#[derive(Clone, Debug)]
-pub struct SpawnEntry {
-    pub entity: String,
-    pub weight: u32,
-    pub min: u32,
-    pub max: u32,
-    /// A `ConstantInt` count (sampling draws nothing).
-    pub constant: bool,
 }
 /// A `natural_mob_spawns` / `spawn_overrides` entry list.
 pub fn parse_entries(list: &Value) -> Vec<SpawnEntry> {
@@ -388,18 +380,6 @@ impl Biomes {
             }
         }
     }
-}
-
-/// A biome's colours as a mod may change them (`native_biome_colors`), each
-/// 0xRRGGBB: what tints grass (before the dark forest's modifier; the swamp's
-/// noise colours replace it), leaves and vines, dry foliage (leaf litter) and
-/// water.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BiomeColors {
-    pub grass: u32,
-    pub foliage: u32,
-    pub dry_foliage: u32,
-    pub water: u32,
 }
 
 impl Biomes {

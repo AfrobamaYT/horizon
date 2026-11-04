@@ -190,7 +190,7 @@ impl Game<'_> {
     pub(super) fn native_player_level_changed(&mut self, from: i32) {
         let to = self.experience.level;
         if from != to
-            && crate::mod_api::listened(crate::mod_api::HookId::PlayerLevelChange)
+            && mod_api::__private::listened(mod_api::HookId::PlayerLevelChange)
             && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
         {
             self.native_player_level_change(player, &name, from, to);
@@ -200,7 +200,7 @@ impl Game<'_> {
     /// `PlayerXpEvent.XpChange` for a `Player.giveExperiencePoints` of `amount`
     /// points: the amount to give, or `None` when a mod cancelled it.
     pub(super) fn xp_change(&mut self, amount: i32) -> Option<i32> {
-        if !crate::mod_api::listened(crate::mod_api::HookId::PlayerXpChange) {
+        if !mod_api::__private::listened(mod_api::HookId::PlayerXpChange) {
             return Some(amount);
         }
         let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
@@ -1388,16 +1388,11 @@ impl Game<'_> {
             .with_component_fields(vec![("hover_event".into(), shown)])
     }
     pub(super) fn item_rarity(&self, item: &str) -> String {
-        static RARITY: std::sync::OnceLock<std::collections::HashMap<String, String>> =
-            std::sync::OnceLock::new();
-        let map = RARITY.get_or_init(|| {
-            horizon_world::item_defaults::read(&self.options.resources)
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|(k, c)| c["minecraft:rarity"].as_str().map(|r| (k, r.to_owned())))
-                .collect()
-        });
-        map.get(item).cloned().unwrap_or_else(|| "common".into())
+        self.items()
+            .enchantments
+            .props
+            .get(item)
+            .map_or_else(|| "common".into(), |props| props.rarity.clone())
     }
     fn cmd_give(&mut self, ctx: &Context) -> R<i32> {
         let Some(Arg::Item(ItemInput { id, components, .. })) = ctx.get("item").cloned() else {
@@ -3161,7 +3156,7 @@ impl Game<'_> {
         &mut self,
         rule: &gamerules::Rule,
         value: Value,
-        actor: Option<&crate::mod_api::GameRuleActor<'_>>,
+        actor: Option<&mod_api::GameRuleActor<'_>>,
     ) {
         if self.ui.rules.set(rule.name, value) {
             self.game_rule_changed(rule.name, value, actor);
@@ -3210,7 +3205,7 @@ impl Game<'_> {
             self.lan_acting_entity,
             name.as_deref(),
         ) {
-            (Some(uuid), Some(entity_id), Some(name)) => Some(crate::mod_api::GameRuleActor {
+            (Some(uuid), Some(entity_id), Some(name)) => Some(mod_api::GameRuleActor {
                 uuid,
                 entity_id: entity_id as i32,
                 name,
@@ -4019,7 +4014,7 @@ mod teleport_pitch_tests {
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )

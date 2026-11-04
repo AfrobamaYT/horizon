@@ -1,5 +1,6 @@
 //! The playable game loop: streaming world, player simulation at 20 ticks/s,
 //! block interaction, inventory and HUD.
+use mod_api::__private::game::*;
 
 /// The content tables the world plays with, as field-level borrows: the
 /// world's data packs' over the game's own. The `Game::items`/`recipes`/
@@ -182,6 +183,7 @@ mod leads;
 mod level_particles;
 mod levels;
 mod lightning;
+mod living_attributes;
 mod llamas;
 mod locator_bar;
 mod loom;
@@ -916,10 +918,10 @@ impl Screen {
 fn vanilla_tool_state(
     transformer: &str,
     particle: &str,
-    ability: crate::mod_api::ToolAbility,
+    ability: mod_api::ToolAbility,
     state: BlockStateId,
 ) -> Option<BlockStateId> {
-    use crate::mod_api::ToolAbility::*;
+    use mod_api::ToolAbility::*;
     let action = match transformer {
         "minecraft:axe" => match particle {
             "scrape" => AxeScrape,
@@ -948,8 +950,8 @@ struct Hit {
 }
 impl Hit {
     /// The hit as block-use hooks hear it (`UseOnContext`'s hit result).
-    fn native(&self) -> horizon_client::mod_api::BlockHit {
-        horizon_client::mod_api::BlockHit::new(self.point, self.face, self.inside)
+    fn native(&self) -> mod_api::BlockHit {
+        mod_api::BlockHit::new(self.point, self.face, self.inside)
     }
     /// The block the clicked face leads to (`pos.relative(direction)`).
     fn beside(&self) -> [i32; 3] {
@@ -1322,7 +1324,7 @@ impl LevelAccess for GameLevel<'_> {
         feature: Option<&'a str>,
     ) -> Option<std::borrow::Cow<'a, str>> {
         if !self.native_authoritative
-            || !crate::mod_api::listened(crate::mod_api::HookId::BlockGrowFeature)
+            || !mod_api::__private::listened(mod_api::HookId::BlockGrowFeature)
         {
             return feature.map(std::borrow::Cow::Borrowed);
         }
@@ -1380,11 +1382,10 @@ impl LevelAccess for GameLevel<'_> {
     ) -> Option<i32> {
         let mut cancel = false;
         if self.native_authoritative {
-            let context = horizon_client::mod_api::NativeNoteBlockChange {
+            let context = mod_api::NativeNoteBlockChange {
                 dimension: self.dimension,
                 pos,
-                instrument: horizon_client::mod_api::NativeNoteInstrument::ALL
-                    [usize::from(instrument)],
+                instrument: mod_api::NativeNoteInstrument::ALL[usize::from(instrument)],
                 old_note: old,
             };
             self.native_note_block_change(&context, &mut new, &mut cancel);
@@ -1398,9 +1399,9 @@ impl LevelAccess for GameLevel<'_> {
         instrument: &mut u8,
         note: &mut i32,
     ) -> bool {
-        use horizon_client::mod_api::NativeNoteInstrument;
+        use mod_api::NativeNoteInstrument;
         if !self.native_authoritative
-            || !crate::mod_api::listened(crate::mod_api::HookId::NoteBlockPlay)
+            || !mod_api::__private::listened(mod_api::HookId::NoteBlockPlay)
         {
             return true;
         }
@@ -1435,16 +1436,15 @@ impl LevelAccess for GameLevel<'_> {
         shape: &horizon_world::level::PortalShape,
     ) -> bool {
         let mut cancel = false;
-        if self.native_authoritative
-            && crate::mod_api::listened(crate::mod_api::HookId::PortalSpawn)
-        {
+        if self.native_authoritative && mod_api::__private::listened(mod_api::HookId::PortalSpawn) {
             let b = shape.bottom_left;
-            let shape = horizon_client::mod_api::NativePortalShape {
-                x_axis: shape.x_axis,
-                bottom_left: [b.x, b.y, b.z],
-                width: shape.width,
-                height: shape.height,
-            };
+            let shape =
+                mod_api::NativePortalShape::from(mod_api::__private::built::NativePortalShape {
+                    x_axis: shape.x_axis,
+                    bottom_left: [b.x, b.y, b.z],
+                    width: shape.width,
+                    height: shape.height,
+                });
             self.native_portal_spawn(self.dimension, pos, state, shape, &mut cancel);
         }
         !cancel
@@ -1500,9 +1500,7 @@ impl LevelAccess for GameLevel<'_> {
     }
     fn has_weak_power_hook(&self) -> bool {
         self.native_authoritative
-            && horizon_client::mod_api::has_scoped_hook(
-                horizon_client::mod_api::HookId::ShouldCheckWeakPower,
-            )
+            && mod_api::__private::has_scoped_hook(mod_api::HookId::ShouldCheckWeakPower)
     }
     fn adjust_should_check_weak_power(
         &self,
@@ -1517,9 +1515,7 @@ impl LevelAccess for GameLevel<'_> {
     }
     fn has_redstone_wire_connection_hook(&self) -> bool {
         self.native_authoritative
-            && horizon_client::mod_api::has_scoped_hook(
-                horizon_client::mod_api::HookId::ShouldRedstoneWireConnectTo,
-            )
+            && mod_api::__private::has_scoped_hook(mod_api::HookId::ShouldRedstoneWireConnectTo)
     }
     fn adjust_should_redstone_wire_connect_to(
         &self,
@@ -2137,6 +2133,7 @@ pub struct Resources {
 }
 
 struct WorldCore {
+    item_data: Arc<horizon_world::item_defaults::ItemData>,
     facts: BlockFacts,
     biomes: Arc<Biomes>,
     environment: Environment,
@@ -2194,6 +2191,9 @@ impl Resources {
     }
     fn facts(&self) -> &BlockFacts {
         &self.core.facts
+    }
+    fn item_defaults(&self) -> &horizon_world::item_defaults::ItemDefaults {
+        self.core.item_data.defaults()
     }
     fn items(&self) -> &Items {
         &self.rest().items
@@ -2279,7 +2279,7 @@ pub(super) fn durability_damage(damage: f32) -> f32 {
 /// The durability damage a mod left for `slot` (`NativeArmorHurt::new_damage`, cast to int
 /// as vanilla casts it); an entry it removed keeps vanilla's `fallback`.
 pub(super) fn answered_wear(
-    entries: &[horizon_client::mod_api::NativeArmorHurt],
+    entries: &[mod_api::NativeArmorHurt],
     slot: horizon_world::player_inventory::EquipmentSlot,
     fallback: u32,
 ) -> u32 {
@@ -2370,12 +2370,14 @@ impl PackResources {
         facts: &BlockFacts,
         biomes: Arc<Biomes>,
         light: Arc<LightTables>,
+        item_data: &horizon_world::item_defaults::ItemData,
     ) -> Result<Self> {
         let visibility = models::load_visibility(root, assets.registry)?;
         let tables = Arc::new(MeshTables::new(&assets, &render, facts, visibility)?);
         let item_renderer = horizon_client::item_render::ItemRenderer::load_with_library(
             root,
             render.model_library.clone(),
+            item_data,
         )?;
         Ok(Self::assemble(
             root,
@@ -2442,14 +2444,6 @@ impl PackResources {
 struct DragView {
     slots: HashMap<usize, Option<(u32, bool)>>,
     left: Option<u32>,
-}
-/// Whether an item modifier of slot `group` applies in the worn or held `slot`
-/// (`EquipmentSlotGroup.test`).
-fn equipment_modifier_applies(group: &str, slot: &str) -> bool {
-    group == slot
-        || group == "any"
-        || (group == "armor" && slot != "mainhand" && slot != "offhand")
-        || (group == "hand" && (slot == "mainhand" || slot == "offhand"))
 }
 /// Ctrl+Q reads the physical keyboard, independently of sprint key mappings.
 /// A chunk whose ticking future can complete (`ChunkMap.prepareTickingChunk`):
@@ -3054,7 +3048,7 @@ struct Game<'a> {
     waypoints: horizon_client::locator_bar::ClientWaypoints,
     /// The camera the last frame drew from (position, yaw, pitch, fov), for the locator bar.
     locator_camera: Option<([f64; 3], f32, f32, f32)>,
-    native_camera_frame: Option<horizon_client::mod_api::NativeCamera>,
+    native_camera_frame: Option<mod_api::NativeCamera>,
     /// `LocalPlayer.postEffects`: the chains the server has the screen run
     /// (`ClientboundPostEffectsPacket`), in order.
     post_effects: Vec<String>,
@@ -3417,7 +3411,7 @@ struct Game<'a> {
     /// State of `/spectate`, `/posteffect`, `/debug`, `/waypoint` and friends.
     cmds: commands::extra::CommandExtras,
     /// The retained server reload listeners of the last successful reload.
-    reload_resources: crate::mod_api::ServerReloadResources,
+    reload_resources: mod_api::ServerReloadResources,
     ui: chat::UiState,
     combat: combat::CombatTracker,
     /// Each guest's own `CombatTracker`, out of `combat` between turns.
@@ -6422,7 +6416,7 @@ impl Game<'_> {
                 .behaviours()
                 .data(state)
                 .is(horizon_world::level::classes::Class::Door)
-            && crate::mod_api::listened(crate::mod_api::HookId::PlayerHarvestCheck)
+            && mod_api::__private::listened(mod_api::HookId::PlayerHarvestCheck)
         {
             self.native_player_harvest_check(
                 self.own_entity_id() as u32,
@@ -6447,7 +6441,7 @@ impl Game<'_> {
                     .res
                     .items()
                     .correct_for_drops(held.as_ref(), &facts.name);
-            if crate::mod_api::listened(crate::mod_api::HookId::PlayerHarvestCheck) {
+            if mod_api::__private::listened(mod_api::HookId::PlayerHarvestCheck) {
                 self.native_player_harvest_check(
                     self.own_entity_id() as u32,
                     pos,
@@ -6700,7 +6694,7 @@ impl Game<'_> {
         // Native mods, where ServerPlayerGameMode.useItemOn starts
         // (RightClickBlock): a cancel answers for the block and the item, and
         // its PASS goes on to Item.use, which a guest's UseItem asks for.
-        use horizon_client::mod_api::{NativeInteractionResult as Answer, NativeTriState};
+        use mod_api::{NativeInteractionResult as Answer, NativeTriState};
         let on_block = matches!(self.guest_use, Some(GuestUse::OnBlock(_)));
         let mut block_hit = block_hit;
         let (mut use_block, mut use_item) = (NativeTriState::Default, NativeTriState::Default);
@@ -6732,18 +6726,12 @@ impl Game<'_> {
         {
             let held = self.held().cloned();
             let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
-            let mut block_answer = self.use_item_on_block(
-                hit,
-                self.hand,
-                held.as_ref(),
-                horizon_client::mod_api::UsePhase::Block,
-            );
+            let mut block_answer =
+                self.use_item_on_block(hit, self.hand, held.as_ref(), mod_api::UsePhase::Block);
             if block_answer.is_none()
-                && horizon_client::mod_api::has_part_hook(
-                    horizon_client::mod_api::HookId::UseItemOn,
-                )
-                && horizon_client::mod_api::parts("use_item_on")
-                    .for_hook(horizon_client::mod_api::HookId::UseItemOn)
+                && mod_api::__private::has_part_hook(mod_api::HookId::UseItemOn)
+                && mod_api::__private::parts("use_item_on")
+                    .for_hook(mod_api::HookId::UseItemOn)
                     .is_some_and(|parts| !parts.block_state(state).is_empty())
             {
                 let click = self.block_click(hit, self.hand, held.as_ref());
@@ -6877,7 +6865,7 @@ impl Game<'_> {
                     (result, UseBranch::ItemOn)
                 } else if self.hand == Hand::Main {
                     let mut empty_answer = None;
-                    if !horizon_client::mod_api::mods().is_empty() {
+                    if !mod_api::mods().is_empty() {
                         let empty_held = self.held().cloned();
                         let click = self.block_click(hit, self.hand, empty_held.as_ref());
                         self.native_use_without_item(state, &click, &mut empty_answer);
@@ -7030,7 +7018,7 @@ impl Game<'_> {
                 hit,
                 self.hand,
                 Some(&stack),
-                horizon_client::mod_api::UsePhase::ItemAfterBlock,
+                mod_api::UsePhase::ItemAfterBlock,
             ) {
                 if answer.consumes_action() {
                     self.trigger_block("minecraft:item_used_on_block", hit.pos, &stack);
@@ -8404,7 +8392,7 @@ impl Game<'_> {
         let active = self.focused || self.agent_pointer;
         if active
             && grabbed
-            && crate::mod_api::listened(crate::mod_api::HookId::CalculatePlayerTurn)
+            && mod_api::__private::listened(mod_api::HookId::CalculatePlayerTurn)
             && let Some(remote) = &self.remote
         {
             self.native_calculate_player_turn(
@@ -10298,7 +10286,7 @@ impl Game<'_> {
             None => game_of.iter().position(|x| *x == Some(g)),
         };
         let mut menu = Menu::new(kind);
-        menu.brewed_potion_hook = !crate::mod_api::mods().is_empty();
+        menu.brewed_potion_hook = !mod_api::mods().is_empty();
         if matches!(kind, Kind::Mount(_)) {
             menu.mount = self.mount_menu_entity();
         }
@@ -12491,6 +12479,7 @@ impl Game<'_> {
             self.prune_entity_attachments();
         }
         self.native_mobs_equipment();
+        self.tick_equipment_attributes();
         self.position_rider();
         self.tick_stats();
         self.tick_scoreboard();
@@ -13195,7 +13184,7 @@ impl Game<'_> {
             for (attribute, id, amount, op, group) in &info.modifiers {
                 // The attack code still reads the held item's attack damage and
                 // speed directly; the map copy is what `/attribute` reports.
-                if !equipment_modifier_applies(group, slot) {
+                if !horizon_client::living_attributes::modifier_applies(group, slot) {
                     continue;
                 }
                 if player
@@ -13271,14 +13260,14 @@ impl Game<'_> {
         });
         // ArmorHurtEvent: once for the pieces that would wear, a server player's only.
         let mut amounts = [amount; 4];
-        if crate::mod_api::listened(crate::mod_api::HookId::ArmorHurt)
+        if mod_api::__private::listened(mod_api::HookId::ArmorHurt)
             && let (Some(uuid), Some(player)) = (self.lan_acting_uuid, self.lan_acting_entity)
         {
-            let mut entries: Vec<horizon_client::mod_api::NativeArmorHurt> = eligible
+            let mut entries: Vec<mod_api::NativeArmorHurt> = eligible
                 .iter()
                 .enumerate()
                 .filter_map(|(i, e)| {
-                    Some(horizon_client::mod_api::NativeArmorHurt {
+                    Some(mod_api::NativeArmorHurt {
                         slot: armor_slot(i),
                         stack: e.as_ref()?.0.clone(),
                         damage: durability_damage(damage),
@@ -13593,11 +13582,11 @@ impl Game<'_> {
                 t.particle.clone(),
             )
         };
-        if crate::mod_api::mods().is_empty() {
+        if mod_api::mods().is_empty() {
             let (new, t) = vanilla?;
             return Some(result(new, t));
         }
-        use crate::mod_api::ToolAbility::*;
+        use mod_api::ToolAbility::*;
         let actions: &[_] = match id.as_str() {
             "minecraft:axe" => &[AxeStrip, AxeScrape, AxeWaxOff],
             "minecraft:shovel" => &[ShovelFlatten],
@@ -13610,7 +13599,7 @@ impl Game<'_> {
                 .and_then(|(state, t)| vanilla_tool_state(&id, &t.particle, ability, *state));
             let matches_vanilla = state.is_some();
             let mut cancel = false;
-            let tool = crate::mod_api::ToolUse {
+            let tool = mod_api::ToolUse::from(mod_api::__private::built::ToolUse {
                 player: self.player.is_some().then(|| self.own_entity_id() as u32),
                 hand: self.hand,
                 pos,
@@ -13618,7 +13607,7 @@ impl Game<'_> {
                 click: hit.point,
                 ability,
                 simulated: false,
-            };
+            });
             self.native_block_tool_modification(stack, &tool, &mut state, &mut cancel);
             if cancel {
                 return None;
@@ -13635,6 +13624,7 @@ impl Game<'_> {
                     ShovelFlatten => ("minecraft:item.shovel.flatten", "none"),
                     HoeTill => ("minecraft:item.hoe.till", "none"),
                     ShovelDouse => unreachable!(),
+                    _ => unreachable!("ToolAbility: unhandled variant"),
                 };
                 return Some((new, sound.to_owned(), None, 1, particle.to_owned()));
             }
@@ -14036,7 +14026,7 @@ impl Game<'_> {
                 // With mods, the fire goes in and `BaseFireBlock.onPlace`
                 // fills the frame, as vanilla's order is, so that
                 // `portal_spawn` is asked once, where vanilla asks it.
-                if !horizon_client::mod_api::mods().is_empty() || !self.try_light_portal(target)? {
+                if !mod_api::mods().is_empty() || !self.try_light_portal(target)? {
                     self.place_used_fire(target)?;
                 }
                 let sound = horizon_client::items::fire_starter_sound(item == "fire_charge");
@@ -14507,7 +14497,7 @@ impl Game<'_> {
         partial: f32,
         out: &mut Vec<Vertex>,
     ) {
-        if crate::mod_api::listened(crate::mod_api::HookId::RenderArm) {
+        if mod_api::__private::listened(mod_api::HookId::RenderArm) {
             let eye = self.eye_position().unwrap_or_default();
             let mut draw = BlockEntityDraw::posed(
                 partial,
@@ -14620,7 +14610,7 @@ impl Game<'_> {
             let attack = attacks[i];
             let inverse_height =
                 horizon_client::first_person::equip_displacement(heights[i], scale);
-            let mut render = horizon_client::mod_api::NativeHandRender {
+            let mut render = mod_api::NativeHandRender {
                 player: self.own_uuid(),
                 player_entity_id: self.own_entity_id(),
                 hand,
@@ -14637,7 +14627,7 @@ impl Game<'_> {
                 scale: 1.0,
             };
             let mut canceled = false;
-            if crate::mod_api::listened(crate::mod_api::HookId::RenderHand) {
+            if mod_api::__private::listened(mod_api::HookId::RenderHand) {
                 self.native_render_hand(&mut render, &mut canceled);
             }
             if canceled {
@@ -16096,7 +16086,7 @@ impl Game<'_> {
         if wait {
             self.save.flush()?;
         }
-        if crate::mod_api::listened(crate::mod_api::HookId::LevelSave) {
+        if mod_api::__private::listened(mod_api::HookId::LevelSave) {
             self.native_level_save(self.dim.id());
         }
         Ok(())
@@ -16503,10 +16493,10 @@ impl Game<'_> {
         let depth_far =
             horizon_client::camera::depth_far(terrain_distance, self.settings.cloud_range);
         // Only native mods read it: no matrices or allocation per frame without one.
-        let mods_read_camera = !horizon_client::mod_api::mods().is_empty();
+        let mods_read_camera = !mod_api::mods().is_empty();
         self.native_camera_frame = (mods_read_camera && !title).then(|| {
             let partial = camera_alpha as f32;
-            horizon_client::mod_api::NativeCamera {
+            mod_api::NativeCamera {
                 position: camera.to_array(),
                 eye_height: self.view.eye_height_old
                     + (self.view.eye_height - self.view.eye_height_old) * partial,
@@ -17757,7 +17747,16 @@ impl ApplicationHandler for Game<'_> {
         };
         self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
         if let Some((event, modifiers)) = key {
-            self.native_input_key(&event, modifiers);
+            let name = match event.physical_key {
+                PhysicalKey::Code(code) => horizon_client::keybinds::key_name(code),
+                PhysicalKey::Unidentified(_) => None,
+            };
+            let action = match (event.state, event.repeat) {
+                (winit::event::ElementState::Released, _) => mod_api::KeyAction::Release,
+                (_, false) => mod_api::KeyAction::Press,
+                (_, true) => mod_api::KeyAction::Repeat,
+            };
+            self.native_input_key(name.unwrap_or("key.keyboard.unknown"), action, modifiers);
         }
     }
     fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
@@ -19429,7 +19428,7 @@ impl<'a> Game<'a> {
         prepared: Option<GameCpuResources>,
     ) -> Result<Self> {
         // A scoped hook on this thread asks this game's parts.
-        horizon_client::mod_api::mark_game_thread();
+        mod_api::__private::mark_game_thread();
         let root = options.resources.clone();
         let mod_sources = options.mods.clone();
         let registry = pack.assets.registry;
@@ -20154,6 +20153,7 @@ impl Game<'_> {
             on_world_screens,
             &self.options.resources,
             self.pack.assets.registry,
+            &self.res.core.item_data,
         );
         if std::mem::take(&mut self.pending_pack_reload) {
             self.reload_packs();
@@ -20318,7 +20318,13 @@ impl Game<'_> {
         }
         let overlay = horizon_world::loot::PackOverlay { files: &files };
         let root = &self.options.resources;
-        let items = match Items::load(root, self.pack.assets.registry, self.res.facts(), &overlay) {
+        let items = match Items::load(
+            root,
+            self.pack.assets.registry,
+            self.res.facts(),
+            &overlay,
+            self.res.item_defaults(),
+        ) {
             Ok(items) => items,
             Err(e) => {
                 log::warn!("Horizon: the world's data packs are not applied: {e}");
@@ -20335,7 +20341,12 @@ impl Game<'_> {
                 return None;
             }
         };
-        let stations = horizon_client::stations::StationData::load(root, &items, &overlay);
+        let stations = horizon_client::stations::StationData::load(
+            root,
+            &items,
+            &overlay,
+            self.res.item_defaults(),
+        );
         let mut data_map_types = Vec::new();
         self.native_data_map_types(&mut data_map_types);
         let data_maps = native_data_maps::DataMaps::load(
@@ -20356,10 +20367,18 @@ impl Game<'_> {
     fn load_server_loot(&mut self) {
         self.server_items = None;
         let overlay = pack_files(&self.world_tables);
-        let loot = if horizon_client::mod_api::mods().is_empty() {
-            horizon_client::structure_blocks::world_loot_data(&self.options.resources, &overlay)
+        let loot = if mod_api::mods().is_empty() {
+            horizon_client::structure_blocks::world_loot_data(
+                &self.options.resources,
+                &overlay,
+                self.res.item_defaults(),
+            )
         } else {
-            match horizon_world::loot::LootData::load(&self.options.resources, &overlay) {
+            match horizon_world::loot::LootData::load(
+                &self.options.resources,
+                &overlay,
+                self.res.item_defaults(),
+            ) {
                 Ok(mut loot) => {
                     loot.apply_native_table_loads();
                     Some(Arc::new(loot))
@@ -20370,7 +20389,7 @@ impl Game<'_> {
                 }
             }
         };
-        if !horizon_client::mod_api::mods().is_empty()
+        if !mod_api::mods().is_empty()
             && let Some(loot) = &loot
         {
             let mut items = self.items().clone();
@@ -20385,10 +20404,10 @@ impl Game<'_> {
     pub(super) fn resolve_parts(&self) -> Result<()> {
         let items = self.items();
         let registry = self.pack.assets.registry;
-        horizon_client::mod_api::resolve_parts(
+        mod_api::__private::resolve_parts(
             &items.block_tags,
             &items.item_tags,
-            horizon_client::mod_api::KnownIds {
+            mod_api::__private::KnownIds {
                 block: &|id| registry.default_state(id).is_some(),
                 item: &|id| items.items.contains_key(id),
                 state_count: registry.len(),
@@ -20402,9 +20421,7 @@ impl Game<'_> {
     /// Ask the parts of each block `isPathfindable` once per state and type: the answer depends
     /// on nothing else, so path finding and spawning read it with no dispatch.
     fn resolve_pathfindable(&self) {
-        let asked = horizon_client::mod_api::has_scoped_hook(
-            horizon_client::mod_api::HookId::IsPathfindable,
-        );
+        let asked = mod_api::__private::has_scoped_hook(mod_api::HookId::IsPathfindable);
         let data = &self.res.rest().mob_data;
         data.set_pathfindable(asked, |state, kind, mut pathfindable| {
             self.native_is_pathfindable(state, kind, &mut pathfindable);
@@ -20432,7 +20449,7 @@ impl Game<'_> {
         let kept = self.lan.as_ref().map(|host| host.hub.lan.shared.sync());
         match kept {
             Some(kept) => {
-                match lan::reload_sync_data(&self.options.resources, &self.pack_files(), &kept) {
+                match lan::reload_sync_data(&self.res.core.item_data, &self.pack_files(), &kept) {
                     Ok(sync) => {
                         if let Some(host) = self.lan.as_mut() {
                             host.hub.reload_resources(sync);
@@ -20597,6 +20614,7 @@ impl<'scope, T: Send + 'scope> Step<'scope, T> {
 /// The world bundle's core tables from one resource root, before
 /// `load_resources` binds them into the pack tables and `WorldCore`.
 struct CoreTables {
+    item_data: Arc<horizon_world::item_defaults::ItemData>,
     assets: Assets,
     render: RenderAssets,
     item_renderer: horizon_client::item_render::ItemRenderer,
@@ -20623,11 +20641,12 @@ struct GameplayTables {
 /// models), which `load_resources` rolls back from.
 fn load_core(
     root: &std::path::Path,
-    headless: bool,
+    role: execution_role::ExecutionRole,
     parallel: bool,
     progress: &Progress,
     launch_world: Option<&str>,
 ) -> std::result::Result<std::result::Result<CoreTables, String>, String> {
+    let headless = !role.is_client();
     // The model library reads every file under `assets/` and needs no
     // block registry, so it is parsed beside `Assets::load` rather than
     // after it. It used to sit inside `reload` behind both the registry
@@ -20650,10 +20669,12 @@ fn load_core(
         Err(e) => return Ok(Err(e.to_string())),
     };
     progress.set(1);
+    let item_data = Arc::new(mods::load_item_data(root, role).map_err(|e| e.to_string())?);
     let registry = assets.registry;
     let (render, gameplay, visibility, biomes, environment, collision) =
         std::thread::scope(|scope| {
             let assets = &assets;
+            let item_data = &item_data;
             let render = Step::spawn(scope, parallel, move || {
                 // A server reads no block sprites' pixels, which only the
                 // renderer draws (32 MB).
@@ -20671,9 +20692,13 @@ fn load_core(
                 let library = render.model_library.clone();
                 let item_renderer = startup::time("core.item_models", || {
                     if headless {
-                        horizon_client::item_render::ItemRenderer::load_for_server(root, library)
+                        horizon_client::item_render::ItemRenderer::load_for_server(
+                            root, library, item_data,
+                        )
                     } else {
-                        horizon_client::item_render::ItemRenderer::load_with_library(root, library)
+                        horizon_client::item_render::ItemRenderer::load_with_library(
+                            root, library, item_data,
+                        )
                     }
                 })
                 .map_err(|e| e.to_string());
@@ -20699,7 +20724,13 @@ fn load_core(
                 // block registry and the biomes, so it starts here rather than
                 // after the block models and facts (~250 ms later).
                 if let Some(folder) = launch_world {
-                    world_loading::preload_launch_world(folder, root, registry, biomes.clone());
+                    world_loading::preload_launch_world(
+                        folder,
+                        root,
+                        registry,
+                        biomes.clone(),
+                        item_data.clone(),
+                    );
                 }
                 Ok::<_, String>(biomes)
             });
@@ -20729,6 +20760,7 @@ fn load_core(
     let gameplay = gameplay?;
     progress.set(3);
     Ok(Ok(CoreTables {
+        item_data,
         gameplay,
         biomes: biomes?,
         environment: environment?,
@@ -20801,10 +20833,11 @@ fn load_resources(
     settings: &Settings,
     started: Instant,
     menu: bool,
-    headless: bool,
+    role: execution_role::ExecutionRole,
     progress: &Progress,
     publish: &mut dyn FnMut(UiResources, &std::path::Path),
 ) -> Result<Loaded> {
+    let headless = !role.is_client();
     let threads = settings.horizon.worker_threads();
     // One pool of workers for every level's streaming, the client's and the
     // server thread's (horizon_threads::jobs), sized before any world opens.
@@ -20849,9 +20882,7 @@ fn load_resources(
                 // resources, which the world's preload must read: with packs
                 // it waits for the core that loaded.
                 let early = launch_world.filter(|_| root == vanilla_root);
-                startup::time("core", || {
-                    load_core(&root, headless, parallel, progress, early)
-                })
+                startup::time("core", || load_core(&root, role, parallel, progress, early))
             });
             let ui = load_ui(&root).map(|ui| offer(ui, &root));
             (ui, core.join())
@@ -20878,6 +20909,7 @@ fn load_resources(
     };
     log::info!("load core tables: {:.2}s", started.elapsed().as_secs_f32());
     let CoreTables {
+        item_data,
         assets,
         render,
         item_renderer,
@@ -20897,7 +20929,13 @@ fn load_resources(
     let assets = Arc::new(assets);
     let render = Arc::new(render);
     if let Some(folder) = launch_world {
-        world_loading::preload_launch_world(folder, &root, assets.registry, biomes.clone());
+        world_loading::preload_launch_world(
+            folder,
+            &root,
+            assets.registry,
+            biomes.clone(),
+            item_data.clone(),
+        );
     }
     let tables = Arc::new(startup::time("pack.mesh_tables", || {
         MeshTables::new(&assets, &render, &facts, visibility)
@@ -20925,6 +20963,7 @@ fn load_resources(
     progress.set(5);
     let resources = Resources {
         core: WorldCore {
+            item_data,
             facts,
             biomes: biomes.clone(),
             environment,
@@ -21119,7 +21158,9 @@ fn load_world_rest(
     // Independent tables load together, within the worker budget the settings
     // allow. Only the recipes and the stations read another table: the items.
     let load_items = || -> Result<_> {
-        let items = startup::time("rest.items", || Items::load(root, registry, facts, overlay))?;
+        let items = startup::time("rest.items", || {
+            Items::load(root, registry, facts, overlay, resources.item_defaults())
+        })?;
         log::info!("load items: {:.2}s", started.elapsed().as_secs_f32());
         progress.set(7);
         // The recipe tables, the stations and the recipe book read one folder:
@@ -21127,7 +21168,12 @@ fn load_world_rest(
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
         let recipes = startup::time("rest.recipes", || Recipes::load(root, &items, overlay))?;
         let stations = startup::time("rest.stations", || {
-            horizon_client::stations::StationData::load(root, &items, overlay)
+            horizon_client::stations::StationData::load(
+                root,
+                &items,
+                overlay,
+                resources.item_defaults(),
+            )
         });
         Ok((items, recipes, stations))
     };
@@ -21141,7 +21187,12 @@ fn load_world_rest(
         if !draws {
             return Ok(Default::default());
         }
-        let mut renderer = BlockEntityRenderer::load_with_visibility(root, registry, visibility)?;
+        let mut renderer = BlockEntityRenderer::load_with_visibility(
+            root,
+            registry,
+            visibility,
+            resources.item_defaults(),
+        )?;
         renderer.add_mod_signs(facts, registry);
         Ok(renderer)
     };
@@ -22300,8 +22351,8 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     options
         .mods
         .select(&std::env::current_dir()?, &early_settings.mods.enabled);
-    crate::mod_api::install_packages(options.mods.native.packages(), &options.mods.selected);
-    if let Err(refused) = crate::mod_api::install_parts(crate::mod_api::mods()) {
+    mod_api::__private::install_packages(options.mods.native.packages(), &options.mods.selected);
+    if let Err(refused) = mod_api::__private::install_parts(mod_api::mods()) {
         panic!("Mod parts refused:\n{}", refused.join("\n"));
     }
     mods::register_components(&vanilla_root)?;
@@ -22357,7 +22408,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         &early_settings,
         started,
         false,
-        options.dedicated.is_some(),
+        options.execution_role,
         &Progress::new(),
         &mut |_, _| {},
     )?;
@@ -22680,29 +22731,25 @@ fn debug_crosshair_drawn(
 
 #[cfg(test)]
 mod tests {
-    use crate::mod_api::ServerHost;
+    use mod_api::ServerHost;
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn reload_resolves_parts_against_reloaded_tags() {
-        use crate::mod_api::{self, BlockPart, DataPackFilesEvent, Hooks, Registrar};
+        use mod_api::{self, BlockPart, DataPackFilesEvent, Hooks, Registrar};
         struct TagPart;
         #[mod_api::horizon_part]
         impl BlockPart for TagPart {
             fn analog_output(
                 &self,
-                _: &dyn crate::mod_api::LevelHost,
-                _: &mut crate::mod_api::AnalogOutputEvent,
+                _: &dyn mod_api::LevelHost,
+                _: &mut mod_api::AnalogOutputEvent,
             ) {
             }
         }
         struct ReloadMod;
         #[mod_api::__subscriptions]
         impl Hooks for ReloadMod {
-            fn register(
-                &self,
-                registrar: &mut Registrar,
-                _: &crate::mod_api::RegistrationContext<'_>,
-            ) {
+            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 registrar.block_part_tag("test:reload", TagPart);
             }
             fn data_pack_files(&self, _: &mut dyn ServerHost, event: &mut DataPackFilesEvent<'_>) {
@@ -22714,8 +22761,8 @@ mod tests {
         }
         let mods: mod_api::Mods =
             vec![mod_api::ModEntry::new("reload", Box::new(ReloadMod))].into();
-        mod_api::install_parts(&mods).unwrap();
-        mod_api::install(mods);
+        mod_api::__private::install_parts(&mods).unwrap();
+        mod_api::__private::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.load_server_loot();
             let stack = super::functions::pack_stack(
@@ -22732,7 +22779,7 @@ mod tests {
                 .default_state("minecraft:stone")
                 .unwrap();
             assert!(
-                !mod_api::parts("test")
+                !mod_api::__private::parts("test")
                     .for_hook(mod_api::HookId::AnalogOutput)
                     .unwrap()
                     .block_state(stone)
@@ -22755,7 +22802,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn right_click_block_controls_cauldron_use() {
-        use horizon_client::mod_api::{
+        use mod_api::{
             self, Flow, Hooks, NativeBlockUpdateFlags, NativeTriState, RightClickBlockEvent,
         };
         use std::sync::{
@@ -22767,7 +22814,7 @@ mod tests {
         impl Hooks for Observer {
             fn right_click_block(
                 &self,
-                _: crate::mod_api::HostSide,
+                _: mod_api::HostSide,
                 event: &mut RightClickBlockEvent<'_>,
             ) -> Flow {
                 self.2.fetch_add(1, Ordering::SeqCst);
@@ -22790,7 +22837,7 @@ mod tests {
             "right-click-observer",
             Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone())),
         )]);
-        mod_api::install(mods);
+        mod_api::__private::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -22903,7 +22950,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn fence_ties_without_a_lead_only_on_main_hand() {
-        use horizon_client::{mobs::leash::Holder, mod_api::NativeBlockUpdateFlags};
+        use horizon_client::mobs::leash::Holder;
+        use mod_api::NativeBlockUpdateFlags;
         super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -22957,7 +23005,7 @@ mod tests {
 
     #[test]
     fn tool_transform_keeps_hoe_and_shovel_results_with_scrape_particle() {
-        use crate::mod_api::ToolAbility::{AxeScrape, HoeTill, ShovelFlatten};
+        use mod_api::ToolAbility::{AxeScrape, HoeTill, ShovelFlatten};
         let result = BlockStateId(42);
         for (transformer, ability) in [
             ("minecraft:hoe", HoeTill),
@@ -23145,23 +23193,6 @@ mod tests {
         );
     }
 
-    /// Held items apply their main-hand and off-hand modifiers to the player (#4118, #4777).
-    #[test]
-    fn equipment_modifiers_follow_their_slot_group() {
-        assert!(equipment_modifier_applies("mainhand", "mainhand"));
-        assert!(equipment_modifier_applies("hand", "mainhand"));
-        assert!(equipment_modifier_applies("any", "mainhand"));
-        assert!(!equipment_modifier_applies("armor", "mainhand"));
-        assert!(!equipment_modifier_applies("mainhand", "head"));
-        assert!(equipment_modifier_applies("armor", "chest"));
-        assert!(!equipment_modifier_applies("hand", "feet"));
-        assert!(equipment_modifier_applies("offhand", "offhand"));
-        assert!(equipment_modifier_applies("hand", "offhand"));
-        assert!(equipment_modifier_applies("any", "offhand"));
-        assert!(!equipment_modifier_applies("armor", "offhand"));
-        assert!(!equipment_modifier_applies("mainhand", "offhand"));
-        assert!(!equipment_modifier_applies("offhand", "mainhand"));
-    }
     use horizon_client::keymapping::{KeyAction, SNEAK, SPRINT, ToggleKeys};
 
     /// A guest's interact packet names its entity and the server keeps it:

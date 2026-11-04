@@ -10,7 +10,6 @@ use super::{Game, Options, lan::LanSettings, world_loading::WorldRequest};
 use horizon_client::{
     Result,
     lan::{LoginGate, NetConfig, NetLog, OnlineMode, hub::HubConfig},
-    mod_api::NativePermissionLevel,
     server::{
         eula, profiles,
         properties::{GAME_MODES, ServerProperties, SystemEntropy},
@@ -24,6 +23,7 @@ use horizon_client::{
 };
 use horizon_protocol::text::translatable;
 use horizon_world::nbt::{JavaString, Tag};
+use mod_api::NativePermissionLevel;
 use std::{
     io::Write,
     path::PathBuf,
@@ -961,7 +961,7 @@ impl Game<'_> {
         self.native_server_about_to_start(true);
         self.native_lifecycle_open_started();
         // The registries the server sends are read while the world prepares.
-        let sync = super::lan::preload_sync_data(&self.options.resources);
+        let sync = super::lan::preload_sync_data(&self.res.core.item_data);
         self.load_world(WorldRequest::new(
             &folder,
             Some(&level_name),

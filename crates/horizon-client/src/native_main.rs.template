@@ -5,7 +5,7 @@ static ALLOCATOR: horizon_threads::Allocator = horizon_threads::ALLOCATOR;
 static GAME_IDENTITY: [u8; horizon_mods::game_identity::MARK.len()] = horizon_mods::game_identity::MARK;
 macro_rules! native_mods {
     ($($id:literal => $hooks:path,)*) => {
-        vec![$(horizon_client::mod_api::ModEntry::new($id, $hooks()),)*].into()
+        vec![$(mod_api::ModEntry::new($id, $hooks()),)*].into()
     };
 }
 const BUILT_MODS: &[horizon_mods::runtime::BuiltMod] = &[
@@ -14,7 +14,7 @@ const BUILT_MODS: &[horizon_mods::runtime::BuiltMod] = &[
 const _: () = assert!(!BUILT_MODS.is_empty(), "The native inventory must be generated from mod manifests");
 fn main() {
     std::hint::black_box(&GAME_IDENTITY);
-    let mods: horizon_client::mod_api::Mods = native_mods! {
+    let mods: mod_api::Mods = native_mods! {
 /* MOD_ENTRIES */
     };
     horizon_client::entry::main_with(mods, BUILT_MODS);

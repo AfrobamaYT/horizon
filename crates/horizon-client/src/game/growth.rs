@@ -150,8 +150,8 @@ pub(super) fn install_live_features(
 #[cfg(test)]
 mod tests {
     use horizon_client::items::ItemStack;
-    use horizon_client::mod_api::{self, BonemealEvent, BonemealSource, Flow, Hooks, HostSide};
     use horizon_core::{geometry::Direction, position::BlockPos};
+    use mod_api::{self, BonemealEvent, BonemealSource, Flow, Hooks, HostSide};
     use std::sync::{Mutex, MutexGuard, PoisonError};
 
     /// What each `bonemeal` listener heard: the player, the target check

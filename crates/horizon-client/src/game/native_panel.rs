@@ -563,7 +563,7 @@ pub(super) fn browser_stack(
 mod tests {
     use super::{BrowserStack, Owner, Panel, RecipePage};
     use crate::game::native_hooks::{NativeRecipeLayout, NativeRecipeResult, NativeRecipeView};
-    use horizon_client::mod_api::FluidStack;
+    use mod_api::FluidStack;
 
     fn stack(item: &str) -> BrowserStack {
         BrowserStack {

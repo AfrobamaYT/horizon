@@ -22,9 +22,9 @@
 //! a mod's chest menu) is kept whole on its first write through a menu slot; a crafting grid
 //! changed by the transaction has its result made again at the root commit.
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
-use horizon_client::mod_api::TransactionSeal;
 use horizon_client::{items::ItemStack, world::BlockEntityExtras};
 use horizon_world::attachments::{Attachments, Holder};
+use mod_api::TransactionSeal;
 use std::collections::HashMap;
 
 type Pos = (i32, i32, i32);
@@ -230,7 +230,7 @@ impl Game<'_> {
         });
     }
     /// Keeps `player`'s menu storage as it is, if a transaction is open and hasn't yet.
-    pub(super) fn journal_menus(&mut self, player: horizon_client::mod_api::PlayerRef) {
+    pub(super) fn journal_menus(&mut self, player: mod_api::PlayerRef) {
         let Some(level) = self.transactions.last() else {
             return;
         };
@@ -464,15 +464,12 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::{Audio, BlockEntity, Game, Options, Progress, Settings, load_resources};
-    use crate::mod_api::HostTransaction;
-    use crate::mod_api::ServerHost;
-    use horizon_client::{
-        chunk::Chunk,
-        items::ItemStack,
-        mod_api::{
-            BlockSide, FLUIDS, FluidStack, ITEMS, ItemResource, NativeAuthority,
-            NativeBlockUpdateFlags, Transaction,
-        },
+    use horizon_client::{chunk::Chunk, items::ItemStack};
+    use mod_api::HostTransaction;
+    use mod_api::ServerHost;
+    use mod_api::{
+        BlockSide, FLUIDS, FluidStack, ITEMS, ItemResource, NativeAuthority,
+        NativeBlockUpdateFlags, Transaction,
     };
     use std::{sync::Arc, time::Instant};
 
@@ -498,7 +495,7 @@ mod tests {
             let menu = game.native_menu_ref(player).unwrap();
             let stone = ItemStack::new("minecraft:stone", 4);
             *game.native_menu_storage(menu, 1).unwrap() = Some(stone.clone());
-            let place = crate::mod_api::ItemPlace::MenuSlot { menu, slot: 1 };
+            let place = mod_api::ItemPlace::MenuSlot { menu, slot: 1 };
             let resource = ItemResource::of(&stone);
             let aborted: Result<(), ()> = game.transaction(|game, tx| {
                 assert_eq!(place.insert(game, tx, &resource, 2), 2);
@@ -590,7 +587,7 @@ mod tests {
             &settings,
             Instant::now(),
             false,
-            true,
+            super::super::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -616,7 +613,7 @@ mod tests {
             .begin_open(NativeAuthority::IntegratedServer);
         // Pins the opaque backend: a real game always hands one out, so a None
         // from Host::backend is a bug, never a fallback.
-        assert!(crate::mod_api::Host::backend(&game).is_some());
+        assert!(mod_api::Host::backend(&game).is_some());
         assert!(ServerHost::backend_mut(&mut game).is_some());
         let level = game.native_level("minecraft:overworld").unwrap();
         let registry = &game.pack.assets.registry;
@@ -701,7 +698,7 @@ mod tests {
         assert!(game.transactions.is_empty());
 
         // An attachment map a write made inside an aborted transaction is gone with it.
-        let chest_holder = horizon_client::mod_api::Holder::BlockEntity([0, 64, 0]);
+        let chest_holder = mod_api::Holder::BlockEntity([0, 64, 0]);
         assert!(game.world.block_entities.attachments((0, 64, 0)).is_none());
         game.transaction_open();
         assert!(game.attachment_map_quiet(chest_holder).is_ok());
@@ -791,9 +788,9 @@ mod tests {
         );
         let dropped = game.dropped.len();
         let me = game.native_acting_id();
-        let hand = horizon_client::mod_api::ItemPlace::PlayerHand {
+        let hand = mod_api::ItemPlace::PlayerHand {
             player: me,
-            hand: horizon_client::first_person::Hand::Main,
+            hand: mod_api::first_person::Hand::Main,
         };
         let water = ItemResource::of(&bucket("minecraft:water_bucket", 1));
         let host: &mut dyn ServerHost = &mut game;
@@ -867,7 +864,7 @@ mod tests {
         mob.extra.items.clear();
         let host: &mut dyn ServerHost = &mut game;
         let _ = host.transaction(|host, tx| {
-            let place = horizon_client::mod_api::ItemPlace::EntitySlot {
+            let place = mod_api::ItemPlace::EntitySlot {
                 entity: id,
                 slot: 0,
             };
@@ -878,7 +875,7 @@ mod tests {
         assert_eq!(len(&game), 0);
         // Grown three transactions deep, the middle one committing: the root's abort still
         // truncates it.
-        let place = horizon_client::mod_api::ItemPlace::EntitySlot {
+        let place = mod_api::ItemPlace::EntitySlot {
             entity: id,
             slot: 0,
         };
@@ -901,7 +898,7 @@ mod tests {
             let id = game
                 .native_summon("minecraft:overworld", kind, [8.5, 70.0, 8.5], nbt)
                 .unwrap_or_else(|| panic!("{kind} not summoned"));
-            let place = |slot| horizon_client::mod_api::ItemPlace::EntitySlot { entity: id, slot };
+            let place = |slot| mod_api::ItemPlace::EntitySlot { entity: id, slot };
             let host: &mut dyn ServerHost = &mut game;
             let went =
                 host.transaction(|host, tx| Ok::<_, ()>(place(0).insert(host, tx, &stick, 5)));
@@ -926,7 +923,7 @@ mod tests {
         // committed one, it's gone.
         game.spawn_item(sticks(4), [0.5, 70.0, 6.5], [0.0; 3], 10);
         let id = game.dropped.last().unwrap().id;
-        let entity = horizon_client::mod_api::ItemPlace::ItemEntity { id };
+        let entity = mod_api::ItemPlace::ItemEntity { id };
         let count = |game: &Game<'_>| game.dropped.len();
         let items = count(&game);
         let host: &mut dyn ServerHost = &mut game;
@@ -974,7 +971,7 @@ mod tests {
                 level,
                 [1, 64, 4],
                 state,
-                horizon_client::mod_api::NativeBlockUpdateFlags::NONE
+                mod_api::NativeBlockUpdateFlags::NONE
             ));
             if let Some(BlockEntity::Chest(items)) = game.world.block_entities.get_mut(&(0, 64, 4))
             {
@@ -996,12 +993,12 @@ mod tests {
 #[cfg(test)]
 mod mod_capability_tests {
     use super::super::native_entity_refs::tests::with_game;
-    use crate::mod_api::ServerHost;
     use horizon_client::chunk::Chunk;
     use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
-    use horizon_client::mod_api::part_tests::{CHEMICALS, ChemTank, Chemical};
-    use horizon_client::mod_api::{BlockSide, HostTransaction, ResourceHandler, move_resources};
     use horizon_world::nbt::{Compound, Tag};
+    use mod_api::__private::part_tests::{CHEMICALS, ChemTank, Chemical};
+    use mod_api::ServerHost;
+    use mod_api::{BlockSide, HostTransaction, ResourceHandler, move_resources};
     use std::sync::Arc;
 
     /// Two mods sharing a capability one of them defines, as Mekanism's chemicals are shared
@@ -1089,8 +1086,8 @@ mod mod_capability_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn entity_and_player_attachments_stay_on_commit_and_go_back_on_abort() {
         use horizon_client::entities::ArmorStand;
-        use horizon_client::mod_api::{AttachmentType, Holder};
         use horizon_core::geometry::Vec3;
+        use mod_api::{AttachmentType, Holder};
         const ENERGY: AttachmentType<i32> = AttachmentType {
             namespace: "robot",
             name: "energy",
@@ -1173,7 +1170,7 @@ mod mod_capability_tests {
                 ENERGY.set(host, fresh, 7)?;
                 host.transaction(|host, _| ENERGY.set(host, stand, 300))?;
                 assert_eq!(energy(host, stand), Some(300));
-                Err(horizon_client::mod_api::AttachmentError::MissingHolder)
+                Err(mod_api::AttachmentError::MissingHolder)
             });
             assert!(aborted.is_err());
             assert_eq!(

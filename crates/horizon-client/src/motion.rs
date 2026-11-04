@@ -2,7 +2,10 @@
 //! jump, collision, support, restitution and stored health bindings, and
 //! powder snow's block-inside effects and freezing. Entity lifecycle, other
 //! block-inside effects and audiovisual event consumers remain separate work.
-use crate::{Result, assets::Assets, collisions::SceneCollisions, world::World};
+use crate::{
+    Result, assets::Assets, collisions::SceneCollisions, living_attributes::attribute_error,
+    world::World,
+};
 use horizon_core::{
     geometry::{Aabb, Axis, Direction, Vec3, VoxelShape, traverse_blocks, trig},
     position::BlockPos,
@@ -447,9 +450,6 @@ pub struct PlayerMotion {
     /// from inside (the game keeps it current; None: no border).
     pub border: Option<horizon_core::geometry::border::BorderGeometry>,
 }
-fn attribute_error(error: impl std::fmt::Debug) -> io::Error {
-    io::Error::other(format!("movement attribute: {error:?}"))
-}
 impl PlayerMotion {
     /// `ServerGamePacketListenerImpl.handleMovePlayer`: the movement the client
     /// sent is the server copy's own delta movement. A glide's wall hit reads it
@@ -723,32 +723,14 @@ impl PlayerMotion {
         operation: &str,
         present: bool,
     ) -> Result<()> {
-        let Some(key) = self.attributes.key(attribute) else {
-            return Ok(());
-        };
-        let Some(handle) = self
-            .attributes
-            .get_instance(Some(key))
-            .map_err(attribute_error)?
-        else {
-            return Ok(());
-        };
-        let operation = match operation {
-            "add_multiplied_base" => Operation::AddMultipliedBase,
-            "add_multiplied_total" => Operation::AddMultipliedTotal,
-            _ => Operation::AddValue,
-        };
-        let modifier = Modifier::new(id, amount, operation)?;
-        self.attributes
-            .edit(&handle, |value, observer| {
-                value.remove(modifier.id(), observer)?;
-                if present {
-                    value.add_transient(modifier, observer)?;
-                }
-                Ok(())
-            })
-            .map_err(attribute_error)?;
-        Ok(())
+        crate::living_attributes::set_modifier(
+            &mut self.attributes,
+            attribute,
+            id,
+            amount,
+            operation,
+            present,
+        )
     }
     /// `AttributeMap.pack` in `AttributeInstance.Packed.LIST_CODEC`'s form: the
     /// player's `attributes` list (LivingEntity.addAdditionalSaveData), each
@@ -766,41 +748,7 @@ impl PlayerMotion {
         self.packed_attributes(restore_all)
     }
     fn packed_attributes(&self, modifiers: bool) -> horizon_world::nbt::Tag {
-        use horizon_client_core::nbt_value::string;
-        use horizon_world::nbt::Tag;
-        let list = self
-            .attributes
-            .instances()
-            .map(|(_, key, instance)| {
-                let packed = instance.pack();
-                let mut entry = vec![
-                    ("id", string(key.name())),
-                    ("base", Tag::Double(packed.base.to_bits())),
-                ];
-                // `modifiers` is an optional field whose default is the empty list.
-                if modifiers && !packed.modifiers.is_empty() {
-                    let modifiers = packed
-                        .modifiers
-                        .iter()
-                        .map(|m| {
-                            let operation = match m.operation() {
-                                Operation::AddValue => "add_value",
-                                Operation::AddMultipliedBase => "add_multiplied_base",
-                                Operation::AddMultipliedTotal => "add_multiplied_total",
-                            };
-                            Tag::compound([
-                                ("id", string(m.id())),
-                                ("amount", Tag::Double(m.amount().to_bits())),
-                                ("operation", string(operation)),
-                            ])
-                        })
-                        .collect();
-                    entry.push(("modifiers", Tag::List(modifiers)));
-                }
-                Tag::compound(entry)
-            })
-            .collect();
-        Tag::List(list)
+        horizon_world::nbt::Tag::List(crate::living_attributes::pack(&self.attributes, modifiers))
     }
     /// `AttributeMap.apply` of a saved `attributes` list
     /// (LivingEntity.readAdditionalSaveData): each known attribute takes its
@@ -809,46 +757,7 @@ impl PlayerMotion {
         &mut self,
         saved: Option<&horizon_world::nbt::Tag>,
     ) -> Result<()> {
-        use horizon_client_core::nbt_value::{float, text};
-        use horizon_world::{attributes::Packed, nbt::Tag};
-        let Some(Tag::List(list)) = saved else {
-            return Ok(());
-        };
-        for entry in list {
-            let Some(key) = text(entry.get("id")).and_then(|id| self.attributes.key(&id)) else {
-                continue;
-            };
-            let modifiers = match entry.get("modifiers") {
-                Some(Tag::List(l)) => l
-                    .iter()
-                    .filter_map(|m| {
-                        let operation = match text(m.get("operation"))?.as_str() {
-                            "add_value" => Operation::AddValue,
-                            "add_multiplied_base" => Operation::AddMultipliedBase,
-                            "add_multiplied_total" => Operation::AddMultipliedTotal,
-                            _ => return None,
-                        };
-                        Modifier::new(&text(m.get("id"))?, float(m.get("amount"))?, operation).ok()
-                    })
-                    .collect(),
-                _ => Vec::new(),
-            };
-            let packed = Packed {
-                base: float(entry.get("base")).unwrap_or(0.0),
-                modifiers,
-            };
-            let Some(handle) = self
-                .attributes
-                .get_instance(Some(key))
-                .map_err(attribute_error)?
-            else {
-                continue;
-            };
-            self.attributes
-                .edit(&handle, |value, observer| value.apply(&packed, observer))
-                .map_err(attribute_error)?;
-        }
-        Ok(())
+        crate::living_attributes::apply_saved(&mut self.attributes, saved)
     }
     /// `Player.readAdditionalSaveData`: the movement speed's base is the abilities' walking speed.
     pub fn set_walking_speed_base(&mut self, speed: f32) -> Result<()> {

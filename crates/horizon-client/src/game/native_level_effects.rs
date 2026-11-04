@@ -5,8 +5,8 @@
 //! an earlier open, or for arguments the network can't carry.
 use super::native_hooks::{mod_particles_ok, mod_sound_ok};
 use super::{Dim, Game, creatures::NativeSound, lan_particles::QueuedParticle};
-use horizon_client::mod_api::{LevelRef, NativeSoundSource, ParticleOptions};
 use horizon_world::registry::BlockStateId;
+use mod_api::{LevelRef, NativeSoundSource, ParticleOptions};
 
 impl Game<'_> {
     /// The level's dimension id, for a handle of this open on the server.

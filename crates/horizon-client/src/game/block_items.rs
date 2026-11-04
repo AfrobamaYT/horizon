@@ -438,11 +438,8 @@ mod tests {
     fn a_mod_block_entity_rides_its_item_through_the_game() {
         use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
         use super::components;
-        use horizon_client::{
-            chunk::Chunk,
-            containers::BlockEntity,
-            mod_api::{self, *},
-        };
+        use horizon_client::{chunk::Chunk, containers::BlockEntity};
+        use mod_api::{self, *};
         use std::sync::Arc;
 
         const CHILD: &str = "HORIZON_MOD_BLOCK_ENTITY_ITEM_CHILD";
@@ -468,7 +465,7 @@ mod tests {
             }
         }
         struct TestMod;
-        #[horizon_client::mod_api::__subscriptions]
+        #[mod_api::__subscriptions]
         impl Hooks for TestMod {
             fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 let kind = registrar
@@ -481,7 +478,7 @@ mod tests {
             }
             fn blocks(
                 &self,
-                _context: &horizon_client::mod_api::RegistrationContext<'_>,
+                _context: &mod_api::RegistrationContext<'_>,
                 event: &mut BlocksEvent<'_>,
             ) {
                 event.blocks.push(horizon_mods::content::Block {
@@ -493,8 +490,8 @@ mod tests {
             }
         }
         let mods: Mods = Arc::from([ModEntry::new("item_test", Box::new(TestMod))]);
-        horizon_client::mod_api::install(mods.clone());
-        horizon_client::mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install(mods.clone());
+        mod_api::__private::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let root = super::super::mods::content_root(&base, &Default::default()).unwrap();
         with_game_at(root, |game| {

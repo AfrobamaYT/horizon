@@ -6,6 +6,7 @@
 //! The float arithmetic follows vanilla and JOML's default (non-FMA,
 //! non-fast-math) code paths operation by operation.
 use horizon_core::geometry::trig;
+pub use mod_api::camera::{CameraEntity, FovPlayer, LivingCamera, UseItem, lerp, wrap_degrees};
 
 /// `(float) Math.PI`.
 const PI: f32 = std::f32::consts::PI;
@@ -36,24 +37,9 @@ pub fn java_max(a: f32, b: f32) -> f32 {
         b
     }
 }
-/// `Mth.lerp(float, float, float)`.
-pub fn lerp(alpha: f32, p0: f32, p1: f32) -> f32 {
-    p0 + alpha * (p1 - p0)
-}
 /// `Mth.lerp(double, double, double)`.
 pub fn lerp_d(alpha: f64, p0: f64, p1: f64) -> f64 {
     p0 + alpha * (p1 - p0)
-}
-/// `Mth.wrapDegrees(float)`.
-pub fn wrap_degrees(angle: f32) -> f32 {
-    let mut normalized = angle % 360.0;
-    if normalized >= 180.0 {
-        normalized -= 360.0;
-    }
-    if normalized < -180.0 {
-        normalized += 360.0;
-    }
-    normalized
 }
 /// `Mth.clamp(float, float, float)`.
 pub fn clamp(value: f32, min: f32, max: f32) -> f32 {
@@ -320,24 +306,6 @@ impl CameraType {
     }
 }
 
-/// What `AbstractClientPlayer.getFieldOfViewModifier` reads.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FovPlayer {
-    /// `Abilities.flying`.
-    pub flying: bool,
-    /// `Abilities.getWalkingSpeed()`.
-    pub walking_speed: f32,
-    /// `getAttributeValue(MOVEMENT_SPEED)`.
-    pub movement_speed: f64,
-    /// The item in use and its use ticks, when using one.
-    pub using: Option<(UseItem, i32)>,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UseItem {
-    Bow,
-    Spyglass,
-    Other,
-}
 /// `AbstractClientPlayer.getFieldOfViewModifier(firstPerson, effectScale)`.
 pub fn field_of_view_modifier(p: &FovPlayer, first_person: bool, effect_scale: f32) -> f32 {
     let mut modifier = 1.0f32;
@@ -361,52 +329,6 @@ pub fn field_of_view_modifier(p: &FovPlayer, first_person: bool, effect_scale: f
         }
     }
     lerp(effect_scale, 1.0, modifier)
-}
-
-/// The camera entity as `Camera.alignWithEntity` and the field-of-view
-/// death and hurt effects see it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CameraEntity {
-    pub position: [f64; 3],
-    /// `xo`, `yo`, `zo`.
-    pub previous: [f64; 3],
-    pub x_rot: f32,
-    pub y_rot: f32,
-    pub x_rot_o: f32,
-    pub y_rot_o: f32,
-    /// `Entity.getEyeHeight()`.
-    pub eye_height: f32,
-    /// A living entity's `getScale()` and camera distance attribute.
-    pub living: Option<LivingCamera>,
-    /// The vehicle's scale and camera distance when it is living.
-    pub mount: Option<(f32, f64)>,
-}
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct LivingCamera {
-    pub scale: f32,
-    pub camera_distance: f64,
-    /// `isSleeping()` with `getBedOrientation()` as its `toYRot()`.
-    pub sleeping: Option<Option<f32>>,
-    /// `isDeadOrDying()` and `deathTime`.
-    pub dead: Option<i32>,
-}
-impl CameraEntity {
-    /// `Entity.getXRot(partialTicks)`.
-    pub fn view_x_rot(&self, partial: f32) -> f32 {
-        if partial == 1.0 {
-            self.x_rot
-        } else {
-            lerp(partial, self.x_rot_o, self.x_rot)
-        }
-    }
-    /// `LocalPlayer.getViewYRot` (`getYRot(partialTicks)`, a `Mth.rotLerp`).
-    pub fn view_y_rot(&self, partial: f32) -> f32 {
-        if partial == 1.0 {
-            self.y_rot
-        } else {
-            self.y_rot_o + partial * wrap_degrees(self.y_rot - self.y_rot_o)
-        }
-    }
 }
 
 /// The fluid `Camera.getFluidInCamera` reports, as the field of view sees it.
