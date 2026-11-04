@@ -222,6 +222,14 @@ pub trait DataLoadContext {
     /// Registry names in ID order, from this resource generation's snapshot.
     fn registry(&self, name: &str) -> Option<Arc<[String]>>;
 
+    /// The fluid tags this load's resources hold (`data/<ns>/tags/fluid`):
+    /// each tag id to the fluids it names, in the sources' order — what a
+    /// recipe's fluid ingredient resolves its `#tag`s with. `None` where the
+    /// load reads no recipe resources.
+    fn fluid_tags(&self) -> Option<Arc<[(String, Arc<[String]>)]>> {
+        None
+    }
+
     /// A loaded mod's setting captured at the owning load boundary, without file I/O.
     fn setting(&self, mod_id: &str, key: &str) -> Option<String>;
 
@@ -253,6 +261,9 @@ impl DataLoadContext for OwningLoad<'_> {
     }
     fn registry(&self, name: &str) -> Option<Arc<[String]>> {
         self.source.registry(name)
+    }
+    fn fluid_tags(&self) -> Option<Arc<[(String, Arc<[String]>)]>> {
+        Some(self.source.fluid_tags().clone())
     }
     fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
         self.source.setting(mod_id, key)

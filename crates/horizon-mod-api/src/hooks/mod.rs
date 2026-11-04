@@ -93,6 +93,7 @@ mod create_spawn_position;
 mod crop_grow;
 mod crosshair_target;
 mod custom_click_action;
+mod custom_spawners;
 mod display_refs;
 mod dragon_refs;
 mod draw_measures;

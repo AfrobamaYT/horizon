@@ -111,6 +111,182 @@ pub fn dedup_keep_order(items: &mut Vec<String>) {
     let mut seen = std::collections::HashSet::new();
     items.retain(|i| seen.insert(i.clone()));
 }
+/// The walk both ingredient kinds share: a string (an id or `#tag`, as
+/// `tags` resolves it), a list of them, or NeoForge's three shapes with
+/// their children walked the same way, each answered by the flat list of
+/// ids it matches in the order the sources named them. A kind outside the
+/// shapes is answered by the wrapper's `custom` as the walk meets it, so a
+/// shape sees its ids like any child's: the item ingredient gives the list
+/// its hook left at load, a fluid one none, which fails the file. An empty
+/// result is no ingredient, as an empty list or an unloaded tag is.
+#[derive(Clone, Debug)]
+pub(crate) struct WalkedIngredient {
+    /// The ids it accepts, however the source shape named them.
+    pub(crate) set: HashSet<String>,
+    /// The same ids in the sources' order (`HolderSet`).
+    pub(crate) order: Vec<String>,
+    /// NeoForge's shapes, with their children walked.
+    pub(crate) children: Option<(Shape, Vec<Self>)>,
+    /// A kind outside the standard shapes: the kind and its JSON, as the
+    /// file wrote it, without the wrapper's answer.
+    pub(crate) custom: Option<(String, serde_json::Map<String, Value>)>,
+}
+/// The wrapper's answer for a kind outside the standard shapes: the ids it
+/// matches, taken out of its JSON, or none to fail the file.
+pub(crate) type CustomIds<'a> =
+    &'a dyn Fn(&mut serde_json::Map<String, Value>) -> Option<Vec<String>>;
+impl WalkedIngredient {
+    /// The walk of `v`: the shapes' flat lists in the sources' order, their
+    /// children kept for matching a concrete stack.
+    pub(crate) fn walk(
+        v: &Value,
+        tags: &std::collections::HashMap<String, Vec<String>>,
+        custom: CustomIds<'_>,
+    ) -> Option<Self> {
+        let mut list: Vec<String> = Vec::new();
+        let mut add = |s: &str| {
+            let more: Vec<String> = match s.strip_prefix('#') {
+                Some(tag) => tags.get(tag).cloned().unwrap_or_default(),
+                None => vec![s.to_owned()],
+            };
+            for i in more {
+                if !list.contains(&i) {
+                    list.push(i);
+                }
+            }
+        };
+        match v {
+            Value::String(s) => add(s),
+            Value::Array(a) => a.iter().filter_map(Value::as_str).for_each(&mut add),
+            Value::Object(o) => return Self::walk_object(o, tags, custom),
+            _ => return None,
+        }
+        Self::flat(list)
+    }
+    /// A plain list's answer: its ids in order, no shapes.
+    fn flat(list: Vec<String>) -> Option<Self> {
+        (!list.is_empty()).then(|| Self {
+            set: list.iter().cloned().collect(),
+            order: list,
+            children: None,
+            custom: None,
+        })
+    }
+    /// NeoForge's ingredient types (`NeoForgeRegistries.Keys.INGREDIENT_TYPES`),
+    /// the standard shapes mods' recipes carry, each answered by the flat id
+    /// list it matches, with the children kept for matching a concrete
+    /// stack. A kind outside these is the wrapper's `custom`; one of
+    /// `minecraft:`'s the wrapper does not know still fails the file.
+    fn walk_object(
+        o: &serde_json::Map<String, Value>,
+        tags: &std::collections::HashMap<String, Vec<String>>,
+        custom: CustomIds<'_>,
+    ) -> Option<Self> {
+        // Current NeoForge marks a custom ingredient with
+        // `neoforge:ingredient_type`; `type` is the older packs' key.
+        let kind = ingredient_kind(o)?;
+        let children = || {
+            o.get("children")
+                .or_else(|| o.get("ingredients"))
+                .and_then(Value::as_array)
+        };
+        // The shapes' walked children, for matching at craft time: every
+        // arm either fills it or returns.
+        let nested;
+        let kept = match kind {
+            // `CompoundIngredient`: any of its children matching the stack
+            // is enough — the union of their ids.
+            "neoforge:compound" => {
+                let subs: Vec<Self> = children()?
+                    .iter()
+                    .map(|s| Self::walk(s, tags, custom))
+                    .collect::<Option<_>>()?;
+                let mut seen = Vec::new();
+                for sub in &subs {
+                    for id in &sub.order {
+                        if !seen.contains(id) {
+                            seen.push(id.clone());
+                        }
+                    }
+                }
+                nested = Some((Shape::Compound, subs));
+                seen
+            }
+            // `IntersectionIngredient`: every child must match the same
+            // stack — the ids all of them name.
+            "neoforge:intersection" => {
+                let subs: Vec<Self> = children()?
+                    .iter()
+                    .map(|s| Self::walk(s, tags, custom))
+                    .collect::<Option<_>>()?;
+                nested = Some((Shape::Intersection, subs.clone()));
+                subs.first()?
+                    .order
+                    .iter()
+                    .filter(|i| subs[1..].iter().all(|s| s.set.contains(*i)))
+                    .cloned()
+                    .collect()
+            }
+            // The base's ids without the subtracted's.
+            "neoforge:difference" => {
+                let base = Self::walk(o.get("base")?, tags, custom)?;
+                let gone = Self::walk(o.get("subtracted")?, tags, custom)?;
+                nested = Some((Shape::Difference, vec![base.clone(), gone.clone()]));
+                base.order
+                    .iter()
+                    .filter(|i| !gone.set.contains(*i))
+                    .cloned()
+                    .collect()
+            }
+            // A kind outside these shapes: the wrapper answers it — the
+            // item ingredient asks its hook, a fluid one fails the file.
+            k if is_custom(k) => {
+                let mut data = o.clone();
+                let list = custom(&mut data)?;
+                return (!list.is_empty()).then(|| Self {
+                    set: list.iter().cloned().collect(),
+                    order: list,
+                    children: None,
+                    custom: Some((k.to_owned(), data)),
+                });
+            }
+            _ => return None,
+        };
+        (!kept.is_empty()).then(|| Self {
+            set: kept.iter().cloned().collect(),
+            order: kept,
+            children: nested,
+            custom: None,
+        })
+    }
+    /// `test` by id: a shape asks each child its own way — a mod's kind
+    /// among them answers through `custom` — and a plain list names it.
+    pub(crate) fn test(
+        &self,
+        id: &str,
+        custom: &dyn Fn(&str, &serde_json::Map<String, Value>) -> bool,
+    ) -> bool {
+        match &self.children {
+            // Each child its own `test`, as on NeoForge — a mod's kind
+            // among them answers through its hook.
+            Some((Shape::Compound, kids)) => kids.iter().any(|k| k.test(id, custom)),
+            Some((Shape::Intersection, kids)) => kids.iter().all(|k| k.test(id, custom)),
+            Some((Shape::Difference, kids)) => {
+                kids.first().is_some_and(|k| k.test(id, custom))
+                    && kids.get(1).is_none_or(|k| !k.test(id, custom))
+            }
+            None => {
+                if !self.set.contains(id) {
+                    return false;
+                }
+                match &self.custom {
+                    Some((kind, data)) => custom(kind, data),
+                    None => true,
+                }
+            }
+        }
+    }
+}
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -219,110 +395,36 @@ impl Ingredient {
         }
     }
     pub fn parse(v: &Value, items: &Items) -> Option<Self> {
-        let mut list: Vec<String> = Vec::new();
-        let mut add = |s: &str| {
-            let more: Vec<String> = match s.strip_prefix('#') {
-                Some(tag) => items.item_tag_order.get(tag).cloned().unwrap_or_default(),
-                None => vec![s.to_owned()],
-            };
-            for i in more {
-                if !list.contains(&i) {
-                    list.push(i);
-                }
-            }
-        };
-        match v {
-            Value::String(s) => add(s),
-            Value::Array(a) => a.iter().filter_map(Value::as_str).for_each(&mut add),
-            Value::Object(o) => return Self::parse_object(o, items),
-            _ => return None,
-        }
-        (!list.is_empty()).then(|| Self::of(list))
+        // A mod's own kind: `resolve` asked the hook once at load and left
+        // the item list it matches with the occurrence; one no load
+        // resolved fails the file.
+        Self::of_walked(WalkedIngredient::walk(
+            v,
+            &items.item_tag_order,
+            &resolved_items,
+        )?)
     }
-    /// NeoForge's ingredient types (`NeoForgeRegistries.Keys.INGREDIENT_TYPES`),
-    /// the standard shapes mods' recipes carry, each resolved to the flat item
-    /// list it matches. A kind outside these still fails the file: a mod's
-    /// own ingredient types come with their own hook, not the loader.
-    fn parse_object(o: &serde_json::Map<String, Value>, items: &Items) -> Option<Self> {
-        // Current NeoForge marks a custom ingredient with
-        // `neoforge:ingredient_type`; `type` is the older packs' key.
-        let kind = ingredient_kind(o)?;
-        let children = || {
-            o.get("children")
-                .or_else(|| o.get("ingredients"))
-                .and_then(Value::as_array)
+    /// The walk of an item ingredient's answer: NeoForge's standard shapes
+    /// keep their children, and a mod's own kind keeps its kind and JSON,
+    /// since the load-time list only names items and matching a concrete
+    /// stack (its components) is the match-time hook's.
+    fn of_walked(walked: WalkedIngredient) -> Option<Self> {
+        // The shapes' children walk the same way; a child no wrapper
+        // answers fails the file.
+        let children = match walked.children {
+            Some((shape, kids)) => Some((
+                shape,
+                kids.into_iter()
+                    .map(Self::of_walked)
+                    .collect::<Option<_>>()?,
+            )),
+            None => None,
         };
-        // The shapes' parsed children, for matching at craft time: every
-        // arm either fills it or returns.
-        let nested;
-        let kept = match kind {
-            // `CompoundIngredient`: any of its children matching the stack
-            // is enough — the union of their items.
-            "neoforge:compound" => {
-                let subs: Vec<Self> = children()?
-                    .iter()
-                    .map(|s| Self::parse(s, items))
-                    .collect::<Option<_>>()?;
-                let mut seen = Vec::new();
-                for sub in &subs {
-                    for item in &sub.order {
-                        if !seen.contains(item) {
-                            seen.push(item.clone());
-                        }
-                    }
-                }
-                nested = Some((Shape::Compound, subs));
-                seen
-            }
-            // `IntersectionIngredient`: every child must match the same
-            // stack — the items all of them name.
-            "neoforge:intersection" => {
-                let subs: Vec<Self> = children()?
-                    .iter()
-                    .map(|s| Self::parse(s, items))
-                    .collect::<Option<_>>()?;
-                nested = Some((Shape::Intersection, subs.clone()));
-                subs.first()?
-                    .order
-                    .iter()
-                    .filter(|i| subs[1..].iter().all(|s| s.items.contains(*i)))
-                    .cloned()
-                    .collect()
-            }
-            // The base's items without the subtracted's.
-            "neoforge:difference" => {
-                let base = Self::parse(o.get("base")?, items)?;
-                let gone = Self::parse(o.get("subtracted")?, items)?;
-                nested = Some((Shape::Difference, vec![base.clone(), gone.clone()]));
-                base.order
-                    .iter()
-                    .filter(|i| !gone.items.contains(*i))
-                    .cloned()
-                    .collect()
-            }
-            // A mod's own kind: `resolve` asked the hook once at load and
-            // left the item list it matches with the occurrence; one no load
-            // resolved fails the file.
-            k if is_custom(k) => {
-                let mut data = o.clone();
-                let list = resolved_items(&mut data)?;
-                // The kind and its JSON stay with the ingredient: the
-                // load-time list only names items, and matching a concrete
-                // stack (its components) is the match-time hook's.
-                return (!list.is_empty()).then(|| Self {
-                    order: list.clone(),
-                    items: list.iter().cloned().collect(),
-                    custom: Some((k.to_owned(), data)),
-                    children: None,
-                });
-            }
-            _ => return None,
-        };
-        (!kept.is_empty()).then(|| Self {
-            items: kept.iter().cloned().collect(),
-            order: kept,
-            custom: None,
-            children: nested,
+        (!walked.order.is_empty()).then(|| Self {
+            items: walked.set,
+            order: walked.order,
+            custom: walked.custom,
+            children,
         })
     }
     /// `Ingredient.test`: whether `stack` fits: a stack the list names, and
