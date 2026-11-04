@@ -46,7 +46,7 @@ pub fn dedup_keep_order(items: &mut Vec<String>) {
 }
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct Ingredient {
     /// The items it accepts, however the source shape named them.
@@ -62,7 +62,7 @@ pub struct Ingredient {
     pub children: Option<(Shape, Vec<Self>)>,
 }
 /// How a shape's children combine at match time.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 // exhaustive: a closed set the game matches without a wildcard
 pub enum Shape {
     /// Any child matching the stack is enough.
