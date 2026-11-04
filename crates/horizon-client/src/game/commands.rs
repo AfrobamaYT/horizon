@@ -1766,6 +1766,11 @@ impl Game<'_> {
         let Some(conn) = conn.filter(|_| at != level) else {
             return false;
         };
+        // A fake player stays in its level. True: the teleport is taken, so no
+        // same-level teleport stands in for it.
+        if Some(conn) == self.lan_acting && self.fake_blocks(mod_api::FakeEffect::ChangeDimension) {
+            return true;
+        }
         self.level_teleports
             .push(super::server_travel::LevelTeleport {
                 conn,
@@ -4381,6 +4386,41 @@ mod teleport_player_tests {
             assert_eq!(player.velocity.y, 0.0);
             assert!(player.ground.on_ground);
             assert_eq!(player.fall_distance, 7.0);
+        });
+    }
+}
+
+#[cfg(test)]
+mod fake_travel_tests {
+    use super::super::Dim;
+    use super::Target;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_fake_player_is_not_teleported_to_another_dimension() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            super::super::bossbars::audience_tests::add_real_and_fake(game);
+            let host = game.lan.as_ref().unwrap();
+            let conn = |uuid| {
+                host.hub
+                    .guests
+                    .iter()
+                    .find(|g| g.uuid == uuid)
+                    .unwrap()
+                    .conn
+            };
+            let (fake, real) = (conn(2), conn(1));
+            let to_nether = |game: &mut super::super::Game<'_>, conn| {
+                game.as_guest(conn, |g| {
+                    g.teleport_across(Target::Player, Dim::Nether, [0.0, 64.0, 0.0], None)
+                })
+            };
+            // Taken (true), so no same-level teleport stands in for it, and nothing queued.
+            assert_eq!(to_nether(game, fake), Some(true));
+            assert!(game.level_teleports.is_empty());
+            // A real player's goes on the queue as before.
+            assert_eq!(to_nether(game, real), Some(true));
+            assert_eq!(game.level_teleports.len(), 1);
         });
     }
 }

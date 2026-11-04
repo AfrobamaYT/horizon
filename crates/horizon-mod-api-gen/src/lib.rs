@@ -459,9 +459,11 @@ fn handle_method<'a>(
         format!("{backend}(host)?.{call}")
     } else if returns("bool") {
         format!("{backend}(host).map(|backend| backend.{call}).unwrap_or(false)")
+    } else if returns("Result") {
+        format!("{backend}(host).map_or_else(|| Err(crate::NoBackend::no_backend()), |backend| backend.{call})")
     } else {
         return Err(format!(
-            "{name}: a {receiver} helper returns Option or bool, the value a host without a backend refuses"
+            "{name}: a {receiver} helper returns Option, bool or Result, the value a host without a backend refuses"
         ));
     };
     Ok((
@@ -1149,6 +1151,21 @@ mod tests {
         assert!(code.contains(
             "backend_mut_of(host).map(|backend| backend.level_set(self)).unwrap_or(false)"
         ));
+        // A `Result` helper refuses with its error's `NoBackend` value on a host without a game.
+        let tried: syn::ItemFn = syn::parse_quote! {
+            fn native_level_attempt(&mut self, level: LevelRef) -> Result<u8, Refused> { todo!() }
+        };
+        let (_, code) = super::handle_method(
+            &tried,
+            "level_attempt",
+            "level",
+            super::Side::Server,
+            &types.handles,
+        )
+        .unwrap();
+        assert!(code.contains(
+            "backend_mut_of(host).map_or_else(|| Err(crate::NoBackend::no_backend()), |backend| backend.level_attempt(self))"
+        ));
         for (method, name, receiver, error) in [
             (
                 syn::parse_quote! { fn native_entity_x(&self, entity: EntityRef) {} },
@@ -1172,7 +1189,7 @@ mod tests {
                 syn::parse_quote! { fn native_entity_x(&self, entity: EntityRef) {} },
                 "entity_x",
                 "entity",
-                "returns Option or bool",
+                "returns Option, bool or Result",
             ),
             (
                 syn::parse_quote! { fn native_entity_x(entity: EntityRef) {} },

@@ -3498,6 +3498,8 @@ struct Game<'a> {
     lan_acting_entity: Option<u32>,
     /// Whether the player currently swapped into the game is connectionless.
     lan_acting_fake: bool,
+    /// A fake player's `perform_action` in progress, and what it refused.
+    fake_action: std::sync::Arc<native_server::FakeAction>,
     /// Command feedback to forward to a guest.
     chat_capture: Option<Vec<horizon_client::text::Text>>,
     /// Packets for the guest acting now, sent once its action returns.
@@ -6161,7 +6163,7 @@ impl Game<'_> {
     }
     /// Menus opened by PlayerEffect::OpenMenu.
     fn open_menu(&mut self, pos: [i32; 3]) {
-        if self.lan_acting_fake {
+        if self.fake_blocks(mod_api::FakeEffect::Menu) {
             return;
         }
         let name = self
@@ -15388,7 +15390,7 @@ impl Game<'_> {
     /// and (outside creative) no monsters within 8 blocks; the bed becomes the
     /// respawn point either way.
     fn try_sleep(&mut self, pos: [i32; 3]) {
-        if self.lan_acting_fake {
+        if self.fake_blocks(mod_api::FakeEffect::Sleep) {
             return;
         }
         let Some((position, yaw)) = self.player.as_ref().map(|p| (p.position, p.yaw)) else {
@@ -20296,6 +20298,7 @@ impl<'a> Game<'a> {
             lan_acting_permission: None,
             lan_acting_entity: None,
             lan_acting_fake: false,
+            fake_action: Default::default(),
             chat_capture: None,
             admin_feedback: Vec::new(),
             console_broadcast: None,

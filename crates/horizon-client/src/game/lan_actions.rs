@@ -31,6 +31,7 @@ use horizon_protocol::{
     text::literal,
 };
 use horizon_world::entity_move::EntityMoveWorld;
+use mod_api::ActionRefused;
 use winit::keyboard::KeyCode;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2297,7 +2298,7 @@ impl Game<'_> {
                     inside: p.inside,
                 };
                 let hand = if p.hand == 1 { Hand::Off } else { Hand::Main };
-                self.guest_use_item_on(conn, gi, hit, hand);
+                let _ = self.guest_use_item_on(conn, gi, hit, hand);
             }
             S::UseItem(p) => {
                 let Some(host) = self.lan.as_mut() else {
@@ -2305,7 +2306,7 @@ impl Game<'_> {
                 };
                 host.hub.ack(conn, p.sequence);
                 let hand = if p.hand == 1 { Hand::Off } else { Hand::Main };
-                self.guest_use_item(conn, gi, hand, Some((p.yaw, p.pitch)));
+                let _ = self.guest_use_item(conn, gi, hand, Some((p.yaw, p.pitch)));
             }
             S::Attack(p) => self.guest_attack(conn, p.id),
             S::Interact(p) => {
@@ -3315,15 +3316,21 @@ impl Game<'_> {
     /// `ServerPlayerGameMode.useItemOn`, and the blocks the client predicted sent back. True
     /// when the use consumed (`InteractionResult` a success or a consume). A fake player's
     /// `PlayerRef::perform_action` runs it as the packet does.
-    pub(super) fn guest_use_item_on(&mut self, conn: u32, gi: usize, hit: Hit, hand: Hand) -> bool {
+    pub(super) fn guest_use_item_on(
+        &mut self,
+        conn: u32,
+        gi: usize,
+        hit: Hit,
+        hand: Hand,
+    ) -> Result<bool, ActionRefused> {
         let mut consumed = false;
         let Some(host) = self.lan.as_mut() else {
-            return false;
+            return Err(ActionRefused::Stale);
         };
         // handleUseItemOn: within reach, then the hit point within
         // a block of the block's centre (logged when it isn't).
         if !host.hub.guests[gi].may_reach_block(hit.pos) {
-            return false;
+            return Err(ActionRefused::OutOfReach);
         }
         let inside = (0..3).all(|k| (hit.point[k] - f64::from(hit.pos[k]) - 0.5).abs() < 1.0000001);
         if !inside {
@@ -3340,7 +3347,7 @@ impl Game<'_> {
                 hit.pos[2]
             );
             self.lan_log_event(horizon_client::lan::hub::HostEvent::Warn(line));
-            return false;
+            return Err(ActionRefused::OutOfReach);
         }
         let face = hit.face;
         // handleUseItemOn: above or below the world nothing is used and
@@ -3352,14 +3359,16 @@ impl Game<'_> {
         let max_y = self.world.shape.max_y() - 1;
         if hit.pos[1] > max_y {
             self.build_limit_message(conn, true, max_y);
-            return false;
+            return Err(ActionRefused::Protected);
         }
         if hit.pos[1] < min_y {
             self.build_limit_message(conn, false, min_y);
-            return false;
+            return Err(ActionRefused::Protected);
         }
+        let mut refused = None;
         if self.under_spawn_protection(gi, hit.pos) {
             self.spawn_protection_message(conn, hit.pos);
+            refused = Some(ActionRefused::Protected);
         } else if self
             .border
             .contains(f64::from(hit.pos[0]), f64::from(hit.pos[2]))
@@ -3402,10 +3411,11 @@ impl Game<'_> {
             }
         } else {
             self.build_limit_message(conn, true, max_y);
+            refused = Some(ActionRefused::Protected);
         }
         // The client predicted a result: correct it with what really is.
         let Some(host) = self.lan.as_mut() else {
-            return consumed;
+            return refused.map_or(Ok(consumed), Err);
         };
         for pos in [
             hit.pos,
@@ -3419,7 +3429,7 @@ impl Game<'_> {
             host.hub
                 .send_to(conn, &C::BlockUpdate(play::BlockUpdate { pos, state }));
         }
-        consumed
+        refused.map_or(Ok(consumed), Err)
     }
 
     /// `ServerGamePacketListenerImpl.handleUseItem` for guest `conn` (at `gi`) using the item in
@@ -3433,18 +3443,19 @@ impl Game<'_> {
         gi: usize,
         hand: Hand,
         rotation: Option<(f32, f32)>,
-    ) -> bool {
+    ) -> Result<bool, ActionRefused> {
         let Some(host) = self.lan.as_ref() else {
-            return false;
+            return Err(ActionRefused::Stale);
         };
+        // ServerPlayerGameMode.useItem: a spectator's use passes.
         if host.hub.guests[gi].spectator() {
-            return false;
+            return Ok(false);
         }
         // handleUseItem: the client's rotation (absSnapRotationTo, which
         // sends nothing back), then the item alone. What it looked at a
         // moment ago (a block, a mob) is UseItemOn's or Interact's.
         let Some(host) = self.lan.as_mut() else {
-            return false;
+            return Err(ActionRefused::Stale);
         };
         let g = &mut host.hub.guests[gi];
         if let Some((yaw, pitch)) = rotation {
@@ -3462,7 +3473,7 @@ impl Game<'_> {
                 .as_guest(conn, |g| g.with_hand(hand, |g| g.spawn_egg_fluid_hit()))
                 .flatten();
             if hit.is_some_and(|h| self.under_spawn_protection(gi, h.pos)) {
-                return false;
+                return Err(ActionRefused::Protected);
             }
         }
         let heard = self.audio.capture.as_ref().map_or(0, Vec::len);
@@ -3485,7 +3496,7 @@ impl Game<'_> {
         };
         self.lan_swing_back(conn, swung);
         self.guest_instrument_sound(conn, heard, horn);
-        consumed
+        Ok(consumed)
     }
 
     fn guest_attack(&mut self, conn: u32, id: i32) {
