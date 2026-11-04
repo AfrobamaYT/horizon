@@ -67,19 +67,19 @@ impl Game<'_> {
         // ScreenEvent.Preedit.Pre, then the screen's handler (the focused
         // field takes it), then Preedit.Post when no field did.
         let shown = event.clone().unwrap_or_default();
-        if self.fire_preedit_pre(&shown) {
+        if self.dispatch_preedit_pre_hook(&shown) {
             return;
         }
         preedit::set_preedit(event.filter(|_| taken));
         if !taken {
-            self.fire_preedit_post(&shown);
+            self.dispatch_preedit_post_hook(&shown);
         }
     }
 
     /// `native_screen_preedit_pre` for the open screen: whether it cancelled.
     /// An empty `event` is a composition that ended. Nothing fires with no
     /// mod listening or no screen open.
-    fn fire_preedit_pre(&self, event: &PreeditEvent) -> bool {
+    fn dispatch_preedit_pre_hook(&self, event: &PreeditEvent) -> bool {
         let mut canceled = false;
         if mod_api::__private::listened(mod_api::HookId::ScreenPreeditPre)
             && let Some(view) = self.observed_screen_view()
@@ -97,7 +97,7 @@ impl Game<'_> {
     }
 
     /// `native_screen_preedit_post` for the open screen, as the Pre.
-    fn fire_preedit_post(&self, event: &PreeditEvent) {
+    fn dispatch_preedit_post_hook(&self, event: &PreeditEvent) {
         if mod_api::__private::listened(mod_api::HookId::ScreenPreeditPost)
             && let Some(view) = self.observed_screen_view()
         {

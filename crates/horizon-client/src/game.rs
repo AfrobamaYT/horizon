@@ -9284,7 +9284,7 @@ impl Game<'_> {
             // TitleScreen.extractRenderState, then ToastManager over it: vanilla
             // draws the toast manager on every screen, so a pack download or a
             // resource-reload failure still shows on the title (#4428).
-            let drawn = self.fire_title_screen_render_pre(&mut batch);
+            let drawn = self.draw_title_screen_with_pre_hook(&mut batch);
             if drawn && let Some(title) = &self.title {
                 title.draw_with_items(
                     &self.gui.atlas,
@@ -9298,7 +9298,7 @@ impl Game<'_> {
             // ScreenEvent.Render.Post over the title's own screens: a mod draws
             // over them here (a pack browser over Create New World, say), and the
             // toasts still come after, as over any screen.
-            self.fire_title_screen_render_post(&mut batch, drawn);
+            self.draw_title_screen_with_post_hook(&mut batch, drawn);
             self.draw_toasts(&mut batch, false);
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
@@ -9677,7 +9677,7 @@ impl Game<'_> {
         }
     }
     /// `draw_screen_with_pre_hook` for the title's own screens.
-    fn fire_title_screen_render_pre(&self, batch: &mut HudBatch) -> bool {
+    fn draw_title_screen_with_pre_hook(&self, batch: &mut HudBatch) -> bool {
         match self.title_screen_render_view(batch) {
             Some(view) => self.screen_render_begin(batch, &view),
             None => true,
@@ -9695,7 +9695,7 @@ impl Game<'_> {
     }
     /// `draw_screen_with_post_hook` for the title's own screen, once a frame,
     /// after it has drawn and before the toasts.
-    fn fire_title_screen_render_post(&self, batch: &mut HudBatch, drawn: bool) {
+    fn draw_title_screen_with_post_hook(&self, batch: &mut HudBatch, drawn: bool) {
         if let Some(view) = self.title_screen_render_view(batch) {
             self.screen_render_end(batch, &view, drawn);
         }
