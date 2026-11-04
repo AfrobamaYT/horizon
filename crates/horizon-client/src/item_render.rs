@@ -702,13 +702,14 @@ impl ItemRenderer {
         drawn: bool,
         item_data: &horizon_world::item_defaults::ItemData,
     ) -> crate::Result<Self> {
+        let prototypes = Arc::clone(item_data.prototypes()?);
         let models = ItemModels {
             definitions: if drawn {
                 load_definitions(root)
             } else {
                 BTreeMap::new()
             },
-            prototypes: Arc::clone(item_data.prototypes()),
+            prototypes,
         };
         let (library, cit) = cit::load(root, library?);
         let permutations = PalettedPermutations::from_atlas(
@@ -1165,10 +1166,17 @@ mod tests {
                 .to_string()
         };
         let broken_items = load();
+        fs::write(root.join("items.json"), r#"{"horizon:bad":false}"#)?;
+        let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload)?;
+        let broken_components = ItemRenderer::load_with_library(&root, library.clone(), &data)
+            .err()
+            .unwrap()
+            .to_string();
         fs::write(root.join("items.json"), "{}")?;
         let bad_model = load();
         let _ = fs::remove_dir_all(&root);
         assert!(!broken_items.starts_with("item models:"));
+        assert!(!broken_components.starts_with("item models:"));
         assert!(bad_model.starts_with("item models:"));
         Ok(())
     }

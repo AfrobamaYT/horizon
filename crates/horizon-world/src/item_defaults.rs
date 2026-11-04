@@ -45,12 +45,14 @@ pub fn native_modify_default_components(
     crate::native_load_hooks::modify_default_components(context, item, components);
 }
 
+type Prototypes = BTreeMap<String, BTreeMap<String, Value>>;
+
 /// One owning load's published defaults and metadata, shared across loader workers.
 pub struct ItemData {
     root: PathBuf,
     context: LoadContext,
     defaults: ItemDefaults,
-    prototypes: Arc<BTreeMap<String, BTreeMap<String, Value>>>,
+    prototypes: Result<Arc<Prototypes>, Arc<serde_json::Error>>,
 }
 
 impl ItemData {
@@ -63,12 +65,14 @@ impl ItemData {
             .map(|(item, components)| {
                 serde_json::from_value(components.clone()).map(|components| (item.clone(), components))
             })
-            .collect::<serde_json::Result<_>>()?;
+            .collect::<serde_json::Result<Prototypes>>()
+            .map(Arc::new)
+            .map_err(Arc::new);
         Ok(Self {
             root: root.to_owned(),
             context,
             defaults,
-            prototypes: Arc::new(prototypes),
+            prototypes,
         })
     }
 
@@ -84,8 +88,11 @@ impl ItemData {
         &self.context
     }
 
-    pub fn prototypes(&self) -> &Arc<BTreeMap<String, BTreeMap<String, Value>>> {
-        &self.prototypes
+    /// Borrow the canonical table; conversion errors retain their renderer-load timing.
+    pub fn prototypes(&self) -> io::Result<&Arc<Prototypes>> {
+        self.prototypes
+            .as_ref()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, Arc::clone(error)))
     }
 }
 
