@@ -814,19 +814,22 @@ impl Game<'_> {
         self.client_logging_out();
         if let Err(error) = self.join_server(address, name, None, cookies, lan) {
             log::warn!("Horizon: could not join server: {error}");
-            if self.title.is_none() {
-                self.title = Some(
-                    horizon_client::title::Title::new(
+            let skip = self.settings.file.bool("skipMultiplayerWarning");
+            match &mut self.title {
+                Some(title) => {
+                    title.skip_multiplayer_warning = skip;
+                    title.failed(error);
+                }
+                None => {
+                    let mut title = horizon_client::title::Title::new(
                         std::env::current_dir()?.join("saves"),
                         &self.options.resources,
                     )
-                    .with_user(|| self.options.player_name()),
-                );
-            }
-            let skip = self.settings.file.bool("skipMultiplayerWarning");
-            if let Some(title) = &mut self.title {
-                title.skip_multiplayer_warning = skip;
-                title.failed(error);
+                    .with_user(|| self.options.player_name());
+                    title.skip_multiplayer_warning = skip;
+                    title.failed(error);
+                    self.show_title(title);
+                }
             }
             self.capture(false);
         }
@@ -969,7 +972,7 @@ impl Game<'_> {
         self.ui.registries.permission = 0;
         self.ui.chat.clear();
         self.set_screen(Screen::Playing);
-        self.title = None;
+        self.hide_title();
         self.dim = Dim::Overworld;
         self.clear_lod();
         self.pending_uploads.clear();
@@ -1241,7 +1244,7 @@ impl Game<'_> {
         title.last_server = self.settings.file.string("lastServer");
         title.skip_multiplayer_warning = self.settings.file.bool("skipMultiplayerWarning");
         if single_player && reason.is_none() {
-            self.title = Some(title);
+            self.show_title(title);
             self.capture(false);
             return Ok(());
         }
@@ -1252,7 +1255,7 @@ impl Game<'_> {
             },
             None => horizon_client::multiplayer::Screen::list(&saves),
         });
-        self.title = Some(title);
+        self.show_title(title);
         self.capture(false);
         Ok(())
     }
