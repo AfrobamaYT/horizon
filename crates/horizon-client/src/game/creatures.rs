@@ -7914,7 +7914,11 @@ fn knock_back(
         x: xd,
         z: zd,
     };
-    if knockback_canceled(level.reborrow(), Hurting::Player(p.entity_id, source), &mut knock) {
+    if knockback_canceled(
+        level.reborrow(),
+        Hurting::Player(p.entity_id, source),
+        &mut knock,
+    ) {
         return;
     }
     let Knock {

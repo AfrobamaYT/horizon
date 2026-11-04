@@ -377,11 +377,7 @@ pub fn knockback_from_holding(
 }
 /// Whether [`KNOCKBACK`] canceled the knockback (never while it is unset). A
 /// value it leaves that is not a finite number is put back as it was.
-pub fn knockback_canceled(
-    level: DamageLevel<'_>,
-    pushed: Hurting<'_>,
-    knock: &mut Knock,
-) -> bool {
+pub fn knockback_canceled(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
     let Some(hook) = KNOCKBACK.get() else {
         return false;
     };

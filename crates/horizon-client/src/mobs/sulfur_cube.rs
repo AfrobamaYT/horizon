@@ -753,12 +753,7 @@ fn launch(
 /// `LivingEntity.dealDefaultKnockback` for a cube with a block: from where the blow came
 /// (`source.getSourcePosition()`) with `knockback(0.4, ...)`. A source with a causing entity goes
 /// through `SulfurCube.knockback`; one with none (a cactus, a fall) through `super.knockback`.
-fn deal_default_knockback(
-    m: &mut Mob,
-    level: &mut DamageLevel<'_>,
-    source: &Damage,
-    damage: f32,
-) {
+fn deal_default_knockback(m: &mut Mob, level: &mut DamageLevel<'_>, source: &Damage, damage: f32) {
     // A projectile knocks the way it travelled (`calculateHorizontalHurtKnockbackDirection`),
     // else from the source's position.
     let (xd, zd) = match m.projectile_motion.take() {
