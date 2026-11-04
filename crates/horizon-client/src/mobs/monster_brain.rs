@@ -22,6 +22,7 @@ use horizon_core::{
     geometry::{Vec3, trig},
     random::{LegacyRandom, RandomSource},
 };
+use mod_api::SoundSource;
 
 /// `Activity` (the ones these brains use).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -844,9 +845,14 @@ impl B {
                 }
                 super::breeze::set_pose(m, super::breeze::INHALING);
                 // level.playSound(null, breeze, BREEZE_CHARGE, HOSTILE, 1, 1)
-                let at = [m.position.x, m.position.y, m.position.z];
-                cx.events
-                    .push(MobEvent::Sound("entity.breeze.charge", at, 1.0, 1.0));
+                let charge = MobEvent::bound_sound(
+                    m,
+                    "entity.breeze.charge",
+                    SoundSource::Hostile,
+                    1.0,
+                    1.0,
+                );
+                cx.events.push(charge);
                 if let Some(p) = mem(m).breeze_jump_target.value() {
                     look_at_eyes(
                         m,

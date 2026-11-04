@@ -1632,6 +1632,19 @@ pub fn main() -> horizon_client::Result<()> {
                         f(*volume),
                         f(*pitch)
                     );
+                } else if let MobEvent::BoundSound {
+                    sound,
+                    volume,
+                    pitch,
+                    ..
+                } = e
+                {
+                    let _ = writeln!(
+                        out,
+                        "{t} sound minecraft:{sound} {} {}",
+                        f(*volume),
+                        f(*pitch)
+                    );
                 } else if let MobEvent::SoundId(name, _, volume, pitch) = e {
                     let _ = writeln!(out, "{t} sound {name} {} {}", f(*volume), f(*pitch));
                 } else if player_hurt(player.as_ref(), e) {

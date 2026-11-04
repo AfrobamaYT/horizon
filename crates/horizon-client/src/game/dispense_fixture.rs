@@ -446,6 +446,10 @@ impl Game<'_> {
         for (sound, at, _, _) in self.audio.capture.take().unwrap_or_default() {
             out.push(format!("S {} {sound}", floor_pos(at)));
         }
+        // The sounds bound to an entity (a sheared mob's) are the server's too.
+        for s in std::mem::take(&mut self.bound_sounds) {
+            out.push(format!("S {} {}", floor_pos(s.at), s.name));
+        }
         out.extend(used);
         out.push(format!("rng {}", self.world.random.next_long()));
         Ok(out)

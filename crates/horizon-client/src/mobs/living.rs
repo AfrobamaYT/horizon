@@ -250,7 +250,8 @@ impl MobWorld<'_> {
                     }
                     current.height = current.height.max(surface - base_y);
                     let mut flow =
-                        crate::motion::pushing_flow(&mut scene, state, p).unwrap_or(Vec3::ZERO);
+                        crate::motion::pushing_flow(self.loop_context, &mut scene, state, p)
+                            .unwrap_or(Vec3::ZERO);
                     if current.height < 0.4 {
                         flow = flow.scale(current.height);
                     }

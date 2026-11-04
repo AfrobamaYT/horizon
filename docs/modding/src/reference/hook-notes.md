@@ -464,8 +464,11 @@ one, where vanilla gives the `by` one.
   `native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Changes made to the departing chunk in `native_chunk_unload` aren't saved: as in vanilla, the chunk is saved before it unloads.
 - Sounds the server plays to its players: `native_play_level_sound_at_position` and `native_play_level_sound_at_entity`
   (NeoForge's `PlayLevelSoundEvent.AtPosition` and `.AtEntity`, in `ServerLevel.playSeededSound`). As in vanilla, a mob's own
-  sounds (`Entity.playSound`) are at its position; only `playSound(except, sourceEntity, ...)` sounds are at an entity: here a
-  goat horn and a mod's sound bound to an entity. A mod may change the sound, its source, volume and pitch, or cancel it. Every
+  sounds (`Entity.playSound`) are at its position; only `playSound(except, sourceEntity, ...)` sounds are at an entity: vanilla's
+  sites go through `Game::play_bound_sound` (the mobs' through `MobEvent::BoundSound`), which queues them for the end of the
+  tick, after the tick's other sounds; the goat horn and a mod's bound sound ask directly. Two sites keep a difference: dye on a
+  sheep and an allay's sounds reach the player who caused them too, since Horizon's client plays them from the packet rather
+  than predicting them. The packet stays positional (horizon-rust/horizon#9284). A mod may change the sound, its source, volume and pitch, or cancel it. Every
   server sound packet but `/playsound`'s goes through `Game::send_level_sound` (`game/level_sounds.rs`), or the native-sound
   flush for a mod's own, so a new sound site asks the mods by calling it. The tick's sounds are asked as they go out, at the end
   of the tick. With no listener, the cost is one `listened` check per sound and nothing is allocated.
@@ -2718,7 +2721,7 @@ clicks already.
 `dyn LoopContext` is the read-only view for a hook fired inside a menu, recipe or
 player-list loop, where no game is at hand (a catalog entry names it with
 `"context": "loop"`; `menu_slot_rules`, `item_stacked_on_other`, `player_name_format`,
-`player_tab_list_name_format`, `living_jump_power`, `living_speed`, `living_flying_speed`, `living_heal`, `living_breathe`, `living_drown`, `living_fall`, `farmland_trample`, `living_jump`, `ender_entity_teleport`, `ingredient_test` and the sound hooks below take it). `side()` is `LoopSide::Server` or
+`player_tab_list_name_format`, `living_jump_power`, `living_speed`, `living_flying_speed`, `living_heal`, `living_breathe`, `living_drown`, `living_fall`, `farmland_trample`, `living_jump`, `ender_entity_teleport`, `fluid_flow`, `player_stays_on_ground_surface`, `block_jump_factor`, `block_speed_factor`, `ingredient_test` and the sound hooks below take it). `side()` is `LoopSide::Server` or
 `LoopSide::Client`, `registry(name)` borrows names in registry ID order,
 `setting(mod_id, key)` returns a loaded mod's setting captured when the context was
 built, and `mods()` is the `LoadedMods` view of registration. It has no game Host,
@@ -2789,7 +2792,7 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 
 ## Player edge backoff
 
-- **`native_player_stays_on_ground_surface(entity, staying)`**: edit whether the player counts as staying on the ground surface (`Player.isStayingOnGroundSurface`, vanilla: the shift key is down) where `maybeBackOffFromEdge` asks, so a mod can make the player hold to an edge without crouching, or walk off one while crouching. It fires on both sides and on the client's replayed ticks, so a mod registers on both and keeps the listener a pure function of its inputs. With no listener the cost is one `listened` branch per movement. Beyond NeoForge (no counterpart); Diverges from upstream: new hook. Mobs never back off an edge, so there is no mob call site.
+- **`native_player_stays_on_ground_surface(context, entity, staying)`**: edit whether the player counts as staying on the ground surface (`Player.isStayingOnGroundSurface`, vanilla: the shift key is down) where `maybeBackOffFromEdge` asks, so a mod can make the player hold to an edge without crouching, or walk off one while crouching. It fires on both sides and on the client's replayed ticks, with the loop `context` of the side that ticks the player (see [The loop context](#the-loop-context)), so a mod registers on both and keeps the listener a pure function of its inputs. With no listener the cost is one `listened` branch per movement. Beyond NeoForge (no counterpart); Diverges from upstream: new hook. Mobs never back off an edge, so there is no mob call site.
 
 ## Block jump and speed factors
 
@@ -2797,7 +2800,7 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 
 ## Fluid flow
 
-- **`native_fluid_flow(fluid, pos, flow)`**: edit the current (`FlowingFluid.getFlow`) of the fluid block at `pos` as it pushes an entity: the player, mobs, dropped items, experience orbs, armor stands and arrows all read it through the one shared helper. It runs for each fluid block the entity touches in a tick, before the vanilla scale for shallow fluid, so keep the listener short. The renderer's own flow vector (a fluid texture's rotation) is not changed. `level.fluid_flow(host, pos)` reads the edited current. It fires on both sides and on the client's replayed ticks, so a mod registers on both and keeps the listener a pure function of its inputs. With no listener the cost is one `listened` branch per fluid block. Beyond NeoForge (no counterpart); Diverges from upstream: new hook.
+- **`native_fluid_flow(context, fluid, pos, flow)`**: edit the current (`FlowingFluid.getFlow`) of the fluid block at `pos` as it pushes an entity: the player, mobs, dropped items, experience orbs, armor stands and arrows all read it through the one shared helper. It runs for each fluid block the entity touches in a tick, before the vanilla scale for shallow fluid, so keep the listener short. The renderer's own flow vector (a fluid texture's rotation) is not changed. `level.fluid_flow(host, pos)` reads the edited current. It fires on both sides and on the client's replayed ticks, with the loop `context` of the side that ticks the entity, so a mod registers on both and keeps the listener a pure function of its inputs. With no listener the cost is one `listened` branch per fluid block. Beyond NeoForge (no counterpart); Diverges from upstream: new hook.
 
 ## Minecart pass
 

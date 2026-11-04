@@ -19,6 +19,7 @@ use horizon_core::{
     geometry::Vec3,
     random::{LegacyRandom, RandomSource},
 };
+use mod_api::SoundSource;
 use std::fmt::Debug;
 
 const JUMP: usize = 0;
@@ -391,9 +392,11 @@ impl LaySpawn {
                 if let Some(state) = cx.w.registry.default_state("minecraft:frogspawn") {
                     cx.events.push(MobEvent::SetBlock { pos: spawn, state });
                 }
-                cx.events.push(MobEvent::Sound(
+                // level.playSound(null, body, FROG_LAY_SPAWN, BLOCKS, 1, 1).
+                cx.events.push(MobEvent::bound_sound(
+                    m,
                     "entity.frog.lay_spawn",
-                    [m.position.x, m.position.y, m.position.z],
+                    SoundSource::Blocks,
                     1.0,
                     1.0,
                 ));
@@ -547,12 +550,17 @@ impl Goal for ShootTongue {
         m.look_at([t.position.x, t.eye_y, t.position.z]);
         m.extra.frog.tongue_target = Some(id);
         m.extra.frog.time += 1;
-        let here = [m.position.x, m.position.y, m.position.z];
         match m.extra.frog.phase {
             Phase::MoveToTarget => {
                 if pos.distance_squared(m.position) < EATING_DISTANCE * EATING_DISTANCE {
-                    cx.events
-                        .push(MobEvent::Sound("entity.frog.tongue", here, 2.0, 1.0));
+                    // level.playSound(null, body, tongueSound, NEUTRAL, 2, 1).
+                    cx.events.push(MobEvent::bound_sound(
+                        m,
+                        "entity.frog.tongue",
+                        SoundSource::Neutral,
+                        2.0,
+                        1.0,
+                    ));
                     set_pose(m, sync::USING_TONGUE);
                     // `target.setDeltaMovement(vectorTo(frog).normalize().scale(0.75))`: the
                     // target's own motion is replaced, and it is drawn in.
@@ -577,8 +585,13 @@ impl Goal for ShootTongue {
                 if f.eat_timer > 6 {
                     f.phase = Phase::EatAnimation;
                     // eatEntity.
-                    cx.events
-                        .push(MobEvent::Sound("entity.frog.eat", here, 2.0, 1.0));
+                    cx.events.push(MobEvent::bound_sound(
+                        m,
+                        "entity.frog.eat",
+                        SoundSource::Neutral,
+                        2.0,
+                        1.0,
+                    ));
                     super::ai::do_hurt_target(m, Who::Mob(id), cx);
                     // `if (!target.isAlive()) target.remove(KILLED)`: no death animation.
                     cx.events.push(MobEvent::RemoveKilled { target: id });
@@ -967,8 +980,9 @@ impl Goal for LongJump {
             .map_or(0.0, |e| f64::from(0.1_f32 * (e.2 + 1) as f32));
         m.velocity = jump.scale((len + boost) / len);
         self.mid_jump = true;
-        let at = [m.position.x, m.position.y, m.position.z];
-        cx.events.push(MobEvent::Sound(jump_sound(m), at, 1.0, 1.0));
+        // level.playSound(null, body, getJumpSound(body), NEUTRAL, 1, 1).
+        let sound = MobEvent::bound_sound(m, jump_sound(m), SoundSource::Neutral, 1.0, 1.0);
+        cx.events.push(sound);
     }
 }
 

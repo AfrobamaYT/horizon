@@ -8376,9 +8376,10 @@ impl Game<'_> {
     }
     /// A sound bound to `entity` is about to play (NeoForge's
     /// `PlayLevelSoundEvent.AtEntity`, in `ServerLevel.playSeededSound`'s
-    /// entity overload, `playSound(except, sourceEntity, ...)`): a goat horn
-    /// and a mod's sound bound to an entity. The fields and their rules are
-    /// `native_play_level_sound_at_position`'s. Server-side.
+    /// entity overload, `playSound(except, sourceEntity, ...)`): vanilla's
+    /// entity-bound sites (`Game::play_bound_sound`, `MobEvent::BoundSound`),
+    /// the goat horn and a mod's sound bound to an entity. The fields and
+    /// their rules are `native_play_level_sound_at_position`'s. Server-side.
     pub(super) fn native_play_level_sound_at_entity(
         &mut self,
         call: mod_api::__private::PlayLevelSoundAtEntityCall<'_>,

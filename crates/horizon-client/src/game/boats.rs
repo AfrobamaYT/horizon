@@ -642,7 +642,7 @@ impl Game<'_> {
         }
         // `Entity.baseTick`: the boat is immersed and pushed by the current it
         // sits in (`isPushedByFluid`), before `floatBoat` scales the velocity.
-        let _ = b.push_by_fluid(&self.world, &self.res.motion().fluids);
+        let _ = b.push_by_fluid(&self.world, &self.res.motion().fluids, &self.loop_context);
         // floatBoat
         // `-getGravity()`: none with NoGravity.
         let mut vspeed = 0.0 - b.get_gravity();

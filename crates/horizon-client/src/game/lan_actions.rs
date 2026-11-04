@@ -6277,6 +6277,7 @@ impl Game<'_> {
             }
             self.send_level_sound(LevelSound::new(&name, at, volume, pitch), None);
         }
+        self.send_bound_sounds();
     }
 
     /// `LivingEntity.tick`'s arrows and bee stingers falling out of the

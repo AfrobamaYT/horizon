@@ -2333,6 +2333,12 @@ pub fn eating_sound(
     }
     Some((sound, volume, pitch))
 }
+/// Whether `playEatingSound` binds the sound to the animal: the frog's, the
+/// goat's and the sniffer's are `level().playSound(null, this, ..., NEUTRAL,
+/// ...)`, the others `Entity.playSound` at its position.
+pub fn eating_sound_is_bound(species: Species) -> bool {
+    matches!(species, Species::Frog | Species::Goat | Species::Sniffer)
+}
 pub fn sound_volume(m: &Mob) -> f32 {
     match m.species() {
         Species::Ghast => 5.0,

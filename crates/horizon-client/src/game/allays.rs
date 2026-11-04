@@ -2,14 +2,24 @@
 //! throwing their load to the player or note block, dancing to jukeboxes,
 //! and the hand-over interaction (`Allay.mobInteract`).
 use super::Game;
+use super::level_sounds::LevelSound;
 use horizon_client::{
     containers::BlockEntity,
     items::ItemStack,
     mobs::{Species, allay},
 };
 use horizon_core::random::RandomSource;
+use mod_api::SoundSource;
 
 impl Game<'_> {
+    /// `Allay.mobInteract`'s `level().playSound(player, this, sound, NEUTRAL,
+    /// 2, 1)`, bound to allay `allay`. Vanilla leaves the player out because
+    /// their client played it; Horizon's own client plays it from the
+    /// packet, so every player gets it.
+    fn play_allay_sound(&mut self, sound: &str, at: [f64; 3], allay: u32) {
+        let sound = LevelSound::new(sound, at, 2.0, 1.0).in_source(SoundSource::Neutral);
+        self.play_bound_sound(sound, allay, None);
+    }
     pub(super) fn tick_allays(&mut self) {
         let griefing = self.ui.rules.bool("mob_griefing");
         // The playing jukeboxes, found at the first allay: no allay starts
@@ -278,8 +288,7 @@ impl Game<'_> {
             // Allay.duplicateAllay: entity event 18, three spawnHeartParticle.
             let id = self.mobs[index].id;
             self.mob_event_particles(id, 18);
-            self.audio
-                .play("minecraft:block.amethyst_block.chime", Some(at), 2.0, 1.0);
+            self.play_allay_sound("minecraft:block.amethyst_block.chime", at, id);
             self.consume_held();
             return true;
         }
@@ -293,8 +302,8 @@ impl Game<'_> {
             m.extra.tame = true;
             // `Allay.mobInteract` remembers LIKED_PLAYER by UUID.
             m.extra.owner = Some(acting);
-            self.audio
-                .play("minecraft:entity.allay.item_given", Some(at), 2.0, 1.0);
+            let id = m.id;
+            self.play_allay_sound("minecraft:entity.allay.item_given", at, id);
             self.consume_held();
             return true;
         }
@@ -310,10 +319,18 @@ impl Game<'_> {
             let carried = m.extra.allay.as_mut().and_then(|st| st.inventory.take());
             m.extra.tame = false;
             m.extra.owner = None;
-            self.audio
-                .play("minecraft:entity.allay.item_taken", Some(at), 2.0, 1.0);
-            if let Some(stack) = carried {
-                self.spawn_item(stack, at, [0.0, 0.2, 0.0], 40);
+            let id = m.id;
+            self.play_allay_sound("minecraft:entity.allay.item_taken", at, id);
+            if carried > 0 {
+                self.spawn_item(
+                    ItemStack {
+                        count: carried as u32,
+                        ..held.clone()
+                    },
+                    at,
+                    [0.0, 0.2, 0.0],
+                    40,
+                );
             }
             if let Some(rest) = self.give(ItemStack { count: 1, ..held })
                 && let Some(eye) = self.eye_position()

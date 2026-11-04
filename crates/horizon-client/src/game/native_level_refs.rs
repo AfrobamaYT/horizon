@@ -272,6 +272,7 @@ impl Game<'_> {
             let flow = horizon_client::entities::fluid_flow(
                 world,
                 &self.res.motion().fluids,
+                &self.loop_context,
                 block_pos(pos),
             );
             Vec3::new(flow.x, flow.y, flow.z)

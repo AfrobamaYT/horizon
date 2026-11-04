@@ -1338,7 +1338,10 @@ impl Game<'_> {
         // uses this fallback until its per-move pickup/push retry is ported.
         self.push_from_ticked_cart(c);
         // AbstractMinecart.tick: updateFluidInteraction, a stream pushes the cart.
-        c.in_water = c.push_by_fluid(&self.world, &self.res.motion().fluids).0 > 0.0;
+        c.in_water = c
+            .push_by_fluid(&self.world, &self.res.motion().fluids, &self.loop_context)
+            .0
+            > 0.0;
         // updateFluidInteraction: being in water resets the fall distance.
         if c.in_water {
             c.fall_distance = 0.0;
