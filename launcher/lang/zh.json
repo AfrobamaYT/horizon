@@ -1045,15 +1045,8 @@
     "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}：Cargo.toml 没有 horizon-client 依赖。",
     "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}：horizon-client 请求 {fields}。服务器构建是无界面的；horizon-client 的特性由启动器管理。请移除 features 并使用 default-features = false，或将其省略。",
     "{mod}: {error}": "{mod}：{error}",
-    "Building {name}'s post-build step": "正在构建 {name} 的构建后步骤",
-    "These mods were made for different Horizon versions": "这些模组是为不同版本的 Horizon 制作的",
-    "They often still work together. If the build fails, install versions made for the same Nightly.": "它们通常仍能一起使用。如果构建失败，请安装为同一个 Nightly 制作的版本。",
     "{mode} · stopped": "{mode} · 已停止",
     "{online} of {max}": "{online}/{max}",
-    "Running {name}'s post-build step": "正在运行 {name} 的构建后步骤",
-    "The source of {source}. Its release ships {file}, a content mod: installing those from GitHub is not supported yet.": "{source} 的源代码。其发布版包含内容模组 {file}：暂不支持从 GitHub 安装此类模组。",
-    "Build anyway": "仍然构建",
-    "{error} They often still build: pass --allow-version-mismatch to try.": "{error} 它们通常仍然可以构建：传递 --allow-version-mismatch 以尝试。",
     "Accent colour, glass, blur, language and the options above go back to how Horizon ships.": "强调色、玻璃、模糊、语言和以上选项恢复为 Horizon 的默认设置。",
     "Reset the launcher's look": "重置启动器外观",
     "Reset to defaults": "恢复默认设置",
@@ -1108,6 +1101,5 @@
     "Save changes switches it. Nothing in its folder is deleted.": "“保存更改”会切换它。其文件夹中的任何内容都不会被删除。",
     "Its mods made for {loader} stay in its folder but won't load.": "其为 {loader} 制作的模组会留在其文件夹中，但不会加载。",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "其为 Minecraft {from} 制作的模组会留在其文件夹中；部分可能无法在 {to} 中加载。",
-    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "其世界由 Minecraft {from} 保存：{to} 会永久升级它们；如果 {to} 更旧，则无法打开它们。",
-    "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "此游戏源码没有可读取的原生入口模板。请更新 Horizon 并针对该游戏重新构建模组。"
+    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "其世界由 Minecraft {from} 保存：{to} 会永久升级它们；如果 {to} 更旧，则无法打开它们。"
 }
