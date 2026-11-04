@@ -50,6 +50,7 @@ pub use crate::gfx::native_render::{
 pub use crate::health::{HurtSource, ShieldBlock};
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
+pub use crate::item_tooltip::TooltipDisplay;
 pub use crate::items::ItemStack;
 pub use crate::menu::{LogicalSide, StackedOnOther};
 pub use crate::merchant::MerchantOffer;
