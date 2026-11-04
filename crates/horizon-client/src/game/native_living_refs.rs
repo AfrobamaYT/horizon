@@ -797,6 +797,10 @@ mod tests {
             // Once the player reference expires, the mob can be credited.
             game.last_hurt_by_player.remove(&100);
             assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(101));
+            // A mob that has left this level is no longer resolvable by its old ID.
+            game.mobs[1].removed = true;
+            assert_eq!(living.kill_credit(game), None);
+            game.mobs[1].removed = false;
             game.mobs[0].age += 101;
             assert_eq!(living.kill_credit(game), None);
         });
