@@ -114,12 +114,12 @@ impl NativeConfigs {
                     continue;
                 }
             };
-            let file = NativeConfigFile {
+            let file = NativeConfigFile::from(mod_api::__private::built::NativeConfigFile {
                 mod_id: config.mod_id,
                 kind: config.kind,
                 file: config.file,
                 text,
-            };
+            });
             loaded.push(file.clone());
             self.files.push(Tracked {
                 config: file,
@@ -404,12 +404,12 @@ mod tests {
         let start = Instant::now();
         assert!(!configs.due(start));
         configs.files.push(Tracked {
-            config: NativeConfigFile {
+            config: NativeConfigFile::from(mod_api::__private::built::NativeConfigFile {
                 mod_id: "gt".into(),
                 kind: Common,
                 file: "gt-common.toml".into(),
                 text: String::new(),
-            },
+            }),
             path: PathBuf::new(),
             modified: None,
         });

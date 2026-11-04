@@ -500,3 +500,144 @@ impl EntitySpan {
         true
     }
 }
+
+#[doc(hidden)]
+pub(crate) mod built {
+    #[allow(unused_imports)]
+    use super::*;
+    pub struct WorldDrawn<'a> {
+        pub device: &'a wgpu::Device,
+        pub queue: &'a wgpu::Queue,
+        pub encoder: &'a mut wgpu::CommandEncoder,
+        pub color: &'a wgpu::Texture,
+        pub color_view: &'a wgpu::TextureView,
+        pub color_format: wgpu::TextureFormat,
+        pub size: [u32; 2],
+        pub depth: &'a wgpu::TextureView,
+        pub depth_size: [u32; 2],
+        pub view_proj: Mat4,
+        pub jittered: Mat4,
+        pub camera: DVec3,
+        pub entities: &'a [super::Vertex],
+        pub spans: &'a [super::EntitySpan],
+        pub motion: &'a [(u32, u64)],
+        pub atlas: Option<&'a wgpu::Texture>,
+        pub quad_indices: &'a wgpu::Buffer,
+        pub block_sprites: super::BlockSpriteArrays<'a>,
+    }
+    impl<'a> From<WorldDrawn<'a>> for super::WorldDrawn<'a> {
+        fn from(v: WorldDrawn<'a>) -> Self {
+            let WorldDrawn {
+                device,
+                queue,
+                encoder,
+                color,
+                color_view,
+                color_format,
+                size,
+                depth,
+                depth_size,
+                view_proj,
+                jittered,
+                camera,
+                entities,
+                spans,
+                motion,
+                atlas,
+                quad_indices,
+                block_sprites,
+            } = v;
+            Self {
+                device,
+                queue,
+                encoder,
+                color,
+                color_view,
+                color_format,
+                size,
+                depth,
+                depth_size,
+                view_proj,
+                jittered,
+                camera,
+                entities,
+                spans,
+                motion,
+                atlas,
+                quad_indices,
+                block_sprites,
+            }
+        }
+    }
+    pub struct BlockSpriteArrays<'a> {
+        pub views: &'a [wgpu::TextureView],
+        pub split: u32,
+        pub size: u32,
+        pub nearest: &'a wgpu::Sampler,
+        pub filtered: &'a wgpu::Sampler,
+    }
+    impl<'a> From<BlockSpriteArrays<'a>> for super::BlockSpriteArrays<'a> {
+        fn from(v: BlockSpriteArrays<'a>) -> Self {
+            let BlockSpriteArrays {
+                views,
+                split,
+                size,
+                nearest,
+                filtered,
+            } = v;
+            Self {
+                views,
+                split,
+                size,
+                nearest,
+                filtered,
+            }
+        }
+    }
+    pub struct HandDrawn<'a> {
+        pub device: &'a wgpu::Device,
+        pub queue: &'a wgpu::Queue,
+        pub encoder: &'a mut wgpu::CommandEncoder,
+        pub color: &'a wgpu::Texture,
+        pub color_view: &'a wgpu::TextureView,
+        pub color_format: wgpu::TextureFormat,
+        pub size: [u32; 2],
+        pub hand: &'a [super::Vertex],
+        pub view_proj: Mat4,
+        pub camera: DVec3,
+        pub atlas: Option<&'a wgpu::Texture>,
+        pub quad_indices: &'a wgpu::Buffer,
+    }
+    impl<'a> From<HandDrawn<'a>> for super::HandDrawn<'a> {
+        fn from(v: HandDrawn<'a>) -> Self {
+            let HandDrawn {
+                device,
+                queue,
+                encoder,
+                color,
+                color_view,
+                color_format,
+                size,
+                hand,
+                view_proj,
+                camera,
+                atlas,
+                quad_indices,
+            } = v;
+            Self {
+                device,
+                queue,
+                encoder,
+                color,
+                color_view,
+                color_format,
+                size,
+                hand,
+                view_proj,
+                camera,
+                atlas,
+                quad_indices,
+            }
+        }
+    }
+}

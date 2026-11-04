@@ -362,6 +362,7 @@ impl Game<'_> {
                 let what = match what {
                     NativeMobFilter::Player => Avoid::Player,
                     NativeMobFilter::Species(ids) => Avoid::Species(self.species_list(ids)?),
+                    _ => unreachable!("&NativeMobFilter: unhandled variant"),
                 };
                 Some(Box::new(AvoidEntity::new(what, *max_dist, *walk, *sprint)))
             }
@@ -425,6 +426,7 @@ impl Game<'_> {
                 let prey = match prey {
                     NativeMobFilter::Player => Prey::Player,
                     NativeMobFilter::Species(ids) => Prey::Species(self.species_list(ids)?),
+                    _ => unreachable!("&NativeMobFilter: unhandled variant"),
                 };
                 let mut g = NearestTarget::new(prey, *must_see);
                 g.must_reach = *must_reach;
@@ -436,6 +438,7 @@ impl Game<'_> {
                 g.alert = *alert;
                 Some(Box::new(g))
             }
+            _ => unreachable!("&NativeGoal: unhandled variant"),
         }
     }
 

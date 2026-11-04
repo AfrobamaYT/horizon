@@ -36,11 +36,11 @@ struct OpenAttempt {
 
 impl OpenAttempt {
     fn context(&self) -> NativeLifecycleContext {
-        NativeLifecycleContext {
+        NativeLifecycleContext::from(mod_api::__private::built::NativeLifecycleContext {
             authority: self.authority,
             epoch: NativeWorldEpoch::new(self.epoch),
             tick: NativeTickId::new(self.ticks),
-        }
+        })
     }
 
     fn server_context(&self) -> Option<NativeLifecycleContext> {

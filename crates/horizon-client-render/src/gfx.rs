@@ -9785,32 +9785,36 @@ impl Renderer {
                 Some((_, depth)) => (depth, self.world_post.size().unwrap_or(size)),
                 None => (&self.depth, size),
             };
-            native_render::native_world_drawn(&mut native_render::WorldDrawn {
-                device: &self.device,
-                queue: &self.queue,
-                encoder: &mut encoder,
-                color: &target_texture,
-                color_view: &view_target,
-                color_format: self.frame_format,
-                size,
-                depth,
-                depth_size,
-                view_proj,
-                jittered,
-                camera: frame.camera,
-                entities: frame.entities,
-                spans: frame.entity_spans,
-                motion: frame.entity_motion,
-                atlas: self.hud.atlas_texture.as_ref(),
-                quad_indices: &self.indices,
-                block_sprites: native_render::BlockSpriteArrays {
-                    views: &self.sprite_views,
-                    split: self.sprite_split,
-                    size: self.sprite_textures[0].width(),
-                    nearest: &self.sprite_nearest,
-                    filtered: &self.sprite_sampler,
+            native_render::native_world_drawn(&mut native_render::WorldDrawn::from(
+                mod_api::__private::built::WorldDrawn {
+                    device: &self.device,
+                    queue: &self.queue,
+                    encoder: &mut encoder,
+                    color: &target_texture,
+                    color_view: &view_target,
+                    color_format: self.frame_format,
+                    size,
+                    depth,
+                    depth_size,
+                    view_proj,
+                    jittered,
+                    camera: frame.camera,
+                    entities: frame.entities,
+                    spans: frame.entity_spans,
+                    motion: frame.entity_motion,
+                    atlas: self.hud.atlas_texture.as_ref(),
+                    quad_indices: &self.indices,
+                    block_sprites: native_render::BlockSpriteArrays::from(
+                        mod_api::__private::built::BlockSpriteArrays {
+                            views: &self.sprite_views,
+                            split: self.sprite_split,
+                            size: self.sprite_textures[0].width(),
+                            nearest: &self.sprite_nearest,
+                            filtered: &self.sprite_sampler,
+                        },
+                    ),
                 },
-            });
+            ));
         }
         let overlay = Overlay {
             hand_quads: hand_quads * u32::from(!pack_draws_hand && !hand_in_world),
@@ -10123,20 +10127,22 @@ impl Renderer {
         }
         // A native mod's turn after the hand, on the real frame only.
         if overlay.real && !frame.title {
-            native_render::native_hand_drawn(&mut native_render::HandDrawn {
-                device: &self.device,
-                queue: &self.queue,
-                encoder: &mut *encoder,
-                color: target_texture,
-                color_view: view_target,
-                color_format: self.frame_format,
-                size: [self.config.width, self.config.height],
-                hand: if overlay.hand_drawn { frame.hand } else { &[] },
-                view_proj: overlay.hand_view_proj,
-                camera: frame.camera,
-                atlas: self.hud.atlas_texture.as_ref(),
-                quad_indices: &self.indices,
-            });
+            native_render::native_hand_drawn(&mut native_render::HandDrawn::from(
+                mod_api::__private::built::HandDrawn {
+                    device: &self.device,
+                    queue: &self.queue,
+                    encoder: &mut *encoder,
+                    color: target_texture,
+                    color_view: view_target,
+                    color_format: self.frame_format,
+                    size: [self.config.width, self.config.height],
+                    hand: if overlay.hand_drawn { frame.hand } else { &[] },
+                    view_proj: overlay.hand_view_proj,
+                    camera: frame.camera,
+                    atlas: self.hud.atlas_texture.as_ref(),
+                    quad_indices: &self.indices,
+                },
+            ));
         }
         // GameRenderer.render: LevelRenderer.blitEntityOutline after the level and the hand.
         self.entity_outline.draw(

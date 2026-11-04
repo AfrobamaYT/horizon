@@ -3,6 +3,7 @@
 //! the vanilla dispense behaviours Horizon has entities for, and container
 //! comparator signals (`AbstractContainerMenu.getRedstoneSignalFromContainer`).
 use super::{Game, storage::is_shulker_box};
+use mod_api::__private::game::*;
 
 mod crafter;
 pub(in crate::game) mod native_energy;
@@ -1111,7 +1112,7 @@ impl Game<'_> {
         source: &View,
         destination: &View,
     ) -> bool {
-        if !mod_api::listened(mod_api::HookId::InventoryMoveItem) {
+        if !mod_api::__private::listened(mod_api::HookId::InventoryMoveItem) {
             return false;
         }
         let containers = self.containers();
@@ -1239,7 +1240,7 @@ impl Game<'_> {
             // room, the setItem putting the bone meal back into the detached
             // container (whose bone meal is lost with it).
             let bone_meal = c.bone_meal.clone();
-            if mod_api::listened(mod_api::HookId::InventoryMoveItem) {
+            if mod_api::__private::listened(mod_api::HookId::InventoryMoveItem) {
                 let mut cancel = false;
                 self.native_inventory_move_item(
                     [above.0, above.1, above.2],

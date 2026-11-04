@@ -221,7 +221,7 @@ impl Game<'_> {
             let anvil_created =
                 gs.kind == StationKind::Anvil && gs.menu.anvil_created() && !cancelled;
             if anvil_created
-                && mod_api::listened(mod_api::HookId::AnvilUpdate)
+                && mod_api::__private::listened(mod_api::HookId::AnvilUpdate)
                 && let Some(mut update) = gs.menu.anvil_update()
             {
                 let (uuid, entity_id) = self
@@ -593,7 +593,7 @@ impl Game<'_> {
         let enchanted_for_hook = enchanted.clone();
         let need = button as i32 + 1;
         // The enchantments the item got, for PlayerEnchantItemEvent.
-        let given = mod_api::listened(mod_api::HookId::PlayerEnchantItem).then(|| {
+        let given = mod_api::__private::listened(mod_api::HookId::PlayerEnchantItem).then(|| {
             horizon_client::stations::enchantment_list(
                 &self.stations().enchantments,
                 self.items(),

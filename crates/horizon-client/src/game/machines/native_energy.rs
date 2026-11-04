@@ -156,7 +156,7 @@ mod tests {
         use horizon_client::fast_hash::FxHashMap;
         use horizon_client::mobs::Mob;
         use horizon_core::geometry::{Direction, Vec3};
-        use mod_api::part_tests::{ROBOT_FLUID, game_thread};
+        use mod_api::__private::part_tests::{ROBOT_FLUID, game_thread};
         use mod_api::{
             ENERGY, ENTITY_ENERGY, ENTITY_FLUIDS, Holder, NativeBlockUpdateFlags, move_energy,
             move_resources,

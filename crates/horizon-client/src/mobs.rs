@@ -600,6 +600,7 @@ impl From<mod_api::NativeEffectDamage> for DamageKind {
         match damage {
             mod_api::NativeEffectDamage::Magic => Self::Magic,
             mod_api::NativeEffectDamage::Wither => Self::Wither,
+            _ => unreachable!("NativeEffectDamage: unhandled variant"),
         }
     }
 }

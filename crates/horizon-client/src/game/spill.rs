@@ -776,8 +776,8 @@ mod tests {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
+        use mod_api::__private::part_tests::{HOARD, HOARD_ASKED, game_thread};
         use mod_api::Holder;
-        use mod_api::part_tests::{HOARD, HOARD_ASKED, game_thread};
         use std::sync::Arc;
         use std::sync::atomic::Ordering;
         with_game(|game| {
@@ -854,8 +854,8 @@ mod tests {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields, ModContainer};
+        use mod_api::__private::part_tests::{HOARD, HOARD_ASKED, game_thread};
         use mod_api::Holder;
-        use mod_api::part_tests::{HOARD, HOARD_ASKED, game_thread};
         use std::sync::Arc;
         use std::sync::atomic::Ordering;
         with_game(|game| {

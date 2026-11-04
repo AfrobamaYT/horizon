@@ -7,6 +7,7 @@ use horizon_world::{
     item_defaults::ItemData,
     native_load_context::{LoadContext, LoadInputs},
 };
+use mod_api::__private::game::*;
 use mod_api::RegistrationContext;
 use std::{
     collections::BTreeMap,
@@ -94,7 +95,7 @@ fn native_declared() -> &'static NativeDeclared {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
         Game::native_blocks(&RegistrationContext::new(), &mut blocks);
         Game::native_items(&RegistrationContext::new(), &mut items);
-        let types = mod_api::block_entity_types().to_vec();
+        let types = mod_api::__private::block_entity_types().to_vec();
         NativeDeclared {
             blocks,
             items,
@@ -295,7 +296,7 @@ fn register_block_entity_types(
         })
         .collect();
     let types = BlockEntityTypes::new(membership, names.clone());
-    mod_api::validate_block_entity_type_keys(&types)?;
+    mod_api::__private::validate_block_entity_type_keys(&types)?;
     block_entity_types::install(types)?;
     Ok(())
 }
@@ -551,7 +552,7 @@ mod tests {
             )]
             .into(),
             || {
-                mod_api::with_test_packages(&["registration_test"], || {
+                mod_api::__private::with_test_packages(&["registration_test"], || {
                     assert_eq!(
                         collect_standalone_models(ExecutionRole::IntegratedServer),
                         None

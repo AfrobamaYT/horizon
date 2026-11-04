@@ -652,7 +652,7 @@ impl Game<'_> {
         };
         // ArmorHurtEvent for a mob's body armor.
         let mut amount = amount;
-        if mod_api::listened(mod_api::HookId::ArmorHurt) {
+        if mod_api::__private::listened(mod_api::HookId::ArmorHurt) {
             let kind = self
                 .mobs
                 .iter()
@@ -752,8 +752,8 @@ impl Game<'_> {
         }
         let t = self.res.mob_types().get(kind).cloned()?;
         let mut cancel = false;
-        let from_kind = (mod_api::listened(mod_api::HookId::LivingConversionPre)
-            || mod_api::listened(mod_api::HookId::LivingConversionPost))
+        let from_kind = (mod_api::__private::listened(mod_api::HookId::LivingConversionPre)
+            || mod_api::__private::listened(mod_api::HookId::LivingConversionPost))
         .then(|| super::native_hooks::mob_kind(from));
         if let Some(from_kind) = &from_kind {
             self.native_living_conversion_pre(from.id, from_kind, kind, &mut cancel);
@@ -973,11 +973,11 @@ impl Game<'_> {
                 None
             },
             asks_animal_tame: self.remote.is_none()
-                && mod_api::listened(mod_api::HookId::AnimalTame),
+                && mod_api::__private::listened(mod_api::HookId::AnimalTame),
             asks_living_destroy_block: self.remote.is_none()
-                && mod_api::listened(mod_api::HookId::LivingDestroyBlock),
+                && mod_api::__private::listened(mod_api::HookId::LivingDestroyBlock),
             asks_baby_spawn: self.remote.is_none()
-                && mod_api::listened(mod_api::HookId::BabyEntitySpawn),
+                && mod_api::__private::listened(mod_api::HookId::BabyEntitySpawn),
             border: Some(self.border.geometry()),
             // The first player in the level: a server has no player of its own.
             difficulty: self.local_difficulty(
@@ -1084,7 +1084,7 @@ impl Game<'_> {
         self.combat.exploded.clear();
         // EntityTickEvent.Pre for the mobs about to tick, before the loop holds them.
         let mut round = self.native_tick_round();
-        if round.listening() || mod_api::listened(mod_api::HookId::CanContinueSleeping) {
+        if round.listening() || mod_api::__private::listened(mod_api::HookId::CanContinueSleeping) {
             let ticking = self.entity_ticking_area();
             let mut i = 0;
             while let Some(m) = self.mobs.get(i) {
@@ -1412,7 +1412,7 @@ impl Game<'_> {
     /// `LivingDeathEvent` for a mob whose health ran out: whether a native
     /// mod canceled the death. A canceled mob stays alive at 1 health.
     fn mob_death_canceled(&mut self, m: &Mob) -> bool {
-        if !mod_api::listened(mod_api::HookId::LivingDeath) {
+        if !mod_api::__private::listened(mod_api::HookId::LivingDeath) {
             return false;
         }
         let (damage_type, attacker) = self.mob_damage_source(m);
@@ -1814,7 +1814,7 @@ impl Game<'_> {
             }
         }
         let table = drops::death_loot_table(m, death.mob_drops).filter(|t| loot.has_table(t));
-        let context = NativeLootDrops {
+        let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {
             table: table.as_deref().unwrap_or_default(),
             dimension: self.dim.id(),
             origin: [m.position.x, m.position.y, m.position.z],
@@ -1824,7 +1824,7 @@ impl Game<'_> {
             tool: None,
             explosion: None,
             used: false,
-        };
+        });
         self.native_loot_drops(&context, &mut stacks);
         stacks.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
         let mut experience = None;
@@ -2182,7 +2182,7 @@ impl Game<'_> {
     /// `LivingDestroyBlockEvent` for the mob `id` about to destroy the block at
     /// `pos`: false when a mod canceled. Nothing is built when no mod is loaded.
     fn mob_may_destroy(&mut self, id: u32, pos: [i32; 3]) -> bool {
-        if !mod_api::listened(mod_api::HookId::LivingDestroyBlock) {
+        if !mod_api::__private::listened(mod_api::HookId::LivingDestroyBlock) {
             return true;
         }
         let Some(kind) = self
@@ -3495,7 +3495,7 @@ impl Game<'_> {
         if !matches!(
             p.species(),
             Species::Turtle | Species::Frog | Species::Sniffer
-        ) && mod_api::listened(mod_api::HookId::BabyEntitySpawn)
+        ) && mod_api::__private::listened(mod_api::HookId::BabyEntitySpawn)
         {
             let mule = matches!(
                 (
@@ -8890,7 +8890,9 @@ mod conversion_subscriber_tests {
                     let events = seen.lock().unwrap();
                     assert_eq!(events.last(), Some(&(from.id, converted)));
                 }
-                assert!(!mod_api::listened(mod_api::HookId::LivingConversionPre));
+                assert!(!mod_api::__private::listened(
+                    mod_api::HookId::LivingConversionPre
+                ));
                 assert_eq!(seen.lock().unwrap().len(), 2);
             });
         });

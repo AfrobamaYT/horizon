@@ -12,17 +12,19 @@ use horizon_client::{
     },
     menu::{Kind, Menu},
 };
+use mod_api::__private::game::*;
 use mod_api::{EntityRef, MenuRef, MenuSlotBacking, PlayerRef};
 
 impl Game<'_> {
     fn native_client_menu_name(&self, menu: MenuRef) -> Option<&str> {
         let remote = self.remote.as_ref().filter(|remote| remote.logged_in)?;
         let epoch = self.native_lifecycle.epoch()?;
-        (menu.player.entity.epoch() == epoch
-            && menu.player.entity.id() == u32::try_from(remote.entity_id).ok()?
-            && menu.player.uuid == remote.profile
-            && menu.generation == remote.menu.generation
-            && menu.window == remote.menu.as_ref().map_or(0, |entry| entry.0))
+        (menu.fields().player.fields().entity.epoch() == epoch
+            && menu.fields().player.fields().entity.id()
+                == u32::try_from(remote.entity_id).ok()?
+            && menu.fields().player.fields().uuid == remote.profile
+            && menu.fields().generation == remote.menu.generation
+            && menu.fields().window == remote.menu.as_ref().map_or(0, |entry| entry.0))
         .then_some(())?;
         Some(
             remote
@@ -40,18 +42,18 @@ impl Game<'_> {
 
     fn native_menu_guest(&self, menu: MenuRef) -> Option<&Guest> {
         let super::native_server::PlayerRead::Guest(guest) =
-            self.player_handle_read(menu.player)?
+            self.player_handle_read(menu.fields().player)?
         else {
             return None;
         };
         let host = self.lan.as_ref()?;
         (host.hub.holder_guest(guest.uuid, self.dim.id())?.conn == guest.conn).then_some(())?;
-        (guest.menu_generation == menu.generation).then_some(())?;
+        (guest.menu_generation == menu.fields().generation).then_some(())?;
         if let Some(open) = &guest.menu {
-            (open.window == menu.window && open.hidden.is_empty()).then_some(guest)
+            (open.window == menu.fields().window && open.hidden.is_empty()).then_some(guest)
         } else {
             let play = host.play.get(&guest.conn);
-            if menu.window != 0
+            if menu.fields().window != 0
                 || play.is_some_and(|p| {
                     p.merchant.is_some()
                         || p.crafting.table.is_some()
@@ -100,7 +102,7 @@ impl Game<'_> {
     /// Container id (0 for the player's inventory menu).
     pub(super) fn native_menu_container_id(&self, menu: MenuRef) -> Option<i32> {
         self.native_menu_guest(menu)?;
-        Some(menu.window)
+        Some(menu.fields().window)
     }
 
     /// Registry menu type; the inventory menu has no MenuType in vanilla.
@@ -206,6 +208,7 @@ impl Game<'_> {
             MenuSlotBacking::CraftResult => guest.craft_result.clone(),
             MenuSlotBacking::Ender(n) => guest.ender_items.get(n)?.clone(),
             MenuSlotBacking::Native(n) => guest.native_menu.get(n)?.clone(),
+            _ => unreachable!("MenuSlotBacking: unhandled variant"),
         })
     }
 
@@ -287,8 +290,8 @@ impl Game<'_> {
             .flat_map(|host| host.hub.guests.iter_mut());
         let g = guests.find(|g| {
             g.placed
-                && g.uuid == menu.player.uuid()
-                && g.entity_id as u32 == menu.player.entity().id()
+                && g.uuid == menu.fields().player.uuid()
+                && g.entity_id as u32 == menu.fields().player.entity().id()
         })?;
         match backing {
             MenuSlotBacking::Ender(n) => g.ender_items.get_mut(n),

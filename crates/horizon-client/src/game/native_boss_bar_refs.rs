@@ -7,14 +7,19 @@ use horizon_client::{
     text::Text,
 };
 use horizon_world::identifier::Identifier;
+use mod_api::__private::game::*;
 use mod_api::{BossBarColor, BossBarOverlay, BossBarRef, PlayerRef};
 
 impl Game<'_> {
     fn boss_bar_state(&self, bar: BossBarRef) -> Option<&BossBar> {
-        if self.remote.is_some() || self.native_lifecycle.epoch() != Some(bar.epoch) {
+        if self.remote.is_some() || self.native_lifecycle.epoch() != Some(bar.fields().epoch) {
             return None;
         }
-        self.bosses.bars.bars.iter().find(|b| b.uuid == bar.uuid)
+        self.bosses
+            .bars
+            .bars
+            .iter()
+            .find(|b| b.uuid == bar.fields().uuid)
     }
 
     fn boss_bar_edit(&mut self, bar: BossBarRef, edit: impl FnOnce(&mut BossBar)) -> bool {
@@ -26,7 +31,7 @@ impl Game<'_> {
             .bars
             .bars
             .iter_mut()
-            .find(|b| b.uuid == bar.uuid)
+            .find(|b| b.uuid == bar.fields().uuid)
         {
             edit(state);
         }

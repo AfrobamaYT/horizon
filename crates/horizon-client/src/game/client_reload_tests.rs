@@ -1,4 +1,5 @@
 use super::*;
+use mod_api::__private::game::*;
 use mod_api::{
     ClientReloadContext, ClientReloadListener, ClientReloadListeners, FileToIdConverter,
     Identifier, ReloadApply, ReloadResourceError,

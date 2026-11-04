@@ -539,7 +539,7 @@ impl Game<'_> {
         if self.remote.is_some() {
             return;
         }
-        if mod_api::listened(mod_api::HookId::VanillaGameEvent) {
+        if mod_api::__private::listened(mod_api::HookId::VanillaGameEvent) {
             let cause = event_cause(ctx.source, self.lan_acting_entity);
             let mut cancel = false;
             self.native_vanilla_game_event(self.dim.id(), event, pos, cause, &mut cancel);

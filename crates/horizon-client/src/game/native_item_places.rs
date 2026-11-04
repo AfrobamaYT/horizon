@@ -6,6 +6,7 @@
 use super::transactions::After;
 use super::{Game, minecarts::CartKind};
 use horizon_client::{first_person::Hand, items::ItemStack};
+use mod_api::__private::game::*;
 use mod_api::{ItemPlace, Transaction};
 
 impl Game<'_> {
@@ -15,9 +16,9 @@ impl Game<'_> {
             ItemPlace::PlayerSlot { player, .. } | ItemPlace::PlayerHand { player, .. } => {
                 Some(*player)
             }
-            ItemPlace::PlayerCursor { menu } => {
-                self.native_menu_carried(*menu).map(|_| menu.player.uuid())
-            }
+            ItemPlace::PlayerCursor { menu } => self
+                .native_menu_carried(*menu)
+                .map(|_| menu.fields().player.uuid()),
             _ => None,
         }
     }
@@ -173,7 +174,7 @@ impl Game<'_> {
             if self.native_menu_storage(*menu, *slot).is_none() {
                 return 0;
             }
-            self.journal_menus(menu.player);
+            self.journal_menus(menu.fields().player);
             if let Some(held) = self.native_menu_storage(*menu, *slot) {
                 fill(held, &mut rest);
             }
@@ -269,7 +270,7 @@ impl Game<'_> {
             if took == 0 {
                 return 0;
             }
-            self.journal_menus(menu.player);
+            self.journal_menus(menu.fields().player);
             if let Some(held) = self.native_menu_storage(*menu, *slot) {
                 *held = held.as_ref().map(|h| left(h, took)).filter(|h| h.count > 0);
             }
@@ -1339,7 +1340,7 @@ mod tests {
             }
         }
         let mods: Mods = vec![ModEntry::new("pigs", Box::new(Pigs(bin.clone())))].into();
-        mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || with_game(test));
     }
 
@@ -1591,7 +1592,7 @@ mod tests {
             }
         }
         let mods: Mods = vec![ModEntry::new("energy", Box::new(Energy))].into();
-        mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             assert!(!has_entity_providers(&ENTITY_AUTOMATION));
             with_game(|game| {

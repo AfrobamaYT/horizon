@@ -2138,7 +2138,7 @@ impl Game<'_> {
                     self.lan_flight_toggled(conn, flying);
                 }
                 HostEvent::Sneak { conn, sneaking } => {
-                    if !mod_api::listened(mod_api::HookId::PlayerToggleSneak) {
+                    if !mod_api::__private::listened(mod_api::HookId::PlayerToggleSneak) {
                         continue;
                     }
                     if let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) {
@@ -2154,7 +2154,7 @@ impl Game<'_> {
                     name,
                     reason,
                 } => {
-                    if !mod_api::listened(mod_api::HookId::PlayerKicked) {
+                    if !mod_api::__private::listened(mod_api::HookId::PlayerKicked) {
                         continue;
                     }
                     // The same poll can have removed the guest (their `Left`): the mods hear the
@@ -2172,7 +2172,7 @@ impl Game<'_> {
                     }
                 }
                 HostEvent::Input { conn, flags } => {
-                    if !mod_api::listened(mod_api::HookId::PlayerInput) {
+                    if !mod_api::__private::listened(mod_api::HookId::PlayerInput) {
                         continue;
                     }
                     if let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) {
@@ -3148,7 +3148,7 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        if !mod_api::listened(mod_api::HookId::EntityPoseChange) {
+        if !mod_api::__private::listened(mod_api::HookId::EntityPoseChange) {
             host.poses.clear();
             return;
         }

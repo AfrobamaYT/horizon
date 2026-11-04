@@ -190,7 +190,7 @@ impl Game<'_> {
     pub(super) fn native_player_level_changed(&mut self, from: i32) {
         let to = self.experience.level;
         if from != to
-            && mod_api::listened(mod_api::HookId::PlayerLevelChange)
+            && mod_api::__private::listened(mod_api::HookId::PlayerLevelChange)
             && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
         {
             self.native_player_level_change(player, &name, from, to);
@@ -200,7 +200,7 @@ impl Game<'_> {
     /// `PlayerXpEvent.XpChange` for a `Player.giveExperiencePoints` of `amount`
     /// points: the amount to give, or `None` when a mod cancelled it.
     pub(super) fn xp_change(&mut self, amount: i32) -> Option<i32> {
-        if !mod_api::listened(mod_api::HookId::PlayerXpChange) {
+        if !mod_api::__private::listened(mod_api::HookId::PlayerXpChange) {
             return Some(amount);
         }
         let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())

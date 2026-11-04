@@ -69,11 +69,11 @@ fn stat_of(meta: &fs::Metadata) -> ConfigStat {
     } else {
         (ConfigEntryKind::File, meta.len())
     };
-    ConfigStat {
+    ConfigStat::from(mod_api::__private::built::ConfigStat {
         kind,
         len,
         modified_millis,
-    }
+    })
 }
 
 fn read(root: &Path, file: &ConfigPath) -> Result<Vec<u8>, ConfigFileError> {
@@ -149,10 +149,10 @@ fn list(root: &Path, folder: &ConfigPath) -> Result<Vec<ConfigEntry>, ConfigFile
         if meta.file_type().is_symlink() || is_write_temp(&name) {
             continue;
         }
-        entries.push(ConfigEntry {
+        entries.push(ConfigEntry::from(mod_api::__private::built::ConfigEntry {
             name,
             stat: stat_of(&meta),
-        });
+        }));
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(entries)

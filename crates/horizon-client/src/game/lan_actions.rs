@@ -829,7 +829,7 @@ impl Game<'_> {
                 p.guest = Some(conn);
             }
         }
-        let listening = mod_api::listened(mod_api::HookId::PlayerLaunchProjectile);
+        let listening = mod_api::__private::listened(mod_api::HookId::PlayerLaunchProjectile);
         for projectile in projectiles..self.creatures.projectiles.len() {
             if !listening {
                 break;
@@ -2094,7 +2094,7 @@ impl Game<'_> {
                         }),
                         Some(conn),
                     );
-                    if mod_api::listened(mod_api::HookId::BlockDamageAbort) {
+                    if mod_api::__private::listened(mod_api::HookId::BlockDamageAbort) {
                         let guest = &host.hub.guests[gi];
                         let (uuid, name) = (guest.uuid, guest.name.clone());
                         self.native_block_damage_abort(uuid, &name, a.pos);
@@ -2185,7 +2185,7 @@ impl Game<'_> {
                         g.player_on_equip("offhand", main.as_ref(), offhand.as_ref());
                         g.player_on_equip("mainhand", offhand.as_ref(), main.as_ref());
                     });
-                    if mod_api::listened(mod_api::HookId::PlayerSwapWithEquipmentSlot) {
+                    if mod_api::__private::listened(mod_api::HookId::PlayerSwapWithEquipmentSlot) {
                         let Some(host) = self.lan.as_ref() else {
                             return;
                         };
@@ -2661,7 +2661,7 @@ impl Game<'_> {
                     };
                     host.hub
                         .select_bundle_item(conn, slot, p.index, &mut self.world);
-                    if mod_api::listened(mod_api::HookId::PlayerBundleItemSelect) {
+                    if mod_api::__private::listened(mod_api::HookId::PlayerBundleItemSelect) {
                         let Some(host) = self.lan.as_ref() else {
                             return;
                         };
@@ -5206,7 +5206,7 @@ impl Game<'_> {
             return;
         };
         if jumps > 0
-            && mod_api::listened(mod_api::HookId::PlayerJump)
+            && mod_api::__private::listened(mod_api::HookId::PlayerJump)
             && let Some((uuid, name)) = self
                 .lan
                 .as_ref()
@@ -5363,7 +5363,7 @@ impl Game<'_> {
             }
         }
         if let Some(v) = marked {
-            if mod_api::listened(mod_api::HookId::PlayerVelocity)
+            if mod_api::__private::listened(mod_api::HookId::PlayerVelocity)
                 && let Some((uuid, name)) = self
                     .lan
                     .as_ref()
@@ -5635,7 +5635,7 @@ impl Game<'_> {
             play.last_progress = progress;
             let guest = &host.hub.guests[gi];
             let id = guest.entity_id;
-            if mod_api::listened(mod_api::HookId::BlockBreakProgressUpdate) {
+            if mod_api::__private::listened(mod_api::HookId::BlockBreakProgressUpdate) {
                 let (uuid, name) = (guest.uuid, guest.name.clone());
                 self.native_block_break_progress_update(uuid, &name, pos, progress);
             }
@@ -6372,7 +6372,7 @@ mod tests {
             }),
         )]
         .into();
-        mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
@@ -6915,7 +6915,7 @@ mod tests {
             Box::new(BlockUse(calls.clone())),
         )]
         .into();
-        mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
@@ -6983,7 +6983,7 @@ mod tests {
             Box::new(Replacement(replace.clone())),
         )]
         .into();
-        mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
                 game.options.dedicated = Some(Vec::new());

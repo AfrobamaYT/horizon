@@ -24,7 +24,7 @@ pub(super) struct Env<'a, 'g> {
 }
 impl ItemEnv for Env<'_, '_> {
     fn item_model_property(&self, property: &str, stack: &StackView) -> bool {
-        if !mod_api::listened(mod_api::HookId::ItemModelProperty) {
+        if !mod_api::__private::listened(mod_api::HookId::ItemModelProperty) {
             return false;
         }
         let mut value = false;
@@ -691,9 +691,9 @@ mod tests {
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let env = Env { game };
-                assert!(!mod_api::listened(HookId::ItemModelProperty));
+                assert!(!mod_api::__private::listened(HookId::ItemModelProperty));
                 assert!(!env.item_model_property("example:charged", &stack));
-                assert!(!mod_api::listened(HookId::ItemModelProperty));
+                assert!(!mod_api::__private::listened(HookId::ItemModelProperty));
                 assert!(!env.item_model_property("example:charged", &stack));
             });
         });
@@ -707,7 +707,7 @@ mod tests {
                 for _ in 0..3 {
                     assert!(env.item_model_property("example:charged", &stack));
                 }
-                assert!(mod_api::listened(HookId::ItemModelProperty));
+                assert!(mod_api::__private::listened(HookId::ItemModelProperty));
             });
         });
         assert_eq!(calls.load(Ordering::Relaxed), 3);

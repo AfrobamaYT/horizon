@@ -106,16 +106,20 @@ impl Game<'_> {
         player: PlayerRef,
     ) -> Option<NativePlayerExperience> {
         Some(match self.player_handle_read(player)? {
-            super::native_server::PlayerRead::Guest(g) => NativePlayerExperience {
-                level: g.xp_level,
-                progress: g.xp_progress,
-                total: g.xp_total,
-            },
-            super::native_server::PlayerRead::Acting { .. } => NativePlayerExperience {
-                level: self.experience.level,
-                progress: self.experience.progress,
-                total: self.experience.total,
-            },
+            super::native_server::PlayerRead::Guest(g) => {
+                NativePlayerExperience::from(mod_api::__private::built::NativePlayerExperience {
+                    level: g.xp_level,
+                    progress: g.xp_progress,
+                    total: g.xp_total,
+                })
+            }
+            super::native_server::PlayerRead::Acting { .. } => {
+                NativePlayerExperience::from(mod_api::__private::built::NativePlayerExperience {
+                    level: self.experience.level,
+                    progress: self.experience.progress,
+                    total: self.experience.total,
+                })
+            }
         })
     }
     /// `Player.getXpNeededForNextLevel`: the points the current level needs

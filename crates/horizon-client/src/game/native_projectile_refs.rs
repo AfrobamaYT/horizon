@@ -197,6 +197,7 @@ impl Game<'_> {
                 };
                 Turn::Direction(Some(speed.normalize()))
             }
+            _ => unreachable!("(NativeDeflection, Option<EntityRef>): unhandled variant"),
         };
         match backing {
             // `deflect` takes the `EntityReference` overload of `setOwner`: an
@@ -258,6 +259,7 @@ impl Game<'_> {
             NativeArrowPickup::Disallowed => Pickup::Disallowed,
             NativeArrowPickup::Allowed => Pickup::Allowed,
             NativeArrowPickup::CreativeOnly => Pickup::CreativeOnly,
+            _ => unreachable!("NativeArrowPickup: unhandled variant"),
         };
         true
     }

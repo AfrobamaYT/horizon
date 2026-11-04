@@ -302,3 +302,31 @@ pub struct CubeFace<'a> {
     pub sprite: &'a str,
     pub uv: Option<[f32; 4]>,
 }
+
+#[doc(hidden)]
+pub(crate) mod built {
+    #[allow(unused_imports)]
+    use super::*;
+    pub struct NativeConfigFile {
+        pub mod_id: String,
+        pub kind: NativeConfigKind,
+        pub file: String,
+        pub text: String,
+    }
+    impl From<NativeConfigFile> for super::NativeConfigFile {
+        fn from(v: NativeConfigFile) -> Self {
+            let NativeConfigFile {
+                mod_id,
+                kind,
+                file,
+                text,
+            } = v;
+            Self {
+                mod_id,
+                kind,
+                file,
+                text,
+            }
+        }
+    }
+}

@@ -856,7 +856,7 @@ impl Game<'_> {
     /// `ExplosionEvent.Start` for the explosion `start`: true when a mod
     /// cancels it, and nothing of it happens.
     pub(super) fn explosion_start_cancelled(&mut self, start: &NativeExplosionStart<'_>) -> bool {
-        if !mod_api::listened(mod_api::HookId::ExplosionStart) {
+        if !mod_api::__private::listened(mod_api::HookId::ExplosionStart) {
             return false;
         }
         let mut cancel = false;
@@ -931,21 +931,24 @@ impl Game<'_> {
         resists: Option<([i32; 3], f32)>,
     ) -> Result<()> {
         if self.serving.is_some() || self.options.dedicated.is_some() {
-            let start = NativeExplosionStart {
-                dimension: self.dim.id(),
-                center,
-                radius,
-                fire,
-                interaction: match interaction {
-                    BlockInteraction::Keep => NativeBlockInteraction::Keep,
-                    BlockInteraction::Destroy => NativeBlockInteraction::Destroy,
-                    BlockInteraction::DestroyWithDecay => NativeBlockInteraction::DestroyWithDecay,
-                },
-                damage_type,
-                source: self.combat.explosion_source,
-                // `getIndirectSourceEntity`, as the blast's attacker is.
-                owner: self.blast_attacker().map(|(id, _)| id),
-            };
+            let start =
+                NativeExplosionStart::from(mod_api::__private::built::NativeExplosionStart {
+                    dimension: self.dim.id(),
+                    center,
+                    radius,
+                    fire,
+                    interaction: match interaction {
+                        BlockInteraction::Keep => NativeBlockInteraction::Keep,
+                        BlockInteraction::Destroy => NativeBlockInteraction::Destroy,
+                        BlockInteraction::DestroyWithDecay => {
+                            NativeBlockInteraction::DestroyWithDecay
+                        }
+                    },
+                    damage_type,
+                    source: self.combat.explosion_source,
+                    // `getIndirectSourceEntity`, as the blast's attacker is.
+                    owner: self.blast_attacker().map(|(id, _)| id),
+                });
             if self.explosion_start_cancelled(&start) {
                 return Ok(());
             }

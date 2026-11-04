@@ -52,7 +52,7 @@ thread_local! {
 }
 
 #[cfg(any(test, feature = "testing"))]
-pub(crate) fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
+pub fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
     let packages: Vec<_> = ids
         .iter()
         .map(|id| PackageInfo {
@@ -93,7 +93,7 @@ fn inventory(
     packages
 }
 
-pub(crate) fn install_packages(
+pub fn install_packages(
     native: &[horizon_mods::packages::AdjacentManifest],
     content: &[horizon_mods::selection::SelectedPackage],
 ) {

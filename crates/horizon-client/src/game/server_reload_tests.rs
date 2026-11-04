@@ -381,15 +381,15 @@ fn server_reload_registration_failure_stops_world_open_and_quiet_mods_never_list
         with_game(|game| {
             // A mod that doesn't implement the hook is never subscribed, so
             // world open and `/reload` skip the registration graph.
-            assert!(!mod_api::listened(
+            assert!(!mod_api::__private::listened(
                 mod_api::HookId::AddServerReloadListeners
             ));
             game.load_world(request(&root)).unwrap();
-            assert!(!mod_api::listened(
+            assert!(!mod_api::__private::listened(
                 mod_api::HookId::AddServerReloadListeners
             ));
             assert!(game.run_command("reload"));
-            assert!(!mod_api::listened(
+            assert!(!mod_api::__private::listened(
                 mod_api::HookId::AddServerReloadListeners
             ));
         })

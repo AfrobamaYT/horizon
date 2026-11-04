@@ -54,7 +54,7 @@ impl fmt::Display for BlockEntityPartError {
 impl std::error::Error for BlockEntityPartError {}
 
 #[derive(Debug)]
-pub(crate) struct BlockEntityTypeLookupError {
+pub struct BlockEntityTypeLookupError {
     missing: Vec<&'static super::part_table::BlockEntityTypeRequest>,
 }
 
@@ -77,7 +77,7 @@ impl fmt::Display for BlockEntityTypeLookupError {
 
 impl std::error::Error for BlockEntityTypeLookupError {}
 
-pub(crate) fn validate_block_entity_type_keys(
+pub fn validate_block_entity_type_keys(
     types: &horizon_client_core::block_entity_types::BlockEntityTypes,
 ) -> Result<(), BlockEntityTypeLookupError> {
     let missing: Vec<_> = super::part_table::requested_block_entity_types()

@@ -983,11 +983,13 @@ impl Game<'_> {
                     let max_health =
                         player.attribute("minecraft:max_health").unwrap_or(20.0) as f32;
                     let food = &player.health.food;
-                    let food = Some(NativePlayerFood {
-                        level: food.food,
-                        saturation: food.saturation,
-                        exhaustion: food.exhaustion,
-                    });
+                    let food = Some(NativePlayerFood::from(
+                        mod_api::__private::built::NativePlayerFood {
+                            level: food.food,
+                            saturation: food.saturation,
+                            exhaustion: food.exhaustion,
+                        },
+                    ));
                     let (keep, changes) = self.mod_effect_tick(
                         e.id,
                         None,
@@ -1008,6 +1010,7 @@ impl Game<'_> {
                         EffectTickChange::Eat(nutrition, saturation) => {
                             EffectAction::Eat(nutrition, saturation)
                         }
+                        _ => unreachable!("EffectTickChange: unhandled variant"),
                     }));
                     if keep {
                         OmenTick::Continue
@@ -2078,7 +2081,7 @@ mod tests {
                 }
             }
         }
-        mod_api::install(std::sync::Arc::from([mod_api::ModEntry::new(
+        mod_api::__private::install(std::sync::Arc::from([mod_api::ModEntry::new(
             "test-potions",
             Box::new(TestMod),
         )]));

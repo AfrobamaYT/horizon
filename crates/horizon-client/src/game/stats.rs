@@ -215,7 +215,7 @@ impl Game<'_> {
             return;
         }
         // No mod, no name copied: the per-tick counters come through here.
-        let acting = if !mod_api::listened(mod_api::HookId::PlayerStatAward) {
+        let acting = if !mod_api::__private::listened(mod_api::HookId::PlayerStatAward) {
             None
         } else {
             self.lan_acting_uuid.zip(self.lan_acting_name.clone())
@@ -443,6 +443,7 @@ impl Game<'_> {
             PhantomSpawnResult::Allow => true,
             PhantomSpawnResult::Default => pos[1] >= 63 && self.can_see_sky(pos),
             PhantomSpawnResult::Deny => false,
+            _ => unreachable!("PhantomSpawnResult: unhandled variant"),
         };
         if !attempt {
             return;

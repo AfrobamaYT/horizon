@@ -262,6 +262,7 @@ impl Game<'_> {
                 .map(|b| std::array::from_fn(|i| b[i] - f64::from(pos[i % 3])))
                 .collect(),
             NativeBlockShapeKind::Collision => self.native_block_collision_in(world, pos),
+            _ => unreachable!("NativeBlockShapeKind: unhandled variant"),
         })
     }
 
@@ -286,6 +287,7 @@ impl Game<'_> {
             NativeBlockFace::South => Direction::South,
             NativeBlockFace::West => Direction::West,
             NativeBlockFace::East => Direction::East,
+            _ => unreachable!("NativeBlockFace: unhandled variant"),
         };
         let b = self.res.behaviours();
         if !b.has_cached_support(state) {
@@ -295,6 +297,7 @@ impl Game<'_> {
             NativeSupportType::Full => b.is_face_sturdy(state, direction),
             NativeSupportType::Center => b.is_face_sturdy_center(state, direction),
             NativeSupportType::Rigid => b.is_face_sturdy_rigid(state, direction),
+            _ => unreachable!("NativeSupportType: unhandled variant"),
         })
     }
 
@@ -332,9 +335,11 @@ impl Game<'_> {
         let mode = match blocks {
             NativeClipBlock::Collider => RayBlockMode::Collider,
             NativeClipBlock::Outline => RayBlockMode::Outline,
+            _ => unreachable!("NativeClipBlock: unhandled variant"),
         };
         let fluid = match fluids {
             NativeClipFluid::None => RayFluidMode::None,
+            _ => unreachable!("NativeClipFluid: unhandled variant"),
         };
         let result = clip_world(
             &mut rays,
@@ -409,6 +414,7 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use mod_api::__private::game::*;
     /// Isolate declarations and frozen registries without changing another test's resources.
     pub(in crate::game) fn run_fresh_cases(name: &str, flag: &str, cases: &[&str]) -> bool {
         if std::env::var_os(flag).is_some() {
@@ -470,7 +476,7 @@ pub(super) mod tests {
         if run_fresh_cases(name, "HORIZON_DECLARED_PART_GAME_CHILD", &["valid"]) {
             return None;
         }
-        let _mods = mod_api::part_tests::game_thread();
+        let _mods = mod_api::__private::part_tests::game_thread();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         Some(super::super::mods::content_root(&base, &Default::default()).unwrap())
     }
@@ -542,7 +548,7 @@ pub(super) mod tests {
         use horizon_core::position::BlockPos;
         use std::sync::Arc;
 
-        mod_api::part_tests::weak_power_game_thread();
+        mod_api::__private::part_tests::weak_power_game_thread();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -584,7 +590,7 @@ pub(super) mod tests {
                 }
             }
         });
-        mod_api::part_tests::pathfindable_game_thread();
+        mod_api::__private::part_tests::pathfindable_game_thread();
         with_game(|game| {
             let registry = game.pack.assets.registry;
             let asks = |name: &str, kind: PathComputationType| {
@@ -618,7 +624,7 @@ pub(super) mod tests {
         use horizon_core::position::BlockPos;
         use std::sync::Arc;
 
-        mod_api::part_tests::removal_game_thread();
+        mod_api::__private::part_tests::removal_game_thread();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -672,7 +678,7 @@ pub(super) mod tests {
         use horizon_core::{geometry::Direction, position::BlockPos};
         use std::sync::Arc;
 
-        mod_api::part_tests::redstone_game_thread();
+        mod_api::__private::part_tests::redstone_game_thread();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -1007,7 +1013,7 @@ pub(super) mod tests {
             .unwrap();
             game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = Some(Box::new(motion));
             let player = game.native_player_ref(12).unwrap();
-            let guest_living = game.native_living(player.entity).unwrap();
+            let guest_living = game.native_living(player.fields().entity).unwrap();
             let host: &dyn mod_api::Host = game;
             assert_eq!(
                 guest_living.attribute_base(host, "minecraft:max_health"),
@@ -1020,7 +1026,7 @@ pub(super) mod tests {
             assert_eq!(guest_living.max_health(host), Some(20.0));
             game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = None;
             // Body and saddle are stored on a guest like on a mob.
-            let living = game.native_living(player.entity).unwrap();
+            let living = game.native_living(player.fields().entity).unwrap();
             let saddle = ItemStack::new("minecraft:saddle", 1);
             assert!(game.native_living_set_equipment(
                 living,
@@ -1082,8 +1088,10 @@ pub(super) mod tests {
             assert_eq!((abilities.walk_speed, abilities.fly_speed), (0.2, 0.1));
             assert!(game.native_player_set_game_mode(player, GameMode::Survival));
             let mut stale = player;
-            stale.entity =
-                mod_api::EntityRef::new(mod_api::NativeWorldEpoch::new(0), player.entity.id());
+            stale.fields().entity = mod_api::EntityRef::new(
+                mod_api::NativeWorldEpoch::new(0),
+                player.fields().entity.id(),
+            );
             assert!(!game.native_player_set_game_mode(stale, GameMode::Creative));
             let other = game
                 .native_lifecycle
@@ -1093,7 +1101,7 @@ pub(super) mod tests {
             game.as_guest(12, |game| {
                 let player = game.native_player_ref(12).unwrap();
                 let entity = game.native_entity(12).unwrap();
-                assert_eq!(player.entity, entity);
+                assert_eq!(player.fields().entity, entity);
                 assert_eq!(entity.position(game), Some([3.0, 64.0, 5.0]));
                 assert_eq!(entity.uuid(game), Some(12));
                 let living = game.native_living(entity).unwrap();
@@ -1161,7 +1169,7 @@ pub(super) mod tests {
                 "minecraft:stone"
             );
             let player = game.native_player_ref(13).unwrap();
-            assert_eq!(player.entity, other);
+            assert_eq!(player.fields().entity, other);
             assert_eq!(player.game_mode(game), Some(GameMode::Survival));
             assert!(game.native_player_set_game_mode(player, GameMode::Creative));
             assert_eq!(player.game_mode(game), Some(GameMode::Creative));

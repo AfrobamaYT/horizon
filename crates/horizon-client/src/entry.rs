@@ -1,6 +1,7 @@
 //! Startup shared by the gameplay library and its executable.
 use crate::{crash, game, logging, ram_limit};
 use horizon_mods::selection::{Argument, LaunchArguments};
+use mod_api::__private::game::*;
 
 /// Start the game. The executable supplies the allocator and retains the mod API marker.
 pub fn main() {
@@ -21,7 +22,7 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
     };
     crate::gfx::native_render::set_mods_built_in(!native.built().is_empty());
     // First: a trait injection into anything below (logging, the crash handler) calls its mod.
-    mod_api::install(mods);
+    mod_api::__private::install(mods);
     horizon_threads::configure_allocator();
     horizon_client::telemetry::mark_start();
     horizon_client::spans::startup::init(std::time::Instant::now());
@@ -71,7 +72,7 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
     }
     let renderers = mod_api::mods()
         .iter()
-        .filter_map(|m| m.hooks.render())
+        .filter_map(|m| m.fields().hooks.render())
         .collect();
     if crate::gfx::native_render::install(renderers).is_err() {
         log::warn!("Trait renderers already installed; keeping the first list");

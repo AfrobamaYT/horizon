@@ -697,7 +697,7 @@ impl Game<'_> {
     }
     /// Apply the client anvil hook once for each input and name combination.
     fn update_anvil_answer(&mut self, s: &mut Station, name: String) {
-        if !mod_api::listened(mod_api::HookId::AnvilUpdate) {
+        if !mod_api::__private::listened(mod_api::HookId::AnvilUpdate) {
             return;
         }
         let Some(left) = s.inputs[0].clone() else {
@@ -1044,7 +1044,7 @@ impl Game<'_> {
         if levels == 0 {
             return;
         }
-        if mod_api::listened(mod_api::HookId::PlayerXpLevelChange)
+        if mod_api::__private::listened(mod_api::HookId::PlayerXpLevelChange)
             && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
         {
             let mut cancel = false;
@@ -2848,7 +2848,7 @@ impl Game<'_> {
         images: Vec<TooltipImage>,
         (width, height): (f32, f32),
     ) -> Option<(Vec<(horizon_client::text::Text, u32)>, Vec<TooltipImage>)> {
-        if !mod_api::listened(mod_api::HookId::RenderTooltipGatherComponents) {
+        if !mod_api::__private::listened(mod_api::HookId::RenderTooltipGatherComponents) {
             return Some((lines, images));
         }
         let mut elements: Vec<TooltipElement> = lines
@@ -3197,7 +3197,7 @@ mod tests {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let mut station = super::Station::new(super::Kind::Anvil, [0; 3]);
                 station.inputs[0] = Some(super::ItemStack::new("minecraft:iron_sword", 1));
-                assert!(!mod_api::listened(HookId::AnvilUpdate));
+                assert!(!mod_api::__private::listened(HookId::AnvilUpdate));
                 game.update_anvil_answer(&mut station, "first".into());
                 assert!(station.anvil_answer.is_none());
                 game.update_anvil_answer(&mut station, "second".into());
@@ -3214,7 +3214,7 @@ mod tests {
                 game.update_anvil_answer(&mut station, "first".into());
                 game.update_anvil_answer(&mut station, "second".into());
                 assert_eq!(calls.load(Ordering::Relaxed), 2);
-                assert!(mod_api::listened(HookId::AnvilUpdate));
+                assert!(mod_api::__private::listened(HookId::AnvilUpdate));
             });
         });
     }
@@ -3258,7 +3258,7 @@ mod tests {
             }
         }
         let mods: Mods = vec![ModEntry::new("lore", Box::new(Mod))].into();
-        mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.settings.file.set(

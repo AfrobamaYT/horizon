@@ -744,8 +744,8 @@ mod tests {
     #[ignore = "needs prepared resources"]
     fn conversion_post_reads_original_and_lightning_outcome() {
         use mod_api::{
-            EntityJoinLevelEvent, EquipmentSlot, Flow, Hooks, LivingConversionPostEvent,
-            LivingConversionPreEvent, install,
+            __private::install, EntityJoinLevelEvent, EquipmentSlot, Flow, Hooks,
+            LivingConversionPostEvent, LivingConversionPreEvent,
         };
         use std::sync::{
             Mutex,

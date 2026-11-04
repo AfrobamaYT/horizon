@@ -616,7 +616,7 @@ impl Game<'_> {
         criterion: &str,
         progress_type: NativeProgressType,
     ) {
-        if !mod_api::listened(mod_api::HookId::PlayerAdvancementProgress) {
+        if !mod_api::__private::listened(mod_api::HookId::PlayerAdvancementProgress) {
             return;
         }
         if let (Some(uuid), Some(entity_id), Some(name)) = (

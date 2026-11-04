@@ -54,11 +54,10 @@ pub mod render;
 pub mod stations;
 use std::sync::{Arc, OnceLock};
 
+#[doc(hidden)]
+pub mod __private;
 mod phase;
 pub use horizon_mods::Side;
-pub(crate) use phase::install_packages;
-#[cfg(any(test, feature = "testing"))]
-pub(crate) use phase::with_test_packages;
 pub use phase::{
     DataLoadContext, DataLoadOrigin, LoadedMods, PackageInfo, PackageKind, RegistrationContext,
 };
@@ -2930,19 +2929,20 @@ pub use resource::{
 };
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
 mod block_entity_type;
-pub(crate) use block_entity_type::validate_block_entity_type_keys;
 pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
 mod part_table;
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use part_table::install_parts;
+#[cfg(test)]
+pub(crate) use part_table::mark_game_thread;
 pub use part_table::{
     Attached, BlockEntityProviders, BlockProvider, EntityProvider, EntityProviders, ItemProvider,
     Parts, Registrar, block_entity_providers, entity_providers, has_entity_providers,
 };
 pub(crate) use part_table::{
-    KnownIds, ProvidedBy, answered, ask_providers, block_entity_types, has_part_hook,
-    has_scoped_hook, install_parts, mark_game_thread, parts, place_provider, providers,
-    resolve_parts,
+    ProvidedBy, answered, ask_providers, has_part_hook, parts, place_provider, providers,
 };
 
 mod generated {
@@ -2985,9 +2985,6 @@ pub use horizon_mod_api_macros::__subscriptions;
 /// #[mod_api::horizon_mod] impl Hooks for B {}
 /// ```
 pub use horizon_mod_api_macros::{horizon_mod, horizon_part};
-
-#[cfg(any(test, feature = "testing"))]
-pub(crate) use part_table::tests as part_tests;
 
 #[cfg(test)]
 mod hooks_tests;
@@ -3790,5 +3787,403 @@ mod tests {
         let (mut rod_damage, mut cancel) = (2, false);
         dispatch_item_fished(&mut host, 7, 3, &fished, &mut rod_damage, &mut cancel);
         assert_eq!((rod_damage, cancel), (4, false));
+    }
+}
+
+#[doc(hidden)]
+pub(crate) mod built {
+    #[allow(unused_imports)]
+    use super::*;
+    pub struct ToolUse {
+        pub player: Option<u32>,
+        pub hand: crate::first_person::Hand,
+        pub pos: [i32; 3],
+        pub face: [i32; 3],
+        pub click: [f64; 3],
+        pub ability: ToolAbility,
+        pub simulated: bool,
+    }
+    impl From<ToolUse> for super::ToolUse {
+        fn from(v: ToolUse) -> Self {
+            let ToolUse {
+                player,
+                hand,
+                pos,
+                face,
+                click,
+                ability,
+                simulated,
+            } = v;
+            Self {
+                player,
+                hand,
+                pos,
+                face,
+                click,
+                ability,
+                simulated,
+            }
+        }
+    }
+    pub struct NativeLootDrops<'a> {
+        pub table: &'a str,
+        pub dimension: &'a str,
+        pub origin: [f64; 3],
+        pub block: Option<([i32; 3], BlockStateId)>,
+        pub entity: Option<(u32, &'a str)>,
+        pub player: Option<u128>,
+        pub tool: Option<&'a ItemStack>,
+        pub explosion: Option<f32>,
+        pub used: bool,
+    }
+    impl<'a> From<NativeLootDrops<'a>> for super::NativeLootDrops<'a> {
+        fn from(v: NativeLootDrops<'a>) -> Self {
+            let NativeLootDrops {
+                table,
+                dimension,
+                origin,
+                block,
+                entity,
+                player,
+                tool,
+                explosion,
+                used,
+            } = v;
+            Self {
+                table,
+                dimension,
+                origin,
+                block,
+                entity,
+                player,
+                tool,
+                explosion,
+                used,
+            }
+        }
+    }
+    pub struct NativeExplosionStart<'a> {
+        pub dimension: &'a str,
+        pub center: [f64; 3],
+        pub radius: f32,
+        pub fire: bool,
+        pub interaction: NativeBlockInteraction,
+        pub damage_type: &'a str,
+        pub source: Option<u32>,
+        pub owner: Option<u32>,
+    }
+    impl<'a> From<NativeExplosionStart<'a>> for super::NativeExplosionStart<'a> {
+        fn from(v: NativeExplosionStart<'a>) -> Self {
+            let NativeExplosionStart {
+                dimension,
+                center,
+                radius,
+                fire,
+                interaction,
+                damage_type,
+                source,
+                owner,
+            } = v;
+            Self {
+                dimension,
+                center,
+                radius,
+                fire,
+                interaction,
+                damage_type,
+                source,
+                owner,
+            }
+        }
+    }
+    pub struct NativeItemFished<'a> {
+        pub hook: u32,
+        pub position: [f64; 3],
+        pub drops: &'a [ItemStack],
+    }
+    impl<'a> From<NativeItemFished<'a>> for super::NativeItemFished<'a> {
+        fn from(v: NativeItemFished<'a>) -> Self {
+            let NativeItemFished {
+                hook,
+                position,
+                drops,
+            } = v;
+            Self {
+                hook,
+                position,
+                drops,
+            }
+        }
+    }
+    pub struct NativeScreenView<'a> {
+        pub id: &'static str,
+        pub menu: Option<&'a str>,
+        pub title: Option<&'a Text>,
+        pub rect: [f32; 4],
+        pub slots: usize,
+        pub mouse: [f32; 2],
+        pub partial_tick: f32,
+    }
+    impl<'a> From<NativeScreenView<'a>> for super::NativeScreenView<'a> {
+        fn from(v: NativeScreenView<'a>) -> Self {
+            let NativeScreenView {
+                id,
+                menu,
+                title,
+                rect,
+                slots,
+                mouse,
+                partial_tick,
+            } = v;
+            Self {
+                id,
+                menu,
+                title,
+                rect,
+                slots,
+                mouse,
+                partial_tick,
+            }
+        }
+    }
+    pub struct NativeItemClick<'a> {
+        pub side: LogicalSide,
+        pub dimension: LevelDimension,
+        pub pos: [i32; 3],
+        pub hand: Hand,
+        pub stack: &'a ItemStack,
+        pub player: u128,
+        pub player_entity_id: i32,
+    }
+    impl<'a> From<NativeItemClick<'a>> for super::NativeItemClick<'a> {
+        fn from(v: NativeItemClick<'a>) -> Self {
+            let NativeItemClick {
+                side,
+                dimension,
+                pos,
+                hand,
+                stack,
+                player,
+                player_entity_id,
+            } = v;
+            Self {
+                side,
+                dimension,
+                pos,
+                hand,
+                stack,
+                player,
+                player_entity_id,
+            }
+        }
+    }
+    pub struct NativeBlockClick<'a> {
+        pub side: LogicalSide,
+        pub dimension: LevelDimension,
+        pub pos: [i32; 3],
+        pub hit: super::BlockHit,
+        pub hand: Hand,
+        pub stack: Option<&'a ItemStack>,
+        pub player: u128,
+        pub player_entity_id: i32,
+    }
+    impl<'a> From<NativeBlockClick<'a>> for super::NativeBlockClick<'a> {
+        fn from(v: NativeBlockClick<'a>) -> Self {
+            let NativeBlockClick {
+                side,
+                dimension,
+                pos,
+                hit,
+                hand,
+                stack,
+                player,
+                player_entity_id,
+            } = v;
+            Self {
+                side,
+                dimension,
+                pos,
+                hit,
+                hand,
+                stack,
+                player,
+                player_entity_id,
+            }
+        }
+    }
+    pub struct NativeLifecycleContext {
+        pub authority: NativeAuthority,
+        pub epoch: super::NativeWorldEpoch,
+        pub tick: super::NativeTickId,
+    }
+    impl From<NativeLifecycleContext> for super::NativeLifecycleContext {
+        fn from(v: NativeLifecycleContext) -> Self {
+            let NativeLifecycleContext {
+                authority,
+                epoch,
+                tick,
+            } = v;
+            Self {
+                authority,
+                epoch,
+                tick,
+            }
+        }
+    }
+    pub struct NativeActiveEffect {
+        pub id: &'static str,
+        pub duration: i32,
+        pub amplifier: i32,
+        pub ambient: bool,
+        pub visible: bool,
+    }
+    impl From<NativeActiveEffect> for super::NativeActiveEffect {
+        fn from(v: NativeActiveEffect) -> Self {
+            let NativeActiveEffect {
+                id,
+                duration,
+                amplifier,
+                ambient,
+                visible,
+            } = v;
+            Self {
+                id,
+                duration,
+                amplifier,
+                ambient,
+                visible,
+            }
+        }
+    }
+    pub struct NativePlayerExperience {
+        pub level: i32,
+        pub progress: f32,
+        pub total: i32,
+    }
+    impl From<NativePlayerExperience> for super::NativePlayerExperience {
+        fn from(v: NativePlayerExperience) -> Self {
+            let NativePlayerExperience {
+                level,
+                progress,
+                total,
+            } = v;
+            Self {
+                level,
+                progress,
+                total,
+            }
+        }
+    }
+    pub struct NativePlayerFood {
+        pub level: i32,
+        pub saturation: f32,
+        pub exhaustion: f32,
+    }
+    impl From<NativePlayerFood> for super::NativePlayerFood {
+        fn from(v: NativePlayerFood) -> Self {
+            let NativePlayerFood {
+                level,
+                saturation,
+                exhaustion,
+            } = v;
+            Self {
+                level,
+                saturation,
+                exhaustion,
+            }
+        }
+    }
+    pub struct NativePlayerAbilities {
+        pub invulnerable: bool,
+        pub flying: bool,
+        pub may_fly: bool,
+        pub instabuild: bool,
+        pub may_build: bool,
+        pub fly_speed: f32,
+        pub walk_speed: f32,
+    }
+    impl From<NativePlayerAbilities> for super::NativePlayerAbilities {
+        fn from(v: NativePlayerAbilities) -> Self {
+            let NativePlayerAbilities {
+                invulnerable,
+                flying,
+                may_fly,
+                instabuild,
+                may_build,
+                fly_speed,
+                walk_speed,
+            } = v;
+            Self {
+                invulnerable,
+                flying,
+                may_fly,
+                instabuild,
+                may_build,
+                fly_speed,
+                walk_speed,
+            }
+        }
+    }
+    pub struct NativeServerPlayer {
+        pub uuid: u128,
+        pub name: String,
+        pub permission: u8,
+        pub dimension: String,
+        pub position: [f64; 3],
+        pub game_mode: i32,
+        pub health: f32,
+        pub yaw: f32,
+        pub pitch: f32,
+        pub entity_id: i32,
+    }
+    impl From<NativeServerPlayer> for super::NativeServerPlayer {
+        fn from(v: NativeServerPlayer) -> Self {
+            let NativeServerPlayer {
+                uuid,
+                name,
+                permission,
+                dimension,
+                position,
+                game_mode,
+                health,
+                yaw,
+                pitch,
+                entity_id,
+            } = v;
+            Self {
+                uuid,
+                name,
+                permission,
+                dimension,
+                position,
+                game_mode,
+                health,
+                yaw,
+                pitch,
+                entity_id,
+            }
+        }
+    }
+    pub struct NativePortalShape {
+        pub x_axis: bool,
+        pub bottom_left: [i32; 3],
+        pub width: i32,
+        pub height: i32,
+    }
+    impl From<NativePortalShape> for super::NativePortalShape {
+        fn from(v: NativePortalShape) -> Self {
+            let NativePortalShape {
+                x_axis,
+                bottom_left,
+                width,
+                height,
+            } = v;
+            Self {
+                x_axis,
+                bottom_left,
+                width,
+                height,
+            }
+        }
     }
 }

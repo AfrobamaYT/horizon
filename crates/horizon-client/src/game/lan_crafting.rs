@@ -255,7 +255,7 @@ impl Game<'_> {
             .recipes()
             .find(&g.craft_grid, 2)
             .map(|(_, stack)| stack);
-        if mod_api::listened(mod_api::HookId::PrepareItemCraft) {
+        if mod_api::__private::listened(mod_api::HookId::PrepareItemCraft) {
             let name = g.name.clone();
             self.native_prepare_item_craft(uuid, &name, None, &mut result);
         }
@@ -458,7 +458,7 @@ impl Game<'_> {
         if furnace && count(menu.slot(2)) < count(items[2].as_ref()) {
             let output = items[2].as_ref();
             if let Some(output) = output
-                && mod_api::listened(mod_api::HookId::FurnaceExtract)
+                && mod_api::__private::listened(mod_api::HookId::FurnaceExtract)
                 && let Some(name) = self
                     .lan
                     .as_ref()

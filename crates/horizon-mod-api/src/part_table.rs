@@ -103,7 +103,7 @@ pub struct Parts {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct HookParts {
+pub struct HookParts {
     blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
     block_states: Vec<Option<NonZeroU32>>,
     block_slices: Vec<Arc<[Attached<dyn BlockPart>]>>,
@@ -177,7 +177,7 @@ struct Installed {
     hook_bits: Vec<bool>,
 }
 
-pub(crate) fn block_entity_types() -> &'static [BlockEntityType] {
+pub fn block_entity_types() -> &'static [BlockEntityType] {
     installed().map_or(&[], |installed| &installed.block_entity_types)
 }
 
@@ -218,17 +218,17 @@ fn installed() -> Option<&'static Installed> {
 }
 
 /// Whether any installed part subscribes to a scoped hook.
-pub(crate) fn has_part_hook(hook: HookId) -> bool {
+pub fn has_part_hook(hook: HookId) -> bool {
     installed().is_some_and(|installed| installed.hook_bits[hook as usize])
 }
 
 /// Preserve the no-mod fast path for level hooks.
-pub(crate) fn has_scoped_hook(hook: HookId) -> bool {
+pub fn has_scoped_hook(hook: HookId) -> bool {
     !super::mods().is_empty() && has_part_hook(hook)
 }
 
 /// The parts table a dispatch reads: the process-wide one, or this game thread's.
-pub(crate) enum PartsRef {
+pub enum PartsRef {
     Shared(&'static Parts),
     Game(Rc<Parts>),
 }
@@ -245,7 +245,7 @@ impl std::ops::Deref for PartsRef {
 
 /// The parts hook `hook` asks: this game thread's resolved table, then the shared key parts
 /// when there are no tag parts, then the off-thread path.
-pub(crate) fn parts(hook: &'static str) -> PartsRef {
+pub fn parts(hook: &'static str) -> PartsRef {
     #[cfg(any(test, feature = "testing"))]
     TEST_PART_LOOKUPS.set(TEST_PART_LOOKUPS.get() + 1);
     let Some(installed) = installed() else {
@@ -271,12 +271,12 @@ pub(crate) fn parts(hook: &'static str) -> PartsRef {
 }
 
 /// Mark this thread as running a `Game`, whose dispatches read its own resolved parts.
-pub(crate) fn mark_game_thread() {
+pub fn mark_game_thread() {
     GAME_THREAD.set(true);
 }
 
 /// The ids a game knows, which a part's key must name.
-pub(crate) struct KnownIds<'a> {
+pub struct KnownIds<'a> {
     pub block: &'a dyn Fn(&str) -> bool,
     pub item: &'a dyn Fn(&str) -> bool,
     pub state_count: usize,
@@ -287,7 +287,7 @@ pub(crate) struct KnownIds<'a> {
 /// tag name without `#` to members). Each run starts again from the key parts, so `/reload` drops
 /// what left a tag. A key naming a block or item the game doesn't know is an error, naming the
 /// mod; a missing tag or a part a tag gives twice is a warning, and the earlier mod's part stays.
-pub(crate) fn resolve_parts(
+pub fn resolve_parts(
     block_tags: &HashMap<String, HashSet<String>>,
     item_tags: &HashMap<String, HashSet<String>>,
     known: KnownIds<'_>,
@@ -394,7 +394,7 @@ fn add_tagged<P: ?Sized>(
 }
 
 impl HookParts {
-    pub(crate) fn block_state(&self, state: BlockStateId) -> &[Attached<dyn BlockPart>] {
+    pub fn block_state(&self, state: BlockStateId) -> &[Attached<dyn BlockPart>] {
         self.block_states
             .get(state.0 as usize)
             .and_then(|index| *index)
@@ -1109,7 +1109,7 @@ pub(super) fn registered_controllers(mods: &[ModEntry]) -> Vec<ControllerInfo> {
 
 /// Builds the parts from every mod's [`Hooks::register`](super::Hooks::register), in dispatch order. Once, at startup;
 /// the error lists every part refused, naming its mods.
-pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
+pub fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
     let mut installed = if mods.is_empty() {
         Installed::default()
     } else {
@@ -1148,7 +1148,7 @@ pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
 }
 
 #[cfg(any(test, feature = "testing"))]
-pub(crate) mod tests {
+pub mod tests {
     use super::super::*;
     use super::{Attached, KnownIds, mark_game_thread, resolve_parts};
     use std::any::{TypeId, type_name};
@@ -1257,7 +1257,7 @@ pub(crate) mod tests {
         }
     }
     /// The gold a `doubler:hoard` block entity holds, kept beside it.
-    pub(crate) const HOARD: AttachmentType<u32> = AttachmentType {
+    pub const HOARD: AttachmentType<u32> = AttachmentType {
         namespace: "test",
         name: "hoard",
         default: || 0,
@@ -1266,8 +1266,7 @@ pub(crate) mod tests {
         sync: false,
     };
     /// How many times a `doubler:hoard` was asked about its removal.
-    pub(crate) static HOARD_ASKED: std::sync::atomic::AtomicU32 =
-        std::sync::atomic::AtomicU32::new(0);
+    pub static HOARD_ASKED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     /// The block entity of type `doubler:hoard`, held by block `test:hoard`: when it is
     /// removed it gives back the gold its `HOARD` counts.
     struct Hoard;
@@ -2332,16 +2331,16 @@ pub(crate) mod tests {
 
     /// A chemical, as Mekanism's: the test mods' own resource, which the game knows nothing of.
     #[derive(Clone, Debug, PartialEq)]
-    pub(crate) struct Chemical(pub(crate) String);
+    pub struct Chemical(pub String);
 
     /// The test mods' own capability, as Mekanism's `Capabilities.CHEMICAL`: the game has no
     /// answer for it, so only their providers do.
-    pub(crate) const CHEMICALS: CapabilityKey<dyn ResourceHandler<Chemical>> =
+    pub const CHEMICALS: CapabilityKey<dyn ResourceHandler<Chemical>> =
         CapabilityKey::new("test:chemical");
 
     /// A mod block entity's one tank of 1000 of a chemical, kept in its saved data (`chemical`
     /// and `amount`), whose writes the game's journal keeps for a transaction.
-    pub(crate) struct ChemTank(pub(crate) BlockSide);
+    pub struct ChemTank(pub BlockSide);
     impl ChemTank {
         fn entity(&self, host: &dyn Host) -> Option<BlockEntityRef> {
             host.block_entity(self.0.level, self.0.pos)
@@ -2424,7 +2423,7 @@ pub(crate) mod tests {
         copy_on_death: false,
         sync: false,
     };
-    pub(crate) const ROBOT_FLUID: AttachmentType<u32> = AttachmentType {
+    pub const ROBOT_FLUID: AttachmentType<u32> = AttachmentType {
         namespace: "test",
         name: "fluid",
         default: || 0,
@@ -2571,7 +2570,7 @@ pub(crate) mod tests {
     }
 
     /// The test mods, their parts installed, on a thread that runs a game.
-    pub(crate) fn game_thread() -> super::super::Mods {
+    pub fn game_thread() -> super::super::Mods {
         let mods: super::super::Mods = vec![
             ModEntry::new("doubler", Box::new(Doubler)),
             ModEntry::new("chemist", Box::new(Chemist)),
@@ -2585,7 +2584,7 @@ pub(crate) mod tests {
     }
 
     /// Install a weak-power part on glass for a real-game query.
-    pub(crate) fn weak_power_game_thread() {
+    pub fn weak_power_game_thread() {
         struct WeakPower;
         #[mod_api::horizon_part]
         impl BlockPart for WeakPower {
@@ -2613,7 +2612,7 @@ pub(crate) mod tests {
 
     /// Install parts that change what a path may cross: glass becomes land and air, air
     /// stops being land and becomes water.
-    pub(crate) fn pathfindable_game_thread() {
+    pub fn pathfindable_game_thread() {
         struct Answers(&'static [(PathComputationType, bool)]);
         #[mod_api::horizon_part]
         impl BlockPart for Answers {
@@ -2651,7 +2650,7 @@ pub(crate) mod tests {
 
     /// Install a part on glass that asks, when a glass block is removed, for every neighbour to
     /// be told, as an override of `affectNeighborsAfterRemoval` calling `updateNeighborsAt`.
-    pub(crate) fn removal_game_thread() {
+    pub fn removal_game_thread() {
         struct Leaver;
         #[mod_api::horizon_part]
         impl BlockPart for Leaver {
@@ -2678,7 +2677,7 @@ pub(crate) mod tests {
     }
 
     /// Install a redstone connector on glass for real-game tests.
-    pub(crate) fn redstone_game_thread() {
+    pub fn redstone_game_thread() {
         struct RedstoneMod;
         #[mod_api::__subscriptions]
         impl Hooks for RedstoneMod {

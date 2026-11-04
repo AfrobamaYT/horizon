@@ -551,7 +551,9 @@ impl Game<'_> {
     }
     /// Ask after this mob's tick Pre; its living tick applies the answer.
     pub(super) fn sync_sleeping_mob(&mut self, index: usize) {
-        if self.remote.is_some() || !mod_api::listened(mod_api::HookId::CanContinueSleeping) {
+        if self.remote.is_some()
+            || !mod_api::__private::listened(mod_api::HookId::CanContinueSleeping)
+        {
             return;
         }
         let m = &self.mobs[index];

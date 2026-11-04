@@ -653,6 +653,7 @@ pub fn debug_crash_after() -> Option<std::time::Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mod_api::__private::game::*;
 
     #[test]
     fn a_release_reports_its_built_in_version() {

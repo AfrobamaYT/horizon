@@ -24,7 +24,7 @@ class RenderHandHookTests(unittest.TestCase):
         fixture = r"""
 mod mod_api {
     pub enum HookId { RenderHand }
-    pub fn listened(_: HookId) -> bool { true }
+    pub mod __private { pub fn listened(_: super::HookId) -> bool { true } }
     pub struct NativeHandRender<'a> {
         pub player: u128, pub player_entity_id: i32, pub hand: usize,
         pub stack: Option<&'a i32>, pub partial: f32, pub interpolated_pitch: f32,

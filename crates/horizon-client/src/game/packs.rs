@@ -14,7 +14,10 @@ use horizon_client::{
     streaming::WorkerContext,
     text::{Style, Text},
 };
-use mod_api::{ClientReloadListeners, FileToIdConverter, Identifier, reload::ReloadFiles};
+use mod_api::__private::game::*;
+use mod_api::{
+    __private::reload::ReloadFiles, ClientReloadListeners, FileToIdConverter, Identifier,
+};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,

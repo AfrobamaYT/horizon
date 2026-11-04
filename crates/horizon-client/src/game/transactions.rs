@@ -996,8 +996,8 @@ mod mod_capability_tests {
     use horizon_client::chunk::Chunk;
     use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
     use horizon_world::nbt::{Compound, Tag};
+    use mod_api::__private::part_tests::{CHEMICALS, ChemTank, Chemical};
     use mod_api::ServerHost;
-    use mod_api::part_tests::{CHEMICALS, ChemTank, Chemical};
     use mod_api::{BlockSide, HostTransaction, ResourceHandler, move_resources};
     use std::sync::Arc;
 

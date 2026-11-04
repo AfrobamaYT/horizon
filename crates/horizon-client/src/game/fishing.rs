@@ -351,13 +351,14 @@ impl Game<'_> {
             // rod's damage, or cancel the catch.
             let mut rod_damage = if hook.on_ground { 2 } else { 1 };
             if let Some(player) = self.lan_acting_uuid
-                && mod_api::listened(mod_api::HookId::ItemFished)
+                && mod_api::__private::listened(mod_api::HookId::ItemFished)
             {
-                let fished = mod_api::NativeItemFished {
-                    hook: hook.id,
-                    position: [hook.position.x, hook.position.y, hook.position.z],
-                    drops: &caught,
-                };
+                let fished =
+                    mod_api::NativeItemFished::from(mod_api::__private::built::NativeItemFished {
+                        hook: hook.id,
+                        position: [hook.position.x, hook.position.y, hook.position.z],
+                        drops: &caught,
+                    });
                 let mut cancel = false;
                 let entity_id = self.own_entity_id();
                 self.native_item_fished(player, entity_id, &fished, &mut rod_damage, &mut cancel);

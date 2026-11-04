@@ -239,7 +239,7 @@ impl Game<'_> {
             return;
         };
         let mut drops = vec![ItemStack::new("minecraft:lead", 1)];
-        let context = NativeLootDrops {
+        let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {
             table: "",
             dimension: self.dim.id(),
             origin: at,
@@ -249,7 +249,7 @@ impl Game<'_> {
             tool: None,
             explosion: None,
             used,
-        };
+        });
         self.native_loot_drops(&context, &mut drops);
         for stack in drops {
             if stack.count > 0 && &*stack.item != "minecraft:air" {

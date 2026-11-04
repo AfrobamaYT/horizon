@@ -115,6 +115,7 @@ impl Game<'_> {
             NativeExplosionInteraction::None => NativeBlast::Keep,
             NativeExplosionInteraction::Block => NativeBlast::Block,
             NativeExplosionInteraction::Tnt => NativeBlast::Tnt,
+            _ => unreachable!("NativeExplosionInteraction: unhandled variant"),
         };
         self.native_explode(level.dimension(), center, radius, fire, blast)
     }
@@ -186,7 +187,7 @@ mod tests {
     fn a_level_event_in_a_write_hook_joins_the_events_in_order() {
         let mods: mod_api::Mods =
             vec![mod_api::ModEntry::new("level-events", Box::new(EventsMod))].into();
-        mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.options.dedicated = Some(Vec::new());

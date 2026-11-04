@@ -137,7 +137,7 @@ impl Game<'_> {
     /// mod listens.
     pub(super) fn validate_mod_chunk_tickets(&mut self, dim: super::Dim) {
         let mut loaded = self.streaming.take_loaded_tickets();
-        if !loaded.is_empty() && mod_api::listened(mod_api::HookId::ValidateTickets) {
+        if !loaded.is_empty() && mod_api::__private::listened(mod_api::HookId::ValidateTickets) {
             let mut controllers: Vec<u32> = loaded.iter().map(|t| t.controller).collect();
             controllers.sort_unstable();
             controllers.dedup();

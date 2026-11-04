@@ -104,7 +104,7 @@ pub(super) struct ObservedScreen {
 
 impl ObservedScreen {
     fn view(&self) -> NativeScreenView<'_> {
-        NativeScreenView {
+        NativeScreenView::from(mod_api::__private::built::NativeScreenView {
             id: self.id,
             menu: self.menu.as_deref(),
             title: self.title.as_ref(),
@@ -112,7 +112,7 @@ impl ObservedScreen {
             slots: self.slots,
             mouse: self.mouse,
             partial_tick: self.partial_tick,
-        }
+        })
     }
 }
 
@@ -145,15 +145,17 @@ impl Game<'_> {
         };
         let renderer = self.renderer.as_ref()?;
         let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
-        Some(NativeScreenView {
-            id,
-            menu: None,
-            title: None,
-            rect: [0.0, 0.0, batch.width, batch.height],
-            slots: 0,
-            mouse: self.native_cursor(),
-            partial_tick: self.clock.fraction() as f32,
-        })
+        Some(NativeScreenView::from(
+            mod_api::__private::built::NativeScreenView {
+                id,
+                menu: None,
+                title: None,
+                rect: [0.0, 0.0, batch.width, batch.height],
+                slots: 0,
+                mouse: self.native_cursor(),
+                partial_tick: self.clock.fraction() as f32,
+            },
+        ))
     }
 
     /// Opens `screen` (`Gui.setScreen`; `Screen::Playing` is vanilla's null):
@@ -169,8 +171,8 @@ impl Game<'_> {
         }
         let mut screen = screen;
         let mut owner = None;
-        if (mod_api::listened(mod_api::HookId::ScreenOpening)
-            || mod_api::listened(mod_api::HookId::ScreenClosing))
+        if (mod_api::__private::listened(mod_api::HookId::ScreenOpening)
+            || mod_api::__private::listened(mod_api::HookId::ScreenClosing))
             && self.options.execution_role.is_client()
             && self.lan_acting.is_none()
         {
@@ -187,6 +189,7 @@ impl Game<'_> {
                 Some(Answered {
                     answer: ScreenOpening::ModScreen,
                     mod_id,
+                    ..
                 }) if !self.mod_screen_blocked() => {
                     screen = Screen::Mod;
                     owner = Some(mod_id);
@@ -246,7 +249,7 @@ impl Game<'_> {
             None => [0.0; 4],
         };
         let none = screen == Screen::Playing;
-        NativeScreenView {
+        NativeScreenView::from(mod_api::__private::built::NativeScreenView {
             id: screen.id(),
             menu: self.remote_menu_type().filter(|m| !none && !m.is_empty()),
             title: self
@@ -258,7 +261,7 @@ impl Game<'_> {
             slots: if none { 0 } else { self.slot_count() },
             mouse: self.native_cursor(),
             partial_tick: self.clock.fraction() as f32,
-        }
+        })
     }
     /// A mod's own screen cannot open now: over the title screen, a book, a
     /// sign editor, a dialog or a prompt, with no player or a
@@ -2785,7 +2788,7 @@ impl Game<'_> {
     /// drawn this frame, which `NativeScreenView.id` comes from. Borrowed:
     /// nothing is copied per frame.
     pub(super) fn screen_view(&self, batch: &HudBatch, screen: Screen) -> NativeScreenView<'_> {
-        NativeScreenView {
+        NativeScreenView::from(mod_api::__private::built::NativeScreenView {
             id: screen.id(),
             menu: self.remote_menu_type().filter(|m| !m.is_empty()),
             title: self.remote.as_ref().and_then(|r| r.menu_title.as_ref()),
@@ -2793,7 +2796,7 @@ impl Game<'_> {
             slots: self.slot_count(),
             mouse: self.native_cursor(),
             partial_tick: self.clock.fraction() as f32,
-        }
+        })
     }
     /// The title's own screen as a native mod sees it (`NativeScreenView`):
     /// its id from the title state machine (`title`, `world_select`,
@@ -2802,15 +2805,17 @@ impl Game<'_> {
     /// open). None while no title screen is up.
     pub(super) fn title_screen_view(&self, batch: &HudBatch) -> Option<NativeScreenView<'_>> {
         let title = self.title.as_ref()?;
-        Some(NativeScreenView {
-            id: title.mode.id(),
-            menu: None,
-            title: None,
-            rect: [0.0, 0.0, batch.width, batch.height],
-            slots: 0,
-            mouse: self.native_cursor(),
-            partial_tick: self.clock.fraction() as f32,
-        })
+        Some(NativeScreenView::from(
+            mod_api::__private::built::NativeScreenView {
+                id: title.mode.id(),
+                menu: None,
+                title: None,
+                rect: [0.0, 0.0, batch.width, batch.height],
+                slots: 0,
+                mouse: self.native_cursor(),
+                partial_tick: self.clock.fraction() as f32,
+            },
+        ))
     }
     /// The open screen's container panel in GUI pixels (`screen`'s, the one
     /// this frame draws), or the whole window for a screen with none
@@ -7192,7 +7197,7 @@ impl Game<'_> {
 /// `native_living_use_totem` for the damage code (`health::USE_TOTEM`): whether it
 /// canceled the totem. The entity and the source are named as the damage hook names them.
 pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
-    if !mod_api::listened(mod_api::HookId::LivingUseTotem) {
+    if !mod_api::__private::listened(mod_api::HookId::LivingUseTotem) {
         return false;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
@@ -7335,7 +7340,7 @@ pub(super) fn incoming_damage(
     victim: Victim,
     container: &mut DamageContainer,
 ) -> bool {
-    if !mod_api::listened(mod_api::HookId::LivingIncomingDamage) {
+    if !mod_api::__private::listened(mod_api::HookId::LivingIncomingDamage) {
         return false;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
@@ -7360,7 +7365,7 @@ pub(super) fn damage_pre(
     hurting: Hurting<'_>,
     container: &mut DamageContainer,
 ) {
-    if !mod_api::listened(mod_api::HookId::LivingDamagePre) {
+    if !mod_api::__private::listened(mod_api::HookId::LivingDamagePre) {
         return;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
@@ -7373,7 +7378,7 @@ pub(super) fn damage_post(
     hurting: Hurting<'_>,
     container: &DamageContainer,
 ) {
-    if !mod_api::listened(mod_api::HookId::LivingDamagePost) {
+    if !mod_api::__private::listened(mod_api::HookId::LivingDamagePost) {
         return;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
@@ -7442,7 +7447,7 @@ impl Game<'_> {
 /// canceled the push. Its one caller. The pushed entity and the source are named as the
 /// damage hook names them.
 pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
-    if !mod_api::listened(mod_api::HookId::LivingKnockback) {
+    if !mod_api::__private::listened(mod_api::HookId::LivingKnockback) {
         return false;
     }
     let attacker = match &pushed {
@@ -8946,7 +8951,7 @@ impl Game<'_> {
         by_player: bool,
         stack: &mut ItemStack,
     ) -> Option<bool> {
-        if !mod_api::listened(mod_api::HookId::Bonemeal) {
+        if !mod_api::__private::listened(mod_api::HookId::Bonemeal) {
             return None;
         }
         let client = self.remote.is_some();
@@ -8994,7 +8999,7 @@ impl Game<'_> {
         stack: Option<&ItemStack>,
     ) -> BlockClickAnswer {
         let (mut use_block, mut use_item) = (NativeTriState::Default, NativeTriState::Default);
-        if !mod_api::listened(mod_api::HookId::RightClickBlock) {
+        if !mod_api::__private::listened(mod_api::HookId::RightClickBlock) {
             return BlockClickAnswer::Go {
                 use_block,
                 use_item,
@@ -9026,7 +9031,7 @@ impl Game<'_> {
         stack: Option<&ItemStack>,
         phase: UsePhase,
     ) -> Option<NativeInteractionResult> {
-        if !mod_api::listened(mod_api::HookId::UseItemOnBlock) {
+        if !mod_api::__private::listened(mod_api::HookId::UseItemOnBlock) {
             return None;
         }
         let click = self.block_click(hit, hand, stack);
@@ -9055,7 +9060,7 @@ impl Game<'_> {
         hand: Hand,
         stack: &ItemStack,
     ) -> Option<NativeInteractionResult> {
-        if !mod_api::listened(mod_api::HookId::RightClickItem)
+        if !mod_api::__private::listened(mod_api::HookId::RightClickItem)
             || self.entity_targeted()
             || self.pick().is_some()
         {
@@ -9065,7 +9070,7 @@ impl Game<'_> {
             .target_position(super::commands::Target::Player)?
             .map(|v| v.floor() as i32);
         let (player, player_entity_id) = self.native_clicker();
-        let click = NativeItemClick {
+        let click = NativeItemClick::from(mod_api::__private::built::NativeItemClick {
             side: if self.remote.is_some() {
                 LogicalSide::Client
             } else {
@@ -9077,7 +9082,7 @@ impl Game<'_> {
             stack,
             player,
             player_entity_id,
-        };
+        });
         let instant = self.use_duration(stack) <= 0;
         let (mut result, mut canceled) = (NativeInteractionResult::Pass, false);
         self.native_right_click_item(&click, &mut result, &mut canceled);
@@ -9094,7 +9099,7 @@ impl Game<'_> {
         stack: Option<&'a ItemStack>,
     ) -> NativeBlockClick<'a> {
         let (player, player_entity_id) = self.native_clicker();
-        NativeBlockClick {
+        NativeBlockClick::from(mod_api::__private::built::NativeBlockClick {
             side: if self.remote.is_some() {
                 LogicalSide::Client
             } else {
@@ -9107,7 +9112,7 @@ impl Game<'_> {
             stack,
             player,
             player_entity_id,
-        }
+        })
     }
     /// `GameRuleChangedEvent` once the server set the rule `name` to `value`
     /// (`GameRules.set` with a server).
@@ -9117,14 +9122,14 @@ impl Game<'_> {
         value: GameRuleValue,
         actor: Option<&GameRuleActor<'_>>,
     ) {
-        if mod_api::listened(mod_api::HookId::GameRuleChanged) {
+        if mod_api::__private::listened(mod_api::HookId::GameRuleChanged) {
             self.native_game_rule_changed(&["minecraft:", name].concat(), value, actor);
         }
     }
     /// `MobSplitEvent` for the dying cube mob `m`, which made `count`
     /// children: how many to spawn.
     pub(super) fn mob_split_count(&mut self, m: &horizon_client::mobs::Mob, count: u32) -> u32 {
-        if !mod_api::listened(mod_api::HookId::MobSplit) {
+        if !mod_api::__private::listened(mod_api::HookId::MobSplit) {
             return count;
         }
         let (size, kind) = (m.extra.size, mob_kind(m));
@@ -9141,7 +9146,7 @@ impl Game<'_> {
         tamer: u128,
         tamer_entity_id: i32,
     ) -> bool {
-        if !mod_api::listened(mod_api::HookId::AnimalTame) {
+        if !mod_api::__private::listened(mod_api::HookId::AnimalTame) {
             return false;
         }
         let m = &self.mobs[index];
@@ -9180,7 +9185,7 @@ impl Game<'_> {
             None => self.res.items(),
         };
         let table = items.block_loot_table(self.pack.assets.registry, state);
-        let context = NativeLootDrops {
+        let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {
             table: table.as_deref().unwrap_or_default(),
             dimension: self.dim.id(),
             origin: pos.map(|c| f64::from(c) + 0.5),
@@ -9190,7 +9195,7 @@ impl Game<'_> {
             tool,
             explosion,
             used: false,
-        };
+        });
         self.native_loot_drops(&context, drops);
         drops.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
     }
@@ -9207,7 +9212,7 @@ impl Game<'_> {
         tool: Option<&ItemStack>,
         drops: &mut Vec<ItemStack>,
     ) {
-        let context = NativeLootDrops {
+        let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {
             table,
             dimension: self.dim.id(),
             origin,
@@ -9217,7 +9222,7 @@ impl Game<'_> {
             tool,
             explosion: None,
             used: true,
-        };
+        });
         self.native_loot_drops(&context, drops);
         drops.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
     }
@@ -10106,6 +10111,7 @@ fn mod_screen_opens(
 
 #[cfg(test)]
 mod tests {
+    use mod_api::__private::game::*;
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn declared_types_create_tick_and_reload_through_game() {
@@ -10248,8 +10254,8 @@ mod tests {
                 }),
             ),
         ]);
-        mod_api::install(mods.clone());
-        mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install(mods.clone());
+        mod_api::__private::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let root = super::super::mods::content_root(&base, &Default::default());
         if invalid {

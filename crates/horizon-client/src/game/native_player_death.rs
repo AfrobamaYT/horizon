@@ -49,6 +49,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
+    use mod_api::__private::game::*;
 
     use super::super::Game;
     use horizon_core::position::BlockPos;
@@ -148,7 +149,10 @@ mod tests {
             // A player who is not online here, and a handle of another
             // player's id, read nothing.
             let mut stale = player;
-            stale.entity = mod_api::EntityRef::new(player.entity.epoch(), player.entity.id() + 1);
+            stale.fields().entity = mod_api::EntityRef::new(
+                player.fields().entity.epoch(),
+                player.fields().entity.id() + 1,
+            );
             game.lan.as_mut().unwrap().hub.guests[0].last_death =
                 Some(("minecraft:overworld".into(), [1, 2, 3]));
             assert_eq!(stale.last_death_location(&*game), None);
