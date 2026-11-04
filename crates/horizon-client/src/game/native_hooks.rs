@@ -7538,7 +7538,7 @@ fn block_entity_for_block(
     name: &str,
     initial: Compound,
 ) -> Option<BlockEntity> {
-    if let Some(kind) = horizon_client::containers::block_entity_types::type_for(name) {
+    if let Some(kind) = horizon_client::block_entity_types::type_for(name) {
         return Some(BlockEntity::Mod(Box::new(ModBlockEntity::new(
             kind.to_owned(),
             ModBlockEntityFields {
@@ -8942,7 +8942,7 @@ impl Game<'_> {
     /// native mod's.
     pub(super) fn new_block_entity(&mut self, name: &str) -> Option<BlockEntity> {
         let mut nbt = None;
-        if horizon_client::containers::block_entity_types::type_for(name).is_some() {
+        if horizon_client::block_entity_types::type_for(name).is_some() {
             self.native_block_entity(name, &mut nbt);
         }
         block_entity_for_block(
@@ -9870,7 +9870,7 @@ mod tests {
             assert!(error.contains("be_user"), "{error}");
             assert!(error.contains("unknown block entity type"), "{error}");
             assert!(error.contains(id), "{error}");
-            assert!(horizon_client::containers::block_entity_types::current().is_none());
+            assert!(horizon_client::block_entity_types::current().is_none());
             return;
         }
         assert_eq!(keys.shared.get(), keys.own.get());

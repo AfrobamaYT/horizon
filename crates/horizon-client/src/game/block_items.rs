@@ -396,4 +396,153 @@ mod tests {
             "minecraft:cake"
         );
     }
+
+    /// A mod block entity's data rides its item through the game: Ctrl+Pick
+    /// Block (`addBlockDataToItem`) puts it on the stack, placing the stack
+    /// (`BlockItem.updateCustomBlockEntityTag`) loads it into the new block
+    /// entity, and `/give` takes the declared type and refuses an unknown one.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_block_entity_rides_its_item_through_the_game() {
+        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
+        use super::components;
+        use horizon_client::{
+            chunk::Chunk,
+            containers::BlockEntity,
+            mod_api::{self, *},
+        };
+        use std::sync::Arc;
+
+        const CHILD: &str = "HORIZON_MOD_BLOCK_ENTITY_ITEM_CHILD";
+        if run_fresh_cases(
+            "game::block_items::tests::a_mod_block_entity_rides_its_item_through_the_game",
+            CHILD,
+            &["game"],
+        ) {
+            return;
+        }
+        const CRATE: &str = "item_test:crate";
+        struct Crate;
+        #[mod_api::horizon_part]
+        impl BlockPart for Crate {}
+        #[mod_api::horizon_part]
+        impl BlockEntityPart for Crate {
+            fn block_entity(
+                &self,
+                _: HostSide<'_>,
+                _: &mut BlockEntityEvent<'_>,
+            ) -> Option<Compound> {
+                Some(Compound::from([("Amount".into(), Tag::Int(0))]))
+            }
+        }
+        struct TestMod;
+        #[horizon_client::mod_api::__subscriptions]
+        impl Hooks for TestMod {
+            fn register(&self, registrar: &mut Registrar) {
+                let kind = registrar
+                    .block_entity_type("crate")
+                    .blocks(&[CRATE])
+                    .build();
+                registrar
+                    .block_entity_part(&kind, Crate)
+                    .expect("native type");
+            }
+            fn blocks(
+                &self,
+                _context: &horizon_client::mod_api::RegistrationContext<'_>,
+                event: &mut BlocksEvent<'_>,
+            ) {
+                event.blocks.push(horizon_mods::content::Block {
+                    id: CRATE.into(),
+                    template: "minecraft:white_banner".into(),
+                    item: true,
+                    ..Default::default()
+                });
+            }
+        }
+        let mods: Mods = Arc::from([ModEntry::new("item_test", Box::new(TestMod))]);
+        horizon_client::mod_api::install(mods.clone());
+        horizon_client::mod_api::install_parts(&mods).unwrap();
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let root = super::super::mods::content_root(&base, &Default::default(), &[]).unwrap();
+        with_game_at(root, |game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level(game.dim.id()).unwrap();
+            let state = game.pack.assets.registry.default_state(CRATE).unwrap();
+            for x in [1, 2] {
+                assert!(game.native_level_set_block(
+                    level,
+                    [x, 64, 0],
+                    state,
+                    NativeBlockUpdateFlags::NONE
+                ));
+            }
+            let Some(BlockEntity::Mod(first)) = game.world.block_entities.get_mut(&(1, 64, 0))
+            else {
+                panic!("no mod block entity");
+            };
+            first.nbt.insert("Amount".into(), Tag::Int(2000));
+            // A component it was placed with (`BlockEntity.components`).
+            let name =
+                Compound::from([("minecraft:custom_name".into(), Tag::String("Box".into()))]);
+            first
+                .nbt
+                .insert("components".into(), Tag::Compound(name.clone()));
+
+            let picked = game.picked_stack([1, 64, 0], true).expect("picked");
+            assert_eq!(&*picked.item, CRATE);
+            let patch = components(&picked);
+            let data = patch
+                .get(&"minecraft:block_entity_data".into())
+                .expect("data");
+            assert_eq!(data.get("id"), Some(&Tag::String(CRATE.into())));
+            assert_eq!(data.get("Amount"), Some(&Tag::Int(2000)));
+            assert_eq!(data.get("x"), None);
+            assert_eq!(data.get("components"), None);
+            assert_eq!(
+                patch.get(&"minecraft:custom_name".into()),
+                Some(&Tag::String("Box".into()))
+            );
+            // Without Ctrl the item carries nothing.
+            let plain = game.picked_stack([1, 64, 0], false).expect("picked");
+            assert!(!components(&plain).contains_key(&"minecraft:block_entity_data".into()));
+
+            game.apply_placed_item([2, 64, 0], &picked, false);
+            let Some(BlockEntity::Mod(second)) = game.world.block_entities.get(&(2, 64, 0)) else {
+                panic!("placing replaced the mod block entity");
+            };
+            assert_eq!(second.nbt.get(&"Amount".into()), Some(&Tag::Int(2000)));
+            assert_eq!(
+                second.nbt.get(&"components".into()),
+                Some(&Tag::Compound(name))
+            );
+
+            // The game's own command tree and registries, as a world opens
+            // them; this headless game has no player for the give to reach, so
+            // the parse, where the data's type is checked, is what runs.
+            game.build_registries();
+            game.ui.registries.permission = 4;
+            let commands = horizon_client::command::vanilla::game_dispatcher_with_features(
+                &game.level.enabled_features,
+            );
+            let give = |kind: &str| {
+                let command =
+                    format!("give @s {CRATE}[block_entity_data={{id:\"{kind}\",Amount:7}}]");
+                commands
+                    .parse(&command, &game.ui.registries)
+                    .executable()
+                    .map(|_| ())
+                    .map_err(|e| e.message.plain())
+            };
+            assert_eq!(give(CRATE), Ok(()));
+            assert!(
+                give("item_test:nope")
+                    .unwrap_err()
+                    .contains("item_test:nope")
+            );
+        });
+    }
 }

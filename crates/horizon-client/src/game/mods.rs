@@ -217,7 +217,7 @@ fn register_block_entity_types(
     root: &std::path::Path,
     mods: &[horizon_client::mod_content::ContentMod],
 ) -> horizon_client::Result<()> {
-    use horizon_client::containers::block_entity_types::{self, BlockEntityTypes};
+    use horizon_client::block_entity_types::{self, BlockEntityTypes};
     use horizon_protocol::registry::Builtin;
     let path = Builtin::find(root).ok_or("registries.json not found")?;
     let builtin = Builtin::load(&path)?;
