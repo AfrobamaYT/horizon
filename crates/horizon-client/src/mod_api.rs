@@ -2834,7 +2834,9 @@ level_attachment_host!(LevelRandomHost, LevelWriteHost);
 mod capability;
 pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS};
 mod entity_capability;
-pub use entity_capability::{ENTITY_ENERGY, ENTITY_FLUIDS, ENTITY_ITEMS, EntityCapabilityKey};
+pub use entity_capability::{
+    ENTITY_AUTOMATION, ENTITY_ENERGY, ENTITY_FLUIDS, ENTITY_ITEMS, EntityCapabilityKey,
+};
 mod energy_capability;
 pub use energy_capability::{ENERGY, EnergyHandler, ITEM_ENERGY, move_energy};
 mod fluid_capability;
@@ -2857,8 +2859,8 @@ mod ticket_controller;
 pub use ticket_controller::TicketController;
 mod part_table;
 pub use part_table::{
-    Attached, BlockEntityProviders, BlockProvider, EntityProvider, ItemProvider, Parts, Registrar,
-    block_entity_providers,
+    Attached, BlockEntityProviders, BlockProvider, EntityProvider, EntityProviders, ItemProvider,
+    Parts, Registrar, block_entity_providers, entity_providers, has_entity_providers,
 };
 pub(crate) use part_table::{
     KnownIds, ProvidedBy, answered, ask_providers, block_entity_types, has_part_hook,
