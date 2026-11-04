@@ -5440,6 +5440,7 @@ impl Game<'_> {
                     id: 2001,
                     pos,
                     data,
+                    ..
                 } => {
                     // LevelEventHandler: destroy particles and the block's
                     // break sound (none for air).
@@ -5466,6 +5467,7 @@ impl Game<'_> {
                     id: 3006,
                     pos,
                     data,
+                    ..
                 } => self.sculk_charge_event(pos, data),
                 LevelEvent::LevelEvent { id: 3007, pos, .. } => self.shriek_event(pos),
                 // LevelEventHandler 1010 and 1011: a jukebox's song starts
@@ -5474,6 +5476,7 @@ impl Game<'_> {
                     id: 1010,
                     pos,
                     data,
+                    ..
                 } => self.jukebox_song_event([pos.x, pos.y, pos.z], data),
                 LevelEvent::LevelEvent { id: 1011, pos, .. } => {
                     self.jukebox_stop_event([pos.x, pos.y, pos.z])
@@ -5484,6 +5487,7 @@ impl Game<'_> {
                     id: id @ (2019 | 2020),
                     pos,
                     data,
+                    ..
                 } => {
                     let face = horizon_core::geometry::Direction::ALL[data.clamp(0, 5) as usize];
                     self.breaking_block_effects([pos.x, pos.y, pos.z], face.normal(), id == 2020);
@@ -5492,6 +5496,7 @@ impl Game<'_> {
                     id: 3008,
                     pos,
                     data,
+                    ..
                 } => self.brush_complete_event([pos.x, pos.y, pos.z], data),
                 LevelEvent::LevelEvent { id: 2004, pos, .. } => {
                     self.spawner_burst([pos.x, pos.y, pos.z])
@@ -5501,6 +5506,7 @@ impl Game<'_> {
                     id: 1505,
                     pos,
                     data,
+                    ..
                 } => {
                     self.growth_particles(pos, data);
                     let at = [pos.x, pos.y, pos.z].map(|v| f64::from(v) + 0.5);
@@ -5511,21 +5517,25 @@ impl Game<'_> {
                     id: 2015,
                     pos,
                     data,
+                    ..
                 } => self.dragon_egg_particles([pos.x, pos.y, pos.z], data),
                 LevelEvent::LevelEvent {
                     id: 2016,
                     pos,
                     data,
+                    ..
                 } => self.shulker_teleport_particles([pos.x, pos.y, pos.z], data),
                 LevelEvent::LevelEvent {
                     id: 2017,
                     pos,
                     data,
+                    ..
                 } => self.consume_teleport_particles([pos.x, pos.y, pos.z], data),
                 LevelEvent::LevelEvent {
                     id: 2018,
                     pos,
                     data,
+                    ..
                 } => self.enderman_teleport_particles([pos.x, pos.y, pos.z], data),
                 LevelEvent::LevelEvent { id: 2003, pos, .. } => {
                     self.eye_break_particles([pos.x, pos.y, pos.z]);
@@ -5534,27 +5544,32 @@ impl Game<'_> {
                     id: 2013,
                     pos,
                     data,
+                    ..
                 } => self.smash_dust(pos, data),
                 // LevelEventHandler 2002 and 2007: a potion's splash.
                 LevelEvent::LevelEvent {
                     id: 2002,
                     pos,
                     data,
+                    ..
                 } => self.potion_splash_particles(pos, data, false),
                 LevelEvent::LevelEvent {
                     id: 2007,
                     pos,
                     data,
+                    ..
                 } => self.potion_splash_particles(pos, data, true),
                 LevelEvent::LevelEvent {
                     id: id @ 3002..=3005,
                     pos,
                     data,
+                    ..
                 } => self.block_particle_event(id, pos, data),
                 LevelEvent::LevelEvent {
                     id: 1500,
                     pos,
                     data,
+                    ..
                 } => self.composter_fill_event(pos, data == 1),
                 // LevelEventHandler 1504: the stalactite's drip particle.
                 LevelEvent::LevelEvent { id: 1504, pos, .. } => self.dripstone_drip_particle(pos),
@@ -5563,6 +5578,7 @@ impl Game<'_> {
                     id: 2006,
                     pos,
                     data,
+                    ..
                 } => self.dragon_fireball_burst(pos, data),
                 // LevelEventHandler 2009: a wet sponge drying.
                 LevelEvent::LevelEvent { id: 2009, pos, .. } => {
@@ -5573,12 +5589,14 @@ impl Game<'_> {
                     id: 2012,
                     pos,
                     data,
+                    ..
                 } => self.turtle_egg_particles(pos, data),
                 // LevelEventHandler 2014: a straw bed destroyed, with no sound.
                 LevelEvent::LevelEvent {
                     id: 2014,
                     pos,
                     data,
+                    ..
                 } => self.destroy_particles([pos.x, pos.y, pos.z], BlockStateId(data as u32)),
                 // EnderDragonFight.spawnNewGateway: an always-visible burst
                 // and a sound at the gateway for every nearby player.
@@ -5614,6 +5632,7 @@ impl Game<'_> {
                     id: id @ 3011..=3021,
                     pos,
                     data,
+                    ..
                 } => self.trial_level_event(id, [pos.x, pos.y, pos.z], data),
                 LevelEvent::LevelEvent { id, pos, .. } => {
                     let c = Some([
