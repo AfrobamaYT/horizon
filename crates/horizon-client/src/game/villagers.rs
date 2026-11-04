@@ -63,6 +63,7 @@ impl Game<'_> {
                     id: 1505,
                     pos,
                     data: 15,
+                    source: None,
                 });
             let _ = self.process_level_events();
         }

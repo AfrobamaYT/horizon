@@ -40,6 +40,7 @@ impl GameLevel<'_> {
             id,
             pos: horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]),
             data,
+            source: None,
         });
         true
     }
@@ -205,6 +206,7 @@ mod tests {
                     id: 1000,
                     pos: horizon_core::position::BlockPos::new(0, 64, 0),
                     data: 0,
+                    source: None,
                 };
                 game.level_events.push(before.clone());
                 let state = game.world.block(0, 64, 0);
@@ -222,6 +224,7 @@ mod tests {
                     id,
                     pos: horizon_core::position::BlockPos::new(x, 64, z),
                     data,
+                    source: None,
                 };
                 assert_eq!(
                     game.level_events,

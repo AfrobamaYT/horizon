@@ -433,6 +433,7 @@ impl Game<'_> {
             id,
             pos: BlockPos::new(pos[0], pos[1], pos[2]),
             data,
+            source: None,
         });
         let _ = self.process_level_events();
     }
