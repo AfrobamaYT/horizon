@@ -187,9 +187,15 @@ mod tests {
         }
         pub(super) struct NativeLifecycleContext;
         pub(super) struct RegistrationContext(pub &'static str);
-        pub(super) trait DataLoadContext {}
+        pub(super) trait DataLoadContext {
+            fn origin(&self) -> &'static str;
+        }
         pub(super) struct Load(pub &'static str);
-        impl DataLoadContext for Load {}
+        impl DataLoadContext for Load {
+            fn origin(&self) -> &'static str {
+                self.0
+            }
+        }
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
         #[derive(Clone, Copy)]
@@ -214,8 +220,8 @@ mod tests {
         pub(super) struct ServerTickPhase;
         #[derive(Clone, Copy)]
         pub(super) struct WorldPhase;
-        pub(super) struct ServerReloadListeners;
-        pub(super) struct ClientReloadListeners;
+        pub(super) trait ServerReloadListeners {}
+        pub(super) trait ClientReloadListeners {}
     }
     use serde_json::{Map, Value};
     use stubs::*;
@@ -309,6 +315,7 @@ mod tests {
             pub mod mod_chunk_tickets {
                 pub trait TicketValidation {}
             }
+            pub use mod_chunk_tickets::TicketValidation;
             pub mod stations {
                 pub struct EnchantmentRow<'a>(std::marker::PhantomData<&'a ()>);
             }
@@ -745,7 +752,7 @@ mod tests {
             context: &dyn DataLoadContext,
             event: &mut ModifyDefaultComponentsEvent<'_>,
         ) {
-            assert_eq!(context.0, "defaults");
+            assert_eq!(context.origin(), "defaults");
             let value = event
                 .components
                 .entry("order")

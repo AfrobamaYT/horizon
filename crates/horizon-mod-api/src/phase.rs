@@ -232,6 +232,7 @@ pub trait DataLoadContext {
 /// The game's owning load, as a [`DataLoadContext`].
 // hidden: the game's side of the context, not part of the mod surface
 #[doc(hidden)]
+// exhaustive: its fields are private; only the game builds it
 pub struct OwningLoad<'a> {
     source: &'a horizon_world::native_load_context::LoadContext,
     mods: LoadedMods,
