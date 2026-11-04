@@ -13,6 +13,7 @@ use std::{fmt::Debug, marker::PhantomData, ops::Deref};
 /// A capability: its name (`horizon:items`, `mymod:chemicals`), the handler trait `T` it answers
 /// with, and the game's own provider, if the game has one.
 pub struct CapabilityKey<T: ?Sized + 'static> {
+    /// The name.
     pub name: &'static str,
     pub(super) default: Option<fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>>>,
     pub(super) handler: PhantomData<fn() -> Box<T>>,
@@ -22,8 +23,11 @@ pub struct CapabilityKey<T: ?Sized + 'static> {
 /// reached through (none: from no particular side): NeoForge's block capability context.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BlockSide {
+    /// The level.
     pub level: LevelRef,
+    /// The pos.
     pub pos: [i32; 3],
+    /// The side.
     pub side: Option<Direction>,
 }
 

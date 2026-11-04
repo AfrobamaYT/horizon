@@ -65,13 +65,13 @@ in Controls, and adding one would put a non-vanilla mapping into `options.txt`.
 ### Moved to native mods
 
 The **FPS counter**, **Keystrokes**, **Zoom** and the **Minimap** are official native mods now (in
-horizon-rust/horizon-mods under `native/<name>/`, [mods.md](mods.md#horizons-official-mods)), with the same look and
+horizon-rust/horizon-mods under `native/<name>/`, [mods.md](modding/src/start/installing.md#horizons-official-mods)), with the same look and
 options. Players install them from the launcher's Mods page, and the launcher builds them into the game
-([native-mods.md](native-mods.md)). The game keeps
+([modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md)). The game keeps
 the hook points they use (`crates/horizon-client/src/game/native_hooks.rs`), and `horizon-extras.txt` keeps the old
 keys and `movedToMods`.
 
-The game still draws the minimap, for the native mod (`native_minimap` in `native_hooks.rs`, [mods.md](mods.md)):
+The game still draws the minimap, for the native mod (`native_minimap` in `native_hooks.rs`, [mods.md](modding/src/how-to/content-mods.md)):
 - a corner map (top right by default), square or round, small/medium/large, zoom 0.5 to 4 blocks per pixel, rotating
   with the player or north up, with the player arrow (vanilla's map decoration sprite);
 - vanilla's `MapColor` per block, as map items use, with the map item's height shading and water-depth dithering;

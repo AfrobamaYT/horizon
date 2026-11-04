@@ -5,7 +5,7 @@
 //! Offered: Java mods (Fabric, NeoForge, Forge), whose content Horizon ports and whose jar is
 //! checked before install ([`java`]), modpacks (imported and ported), resource packs
 //! (`resourcepacks/`) and data packs (into a world, [`installed::install_datapack`]). Java code
-//! itself doesn't run in Horizon (docs/mods.md).
+//! itself doesn't run in Horizon (docs/modding/src/how-to/content-mods.md).
 pub mod curseforge;
 pub mod details;
 pub mod download;

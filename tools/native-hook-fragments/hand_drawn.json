@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "hand_drawn",
+      "doc": "The first-person hand is drawn (see [`HandDrawn`]), on every frame [`native_world_drawn`]\nruns, with no hand too.",
       "target": "mod_api::render::native_hand_drawn",
       "side": "client",
       "mod_api": {"contract": "listen"}

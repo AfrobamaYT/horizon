@@ -607,7 +607,7 @@ enum ModsCmd {
         #[arg(long)]
         instance: Option<String>,
     },
-    /// Install a native mod from a GitHub link (docs/native-mods.md, "Install from GitHub"):
+    /// Install a native mod from a GitHub link (docs/modding/src/how-to/native-mods.md, "Install from GitHub"):
     /// https://github.com/OWNER/REPO (its latest release, else its default branch),
     /// .../releases/tag/TAG, .../tree/REF or .../commit/SHA. Resolved to an exact release file or
     /// commit, checked like a registry mod. NOT reviewed by the Horizon registry
@@ -789,7 +789,7 @@ enum Cmd {
         #[arg(long)]
         accept_eula: bool,
     },
-    /// Native mods (docs/native-mods.md): compile flat Rust mod projects against the instance's exact
+    /// Native mods (docs/modding/src/how-to/native-mods.md): compile flat Rust mod projects against the instance's exact
     /// Horizon source revision with the launcher's own Rust, as the version the instance then
     /// plays. Not sandboxed: the mods' code runs with your rights
     NativeBuild {
@@ -949,7 +949,7 @@ enum Cmd {
         #[command(subcommand)]
         action: Option<ModsCmd>,
     },
-    /// The portable Rust toolchain native mods compile with (docs/native-mods.md): the launcher's
+    /// The portable Rust toolchain native mods compile with (docs/modding/src/how-to/native-mods.md): the launcher's
     /// own, in its data folder, never installed on the system
     Rust {
         #[command(subcommand)]

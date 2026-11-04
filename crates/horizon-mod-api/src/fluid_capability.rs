@@ -13,8 +13,11 @@ use std::{fmt, marker::PhantomData, sync::Arc};
 /// `minecraft:potion_contents`). Water and lava have none.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FluidStack {
+    /// The fluid.
     pub fluid: Arc<str>,
+    /// The amount.
     pub amount: u32,
+    /// The components.
     pub components: Option<Box<StackData>>,
 }
 

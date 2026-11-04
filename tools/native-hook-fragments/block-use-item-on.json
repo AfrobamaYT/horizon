@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "use_item_on",
+      "doc": "`BlockBehaviour.useItemOn`: the block's own behaviour, with the\nheld item, on the server for each player. An answer replaces the\ntemplate's behaviour; `TryWithEmptyHand` tries `useWithoutItem` on\nthe main hand, and `Pass` goes on to the item's `useOn`.",
       "side": "server",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_use_item_on",

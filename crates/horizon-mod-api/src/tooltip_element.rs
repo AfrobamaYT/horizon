@@ -18,6 +18,8 @@ pub enum TooltipElement {
 /// An item's own `tooltip_component` part answers the one it starts with.
 #[derive(Clone)]
 pub struct TooltipImage {
+    /// The stack.
     pub stack: ItemStack,
+    /// The size.
     pub size: [f32; 2],
 }
