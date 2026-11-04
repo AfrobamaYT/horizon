@@ -80,14 +80,14 @@ use mod_api::{
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, UsePhase,
 };
+use mod_api::{
+    MobRef, NativeDespawn, NativeDifficulty, NativePermissionLevel, NativeSpawnCheck,
+    NativeSpawnReason, NativeSpawner, Recipe,
+};
 pub(crate) use mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
     NativeMinimap, NativeMod, NativeNoteInstrument, NativePanelEvent, NativePortalShape,
     NativeScreen, NativeScreenView, NativeStack, NativeZoom,
-};
-use mod_api::{
-    NativeDespawn, NativeDifficulty, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason,
-    NativeSpawner, Recipe,
 };
 use std::{
     collections::HashMap,
@@ -5940,16 +5940,18 @@ impl Game<'_> {
     }
 
     /// `Mob.checkDespawn` is about to run for mob `entity` (NeoForge's
-    /// `MobDespawnEvent`): set `result` to force or forbid the despawn.
+    /// `MobDespawnEvent`): set `result` to force or forbid the despawn. `kind`
+    /// and `pos` are the mob's, given as data because a mob taken out for its
+    /// tick does not resolve through its handle (a #29 follow-up).
     pub(super) fn native_mob_despawn(
         &self,
         dimension: &str,
+        mob: MobRef,
         kind: &str,
-        entity: u32,
         pos: [f64; 3],
         result: &mut NativeDespawn,
     ) {
-        mod_api::dispatch_mob_despawn(self, dimension, kind, entity, pos, result);
+        mod_api::dispatch_mob_despawn(self, dimension, mob, kind, pos, result);
     }
 
     /// `FinalizeSpawnEvent`: the mob of type `kind` at `pos` is about to be

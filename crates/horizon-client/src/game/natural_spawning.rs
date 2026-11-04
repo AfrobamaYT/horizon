@@ -1438,27 +1438,36 @@ mod tests {
         });
     }
 
-    /// Answers every `mob_despawn` event with the value in its cell.
-    struct Despawns(std::sync::Arc<std::sync::Mutex<mod_api::NativeDespawn>>);
+    /// Answers every `mob_despawn` event with the value in its cell and counts them.
+    struct Despawns(
+        std::sync::Arc<std::sync::Mutex<mod_api::NativeDespawn>>,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    );
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for Despawns {
         fn mob_despawn(&self, _: &dyn mod_api::Host, event: &mut mod_api::MobDespawnEvent<'_>) {
+            self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             *event.result = *self.0.lock().unwrap();
         }
     }
 
-    /// A zombie in peaceful is discarded by `Mob.checkDespawn`: `Default` leaves
-    /// that to vanilla, `Deny` keeps it, `Allow` discards it in normal too. The
-    /// listener's answer reaches the mob through the hook.
+    /// `MobDespawnEvent` wraps the whole of `Mob.checkDespawn`: `Default` and no
+    /// listener leave vanilla's checks and their `nextInt(800)` draw as they
+    /// are, `Deny` keeps a peaceful-mode zombie and draws nothing, `Allow`
+    /// discards it in normal and draws nothing. The mob's own random is the
+    /// real draw source (a `LegacyRandom`), compared with an untouched copy.
+    /// A mob in an unloaded chunk is never asked.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
     fn mob_despawn_answers_override_vanilla_and_default_passes_through() {
         use super::super::native_entity_refs::tests::with_game;
         use mod_api::NativeDespawn::{Allow, Default as Vanilla, Deny};
+        use std::sync::atomic::Ordering::Relaxed;
         let answer = std::sync::Arc::new(std::sync::Mutex::new(Vanilla));
+        let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let mods = vec![mod_api::ModEntry::new(
             "despawns",
-            Box::new(Despawns(answer.clone())),
+            Box::new(Despawns(answer.clone(), asked.clone())),
         )];
         mod_api::testing::with_mods(mods.into(), || {
             with_game(|game| {
@@ -1470,35 +1479,91 @@ mod tests {
                         super::super::creatures::SpawnSite::Plain,
                     )
                     .unwrap();
-                let at = [8.5, 64.0, 8.5];
-                let kept_with = |game: &mut super::Game<'_>, said, peaceful: bool| {
+                // Asks the hook, then runs `despawn_check` for an idle zombie 40
+                // blocks from the player. Returns whether it stayed and whether
+                // its random is where an untouched copy of it is.
+                let ask = |game: &mut super::Game<'_>, said, peaceful: bool| {
                     *answer.lock().unwrap() = said;
                     let mut mob = game.mobs.iter().find(|m| m.id == id).unwrap().clone();
+                    mob.ai.no_action_time = 601;
+                    let mut untouched = mob.random.clone();
+                    let handle = mod_api::MobRef::new(mod_api::EntityRef::new(
+                        game.native_lifecycle.epoch().unwrap(),
+                        id,
+                    ));
+                    let pos = [mob.position.x, mob.position.y, mob.position.z];
                     game.native_mob_despawn(
                         "minecraft:overworld",
+                        handle,
                         &mob.kind.id,
-                        id,
-                        at,
+                        pos,
                         &mut mob.despawn,
                     );
                     let mut world = game.mob_world_base(&[]);
                     world.difficulty.effective = if peaceful { 0.0 } else { 2.0 };
-                    horizon_client::mobs::ai::despawn_check(&mut mob, &world)
+                    let mut player = mob.position;
+                    player.x += 40.0;
+                    world.nearest_player = Some(player);
+                    let kept = horizon_client::mobs::ai::despawn_check(&mut mob, &world);
+                    let untouched_random =
+                        mob.random.next_int_bound(1 << 30) == untouched.next_int_bound(1 << 30);
+                    (kept, untouched_random)
                 };
-                assert!(
-                    !kept_with(game, Vanilla, true),
-                    "Default: vanilla discards it in peaceful"
+                assert!(!ask(game, Vanilla, true).0, "Default: peaceful discards it");
+                assert_eq!(
+                    ask(game, Deny, true),
+                    (true, true),
+                    "Deny keeps it, no draw"
                 );
-                assert!(kept_with(game, Deny, true), "Deny keeps it in peaceful");
-                assert!(
-                    !kept_with(game, Allow, false),
-                    "Allow discards it in normal"
+                assert_eq!(
+                    ask(game, Allow, false),
+                    (false, true),
+                    "Allow discards it, no draw"
                 );
                 assert!(
-                    kept_with(game, Vanilla, false),
-                    "Default: vanilla keeps it in normal"
+                    !ask(game, Vanilla, false).1,
+                    "Default rolls vanilla's nextInt(800)"
                 );
+                assert_eq!(asked.load(Relaxed), 4);
+                // No chunk is loaded here, so the mob loop skips the mob before
+                // the hook: an unloaded mob is never asked.
+                *answer.lock().unwrap() = Deny;
+                game.tick_creatures().unwrap();
+                assert_eq!(asked.load(Relaxed), 4, "an unloaded mob is not asked");
             });
+        });
+    }
+
+    /// With no mod listening, `Mob.despawn` stays `Default` and vanilla's checks
+    /// and draws run as before.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_despawn_with_no_listener_draws_as_vanilla() {
+        use super::super::native_entity_refs::tests::with_game;
+        with_game(|game| {
+            let id = game
+                .spawn_mob(
+                    "minecraft:zombie",
+                    [8.5, 64.0, 8.5],
+                    false,
+                    super::super::creatures::SpawnSite::Plain,
+                )
+                .unwrap();
+            let mut mob = game.mobs.iter().find(|m| m.id == id).unwrap().clone();
+            mob.ai.no_action_time = 601;
+            let mut untouched = mob.random.clone();
+            let mut world = game.mob_world_base(&[]);
+            world.difficulty.effective = 2.0;
+            let mut player = mob.position;
+            player.x += 40.0;
+            world.nearest_player = Some(player);
+            horizon_client::mobs::ai::despawn_check(&mut mob, &world);
+            assert_eq!(mob.despawn, mod_api::NativeDespawn::Default);
+            assert_ne!(
+                mob.random.next_int_bound(1 << 30),
+                untouched.next_int_bound(1 << 30),
+                "vanilla's nextInt(800) is drawn"
+            );
         });
     }
 }

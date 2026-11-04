@@ -232,6 +232,7 @@ mod tests {
         pub(super) struct NativePlayerFood;
         #[derive(Clone, Copy)]
         pub(super) struct LivingRef;
+        pub(super) struct MobRef;
         #[derive(Clone, Copy)]
         pub(super) struct EntityRef;
         #[derive(Clone, Copy)]
