@@ -106,7 +106,9 @@ pub fn main() -> horizon_client::Result<()> {
     let env = Env {
         player: None,
         player_entity_id: None,
-        side: horizon_client::menu::LogicalSide::Server,
+        loop_context: &crate::test_resources::loop_context(
+            horizon_world::native_load_context::LoopSide::Server,
+        ),
         items: &items,
         recipes: &recipes,
         brewing: &brewing,

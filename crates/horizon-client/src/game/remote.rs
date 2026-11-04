@@ -12368,7 +12368,8 @@ mod tests {
         let env = Env {
             player: None,
             player_entity_id: None,
-            side: mod_api::menu::LogicalSide::Client,
+            loop_context: &crate::game::test_server_load()
+                .loop_context(horizon_world::native_load_context::LoopSide::Client, []),
             items: &items,
             recipes: &recipes,
             brewing: &brewing,

@@ -199,6 +199,7 @@ mod tests {
         pub(super) struct NativeLifecycleContext;
         pub(super) struct RegistrationContext<'a>(pub &'a str);
         pub(super) struct DataLoadContext<'a>(pub &'a str);
+        pub(super) struct LoopContext<'a>(pub &'a str);
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
         #[derive(Clone, Copy)]
@@ -700,7 +701,8 @@ mod tests {
         fn menu_subscribed(&self) -> &'static [Option<HookId>] {
             &[]
         }
-        fn menu_slot_rules(&self, event: &mut MenuSlotRulesEvent<'_>) {
+        fn menu_slot_rules(&self, context: &LoopContext<'_>, event: &mut MenuSlotRulesEvent<'_>) {
+            assert_eq!(context.0, "loop");
             event.may_place = false;
             event.max_stack = self.id;
         }
@@ -857,6 +859,7 @@ mod tests {
         });
         let (mut may_place, mut max_stack) = (true, 64);
         dispatch_menu_slot_rules(
+            &LoopContext("loop"),
             "test:menu",
             0,
             &ItemStack::default(),
