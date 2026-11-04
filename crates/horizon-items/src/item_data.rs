@@ -4,9 +4,30 @@
 use crate::items::ItemStack;
 use horizon_world::nbt::{JavaString, Tag};
 
-/// One item attribute modifier, as `ItemAttributeModifiers.Entry` holds it:
-/// the attribute, the modifier's id, amount and operation, and the slot group.
-pub type ModifierRow = (String, String, f64, String, String);
+/// One item attribute modifier, as `ItemAttributeModifiers.Entry` holds it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModifierRow {
+    /// The attribute's id (`type` in the component): `minecraft:armor`.
+    pub attribute: String,
+    /// The modifier's id.
+    pub id: String,
+    pub amount: f64,
+    /// `add_value`, `add_multiplied_base` or `add_multiplied_total`.
+    pub operation: String,
+    /// The `EquipmentSlotGroup` it applies in: `mainhand`, `armor`, `any`...
+    pub slot: String,
+}
+impl ModifierRow {
+    pub fn new(attribute: &str, id: &str, amount: f64, operation: &str, slot: &str) -> Self {
+        Self {
+            attribute: attribute.to_owned(),
+            id: id.to_owned(),
+            amount,
+            operation: operation.to_owned(),
+            slot: slot.to_owned(),
+        }
+    }
+}
 
 /// `ItemAttributeModifiers.CODEC`: the entries of an `attribute_modifiers`
 /// list (`type`, `id`, `amount`, `operation`, `slot` defaulting to `any`).
@@ -19,13 +40,13 @@ pub fn modifier_rows(tag: &Tag) -> Vec<ModifierRow> {
     entries
         .iter()
         .filter_map(|e| {
-            Some((
-                text(e.get("type"))?,
-                text(e.get("id"))?,
-                float(e.get("amount"))?,
-                text(e.get("operation"))?,
-                text(e.get("slot")).unwrap_or_else(|| "any".to_owned()),
-            ))
+            Some(ModifierRow {
+                attribute: text(e.get("type"))?,
+                id: text(e.get("id"))?,
+                amount: float(e.get("amount"))?,
+                operation: text(e.get("operation"))?,
+                slot: text(e.get("slot")).unwrap_or_else(|| "any".to_owned()),
+            })
         })
         .collect()
 }
@@ -1180,12 +1201,12 @@ mod tests {
             }
             Tag::compound(e)
         };
-        let types: Vec<ModifierRow> = vec![(
-            "minecraft:attack_damage".into(),
-            "minecraft:base_attack_damage".into(),
+        let types = vec![ModifierRow::new(
+            "minecraft:attack_damage",
+            "minecraft:base_attack_damage",
             6.0,
-            "add_value".into(),
-            "mainhand".into(),
+            "add_value",
+            "mainhand",
         )];
         let mut stack = ItemStack::new("minecraft:diamond_sword", 1);
         assert_eq!(&*stack.attribute_modifiers_or(&types), &types[..]);
@@ -1202,20 +1223,8 @@ mod tests {
         assert_eq!(
             &*own,
             &[
-                (
-                    "minecraft:armor".to_owned(),
-                    "test:plate".to_owned(),
-                    2.0,
-                    "add_value".to_owned(),
-                    "chest".to_owned()
-                ),
-                (
-                    "minecraft:luck".to_owned(),
-                    "test:charm".to_owned(),
-                    1.0,
-                    "add_value".to_owned(),
-                    "any".to_owned()
-                ),
+                ModifierRow::new("minecraft:armor", "test:plate", 2.0, "add_value", "chest"),
+                ModifierRow::new("minecraft:luck", "test:charm", 1.0, "add_value", "any"),
             ][..]
         );
         let mut removed = ItemStack::new("minecraft:diamond_sword", 1);

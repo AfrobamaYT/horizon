@@ -377,7 +377,14 @@ fn apply_item(
     present: bool,
 ) -> Result<()> {
     let slot_name = horizon_items::equipment::SLOT_NAMES[slot];
-    for (attribute, id, amount, operation, group) in stack.attribute_modifiers(items).iter() {
+    for horizon_items::item_data::ModifierRow {
+        attribute,
+        id,
+        amount,
+        operation,
+        slot: group,
+    } in stack.attribute_modifiers(items).iter()
+    {
         if modifier_applies(group, slot_name) {
             set_modifier(map, attribute, id, *amount, operation, present)?;
         }

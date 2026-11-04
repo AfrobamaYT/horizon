@@ -88,14 +88,21 @@ fn attribute_color(attribute: &str, rises: bool) -> u32 {
 /// `ItemStack.addAttributeTooltips`: slot groups, colors and optional player
 /// attack damage/speed bases. Recipe search has no player context.
 pub fn attribute_lines(
-    modifiers: &[(String, String, f64, String, String)],
+    modifiers: &[horizon_items::item_data::ModifierRow],
     player_base: Option<[f64; 2]>,
     translate: &dyn Fn(&str) -> Option<String>,
 ) -> Vec<(String, u32)> {
     let mut lines = Vec::new();
     for group in SLOT_GROUPS {
         let mut first = true;
-        for (attribute, modifier, amount, operation, slot) in modifiers {
+        for horizon_items::item_data::ModifierRow {
+            attribute,
+            id: modifier,
+            amount,
+            operation,
+            slot,
+        } in modifiers
+        {
             if slot != group {
                 continue;
             }
@@ -1535,12 +1542,12 @@ mod tests {
             ("armor", "armor", 3.0, "head"),
         ]
         .map(|(attribute, id, amount, slot)| {
-            (
-                format!("minecraft:{attribute}"),
-                format!("minecraft:{id}"),
+            horizon_items::item_data::ModifierRow::new(
+                &format!("minecraft:{attribute}"),
+                &format!("minecraft:{id}"),
                 amount,
-                "add_value".to_owned(),
-                slot.to_owned(),
+                "add_value",
+                slot,
             )
         });
         let root = std::env::temp_dir().join(format!(

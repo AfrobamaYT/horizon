@@ -71,7 +71,14 @@ pub fn attribute_with(
     slot: Slot,
 ) -> f64 {
     let mut value = base;
-    for (kind, _, amount, operation, group) in modifiers {
+    for horizon_items::item_data::ModifierRow {
+        attribute: kind,
+        amount,
+        operation,
+        slot: group,
+        ..
+    } in modifiers
+    {
         if kind != attribute || !group_matches(group, slot) {
             continue;
         }
@@ -380,12 +387,12 @@ mod tests {
     #[test]
     fn attribute_modifiers_apply_by_slot_group_and_operation() {
         let entry = |attribute: &str, amount: f64, operation: &str, group: &str| {
-            (
-                attribute.to_owned(),
-                "minecraft:test".to_owned(),
+            horizon_items::item_data::ModifierRow::new(
+                attribute,
+                "minecraft:test",
                 amount,
-                operation.to_owned(),
-                group.to_owned(),
+                operation,
+                group,
             )
         };
         let modifiers = [

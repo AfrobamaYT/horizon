@@ -7,9 +7,10 @@ use super::commands::Target;
 use horizon_client::items::ItemStack;
 use horizon_client::{
     effects,
+    items::Items,
     lan::attributes::{add_modifier, generic_syncable, instance, operation_named},
     mobs::{
-        Mob, Species,
+        GearKnockback, Mob, Species,
         finalize::{self, Attr, Op},
     },
 };
@@ -33,56 +34,81 @@ fn generic_attributes_into(
     }
 }
 
-impl Game<'_> {
-    /// `getAttributeValue(KNOCKBACK_RESISTANCE)` of a mob: its own value plus
-    /// the modifiers of the items it wears or holds in matching slots.
-    pub(super) fn mob_knockback_resistance(&self, m: &Mob) -> f64 {
-        let e = &m.extra;
-        use horizon_items::equipment::{CHEST, FEET, HEAD, LEGS, MAINHAND, OFFHAND};
-        let slots = [
-            ("mainhand", e.slot_stack(MAINHAND)),
-            ("offhand", e.slot_stack(OFFHAND)),
-            ("feet", e.slot_stack(FEET)),
-            ("legs", e.slot_stack(LEGS)),
-            ("chest", e.slot_stack(CHEST)),
-            ("head", e.slot_stack(HEAD)),
-        ];
-        let mut extra = Vec::new();
-        for (slot, stack) in slots {
-            let Some(stack) = stack else {
-                continue;
-            };
-            for (attribute, _, amount, op, group) in stack.attribute_modifiers(self.items()).iter()
-            {
-                if attribute == "minecraft:knockback_resistance" && slot_in_group(group, slot) {
-                    let op = match operation_named(op) {
-                        1 => Op::AddMultipliedBase,
-                        2 => Op::AddMultipliedTotal,
-                        _ => Op::AddValue,
-                    };
-                    extra.push((*amount, op));
-                }
+/// The hand and armor slots, mainhand to head, with their names.
+const GEAR: [(usize, &str); 6] = {
+    use horizon_items::equipment::{CHEST, FEET, HEAD, LEGS, MAINHAND, OFFHAND};
+    [
+        (MAINHAND, "mainhand"),
+        (OFFHAND, "offhand"),
+        (FEET, "feet"),
+        (LEGS, "legs"),
+        (CHEST, "chest"),
+        (HEAD, "head"),
+    ]
+};
+
+/// The knockback resistance modifiers of the stacks `worn` in `GEAR`'s
+/// slots, where their slot groups cover the slot.
+fn gear_knockback(items: &Items, worn: &[Option<&ItemStack>; 6]) -> Vec<(f64, Op)> {
+    let mut modifiers = Vec::new();
+    for ((_, slot), stack) in GEAR.iter().zip(worn) {
+        let Some(stack) = stack else {
+            continue;
+        };
+        for row in stack.attribute_modifiers(items).iter() {
+            if row.attribute == "minecraft:knockback_resistance" && slot_in_group(&row.slot, slot) {
+                let op = match operation_named(&row.operation) {
+                    1 => Op::AddMultipliedBase,
+                    2 => Op::AddMultipliedTotal,
+                    _ => Op::AddValue,
+                };
+                modifiers.push((row.amount, op));
             }
         }
-        finalize::value_with(m, Attr::KnockbackResistance, &extra)
     }
+    modifiers
+}
 
+/// `getAttributeValue(KNOCKBACK_RESISTANCE)` of a mob: its own value plus the
+/// modifiers of the items it wears or holds, as the tick's
+/// `refresh_gear_knockback_resistance` read them.
+pub(super) fn mob_knockback_resistance(m: &Mob) -> f64 {
+    let gear = m.extra.gear_knockback.as_deref();
+    finalize::value_with(
+        m,
+        Attr::KnockbackResistance,
+        gear.map_or(&[], |g| &g.modifiers),
+    )
+}
+
+impl Game<'_> {
     /// Each mob's `gear_knockback_resistance`, for the pushes that read the
-    /// mob (`Mob::knockback`, Punch, the mace's smash): worked out for the
-    /// mobs that wear or hold something, since the mob does not know items.
+    /// mob alone. A worn or held stack is read again only when it changed
+    /// (`ItemStack.matches`, as `collectEquipmentChanges` asks), so a tick
+    /// with the same gear reads no item data and allocates nothing.
     pub(super) fn refresh_gear_knockback_resistance(&mut self) {
-        let values: Vec<Option<f64>> = self
-            .mobs
-            .iter()
-            .map(|m| {
-                let e = &m.extra;
-                (horizon_items::equipment::MAINHAND..=horizon_items::equipment::HEAD)
-                    .any(|slot| e.slot_stack(slot).is_some())
-                    .then(|| self.mob_knockback_resistance(m))
-            })
-            .collect();
-        for (m, value) in self.mobs.iter_mut().zip(values) {
-            m.gear_knockback_resistance = value;
+        let items = self.res.items();
+        for m in &mut self.mobs {
+            let worn = GEAR.map(|(slot, _)| m.extra.slot_stack(slot));
+            if worn.iter().all(Option::is_none) {
+                m.extra.gear_knockback = None;
+                m.gear_knockback_resistance = None;
+                continue;
+            }
+            let same = m.extra.gear_knockback.as_ref().is_some_and(|g| {
+                g.worn.iter().zip(&worn).all(|pair| match pair {
+                    (Some(was), Some(now)) => now.matches(was),
+                    (was, now) => was.is_none() && now.is_none(),
+                })
+            });
+            if !same {
+                let gear = GearKnockback {
+                    modifiers: gear_knockback(items, &worn),
+                    worn: worn.map(|stack| stack.cloned()),
+                };
+                m.extra.gear_knockback = Some(Box::new(gear));
+            }
+            m.gear_knockback_resistance = Some(mob_knockback_resistance(m));
         }
     }
 
@@ -118,7 +144,13 @@ impl Game<'_> {
             let Some(stack) = stack else {
                 continue;
             };
-            for (attribute, id, amount, op, group) in stack.attribute_modifiers(self.items()).iter()
+            for horizon_items::item_data::ModifierRow {
+                attribute,
+                id,
+                amount,
+                operation: op,
+                slot: group,
+            } in stack.attribute_modifiers(self.items()).iter()
             {
                 if !slot_in_group(group, slot) {
                     continue;

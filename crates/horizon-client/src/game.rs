@@ -13208,8 +13208,13 @@ impl Game<'_> {
             let Some(stack) = stack else {
                 continue;
             };
-            for (attribute, id, amount, op, group) in
-                stack.attribute_modifiers(world_items!(self)).iter()
+            for horizon_items::item_data::ModifierRow {
+                attribute,
+                id,
+                amount,
+                operation: op,
+                slot: group,
+            } in stack.attribute_modifiers(world_items!(self)).iter()
             {
                 // The attack code still reads the held item's attack damage and
                 // speed directly; the map copy is what `/attribute` reports.
