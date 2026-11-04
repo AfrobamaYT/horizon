@@ -326,6 +326,9 @@ mod tests {
                 pub struct FovPlayer;
             }
             pub struct NativeClientInfo;
+            pub struct CustomSpawners;
+            #[derive(Clone)]
+            pub struct SpawnerKey;
             #[derive(Clone, Copy)]
             pub enum KeyAction {}
             pub struct NativeArmorHurt;

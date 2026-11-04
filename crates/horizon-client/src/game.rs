@@ -82,6 +82,7 @@ mod campfire;
 mod campfire_douse;
 mod cartography;
 mod cat_spawner;
+mod custom_spawners;
 mod chat;
 mod chat_filter;
 mod chiseled_bookshelf;
@@ -13200,6 +13201,7 @@ impl Game<'_> {
         self.player_spawn = None;
         self.creatures.reset_trader();
         self.creatures.cat_tick = 0;
+        self.creatures.custom_spawners.clear();
         self.portals = Default::default();
         self.experience = Experience {
             level: self.level.xp_level,

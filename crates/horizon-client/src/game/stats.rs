@@ -376,6 +376,7 @@ impl Game<'_> {
             || !rules.bool("spawn_monsters")
             || !rules.bool("spawn_phantoms")
             || self.dim != Dim::Overworld
+            || !self.has_custom_spawner(mod_api::SpawnerKind::Phantom)
         {
             return;
         }
