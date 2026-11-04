@@ -152,10 +152,12 @@ mod tests {
     use horizon_client::items::ItemStack;
     use horizon_client::mod_api::{self, BonemealEvent, BonemealSource, Flow, Hooks, HostSide};
     use horizon_core::{geometry::Direction, position::BlockPos};
-    use std::sync::Mutex;
+    use std::sync::{Mutex, MutexGuard, PoisonError};
 
     /// What each `bonemeal` listener heard: the player, the target check
-    /// and the source.
+    /// and the source. The test that reads it runs in a process of its own,
+    /// so no other test's events cross into it; a failed assertion doesn't
+    /// hide the next one behind poison.
     static HEARD: Mutex<Vec<(Option<u128>, bool, BonemealSource)>> = Mutex::new(Vec::new());
 
     /// Sets the stack's count to `count`, then cancels with `successful`.
@@ -166,10 +168,7 @@ mod tests {
     #[mod_api::__subscriptions]
     impl Hooks for Meal {
         fn bonemeal(&self, _: HostSide, event: &mut BonemealEvent<'_>) -> Flow {
-            HEARD
-                .lock()
-                .unwrap()
-                .push((event.player, event.valid_bonemeal_target, event.source));
+            heard().push((event.player, event.valid_bonemeal_target, event.source));
             if let Some(count) = self.count {
                 event.stack.count = count;
             }
@@ -181,12 +180,16 @@ mod tests {
         }
     }
 
+    fn heard() -> MutexGuard<'static, Vec<(Option<u128>, bool, BonemealSource)>> {
+        HEARD.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     const CROP: BlockPos = BlockPos { x: 0, y: 64, z: 0 };
 
     /// A dispenser at (0, 64, 1) facing young wheat, with `meal` listening:
     /// what the slot holds after one dispense, and the wheat's age.
     fn dispense(meal: Meal, target: &str) -> (Option<ItemStack>, i32) {
-        HEARD.lock().unwrap().clear();
+        heard().clear();
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("meal", Box::new(meal))].into();
         let mut out = None;
         mod_api::testing::with_mods(mods, || {
@@ -216,9 +219,19 @@ mod tests {
         out.unwrap()
     }
 
+    /// A successful cancel keeps the meal and grows nothing; an unsuccessful
+    /// one fails; an untouched use grows the stack the mod edited. One test,
+    /// run in order in a fresh process, since every case reads `HEARD`.
     #[test]
     #[ignore = "needs prepared resources and an isolated process for native mods"]
-    fn a_successful_cancel_keeps_the_meal_and_grows_nothing() {
+    fn a_dispensers_bonemeal_follows_the_cancel_and_the_edited_stack() {
+        if super::super::native_entity_refs::tests::run_fresh_cases(
+            "game::growth::tests::a_dispensers_bonemeal_follows_the_cancel_and_the_edited_stack",
+            "HORIZON_BONEMEAL_DISPENSE_CHILD",
+            &["dispense"],
+        ) {
+            return;
+        }
         let (left, age) = dispense(
             Meal {
                 count: None,
@@ -229,15 +242,8 @@ mod tests {
         assert_eq!(left.map(|s| s.count), Some(3));
         assert_eq!(age, 0);
         // A dispenser has no player; the young wheat is a target.
-        assert_eq!(
-            *HEARD.lock().unwrap(),
-            [(None, true, BonemealSource::Interaction)]
-        );
-    }
+        assert_eq!(*heard(), [(None, true, BonemealSource::Interaction)]);
 
-    #[test]
-    #[ignore = "needs prepared resources and an isolated process for native mods"]
-    fn an_unsuccessful_cancel_fails_and_an_untouched_use_grows_the_edited_stack() {
         let (left, age) = dispense(
             Meal {
                 count: None,
@@ -265,10 +271,7 @@ mod tests {
             "minecraft:stone",
         );
         assert_eq!(left.map(|s| s.count), Some(3));
-        assert_eq!(
-            *HEARD.lock().unwrap(),
-            [(None, false, BonemealSource::Interaction)]
-        );
+        assert_eq!(*heard(), [(None, false, BonemealSource::Interaction)]);
     }
 
     #[test]

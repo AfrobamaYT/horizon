@@ -3,7 +3,10 @@
 //! is mid-tick, preserving damage callbacks and the following timer reset.
 use crate::{
     Result,
-    health::{Attributes, Environment, HealthEvent, HealthResources, HealthRules, State, Updates},
+    health::{
+        Attributes, DamageLevel, Environment, HealthEvent, HealthResources, HealthRules, State,
+        Updates,
+    },
     motion::{MotionEvent, PlayerMotion},
 };
 use horizon_world::{
@@ -66,12 +69,19 @@ impl PlayerMotion {
         }
         Ok(())
     }
-    pub fn food_tick(&mut self, resources: &HealthResources, rules: HealthRules) -> Result<()> {
+    /// `FoodData.tick` in `level`, where starvation hurts.
+    pub fn food_tick(
+        &mut self,
+        level: &mut DamageLevel<'_>,
+        resources: &HealthResources,
+        rules: HealthRules,
+    ) -> Result<()> {
         if self.client_side {
             return Ok(());
         }
         let h = &mut self.health;
         let mut world = TickWorld {
+            level: level.reborrow(),
             entity: self.entity_id,
             resources,
             rules,
@@ -91,6 +101,7 @@ impl PlayerMotion {
     }
 }
 struct TickWorld<'a> {
+    level: DamageLevel<'a>,
     entity: i32,
     resources: &'a HealthResources,
     rules: HealthRules,
@@ -165,6 +176,7 @@ impl FoodWorld for TickWorld<'_> {
         self.events
             .push(MotionEvent::Health(HealthEvent::StarvationDamage(amount)));
         let mut environment = Environment {
+            level: self.level.reborrow(),
             entity: self.entity,
             causing: 0,
             invulnerable: false,

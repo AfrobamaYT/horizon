@@ -4,12 +4,9 @@ use std::{collections::BTreeMap, io::Read, path::Path};
 
 pub const MIXINS_REV: &str = "e8cd0aa38cffef49cb2e088ef716baa107148c02";
 
-/// Whether an archive contains a root Cargo project, irrespective of install folder.
+/// Whether a valid package is native, irrespective of its install folder.
 pub fn holds(path: &Path) -> bool {
-    std::fs::File::open(path)
-        .ok()
-        .and_then(|f| zip::ZipArchive::new(f).ok())
-        .is_some_and(|zip| zip.index_for_name("Cargo.toml").is_some())
+    crate::Package::read(path).is_ok_and(|package| package.is_native())
 }
 
 /// A flat native mod and its checked, archive-relative files.
@@ -23,7 +20,7 @@ impl Bundle {
         let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
         let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
         let package = crate::Package::read_zip(&mut zip)?;
-        if package.manifest.native.is_none() {
+        if !package.is_native() {
             return Err("not a native package".into());
         }
         let mut files = BTreeMap::new();
@@ -163,25 +160,42 @@ mod tests {
     }
 
     #[test]
-    fn classification_uses_root_cargo_not_install_folder() {
+    fn classification_uses_the_validated_package_not_install_folder() {
         let root = std::env::temp_dir().join(format!("native-kind-{}", std::process::id()));
         for (folder, native) in [("content", true), ("native", false)] {
             let dir = root.join(folder);
             std::fs::create_dir_all(&dir).unwrap();
             let path = dir.join("test.hmod");
-            let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
-            zip.start_file(
-                if native {
-                    "Cargo.toml"
-                } else {
-                    crate::manifest::MANIFEST
-                },
-                zip::write::SimpleFileOptions::default(),
-            )
-            .unwrap();
-            zip.write_all(b"contents").unwrap();
-            zip.finish().unwrap();
+            let text = manifest();
+            let (text, files) = if native {
+                (
+                    text.as_str(),
+                    vec![
+                        (
+                            "Cargo.toml",
+                            b"[package]\nname='example'\nversion='1'".as_slice(),
+                        ),
+                        ("src/lib.rs", b"fn hook() {}".as_slice()),
+                    ],
+                )
+            } else {
+                (text.split("[native]").next().unwrap(), vec![])
+            };
+            std::fs::write(&path, crate::Package::write_files(text, &files).unwrap()).unwrap();
             assert_eq!(holds(&path), native);
+            if native {
+                let directory = dir.join("source");
+                zip::ZipArchive::new(std::fs::File::open(&path).unwrap())
+                    .unwrap()
+                    .extract(&directory)
+                    .unwrap();
+                assert!(holds(&directory));
+                std::fs::remove_file(directory.join(crate::manifest::MANIFEST)).unwrap();
+                assert!(
+                    !holds(&directory),
+                    "Cargo alone is not a valid native package"
+                );
+            }
         }
         std::fs::remove_dir_all(root).unwrap();
     }

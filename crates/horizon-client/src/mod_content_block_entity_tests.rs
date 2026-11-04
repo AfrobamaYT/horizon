@@ -99,6 +99,15 @@ fn code_types_join_package_and_code_blocks_before_planning() {
 fn validates_declared_type_ids_and_exclusive_known_mod_block_membership() {
     let base = base("validation");
     let mut mods = [declared_mod()];
+    mods[0].content.block_entity_types = vec![kind("minecraft:custom", &["test:a"])];
+    let error = Plan::new(&base, &mods).err().unwrap();
+    assert_eq!(
+        error
+            .downcast_ref::<ReservedBlockEntityNamespace>()
+            .unwrap()
+            .kind,
+        "minecraft:custom"
+    );
     for (types, error) in [
         (
             vec![
@@ -109,7 +118,7 @@ fn validates_declared_type_ids_and_exclusive_known_mod_block_membership() {
         ),
         (
             vec![kind("minecraft:sign", &["test:a"])],
-            "block entity type minecraft:sign is already declared",
+            "block entity type minecraft:sign cannot use the minecraft namespace",
         ),
         (
             vec![kind("test:machine", &["test:a", "test:a"])],

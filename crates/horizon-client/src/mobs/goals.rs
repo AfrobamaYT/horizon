@@ -4,7 +4,7 @@ use super::{Mob, MobEvent, MobWorld, Seen, Species, Who, world::TargetInfo};
 use horizon_core::{
     geometry::{Aabb, Vec3},
     jmath,
-    random::{LegacyRandom, RandomSource},
+    random::RandomSource,
 };
 use std::sync::Arc;
 
@@ -14,11 +14,11 @@ pub const JUMP: u8 = 4;
 pub const TARGET: u8 = 8;
 
 /// What goals may read and emit during a tick.
-pub struct Cx<'a, 'w> {
+pub struct Cx<'a, 'w, 'l> {
     pub w: &'a MobWorld<'w>,
-    /// The level's random (`level.getRandom()`), for the draws vanilla's
-    /// behaviours make from it rather than from the mob's own.
-    pub lr: &'a mut LegacyRandom,
+    /// The level: its random (`level.getRandom()`), for the draws vanilla's
+    /// behaviours make from it rather than from the mob's own, and the damage hooks.
+    pub level: &'a mut crate::health::DamageLevel<'l>,
     pub events: &'a mut Vec<MobEvent>,
 }
 pub trait Goal: std::fmt::Debug {
@@ -707,6 +707,12 @@ impl Mob {
                 | Species::Nautilus
                 | Species::ZombieNautilus
         )
+    }
+    /// A `TamableAnimal` or an `AbstractHorse` (camels and llamas too): the
+    /// mobs `isTame` (`isTamed`) and an owner belong to. An allay's liked
+    /// player is kept as an owner but is not one.
+    pub fn is_tamable(&self) -> bool {
+        self.is_tamable_animal() || super::equine::is_equine(self.species())
     }
     /// `IronGolem.isPlayerCreated`: a golem a player built, which
     /// `IronGolem.canAttack` never lets attack a player.
@@ -2728,7 +2734,7 @@ impl Goal for BreathAir {
         );
         m.move_relative(0.02, input);
         let mut ev = Vec::new();
-        m.do_move(cx.w, &mut ev);
+        m.do_move(cx.w, cx.level, &mut ev);
         cx.events.extend(ev);
     }
 }
@@ -2891,10 +2897,7 @@ impl MoveToBlock {
 mod breeding_variant_tests {
     use super::*;
     use crate::mobs::{BreedExperience, world::with_test_world};
-    use horizon_core::{
-        geometry::Vec3,
-        random::{LegacyRandom, RandomSource},
-    };
+    use horizon_core::{geometry::Vec3, random::RandomSource};
     use std::sync::Arc;
 
     #[test]
@@ -2914,7 +2917,7 @@ mod breeding_variant_tests {
                 true
             }
             fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-                m.random = LegacyRandom::new(1);
+                m.random = horizon_core::random::LegacyRandom::new(1);
                 self.0.tick(m, cx);
             }
         }
@@ -2949,7 +2952,11 @@ mod breeding_variant_tests {
                     disabled: 0,
                 };
                 let mut events = Vec::new();
-                parent.tick(&w, &mut LegacyRandom::new(1), &mut events);
+                parent.tick(
+                    &w,
+                    &mut crate::health::TestLevel::new(1).level(),
+                    &mut events,
+                );
                 assert!(events.iter().any(|event| matches!(
                     event,
                     MobEvent::Breed {
@@ -2987,17 +2994,18 @@ mod breeding_variant_tests {
                         ..world.clone()
                     };
                     let mut parent = Mob::new(1, kind.clone(), Vec3::new(0.0, 64.0, 0.0), 0.0);
-                    parent.random = LegacyRandom::new(0);
+                    parent.random = horizon_core::random::LegacyRandom::new(0);
                     let mut goal = Breed {
                         speed: 1.0,
                         partner: Some(2),
                         love_time: reduced(60) - 1,
                     };
                     let mut events = Vec::new();
-                    let mut level_random = LegacyRandom::new(1);
+                    let mut test_level = crate::health::TestLevel::new(1);
+                    let level = &mut test_level.level();
                     let mut cx = Cx {
                         w: &world,
-                        lr: &mut level_random,
+                        level,
                         events: &mut events,
                     };
                     goal.tick(&mut parent, &mut cx);
@@ -3079,10 +3087,11 @@ mod eat_block_tests {
         with_built_test_world_rules(&[], griefing, build, |w, types| {
             let kind = Arc::new(types.types["minecraft:sheep"].clone());
             let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
-            let mut random = LegacyRandom::new(0);
+            let mut test_level = crate::health::TestLevel::new(0);
+            let level = &mut test_level.level();
             let mut events = Vec::new();
             for _ in 0..6000 {
-                crate::mobs::ai::tick(&mut m, w, &mut random, &mut events);
+                crate::mobs::ai::tick(&mut m, w, level, &mut events);
             }
             out = Some(events);
         });
@@ -3176,6 +3185,21 @@ mod built_by_player_tests {
         zombie.extra.player_created = true;
         assert!(!zombie.built_by_player());
     }
+
+    #[test]
+    fn pets_and_horses_are_tamable_but_an_allay_is_not() {
+        for s in [
+            Species::Wolf,
+            Species::Parrot,
+            Species::Horse,
+            Species::Camel,
+        ] {
+            assert!(mob(s).is_tamable(), "{s:?}");
+        }
+        for s in [Species::Allay, Species::Fox, Species::Zombie] {
+            assert!(!mob(s).is_tamable(), "{s:?}");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3230,12 +3254,12 @@ mod remove_all_tests {
                 };
                 goals.add(0, Float);
                 goals.add(1, Walk);
-                let mut lr = LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
                 let mut events = Vec::new();
                 {
                     let mut cx = Cx {
                         w,
-                        lr: &mut lr,
+                        level: &mut test_level.level(),
                         events: &mut events,
                     };
                     goals.tick(&mut m, &mut cx);
@@ -3281,11 +3305,12 @@ mod peaceful_targets_tests {
             let mut wolf = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
             wolf.ai.last_hurt_by = Some(Who::Player);
             wolf.ai.last_hurt_by_time = 5;
-            let mut random = LegacyRandom::new(0);
+            let mut test_level = crate::health::TestLevel::new(0);
+            let level = &mut test_level.level();
             let mut events = Vec::new();
             let mut cx = Cx {
                 w: &w,
-                lr: &mut random,
+                level,
                 events: &mut events,
             };
             assert!(
@@ -3298,7 +3323,7 @@ mod peaceful_targets_tests {
             peaceful.difficulty = crate::mobs::spawning::LocalDifficulty::new(0, 18000, 0, 0.0);
             let mut cx = Cx {
                 w: &peaceful,
-                lr: &mut random,
+                level,
                 events: &mut events,
             };
             assert!(

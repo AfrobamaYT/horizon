@@ -15,6 +15,7 @@ use super::{
     path::{Path, PathNode},
     sniffer,
 };
+use crate::health::DamageLevel;
 use horizon_core::{
     geometry::Vec3,
     random::{LegacyRandom, RandomSource},
@@ -484,15 +485,15 @@ pub fn lock_gaze(m: &mut Mob, partner: u32) {
 }
 
 /// What behaviours read and emit during a brain tick.
-pub struct Bx<'a, 'w> {
+pub struct Bx<'a, 'w, 'l> {
     pub w: &'a MobWorld<'w>,
-    pub lr: &'a mut LegacyRandom,
+    pub level: &'a mut DamageLevel<'l>,
     pub events: &'a mut Vec<MobEvent>,
     pub now: i64,
 }
 
 /// `Brain.tick` then `updateActivity` (from `customServerAiStep`).
-pub fn tick(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom, events: &mut Vec<MobEvent>) {
+pub fn tick(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut Vec<MobEvent>) {
     if brain(m).is_none() {
         let seed = i64::from(m.id);
         init(m, seed);
@@ -506,7 +507,7 @@ pub fn tick(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom, events: &mut Vec<M
     let mut list = std::mem::take(&mut brain_mut(m).list);
     let mut cx = Bx {
         w,
-        lr,
+        level,
         events,
         now: w.game_time,
     };
@@ -1060,7 +1061,7 @@ impl B {
                 {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 mem(m).walk_target.clear();
                 mem(m).look_target.clear();
                 m.add_effect("minecraft:regeneration", 200, 0);
@@ -1070,7 +1071,7 @@ impl B {
                 if !swim_condition(m) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::AnimalPanic { t, .. } => {
@@ -1078,7 +1079,7 @@ impl B {
                 if !(mm.hurt_by.get() == Some(&true) || mm.is_panicking.present()) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 if brain_mut(m).kind == Kind::Sniffer {
                     reset_sniffing(m, cx);
                 }
@@ -1107,7 +1108,7 @@ impl B {
                 let reached = reached(m, cx.w, &walk);
                 if !reached && compute_path(m, cx, &walk, path, speed) {
                     *last_target = walk.target.block(cx.w);
-                    t.begin(cx.lr, cx.now);
+                    t.begin(cx.level.random(), cx.now);
                     mem(m).path.set_opt(path.clone());
                     m.nav_move_to_path(cx.w, path.clone(), f64::from(*speed));
                     return true;
@@ -1123,21 +1124,21 @@ impl B {
                 if !mem(m).temptation_cooldown_ticks.present() {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::CountDownGaze(t) => {
                 if !mem(m).gaze_cooldown_ticks.present() {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::CountDownTransport(t) => {
                 if !mem(m).transport_items_cooldown_ticks.present() {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::Transport(x) => x.try_start(m, cx),
@@ -1155,7 +1156,7 @@ impl B {
                 let Some(partner) = breed_partner(m, cx.w) else {
                     return false;
                 };
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 if brain_mut(m).kind == Kind::Sniffer {
                     reset_sniffing(m, cx);
                 }
@@ -1184,7 +1185,7 @@ impl B {
                 {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 if brain_mut(m).kind == Kind::Sniffer {
                     reset_sniffing(m, cx);
                 }
@@ -1194,14 +1195,14 @@ impl B {
                 if !mem(m).look_target.present() {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::FeelingHappy(t) => {
                 if !mem(m).sniffer_happy.present() {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 transition(m, cx, sniffer::FEELING_HAPPY);
                 true
             }
@@ -1217,7 +1218,7 @@ impl B {
                 if !can_sniff(m) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 transition(m, cx, sniffer::DIGGING);
                 true
             }
@@ -1230,7 +1231,7 @@ impl B {
                 {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 transition(m, cx, sniffer::RISING);
                 true
             }
@@ -1245,7 +1246,7 @@ impl B {
                 if !can_sniff(m) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 transition(m, cx, sniffer::SEARCHING);
                 true
             }
@@ -1262,7 +1263,7 @@ impl B {
                 if is_tempted(m) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 transition(m, cx, sniffer::SCENTING);
                 true
             }
@@ -1277,12 +1278,12 @@ impl B {
                 if m.is_baby() || !can_sniff(m) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 transition(m, cx, sniffer::SNIFFING);
                 true
             }
             B::DoNothing(t) => {
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::AxolotlAction { .. }
@@ -1377,9 +1378,9 @@ impl B {
                 // Ticker.tickDownAndCheck (UniformInt 40..80 on the level random).
                 if *ticks == 0 {
                     *ticks = if matches!(m.species(), Species::Axolotl | Species::Tadpole) {
-                        30 + cx.lr.next_int_bound(31).unwrap_or(0) - 1
+                        30 + cx.level.random().next_int_bound(31).unwrap_or(0) - 1
                     } else {
-                        40 + cx.lr.next_int_bound(41).unwrap_or(0) - 1
+                        40 + cx.level.random().next_int_bound(41).unwrap_or(0) - 1
                     };
                     return false;
                 }
@@ -1743,7 +1744,7 @@ impl B {
                     && !reached(m, cx.w, &walk)
                     && m.ai.nav.stuck
                 {
-                    *cooldown = cx.lr.next_int_bound(40).unwrap_or(0);
+                    *cooldown = cx.level.random().next_int_bound(40).unwrap_or(0);
                 }
                 m.nav_stop();
                 let mm = mem(m);
@@ -2464,7 +2465,7 @@ fn axolotl_action(m: &mut Mob, cx: &mut Bx, action: AxolotlAction, until: &mut i
                 target,
                 &mut super::goals::Cx {
                     w: cx.w,
-                    lr: cx.lr,
+                    level: cx.level,
                     events: cx.events,
                 },
             );

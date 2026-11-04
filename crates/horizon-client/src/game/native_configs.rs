@@ -10,8 +10,9 @@
 //! (`native_config_reloading`). A server's configs are dropped when it stops
 //! (`native_config_unloading`).
 use super::Game;
+use horizon_client::mod_api::ConfigPath;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 /// How often the files' modification times are read.
@@ -78,16 +79,16 @@ impl NativeConfig {
 pub struct NativeConfigFile {
     pub mod_id: String,
     pub kind: NativeConfigKind,
-    /// The registered name, relative to `config/`.
+    /// The registered name, relative to `config/` (or to a world's
+    /// `serverconfig/`, where that copy was read).
     pub file: String,
-    /// Where it was read: in `config/`, or a world's `serverconfig/`.
-    pub path: PathBuf,
     pub text: String,
 }
 
-/// A loaded config and what its file looked like when read.
+/// A loaded config, where it was read and what its file looked like then.
 struct Tracked {
     config: NativeConfigFile,
+    path: PathBuf,
     modified: Option<SystemTime>,
 }
 
@@ -98,13 +99,6 @@ pub(super) struct NativeConfigs {
     started: bool,
     files: Vec<Tracked>,
     next_check: Option<Instant>,
-}
-
-/// Whether `file` stays inside the folder it is joined to.
-fn inside(file: &str) -> bool {
-    let path = Path::new(file);
-    path.components().next().is_some()
-        && path.components().all(|c| matches!(c, Component::Normal(_)))
 }
 
 /// The file `config` is read from: the world's `serverconfig/` copy of a
@@ -138,8 +132,9 @@ fn modified(path: &Path) -> Option<SystemTime> {
 }
 
 impl NativeConfigs {
-    /// Reads `configs` of `kinds` (a duplicate path or a file outside
-    /// `config/` is skipped) and answers each loaded file.
+    /// Reads `configs` of `kinds` (a duplicate path, or a file outside the
+    /// mod's own in `config/` as `Host::config_files` reads them, is skipped)
+    /// and answers each loaded file.
     fn load(
         &mut self,
         configs: Vec<NativeConfig>,
@@ -150,9 +145,9 @@ impl NativeConfigs {
         self.started = true;
         let mut loaded = Vec::new();
         for config in configs.into_iter().filter(|c| kinds.contains(&c.kind)) {
-            if !inside(&config.file) {
+            if !ConfigPath::new(&config.file).is_ok_and(|file| file.owned_by(&config.mod_id)) {
                 log::warn!(
-                    "Horizon: mod {} config {:?} is not a file in config/",
+                    "Horizon: mod {} config {:?} is not one of its files in config/",
                     config.mod_id,
                     config.file
                 );
@@ -165,7 +160,7 @@ impl NativeConfigs {
                     continue;
                 }
             };
-            if self.files.iter().any(|t| t.config.path == path) {
+            if self.files.iter().any(|t| t.path == path) {
                 log::warn!(
                     "Horizon: mod {} config {} is registered twice",
                     config.mod_id,
@@ -189,12 +184,12 @@ impl NativeConfigs {
                 mod_id: config.mod_id,
                 kind: config.kind,
                 file: config.file,
-                path,
                 text,
             };
             loaded.push(file.clone());
             self.files.push(Tracked {
                 config: file,
+                path,
                 modified,
             });
         }
@@ -206,11 +201,11 @@ impl NativeConfigs {
     fn changed(&mut self) -> Vec<NativeConfigFile> {
         let mut changed = Vec::new();
         for tracked in &mut self.files {
-            let now = modified(&tracked.config.path);
+            let now = modified(&tracked.path);
             if now.is_none() || now == tracked.modified {
                 continue;
             }
-            let Ok(text) = fs::read_to_string(&tracked.config.path) else {
+            let Ok(text) = fs::read_to_string(&tracked.path) else {
                 continue;
             };
             tracked.modified = now;
@@ -396,10 +391,12 @@ mod tests {
             &config,
             Some(&world),
         );
-        let got: Vec<_> = loaded
+        let got: Vec<_> = configs
+            .files
             .iter()
-            .map(|f| (f.path.clone(), f.text.as_str()))
+            .map(|t| (t.path.clone(), t.config.text.as_str()))
             .collect();
+        assert_eq!(loaded.len(), 2);
         assert_eq!(
             got,
             [
@@ -414,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn a_file_outside_config_or_registered_twice_is_skipped() {
+    fn a_file_not_the_mods_own_or_registered_twice_is_skipped() {
         let root = Folder::new("skip");
         let config = root.0.join("config");
         let mut configs = NativeConfigs::default();
@@ -423,6 +420,8 @@ mod tests {
                 NativeConfig::new("a", Common, "x").file("../options.txt"),
                 NativeConfig::new("a", Common, "x").file(""),
                 NativeConfig::new("a", Common, "first"),
+                NativeConfig::new("a", Common, "again"),
+                // Another mod's file, as `Host::config_files` refuses it.
                 NativeConfig::new("b", Common, "second").file("a-common.toml"),
             ],
             &[Common],
@@ -475,9 +474,9 @@ mod tests {
                 mod_id: "gt".into(),
                 kind: Common,
                 file: "gt-common.toml".into(),
-                path: PathBuf::new(),
                 text: String::new(),
             },
+            path: PathBuf::new(),
             modified: None,
         });
         assert!(configs.due(start));

@@ -21,16 +21,16 @@ use super::{
 };
 use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
-    self, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef, NativeCamera, NativeCommand,
-    NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
-    NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
-    RecipeBookCategory, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse,
-    WorldPhase,
+    self, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef,
+    NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
+    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
+    NativeServerPlayer, RecipeBookCategory, ServerReloadListeners, ServerTickPhase,
+    TicketController, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
-    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult, NativeTriState,
-    Suggestion,
+    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult,
+    NativeItemClick, NativeTriState, Suggestion, UsePhase,
 };
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -51,8 +51,9 @@ use horizon_client::{
     extras_hud::Corners,
     fast_hash::FxHashMap,
     first_person::Hand,
-    health::{HurtSource, Hurting, Knock, ShieldBlock},
+    health::{DamageContainer, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock},
     hud::{HudBatch, rgba},
+    item_tooltip::TooltipDisplay,
     items::ItemStack,
     keybinds,
     lan::menu::Slots,
@@ -193,6 +194,15 @@ impl Game<'_> {
 pub(super) use horizon_world::level::flags;
 
 impl GameLevel<'_> {
+    /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`),
+    /// fired inside the write that creates it (`LevelChunk.setBlockState`), on
+    /// a server and on a client of one. The declaration owns the type id; no
+    /// answer starts with an empty compound. The level is read-only, as
+    /// `newBlockEntity` gets no level.
+    #[inline(always)]
+    pub(super) fn native_block_entity(&self, block: &str, entity: &mut Option<Compound>) {
+        mod_api::dispatch_block_entity(super::mod_api_host::level_side(self), block, entity);
+    }
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side.
     #[inline(always)]
     pub(super) fn native_hopper_pickup_item(
@@ -1376,6 +1386,30 @@ impl Game<'_> {
             cancel,
         );
     }
+    /// NeoForge's `ClientChatReceivedEvent`: a chat line from the server is
+    /// about to show, once Chat Delay lets it through. `system` is a system
+    /// message (`ClientChatReceivedEvent.System`), shown in the action bar
+    /// when `overlay` is set; otherwise a player or disguised message in its
+    /// chat type `chat_type` (`getBoundChatType`, its registry name; `None`
+    /// for a system message or an inline chat type). `sender` is the player's
+    /// UUID, 0 (`Util.NIL_UUID`) for system and disguised messages. `message`
+    /// starts as the decorated line; replace it and the chat shows the new
+    /// one, while the narrator still says the original. Set `cancel` and it
+    /// doesn't show: a delayed message lets the next one through. Lines the
+    /// client adds itself and validation errors are not told. Client-side.
+    pub(super) fn native_client_chat_received(
+        &mut self,
+        system: bool,
+        overlay: bool,
+        sender: u128,
+        chat_type: Option<&str>,
+        message: &mut Text,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_client_chat_received(
+            self, system, overlay, sender, chat_type, message, cancel,
+        );
+    }
     /// NeoForge's `ClientPauseChangeEvent.Pre`: cancel a proposed pause change.
     pub(super) fn native_client_pause_change_pre(&mut self, paused: bool, cancel: &mut bool) {
         mod_api::dispatch_client_pause_change_pre(self, paused, cancel);
@@ -1506,6 +1540,20 @@ impl Game<'_> {
     /// `AddServerReloadListenersEvent.getRegistryAccess` does.
     pub(super) fn native_add_server_reload_listeners(&self, listeners: &mut ServerReloadListeners) {
         mod_api::dispatch_add_server_reload_listeners(self, listeners);
+    }
+    /// Register client asset reload listeners before a reload stages its
+    /// assets (NeoForge's `AddClientReloadListenersEvent`, the client's
+    /// counterpart of `native_add_server_reload_listeners`): the first load
+    /// before the loader thread runs, then every later reload — the player
+    /// changed resource packs, F3+T was pressed, or a server sent its packs.
+    /// The listener's `prepare` then reads the merged asset view with
+    /// resource-pack overrides resolved, and its returned apply publishes the
+    /// parsed state, all applies after all prepares, before
+    /// `native_client_resources_reloaded`. A listener that returns an error
+    /// aborts the reload and keeps every listener's previous assets.
+    /// Client-side.
+    pub(super) fn native_add_client_reload_listeners(&self, listeners: &mut ClientReloadListeners) {
+        mod_api::dispatch_add_client_reload_listeners(self, listeners);
     }
     /// The server is assembling its data tables, as for
     /// `native_data_pack_files` (a world's first open and every `/reload`):
@@ -2030,11 +2078,6 @@ impl Game<'_> {
     /// act on it when it is yours.
     pub(super) fn native_panel_event(&mut self, mod_id: &str, event: &NativePanelEvent) {
         mod_api::dispatch_panel_event(self, mod_id, event);
-    }
-    /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`).
-    /// The declaration owns the type id; no answer starts with an empty compound.
-    pub(super) fn native_block_entity(&mut self, block: &str, entity: &mut Option<Compound>) {
-        mod_api::dispatch_block_entity(mod_api::HostSide::of(self), block, entity);
     }
     /// Whether block `block`'s block entity ticks (`EntityBlock.getTicker`):
     /// set `ticks` when it is yours. Asked for each of the block's states
@@ -5293,6 +5336,36 @@ impl Game<'_> {
     pub(super) fn native_tooltip(&self, stack: &ItemStack, lines: &mut Vec<(Text, u32)>) {
         mod_api::dispatch_tooltip(self, stack, lines);
     }
+    /// `ItemTooltipEvent`: the whole tooltip of `stack` (`ItemStack.getTooltipLines`),
+    /// once its name, the item's own lines, the components' lines, the
+    /// advanced lines and the operator warning are in `lines`, each with a
+    /// colour as `rgba` packs it (`u32::MAX` keeps the text's own). Add,
+    /// change, reorder or remove lines. `player` and `player_entity_id` are
+    /// the local player's, `display` the stack's `minecraft:tooltip_display`,
+    /// `advanced` (F3+H) and `creative` (a creative tab's own slot) its
+    /// `TooltipFlag`. Asked each frame the tooltip shows, never for one the
+    /// stack hides or a crossbow's loaded projectile. Client-side.
+    pub(super) fn native_item_tooltip(
+        &self,
+        player: u128,
+        player_entity_id: i32,
+        stack: &ItemStack,
+        display: &TooltipDisplay<'_>,
+        advanced: bool,
+        creative: bool,
+        lines: &mut Vec<(Text, u32)>,
+    ) {
+        mod_api::dispatch_item_tooltip(
+            self,
+            player,
+            player_entity_id,
+            stack,
+            display,
+            advanced,
+            creative,
+            lines,
+        );
+    }
     /// Change a tooltip box's background and border gradient colors, as ARGB.
     /// Stack is None for tooltips not associated with an item.
     pub(super) fn native_tooltip_color(
@@ -5766,6 +5839,40 @@ impl Game<'_> {
             click,
             use_block,
             use_item,
+            cancellation_result,
+            canceled,
+        );
+    }
+    /// `UseItemOnBlockEvent`: after a phase was chosen, before its Part or
+    /// vanilla behaviour. Cancel skips that behaviour and returns
+    /// `cancellation_result` (initially `TryWithEmptyHand`).
+    pub(super) fn native_use_item_on_block(
+        &mut self,
+        click: &NativeBlockClick<'_>,
+        phase: UsePhase,
+        cancellation_result: &mut NativeInteractionResult,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_use_item_on_block(
+            mod_api::HostSide::of(self),
+            click,
+            phase,
+            cancellation_result,
+            canceled,
+        );
+    }
+    /// `PlayerInteractEvent.RightClickItem`, immediately before `Item.use`.
+    /// Cancel skips its Part and vanilla behaviour; its result defaults to
+    /// `Pass`. On the client only `Success` ends the hand loop.
+    pub(super) fn native_right_click_item(
+        &mut self,
+        click: &NativeItemClick<'_>,
+        cancellation_result: &mut NativeInteractionResult,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_right_click_item(
+            mod_api::HostSide::of(self),
+            click,
             cancellation_result,
             canceled,
         );
@@ -6945,6 +7052,75 @@ pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
     cancel
 }
 
+/// The level a hit lands in, as its damage hooks' level host: its blocks, its random and its
+/// own attachments. Not `GameLevel`, which a hit can't build: a mob's hit lands in the mob
+/// tick, where the world is read by every mob and its random is lent out, and building one
+/// per hit would allocate its entity boxes.
+pub(super) struct HitLevel<'a>(pub(super) DamageLevel<'a>);
+
+impl HitLevel<'_> {
+    /// NeoForge's `LivingDamageEvent.Pre`: `LivingEntity.actuallyHurt` of entity `entity` of
+    /// type `kind` (`minecraft:player`, `minecraft:zombie`) by `source` (named as
+    /// `native_living_incoming_damage` names it) has taken armor and magic, and the absorption
+    /// hearts are next: `container` holds the damage it started with, what it is now
+    /// (`new_damage`, which may be 0) and each reduction so far (armor, enchantments, mob
+    /// effects). Change its
+    /// `new_damage` and the health takes that; set its post-attack invulnerability ticks and the
+    /// entity keeps them instead of vanilla's. A value that is not a number is put back as it
+    /// was. It fires for players, mobs and the ender dragon; a wolf whose armor takes the hit and
+    /// armor stands do not fire it. The level is the hit's: its blocks, random and own
+    /// attachments; the hurt entity is in the middle of its hit.
+    pub(super) fn native_living_damage_pre(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        container: &mut DamageContainer,
+    ) {
+        mod_api::dispatch_living_damage_pre(self, entity, kind, source, container);
+    }
+    /// NeoForge's `LivingDamageEvent.Post`: the health of entity `entity` of type `kind` has
+    /// just lost the hit `container` describes, with its final values (health damage, the
+    /// reductions, the post-attack invulnerability ticks). It only listens, and fires where
+    /// `native_living_damage_pre` does once the health took more than 0. It can't write the
+    /// entity or the world's blocks: the level host gives the hit's random and level attachments.
+    pub(super) fn native_living_damage_post(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        container: &DamageContainer,
+    ) {
+        mod_api::dispatch_living_damage_post(self, entity, kind, source, container);
+    }
+}
+
+/// `native_living_damage_pre` for the damage code (`health::DAMAGE_PRE`).
+pub(super) fn damage_pre(
+    level: DamageLevel<'_>,
+    hurting: Hurting<'_>,
+    container: &mut DamageContainer,
+) {
+    if !mod_api::listened(mod_api::HookId::LivingDamagePre) {
+        return;
+    }
+    let (entity, kind, source) = hurt_server_args(hurting);
+    HitLevel(level).native_living_damage_pre(entity, kind, &source, container);
+}
+
+/// `native_living_damage_post` for the damage code (`health::DAMAGE_POST`).
+pub(super) fn damage_post(
+    level: DamageLevel<'_>,
+    hurting: Hurting<'_>,
+    container: &DamageContainer,
+) {
+    if !mod_api::listened(mod_api::HookId::LivingDamagePost) {
+        return;
+    }
+    let (entity, kind, source) = hurt_server_args(hurting);
+    HitLevel(level).native_living_damage_post(entity, kind, &source, container);
+}
+
 /// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`): whether it
 /// canceled the block. Its one caller. The hurt entity and the source are named as the
 /// damage hook names them.
@@ -7331,7 +7507,7 @@ impl GameLevel<'_> {
                 state,
                 at,
                 spread,
-                speed,
+                speed: [speed; 3],
                 count,
                 randomization: 0,
             });
@@ -7368,6 +7544,50 @@ impl GameLevel<'_> {
         };
         let b = self.behaviours;
         b.set_block(self, ticks, at, id, flags)
+    }
+    /// `EntityBlock.newBlockEntity` of block `name`: a declared mod type
+    /// starts with the data `native_block_entity` gives, a mod's sign, else
+    /// Horizon's own. The one place both whole-block write paths make it.
+    pub(super) fn new_block_entity(&self, name: &str) -> Option<BlockEntity> {
+        let mut nbt = None;
+        if horizon_client::block_entity_types::type_for(name).is_some() {
+            self.native_block_entity(name, &mut nbt);
+        }
+        block_entity_for_block(self.registry, self.facts, name, nbt.unwrap_or_default())
+    }
+    /// Replaces the block at `pos` with `state` through `Level.setBlock`, as
+    /// `Game::native_set_block` does for the Host, from a hook that gets the
+    /// level's `ticks`: the old block's block entity is removed and the new
+    /// block's is created in the write (`LevelChunk.setBlockState`), and the
+    /// write's level events stay queued for the caller, in order; a mod block
+    /// entity starts with the data `native_block_entity` gives. True when the block changed; false off an
+    /// authoritative server, for a position that is not loaded or outside the
+    /// build height, an invalid state, or an unchanged state. Never loads a
+    /// chunk.
+    pub(super) fn native_set_block(
+        &mut self,
+        ticks: &mut Ticks,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: i32,
+    ) -> bool {
+        if !self.native_authoritative
+            || !self.world.is_loaded_at(pos[0], pos[1], pos[2])
+            || self.registry.state(state).is_none()
+        {
+            return false;
+        }
+        let at = BlockPos::new(pos[0], pos[1], pos[2]);
+        let previous = self.world.block(pos[0], pos[1], pos[2]);
+        let b = self.behaviours;
+        let changed = b.set_block(self, ticks, at, state, flags);
+        let landed = self.world.block(pos[0], pos[1], pos[2]);
+        if let Some(name) = block_entity_to_create(self.facts, changed, previous, state, landed)
+            && let Some(entity) = self.new_block_entity(&name)
+        {
+            put_block_entity(self.world, pos, entity);
+        }
+        changed
     }
     /// Schedules a tick of `block` (a block name) at `pos` in `delay` game
     /// ticks, as a falling block's shape update schedules its fall
@@ -7445,6 +7665,65 @@ impl GameLevel<'_> {
     }
 }
 
+/// `EntityBlock.newBlockEntity` of block `name`: a declared mod type starting
+/// with `initial` data, a mod's sign, else Horizon's own. Shared by the
+/// Host's and a level hook's whole-block writes.
+fn block_entity_for_block(
+    registry: &BlockRegistry,
+    facts: &horizon_client::blocks::BlockFacts,
+    name: &str,
+    initial: Compound,
+) -> Option<BlockEntity> {
+    if let Some(kind) = horizon_client::block_entity_types::type_for(name) {
+        return Some(BlockEntity::Mod(Box::new(ModBlockEntity::new(
+            kind.to_owned(),
+            ModBlockEntityFields {
+                nbt: initial,
+                ..Default::default()
+            },
+        ))));
+    }
+    // Undeclared content blocks retain their template's vanilla behaviour.
+    // `SignBlock.newBlockEntity`: a mod's sign is one by its template's class.
+    if !name.starts_with("minecraft:")
+        && let Some(state) = registry.default_state(name)
+        && let Some(form) = facts.get(state).sign_form()
+    {
+        return Some(BlockEntity::Sign(horizon_client::signs::SignData {
+            hanging: form.hanging,
+            ..Default::default()
+        }));
+    }
+    BlockEntity::for_block(name)
+}
+
+/// After a `Level.setBlock` of `state` over `previous`: the block whose block
+/// entity the write creates, when the write changed the block's name and the
+/// new block landed.
+fn block_entity_to_create(
+    facts: &horizon_client::blocks::BlockFacts,
+    changed: bool,
+    previous: BlockStateId,
+    state: BlockStateId,
+    landed: BlockStateId,
+) -> Option<String> {
+    let new = &facts.get(state).name;
+    (changed && facts.get(previous).name != *new && facts.get(landed).name == *new)
+        .then(|| new.to_string())
+}
+
+/// Stores a new block entity at `pos`, keeping an existing one of the same kind.
+fn put_block_entity(world: &mut horizon_client::world::World, pos: [i32; 3], entity: BlockEntity) {
+    let key = (pos[0], pos[1], pos[2]);
+    if world
+        .block_entities
+        .get(&key)
+        .is_none_or(|existing| std::mem::discriminant(existing) != std::mem::discriminant(&entity))
+    {
+        world.block_entities.insert(key, entity);
+    }
+}
+
 /// Helpers for native mods, kept as stable as the hook points.
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
@@ -7514,24 +7793,8 @@ impl Game<'_> {
         {
             return false;
         }
-        let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        let previous = self.world.block(pos[0], pos[1], pos[2]);
         let changed =
-            self.with_level(|b, level, ticks| b.set_block(level, ticks, at, state, flags));
-        let new = self.res.facts().get(state).name.clone();
-        let landed = self.world.block(pos[0], pos[1], pos[2]);
-        if changed
-            && self.res.facts().get(previous).name != new
-            && self.res.facts().get(landed).name == new
-            && let Some(entity) = self.new_block_entity(&new)
-        {
-            let key = (pos[0], pos[1], pos[2]);
-            if self.world.block_entities.get(&key).is_none_or(|existing| {
-                std::mem::discriminant(existing) != std::mem::discriminant(&entity)
-            }) {
-                self.world.block_entities.insert(key, entity);
-            }
-        }
+            self.with_level(|_, level, ticks| level.native_set_block(ticks, pos, state, flags));
         let _ = self.process_level_events();
         changed
     }
@@ -7555,10 +7818,7 @@ impl Game<'_> {
     /// or a wind turbine reads. Both 0 in the Nether and the End, which have
     /// no weather (`Level.canHaveWeather`).
     pub(super) fn native_weather(&self) -> (f32, f32) {
-        if self.dim != super::Dim::Overworld {
-            return (0.0, 0.0);
-        }
-        self.world.weather.levels(1.0)
+        self.weather_levels(1.0)
     }
     /// The world's time of day in ticks (`Level.getOverworldClockTime`), the
     /// same as `native_clock`'s `day_time`; it keeps counting past 24000, so
@@ -8044,16 +8304,6 @@ impl Game<'_> {
     pub(super) fn native_screen_title(&self) -> Option<String> {
         self.remote_menu_title().map(|t| t.plain())
     }
-    /// A data file of the game's resources, content mods' included
-    /// (`data/mymod/machines.json`), when there is one: what a mod's content
-    /// says, read at runtime. Only relative paths of plain names.
-    pub(super) fn native_data(&self, path: &str) -> Option<Vec<u8>> {
-        let plain = |p: &str| !p.is_empty() && p != "." && p != ".." && !p.contains('\\');
-        if !path.starts_with("data/") || !path.split('/').all(plain) {
-            return None;
-        }
-        fs::read(self.options.resources.join(path)).ok()
-    }
     /// The block at `pos` (`mymod:cable`; air where nothing is loaded).
     pub(super) fn native_block(&self, pos: [i32; 3]) -> String {
         let state = self.world.block(pos[0], pos[1], pos[2]);
@@ -8216,13 +8466,11 @@ impl Game<'_> {
         let _ = fs::create_dir_all(&dir).and_then(|()| fs::write(dir.join(key), value));
     }
     /// The game's `config/` folder beside `options.txt`, shared by every mod
-    /// as on Fabric and NeoForge: a mod names its own files in it
-    /// (`config/<id>.json`, or a folder of its own). The same folder on the
-    /// window, its server thread and a LAN host; a dedicated server's is in
-    /// its own folder, beside `server.properties`. Made when missing. No
-    /// `self`, so a mixin helper calls `Game::native_config_dir()` and a trait
-    /// mod `Host::config_dir`.
-    pub(super) fn native_config_dir() -> Result<PathBuf, String> {
+    /// as on Fabric and NeoForge. The same folder on the window, its server
+    /// thread and a LAN host; a dedicated server's is in its own folder,
+    /// beside `server.properties`. Made when missing. Mods reach their own
+    /// files in it through `Host::config_files`.
+    pub(super) fn native_config_dir() -> std::io::Result<PathBuf> {
         config_dir(&Self::game_dir())
     }
     /// Shows the panel beside container screens with these items (at most
@@ -8501,6 +8749,74 @@ impl Game<'_> {
             }
         }
     }
+    /// The chosen phase's broadcast event, before its scoped behaviour.
+    pub(super) fn use_item_on_block(
+        &mut self,
+        hit: &super::Hit,
+        hand: Hand,
+        stack: Option<&ItemStack>,
+        phase: UsePhase,
+    ) -> Option<NativeInteractionResult> {
+        if !mod_api::listened(mod_api::HookId::UseItemOnBlock) {
+            return None;
+        }
+        let click = self.block_click(hit, hand, stack);
+        let (mut result, mut canceled) = (NativeInteractionResult::TryWithEmptyHand, false);
+        self.native_use_item_on_block(&click, phase, &mut result, &mut canceled);
+        if !canceled {
+            return None;
+        }
+        if phase == UsePhase::ItemAfterBlock
+            && result.consumes_action()
+            && let Some(stack) = stack
+        {
+            self.with_hand(hand, |game| {
+                if game.remote.is_none() {
+                    game.award_stat("used", &stack.item, 1);
+                }
+                game.apply_after_use_components(stack);
+            });
+        }
+        Some(result)
+    }
+    /// Air use only: a passing block or entity keeps its target, rather than
+    /// becoming a `RightClickItem` interaction.
+    pub(super) fn right_click_item(
+        &mut self,
+        hand: Hand,
+        stack: &ItemStack,
+    ) -> Option<NativeInteractionResult> {
+        if !mod_api::listened(mod_api::HookId::RightClickItem)
+            || self.entity_targeted()
+            || self.pick().is_some()
+        {
+            return None;
+        }
+        let pos = self
+            .target_position(super::commands::Target::Player)?
+            .map(|v| v.floor() as i32);
+        let (player, player_entity_id) = self.native_clicker();
+        let click = NativeItemClick {
+            side: if self.remote.is_some() {
+                LogicalSide::Client
+            } else {
+                LogicalSide::Server
+            },
+            dimension: self.dim.level(),
+            pos,
+            hand,
+            stack,
+            player,
+            player_entity_id,
+        };
+        let instant = self.use_duration(stack) <= 0;
+        let (mut result, mut canceled) = (NativeInteractionResult::Pass, false);
+        self.native_right_click_item(&click, &mut result, &mut canceled);
+        if canceled && instant && result.consumes_action() {
+            self.with_hand(hand, |game| game.apply_after_use_components(stack));
+        }
+        canceled.then_some(result)
+    }
     /// The shared context for a block's behaviour and the click event.
     pub(super) fn block_click<'a>(
         &mut self,
@@ -8748,34 +9064,19 @@ impl Game<'_> {
         }
     }
     /// `EntityBlock.newBlockEntity` of block `name`: Horizon's own, else a
-    /// native mod's.
+    /// native mod's, made as a write of the level creates it
+    /// (`GameLevel::new_block_entity`). Only a declared mod type builds the
+    /// level.
     pub(super) fn new_block_entity(&mut self, name: &str) -> Option<BlockEntity> {
-        if let Some(kind) = horizon_client::containers::block_entity_types::type_for(name) {
-            let mut nbt = None;
-            self.native_block_entity(name, &mut nbt);
-            return Some(BlockEntity::Mod(Box::new(ModBlockEntity::new(
-                kind.to_owned(),
-                ModBlockEntityFields {
-                    nbt: nbt.unwrap_or_default(),
-                    ..Default::default()
-                },
-            ))));
+        if horizon_client::block_entity_types::type_for(name).is_none() {
+            return block_entity_for_block(
+                self.pack.assets.registry,
+                self.res.facts(),
+                name,
+                Compound::default(),
+            );
         }
-        // Undeclared content blocks retain their template's vanilla behaviour.
-        // `SignBlock.newBlockEntity`: a mod's sign is one by its template's class.
-        if !name.starts_with("minecraft:")
-            && let Some(state) = self.pack.assets.registry.default_state(name)
-            && let Some(form) = self.res.facts().get(state).sign_form()
-        {
-            return Some(BlockEntity::Sign(horizon_client::signs::SignData {
-                hanging: form.hanging,
-                ..Default::default()
-            }));
-        }
-        if let Some(entity) = BlockEntity::for_block(name) {
-            return Some(entity);
-        }
-        None
+        self.with_level(|_, level, _| level.new_block_entity(name))
     }
     /// The containers of the mod blocks' block entities, by block state
     /// (`native_block_entity_container`), checked.
@@ -9263,23 +9564,27 @@ impl Game<'_> {
     pub(super) fn list_native_mods(&mut self) {
         let mut mods = Vec::new();
         self.native_mods(&mut mods);
-        // A WebAssembly mod of the same id: the native row stands for it,
-        // and alone toggles its `mod.<id>` line.
+        let native = self.mods.native.clone();
         self.settings
             .mods
             .installed
-            .retain(|row| row.native.is_none() && !mods.iter().any(|m| m.id == row.id));
-        for m in mods {
+            .retain(|row| row.native.is_none() && !native.built().iter().any(|m| m.id == row.id));
+        for package in native.packages() {
+            let m = &package.manifest;
             let mut buttons = Vec::new();
             self.native_settings(&m.id, &mut buttons);
             let page = NativePage {
-                keys: m.keys,
+                keys: mods
+                    .iter_mut()
+                    .find(|page| page.id == m.id)
+                    .map(|page| std::mem::take(&mut page.keys))
+                    .unwrap_or_default(),
                 buttons,
             };
             self.settings.mods.installed.push(Installed {
-                id: m.id,
-                title: m.title,
-                description: m.description,
+                id: m.id.clone(),
+                title: [m.name.as_str(), " ", m.version.as_str()].concat(),
+                description: m.description.clone(),
                 problem: None,
                 dev: false,
                 native: Some(page),
@@ -9427,7 +9732,7 @@ fn mod_menu(name: &str) -> Option<(&'static str, usize)> {
 
 /// `state` with its property `key` set to `value`; none when the block has
 /// no such property or value.
-fn with_property(
+pub(super) fn with_property(
     registry: &BlockRegistry,
     state: BlockStateId,
     key: &str,
@@ -9455,11 +9760,10 @@ fn property_change(
     with_property(registry, state, key, value).filter(|&id| id != state)
 }
 
-/// `config/` beside `options`, made when missing.
-/// `config/` in the game folder, shared by its players.
-fn config_dir(game_dir: &Path) -> Result<PathBuf, String> {
+/// `config/` in the game folder, beside `options.txt`, made when missing.
+fn config_dir(game_dir: &Path) -> std::io::Result<PathBuf> {
     let dir = game_dir.join("config");
-    fs::create_dir_all(&dir).map_err(|e| dir.display().to_string() + ": " + &e.to_string())?;
+    fs::create_dir_all(&dir)?;
     Ok(dir)
 }
 
@@ -9549,7 +9853,7 @@ mod tests {
         if run_fresh_cases(
             "game::native_hooks::tests::declared_types_create_tick_and_reload_through_game",
             CHILD,
-            &["valid", "unknown_block"],
+            &["valid", "unknown_block", "unknown_type", "block_not_type"],
         ) {
             return;
         }
@@ -9558,6 +9862,22 @@ mod tests {
         const SECOND: &str = "be_test:ornate_banner";
         const EMPTY: &str = "be_test:blank";
         const PLAIN: &str = "be_test:plain_banner";
+        #[derive(Default)]
+        struct Keys {
+            own: std::sync::OnceLock<BlockEntityTypeKey>,
+            shared: std::sync::OnceLock<BlockEntityTypeKey>,
+            vanilla: std::sync::OnceLock<BlockEntityTypeKey>,
+        }
+        trait Probe {
+            fn value(&self) -> u32;
+        }
+        struct Marker(u32);
+        impl Probe for Marker {
+            fn value(&self) -> u32 {
+                self.0
+            }
+        }
+        const PROBE: CapabilityKey<dyn Probe> = CapabilityKey::new("be_test:probe");
         struct Press;
         #[mod_api::horizon_part]
         impl BlockPart for Press {}
@@ -9565,7 +9885,7 @@ mod tests {
         impl BlockEntityPart for Press {
             fn block_entity(
                 &self,
-                _: HostSide<'_>,
+                _: LevelSide<'_>,
                 _: &mut BlockEntityEvent<'_>,
             ) -> Option<Compound> {
                 Some(Compound::from([("energy".into(), Tag::Long(6300))]))
@@ -9581,8 +9901,32 @@ mod tests {
                 *energy += 1;
             }
         }
+        struct User {
+            keys: Arc<Keys>,
+            unknown: Option<&'static str>,
+        }
+        #[horizon_client::mod_api::__subscriptions]
+        impl Hooks for User {
+            fn register(&self, registrar: &mut Registrar) {
+                let kind = registrar.block_entity_type_key("be_test:shared");
+                registrar
+                    .block_entity_part(&kind, Press)
+                    .expect("native type");
+                registrar
+                    .block_entity_capability(&PROBE, &kind, |_, _| Some(Box::new(Marker(6300))));
+                self.keys.shared.set(kind).unwrap();
+                let vanilla = registrar.block_entity_type_key("minecraft:chest");
+                registrar
+                    .block_entity_capability(&PROBE, &vanilla, |_, _| Some(Box::new(Marker(26))));
+                self.keys.vanilla.set(vanilla).unwrap();
+                if let Some(id) = self.unknown {
+                    registrar.block_entity_type_key(id);
+                }
+            }
+        }
         struct TestMod {
             invalid: bool,
+            keys: Arc<Keys>,
         }
         #[horizon_client::mod_api::__subscriptions]
         impl Hooks for TestMod {
@@ -9595,7 +9939,7 @@ mod tests {
                         &[FIRST, SECOND]
                     })
                     .build();
-                registrar.block_entity_part(&kind, Press);
+                self.keys.own.set(kind).unwrap();
                 registrar
                     .block_entity_type("empty")
                     .blocks(&[EMPTY])
@@ -9615,12 +9959,35 @@ mod tests {
                 }));
             }
         }
-        let invalid = std::env::var(CHILD).unwrap() == "unknown_block";
-        let mods: Mods = Arc::from([ModEntry::new("be_test", Box::new(TestMod { invalid }))]);
+        let case = std::env::var(CHILD).unwrap();
+        let invalid = case == "unknown_block";
+        let unknown = match case.as_str() {
+            "unknown_type" => Some("other:missing"),
+            "block_not_type" => Some("minecraft:red_shulker_box"),
+            _ => None,
+        };
+        let keys = Arc::new(Keys::default());
+        let mods: Mods = Arc::from([
+            ModEntry::new(
+                "be_user",
+                Box::new(User {
+                    keys: keys.clone(),
+                    unknown,
+                }),
+            ),
+            ModEntry::new(
+                "be_test",
+                Box::new(TestMod {
+                    invalid,
+                    keys: keys.clone(),
+                }),
+            ),
+        ]);
         horizon_client::mod_api::install(mods.clone());
         horizon_client::mod_api::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root = super::super::mods::content_root(&base, &Default::default(), &[]);
+        let root =
+            super::super::mods::content_root(&base, &Default::default(), &Default::default());
         if invalid {
             let error = root.unwrap_err().to_string();
             assert!(error.contains("be_test:shared"), "{error}");
@@ -9628,6 +9995,15 @@ mod tests {
             assert!(!std::path::Path::new(".horizon-cache").exists());
             return;
         }
+        if let Some(id) = unknown {
+            let error = root.unwrap_err().to_string();
+            assert!(error.contains("be_user"), "{error}");
+            assert!(error.contains("unknown block entity type"), "{error}");
+            assert!(error.contains(id), "{error}");
+            assert!(horizon_client::block_entity_types::current().is_none());
+            return;
+        }
+        assert_eq!(keys.shared.get(), keys.own.get());
         with_game_at(root.unwrap(), |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -9640,7 +10016,13 @@ mod tests {
                 .registry
                 .default_state("minecraft:stone")
                 .unwrap();
-            for (x, block) in [(1, FIRST), (2, SECOND), (3, EMPTY), (4, PLAIN)] {
+            for (x, block) in [
+                (1, FIRST),
+                (2, SECOND),
+                (3, EMPTY),
+                (4, PLAIN),
+                (5, "minecraft:chest"),
+            ] {
                 let state = game.pack.assets.registry.default_state(block).unwrap();
                 assert!(game.native_level_set_block(
                     level,
@@ -9655,6 +10037,13 @@ mod tests {
                     NativeBlockUpdateFlags::NONE
                 ));
                 let pos = (x, 64, 0);
+                let handle = game.native_block_entity_ref(level, [x, 64, 0]).unwrap();
+                if block == "minecraft:chest" {
+                    assert_eq!(handle.kind(game).as_ref(), keys.vanilla.get());
+                    let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
+                    assert_eq!((probe.value(), probe.owner()), (26, "be_user".into()));
+                    continue;
+                }
                 if block == PLAIN {
                     assert!(matches!(
                         game.world.block_entities.get(&pos),
@@ -9672,6 +10061,9 @@ mod tests {
                 }
                 assert_eq!(entity.id(), "be_test:shared");
                 assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
+                assert_eq!(handle.kind(game).as_ref(), keys.shared.get());
+                let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
+                assert_eq!((probe.value(), probe.owner()), (6300, "be_user".into()));
                 game.tick_mod_block_entity(pos);
                 let saved = save::encode_block_entity(
                     pos,
@@ -9693,6 +10085,23 @@ mod tests {
                 );
                 assert_eq!(saved.get("energy"), Some(&Tag::Long(6302)));
             }
+
+            // A level hook's `LevelWriteHost::set_block` fires the same hook in its write.
+            let first = game.pack.assets.registry.default_state(FIRST).unwrap();
+            let written = game.with_level(|_, level, ticks| {
+                LevelWriteHost::set_block(
+                    &mut super::super::mod_api_host::LevelTicks { level, ticks },
+                    [5, 64, 0],
+                    first,
+                    NativeBlockUpdateFlags::NONE,
+                )
+            });
+            assert!(written);
+            let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&(5, 64, 0)) else {
+                panic!("a level write did not create the declared block entity");
+            };
+            assert_eq!(entity.id(), "be_test:shared");
+            assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
         });
     }
 
@@ -10302,22 +10711,26 @@ mod tests {
             .split("/// Server-level helpers for native mods.")
             .next()
             .unwrap();
-        let level_section = source
-            .split("impl GameLevel<'_> {")
-            .nth(1)
-            .unwrap()
-            .split("\n}")
-            .next()
-            .unwrap();
-        let level_hooks: BTreeSet<_> = level_section
-            .lines()
-            .filter_map(|line| {
-                line.trim()
-                    .strip_prefix("pub(super) fn native_")?
-                    .split('(')
-                    .next()
-            })
-            .collect();
+        // The hook points of one `impl` block of this file.
+        let impl_hooks = |head: &str| -> BTreeSet<&'static str> {
+            source
+                .split(head)
+                .nth(1)
+                .unwrap()
+                .split("\n}")
+                .next()
+                .unwrap()
+                .lines()
+                .filter_map(|line| {
+                    line.trim()
+                        .strip_prefix("pub(super) fn native_")?
+                        .split('(')
+                        .next()
+                })
+                .collect()
+        };
+        let level_hooks = impl_hooks("impl GameLevel<'_> {");
+        let hit_hooks = impl_hooks("impl HitLevel<'_> {");
         // Hook points that are free functions in other crates.
         let free_hooks = |source: &'static str| -> BTreeSet<&'static str> {
             source
@@ -10342,17 +10755,19 @@ mod tests {
         let hunger_hooks = free_hooks(include_str!("../hunger.rs"));
         let landing_hooks = free_hooks(include_str!("../landing.rs"));
         let motion_hooks = free_hooks(include_str!("../motion.rs"));
-        let hub_hooks = free_hooks(include_str!("../lan/hub.rs"));
+        // The chat relay's (`horizon_client_lib::lan::hub::chat`).
+        let chat_hooks = free_hooks(include_str!("../lan/hub/chat.rs"));
         let ender_hooks = free_hooks(include_str!("../mobs/enderman.rs"));
         let declared: BTreeSet<_> = section
             .lines()
-            .chain(level_section.lines())
             .filter_map(|line| {
                 line.trim()
                     .strip_prefix("pub(super) fn native_")?
                     .split('(')
                     .next()
             })
+            .chain(level_hooks.iter().copied())
+            .chain(hit_hooks.iter().copied())
             .chain(render_hooks.iter().copied())
             .chain(item_hooks.iter().copied())
             .chain(loot_hooks.iter().copied())
@@ -10362,7 +10777,7 @@ mod tests {
             .chain(hunger_hooks.iter().copied())
             .chain(landing_hooks.iter().copied())
             .chain(motion_hooks.iter().copied())
-            .chain(hub_hooks.iter().copied())
+            .chain(chat_hooks.iter().copied())
             .chain(ender_hooks.iter().copied())
             .collect();
         let mut names = BTreeSet::new();
@@ -10391,8 +10806,8 @@ mod tests {
                 format!("horizon_client_lib::landing::native_{name}")
             } else if motion_hooks.contains(name) {
                 format!("horizon_client_lib::motion::native_{name}")
-            } else if hub_hooks.contains(name) {
-                format!("horizon_client_lib::lan::hub::native_{name}")
+            } else if chat_hooks.contains(name) {
+                format!("horizon_client_lib::lan::hub::chat::native_{name}")
             } else if menu_hooks.contains(name) {
                 // menu.rs compiles into horizon-client-lib (#5446's
                 // split): horizon-mixins resolves the crate by its package.
@@ -10404,6 +10819,8 @@ mod tests {
                 format!("horizon_client_lib::breathing::native_{name}")
             } else if level_hooks.contains(name) {
                 format!("horizon_client::game::native_hooks::GameLevel<'_>::native_{name}")
+            } else if hit_hooks.contains(name) {
+                format!("horizon_client::game::native_hooks::HitLevel<'_>::native_{name}")
             } else {
                 format!("horizon_client::game::native_hooks::Game<'_>::native_{name}")
             };
@@ -10489,8 +10906,6 @@ mod tests {
     /// missing.
     #[test]
     fn config_dir_is_config_in_the_game_folder() {
-        // Callable without a game, from any hook.
-        let _: fn() -> Result<std::path::PathBuf, String> = super::Game::native_config_dir;
         use super::config_dir;
         let root = std::env::temp_dir().join(format!("horizon-config-dir-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);

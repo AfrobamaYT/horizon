@@ -31,7 +31,7 @@ mod package;
 
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
-const STAGING: &str = "source-only-v1";
+const STAGING: &str = "embedded-inventory-packages-v1";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
 pub const MIXINS_REV: &str = horizon_mods::index::native::MIXINS_REV;
@@ -401,7 +401,7 @@ const MANIFEST: &str = "horizon-mixin.toml";
 const NATIVE_MANIFEST: &str = horizon_mods::manifest::MANIFEST;
 /// Where an instance keeps the native mods installed from the registry, `<id>.hmod`, each on or
 /// off in `horizon-mods.txt` like any mod.
-pub const INSTALLED: &str = "horizon-native-mods";
+pub const INSTALLED: &str = horizon_mods::mod_list::NATIVE_DIR;
 
 /// The native mods turned on in the game folder `home`, unpacked into a folder [`build`] takes.
 /// Each flat `.hmod` passes the registry's shared package boundary; no code is run.
@@ -1406,6 +1406,7 @@ fn pipeline(
     folder: &Path,
     profile: Profile,
     target: Target,
+    allow_jar_downloads: bool,
     progress: &impl Fn(Step),
 ) -> Result<Built, String> {
     let started = std::time::Instant::now();
@@ -1464,6 +1465,11 @@ fn pipeline(
         .collect();
     let resolution = dependencies::resolve(&inputs).map_err(|e| e.to_string())?;
     let ordered: Vec<Bundle> = resolution.order.iter().map(|&i| mods[i].clone()).collect();
+    let projects: Vec<_> = mods
+        .iter()
+        .map(|bundle| api::Project::read(bundle, target))
+        .collect::<Result<_, _>>()
+        .map_err(|error| error.to_string())?;
     let revision = match &built_on {
         Some(about) => about.horizon.clone(),
         None => revision_of(base)?,
@@ -1471,6 +1477,16 @@ fn pipeline(
     let other = mismatch(&mods, &revision);
     if let Some(list) = &other {
         return Err(format!("{MISMATCH}{list}; rebuild against this game."));
+    }
+    if target == Target::Server {
+        let jars = crate::jars::collect(mods.iter().map(|bundle| &bundle.manifest))
+            .map_err(|error| error.to_string())?;
+        crate::jars::prepare(
+            &backend::game_home(),
+            &jars,
+            crate::jars::Permission::headless(allow_jar_downloads),
+        )
+        .map_err(|error| error.to_string())?;
     }
     // Said with a failure: a mod made for another revision may not apply or compile on this one.
     let blame = |e: String| {
@@ -1560,7 +1576,7 @@ fn pipeline(
             fetch.arg("--locked");
             run(fetch, "Downloading Horizon's crates", |_| {})?;
         }
-        let has_api = api::stage(&fresh, &mods, &declared, &resolution)?;
+        let has_api = api::stage(&fresh, &projects, &declared, &resolution)?;
         let paths = mods
             .iter()
             .map(|bundle| {
@@ -1647,7 +1663,7 @@ fn pipeline(
                 "sha256": digests.get(&m.manifest.id).cloned().flatten(),
             })).collect::<Vec<_>>(),
         });
-        install(base, &version, target, &binary, &about)?;
+        install(base, &version, target, &binary, &about, &ordered)?;
     } else {
         // Used again: it counts as the newest of the builds kept (`prune`).
         let _ = fs::write(target.directory(&version).join(".installed"), "");
@@ -1667,7 +1683,7 @@ pub fn build(
     progress: impl Fn(Step),
 ) -> Result<String, String> {
     logged(|| {
-        let built = pipeline(base, folder, profile, Target::Client, &progress)?;
+        let built = pipeline(base, folder, profile, Target::Client, false, &progress)?;
         instances::edit(&instance.id, |meta| {
             meta.version = Some(built.version.clone())
         })?;
@@ -1698,6 +1714,7 @@ pub fn build_server(
     folder: &Path,
     output: &Path,
     profile: Profile,
+    allow_jar_downloads: bool,
     progress: impl Fn(Step),
 ) -> Result<PathBuf, String> {
     logged(|| {
@@ -1725,7 +1742,14 @@ pub fn build_server(
                 return Err(tr("Export the server outside the launcher's managed folders.").into());
             }
         }
-        let built = pipeline(base, folder, profile, Target::Server, &progress)?;
+        let built = pipeline(
+            base,
+            folder,
+            profile,
+            Target::Server,
+            allow_jar_downloads,
+            &progress,
+        )?;
         export(&Target::Server.directory(&built.version), &output)?;
         // Exports are independent; keep only the newest cached server builds.
         let cached = root().join("server-builds");
@@ -1826,6 +1850,7 @@ fn install(
     target: Target,
     binary: &Path,
     about: &serde_json::Value,
+    mods: &[Bundle],
 ) -> Result<(), String> {
     let from = backend::version_dir(base);
     let partial = target.directory(&format!(".{version}.partial"));
@@ -1835,6 +1860,14 @@ fn install(
     let installed = partial.join(target.binary());
     fs::copy(binary, &installed).map_err(|e| format!("The built game: {e}"))?;
     fs::write(partial.join("native-mods.json"), about.to_string()).map_err(|e| e.to_string())?;
+    for bundle in mods {
+        package::copy(
+            bundle,
+            &partial
+                .join(horizon_mods::mod_list::NATIVE_DIR)
+                .join(&bundle.manifest.id),
+        )?;
+    }
     let dir = target.directory(version);
     let _ = fs::remove_dir_all(&dir);
     fs::rename(&partial, &dir).map_err(|e| e.to_string())?;
@@ -1867,10 +1900,15 @@ pub(crate) fn copy_base(from: &Path, to: &Path, target: Target) -> Result<(), St
 /// over. A server build is the headless engine: it keeps neither the game's own binary
 /// nor any `horizon-engine` the base shipped, which would run unmodded beside its own.
 fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
-    let mut own: Vec<String> = ["Horizon.app", "native-mods.json", "native-data"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let mut own: Vec<String> = [
+        "Horizon.app",
+        "native-mods.json",
+        "native-data",
+        horizon_mods::mod_list::NATIVE_DIR,
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
     own.push(backend::CLIENT.to_string());
     own.push(".installed".to_string());
     if target == Target::Server {
@@ -2862,6 +2900,7 @@ mod tests {
             Path::new("missing-mod-folder"),
             Profile::Dev,
             Target::Client,
+            false,
             &|_| panic!("invalid records must not start a build"),
         ) else {
             panic!("invalid build must be refused");
@@ -2961,6 +3000,20 @@ mod tests {
         )
         .unwrap();
         fs::write(source.join(Target::Server.binary()), b"unmodded").unwrap();
+        let native_dir = horizon_mods::mod_list::NATIVE_DIR;
+        fs::create_dir_all(source.join(native_dir).join("stale")).unwrap();
+        let project = dir("server-runtime-project");
+        write_bundle(&project, "exported", "pub fn hook() {}");
+        for (path, bytes) in [
+            ("assets/exported/probe.txt", "asset"),
+            ("data/exported/native/probe.json", "{}"),
+            ("jars/cache.jar", "not a project file"),
+        ] {
+            let path = project.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+        let bundle = bundle_in(&project).unwrap().unwrap();
         let binary = dir("server-install").join("built");
         fs::write(&binary, b"modded").unwrap();
         install(
@@ -2969,6 +3022,7 @@ mod tests {
             Target::Server,
             &binary,
             &serde_json::json!({"target":"server"}),
+            &[bundle],
         )
         .unwrap();
         assert!(!backend::installed().contains(&version.to_string()));
@@ -2985,6 +3039,28 @@ mod tests {
             b"facts"
         );
         assert!(output.join("native-mods.json").is_file());
+        fs::remove_dir_all(project).unwrap();
+        let package = output.join(native_dir).join("exported");
+        assert_eq!(
+            fs::read(package.join("assets/exported/probe.txt")).unwrap(),
+            b"asset"
+        );
+        assert_eq!(
+            fs::read(package.join("data/exported/native/probe.json")).unwrap(),
+            b"{}"
+        );
+        assert!(!package.join("jars").exists());
+        assert!(!output.join(native_dir).join("stale").exists());
+        let runtime = horizon_mods::runtime::Runtime::load(
+            &output.join(Target::Server.binary()),
+            &[horizon_mods::runtime::BuiltMod {
+                id: "exported",
+                version: "0.1.0",
+                side: horizon_mods::Side::Client,
+            }],
+        )
+        .unwrap();
+        assert_eq!(runtime.packages()[0].path, package);
         let _ = fs::remove_dir_all(source);
     }
 
@@ -3004,6 +3080,7 @@ mod tests {
             &folder,
             &output,
             Profile::Performance,
+            false,
             |_| {},
         )
         .unwrap_err();
@@ -3015,6 +3092,7 @@ mod tests {
             &folder,
             &managed,
             Profile::Performance,
+            false,
             |_| {},
         )
         .unwrap_err();
@@ -3067,6 +3145,7 @@ mod tests {
             &folder,
             &out.join("server"),
             Profile::Performance,
+            false,
             |_| {},
         )
         .unwrap_err();

@@ -506,6 +506,19 @@ impl Game<'_> {
     /// outer players whose records are displaced return None.
     pub(super) fn native_player_ref(&self, uuid: u128) -> Option<PlayerRef> {
         let epoch = self.native_lifecycle.epoch()?;
+        if let Some(remote) = self
+            .remote
+            .as_ref()
+            .filter(|r| r.logged_in && r.profile == uuid)
+        {
+            return Some(PlayerRef {
+                entity: crate::mod_api::EntityRef::new(
+                    epoch,
+                    u32::try_from(remote.entity_id).ok()?,
+                ),
+                uuid,
+            });
+        }
         let (_, id) = self.player_lookup(uuid)?;
         Some(PlayerRef {
             entity: crate::mod_api::EntityRef::new(epoch, id),
@@ -717,6 +730,7 @@ impl Game<'_> {
                 health: g.health,
                 yaw: g.yaw,
                 pitch: g.pitch,
+                entity_id: g.entity_id,
             })
             .collect()
     }
@@ -948,6 +962,7 @@ impl Game<'_> {
             health: p.health.health(),
             yaw: p.yaw,
             pitch: p.pitch,
+            entity_id: self.native_acting_entity() as i32,
         })
     }
     /// Runs `line` (no slash) as the server's console does: permission
@@ -1266,6 +1281,7 @@ impl Game<'_> {
             health: g.health,
             yaw: g.yaw,
             pitch: g.pitch,
+            entity_id: g.entity_id,
         };
         if !self.native_command_valid(line, permission) {
             return true;

@@ -2,12 +2,65 @@
 //! written to `logs/chat-filter.log` and told to horizon-server's event stream as `chat_filtered`
 //! (never as `chat`), a temporary ban goes into banned-players.json, and operators mute and unmute
 //! players by hand with `/mute`, `/tempmute`, `/mutelist` and `/unmute` (the same words on the console).
+use super::lan::LanHost;
 use super::{Game, dedicated};
 use horizon_chat_filter::Action;
 use horizon_client::lan::hub::{HostEvent, chat_filter::Place};
+use horizon_client::text::Text;
 use horizon_protocol::packets::play::{self, Clientbound as C};
 use horizon_protocol::text::{literal, translatable};
 use horizon_server_files::user_lists::{BanEntry, NameAndId};
+use horizon_world::nbt::Tag;
+
+/// One line that `/mute`, `/tempmute`, `/mutelist`, `/unmute` and `/tempban` answer with: Horizon's own words,
+/// or vanilla's message where vanilla has one, which each client shows in its language.
+#[derive(Debug, PartialEq)]
+pub(super) enum Reply {
+    Line(String),
+    /// A vanilla translation key with no argument.
+    Vanilla(&'static str),
+}
+
+impl Reply {
+    /// `EntityArgument.NO_PLAYERS_FOUND`, `argument.entity.notfound.player`: what `/kick` and the other
+    /// player commands answer for a name no player has.
+    pub(super) fn no_player() -> Self {
+        Self::Vanilla("argument.entity.notfound.player")
+    }
+
+    /// `BanPlayerCommands.ERROR_ALREADY_BANNED`: `commands.ban.failed`.
+    pub(super) fn already_banned() -> Self {
+        Self::Vanilla("commands.ban.failed")
+    }
+
+    /// The chat component a player is sent.
+    pub(super) fn tag(&self) -> Tag {
+        match self {
+            Self::Line(line) => literal(line),
+            Self::Vanilla(key) => translatable(key, &[]),
+        }
+    }
+
+    /// The text the console prints.
+    pub(super) fn text(&self) -> Text {
+        match self {
+            Self::Line(line) => Text::literal(line.clone()),
+            Self::Vanilla(key) => Text::translate(key, &[]),
+        }
+    }
+}
+
+impl From<String> for Reply {
+    fn from(line: String) -> Self {
+        Self::Line(line)
+    }
+}
+
+impl From<&str> for Reply {
+    fn from(line: &str) -> Self {
+        Self::Line(line.to_owned())
+    }
+}
 
 /// The operator level the mute commands need, as `/ban`'s.
 const MUTE_LEVEL: u8 = 3;
@@ -176,40 +229,39 @@ impl Game<'_> {
 
     /// A mute command from a guest: operators of level 3 (`/ban`'s); vanilla's unknown command for
     /// the others.
-    pub(super) fn guest_mute_command(&mut self, conn: u32, words: &[&str]) {
-        let Some((permission, by)) = self
-            .lan
-            .as_ref()
-            .and_then(|host| host.hub.guest(conn))
-            .map(|g| (g.permission, g.name.clone()))
-        else {
+    pub(super) fn guest_mute_command(&mut self, host: &mut LanHost, conn: u32, words: &[&str]) {
+        let Some(g) = host.hub.guest(conn) else {
             return;
         };
+        let (permission, by) = (g.permission, g.name.clone());
         let replies = if permission < MUTE_LEVEL {
             vec![translatable("command.unknown.command", &[])]
         } else {
             let words: Vec<&str> = words.iter().copied().filter(|w| !w.is_empty()).collect();
-            self.mute_command(&words, &by)
+            self.mute_command(host, &words, &by)
                 .iter()
-                .map(|line| literal(line))
+                .map(Reply::tag)
                 .collect()
         };
         for content in replies {
-            if let Some(host) = self.lan.as_ref() {
-                host.hub.send_to(
-                    conn,
-                    &C::SystemChat(play::SystemChat {
-                        content,
-                        overlay: false,
-                    }),
-                );
-            }
+            host.hub.send_to(
+                conn,
+                &C::SystemChat(play::SystemChat {
+                    content,
+                    overlay: false,
+                }),
+            );
         }
     }
 
     /// `/mute <player> [reason]`, `/tempmute <player> <duration> [reason]`, `/mutelist` and
     /// `/unmute <player>` (`words`, the command first) by `by`: the lines to answer.
-    pub(super) fn mute_command(&mut self, words: &[&str], by: &str) -> Vec<String> {
+    pub(super) fn mute_command(
+        &mut self,
+        host: &mut LanHost,
+        words: &[&str],
+        by: &str,
+    ) -> Vec<Reply> {
         let reason = |from: usize| (words.len() > from).then(|| words[from..].join(" "));
         match words {
             ["mutelist"] => {
@@ -235,13 +287,13 @@ impl Game<'_> {
                     let why = m.reason.map(|r| format!(": {r}")).unwrap_or_default();
                     lines.push(format!("{} was muted by {by} {until}{why}", m.name));
                 }
-                lines
+                lines.into_iter().map(Reply::from).collect()
             }
-            ["unmute", name] => vec![self.unmute(name, by)],
-            ["mute", name, ..] => vec![self.mute(name, None, reason(2), by)],
+            ["unmute", name] => vec![self.unmute(host, name, by).into()],
+            ["mute", name, ..] => vec![self.mute(host, name, None, reason(2), by)],
             ["tempmute", name, time, ..] => match horizon_chat_filter::parse_duration(time) {
-                Some(ms) => vec![self.mute(name, Some(ms), reason(3), by)],
-                None => vec![format!("{time} isn't a duration: 10m, 2h, 1d")],
+                Some(ms) => vec![self.mute(host, name, Some(ms), reason(3), by)],
+                None => vec![format!("{time} isn't a duration: 10m, 2h, 1d").into()],
             },
             ["mute", ..] => vec!["/mute <player> [reason]".into()],
             ["tempmute", ..] => vec!["/tempmute <player> <duration> [reason]".into()],
@@ -251,21 +303,24 @@ impl Game<'_> {
     }
 
     /// Mutes `name` for `time` milliseconds (`None`: until `/unmute`), logged; what to answer.
-    fn mute(&mut self, name: &str, time: Option<i64>, reason: Option<String>, by: &str) -> String {
+    fn mute(
+        &mut self,
+        host: &mut LanHost,
+        name: &str,
+        time: Option<i64>,
+        reason: Option<String>,
+        by: &str,
+    ) -> Reply {
         // A player here, else one the server has seen (the user cache).
-        let user = self
-            .lan
-            .as_ref()
-            .and_then(|host| {
-                host.hub
-                    .guests
-                    .iter()
-                    .find(|g| g.name.eq_ignore_ascii_case(name))
-                    .map(|g| (g.uuid, g.name.clone()))
-            })
+        let user = host
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.name.eq_ignore_ascii_case(name))
+            .map(|g| (g.uuid, g.name.clone()))
             .or_else(|| self.resolve_name(name).map(|u| (u.id, u.name)));
         let Some((uuid, name)) = user else {
-            return format!("No player was found named {name}");
+            return Reply::no_player();
         };
         let until = time.map(|ms| horizon_chat_filter::now_millis() + ms);
         let what = time.map_or_else(
@@ -276,21 +331,19 @@ impl Game<'_> {
             .as_deref()
             .map(|r| format!(": {r}"))
             .unwrap_or_default();
-        if let Some(host) = self.lan.as_mut() {
-            host.hub.mute(uuid, &name, until, by, reason);
-        }
+        host.hub.mute(uuid, &name, until, by, reason);
         if self.options.dedicated.is_some() {
             dedicated::log(
                 "INFO",
                 &format!("[chat-filter] {by} muted {name} {what}{why}"),
             );
         }
-        format!("Muted {name} {what}{why}")
+        format!("Muted {name} {what}{why}").into()
     }
 
     /// Lifts `name`'s mute, logged; what to answer.
-    pub(super) fn unmute(&mut self, name: &str, by: &str) -> String {
-        match self.lan.as_mut().and_then(|host| host.hub.unmute(name)) {
+    pub(super) fn unmute(&mut self, host: &mut LanHost, name: &str, by: &str) -> String {
+        match host.hub.unmute(name) {
             Some(name) => {
                 if self.options.dedicated.is_some() {
                     dedicated::log("INFO", &format!("[chat-filter] {by} unmuted {name}"));
@@ -299,5 +352,29 @@ impl Game<'_> {
             }
             None => format!("{name} isn't muted"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vanillas_messages_go_out_as_its_translation_keys() {
+        for (reply, key) in [
+            (Reply::no_player(), "argument.entity.notfound.player"),
+            (Reply::already_banned(), "commands.ban.failed"),
+        ] {
+            assert_eq!(reply.tag(), translatable(key, &[]));
+            assert_eq!(reply.text().translation_key(), Some(key));
+        }
+    }
+
+    #[test]
+    fn horizons_own_lines_stay_literal() {
+        let reply = Reply::from("Muted Steve until unmuted");
+        assert_eq!(reply.tag(), literal("Muted Steve until unmuted"));
+        assert_eq!(reply.text().translation_key(), None);
+        assert_eq!(reply.text().plain(), "Muted Steve until unmuted");
     }
 }

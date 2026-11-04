@@ -329,6 +329,20 @@ impl Game<'_> {
     pub(super) fn container_size(&self) -> usize {
         self.container_parts().iter().map(|p| p.1).sum()
     }
+    pub(super) fn container_slot(&self, mut n: usize) -> &Option<ItemStack> {
+        for (pos, size) in self.container_parts() {
+            if n < size {
+                return self
+                    .world
+                    .block_entities
+                    .get(&pos)
+                    .and_then(|e| e.slots().get(n))
+                    .unwrap_or(&self.scratch_slot);
+            }
+            n -= size;
+        }
+        &self.scratch_slot
+    }
     /// Container slot `n` (menu slot `300 + n`).
     pub(super) fn container_slot_mut(&mut self, mut n: usize) -> &mut Option<ItemStack> {
         let mut target = None;

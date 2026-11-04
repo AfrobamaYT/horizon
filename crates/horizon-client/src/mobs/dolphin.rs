@@ -355,7 +355,7 @@ impl Goal for FollowPlayerRidden {
             f64::from(m.ai.zza),
         );
         m.move_relative(speed, input);
-        m.do_move(cx.w, cx.events);
+        m.do_move(cx.w, cx.level, cx.events);
         self.recalc -= 1;
         if self.recalc > 0 {
             return;

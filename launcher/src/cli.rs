@@ -213,6 +213,9 @@ enum ModpackCmd {
     /// Play a ported pack as its own profile
     Play {
         pack: String,
+        /// Allow missing original Java asset/data jars to be downloaded from Modrinth
+        #[arg(long)]
+        allow_jar_downloads: bool,
         #[arg(long)]
         version: Option<String>,
     },
@@ -742,6 +745,9 @@ enum Cmd {
     },
     /// Start the client (needs a signed-in Microsoft account that owns Minecraft: Java Edition)
     Play {
+        /// Allow missing original Java asset/data jars to be downloaded from Modrinth
+        #[arg(long)]
+        allow_jar_downloads: bool,
         #[arg(long)]
         version: Option<String>,
         /// The instance to play (its name or id; default: the selected one). A Java instance
@@ -771,6 +777,9 @@ enum Cmd {
     },
     /// Run a dedicated server here; type commands into its console
     Server {
+        /// Allow missing original Java asset/data jars to be downloaded from Modrinth
+        #[arg(long)]
+        allow_jar_downloads: bool,
         /// The server's folder (default: the one the launcher uses)
         #[arg(long)]
         dir: Option<PathBuf>,
@@ -797,6 +806,10 @@ enum Cmd {
             requires = "folder"
         )]
         server_output: Option<PathBuf>,
+        /// Allow exact-hash jar downloads into the local cache for the server export;
+        /// jar bytes are never included in the exported folder
+        #[arg(long, requires = "server_output")]
+        allow_jar_downloads: bool,
         /// The instance whose installed native mods to build, and which then plays the build
         /// (default: the selected one)
         #[arg(long)]
@@ -1253,6 +1266,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
         Cmd::NativeBuild {
             folder,
             server_output,
+            allow_jar_downloads,
             instance,
             version,
             update,
@@ -1282,7 +1296,14 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                     None => native_mods::base_for(None, &backend::installed(), update)
                         .ok_or_else(|| tr("No version is installed yet."))?,
                 };
-                let built = native_mods::build_server(&base, &folder, &output, profile, steps)?;
+                let built = native_mods::build_server(
+                    &base,
+                    &folder,
+                    &output,
+                    profile,
+                    allow_jar_downloads,
+                    steps,
+                )?;
                 let built = std::path::absolute(&built).unwrap_or(built);
                 let path = built.display().to_string();
                 println!(
@@ -1366,6 +1387,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             println!("{tag} is prepared.");
         }
         Cmd::Play {
+            allow_jar_downloads,
             version,
             instance,
             world,
@@ -1456,6 +1478,12 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             let vars = instance.vars(cmd.get_program());
             cmd.envs(vars.iter().map(|(k, v)| (k, v)));
             horizon_launcher::launch::limit_memory(&mut cmd, &instance.launch);
+            horizon_launcher::jars::prepare_launch(
+                &mut cmd,
+                &instance.launch,
+                horizon_launcher::jars::Permission::headless(allow_jar_downloads),
+            )
+            .map_err(|error| error.to_string())?;
             let played = attached(horizon_launcher::launch::wrap(cmd, &instance.launch));
             if let Err(e) = instances::record_play(&instance.id, started.elapsed()) {
                 eprintln!("Play time not saved: {e}");
@@ -1467,11 +1495,19 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             dir,
             version,
             accept_eula,
+            allow_jar_downloads,
         } => {
             let tag = backend::resolve_version(version.as_deref())?;
             let dir = backend::server_dir(dir);
             // The server inherits this terminal, so typed lines reach its console.
-            attached(backend::server(&tag, &dir, accept_eula)?)?
+            let mut cmd = backend::server(&tag, &dir, accept_eula)?;
+            horizon_launcher::jars::prepare_launch(
+                &mut cmd,
+                &Default::default(),
+                horizon_launcher::jars::Permission::headless(allow_jar_downloads),
+            )
+            .map_err(|error| error.to_string())?;
+            attached(cmd)?
         }
         Cmd::Notes { tag } => {
             let r = backend::release_notes(tag.as_deref())?;
@@ -3586,9 +3622,19 @@ fn modpack(action: ModpackCmd, as_json: bool) -> Result<(), String> {
                 log,
             )?)
         }
-        ModpackCmd::Play { pack, version } => {
+        ModpackCmd::Play {
+            pack,
+            version,
+            allow_jar_downloads,
+        } => {
             let mut cmd = backend::client(&backend::resolve_version(version.as_deref())?)?;
             modpacks::apply_profile(&mut cmd, &work(&pack)?)?;
+            horizon_launcher::jars::prepare_launch(
+                &mut cmd,
+                &Default::default(),
+                horizon_launcher::jars::Permission::headless(allow_jar_downloads),
+            )
+            .map_err(|error| error.to_string())?;
             attached(cmd)?
         }
         ModpackCmd::Remove { pack } => modpacks::remove(&work(&pack)?)?,
@@ -3791,6 +3837,21 @@ mod tests {
             }
             _ => panic!("expected native-build"),
         }
+        assert!(matches!(
+            parse(&[
+                "mods",
+                "--server-output",
+                "engine-out",
+                "--allow-jar-downloads"
+            ])
+            .unwrap()
+            .command,
+            Some(Cmd::NativeBuild {
+                allow_jar_downloads: true,
+                ..
+            })
+        ));
+        assert!(parse(&["mods", "--allow-jar-downloads"]).is_err());
         // The mod folder is explicit in export mode: no default from an instance.
         assert!(parse(&["--server-output", "engine-out"]).is_err());
         // Export mode never touches an instance.

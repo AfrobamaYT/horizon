@@ -37,15 +37,15 @@ impl DataPack {
             }
         }
     }
-    /// The files of `data/<namespace>/<kind>/` for each kind, in the order
-    /// `list("data/")` gives them. A folder pack walks only those folders:
+    /// The files of `<top>/<namespace>/<kind>/` for each kind, in the order
+    /// `list("<top>/")` gives them. A folder pack walks only those folders:
     /// the built-in pack holds about 10,000 other data files.
-    pub fn list_kinds(&self, kinds: &[&str]) -> Vec<String> {
+    pub fn list_under(&self, top: &str, kinds: &[&str]) -> Vec<String> {
         debug_assert!(kinds.is_sorted(), "kinds in walk order");
         let Source::Dir(root) = &self.source else {
-            return self.list("data/");
+            return self.list(&format!("{top}/"));
         };
-        let Ok(entries) = std::fs::read_dir(root.join("data")) else {
+        let Ok(entries) = std::fs::read_dir(root.join(top)) else {
             return Vec::new();
         };
         let mut namespaces: Vec<_> = entries.flatten().map(|e| e.path()).collect();
@@ -57,6 +57,10 @@ impl DataPack {
             }
         }
         out
+    }
+    /// The files of `data/<namespace>/<kind>/` for each kind.
+    pub fn list_kinds(&self, kinds: &[&str]) -> Vec<String> {
+        self.list_under("data", kinds)
     }
     pub fn read(&self, path: &str) -> Option<Vec<u8>> {
         match &self.source {

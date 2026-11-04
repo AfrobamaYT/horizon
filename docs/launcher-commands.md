@@ -76,6 +76,7 @@ Start the client (needs a signed-in Microsoft account that owns Minecraft: Java 
 
     horizon-launcher play
 
+- `--allow-jar-downloads`: Allow missing original Java asset/data jars to be downloaded from Modrinth
 - `--instance`: The instance to play (its name or id; default: the selected one). A Java instance starts its Minecraft: Java Edition, downloaded with its Java the first time
 - `--world`: Open or create this world (a folder under saves) at once
 - `--creative`: Creative mode for a new world
@@ -92,6 +93,7 @@ Run a dedicated server here; type commands into its console.
 
     horizon-launcher server
 
+- `--allow-jar-downloads`: Allow missing original Java asset/data jars to be downloaded from Modrinth
 - `--dir`: The server's folder (default: the one the launcher uses)
 - `--accept-eula`: Agree to the Minecraft EULA (https://aka.ms/MinecraftEULA)
 
@@ -105,6 +107,7 @@ Native mods (docs/native-mods.md): compile flat Rust mod projects against the in
 
 - `FOLDER`: A mod folder (horizon-mod.toml with [native], Cargo.toml and src/), or a folder of them (default: the native mods installed and turned on in the instance)
 - `--server-output`: Export mode: build a standalone dedicated-server engine into this folder instead of an instance's build. Needs a mod FOLDER; no instance is read or changed, and no launcher config is written
+- `--allow-jar-downloads`: Allow exact-hash jar downloads into the local cache for the server export; jar bytes are never included in the exported folder
 - `--instance`: The instance whose installed native mods to build, and which then plays the build (default: the selected one)
 - `--update`: Move to the newest installed release or Nightly instead of the Horizon the instance plays (a full rebuild)
 - `--trust-native-code`: You read the mods' source and trust it with full access to this computer
@@ -812,6 +815,7 @@ Play a ported pack as its own profile.
     horizon-launcher modpack play <PACK>
 
 - `PACK`
+- `--allow-jar-downloads`: Allow missing original Java asset/data jars to be downloaded from Modrinth
 
 MCP: `modpack_play`.
 

@@ -865,6 +865,16 @@ impl Game<'_> {
                 self.armor_stand_location_effects(i, true);
             }
             self.armor_stand_turtle_eggs(i, landed)?;
+            let a = &self.armor_stands[i];
+            if !a.marker && !a.no_gravity {
+                self.entity_powder_snow_particles(
+                    a.previous,
+                    a.position,
+                    a.bounds(),
+                    a.velocity,
+                    true,
+                );
+            }
             let a = &mut self.armor_stands[i];
             if let Some(damage_type) =
                 a.environment_tick(&self.world, self.res.facts(), self.pack.assets.registry)
@@ -1412,7 +1422,7 @@ impl Game<'_> {
             && let Some(eye) = self.eye_position()
         {
             // Player.drop(stack, false): thrown from the eyes, no thrower.
-            self.throw_from_eyes(rest, eye, false);
+            self.throw_from_eyes(rest, eye, false, false);
         }
         // The attribute modifiers of a worn piece come from the server's
         // ClientboundUpdateAttributesPacket on a client.

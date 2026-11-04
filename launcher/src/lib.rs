@@ -19,6 +19,7 @@ pub mod import;
 #[cfg(windows)]
 pub mod installer;
 pub mod instances;
+pub mod jars;
 pub mod java;
 pub mod java_launch;
 pub mod launch;
@@ -39,6 +40,7 @@ pub mod rust_toolchain;
 pub mod screenshots;
 pub mod server_list;
 pub mod servers;
+pub mod shop;
 pub mod shortcut;
 pub mod signed;
 pub mod skins;
