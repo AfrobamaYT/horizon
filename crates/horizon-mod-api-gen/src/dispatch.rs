@@ -441,7 +441,7 @@ pub(super) fn emit(
             } else {
                 "Game"
             };
-            fire.push_str(&format!("impl {receiver}<'_> {{ #[inline] pub(super) {signature} {{ mod_api::{call}({passed}); }} }}\n", signature = signature.to_token_stream()));
+            fire.push_str(&format!("impl {receiver}<'_> {{ #[allow(dead_code)] #[inline] pub(super) {signature} {{ mod_api::{call}({passed}); }} }}\n", signature = signature.to_token_stream()));
             if fill {
                 let passed = sig
                     .inputs

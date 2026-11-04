@@ -9239,13 +9239,13 @@ impl Game<'_> {
             self.show_calibration(h);
         }
         if self.screen == Screen::Win {
-            let drawn = self.fire_screen_render_pre(&mut batch);
+            let drawn = self.draw_screen_with_pre_hook(&mut batch);
             if drawn {
                 self.draw_win_screen(&mut batch);
             }
             // The early return skips the match below: the hooks still see the
             // screen, after its own drawing.
-            self.fire_screen_render_post(&mut batch, drawn);
+            self.draw_screen_with_post_hook(&mut batch, drawn);
             return batch;
         }
         if self.screen == Screen::Options {
@@ -9253,11 +9253,11 @@ impl Game<'_> {
                 self.flush_skin_slots();
                 self.update_remote_skins();
             }
-            let drawn = self.fire_screen_render_pre(&mut batch);
+            let drawn = self.draw_screen_with_pre_hook(&mut batch);
             if drawn {
                 self.draw_options(&mut batch);
             }
-            self.fire_screen_render_post(&mut batch, drawn);
+            self.draw_screen_with_post_hook(&mut batch, drawn);
             self.draw_split_hud(&mut batch, true);
             return batch;
         }
@@ -9573,7 +9573,7 @@ impl Game<'_> {
         } else {
             self.screen
         };
-        let drawn = self.fire_screen_render_pre(&mut batch);
+        let drawn = self.draw_screen_with_pre_hook(&mut batch);
         match screen {
             _ if !drawn => {}
             Screen::Paused if self.pause_menu => self.draw_pause_menu(&mut batch),
@@ -9621,7 +9621,7 @@ impl Game<'_> {
         // tooltips, so a native mod draws over it here. Never `Playing`: the
         // prompts, books and sign editors drawn over gameplay keep it, draw
         // after this point and so over what a mod drew.
-        self.fire_screen_render_post(&mut batch, drawn);
+        self.draw_screen_with_post_hook(&mut batch, drawn);
         self.draw_saving_indicator(&mut batch);
         // ToastManager.extractRenderState: F1 hides the toasts too.
         self.draw_toasts(&mut batch, !show_hud);
@@ -9670,13 +9670,13 @@ impl Game<'_> {
     /// once a frame, before it draws itself: whether it is drawn (a cancelled
     /// `Render.Pre` skips it and its Background). The Win and Options screens
     /// call this on their own path. Client only: what a mod draws is its own.
-    fn fire_screen_render_pre(&self, batch: &mut HudBatch) -> bool {
+    fn draw_screen_with_pre_hook(&self, batch: &mut HudBatch) -> bool {
         match self.screen_render_view(batch) {
             Some(view) => self.screen_render_begin(batch, &view),
             None => true,
         }
     }
-    /// `fire_screen_render_pre` for the title's own screens.
+    /// `draw_screen_with_pre_hook` for the title's own screens.
     fn fire_title_screen_render_pre(&self, batch: &mut HudBatch) -> bool {
         match self.title_screen_render_view(batch) {
             Some(view) => self.screen_render_begin(batch, &view),
@@ -9688,12 +9688,12 @@ impl Game<'_> {
     /// itself and its tooltips, so a native mod draws over it here. Never
     /// `Playing`: the prompts, books and sign editors drawn over gameplay keep
     /// it, draw after this point and so over what a mod drew.
-    fn fire_screen_render_post(&self, batch: &mut HudBatch, drawn: bool) {
+    fn draw_screen_with_post_hook(&self, batch: &mut HudBatch, drawn: bool) {
         if let Some(view) = self.screen_render_view(batch) {
             self.screen_render_end(batch, &view, drawn);
         }
     }
-    /// `fire_screen_render_post` for the title's own screen, once a frame,
+    /// `draw_screen_with_post_hook` for the title's own screen, once a frame,
     /// after it has drawn and before the toasts.
     fn fire_title_screen_render_post(&self, batch: &mut HudBatch, drawn: bool) {
         if let Some(view) = self.title_screen_render_view(batch) {

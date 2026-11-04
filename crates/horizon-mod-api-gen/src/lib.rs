@@ -1732,5 +1732,12 @@ mod tests {
             syn::parse_quote! { fn native_zoom(&self) { mod_api::dispatch_zoom(); } };
         assert!(!super::has_call(&missing.block, "dispatch_zoom"));
         assert!(super::has_call(&present.block, "dispatch_zoom"));
+        let generated: syn::ItemFn = syn::parse_quote! {
+            fn native_zoom(&self) { self.fire_zoom(); }
+        };
+        assert_eq!(
+            super::needs_fill(&generated, "dispatch_zoom", true),
+            Ok(false)
+        );
     }
 }
