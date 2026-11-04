@@ -166,7 +166,7 @@ pub trait Hooks {
     );
     /// A command typed or clicked in chat, without its slash, before the
     /// server and Horizon's commands see it: set `ran` when the mod ran it.
-    #[hook(side = "both", contract = "cancel", out = "ran")]
+    #[hook(side = "client", contract = "cancel", out = "ran")]
     fn command();
     /// The client's own commands (NeoForge's `RegisterClientCommandsEvent`), which
     /// `command` runs: push a `NativeCommand` per usage (`x <mode:word>`).
