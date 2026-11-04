@@ -2604,6 +2604,19 @@ pub enum NativeSpawnCheck {
     Fail,
 }
 
+/// What a mod answers a despawn check (`MobDespawnEvent.Result`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeDespawn {
+    /// `ALLOW`: the mob despawns now.
+    Allow,
+    /// `DEFAULT`: vanilla's `Mob.checkDespawn` decides.
+    #[default]
+    Default,
+    /// `DENY`: the mob does not despawn.
+    Deny,
+}
+
 /// Block shape used by an empty-context level ray.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
