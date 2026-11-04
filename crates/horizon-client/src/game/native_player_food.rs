@@ -105,7 +105,7 @@ impl Game<'_> {
         &self,
         player: PlayerRef,
     ) -> Option<NativePlayerExperience> {
-        Some(match self.player_handle_read(player)? {
+        Some(match self.player_read_both(player)? {
             super::native_server::PlayerRead::Guest(g) => {
                 NativePlayerExperience::from(mod_api::__private::built::NativePlayerExperience {
                     level: g.xp_level,

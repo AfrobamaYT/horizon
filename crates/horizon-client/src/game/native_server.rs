@@ -588,6 +588,39 @@ impl Game<'_> {
         self.player_handle_read(player)?.last_death().cloned()
     }
 
+    /// `player_handle_read` for the reads that work on both sides. On a
+    /// client the local player (`Minecraft.player`) reads its own copy of
+    /// what the server sent (`LocalPlayer`): the game mode, food, abilities,
+    /// hotbar slot and experience. Any other player reads None there: the
+    /// client is not sent their state.
+    pub(super) fn player_read_both(&self, player: PlayerRef) -> Option<PlayerRead<'_>> {
+        if self.is_logical_server() {
+            return self.player_handle_read(player);
+        }
+        (self.native_local_player()? == player).then(|| PlayerRead::Acting {
+            mode: self.mode_id(),
+            body: self.player.as_ref(),
+            abilities: Some(self.client_abilities()),
+            last_death: self.level.last_death.as_ref(),
+        })
+    }
+    /// The local player's `Abilities` on a client: what its game mode gives
+    /// (`GameType.updatePlayerAbilities`, `mayBuild` among them), then the
+    /// flags and speeds `ClientPacketListener.handlePlayerAbilities` took.
+    fn client_abilities(&self) -> PlayerAbilities {
+        let mut a = PlayerAbilities::default();
+        a.update_for_mode(self.mode_id());
+        if let Some(p) = self.remote_abilities() {
+            a.invulnerable = p.flags & 1 != 0;
+            a.flying = p.flags & 2 != 0;
+            a.may_fly = p.flags & 4 != 0;
+            a.instabuild = p.flags & 8 != 0;
+            a.flying_speed = p.flying_speed;
+            a.walking_speed = p.walking_speed;
+        }
+        a
+    }
+
     pub(super) fn player_handle_read(&self, player: PlayerRef) -> Option<PlayerRead<'_>> {
         (self.native_lifecycle.epoch()? == player.fields().entity.epoch()).then_some(())?;
         if self.lan_acting_fake
@@ -619,7 +652,7 @@ impl Game<'_> {
     /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
     /// None for stale, offline or unavailable players (including displaced outer players).
     pub(super) fn native_player_game_mode(&self, player: PlayerRef) -> Option<GameMode> {
-        GameMode::from_id(self.player_handle_read(player)?.mode())
+        GameMode::from_id(self.player_read_both(player)?.mode())
     }
 
     /// Changes a player's game mode as `ServerPlayer.setGameMode` and
@@ -685,12 +718,12 @@ impl Game<'_> {
 
     /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
     pub(super) fn native_player_is_creative(&self, player: PlayerRef) -> Option<bool> {
-        Some(self.player_handle_read(player)?.creative())
+        Some(self.player_read_both(player)?.creative())
     }
 
     /// `Inventory.getSelectedSlot`: the hotbar slot the player holds, 0..9.
     pub(super) fn native_player_selected_slot(&self, player: PlayerRef) -> Option<usize> {
-        Some(match self.player_handle_read(player)? {
+        Some(match self.player_read_both(player)? {
             PlayerRead::Acting { .. } => self.selected,
             PlayerRead::Guest(guest) => guest.selected,
         })
@@ -698,19 +731,19 @@ impl Game<'_> {
 
     /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.
     pub(super) fn native_player_is_spectator(&self, player: PlayerRef) -> Option<bool> {
-        Some(self.player_handle_read(player)?.mode() == 3)
+        Some(self.player_read_both(player)?.mode() == 3)
     }
 
     /// `Player.mayBuild`; Paper `HumanEntity#getGameMode`.
     pub(super) fn native_player_may_build(&self, player: PlayerRef) -> Option<bool> {
-        Some(self.player_handle_read(player)?.may_build())
+        Some(self.player_read_both(player)?.may_build())
     }
 
     /// `FoodData.getFoodLevel/getSaturationLevel/getExhaustionLevel`; Paper
     /// `HumanEntity#getFoodLevel/getSaturation/getExhaustion`. None until the
     /// guest's body exists, as well as for stale or unavailable players.
     pub(super) fn native_player_food(&self, player: PlayerRef) -> Option<NativePlayerFood> {
-        self.player_handle_read(player)?.food()
+        self.player_read_both(player)?.food()
     }
 
     /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
@@ -718,7 +751,7 @@ impl Game<'_> {
         &self,
         player: PlayerRef,
     ) -> Option<NativePlayerAbilities> {
-        self.player_handle_read(player)?.abilities()
+        self.player_read_both(player)?.abilities()
     }
 
     /// The players on this server, in the order they joined. Empty on a
