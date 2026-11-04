@@ -3384,7 +3384,13 @@ mod poison_effect_tests {
         let mut pig = Mob::new(1, pig_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.health = 20.0;
         pig.extra.effects.push(("minecraft:poison", 0, 0));
-        tick_effects(&mut pig, None);
+        let mut test_level = crate::health::TestLevel::new(0);
+        tick_effects(
+            &mut pig,
+            crate::test_resources::server_loop_context(),
+            &mut test_level.level(),
+            None,
+        );
         assert!(pig.extra.effects.is_empty());
         // A poison with no remaining duration does not get its first tick either.
         assert_eq!(pig.health, 20.0);
@@ -4601,9 +4607,10 @@ mod wither_block_slowdown_tests {
                 let mut m = mob(types, "minecraft:cow");
                 m.fall_distance = 4.5;
                 m.stuck_multiplier = Vec3::ZERO;
-                let mut random = LegacyRandom::new(42);
+                let mut test_level = crate::health::TestLevel::new(42);
+                let random = &mut test_level.level();
                 let mut events = Vec::new();
-                effects_from_blocks(&mut m, w, &mut random, &mut events);
+                effects_from_blocks(&mut m, w, random, &mut events);
                 assert_eq!(m.fall_distance, 0.0, "cow fall distance reset");
                 assert_eq!(
                     m.stuck_multiplier,
@@ -4622,9 +4629,10 @@ mod wither_block_slowdown_tests {
             let mut m = mob(types, "minecraft:cow");
             m.fall_distance = 4.5;
             m.stuck_multiplier = Vec3::ZERO;
-            let mut random = LegacyRandom::new(42);
+            let mut test_level = crate::health::TestLevel::new(42);
+            let random = &mut test_level.level();
             let mut events = Vec::new();
-            effects_from_blocks(&mut m, w, &mut random, &mut events);
+            effects_from_blocks(&mut m, w, random, &mut events);
             assert_eq!(m.fall_distance, 0.0, "cow fall distance reset");
             assert_eq!(
                 m.stuck_multiplier,
@@ -4644,9 +4652,10 @@ mod wither_block_slowdown_tests {
                 let mut m = mob(types, "minecraft:wither");
                 m.fall_distance = 4.5;
                 m.stuck_multiplier = Vec3::ZERO;
-                let mut random = LegacyRandom::new(42);
+                let mut test_level = crate::health::TestLevel::new(42);
+                let random = &mut test_level.level();
                 let mut events = Vec::new();
-                effects_from_blocks(&mut m, w, &mut random, &mut events);
+                effects_from_blocks(&mut m, w, random, &mut events);
                 assert_eq!(m.fall_distance, 4.5, "wither fall distance preserved");
                 assert_eq!(m.stuck_multiplier, Vec3::ZERO, "wither not slowed");
             });
@@ -4661,9 +4670,10 @@ mod wither_block_slowdown_tests {
             let mut m = mob(types, "minecraft:wither");
             m.fall_distance = 4.5;
             m.stuck_multiplier = Vec3::ZERO;
-            let mut random = LegacyRandom::new(42);
+            let mut test_level = crate::health::TestLevel::new(42);
+            let random = &mut test_level.level();
             let mut events = Vec::new();
-            effects_from_blocks(&mut m, w, &mut random, &mut events);
+            effects_from_blocks(&mut m, w, random, &mut events);
             assert_eq!(m.fall_distance, 4.5, "wither fall distance preserved");
             assert_eq!(m.stuck_multiplier, Vec3::ZERO, "wither not slowed");
         });
@@ -4703,9 +4713,10 @@ mod wither_block_slowdown_tests {
                 let initial_health = m.health;
                 m.previous = Vec3::new(0.5, 64.0, 0.5);
                 m.position = Vec3::new(0.52, 64.0, 0.5);
-                let mut random = LegacyRandom::new(42);
+                let mut test_level = crate::health::TestLevel::new(42);
+                let random = &mut test_level.level();
                 let mut events = Vec::new();
-                effects_from_blocks(&mut m, w, &mut random, &mut events);
+                effects_from_blocks(&mut m, w, random, &mut events);
                 assert_eq!(
                     m.health,
                     initial_health - 0.86,

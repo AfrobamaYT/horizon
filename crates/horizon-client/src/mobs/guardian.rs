@@ -364,7 +364,6 @@ pub fn elder_server_ai_step(m: &mut Mob, cx: &mut Cx) {
 mod elder_home_tests {
     use super::*;
     use crate::mobs::world::with_test_world;
-    use horizon_core::random::LegacyRandom;
     use std::sync::Arc;
 
     /// `ElderGuardian.customServerAiStep`: with no home yet, `setHomeTo(blockPosition(), 16)`,
@@ -373,14 +372,14 @@ mod elder_home_tests {
     fn an_elder_guardian_homes_where_it_stands() {
         with_test_world(&[], |w, types| {
             let kind = Arc::new(types.types["minecraft:elder_guardian"].clone());
-            let mut lr = LegacyRandom::new(0);
+            let mut test_level = crate::health::TestLevel::new(0);
             let mut events = Vec::new();
             let mut m = Mob::new(1, kind.clone(), Vec3::new(10.7, 64.2, -20.9), 0.0);
             elder_server_ai_step(
                 &mut m,
                 &mut Cx {
                     w,
-                    lr: &mut lr,
+                    level: &mut test_level.level(),
                     events: &mut events,
                 },
             );
@@ -394,7 +393,7 @@ mod elder_home_tests {
                 &mut kept,
                 &mut Cx {
                     w,
-                    lr: &mut lr,
+                    level: &mut test_level.level(),
                     events: &mut events,
                 },
             );
