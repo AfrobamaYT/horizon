@@ -7657,6 +7657,21 @@ impl Game<'_> {
                     }
                 }
             }
+            // The held item's onItemUseFirst on this client: the broadcast
+            // event's ItemBeforeBlock phase answers for the block and the
+            // item, as on the server (a Part's answer comes from the server).
+            if canceled.is_none()
+                && !spectator
+                && use_item.or(true)
+                && let Some(stack) = held.as_ref()
+            {
+                canceled = self.use_item_on_block(
+                    &hit,
+                    hand,
+                    Some(stack),
+                    mod_api::UsePhase::ItemBeforeBlock,
+                );
+            }
             // Player.isSecondaryUseActive with something in either hand
             // keeps the block from reacting.
             let sneaking = self.keys.contains(&KeyCode::ShiftLeft);
@@ -8356,7 +8371,7 @@ impl Game<'_> {
         if self.cooldowns.is_on_cooldown(&group) {
             return false;
         }
-        if let Some(answer) = self.right_click_item(hand, &held) {
+        if let Some(answer) = self.right_click_item(hand, &held, self.pick().is_some()) {
             let success = answer == mod_api::NativeInteractionResult::Success;
             if success {
                 self.with_hand(hand, Game::swing_arm);

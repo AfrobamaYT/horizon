@@ -1,0 +1,18 @@
+{
+  "hooks": [
+    {
+      "name": "on_item_use_first",
+      "doc": "`IItemExtension.onItemUseFirst`: the held item's first say on a\nclick on a block, on the server for each player, after\n`use_item_on_block` (`ItemBeforeBlock`) let it through and before the\nblock's own `useItemOn`. An answer ends the click: neither the block\nnor the item's `useOn` runs. `Pass` goes on to the block.",
+      "side": "server",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_on_item_use_first",
+      "mod_api": {
+        "contract": "replace",
+        "out": "answer",
+        "scope": "item",
+        "key": "stack"
+      }
+    }
+  ],
+  "helpers": []
+}

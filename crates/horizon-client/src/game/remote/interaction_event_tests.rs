@@ -29,6 +29,7 @@ enum Step {
     Phase(UsePhase, LogicalSide),
     BlockPart,
     UseOnPart,
+    FirstPart,
     Air(LogicalSide, Hand),
     ItemPart,
 }
@@ -36,6 +37,10 @@ enum Step {
 #[derive(Default)]
 struct Controls {
     steps: Vec<Step>,
+    /// Whether the onItemUseFirst moment is recorded in `steps`.
+    record_first: bool,
+    first_answer: Option<Answer>,
+    first_part_answer: Option<Answer>,
     block_answer: Option<Answer>,
     item_on_answer: Option<Answer>,
     air_answer: Option<Answer>,
@@ -82,11 +87,13 @@ impl Hooks for Observer {
         assert_eq!(*event.cancellation_result, Answer::TryWithEmptyHand);
         let mut state = self.0.lock().unwrap();
         assert_eq!(event.click.hand, state.expected_hand.unwrap_or(Hand::Main));
-        state.steps.push(Step::Phase(event.phase, event.click.side));
+        if event.phase != UsePhase::ItemBeforeBlock || state.record_first {
+            state.steps.push(Step::Phase(event.phase, event.click.side));
+        }
         let answer = match event.phase {
             UsePhase::Block => state.block_answer,
             UsePhase::ItemAfterBlock => state.item_on_answer,
-            UsePhase::ItemBeforeBlock => panic!("onItemUseFirst has no firing point yet"),
+            UsePhase::ItemBeforeBlock => state.first_answer,
             _ => unreachable!("UsePhase: unhandled variant"),
         };
         if let Some(answer) = answer {
@@ -140,6 +147,17 @@ impl BlockPart for Observer {
 }
 #[mod_api::horizon_part]
 impl ItemPart for Observer {
+    fn on_item_use_first(
+        &self,
+        _: &mut dyn ServerHost,
+        _: &mut mod_api::OnItemUseFirstEvent<'_>,
+    ) -> Option<Answer> {
+        let mut state = self.0.lock().unwrap();
+        if state.record_first {
+            state.steps.push(Step::FirstPart);
+        }
+        state.first_part_answer
+    }
     fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
         self.0.lock().unwrap().steps.push(Step::UseOnPart);
         Flow::Cancel
@@ -658,7 +676,7 @@ fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() 
                 game.forced_hit = Some(hit());
                 // Even a passing block remains a block target for Item.use.
                 assert!(
-                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1))
+                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1), true)
                         .is_none()
                 );
                 assert!(observer.0.lock().unwrap().steps.is_empty());
@@ -677,11 +695,81 @@ fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() 
                 ));
                 assert!(game.entity_targeted());
                 assert!(
-                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1))
+                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1), false)
                         .is_none()
                 );
                 assert!(observer.0.lock().unwrap().steps.is_empty());
             });
         }
+    });
+}
+
+#[test]
+#[ignore = "requires prepared game resources"]
+fn on_item_use_first_runs_before_the_block_and_ends_the_click() {
+    let observer = Observer::default();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "first_observer",
+        Box::new(observer.clone()),
+    )]
+    .into();
+    mod_api::__private::install_parts(&mods).unwrap();
+    mod_api::testing::with_mods(mods, || {
+        with_interaction_game(false, |game| {
+            let registry = game.pack.assets.registry;
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let lever = game
+                .with_props(
+                    registry.default_state("minecraft:lever").unwrap(),
+                    &[("face", "floor")],
+                )
+                .unwrap();
+            game.world.set(0, 63, 0, stone).unwrap();
+            game.world.set(0, 64, 0, lever).unwrap();
+            game.forced_hit = Some(hit());
+            let server = LogicalSide::Server;
+            let first = Step::Phase(UsePhase::ItemBeforeBlock, server);
+
+            // A Part's answer ends the click before the block is asked.
+            *observer.0.lock().unwrap() = Controls {
+                record_first: true,
+                first_part_answer: Some(Answer::Success),
+                ..Controls::default()
+            };
+            assert!(use_block(game, false));
+            assert_eq!(game.world.block(0, 64, 0), lever);
+            assert_eq!(observer.0.lock().unwrap().steps, [first, Step::FirstPart]);
+
+            // The broadcast event goes first: its cancel stops the Part.
+            *observer.0.lock().unwrap() = Controls {
+                record_first: true,
+                first_answer: Some(Answer::Success),
+                first_part_answer: Some(Answer::Success),
+                ..Controls::default()
+            };
+            assert!(use_block(game, false));
+            assert_eq!(game.world.block(0, 64, 0), lever);
+            assert_eq!(
+                observer.0.lock().unwrap().steps,
+                [Step::Phase(UsePhase::ItemBeforeBlock, server)]
+            );
+
+            // A pass goes on: the block's phase and the lever flip.
+            *observer.0.lock().unwrap() = Controls {
+                record_first: true,
+                first_part_answer: Some(Answer::Pass),
+                ..Controls::default()
+            };
+            assert!(use_block(game, false));
+            assert_ne!(game.world.block(0, 64, 0), lever);
+            assert_eq!(
+                observer.0.lock().unwrap().steps[..3],
+                [
+                    Step::Phase(UsePhase::ItemBeforeBlock, server),
+                    Step::FirstPart,
+                    Step::Phase(UsePhase::Block, server),
+                ]
+            );
+        });
     });
 }
