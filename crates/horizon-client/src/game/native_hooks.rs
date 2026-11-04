@@ -2334,7 +2334,7 @@ impl Game<'_> {
     /// A command typed or clicked in chat, without its slash, before the
     /// server and Horizon's commands see it: set `ran` when the mod ran it.
     pub(super) fn native_command(&mut self, command: &str, ran: &mut bool) {
-        mod_api::dispatch_command(super::execution_role::host_side(self), command, ran);
+        mod_api::dispatch_command(self, command, ran);
     }
     /// The client's own commands (`RegisterClientCommandsEvent`), which
     /// `native_command` runs: push a `NativeCommand` per usage. Asked when a
@@ -11341,7 +11341,7 @@ impl Game<'_> {
         self.native_interaction_key_mapping_triggered(key, hand, &mut swing_hand, &mut canceled);
         canceled.then_some(swing_hand)
     }
-    /// A native mod's command.
+    /// A client mod's command (the `command` hook); a server never asks.
     pub(super) fn client_mod_command(&mut self, command: &str) -> bool {
         let mut ran = false;
         self.native_command(command, &mut ran);
