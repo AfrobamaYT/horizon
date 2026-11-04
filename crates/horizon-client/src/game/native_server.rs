@@ -478,7 +478,7 @@ impl Game<'_> {
             return false;
         };
         let index = host.hub.guests.iter().position(|g| {
-            !g.participates_online()
+            g.is_fake()
                 && g.uuid == player.fields().uuid
                 && g.entity_id as u32 == player.fields().entity.id()
                 && host
@@ -498,40 +498,52 @@ impl Game<'_> {
     }
 
     /// A fake player acts as a player does, through the game's own path for the action
-    /// (`ServerGamePacketListenerImpl.handleUseItemOn` / `handleUseItem`), as its packet would
-    /// run it: reach, protection and the border, then `ServerPlayerGameMode`. Once the click
-    /// runs, an effect a fake can't take part in (a menu, sleep, a ride, another dimension) is
-    /// stopped where it would start, and the answer says which; the click's own side effects
-    /// (the swing, the hooks before the use, vanilla's result) have still happened then.
+    /// (`ServerGamePacketListenerImpl.handleUseItemOn` / `handleUseItem` / `handleInteract`'s
+    /// ATTACK, and `ServerPlayerGameMode.destroyBlock`), as its packet would run it: reach,
+    /// protection and the border, then the action. Once it runs, an effect a fake can't take
+    /// part in (a menu, sleep, a ride, another dimension) is stopped where it would start, and
+    /// the answer says which; the action's own side effects (the swing, the hooks before it,
+    /// vanilla's result) have still happened then. The fake is found once, and its turn
+    /// starts at that place in the list.
     pub(super) fn native_player_perform_action(
         &mut self,
         player: PlayerRef,
         action: PlayerAction,
     ) -> Result<ActionOutcome, ActionRefused> {
-        match self.native_player_is_fake(player) {
-            None => return Err(ActionRefused::Stale),
-            Some(false) => return Err(ActionRefused::NotFake),
-            Some(true) => {}
+        if self.native_lifecycle.epoch() != Some(player.fields().entity.epoch()) {
+            return Err(ActionRefused::Stale);
         }
+        let found = self.lan.as_ref().and_then(|host| {
+            host.hub.guests.iter().enumerate().find(|(_, g)| {
+                g.placed
+                    && g.uuid == player.fields().uuid
+                    && g.entity_id as u32 == player.fields().entity.id()
+            })
+        });
+        let (gi, conn) = match found {
+            Some((gi, g)) if g.is_fake() => (gi, g.conn),
+            Some(_) => return Err(ActionRefused::NotFake),
+            // Not in the hub's list as itself: the acting player, or gone.
+            None => {
+                return Err(match self.native_player_is_fake(player) {
+                    Some(false) => ActionRefused::NotFake,
+                    Some(true) => ActionRefused::Busy,
+                    None => ActionRefused::Stale,
+                });
+            }
+        };
         if !self.lan_guest_swaps.is_empty()
             || !self.transactions.is_empty()
             || self.fake_action.acting()
         {
             return Err(ActionRefused::Busy);
         }
-        let (gi, conn) = self
-            .lan
-            .as_ref()
-            .and_then(|host| {
-                host.hub.guests.iter().enumerate().find(|(_, g)| {
-                    g.placed
-                        && !g.participates_online()
-                        && g.uuid == player.fields().uuid
-                        && g.entity_id as u32 == player.fields().entity.id()
-                })
-            })
-            .map(|(gi, g)| (gi, g.conn))
-            .ok_or(ActionRefused::Stale)?;
+        if let PlayerAction::Attack { target } = action
+            && (self.native_lifecycle.epoch() != Some(target.epoch())
+                || target.id() == player.fields().entity.id())
+        {
+            return Err(ActionRefused::InvalidTarget);
+        }
         let acting = Acting::start(&self.fake_action);
         let consumed = match action {
             PlayerAction::UseOn { hand, pos, hit } => {
@@ -544,6 +556,11 @@ impl Game<'_> {
                 self.guest_use_item_on(conn, gi, hit, hand)?
             }
             PlayerAction::UseItem { hand } => self.guest_use_item(conn, gi, hand, None)?,
+            PlayerAction::Attack { target } => {
+                let id = i32::try_from(target.id()).map_err(|_| ActionRefused::InvalidTarget)?;
+                self.guest_attack(conn, gi, id)?
+            }
+            PlayerAction::BreakBlock { pos } => self.guest_break_block(conn, gi, pos)?,
         };
         Ok(match acting.blocked() {
             Some(effect) => ActionOutcome::EffectBlocked(effect),
@@ -571,7 +588,7 @@ impl Game<'_> {
         let mut i = 0;
         while i < host.hub.guests.len() {
             let g = &host.hub.guests[i];
-            if !g.participates_online() && g.dimension == dimension {
+            if g.is_fake() && g.dimension == dimension {
                 let guest = host.hub.guests.remove(i);
                 self.cleanup_fake_player(&mut host, &guest);
             } else {
@@ -585,7 +602,7 @@ impl Game<'_> {
     pub(super) fn native_player_is_fake(&self, player: PlayerRef) -> Option<bool> {
         match self.player_handle_read(player)? {
             PlayerRead::Acting { .. } => Some(self.lan_acting_fake),
-            PlayerRead::Guest(guest) => Some(!guest.participates_online()),
+            PlayerRead::Guest(guest) => Some(guest.is_fake()),
         }
     }
 
@@ -756,7 +773,7 @@ impl Game<'_> {
         }
         let guest = self.lan.as_ref()?.hub.guests.iter().find(|guest| {
             guest.placed
-                && !guest.participates_online()
+                && guest.is_fake()
                 && guest.uuid == player.fields().uuid
                 && guest.entity_id as u32 == player.fields().entity.id()
                 && !self.lan_guest_swaps.contains(&guest.conn)
@@ -1951,6 +1968,7 @@ mod fake_action_tests {
         for g in host.hub.guests.iter_mut() {
             g.position = [0.5, 64.0, 0.5];
             g.game_mode = mode;
+            g.abilities.update_for_mode(mode);
             g.inventory[g.selected] = item.map(|i| ItemStack::new(i, 1));
         }
         (player, fake, real)
@@ -2040,6 +2058,194 @@ mod fake_action_tests {
                 Ok(ActionOutcome::Consumed)
             );
             assert_eq!(held(game, 2), None);
+        });
+    }
+
+    /// A zombie standing at `at`, entity id `id`, and its handle.
+    fn zombie(game: &mut Game<'_>, id: u32, at: [f64; 3]) -> mod_api::EntityRef {
+        let kind = game
+            .res
+            .mob_types()
+            .get("minecraft:zombie")
+            .unwrap()
+            .clone();
+        let [x, y, z] = at;
+        game.mobs.push(horizon_client::mobs::Mob::new(
+            id,
+            kind,
+            horizon_core::geometry::Vec3::new(x, y, z),
+            0.0,
+        ));
+        mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), id)
+    }
+
+    fn health(game: &Game<'_>, id: u32) -> f32 {
+        game.mobs.iter().find(|m| m.id == id).unwrap().health
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_fake_attacks_through_the_players_own_path() {
+        use super::super::native_entity_refs::tests::with_game;
+        with_game(|game| {
+            let (player, fake_conn, _) = fake(game, None, 0);
+            for g in game.lan.as_mut().unwrap().hub.guests.iter_mut() {
+                g.yaw = -90.0;
+            }
+            // A fist does 1 (the attack damage attribute's base), scaled by the attack strength
+            // of a player that hasn't waited (`getAttackStrengthScale(0.5)`: 0.5 of a 5-tick
+            // delay, 0.1, so 0.2 + 0.1² × 0.8 = 0.208), then by a zombie's 2 armour
+            // (`CombatRules.getDamageAfterAbsorb`: 1 - (2 - 0.208 / 2) / 25).
+            let near = zombie(game, 5000, [2.0, 64.0, 0.5]);
+            let full = health(game, 5000);
+            assert_eq!(
+                game.native_player_perform_action(player, PlayerAction::Attack { target: near }),
+                Ok(ActionOutcome::Consumed)
+            );
+            let dealt = 0.208f32 * (1.0 - (2.0 - 0.208 / 2.0) / 25.0);
+            assert!((full - health(game, 5000) - dealt).abs() < 1e-4);
+            // No mob takes the fake as the player to answer.
+            let bound = game.lan.as_ref().unwrap().mob_players.get(&5000).copied();
+            assert_ne!(bound, Some(fake_conn));
+            assert_eq!(bound, None);
+            // Ten blocks off is past the attack range; the fake itself isn't a target, nor is
+            // an id no entity has.
+            let far = zombie(game, 5001, [10.5, 64.0, 0.5]);
+            assert_eq!(
+                game.native_player_perform_action(player, PlayerAction::Attack { target: far }),
+                Err(ActionRefused::OutOfReach)
+            );
+            assert_eq!(health(game, 5001), full);
+            assert_eq!(
+                game.native_player_perform_action(
+                    player,
+                    PlayerAction::Attack {
+                        target: player.entity()
+                    }
+                ),
+                Err(ActionRefused::InvalidTarget)
+            );
+            let nobody = mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), 6000);
+            assert_eq!(
+                game.native_player_perform_action(player, PlayerAction::Attack { target: nobody }),
+                Err(ActionRefused::InvalidTarget)
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_fake_breaks_blocks_at_once_by_the_game_modes_rules() {
+        use super::super::native_entity_refs::tests::with_game;
+        let level_block = |game: &mut Game<'_>, pos| {
+            let level = game.native_level(game.dim.id()).unwrap();
+            game.native_level_block(level, pos)
+        };
+        // Survival, bare-handed: stone breaks at once, with no digging time.
+        with_game(|game| {
+            let (player, ..) = fake(game, None, 0);
+            let pos = [1, 63, 0];
+            assert_eq!(
+                game.native_player_perform_action(player, PlayerAction::BreakBlock { pos }),
+                Ok(ActionOutcome::Consumed)
+            );
+            assert_eq!(level_block(game, pos).as_deref(), Some("minecraft:air"));
+            // Air breaks nothing; bedrock, which no digging breaks (destroy time -1), stays;
+            // ten blocks off is out of reach.
+            assert_eq!(
+                game.native_player_perform_action(player, PlayerAction::BreakBlock { pos }),
+                Ok(ActionOutcome::Passed)
+            );
+            place(game, [-1, 63, 0], "minecraft:bedrock");
+            assert_eq!(
+                game.native_player_perform_action(
+                    player,
+                    PlayerAction::BreakBlock { pos: [-1, 63, 0] }
+                ),
+                Ok(ActionOutcome::Passed)
+            );
+            assert_eq!(
+                level_block(game, [-1, 63, 0]).as_deref(),
+                Some("minecraft:bedrock")
+            );
+            place(game, [3, 64, 3], "minecraft:stone");
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guests
+                .iter_mut()
+                .for_each(|g| {
+                    g.position = [-6.5, 64.0, -6.5];
+                });
+            assert_eq!(
+                game.native_player_perform_action(
+                    player,
+                    PlayerAction::BreakBlock { pos: [3, 64, 3] }
+                ),
+                Err(ActionRefused::OutOfReach)
+            );
+        });
+        // Creative breaks what survival can't dig.
+        with_game(|game| {
+            let (player, ..) = fake(game, None, 1);
+            place(game, [1, 63, 0], "minecraft:bedrock");
+            assert_eq!(
+                game.native_player_perform_action(
+                    player,
+                    PlayerAction::BreakBlock { pos: [1, 63, 0] }
+                ),
+                Ok(ActionOutcome::Consumed)
+            );
+            assert_eq!(
+                level_block(game, [1, 63, 0]).as_deref(),
+                Some("minecraft:air")
+            );
+        });
+        // Adventure mode can't break a block (blockActionRestricted), and a sword in creative
+        // breaks nothing (canDestroyBlock).
+        for (mode, item) in [(2, None), (1, Some("minecraft:iron_sword"))] {
+            with_game(|game| {
+                let (player, ..) = fake(game, item, mode);
+                let pos = [1, 63, 0];
+                assert_eq!(
+                    game.native_player_perform_action(player, PlayerAction::BreakBlock { pos }),
+                    Ok(ActionOutcome::Passed),
+                    "game mode {mode}, holding {item:?}"
+                );
+                assert_eq!(level_block(game, pos).as_deref(), Some("minecraft:stone"));
+            });
+        }
+    }
+
+    /// `as_guest_at` starts a turn only for the guest it names: another `conn` at that place,
+    /// a place past the list's end, and a guest already in a turn are refused, not a panic.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_turn_at_a_place_is_refused_for_another_guest() {
+        use super::super::lan_actions::TurnRefused;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (_, fake_conn, real_conn) = fake(game, None, 0);
+            let gi = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .position(|g| g.conn == fake_conn)
+                .unwrap();
+            assert_eq!(
+                game.as_guest_at(gi, real_conn, |_| ()),
+                Err(TurnRefused::Gone)
+            );
+            assert_eq!(
+                game.as_guest_at(999, fake_conn, |_| ()),
+                Err(TurnRefused::Gone)
+            );
+            let nested = game.as_guest_at(gi, fake_conn, |g| g.as_guest_at(gi, fake_conn, |_| ()));
+            assert_eq!(nested, Ok(Err(TurnRefused::Nested)));
+            assert_eq!(game.as_guest_at(gi, fake_conn, |_| 7), Ok(7));
         });
     }
 
@@ -2151,32 +2357,63 @@ mod fake_action_tests {
     #[test]
     #[ignore = "timing"]
     fn fakes_acting_each_tick_cost() {
-        for count in [1u128, 64, 256] {
-            super::super::native_entity_refs::tests::with_game(|game| {
-                let (first, ..) = fake(game, None, 0);
-                let level = game.native_level(game.dim.id()).unwrap();
-                let mut players = vec![first];
-                for i in 1..count {
-                    players.push(
-                        game.native_fake_player(level, 100 + i, &format!("fake{i}"))
-                            .unwrap(),
-                    );
-                }
-                for g in game.lan.as_mut().unwrap().hub.guests.iter_mut() {
-                    g.position = [0.5, 64.0, 0.5];
-                }
-                let ticks = 200;
-                let start = std::time::Instant::now();
-                for _ in 0..ticks {
-                    for &player in &players {
-                        let outcome = game.native_player_perform_action(player, on_top([1, 63, 0]));
-                        assert_eq!(outcome, Ok(ActionOutcome::Passed));
+        #[derive(Clone, Copy, Debug)]
+        enum Kind {
+            UseOn,
+            Attack,
+            BreakBlock,
+        }
+        for kind in [Kind::UseOn, Kind::Attack, Kind::BreakBlock] {
+            for count in [1u128, 64, 256] {
+                super::super::native_entity_refs::tests::with_game(|game| {
+                    let (first, ..) = fake(game, None, 0);
+                    let level = game.native_level(game.dim.id()).unwrap();
+                    let mut players = vec![first];
+                    for i in 1..count {
+                        players.push(
+                            game.native_fake_player(level, 100 + i, &format!("fake{i}"))
+                                .unwrap(),
+                        );
                     }
-                }
-                let per_tick = start.elapsed() / ticks;
-                let per_action = per_tick / count as u32;
-                println!("{count} fakes: {per_tick:?} a tick, {per_action:?} an action");
-            });
+                    for g in game.lan.as_mut().unwrap().hub.guests.iter_mut() {
+                        g.position = [0.5, 64.0, 0.5];
+                        g.yaw = -90.0;
+                    }
+                    let target = zombie(game, 5000, [2.0, 64.0, 0.5]);
+                    let stone = game
+                        .pack
+                        .assets
+                        .registry
+                        .default_state("minecraft:stone")
+                        .unwrap();
+                    let (action, expected) = match kind {
+                        Kind::UseOn => (on_top([1, 63, 0]), ActionOutcome::Passed),
+                        Kind::Attack => (PlayerAction::Attack { target }, ActionOutcome::Consumed),
+                        Kind::BreakBlock => (
+                            PlayerAction::BreakBlock { pos: [1, 63, 0] },
+                            ActionOutcome::Consumed,
+                        ),
+                    };
+                    let ticks = 200;
+                    let start = std::time::Instant::now();
+                    for _ in 0..ticks {
+                        // The zombie never dies, and each break has a stone to break.
+                        game.mobs[0].health = 20.0;
+                        for &player in &players {
+                            if let Kind::BreakBlock = kind {
+                                game.world.set(1, 63, 0, stone).unwrap();
+                            }
+                            let outcome = game.native_player_perform_action(player, action);
+                            assert_eq!(outcome, Ok(expected));
+                        }
+                    }
+                    let per_tick = start.elapsed() / ticks;
+                    let per_action = per_tick / count as u32;
+                    println!(
+                        "{kind:?}, {count} fakes: {per_tick:?} a tick, {per_action:?} an action"
+                    );
+                });
+            }
         }
     }
 
