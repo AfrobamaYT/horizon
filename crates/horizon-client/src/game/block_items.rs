@@ -94,6 +94,30 @@ impl Game<'_> {
         block_entity_nbt::canonical(&tag)
     }
 
+    /// The `CustomName` a block entity loads from `tag`
+    /// (`BaseContainerBlockEntity.loadAdditional`): kept beside the model in
+    /// `block_names`, and dropped when the tag has none. Banners and signs
+    /// keep their name themselves. True when the name changed.
+    pub(super) fn load_block_name(
+        &mut self,
+        key: (i32, i32, i32),
+        entity: &BlockEntity,
+        tag: &Tag,
+    ) -> bool {
+        if matches!(entity, BlockEntity::Banner(_) | BlockEntity::Sign(_)) {
+            return false;
+        }
+        let name = save::text(tag.get("CustomName"));
+        if self.world.block_names.get(&key) == name.as_ref() {
+            return false;
+        }
+        match name {
+            Some(name) => self.world.block_names.insert(key, name),
+            None => self.world.block_names.remove(&key),
+        };
+        true
+    }
+
     /// `BlockState.getCloneItemStack` of the block at `pos`, then, with
     /// `include_data`, `ServerGamePacketListenerImpl.addBlockDataToItem`.
     pub(super) fn picked_stack(&self, pos: [i32; 3], include_data: bool) -> Option<ItemStack> {
@@ -308,13 +332,7 @@ impl Game<'_> {
         {
             new.state_triggered = old.state_triggered;
         }
-        // Banners and signs keep their name themselves.
-        if !matches!(entity, BlockEntity::Banner(_) | BlockEntity::Sign(_)) {
-            match save::text(placed.get("CustomName")) {
-                Some(name) => self.world.block_names.insert(key, name),
-                None => self.world.block_names.remove(&key),
-            };
-        }
+        self.load_block_name(key, &entity, &placed);
         self.world.block_entities.insert(key, entity);
         self.update_spawner_display(key);
     }
@@ -452,7 +470,7 @@ mod tests {
         struct TestMod;
         #[horizon_client::mod_api::__subscriptions]
         impl Hooks for TestMod {
-            fn register(&self, registrar: &mut Registrar) {
+            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 let kind = registrar
                     .block_entity_type("crate")
                     .blocks(&[CRATE])
@@ -478,9 +496,7 @@ mod tests {
         horizon_client::mod_api::install(mods.clone());
         horizon_client::mod_api::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root =
-            super::super::mods::content_root(&base, &Default::default(), &Default::default())
-                .unwrap();
+        let root = super::super::mods::content_root(&base, &Default::default()).unwrap();
         with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world

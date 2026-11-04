@@ -197,16 +197,11 @@ fn initial_load_stages_and_applies_client_reload_listeners() {
                 &game.options.resources,
                 &game.settings.resource_packs,
                 &[],
-                &game.settings.mods.enabled,
                 &game.options.mods,
             )
             .or_else(|error| {
                 log::warn!("Horizon: resource packs not applied: {error}");
-                crate::game::mods::content_root(
-                    &game.options.resources,
-                    &game.settings.mods.enabled,
-                    &game.options.mods,
-                )
+                crate::game::mods::content_root(&game.options.resources, &game.options.mods)
             })
             .unwrap();
             let mut loaded = load_resources(
@@ -366,15 +361,16 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
         with_game(|game| {
             let resources = game.options.resources.clone();
             let enabled = BTreeSet::new();
-            let sources = crate::game::mods::ModsState {
+            let mut sources = crate::game::mods::ModsState {
                 dev: vec![mod_dir.clone()],
-                native: Default::default(),
+                ..Default::default()
             };
+            sources.select(&std::env::current_dir().unwrap(), &enabled);
             // The merged root without `startup_root`'s process-wide mod
             // registrations, which a test must not freeze for the others
             // (`brewing`'s mod effects among them).
             let merged = |packs: &[horizon_client::packs::Pack]| {
-                let base = crate::game::mods::content_overlay(&resources, &enabled, &sources)
+                let base = crate::game::mods::content_overlay(&resources, &sources)
                     .unwrap()
                     .root;
                 horizon_client::packs::resource_root(&base, packs, &crate::game::packs::cache_dir())

@@ -2,7 +2,7 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "entity_velocity", "side": "server",
+      "name": "entity_velocity", "side": "both",
       "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_velocity",
       "receiver": "entity"
     },

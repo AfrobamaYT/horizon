@@ -44,6 +44,18 @@ impl Game<'_> {
         }
         self.levels.parked_world_of(level.dimension())
     }
+    /// The world a handle names for a read that works on both sides: the
+    /// server's level, or on a client the one it shows (`Minecraft.level`, its
+    /// copy of the server's). None for a stale handle or another dimension.
+    fn native_level_read_world(&self, level: LevelRef) -> Option<&World> {
+        if self.is_logical_server() {
+            return self.native_level_world(level);
+        }
+        (self.remote.as_ref().is_some_and(|r| r.logged_in)
+            && self.native_lifecycle.epoch() == Some(level.epoch())
+            && level.dimension() == self.dim.id())
+        .then_some(&self.world)
+    }
     /// Find a loaded chunk in an open server level.
     pub(super) fn native_chunk(&self, level: LevelRef, pos: [i32; 2]) -> Option<ChunkRef> {
         self.native_level_world(level)?
@@ -232,13 +244,14 @@ impl Game<'_> {
         Some(forced.into_iter().map(|(x, z)| [x, z]).collect())
     }
     /// The block state ID at `pos` (`Level.getBlockState`), without formatting a string.
-    /// None for a chunk that isn't loaded or a `y` outside the world.
+    /// None for a chunk that isn't loaded or a `y` outside the world. On a client, the
+    /// state is the one the server sent for a chunk the client holds.
     pub(super) fn native_level_state(
         &self,
         level: LevelRef,
         pos: [i32; 3],
     ) -> Option<BlockStateId> {
-        let world = self.native_level_world(level)?;
+        let world = self.native_level_read_world(level)?;
         let [x, y, z] = pos;
         world.is_loaded_at(x, y, z).then(|| world.block(x, y, z))
     }
@@ -279,9 +292,10 @@ impl Game<'_> {
     /// Whether `pos` is inside the world's height and its chunk is loaded
     /// (`Level.isLoaded`, which is false outside `isInValidBounds`): a block
     /// read or write there finds the world. False on a client or for a stale
-    /// handle: the position is not loaded here.
+    /// handle: the position is not loaded here. On a client, a chunk it holds is loaded
+    /// (`ClientLevel.hasChunkAt`).
     pub(super) fn native_level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
-        self.native_level_world(level)
+        self.native_level_read_world(level)
             .is_some_and(|w| w.is_loaded_at(pos[0], pos[1], pos[2]))
     }
     /// The stored light of one layer at `pos` (`BlockAndLightGetter.getBrightness`), 0 to 15.
@@ -519,7 +533,7 @@ mod tests {
     struct Machines;
     #[mod_api::__subscriptions]
     impl Hooks for Machines {
-        fn register(&self, r: &mut Registrar) {
+        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
             r.register_ticket_controller("quarry", true);
             r.register_ticket_controller("machines:drill", true);
             r.register_ticket_controller("plain", false);
@@ -544,7 +558,7 @@ mod tests {
     struct Other;
     #[mod_api::__subscriptions]
     impl Hooks for Other {
-        fn register(&self, r: &mut Registrar) {
+        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
             r.register_ticket_controller("vault", true);
         }
         fn validate_tickets(&self, _: &mut dyn ServerHost, e: &mut ValidateTicketsEvent<'_>) {
@@ -991,7 +1005,7 @@ mod tests {
         struct Idle;
         #[mod_api::__subscriptions]
         impl Hooks for Idle {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 r.register_ticket_controller("quarry", true);
             }
         }
