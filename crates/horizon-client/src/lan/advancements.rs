@@ -691,7 +691,7 @@ mod tests {
             root,
             &horizon_world::loot::PackOverlay::NONE,
             &defaults,
-            &crate::test_resources::server_load(),
+            &crate::test_resources::server_sources(root, &horizon_world::loot::PackOverlay::NONE),
         )
         .unwrap();
         let entries = sync
@@ -788,7 +788,7 @@ mod tests {
             &root,
             &overlay,
             &defaults,
-            &crate::test_resources::server_load(),
+            &crate::test_resources::server_sources(&root, &overlay),
         )
         .unwrap();
         // What the craft hands the book: find_with over the crafting
@@ -863,7 +863,7 @@ mod tests {
             &root,
             &horizon_world::loot::PackOverlay::NONE,
             &defaults,
-            &crate::test_resources::server_load(),
+            &crate::test_resources::server_sources(&root, &horizon_world::loot::PackOverlay::NONE),
         )
         .unwrap();
         assert!(
@@ -907,7 +907,7 @@ mod tests {
             &root,
             &horizon_world::loot::PackOverlay::NONE,
             &defaults,
-            &crate::test_resources::server_load(),
+            &crate::test_resources::server_sources(&root, &horizon_world::loot::PackOverlay::NONE),
         )
         .unwrap();
         let item = |n: &str| sync.id("minecraft:item", n).unwrap();
@@ -968,7 +968,7 @@ mod tests {
             &root,
             &horizon_world::loot::PackOverlay::NONE,
             &defaults,
-            &crate::test_resources::server_load(),
+            &crate::test_resources::server_sources(&root, &horizon_world::loot::PackOverlay::NONE),
         )
         .unwrap();
         assert_eq!(
@@ -1068,7 +1068,7 @@ mod tests {
             &root,
             &overlay,
             &defaults,
-            &crate::test_resources::server_load(),
+            &crate::test_resources::server_sources(&root, &overlay),
         )
         .unwrap();
         let entries = sync.advancements.book_entries(

@@ -18,6 +18,18 @@ pub(crate) fn item_data(
     )?))
 }
 
+/// The recipes of a server load over `root`, resolved once as a load does.
+#[allow(
+    dead_code,
+    reason = "standalone probes that include this file may not load recipes"
+)]
+pub(crate) fn server_sources(
+    root: &std::path::Path,
+    overlay: &horizon_world::loot::PackOverlay,
+) -> horizon_client::crafting::ResolvedSources {
+    horizon_client::crafting::ResolvedSources::load_or_empty(root, overlay, &server_load())
+}
+
 /// A server's data load with no mods and no settings, for loaders under test.
 #[allow(
     dead_code,

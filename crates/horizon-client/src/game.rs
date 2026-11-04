@@ -4420,12 +4420,12 @@ impl Game<'_> {
         // LivingEntity.drop: every drop swings the main hand, a menu's
         // THROW and a creative tab's drop included.
         self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
-        // Player.drop: the drop statistics.
-        self.award_stat("dropped", &thrown.item, thrown.count as i32);
+        // ServerPlayer.drop: the drop statistics, only when an item entity came of it.
+        let (item, count) = (thrown.item.clone(), thrown.count as i32);
+        let dropped = self.throw_from_eyes(thrown, eye, false, true)?;
+        self.award_stat("dropped", &item, count);
         self.award_custom_stat("drop", 1);
-        let player = self.native_acting_id();
-        self.native_item_dropped(player, &thrown.item, thrown.count);
-        self.throw_from_eyes(thrown, eye, false, true)
+        Some(dropped)
     }
     /// `Player.drop(stack, false)`, as `ItemUtils.createFilledResult` drops what no longer fits
     /// in the inventory: thrown from the eyes, with no thrower, statistic or drop hook.
@@ -4453,6 +4453,13 @@ impl Game<'_> {
         let r = &mut self.world.random;
         let v = horizon_client::entities::drop_motion(r, self.yaw, self.pitch, randomly);
         let y = eye[1] - f64::from(0.3f32);
+        // ItemTossEvent: a canceled toss never enters the world; what was thrown is gone.
+        let player = self.native_acting_id();
+        let mut canceled = false;
+        self.native_item_toss(player, &thrown.item, thrown.count, &mut canceled);
+        if canceled {
+            return None;
+        }
         self.spawn_item(thrown, [eye[0], y, eye[2]], v, 40);
         let uuid = thrown_from_hand.then(|| self.acting_player_uuid());
         let item = self.just_spawned_item()?;
@@ -13270,6 +13277,7 @@ impl Game<'_> {
         // Clear sync data (registries, dialog tags) so dialogs don't leak
         // between worlds.
         lan::forget_sync_data();
+        lan::forget_server_sources();
         let mut title = Title::new(
             std::env::current_dir()?.join("saves"),
             &self.options.resources,
@@ -15491,12 +15499,15 @@ impl Game<'_> {
                 // SleepFinishedTimeEvent: the mods may move the wake-up time,
                 // never before now (`setTimeAddition` refuses a lower one).
                 let mut asked = target;
-                self.native_sleep_finished_time(self.dim.id(), t, &mut asked);
+                let mut cancel = false;
+                self.native_sleep_finished_time(self.dim.id(), t, &mut asked, &mut cancel);
                 if asked >= t {
                     target = asked;
                 }
-                let mut cancel = false;
-                self.native_time_skip(self.dim.id(), t, target, "sleep", &mut cancel);
+                // A canceled event leaves the clock alone, so `native_time_skip` is not asked.
+                if !cancel {
+                    self.native_time_skip(self.dim.id(), t, target, "sleep", &mut cancel);
+                }
                 if !cancel {
                     self.world.day_time = target;
                 }
@@ -20519,23 +20530,24 @@ impl Game<'_> {
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
-        let context = self.res.core.item_data.context().for_load(
+        let sources = lan::load_sources(
+            &self.res.core.item_data,
             self.options.execution_role.data_load_origin(),
-            mod_api::__private::loaded_mods().ids(),
+            &overlay,
         );
-        let recipes = match Recipes::load(root, &items, &overlay, &context) {
+        let recipes = match Recipes::from_resolved(root, &items, &overlay, &sources) {
             Ok(recipes) => recipes,
             Err(e) => {
                 log::warn!("Horizon: the world's data packs are not applied: {e}");
                 return None;
             }
         };
-        let stations = horizon_client::stations::StationData::load(
+        let stations = horizon_client::stations::StationData::from_sources(
             root,
             &items,
             &overlay,
             self.res.item_defaults(),
-            &context,
+            &sources,
         );
         let mut data_map_types = Vec::new();
         self.native_data_map_types(&mut data_map_types);
@@ -20625,6 +20637,9 @@ impl Game<'_> {
         if self.remote.is_some() {
             return;
         }
+        // One pass over the recipes for this reload: the tables built next and
+        // the players' copy below share it.
+        lan::forget_server_sources();
         self.world_tables = self.build_world_tables(stack);
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
@@ -21351,16 +21366,23 @@ fn load_world_rest(
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
+        let sources = startup::time("rest.recipe_sources", || {
+            lan::load_sources(
+                &resources.core.item_data,
+                resources.core.item_data.context().origin(),
+                overlay,
+            )
+        });
         let recipes = startup::time("rest.recipes", || {
-            Recipes::load(root, &items, overlay, resources.core.item_data.context())
+            Recipes::from_resolved(root, &items, overlay, &sources)
         })?;
         let stations = startup::time("rest.stations", || {
-            horizon_client::stations::StationData::load(
+            horizon_client::stations::StationData::from_sources(
                 root,
                 &items,
                 overlay,
                 resources.item_defaults(),
-                resources.core.item_data.context(),
+                &sources,
             )
         });
         Ok((items, recipes, stations))

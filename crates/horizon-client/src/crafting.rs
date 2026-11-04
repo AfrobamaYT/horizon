@@ -1200,6 +1200,129 @@ fn matches_all(ingredients: &[Ingredient], stacks: &[&ItemStack]) -> bool {
 }
 pub use horizon_items::recipe_sources::qualified;
 
+/// The keys of a minecraft-typed recipe that hold an ingredient: one entry
+/// or a list, what `Recipes`, the station tables and the network copy read.
+const INGREDIENT_KEYS: [&str; 23] = [
+    "ingredient",
+    "ingredients",
+    "base",
+    "addition",
+    "template",
+    "input",
+    "reagent",
+    "banner",
+    "target",
+    "material",
+    "dye",
+    "source",
+    "shell",
+    "fuel",
+    "star",
+    "trail",
+    "twinkle",
+    "map",
+    "back",
+    "left",
+    "right",
+    "front",
+    "item",
+];
+/// The keys whose values are a map of ingredients: a shaped recipe's symbols,
+/// a firework star's shapes.
+const INGREDIENT_MAPS: [&str; 2] = ["key", "shapes"];
+
+/// One recipe file after its load's ingredient pass.
+pub struct ResolvedRecipe {
+    /// The id as `recipe_sources::sources` names it.
+    pub name: String,
+    /// The file as written: what mods and clients see.
+    pub file: Arc<Value>,
+    /// The file with the `ingredient` hook's answers in place, for the tables
+    /// to parse. The file itself when it names no mod kind.
+    pub resolved: Arc<Value>,
+}
+
+/// The recipes one load reads, each mod ingredient resolved exactly once
+/// (`Ingredient::resolve`): the tables and the network copy of a server load
+/// all read this, so the `ingredient` hook hears each occurrence once per load.
+#[derive(Default)]
+pub struct ResolvedSources {
+    pub recipes: Vec<ResolvedRecipe>,
+}
+impl ResolvedSources {
+    /// The recipes under `root` and `overlay`, resolved for `context`'s load.
+    pub fn load(
+        root: &Path,
+        overlay: &PackOverlay,
+        context: &horizon_world::native_load_context::LoadContext,
+    ) -> Result<Self> {
+        Ok(Self::resolve(
+            horizon_items::recipe_sources::sources(root, overlay)?,
+            context,
+        ))
+    }
+    /// `load`, an unreadable recipe folder leaving no recipes.
+    pub fn load_or_empty(
+        root: &Path,
+        overlay: &PackOverlay,
+        context: &horizon_world::native_load_context::LoadContext,
+    ) -> Self {
+        Self::load(root, overlay, context).unwrap_or_else(|e| {
+            log::warn!("recipes: could not load recipe sources: {e}");
+            Self::default()
+        })
+    }
+    /// `sources` (`recipe_sources::sources`' shape), the hook asked once for
+    /// each mod ingredient in the recipes the loader parses (minecraft's own
+    /// types; a mod's recipe types are its own to read).
+    pub fn resolve(
+        sources: Vec<(String, Value)>,
+        context: &horizon_world::native_load_context::LoadContext,
+    ) -> Self {
+        let recipes = sources
+            .into_iter()
+            .map(|(name, file)| {
+                let mut resolved = file.clone();
+                let parsed_here = resolved["type"]
+                    .as_str()
+                    .is_some_and(|t| t.starts_with("minecraft:"));
+                // Answers a file carries are forgeries; an unlisted slot
+                // would otherwise keep one.
+                let mut changed = Ingredient::forget_answers(&mut resolved);
+                if parsed_here {
+                    for key in INGREDIENT_KEYS {
+                        if let Some(slot) = resolved.get_mut(key) {
+                            changed |= Ingredient::resolve(slot, context);
+                        }
+                    }
+                    for key in INGREDIENT_MAPS {
+                        for slot in resolved
+                            .get_mut(key)
+                            .and_then(Value::as_object_mut)
+                            .into_iter()
+                            .flat_map(|map| map.values_mut())
+                        {
+                            changed |= Ingredient::resolve(slot, context);
+                        }
+                    }
+                }
+                let file = Arc::new(file);
+                let resolved = if changed {
+                    Arc::new(resolved)
+                } else {
+                    Arc::clone(&file)
+                };
+                ResolvedRecipe {
+                    name,
+                    file,
+                    resolved,
+                }
+            })
+            .collect();
+        Self { recipes }
+    }
+}
+
 impl Recipes {
     pub fn empty() -> Self {
         Self {
@@ -1228,11 +1351,11 @@ impl Recipes {
         overlay: &PackOverlay,
         context: &horizon_world::native_load_context::LoadContext,
     ) -> Result<Self> {
-        let sources = horizon_items::recipe_sources::sources(root, overlay)?;
-        Self::from_sources(root, items, overlay, sources, context)
+        let sources = ResolvedSources::load(root, overlay, context)?;
+        Self::from_resolved(root, items, overlay, &sources)
     }
-    /// The tables from `sources` (`recipe_sources::sources`' shape); `root` and
-    /// `overlay` give the enchantment tags the tables keep.
+    /// The tables from recipe `sources` (`recipe_sources::sources`' shape),
+    /// resolved here for `context`'s load.
     pub fn from_sources(
         root: &Path,
         items: &Items,
@@ -1240,12 +1363,31 @@ impl Recipes {
         sources: Vec<(String, Value)>,
         context: &horizon_world::native_load_context::LoadContext,
     ) -> Result<Self> {
+        Self::from_resolved(
+            root,
+            items,
+            overlay,
+            &ResolvedSources::resolve(sources, context),
+        )
+    }
+    /// The tables from `sources`, the recipes one load resolved; `root` and
+    /// `overlay` give the enchantment tags the tables keep.
+    pub fn from_resolved(
+        root: &Path,
+        items: &Items,
+        overlay: &PackOverlay,
+        sources: &ResolvedSources,
+    ) -> Result<Self> {
         let mut crafting = Vec::new();
         let mut cooking = Vec::new();
         let mut by_type: HashMap<String, Vec<RecipeFile>> = HashMap::new();
         let mut meta = HashMap::new();
-        for (name, v) in sources {
-            let json = Arc::new(v);
+        for ResolvedRecipe {
+            name,
+            file: json,
+            resolved,
+        } in &sources.recipes
+        {
             if let Some(kind) = json["type"]
                 .as_str()
                 .filter(|t| !t.starts_with("minecraft:") || VANILLA_RECIPE_TYPES.contains(t))
@@ -1263,13 +1405,13 @@ impl Recipes {
                         json: json.clone(),
                     });
             }
-            if custom_type(&json).is_some() {
+            if custom_type(json).is_some() {
                 continue;
             }
-            let v = &*json;
+            let v = &**resolved;
             let text = |k: &str| v[k].as_str().unwrap_or("").to_owned();
             meta.insert(name.clone(), (text("category"), text("group")));
-            let ing = |k: &str| Ingredient::parse(&v[k], items, context);
+            let ing = |k: &str| Ingredient::parse(&v[k], items);
             let result = || Template::parse(&v["result"]);
             let special = |recipe: Option<Special>| recipe.map(Recipe::Special);
             let parsed: Option<Recipe> = match v["type"].as_str().unwrap_or("") {
@@ -1290,7 +1432,7 @@ impl Recipes {
                             if *c == ' ' {
                                 cells.push(None);
                             } else {
-                                match Ingredient::parse(&v["key"][c.to_string()], items, context) {
+                                match Ingredient::parse(&v["key"][c.to_string()], items) {
                                     Some(i) => cells.push(Some(i)),
                                     None => ok = false,
                                 }
@@ -1312,7 +1454,7 @@ impl Recipes {
                         .as_array()
                         .into_iter()
                         .flatten()
-                        .map(|i| Ingredient::parse(i, items, context))
+                        .map(|i| Ingredient::parse(i, items))
                         .collect();
                     match (ingredients, result()) {
                         (Some(ingredients), Some(result)) => Some(Recipe::Shapeless {
@@ -1388,7 +1530,7 @@ impl Recipes {
                     for (shape, value) in v["shapes"].as_object()? {
                         shapes.push((
                             FireworkShape::from_name(shape),
-                            Ingredient::parse(value, items, context)?,
+                            Ingredient::parse(value, items)?,
                         ));
                     }
                     Some(Special::FireworkStar {
@@ -1445,7 +1587,7 @@ impl Recipes {
                 _ => None,
             };
             if let Some(recipe) = parsed {
-                crafting.push((name, recipe));
+                crafting.push((name.clone(), recipe));
             }
         }
         let facts = items
@@ -1774,29 +1916,11 @@ mod tests {
         let items = Items::for_tests(HashMap::new());
         let json = |s: &str| serde_json::from_str::<Value>(s).unwrap();
         assert!(
-            Ingredient::parse(
-                &json(r#"{"type":"mymod:aspect","aspect":"fire"}"#),
-                &items,
-                &crate::test_resources::server_load()
-            )
-            .is_none()
+            Ingredient::parse(&json(r#"{"type":"mymod:aspect","aspect":"fire"}"#), &items)
+                .is_none()
         );
-        assert!(
-            Ingredient::parse(
-                &json(r#"{"type":"minecraft:future_shape"}"#),
-                &items,
-                &crate::test_resources::server_load()
-            )
-            .is_none()
-        );
-        assert!(
-            Ingredient::parse(
-                &json(r#"{"type":"aspect"}"#),
-                &items,
-                &crate::test_resources::server_load()
-            )
-            .is_none()
-        );
+        assert!(Ingredient::parse(&json(r#"{"type":"minecraft:future_shape"}"#), &items).is_none());
+        assert!(Ingredient::parse(&json(r#"{"type":"aspect"}"#), &items).is_none());
         let mut list = vec!["b".to_string(), "a".to_string(), "b".to_string()];
         mod_api::crafting::dedup_keep_order(&mut list);
         assert_eq!(list, vec!["b".to_string(), "a".to_string()]);
@@ -1811,12 +1935,7 @@ mod tests {
     fn nested_shapes_test_each_child_their_own_way() {
         let items = Items::for_tests(HashMap::new());
         let parse = |s: &str| {
-            Ingredient::parse(
-                &serde_json::from_str::<Value>(s).unwrap(),
-                &items,
-                &crate::test_resources::server_load(),
-            )
-            .unwrap()
+            Ingredient::parse(&serde_json::from_str::<Value>(s).unwrap(), &items).unwrap()
         };
         let stack = |n: &str| ItemStack {
             item: n.into(),
@@ -1859,7 +1978,7 @@ mod tests {
         // the union of their items, a tag beside an item gives both.
         let union = Ingredient::parse(
             &json(r##"{"neoforge:ingredient_type":"neoforge:compound","children":["#minecraft:planks","minecraft:stone"]}"##),
-            &items, &crate::test_resources::server_load())
+            &items)
         .unwrap();
         // The tag's items come from a HashSet: their order is not fixed.
         let mut all = union.order.clone();
@@ -1875,13 +1994,13 @@ mod tests {
         // Intersection: every child must match — only the items all name.
         let both = Ingredient::parse(
             &json(r##"{"type":"neoforge:intersection","children":["#minecraft:planks","minecraft:oak_planks"]}"##),
-            &items, &crate::test_resources::server_load())
+            &items)
         .unwrap();
         assert_eq!(both.order, ["minecraft:oak_planks"]);
         // Difference: the base without the subtracted.
         let no_oak = Ingredient::parse(
             &json(r##"{"type":"neoforge:difference","base":"#minecraft:planks","subtracted":"minecraft:oak_planks"}"##),
-            &items, &crate::test_resources::server_load())
+            &items)
         .unwrap();
         assert_eq!(no_oak.order, ["minecraft:birch_planks"]);
         // An empty intersection and an unknown kind fail the file, as today.
@@ -1890,14 +2009,10 @@ mod tests {
                 r#"{"type":"neoforge:intersection","children":["minecraft:oak_planks","minecraft:birch_planks"]}"#,
             ),
             &items,
-            &crate::test_resources::server_load(),
         );
         assert!(empty.is_none());
-        let unknown = Ingredient::parse(
-            &json(r#"{"type":"mymod:aspect","aspect":"fire"}"#),
-            &items,
-            &crate::test_resources::server_load(),
-        );
+        let unknown =
+            Ingredient::parse(&json(r#"{"type":"mymod:aspect","aspect":"fire"}"#), &items);
         assert!(unknown.is_none());
     }
 
