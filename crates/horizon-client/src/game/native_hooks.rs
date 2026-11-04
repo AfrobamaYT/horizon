@@ -2750,7 +2750,6 @@ impl Game<'_> {
     }
     /// The id of the item in the slot under the pointer on the open container screen
     /// (`AbstractContainerScreen.getHoveredSlot().getItem()`), None over no slot or an empty one.
-    /// API @API:screen_hovered_item@.
     pub(super) fn native_screen_hovered_item(&self) -> Option<String> {
         let size = self
             .renderer
