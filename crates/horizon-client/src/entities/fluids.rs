@@ -174,7 +174,14 @@ impl FluidInteractionWorld for EntityFluidWorld<'_> {
         f.camera_height_at(self, [p.x, p.y, p.z])
     }
     fn flow(&mut self, f: FluidState, p: BlockPos) -> Result<Vec3, Error> {
-        crate::motion::pushing_flow(self, f, p)
+        crate::motion::pushing_flow(
+            &mut FlowLevel {
+                world: self.world,
+                fluids: self.fluids,
+            },
+            f,
+            p,
+        )
     }
 }
 impl FluidHeightWorld for EntityFluidWorld<'_> {
@@ -187,7 +194,19 @@ impl FluidHeightWorld for EntityFluidWorld<'_> {
         Ok(self.fluids.sturdy(state, Direction::Down))
     }
 }
-impl FluidFlowWorld for EntityFluidWorld<'_> {
+/// `FluidState.getFlow` at `pos` as it pushes an entity there: vanilla's vector, then the
+/// `fluid_flow` hook. Zero where no fluid flows.
+pub fn fluid_flow(world: &World, fluids: &FluidResources, pos: BlockPos) -> Vec3 {
+    let state = fluids.fluid(world.block(pos.x, pos.y, pos.z));
+    let Ok(flow) = crate::motion::pushing_flow(&mut FlowLevel { world, fluids }, state, pos);
+    flow
+}
+/// The blocks a current reads, from a loaded world.
+struct FlowLevel<'a> {
+    world: &'a World,
+    fluids: &'a FluidResources,
+}
+impl FluidFlowWorld for FlowLevel<'_> {
     type Error = Error;
     type Block = BlockStateId;
     fn fluid(&mut self, p: BlockPos) -> Result<FluidState, Error> {
