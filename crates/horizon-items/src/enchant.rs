@@ -1281,8 +1281,14 @@ mod ignite_tests {
     #[test]
     fn summary_lists_id_max_level_and_curse() {
         let mut reg = registry();
-        assert_eq!(reg.summary(), [("minecraft:fire_aspect".to_string(), 2, false)]);
-        reg.tags.insert("minecraft:curse".into(), vec![Arc::from("minecraft:fire_aspect")]);
+        assert_eq!(
+            reg.summary(),
+            [("minecraft:fire_aspect".to_string(), 2, false)]
+        );
+        reg.tags.insert(
+            "minecraft:curse".into(),
+            vec![Arc::from("minecraft:fire_aspect")],
+        );
         assert!(reg.summary()[0].2);
     }
 

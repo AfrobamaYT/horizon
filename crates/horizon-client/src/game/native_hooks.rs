@@ -8829,7 +8829,10 @@ impl Game<'_> {
     }
     /// `Enchantment.getMinCost(level)`: the enchanting power the level needs (0 for an unknown id).
     pub(super) fn native_enchantment_min_cost(&self, id: &str, level: u32) -> i32 {
-        self.native_stations().enchantments.get(id).map_or(0, |e| e.min_cost.calculate(level))
+        self.native_stations()
+            .enchantments
+            .get(id)
+            .map_or(0, |e| e.min_cost.calculate(level))
     }
     /// Whether enchantment `id` can go on `item` (`Enchantment.isSupportedItem`).
     pub(super) fn native_enchantment_supports(&self, id: &str, item: &str) -> bool {
