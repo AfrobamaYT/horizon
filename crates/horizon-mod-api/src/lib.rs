@@ -700,11 +700,11 @@ pub struct NativeMinimap {
 pub struct NativeScreen {
     /// Vanilla's container screens are 176 wide.
     pub width: f32,
-    /// The height.
+    /// The screen's height in GUI pixels; vanilla's is 166.
     pub height: f32,
-    /// The slots.
+    /// Each menu slot's top-left (x, y), or `None` to hide it.
     pub slots: Vec<Option<[f32; 2]>>,
-    /// The inventory y.
+    /// The y of the player inventory's first row; vanilla's is 84.
     pub inventory_y: f32,
     /// The inventory's left column (vanilla's is 8).
     pub inventory_x: f32,
@@ -1538,13 +1538,13 @@ impl NativeTextAlignment {
 /// right rotation. Quaternions are `[x, y, z, w]`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeTransformation {
-    /// The translation.
+    /// The offset in blocks.
     pub translation: [f32; 3],
-    /// The left rotation.
+    /// The rotation applied after the scale, as a quaternion (x, y, z, w).
     pub left_rotation: [f32; 4],
-    /// The scale.
+    /// The scale on each axis.
     pub scale: [f32; 3],
-    /// The right rotation.
+    /// The rotation applied before the scale, as a quaternion (x, y, z, w).
     pub right_rotation: [f32; 4],
 }
 
@@ -2141,19 +2141,19 @@ pub struct BossBarRef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum BossBarColor {
-    /// Pink.
+    /// A pink bar.
     Pink,
-    /// Blue.
+    /// A blue bar.
     Blue,
-    /// Red.
+    /// A red bar.
     Red,
-    /// Green.
+    /// A green bar.
     Green,
-    /// Yellow.
+    /// A yellow bar.
     Yellow,
-    /// Purple.
+    /// A purple bar.
     Purple,
-    /// White.
+    /// A white bar.
     White,
 }
 
@@ -2393,11 +2393,11 @@ pub enum ServerTickPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeLifecycleContext {
-    /// The authority.
+    /// The server role that fired the phase.
     pub authority: NativeAuthority,
-    /// The epoch.
+    /// Identifies the open attempt this phase belongs to.
     pub epoch: NativeWorldEpoch,
-    /// The tick.
+    /// Non-paused server ticks since the world opened.
     pub tick: NativeTickId,
 }
 
@@ -2405,17 +2405,17 @@ pub struct NativeLifecycleContext {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ToolAbility {
-    /// Axe strip.
+    /// An axe strips a log.
     AxeStrip,
-    /// Axe scrape.
+    /// An axe scrapes oxidation off copper.
     AxeScrape,
-    /// Axe wax off.
+    /// An axe removes wax from copper.
     AxeWaxOff,
-    /// Shovel flatten.
+    /// A shovel makes a path block.
     ShovelFlatten,
-    /// Shovel douse.
+    /// A shovel puts out a campfire.
     ShovelDouse,
-    /// Hoe till.
+    /// A hoe tills soil.
     HoeTill,
 }
 
@@ -2915,19 +2915,19 @@ pub enum UsePhase {
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct NativeItemClick<'a> {
-    /// The side.
+    /// The side the click is handled on.
     pub side: LogicalSide,
-    /// The dimension.
+    /// The dimension the player is in.
     pub dimension: LevelDimension,
     /// The block containing the clicking player's feet (`getPos`).
     pub pos: [i32; 3],
-    /// The hand.
+    /// The hand that holds the stack.
     pub hand: Hand,
-    /// The stack.
+    /// The stack in that hand.
     pub stack: &'a ItemStack,
-    /// The player.
+    /// The clicking player's UUID.
     pub player: u128,
-    /// The player entity id.
+    /// The clicking player's network id.
     pub player_entity_id: i32,
 }
 
