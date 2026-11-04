@@ -26,17 +26,12 @@ pub struct TooltipImage {
     pub size: [f32; 2],
 }
 
-/// Where a tooltip hangs from, in GUI pixels, and the screen it is on:
-/// what `render_tooltip_pre` lets a mod move.
+/// Where a tooltip hangs from, in GUI pixels: what `render_tooltip_pre` lets a mod move.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// exhaustive: the game builds it with a literal; mods change `x` and `y`
+// exhaustive: the game builds it with a literal; mods change both fields
 pub struct TooltipPlace {
     /// The point's x, before the positioner's offset and clamp; set it to move the tooltip.
     pub x: i32,
     /// The point's y, before the positioner's offset and clamp; set it to move the tooltip.
     pub y: i32,
-    /// The screen's width in GUI pixels. Changing it has no effect.
-    pub screen_width: i32,
-    /// The screen's height in GUI pixels. Changing it has no effect.
-    pub screen_height: i32,
 }

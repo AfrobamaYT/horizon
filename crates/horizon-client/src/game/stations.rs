@@ -2695,12 +2695,25 @@ impl Game<'_> {
         let mut place = mod_api::TooltipPlace {
             x: at.0 as i32,
             y: at.1 as i32,
-            screen_width: screen.0 as i32,
-            screen_height: screen.1 as i32,
         };
+        let before = place;
         let mut cancel = false;
-        self.native_render_tooltip_pre(stack, &elements, &mut place, &mut cancel);
-        (!cancel).then_some((place.x as f32, place.y as f32))
+        self.native_render_tooltip_pre(
+            stack,
+            screen.0 as i32,
+            screen.1 as i32,
+            &elements,
+            &mut place,
+            &mut cancel,
+        );
+        if cancel {
+            return None;
+        }
+        Some(if place == before {
+            at
+        } else {
+            (place.x as f32, place.y as f32)
+        })
     }
     /// A tooltip's lines with their legacy codes resolved and their colours.
     fn resolved<T: Clone + Into<horizon_client::text::Text>>(
@@ -3596,10 +3609,7 @@ mod cycling_tests {
                     matches!(&event.elements[0], TooltipElement::Text(t, _) if t.plain() == "Tip")
                 );
                 assert_eq!((event.place.x, event.place.y), (10, 20));
-                assert_eq!(
-                    (event.place.screen_width, event.place.screen_height),
-                    (320, 240)
-                );
+                assert_eq!((event.screen_width, event.screen_height), (320, 240));
                 match MODE.load(Ordering::Relaxed) {
                     1 => {
                         event.place.x = 50;
@@ -3616,10 +3626,11 @@ mod cycling_tests {
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let pre = |game: &super::Game<'_>| {
-                    game.tooltip_pre(None, &lines, &[], (10.0, 20.0), (320.0, 240.0))
+                    game.tooltip_pre(None, &lines, &[], (10.6, 20.4), (320.0, 240.0))
                 };
                 MODE.store(0, Ordering::Relaxed);
-                assert_eq!(pre(game), Some((10.0, 20.0)));
+                // Unmoved, the cursor's own fractional point stays.
+                assert_eq!(pre(game), Some((10.6, 20.4)));
                 MODE.store(1, Ordering::Relaxed);
                 assert_eq!(pre(game), Some((50.0, 60.0)));
                 MODE.store(2, Ordering::Relaxed);

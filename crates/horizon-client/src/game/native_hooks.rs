@@ -7596,18 +7596,27 @@ impl Game<'_> {
         );
     }
     /// `RenderTooltipEvent.Pre`: a tooltip about to be placed and drawn. `place` is the point
-    /// it hangs from, before the positioner's offset and clamp, and the screen; change its `x`
-    /// and `y` to move it. `elements` are its lines then its images, read-only; `stack` is the
-    /// item it describes. Set `cancel` and nothing is drawn, and no `tooltip_color` is asked.
-    /// Client-side.
+    /// it hangs from, before the positioner's offset and clamp; change it to move the tooltip.
+    /// `elements` are its lines then its images, read-only; `stack` is the item it describes.
+    /// Set `cancel` and nothing is drawn, and no `tooltip_color` is asked. Client-side.
     pub(super) fn native_render_tooltip_pre(
         &self,
         stack: Option<&ItemStack>,
-        elements: &Vec<TooltipElement>,
+        screen_width: i32,
+        screen_height: i32,
+        elements: &[TooltipElement],
         place: &mut TooltipPlace,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_render_tooltip_pre(self, stack, elements, place, cancel);
+        mod_api::dispatch_render_tooltip_pre(
+            self,
+            stack,
+            screen_width,
+            screen_height,
+            elements,
+            place,
+            cancel,
+        );
     }
     /// Change a tooltip box's background and border gradient colors, as ARGB.
     /// Stack is None for tooltips not associated with an item.
