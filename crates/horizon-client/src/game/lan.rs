@@ -99,7 +99,7 @@ pub(super) fn load_sources(
 }
 
 /// Let go of the resolved recipes: a `/reload`, a world closed or a preload no
-/// world used.
+/// world used. Not a world opening, which adopts what its preload resolved.
 pub(super) fn forget_server_sources() {
     *SOURCES.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
