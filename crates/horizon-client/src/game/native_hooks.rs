@@ -1916,7 +1916,7 @@ impl Game<'_> {
     }
     /// Once a client tick, before the window's tick runs (`ClientTickEvent.Pre`).
     pub(super) fn native_client_tick_pre(&mut self) {
-        mod_api::dispatch_client_tick_pre(self);
+        self.fire_client_tick_pre();
     }
     /// Once a client tick, after the window's tick ran (`ClientTickEvent.Post`).
     pub(super) fn native_client_tick_post(&mut self) {
@@ -2276,7 +2276,7 @@ impl Game<'_> {
         action: mod_api::KeyAction,
         modifiers: u32,
     ) {
-        mod_api::dispatch_input_key(self, key, action, modifiers);
+        self.fire_input_key(key, action, modifiers);
     }
     /// Raw mouse button input on any screen, before dispatch; cancel skips dispatch and Post.
     /// Button/modifiers use the same GLFW encoding as screen hooks. Synthetic clicks skip it.
@@ -2365,7 +2365,7 @@ impl Game<'_> {
         jump: &mut bool,
         sneak: &mut bool,
     ) {
-        mod_api::dispatch_movement_input(self, forward, strafe, jump, sneak);
+        self.fire_movement_input(forward, strafe, jump, sneak);
     }
     /// World field of view, after normal calculation and zoom and before projection/Nausea.
     /// Called for world rendering and near-plane overlays; hand/HUD FOV uses its own path.
