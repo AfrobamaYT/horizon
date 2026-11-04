@@ -25,6 +25,41 @@ use std::{collections::HashMap, sync::Arc};
 fn string(s: &str) -> Tag {
     Tag::String(s.into())
 }
+
+fn hidden_effect_nbt(effect: &crate::effects::EffectInstance) -> Tag {
+    let mut fields = vec![("duration", Tag::Int(effect.duration))];
+    if effect.amplifier != 0 {
+        fields.push((
+            "amplifier",
+            Tag::Byte(effect.amplifier.clamp(0, 255) as u8 as i8),
+        ));
+    }
+    if effect.ambient {
+        fields.push(("ambient", Tag::Byte(1)));
+    }
+    if !effect.visible {
+        fields.push(("show_particles", Tag::Byte(0)));
+    }
+    fields.push(("show_icon", Tag::Byte(i8::from(effect.visible))));
+    if let Some(hidden) = &effect.hidden {
+        fields.push(("hidden_effect", hidden_effect_nbt(hidden)));
+    }
+    Tag::compound(fields)
+}
+
+fn hidden_effect_from_nbt(effect: &'static str, tag: &Tag) -> crate::effects::EffectInstance {
+    let mut instance = crate::effects::EffectInstance::new(
+        effect,
+        number(tag.get("duration")).unwrap_or(0) as i32,
+        number(tag.get("amplifier")).unwrap_or(0) as i32,
+    );
+    instance.ambient = number(tag.get("ambient")).is_some_and(|v| v != 0);
+    instance.visible = number(tag.get("show_particles")) != Some(0);
+    instance.hidden = tag
+        .get("hidden_effect")
+        .map(|hidden| Box::new(hidden_effect_from_nbt(effect, hidden)));
+    instance
+}
 /// Entity type ID (`id`).
 pub fn kind(tag: &Tag) -> Option<String> {
     horizon_client_core::identifier::normalize_id(&text(tag.get("id"))?)
@@ -79,7 +114,8 @@ impl Base<'_> {
         }
         if let Tag::Compound(map) = &mut tag {
             for (key, value) in [
-                ("Fire", Tag::Short(-1)),
+                // Entity.remainingFireTicks starts at 0 (-1 was the old default).
+                ("Fire", Tag::Short(0)),
                 ("Air", Tag::Short(300)),
                 ("Invulnerable", Tag::Byte(0)),
                 ("PortalCooldown", Tag::Int(0)),
@@ -482,6 +518,9 @@ pub fn mob_to_nbt(
                     e.push(("show_particles", Tag::Byte(0)));
                 }
                 e.push(("show_icon", Tag::Byte(i8::from(shown))));
+                if let Some(hidden) = m.extra.effect_chains.iter().find(|e| e.id == effect) {
+                    e.push(("hidden_effect", hidden_effect_nbt(hidden)));
+                }
                 Tag::compound(e)
             });
         map.insert("active_effects".into(), Tag::List(effects.collect()));
@@ -726,21 +765,7 @@ pub fn mob_to_nbt(
             } else {
                 map.remove(&"Items".into());
             }
-            // Body and saddle are written with the other slots below.
-            let mut equipment = Vec::new();
-            // A helmet given to the mount (say by `/item ... armor.head`)
-            // keeps its own slot.
-            if let Some(helmet) = &m.extra.head {
-                equipment.push((
-                    "head",
-                    Tag::compound([("id", string(helmet)), ("count", Tag::Int(1))]),
-                ));
-            }
-            if equipment.is_empty() {
-                map.remove(&"equipment".into());
-            } else {
-                map.insert("equipment".into(), Tag::compound(equipment));
-            }
+            // The `equipment` compound is written below, for every mob.
             let modelled = [
                 ("minecraft:max_health", f64::from(m.attrs.max_health)),
                 ("minecraft:movement_speed", m.attrs.speed),
@@ -873,11 +898,11 @@ pub fn mob_to_nbt(
         "minecraft:allay" => {
             // InventoryCarrier: the fetched stack; the liked player memory.
             let mut inv = Vec::new();
-            if let (Some(item), n) = (&m.extra.main_hand, m.extra.ints[1])
+            if let (Some(item), n) = (m.extra.main_hand_id(), m.extra.ints[1])
                 && n > 0
             {
                 inv.push(Tag::compound([
-                    ("id", Tag::String(item.as_ref().into())),
+                    ("id", Tag::String(item.into())),
                     ("count", Tag::Int(n)),
                 ]));
             }
@@ -1010,18 +1035,6 @@ pub fn mob_to_nbt(
             map.insert("Size".into(), Tag::Int(m.extra.size.max(1) - 1));
             map.insert("wasOnGround".into(), Tag::Byte(i8::from(m.extra.flag2)));
         }
-        // Skeletons are spawned holding a bow (finalizeSpawn); a mob loaded
-        // from NBT keeps only its saved equipment.
-        "minecraft:skeleton" | "minecraft:stray" | "minecraft:bogged"
-            if raw.is_none() && m.extra.main_hand.as_deref() == Some("minecraft:bow") =>
-        {
-            map.entry("equipment".into()).or_insert_with(|| {
-                Tag::compound([(
-                    "mainhand",
-                    Tag::compound([("id", string("minecraft:bow")), ("count", Tag::Int(1))]),
-                )])
-            });
-        }
         // Zombie and Skeleton.addAdditionalSaveData (a husk keeps Zombie's):
         // `ConversionTracker`'s conversion and affliction times, -1 when it is
         // not converting or not afflicted.
@@ -1111,15 +1124,14 @@ pub fn mob_to_nbt(
     // Zombie and Piglin.setBaby (even for an adult) the speed, Rabbit.setVariant
     // the attack damage.
     use crate::mobs::finalize::Attr;
-    let made = if crate::mobs::doors::is_zombie(species) || species == crate::mobs::Species::Piglin
-    {
-        Some(Attr::MovementSpeed)
-    } else if species == crate::mobs::Species::Rabbit {
-        Some(Attr::AttackDamage)
+    // Every other living entity's first tick makes the movement_speed instance
+    // (LivingEntity.removeFrost reads it through getAttribute).
+    let made = if species == crate::mobs::Species::Rabbit {
+        vec![Attr::MovementSpeed, Attr::AttackDamage]
     } else {
-        None
+        vec![Attr::MovementSpeed]
     };
-    if let Some(attr) = made {
+    for attr in made {
         let base = crate::mobs::finalize::base_value(m, attr);
         let mut list = match map.get(&"attributes".into()) {
             Some(Tag::List(l)) => l.clone(),
@@ -1153,111 +1165,23 @@ pub fn mob_to_nbt(
     }
     crate::mobs::raider::write_nbt(m, map);
     crate::mobs::riders::write_nbt(m, map);
-    // LivingEntity equipment: what the mob holds now.
+    // LivingEntity equipment: what the mob holds and wears now.
     {
-        let mut equipment = match map.get(&"equipment".into()) {
-            Some(Tag::Compound(c)) => c.clone(),
-            _ => horizon_world::nbt::Compound::new(),
-        };
-        for (index, (slot, item)) in [
-            ("mainhand", &m.extra.main_hand),
-            ("offhand", &m.extra.off_hand),
-            ("head", &m.extra.head),
-            ("chest", &m.extra.chest),
-            ("legs", &m.extra.legs),
-            ("feet", &m.extra.feet),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            if slot == "mainhand"
-                && let Some(stack) = m.extra.main_hand_stack()
-            {
-                let mut stack = stack.clone();
-                if let Some(g) = crate::mobs::gear::gear(m) {
-                    stack.data_mut().enchantments = g.slots[index].clone();
-                    stack.data_mut().trim = g.trims[index].clone();
-                }
-                equipment.insert(slot.into(), crate::save::item_to_nbt(&stack));
-                continue;
-            }
-            // A worn piece or held item that kept its damage, name or
-            // components is saved with them.
-            if slot != "mainhand"
-                && item.is_some()
-                && let Some(stack) = crate::mobs::finalize::stored_stack(
-                    m,
-                    [
-                        crate::mobs::finalize::MAINHAND,
-                        crate::mobs::finalize::OFFHAND,
-                        crate::mobs::finalize::HEAD,
-                        crate::mobs::finalize::CHEST,
-                        crate::mobs::finalize::LEGS,
-                        crate::mobs::finalize::FEET,
-                    ][index],
-                )
-            {
-                equipment.insert(slot.into(), crate::save::item_to_nbt(&stack));
-                continue;
-            }
-            // Enchanted or trimmed gear is saved with its components.
-            if let (Some(id), Some(g)) = (item, crate::mobs::gear::gear(m))
-                && (!g.slots[index].is_empty() || g.trims[index].is_some())
-            {
-                let mut stack = crate::items::ItemStack::new(id, 1);
-                stack.data_mut().enchantments = g.slots[index].clone();
-                stack.data_mut().trim = g.trims[index].clone();
-                equipment.insert(slot.into(), crate::save::item_to_nbt(&stack));
-                continue;
-            }
-            match item {
-                Some(id) => {
-                    let keep = slot != "mainhand"
-                        && matches!(
-                            equipment.get(&slot.into()).and_then(|e| e.get("id")),
-                            Some(Tag::String(s)) if s.to_string_lossy() == **id
-                        );
-                    if slot == "head"
-                        && &**id == crate::mobs::raider::BANNER
-                        && crate::mobs::raider::is_raider(m.species())
-                    {
-                        // The captain's ominous banner keeps its patterns.
-                        let has_patterns = equipment
-                            .get(&slot.into())
-                            .and_then(|e| e.get("components"))
-                            .is_some();
-                        if !has_patterns {
-                            equipment.insert(
-                                slot.into(),
-                                crate::save::item_to_nbt(&crate::mobs::raider::ominous_banner()),
-                            );
-                        }
-                    } else if !keep {
-                        equipment.insert(
-                            slot.into(),
-                            Tag::compound([
-                                ("id", Tag::String(id.as_ref().into())),
-                                ("count", Tag::Int(1)),
-                            ]),
-                        );
-                    }
-                }
-                None => {
-                    equipment.remove(&slot.into());
-                }
-            }
+        let mut equipment = m.extra.equipment.clone();
+        let head = horizon_items::equipment::HEAD;
+        // Held and worn items are saved with their enchantments and trim.
+        for slot in horizon_items::equipment::MAINHAND..=head {
+            equipment[slot] = crate::mobs::finalize::item_stack(m, slot);
         }
-        horizon_items::equipment::put(
-            &mut equipment,
-            horizon_items::equipment::BODY,
-            m.extra.body_stack(),
-        );
-        horizon_items::equipment::put(
-            &mut equipment,
-            horizon_items::equipment::SADDLE,
-            m.saddle_item().as_ref(),
-        );
-        horizon_items::equipment::store(map, equipment);
+        // The captain's ominous banner keeps its patterns.
+        if equipment[head].as_ref().is_some_and(|banner| {
+            &*banner.item == crate::mobs::raider::BANNER
+                && banner.extra.is_none()
+                && crate::mobs::raider::is_raider(m.species())
+        }) {
+            equipment[head] = Some(crate::mobs::raider::ominous_banner());
+        }
+        equipment.store(map);
     }
     tag
 }
@@ -1281,7 +1205,7 @@ fn put_attributes(map: &mut Compound, m: &Mob, a: &crate::mobs::finalize::Attrib
                     Op::AddMultipliedTotal => "add_multiplied_total",
                 };
                 Tag::compound([
-                    ("id", string(x.id)),
+                    ("id", string(&x.id)),
                     ("amount", Tag::Double(x.amount.to_bits())),
                     ("operation", string(op)),
                 ])
@@ -1489,32 +1413,20 @@ pub fn mob_from_nbt(
     m.hurt_time = number(tag.get("HurtTime")).unwrap_or(0) as i32;
     // What it holds (equipment.mainhand / offhand), when saved.
     if let Some(eq) = tag.get("equipment") {
-        m.extra
-            .set_main_hand_stack(eq.get("mainhand").and_then(crate::save::item_from_nbt));
-        m.extra.off_hand = eq
-            .get("offhand")
-            .and_then(|i| text(i.get("id")))
-            .map(Into::into);
-        let slot = |key| eq.get(key).and_then(|i| text(i.get("id"))).map(Into::into);
-        m.extra.head = slot("head");
-        // Body and saddle: the one `equipment` codec.
-        let equipment = horizon_items::equipment::Equipment::read(eq);
-        m.extra
-            .set_body_stack(equipment.get(horizon_items::equipment::BODY).cloned());
-        m.set_saddle(equipment.get(horizon_items::equipment::SADDLE).cloned());
-        m.extra.chest = slot("chest");
-        m.extra.legs = slot("legs");
-        m.extra.feet = slot("feet");
+        // The hands, armour, body and saddle: the one `equipment` codec.
+        m.extra.equipment = horizon_items::equipment::Equipment::read(eq);
         // Their enchantments and trims.
-        for (index, key) in crate::mobs::gear::KEYS.iter().enumerate() {
-            if let Some(stack) = eq.get(key).and_then(crate::save::item_from_nbt) {
-                crate::mobs::gear::set(&mut m, index, stack.enchantments().to_vec());
+        // (`gear` slot order: hands, then head to feet.)
+        use horizon_items::equipment::{CHEST, FEET, HEAD, LEGS, MAINHAND, OFFHAND};
+        for (index, slot) in [MAINHAND, OFFHAND, HEAD, CHEST, LEGS, FEET]
+            .into_iter()
+            .enumerate()
+        {
+            if let Some(stack) = m.extra.slot_stack(slot) {
+                let levels = stack.enchantments().to_vec();
                 let trim = stack.data().and_then(|d| d.trim.clone());
+                crate::mobs::gear::set(&mut m, index, levels);
                 crate::mobs::gear::set_trim(&mut m, index, trim);
-                // The damage, name and components stay with the slot.
-                if index != crate::mobs::gear::MAIN {
-                    crate::mobs::gear::set_stack(&mut m, index, stack);
-                }
             }
         }
     } else {
@@ -1594,8 +1506,13 @@ pub fn mob_from_nbt(
             let effect = crate::brewing::namespaced(def.id);
             let duration = number(e.get("duration")).unwrap_or(0) as i32;
             let amplifier = number(e.get("amplifier")).unwrap_or(0) as i32;
-            m.extra.effects.retain(|x| x.0 != effect);
-            m.extra.effects.push((effect, duration, amplifier));
+            m.load_effect(effect, duration, amplifier);
+            m.extra.effect_chains.retain(|e| e.id != effect);
+            if let Some(hidden) = e.get("hidden_effect") {
+                m.extra
+                    .effect_chains
+                    .push(hidden_effect_from_nbt(effect, hidden));
+            }
             // Details.CODEC: `show_particles` defaults to true.
             m.extra.hidden_effects.retain(|h| *h != effect);
             if number(e.get("show_particles")) == Some(0) {
@@ -2436,19 +2353,10 @@ pub fn fireball_to_nbt(
     if let Some(power) = power {
         put(&mut tag, "ExplosionPower", Tag::Byte(power as i8));
     }
-    // Fireball.addAdditionalSaveData: the item it is drawn as, one of the loaded
-    // item or else a fire charge (`setItem` refuses an empty stack and keeps one).
-    if matches!(
-        p.kind,
-        ProjectileKind::LargeFireball { .. } | ProjectileKind::SmallFireball
-    ) {
-        let mut item = tag
-            .get("Item")
-            .and_then(item_from_nbt)
-            .filter(|i| i.count > 0 && &*i.item != "minecraft:air")
-            .unwrap_or_else(|| crate::items::ItemStack::new("minecraft:fire_charge", 1));
-        item.count = 1;
-        put(&mut tag, "Item", item_to_nbt(&item));
+    // Fireball.addAdditionalSaveData: the item `getItem` returns, a fire
+    // charge unless `setItem` was given another (kept as a single one).
+    if let Some(item) = &p.item {
+        put(&mut tag, "Item", item_to_nbt(item));
     }
     Some(tag)
 }
@@ -2660,6 +2568,10 @@ pub fn owner_uuid(tag: &Tag) -> Option<[i32; 4]> {
     uuid_from_tag(tag.get("Owner"))
 }
 
+/// `Fireball.readAdditionalSaveData` (and, around it, `Projectile`'s Owner and
+/// LeftOwner and `AbstractHurtingProjectile`'s acceleration power): a fireball
+/// also reads the item it is drawn as through `setItem`, whose default is the
+/// fire charge; a wind charge is no `Fireball` and has none.
 pub fn fireball_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<Projectile> {
     let kind = match kind(tag)?.as_str() {
         "minecraft:fireball" => ProjectileKind::LargeFireball {
@@ -2680,6 +2592,9 @@ pub fn fireball_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<Projecti
     p.owner_uuid = owner;
     p.no_gravity = flag(tag, "NoGravity");
     p.acceleration = float(tag.get("acceleration_power")).unwrap_or(0.1);
+    if let Some(item) = tag.get("Item").and_then(item_from_nbt) {
+        p.set_item(item);
+    }
     Some(p)
 }
 
@@ -2763,6 +2678,7 @@ pub struct TridentSave<'a> {
     pub dealt_damage: bool,
     pub creative_only: bool,
     pub no_gravity: bool,
+    pub fire_ticks: i32,
     pub item: &'a crate::items::ItemStack,
 }
 pub fn trident_to_nbt(t: &TridentSave, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
@@ -2789,6 +2705,7 @@ pub fn trident_to_nbt(t: &TridentSave, uuid: [i32; 4], raw: Option<&Tag>) -> Tag
         ("SoundEvent", string("minecraft:item.trident.hit_ground")),
         ("item", item_to_nbt(t.item)),
         ("DealtDamage", Tag::Byte(i8::from(t.dealt_damage))),
+        ("Fire", Tag::Short(t.fire_ticks as i16)),
     ] {
         put(&mut tag, key, value);
     }
@@ -2813,6 +2730,7 @@ pub struct TridentNbt {
     pub dealt_damage: bool,
     pub creative_only: bool,
     pub no_gravity: bool,
+    pub fire_ticks: i32,
     pub item: crate::items::ItemStack,
 }
 pub fn trident_from_nbt(tag: &Tag) -> Option<TridentNbt> {
@@ -2828,6 +2746,7 @@ pub fn trident_from_nbt(tag: &Tag) -> Option<TridentNbt> {
         dealt_damage: flag(tag, "DealtDamage"),
         creative_only: number(tag.get("pickup")) == Some(2),
         no_gravity: flag(tag, "NoGravity"),
+        fire_ticks: number(tag.get("Fire")).unwrap_or(0) as i32,
         item: tag
             .get("item")
             .and_then(item_from_nbt)
@@ -3068,18 +2987,9 @@ pub fn armor_stand_to_nbt(a: &ArmorStand, uuid: [i32; 4], raw: Option<&Tag>) -> 
         fall_distance: 0.0,
     };
     let mut tag = base.tag(raw);
-    let equipment: Vec<(&str, Tag)> = ArmorStand::SLOTS
-        .iter()
-        .zip(&a.equipment)
-        .filter_map(|(slot, stack)| Some((*slot, item_to_nbt(stack.as_ref()?))))
-        .collect();
     // `equipment` is saved only when something is worn, `Marker` only when set.
-    if equipment.is_empty() {
-        if let Tag::Compound(map) = &mut tag {
-            map.remove(&"equipment".into());
-        }
-    } else {
-        put(&mut tag, "equipment", Tag::compound(equipment));
+    if let Tag::Compound(map) = &mut tag {
+        a.equipment.store(map);
     }
     put(&mut tag, "DisabledSlots", Tag::Int(a.disabled_slots));
     for (key, value) in [
@@ -3135,7 +3045,15 @@ pub fn armor_stand_to_nbt(a: &ArmorStand, uuid: [i32; 4], raw: Option<&Tag>) -> 
             ("AbsorptionAmount", Tag::Float(0)),
             ("FallFlying", Tag::Byte(0)),
             ("current_impulse_context_reset_grace_time", Tag::Int(0)),
-            ("attributes", Tag::List(Vec::new())),
+            // AttributeMap.pack: the movement_speed instance every living
+            // entity's first tick makes (removeFrost), at the registry default.
+            (
+                "attributes",
+                Tag::List(vec![Tag::compound([
+                    ("id", string("minecraft:movement_speed")),
+                    ("base", Tag::Double(0.7f64.to_bits())),
+                ])]),
+            ),
             (
                 "Brain",
                 Tag::compound([("memories", Tag::Compound(Compound::new()))]),
@@ -3156,9 +3074,7 @@ pub fn armor_stand_from_nbt(tag: &Tag, id: u32) -> Option<ArmorStand> {
     a.custom_name = tag.get("CustomName").map(name_text);
     a.name_visible = flag(tag, "CustomNameVisible");
     if let Some(eq) = tag.get("equipment") {
-        for (i, slot) in ArmorStand::SLOTS.iter().enumerate() {
-            a.equipment[i] = eq.get(slot).and_then(item_from_nbt);
-        }
+        a.equipment = horizon_items::equipment::Equipment::read(eq);
     }
     a.small = flag(tag, "Small");
     a.show_arms = flag(tag, "ShowArms");
@@ -3496,7 +3412,7 @@ mod tests {
         ]);
         let m = mob_from_nbt(&raw, &types, 1, None).unwrap();
         assert_eq!(m.extra.body_id(), Some("minecraft:diamond_horse_armor"));
-        assert_eq!(m.extra.head.as_deref(), Some("minecraft:iron_helmet"));
+        assert_eq!(m.extra.head_id(), Some("minecraft:iron_helmet"));
         let saved = mob_to_nbt(&m, [0; 4], Some(&raw), None);
         let eq = saved.get("equipment").unwrap();
         let id = |key: &str| {
@@ -3546,7 +3462,7 @@ mod tests {
         let m = mob_from_nbt(&raw, &types, 1, None).unwrap();
         assert_eq!(m.extra.body_id(), Some("minecraft:wolf_armor"));
         assert_eq!(m.extra.body_damage(), 9);
-        assert_eq!(m.extra.head.as_deref(), Some("minecraft:iron_helmet"));
+        assert_eq!(m.extra.head_id(), Some("minecraft:iron_helmet"));
     }
 
     fn fused_creeper(fuse: Option<i16>) -> (Mob, Tag) {
@@ -3598,9 +3514,11 @@ mod tests {
 
     #[test]
     fn creeper_fall_swell_uses_custom_fuse_without_a_zero_floor() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         for (fuse, expected) in [(Some(1), -4), (None, 25), (Some(40), 35)] {
             let (mut mob, _) = fused_creeper(fuse);
-            mob.cause_fall_damage_from(100.0, 0.0, &mut Vec::new());
+            mob.cause_fall_damage_from(level, 100.0, 0.0, &mut Vec::new());
             assert_eq!(mob.swell, expected, "Fuse={fuse:?}");
         }
     }
@@ -3731,6 +3649,7 @@ mod tests {
                 dealt_damage: true,
                 creative_only: true,
                 no_gravity: true,
+                fire_ticks: 0,
                 item: &trident,
             },
             [1, 2, 3, 4],
@@ -4071,6 +3990,32 @@ mod tests {
         let tag = item_entity_to_nbt(&e, [0; 4], Some(&raw));
         assert_eq!(text(tag.get("CustomName")).as_deref(), Some("x"));
         assert_eq!(number(tag.get("Health")), Some(5));
+    }
+    #[test]
+    fn entities_without_fire_save_zero_and_a_mob_saves_its_speed_instance() {
+        // Entity.remainingFireTicks starts at 0; LivingEntity.removeFrost makes
+        // the movement_speed instance AttributeMap.pack then saves.
+        let orb = ExperienceOrb {
+            join: Default::default(),
+            no_gravity: false,
+            id: 0,
+            position: Vec3::ZERO,
+            previous: Vec3::ZERO,
+            velocity: Vec3::ZERO,
+            value: 1,
+            age: 0,
+            on_ground: false,
+            count: 1,
+            ticks: 0,
+            health: 5,
+        };
+        let tag = orb_to_nbt(&orb, [0; 4]);
+        assert_eq!(tag.get("Fire"), Some(&Tag::Short(0)));
+        let stand = armor_stand_to_nbt(&ArmorStand::new(1, Vec3::ZERO, 0.0), [0; 4], None);
+        let Some(Tag::List(attrs)) = stand.get("attributes") else {
+            panic!("no attributes");
+        };
+        assert_eq!(attrs.len(), 1);
     }
     #[test]
     fn orbs_keep_their_count() {
@@ -4902,15 +4847,22 @@ mod sheep_nbt_tests {
             200,
             2,
         );
+        m.add_effect("minecraft:slowness", 90, 3);
         let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None);
         let Some(Tag::List(saved)) = tag.get("active_effects") else {
             panic!("no active_effects");
         };
+        assert_eq!(
+            number(saved[1].get("hidden_effect").unwrap().get("duration")),
+            Some(200)
+        );
         assert!(saved[0].get("amplifier").is_none());
         assert!(saved[1].get("amplifier").is_some());
         let back = mob_from_nbt(&tag, &types, 2, None).unwrap();
         assert_eq!(back.extra.effects[0].2, 0);
-        assert_eq!(back.extra.effects[1].2, 2);
+        assert_eq!(back.extra.effects[1].2, 3);
+        assert_eq!(back.extra.effect_chains[0].amplifier, 2);
+        assert_eq!(back.extra.effect_chains[0].duration, 200);
     }
 
     #[test]
@@ -5590,7 +5542,7 @@ mod fireball_nbt_tests {
                 ("minecraft:fire_charge".to_owned(), 1),
                 "{id}"
             );
-            // A loaded item stays, as a single one.
+            // A loaded item stays, as a single one, on the entity itself.
             let mut loaded = plain.clone();
             put(
                 &mut loaded,
@@ -5598,7 +5550,18 @@ mod fireball_nbt_tests {
                 item_to_nbt(&crate::items::ItemStack::new("minecraft:diamond", 5)),
             );
             let p = fireball_from_nbt(&loaded, None).unwrap();
-            let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&loaded)).unwrap();
+            let held = p.item.as_ref().unwrap();
+            assert_eq!((&*held.item, held.count), ("minecraft:diamond", 1), "{id}");
+            // `addAdditionalSaveData` writes `getItem()`: the item in the
+            // compound it was loaded from does not replace the one it holds,
+            // which is what `/data get` and the chunk save then report.
+            let mut stale = plain.clone();
+            put(
+                &mut stale,
+                "Item",
+                item_to_nbt(&crate::items::ItemStack::new("minecraft:stone", 8)),
+            );
+            let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&stale)).unwrap();
             assert_eq!(item_of(&back), ("minecraft:diamond".to_owned(), 1), "{id}");
             // An empty one falls back to the fire charge.
             let mut empty = plain.clone();
@@ -5944,7 +5907,10 @@ mod held_item_name_tests {
         assert_eq!(zombie.saddle_item(), Some(saddle));
         assert_eq!(zombie.equipment_stacks()[1], Some(offhand));
         let mut horse = Mob::new(1, Arc::clone(&types["minecraft:horse"]), Vec3::ZERO, 0.0);
-        horse.extra.head = Some("minecraft:iron_helmet".into());
+        horse.extra.set_slot_id(
+            horizon_items::equipment::HEAD,
+            Some("minecraft:iron_helmet".into()),
+        );
         let mut armor = crate::items::ItemStack::new("minecraft:diamond_horse_armor", 3);
         armor.damage = 7;
         armor.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Body".into()));
@@ -5960,7 +5926,7 @@ mod held_item_name_tests {
         );
         let raw = mob_to_nbt(&horse, [1, 2, 3, 4], None, None);
         let mut horse = mob_from_nbt(&raw, &types, 2, None).unwrap();
-        assert_eq!(horse.extra.head.as_deref(), Some("minecraft:iron_helmet"));
+        assert_eq!(horse.extra.head_id(), Some("minecraft:iron_helmet"));
         assert_eq!(horse.extra.body_id(), Some("minecraft:diamond_horse_armor"));
         assert_eq!(horse.equipment_stacks()[6], Some(armor.clone()));
         let mut chances = [0.0; 8];
@@ -6084,7 +6050,7 @@ mod held_item_name_tests {
         let saved = mob_to_nbt(&loaded, [1, 2, 3, 4], Some(&raw), None);
         let restored = mob_from_nbt(&saved, &types, 3, None).unwrap();
         assert_eq!(
-            restored.extra.main_hand.as_deref(),
+            restored.extra.main_hand_id(),
             Some("minecraft:diamond_sword")
         );
         assert!(

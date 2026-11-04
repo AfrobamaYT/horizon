@@ -87,7 +87,9 @@ impl TraitInjection {
             .zip(&scalars)
             .filter(|(_, scalar)| **scalar)
             .map(|((n, _), _)| quote!(*#n = event.#n;));
+        let hook = name.to_string();
         let call = quote! {
+            let _call = owner.enter(#hook);
             let mut event = crate::mod_api::#event { #(#inits),* };
             let _flow = owner.hooks.#name(&mut event);
             #(#write_back)*
@@ -121,6 +123,9 @@ impl TraitInjection {
                 let Some(owner) = crate::mod_api::mods().get(#owner) else {
                     return #absent;
                 };
+                if !crate::mod_api::subscribed_by(#owner, crate::mod_api::hook_ids::#name) {
+                    return #absent;
+                }
                 #result
             }
         }

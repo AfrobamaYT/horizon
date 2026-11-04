@@ -76,6 +76,7 @@ Start the client (needs a signed-in Microsoft account that owns Minecraft: Java 
 
     horizon-launcher play
 
+- `--allow-jar-downloads`: Allow missing original Java asset/data jars to be downloaded from Modrinth
 - `--instance`: The instance to play (its name or id; default: the selected one). A Java instance starts its Minecraft: Java Edition, downloaded with its Java the first time
 - `--world`: Open or create this world (a folder under saves) at once
 - `--creative`: Creative mode for a new world
@@ -92,6 +93,7 @@ Run a dedicated server here; type commands into its console.
 
     horizon-launcher server
 
+- `--allow-jar-downloads`: Allow missing original Java asset/data jars to be downloaded from Modrinth
 - `--dir`: The server's folder (default: the one the launcher uses)
 - `--accept-eula`: Agree to the Minecraft EULA (https://aka.ms/MinecraftEULA)
 
@@ -99,12 +101,13 @@ MCP: `server`, `server_command`, `server_log`, `server_stop`.
 
 ## `horizon-launcher native-build`
 
-Native mods (docs/native-mods.md): compile mixin bundles against the instance's exact Horizon source revision with the launcher's own Rust, as the version the instance then plays. Not sandboxed: the mods' code runs with your rights.
+Native mods (docs/native-mods.md): compile flat Rust mod projects against the instance's exact Horizon source revision with the launcher's own Rust, as the version the instance then plays. Not sandboxed: the mods' code runs with your rights.
 
     horizon-launcher native-build [FOLDER]
 
-- `FOLDER`: A mod folder (horizon-mixin.toml, or an unpacked .hmod), or a folder of them (default: the native mods installed and turned on in the instance)
+- `FOLDER`: A mod folder (horizon-mod.toml with [native], Cargo.toml and src/), or a folder of them (default: the native mods installed and turned on in the instance)
 - `--server-output`: Export mode: build a standalone dedicated-server engine into this folder instead of an instance's build. Needs a mod FOLDER; no instance is read or changed, and no launcher config is written
+- `--allow-jar-downloads`: Allow exact-hash jar downloads into the local cache for the server export; jar bytes are never included in the exported folder
 - `--instance`: The instance whose installed native mods to build, and which then plays the build (default: the selected one)
 - `--update`: Move to the newest installed release or Nightly instead of the Horizon the instance plays (a full rebuild)
 - `--trust-native-code`: You read the mods' source and trust it with full access to this computer
@@ -225,7 +228,7 @@ MCP: `account_skin`.
 
 ## `horizon-launcher settings`
 
-Show the launcher's settings, or set one (the Settings page): selected-version TAG, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, prune-old-versions on|off (delete old versions after an install, keeping the selected one, the ones instances use and the newest few), keep-versions N (how many of the newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink, background PATH (a picture behind Home; "default" shows Horizon's landscape), native-profile performance|dev|release (the profile native mods build with: performance is incremental, dev rebuilds a mod quickest for a slow game, release is slowest to build and slightly faster to play).
+Show the launcher's settings, or set one (the Settings page): selected-version TAG, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, prune-old-versions on|off (delete old versions after an install, keeping the selected one, the ones instances use and the newest few), keep-versions N (how many of the newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any hue), background PATH (a picture behind Home; "default" shows Horizon's landscape), native-profile performance|dev|release (the profile native mods build with: performance is incremental, dev rebuilds a mod quickest for a slow game, release is slowest to build and slightly faster to play).
 
     horizon-launcher settings [KEY] [VALUE]
 
@@ -812,6 +815,7 @@ Play a ported pack as its own profile.
     horizon-launcher modpack play <PACK>
 
 - `PACK`
+- `--allow-jar-downloads`: Allow missing original Java asset/data jars to be downloaded from Modrinth
 
 MCP: `modpack_play`.
 

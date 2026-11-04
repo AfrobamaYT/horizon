@@ -895,6 +895,29 @@ fn status_and_join() {
     // ServerStatus.CODEC writes a plain literal MOTD as a bare string.
     assert_eq!(v["description"], "Test - World");
 
+    // `DedicatedServer.setRepliesToStatus`: disabling it closes a fresh status handshake.
+    s.hub.lan.shared.set_enable_status(false);
+    let closed = run(&mut s, move || {
+        let mut c = Connection::connect("127.0.0.1", port, Duration::from_secs(5))
+            .map_err(|e| e.to_string())?;
+        c.send(
+            &handshake::Serverbound::Intention(handshake::Intention {
+                protocol: PROTOCOL_VERSION,
+                host: "127.0.0.1".into(),
+                port,
+                intent: handshake::STATUS,
+            })
+            .encode(),
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(c.recv().is_err())
+    });
+    assert!(
+        closed,
+        "status handshake should close when replies are disabled"
+    );
+    s.hub.lan.shared.set_enable_status(true);
+
     // Join, receive the world, place a block, see another player arrive.
     let report = run(&mut s, move || {
         let mut bot = connect(port, "Steve", true)?;
@@ -1438,16 +1461,38 @@ fn the_prediction_records_each_client_tick_and_the_server_ticks_it_had_seen() {
 
 /// A mod block entity reaches the players that see its chunk as vanilla's do
 /// (`BlockEntityInfo.create`, then `sendBlockUpdated` and
-/// `ChunkHolder.broadcastChanges`): in the chunk with its block's own type
+/// `ChunkHolder.broadcastChanges`): in the chunk with its declared type
 /// and its mod's update tag, then once per tick however often it is synced,
 /// with no `BlockEntityData` for one whose mod gives no tag.
 #[test]
 fn a_synced_mod_block_entity_reaches_the_chunks_players_once_a_tick() {
-    use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
+    use horizon_client::block_entity_types::{self, BlockEntityTypes};
+    use horizon_client::containers::{BlockEntity, ModBlockEntity};
     use horizon_world::nbt::{Compound, JavaString, Tag};
     let Some(resources) = resources() else {
         return;
     };
+    const CHILD: &str = "HORIZON_TEST_LAN_DECLARED_ENTITY";
+    if std::env::var_os(CHILD).is_none() {
+        assert!(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "a_synced_mod_block_entity_reaches_the_chunks_players_once_a_tick",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .status()
+                .unwrap()
+                .success()
+        );
+        return;
+    }
+    block_entity_types::install(BlockEntityTypes::new(
+        [("test:machine".into(), "test:machine_entity".into())].into(),
+        vec!["test:machine_entity".into()],
+    ))
+    .unwrap();
     const MACHINE: u32 = 3;
     let mut s = server(&resources);
     let states = [
@@ -1458,7 +1503,7 @@ fn a_synced_mod_block_entity_reaches_the_chunks_players_once_a_tick() {
     ]
     .map(|n| (Arc::<str>::from(n), false));
     let builtin = horizon_protocol::registry::Builtin::parse(
-        r#"{"minecraft:block_entity_type": {"entries": {"test:machine": {"protocol_id": 60}}}}"#,
+        r#"{"minecraft:block_entity_type": {"entries": {"test:machine_entity": {"protocol_id": 60}}}}"#,
     )
     .unwrap();
     s.hub.encoder = ChunkEncoder::new(states, &builtin, &[], &[]);
@@ -1472,10 +1517,7 @@ fn a_synced_mod_block_entity_reaches_the_chunks_players_once_a_tick() {
         s.world
             .set(pos.0, pos.1, pos.2, BlockStateId(MACHINE))
             .unwrap();
-        let mut machine = ModBlockEntity::new(ModBlockEntityFields {
-            id: "test:machine".into(),
-            ..Default::default()
-        });
+        let mut machine = ModBlockEntity::new("test:machine_entity".into(), Default::default());
         if let Some(on) = on {
             machine.nbt.insert("on".into(), Tag::Byte(on));
         }

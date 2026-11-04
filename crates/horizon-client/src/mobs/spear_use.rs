@@ -17,19 +17,19 @@ use horizon_core::geometry::{Aabb, Vec3, trig::Mth};
 
 /// The kinetic weapon in the main hand (`getMainHandItem().get(KINETIC_WEAPON)`).
 pub fn main_hand_kinetic(m: &Mob) -> Option<Kinetic> {
-    m.extra.main_hand.as_deref().and_then(Kinetic::of)
+    m.extra.main_hand_id().and_then(Kinetic::of)
 }
 
 /// `LivingEntity.isUsingItem`. A piglin admiring what it holds in its off
 /// hand counts `using_item` down as well; vanilla keeps that in a memory.
 pub fn is_using_item(m: &Mob) -> bool {
-    m.extra.using_item > 0 && !(m.species() == Species::Piglin && m.extra.off_hand.is_some())
+    m.extra.using_item > 0 && !(m.species() == Species::Piglin && m.extra.off_hand_id().is_some())
 }
 
 /// `LivingEntity.startUsingItem(MAIN_HAND)`: the use of a kinetic weapon
 /// starts with a new `recentKineticEnemies`.
 pub fn start_using_item(m: &mut Mob) {
-    if m.extra.main_hand.is_none() || is_using_item(m) {
+    if m.extra.main_hand_id().is_none() || is_using_item(m) {
         return;
     }
     m.extra.using_item = 1;
@@ -811,21 +811,21 @@ impl Goal for PiglinSpear {
             && m.extra.piglin.spear.status.is_none()
             && approach_check_extra_start_conditions(m, cx.w)
         {
-            self.approach.begin(cx.lr, now);
+            self.approach.begin(cx.level.random(), now);
             approach_start(m);
         }
         if !self.attack.running
             && m.extra.piglin.spear.status.is_some()
             && attack_check_extra_start_conditions(m, cx.w)
         {
-            self.attack.begin(cx.lr, now);
+            self.attack.begin(cx.level.random(), now);
             attack_start(m);
         }
         if !self.retreat.running
             && m.extra.piglin.spear.status.is_some()
             && retreat_check_extra_start_conditions(m, cx)
         {
-            self.retreat.begin(cx.lr, now);
+            self.retreat.begin(cx.level.random(), now);
             retreat_start(m);
         }
         if self.approach.running {
@@ -861,7 +861,7 @@ impl Goal for PiglinSpear {
 pub struct NoMeleeWithSpear<G>(pub G);
 /// A kinetic weapon or a crossbow in the main hand: the melee goal stays off.
 pub(super) fn holds_non_melee_weapon(m: &Mob) -> bool {
-    main_hand_kinetic(m).is_some() || m.extra.main_hand.as_deref() == Some("minecraft:crossbow")
+    main_hand_kinetic(m).is_some() || m.extra.main_hand_id() == Some("minecraft:crossbow")
 }
 impl<G: Goal + Clone + 'static> Goal for NoMeleeWithSpear<G> {
     goal_clone!();

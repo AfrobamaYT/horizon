@@ -232,6 +232,7 @@ fn matching_helper_signatures(server: &str, client: &str, name: &str) -> Result<
 fn host_method(
     method: &syn::ItemFn,
     name: &str,
+    trait_name: &str,
     exports: &HashSet<String>,
 ) -> Result<(String, String), String> {
     struct Types<'a> {
@@ -384,7 +385,7 @@ fn host_method(
         .collect::<String>();
     Ok((
         format!(
-            "{docs}{} {{ {unused} unimplemented!(\"Host::{name}\") }}\n",
+            "{docs}{} {{ {unused} unimplemented!(\"{trait_name}::{name}\") }}\n",
             sig.to_token_stream()
         ),
         format!(
@@ -403,6 +404,7 @@ fn handle_method<'a>(
     method: &syn::ItemFn,
     name: &str,
     receiver: &str,
+    side: HelperSide,
     handles: &'a BTreeMap<String, String>,
 ) -> Result<(&'a str, String), String> {
     let handle = handles
@@ -418,12 +420,28 @@ fn handle_method<'a>(
         syn::parse_str(short).map_err(|_| format!("{name}: {short} is not a method name"))?;
     let mut inputs = sig.inputs.iter();
     let mutable = matches!(inputs.next(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
+    if mutable {
+        match side {
+            HelperSide::Server => {}
+            HelperSide::Both => {
+                return Err(format!("{name}: a both-side handle write is not allowed"));
+            }
+            HelperSide::Client => {
+                return Err(format!(
+                    "{name}: client handle writes need a client backend accessor; add it with the first one"
+                ));
+            }
+        }
+    }
     let mut inputs = sig.inputs.iter();
     let host: FnArg = match inputs.next() {
         Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_some() => {
-            syn::parse_quote!(host: &mut dyn Host)
+            syn::parse_quote!(host: &mut dyn ServerHost)
         }
-        Some(FnArg::Receiver(r)) if r.reference.is_some() => syn::parse_quote!(host: &dyn Host),
+        Some(FnArg::Receiver(r)) if r.reference.is_some() => match side {
+            HelperSide::Client => syn::parse_quote!(host: &dyn ClientHost),
+            HelperSide::Server | HelperSide::Both => syn::parse_quote!(host: &dyn Host),
+        },
         _ => return Err(format!("{name}: a {receiver} helper borrows Game")),
     };
     let takes_handle = matches!(
@@ -595,10 +613,16 @@ impl VisitMut for EventLifetimes {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HookContext {
+    Registration,
+}
+
 #[derive(Debug)]
 struct CatalogHook {
     entry: serde_json::Value,
     side: HelperSide,
+    context: Option<HookContext>,
 }
 
 impl std::ops::Deref for CatalogHook {
@@ -607,6 +631,95 @@ impl std::ops::Deref for CatalogHook {
     fn deref(&self) -> &Self::Target {
         &self.entry
     }
+}
+
+fn hook_id(name: &str) -> String {
+    name.split('_')
+        .map(|word| word[..1].to_uppercase() + &word[1..])
+        .collect()
+}
+
+fn complete_hook_constants(
+    code: String,
+    trait_name: &str,
+    module: &str,
+    id: &str,
+) -> Result<String, String> {
+    let file = syn::parse_file(&code).map_err(|e| e.to_string())?;
+    let methods = file
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Trait(item) if item.ident == trait_name => Some(&item.items),
+            _ => None,
+        })
+        .ok_or("generated hook trait missing")?;
+    let existing: HashSet<_> = file
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Mod(item) if item.ident == module => {
+                item.content.as_ref().map(|(_, items)| items)
+            }
+            _ => None,
+        })
+        .ok_or("generated hook constants missing")?
+        .iter()
+        .filter_map(|item| match item {
+            Item::Const(item) => Some(item.ident.to_string()),
+            _ => None,
+        })
+        .collect();
+    let mut defaults = String::new();
+    for method in methods {
+        if let syn::TraitItem::Fn(method) = method {
+            let name = method.sig.ident.to_string();
+            if !existing.contains(&name) {
+                defaults.push_str(&format!("pub const {name}: Option<super::{id}> = None;\n"));
+            }
+        }
+    }
+    Ok(code.replacen(
+        &format!("pub mod {module} {{"),
+        &format!("pub mod {module} {{\n{defaults}"),
+        1,
+    ))
+}
+
+/// A catalog hook point, as a raw injection's `target` can name it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HookPoint {
+    pub name: String,
+    /// The contract version an injection's `hook_version` names.
+    pub version: u64,
+    /// The function the hook is called from: an injection's `target` for it.
+    pub target: String,
+    /// A scoped hook is a Part method alone and has no `Hooks` method.
+    pub scoped: bool,
+}
+
+/// The catalog's hook points, `native-hooks.json` and the fragments beside it, as the
+/// generator reads them.
+pub fn hook_points(root: &Path) -> Result<Vec<HookPoint>, String> {
+    let catalog = serde_json::from_str(
+        &fs::read_to_string(root.join("native-hooks.json")).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    catalog_hooks(root, &catalog)?
+        .into_iter()
+        .map(|hook| {
+            let name = hook["name"].as_str().ok_or("hook name missing")?;
+            Ok(HookPoint {
+                name: name.to_owned(),
+                version: hook["version"].as_u64().unwrap_or(1),
+                target: hook["target"]
+                    .as_str()
+                    .ok_or_else(|| format!("hook {name}: target missing"))?
+                    .to_owned(),
+                scoped: hook["mod_api"].get("scope").is_some(),
+            })
+        })
+        .collect()
 }
 
 fn catalog_hooks(root: &Path, catalog: &serde_json::Value) -> Result<Vec<CatalogHook>, String> {
@@ -657,7 +770,18 @@ fn catalog_hooks(root: &Path, catalog: &serde_json::Value) -> Result<Vec<Catalog
                 }
             }
         }
-        validated.push(CatalogHook { entry: hook, side });
+        let context = match hook.get("context") {
+            None => None,
+            Some(value) => Some(match value.as_str() {
+                Some("registration") => HookContext::Registration,
+                _ => return Err(format!("hook {name}: invalid phase context")),
+            }),
+        };
+        validated.push(CatalogHook {
+            entry: hook,
+            side,
+            context,
+        });
     }
     Ok(validated)
 }
@@ -781,7 +905,7 @@ fn rustfmt(code: &str) -> Result<Vec<u8>, String> {
 }
 
 /// The doc of [`BlockPart`], the first part trait in the generated file.
-const PART_DOCS: &str = "/// A block's part: code attached through [`Registrar`] to one block, a mod's own or vanilla's.\n/// Its methods are the scoped hooks', asked only for the blocks it is attached to, after\n/// every mod's [`Hooks`] method. They may run on the window's thread or the server thread.\n";
+const PART_DOCS: &str = "/// A block's part: code attached through [`Registrar`] to one block, a mod's own or vanilla's.\n/// Its methods are the scoped hooks', asked only for the blocks it is attached to: a scoped\n/// hook has no [`Hooks`] method. They may run on the window's thread or the server thread.\n/// Annotate each part trait implementation with [`horizon_part`] to derive its subscriptions.\n";
 
 /// The crate whose generated sources are being built.
 #[derive(Clone, Copy)]
@@ -827,8 +951,10 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
         part_traits,
         fills,
         hook_ids,
+        hook_constants,
         hook_count,
         render_hook_ids,
+        render_hook_constants,
         render_hook_count,
     } = dispatch::emit(root, &hooks, &methods)?;
     if hooks.is_empty() {
@@ -836,16 +962,23 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
     }
     let part = |name: &str| part_traits.get(name).map_or("", String::as_str);
     let code = format!(
-        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse super::*;\n#[doc(hidden)]\n#[repr(usize)]\n#[derive(Clone, Copy)]\npub enum HookId {{ {hook_ids} }}\npub(crate) const HOOK_COUNT: usize = {hook_count};\npub trait Hooks: std::any::Any + Send + Sync {{\nfn render(&self) -> Option<&dyn RenderHooks> {{ None }}\n/// Once, at startup: attach this mod's parts (`r.block_part(\"mymod:shaft\", Shaft)`).\nfn register(&self, r: &mut Registrar) {{ let _ = r; }}\n{traits}}}\n{PART_DOCS}pub trait BlockPart: Send + Sync + 'static {{\n{}}}\n/// A block's part that also answers for its block entity, and for the block like a [`BlockPart`].\npub trait BlockEntityPart: BlockPart {{\n{}}}\n/// An item's part.\npub trait ItemPart: Send + Sync + 'static {{\n{}}}\n/// A mod menu type's part.\npub trait MenuPart: Send + Sync + 'static {{\n{}}}\n{dispatch}",
+        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse super::*;\n#[doc(hidden)]\n#[repr(usize)]\n#[derive(Clone, Copy)]\n#[non_exhaustive]\npub enum HookId {{ {hook_ids} }}\n#[doc(hidden)]\n#[allow(non_upper_case_globals)]\npub mod hook_ids {{ {hook_constants} }}\npub(crate) const HOOK_COUNT: usize = {hook_count};\npub trait Hooks: std::any::Any + Send + Sync {{\nfn subscribed(&self) -> &'static [Option<HookId>];\nfn render(&self) -> Option<&dyn RenderHooks> {{ None }}\n/// Once, at startup: attach this mod's parts (`r.block_part(\"mymod:shaft\", Shaft)`).\nfn register(&self, r: &mut Registrar, cx: &RegistrationContext<'_>) {{ let _ = (r, cx); }}\n{traits}}}\n{PART_DOCS}pub trait BlockPart: Send + Sync + 'static {{\nfn block_subscribed(&self) -> &'static [Option<HookId>];\n{}}}\n/// A block's part that also answers for its block entity, and for the block like a [`BlockPart`].\npub trait BlockEntityPart: BlockPart {{\nfn block_entity_subscribed(&self) -> &'static [Option<HookId>];\n{}}}\n/// An item's part.\npub trait ItemPart: Send + Sync + 'static {{\nfn item_subscribed(&self) -> &'static [Option<HookId>];\n{}}}\n/// A mod menu type's part.\npub trait MenuPart: Send + Sync + 'static {{\nfn menu_subscribed(&self) -> &'static [Option<HookId>];\n{}}}\n{dispatch}",
         part("BlockPart"),
         part("BlockEntityPart"),
         part("ItemPart"),
         part("MenuPart"),
     );
+    let code = complete_hook_constants(code, "Hooks", "hook_ids", "HookId")?;
     let (host, implementation) = host::generate(root, &catalog, &code)?;
     let render_code = format!(
-        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse super::*;\n#[doc(hidden)]\n#[repr(usize)]\n#[derive(Clone, Copy)]\npub enum RenderHookId {{ {render_hook_ids} }}\npub(crate) const RENDER_HOOK_COUNT: usize = {render_hook_count};\npub trait RenderHooks: std::any::Any + Send + Sync {{\n{render_traits}}}\n{render_dispatch}"
+        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse super::*;\n#[doc(hidden)]\n#[repr(usize)]\n#[derive(Clone, Copy)]\n#[non_exhaustive]\npub enum RenderHookId {{ {render_hook_ids} }}\n#[doc(hidden)]\n#[allow(non_upper_case_globals)]\npub mod render_hook_ids {{ {render_hook_constants} }}\npub(crate) const RENDER_HOOK_COUNT: usize = {render_hook_count};\npub trait RenderHooks: std::any::Any + Send + Sync {{\nfn subscribed(&self) -> &'static [Option<RenderHookId>];\n{render_traits}}}\n{render_dispatch}"
     );
+    let render_code = complete_hook_constants(
+        render_code,
+        "RenderHooks",
+        "render_hook_ids",
+        "RenderHookId",
+    )?;
     // A new hook's placeholder body becomes its dispatch call.
     let filled = if fills.is_empty() {
         None
@@ -980,6 +1113,25 @@ mod tests {
     use quote::ToTokens;
     use serde_json::Value;
     #[test]
+    fn hook_points_come_from_the_catalog_and_its_fragments() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let points = super::hook_points(&root).unwrap();
+        let frame = points.iter().find(|p| p.name == "frame").unwrap();
+        assert_eq!(frame.version, 1);
+        assert_eq!(
+            frame.target,
+            "horizon_client::game::native_hooks::Game<'_>::native_frame"
+        );
+        assert!(!frame.scoped);
+        let scoped = points
+            .iter()
+            .find(|p| p.name == "pre_remove_side_effects")
+            .unwrap();
+        assert!(scoped.scoped);
+        assert_eq!(scoped.version, 1);
+    }
+
+    #[test]
     fn fragment_hooks_generate_and_duplicates_fail() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let catalog: serde_json::Value =
@@ -1070,8 +1222,14 @@ mod tests {
                 "fn native_{name}(&self, value: {ty}) -> Option<()> {{}}"
             ))
             .unwrap();
-            let (handle, code) =
-                super::handle_method(&method, &name, receiver, &types.handles).unwrap();
+            let (handle, code) = super::handle_method(
+                &method,
+                &name,
+                receiver,
+                super::HelperSide::Server,
+                &types.handles,
+            )
+            .unwrap();
             assert_eq!(handle, ty);
             assert!(code.contains(&format!("backend_of(host)?.{name}(self)")));
         }
@@ -1086,9 +1244,15 @@ mod tests {
             "missing",
         ] {
             assert!(
-                super::handle_method(&method, "hidden_kind", receiver, &types.handles)
-                    .unwrap_err()
-                    .contains("unknown receiver")
+                super::handle_method(
+                    &method,
+                    "hidden_kind",
+                    receiver,
+                    super::HelperSide::Server,
+                    &types.handles
+                )
+                .unwrap_err()
+                .contains("unknown receiver")
             );
         }
         assert_eq!(
@@ -1106,19 +1270,56 @@ mod tests {
             /// Where it is.
             fn native_entity_position(&self, entity: EntityRef, mut scale: f64) -> Option<[f64; 3]> { todo!() }
         };
-        let (handle, code) =
-            super::handle_method(&read, "entity_position", "entity", &types.handles).unwrap();
+        let (handle, code) = super::handle_method(
+            &read,
+            "entity_position",
+            "entity",
+            super::HelperSide::Server,
+            &types.handles,
+        )
+        .unwrap();
         assert_eq!(handle, "EntityRef");
         assert!(code.starts_with("/// Where it is.\n"));
         assert!(code.contains("pub fn position (self , host : & dyn Host , scale : f64)"));
         assert!(code.contains("backend_of(host)?.entity_position(self, scale)"));
+        let (_, client_code) = super::handle_method(
+            &read,
+            "entity_position",
+            "entity",
+            super::HelperSide::Client,
+            &types.handles,
+        )
+        .unwrap();
+        assert!(client_code.contains("host : & dyn ClientHost"));
         let write: syn::ItemFn = syn::parse_quote! {
             fn native_level_set(&mut self, level: LevelRef) -> bool { todo!() }
         };
-        let (handle, code) =
-            super::handle_method(&write, "level_set", "level", &types.handles).unwrap();
+        let (handle, code) = super::handle_method(
+            &write,
+            "level_set",
+            "level",
+            super::HelperSide::Server,
+            &types.handles,
+        )
+        .unwrap();
         assert_eq!(handle, "LevelRef");
-        assert!(code.contains("host : & mut dyn Host"));
+        for (side, error) in [
+            (
+                super::HelperSide::Both,
+                "level_set: a both-side handle write is not allowed",
+            ),
+            (
+                super::HelperSide::Client,
+                "level_set: client handle writes need a client backend accessor; add it with the first one",
+            ),
+        ] {
+            assert_eq!(
+                super::handle_method(&write, "level_set", "level", side, &types.handles)
+                    .unwrap_err(),
+                error
+            );
+        }
+        assert!(code.contains("host : & mut dyn ServerHost"));
         assert!(code.contains(
             "backend_mut_of(host).map(|backend| backend.level_set(self)).unwrap_or(false)"
         ));
@@ -1162,9 +1363,15 @@ mod tests {
         ] {
             let method: syn::ItemFn = method;
             assert!(
-                super::handle_method(&method, name, receiver, &types.handles)
-                    .unwrap_err()
-                    .contains(error),
+                super::handle_method(
+                    &method,
+                    name,
+                    receiver,
+                    super::HelperSide::Server,
+                    &types.handles
+                )
+                .unwrap_err()
+                .contains(error),
                 "{name}"
             );
         }
@@ -1181,42 +1388,48 @@ mod tests {
         for ty in ["Visible", "Renamed", "Defined", "Generated"] {
             let method: syn::ItemFn =
                 syn::parse_str(&format!("fn native_test(&self, value: {ty}) {{ }}")).unwrap();
-            assert!(super::host_method(&method, "test", &exports).is_ok());
+            assert!(super::host_method(&method, "test", "Host", &exports).is_ok());
         }
         let foreign: syn::ItemFn =
             syn::parse_quote! { fn native_foreign(&self, value: elsewhere::Visible) {} };
-        assert!(super::host_method(&foreign, "foreign", &exports).is_err());
+        assert!(super::host_method(&foreign, "foreign", "Host", &exports).is_err());
         let hidden_trait: syn::ItemFn =
             syn::parse_quote! { fn native_hidden(&self, value: &dyn Hidden) {} };
-        assert!(super::host_method(&hidden_trait, "hidden", &exports).is_err());
+        assert!(super::host_method(&hidden_trait, "hidden", "Host", &exports).is_err());
         let read: syn::ItemFn = syn::parse_quote! {
             /// Read a value exactly.
             ///
             /// Keep the blank line too.
             fn native_read(&self, pos: [i32; 3]) -> String { todo!() }
         };
-        let (declaration, implementation) = super::host_method(&read, "read", &exports).unwrap();
+        let (declaration, implementation) =
+            super::host_method(&read, "read", "Host", &exports).unwrap();
         assert!(
             declaration.contains("/// Read a value exactly.\n///\n/// Keep the blank line too.")
         );
         assert!(declaration.contains("& self"));
         assert!(implementation.contains("self.native_read(pos)"));
         let dir: syn::ItemFn = syn::parse_quote! { fn native_dir() -> PathBuf { todo!() } };
-        let (declaration, implementation) = super::host_method(&dir, "dir", &exports).unwrap();
+        let (declaration, implementation) =
+            super::host_method(&dir, "dir", "Host", &exports).unwrap();
         assert!(declaration.contains("& self"));
         assert!(implementation.contains("Self::native_dir()"));
         let owned: syn::ItemFn = syn::parse_quote! { fn native_owned(self) {} };
-        assert!(super::host_method(&owned, "owned", &exports).is_err());
+        assert!(super::host_method(&owned, "owned", "Host", &exports).is_err());
         let write: syn::ItemFn = syn::parse_quote! {
             fn native_write(&mut self, value: i32) { }
         };
-        let (declaration, _) = super::host_method(&write, "write", &exports).unwrap();
+        let (declaration, _) = super::host_method(&write, "write", "Host", &exports).unwrap();
         assert!(declaration.contains("& mut self"));
+        for side in ["ServerHost", "ClientHost"] {
+            let (declaration, _) = super::host_method(&write, "write", side, &exports).unwrap();
+            assert!(declaration.contains(&format!("{side}::write")));
+        }
         let private: syn::ItemFn = syn::parse_quote! {
             fn native_private(&self, value: BinOnly) { }
         };
         assert!(
-            super::host_method(&private, "private", &exports)
+            super::host_method(&private, "private", "Host", &exports)
                 .unwrap_err()
                 .contains("BinOnly")
         );
@@ -1224,7 +1437,7 @@ mod tests {
             fn native_generic<T>(&self, value: T) { }
         };
         assert!(
-            super::host_method(&generic, "generic", &exports)
+            super::host_method(&generic, "generic", "Host", &exports)
                 .unwrap_err()
                 .contains("object-safe")
         );
@@ -1232,7 +1445,7 @@ mod tests {
             fn native_callback(&self, callback: impl FnOnce()) { }
         };
         assert!(
-            super::host_method(&callback, "callback", &exports)
+            super::host_method(&callback, "callback", "Host", &exports)
                 .unwrap_err()
                 .contains("object-safe")
         );
@@ -1240,7 +1453,7 @@ mod tests {
             async fn native_async(&self) { }
         };
         assert!(
-            super::host_method(&asynchronous, "async", &exports)
+            super::host_method(&asynchronous, "async", "Host", &exports)
                 .unwrap_err()
                 .contains("object-safe")
         );
@@ -1271,11 +1484,13 @@ mod tests {
     fn level_hosts_match_receiver_mutability() {
         let level = super::CatalogHook {
             entry: serde_json::json!({"target": "horizon_client::game::GameLevel<'_>::native_test"}),
-            side: super::HelperSide::Both,
+            side: super::HelperSide::Server,
+            context: None,
         };
         let game = super::CatalogHook {
             entry: serde_json::json!({"target": "horizon_client::game::Game<'_>::native_test"}),
             side: super::HelperSide::Both,
+            context: None,
         };
         use super::host_param::{HostParam, host_param};
         let param = |ty: &str, call| {
@@ -1302,10 +1517,96 @@ mod tests {
             param("&mut dyn LevelWriteHost", ticks)
         );
         assert_eq!(host_param(&level, None, false), None);
+        let level_both = super::CatalogHook {
+            entry: level.entry.clone(),
+            side: super::HelperSide::Both,
+            context: None,
+        };
+        assert_eq!(
+            host_param(&level_both, Some(false), false),
+            param("LevelSide", "super::mod_api_host::level_side(self)")
+        );
+        for (mutable, ticks) in [(Some(true), false), (Some(false), true)] {
+            assert_eq!(
+                super::host_param::validate(&level_both, "test", true, mutable, ticks).unwrap_err(),
+                "test: a both-side level hook takes the read kind until a client level seam exists"
+            );
+        }
         assert_eq!(
             host_param(&game, Some(true), false),
-            param("&mut dyn Host", "self")
+            param("HostSide", "HostSide::of(self)")
         );
+        assert_eq!(
+            super::host_param::validate(&game, "test", false, Some(false), false).unwrap_err(),
+            "test: a both-side hook with a &self target takes host \"read\""
+        );
+        let read = super::CatalogHook {
+            entry: serde_json::json!({"target": "horizon_client::game::Game<'_>::native_test", "host": "read"}),
+            side: super::HelperSide::Both,
+            context: None,
+        };
+        assert_eq!(
+            host_param(&read, Some(false), false),
+            param("&dyn Host", "&*self")
+        );
+        let client = super::CatalogHook {
+            entry: game.entry.clone(),
+            side: super::HelperSide::Client,
+            context: None,
+        };
+        assert_eq!(
+            host_param(&client, Some(false), false),
+            param("&dyn ClientHost", "&*self")
+        );
+        assert_eq!(
+            host_param(&client, Some(true), false),
+            param("&mut dyn ClientHost", "self")
+        );
+        let client_read = super::CatalogHook {
+            entry: read.entry.clone(),
+            side: super::HelperSide::Client,
+            context: None,
+        };
+        assert_eq!(
+            super::host_param::validate(&client_read, "test", false, Some(false), false)
+                .unwrap_err(),
+            "test: this entry takes no host marker"
+        );
+        assert_eq!(
+            super::host_param::validate(&read, "test", true, Some(false), false).unwrap_err(),
+            "test: this entry takes no host marker"
+        );
+        // A hit's level: another receiver than `GameLevel`, marked as a level host.
+        let hit = super::CatalogHook {
+            entry: serde_json::json!({"target": "horizon_client::game::native_hooks::HitLevel<'_>::native_test", "host": "level"}),
+            side: super::HelperSide::Server,
+            context: None,
+        };
+        assert!(super::host_param::is_level(&hit));
+        assert_eq!(
+            host_param(&hit, Some(true), false),
+            param("&mut dyn LevelRandomHost", "self")
+        );
+        super::host_param::validate(&hit, "test", true, Some(true), false).unwrap();
+        for (entry, side, mutable) in [
+            (hit.entry.clone(), super::HelperSide::Server, Some(false)),
+            (hit.entry.clone(), super::HelperSide::Both, Some(true)),
+            (
+                serde_json::json!({"target": "horizon_client::game::GameLevel<'_>::native_test", "host": "level"}),
+                super::HelperSide::Server,
+                Some(true),
+            ),
+        ] {
+            let hook = super::CatalogHook {
+                entry,
+                side,
+                context: None,
+            };
+            assert_eq!(
+                super::host_param::validate(&hook, "test", true, mutable, false).unwrap_err(),
+                "test: this entry takes no host marker"
+            );
+        }
     }
 
     #[test]

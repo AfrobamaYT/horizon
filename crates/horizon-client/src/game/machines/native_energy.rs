@@ -52,7 +52,7 @@ impl Game<'_> {
         });
         // The block entity is out of the world while it ticks.
         match self.world.block_entities.get(&(x, y, z)) {
-            Some(BlockEntity::Mod(m)) if reached && !m.id.is_empty() => {
+            Some(BlockEntity::Mod(m)) if reached && !m.id().is_empty() => {
                 Some((Arc::clone(buffer), read_energy(&m.nbt)))
             }
             _ => None,
@@ -133,6 +133,8 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::HostTransaction;
+    use crate::mod_api::ServerHost;
 
     fn buffer(capacity: i32, max_insert: i32, max_extract: i32) -> ModEnergyBuffer {
         ModEnergyBuffer {
@@ -142,6 +144,110 @@ mod tests {
             insert_faces: [true; 6],
             extract_faces: [true; 6],
         }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn entity_energy_and_fluids_move_and_roll_back() {
+        use super::super::super::native_entity_refs::tests::with_game;
+        use horizon_client::chunk::Chunk;
+        use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
+        use horizon_client::entities::ArmorStand;
+        use horizon_client::fast_hash::FxHashMap;
+        use horizon_client::mobs::Mob;
+        use horizon_client::mod_api::part_tests::{ROBOT_FLUID, game_thread};
+        use horizon_client::mod_api::{
+            ENERGY, ENTITY_ENERGY, ENTITY_FLUIDS, Holder, NativeBlockUpdateFlags, move_energy,
+            move_resources,
+        };
+        use horizon_core::geometry::{Direction, Vec3};
+        with_game(|game| {
+            let _mods = game_thread();
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let block = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world
+                .block_entities
+                .set_mod_energy(FxHashMap::from_iter([(
+                    block.0,
+                    Arc::new(buffer(1000, 1000, 1000)),
+                )]));
+            let pos = [0, 64, 0];
+            assert!(game.native_level_set_block(
+                level,
+                pos,
+                block,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            let mut fields = ModBlockEntityFields::default();
+            fields.nbt.insert("energy".into(), Tag::Int(800));
+            game.world.block_entities.insert(
+                (0, 64, 0),
+                BlockEntity::Mod(Box::new(ModBlockEntity::new("test:battery".into(), fields))),
+            );
+            for id in [13, 14] {
+                game.armor_stands.push(ArmorStand::new(id, Vec3::ZERO, 0.0));
+            }
+            let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(Mob::new(15, pig, Vec3::ZERO, 0.0));
+            let (stand, other, pig) = (
+                game.native_entity(13).unwrap(),
+                game.native_entity(14).unwrap(),
+                game.native_entity(15).unwrap(),
+            );
+            let host: &mut dyn ServerHost = game;
+            assert!(pig.capability(host, &ENTITY_ENERGY, None).is_none());
+            assert!(pig.capability(host, &ENTITY_FLUIDS, None).is_none());
+            let source = level.capability(host, &ENERGY, pos, None).unwrap();
+            // The side reaches the provider: this one answers from every side but below.
+            assert!(
+                stand
+                    .capability(host, &ENTITY_ENERGY, Some(Direction::Down))
+                    .is_none()
+            );
+            assert!(
+                stand
+                    .capability(host, &ENTITY_ENERGY, Some(Direction::Up))
+                    .is_some()
+            );
+            let target = stand.capability(host, &ENTITY_ENERGY, None).unwrap();
+            assert_eq!(
+                host.transaction(|host, tx| move_energy(host, &source, &target, 100, tx)),
+                Ok(100)
+            );
+            assert_eq!((source.amount(host), target.amount(host)), (700, 100));
+            let abort: Result<(), ()> = host.transaction(|host, tx| {
+                assert_eq!(move_energy(host, &source, &target, 100, tx), Ok(100));
+                Err(())
+            });
+            assert!(abort.is_err());
+            assert_eq!((source.amount(host), target.amount(host)), (700, 100));
+            ROBOT_FLUID.set(host, Holder::Entity(14), 600).unwrap();
+            let tank = stand.capability(host, &ENTITY_FLUIDS, None).unwrap();
+            let from = other.capability(host, &ENTITY_FLUIDS, None).unwrap();
+            assert_eq!(
+                host.transaction(|host, tx| move_resources(host, &from, &tank, |_| true, 100, tx)),
+                Ok(100)
+            );
+            assert_eq!((from.amount(host, 0), tank.amount(host, 0)), (500, 100));
+            let abort: Result<(), ()> = host.transaction(|host, tx| {
+                assert_eq!(
+                    move_resources(host, &from, &tank, |_| true, 100, tx),
+                    Ok(100)
+                );
+                Err(())
+            });
+            assert!(abort.is_err());
+            assert_eq!((from.amount(host, 0), tank.amount(host, 0)), (500, 100));
+        });
     }
 
     #[test]
@@ -192,7 +298,7 @@ mod tests {
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
         use horizon_client::fast_hash::FxHashMap;
-        use horizon_client::mod_api::{ENERGY, Host, NativeBlockUpdateFlags, move_energy};
+        use horizon_client::mod_api::{ENERGY, NativeBlockUpdateFlags, move_energy};
         use horizon_core::geometry::Direction;
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -220,20 +326,18 @@ mod tests {
             for (pos, energy) in [(from, 800), (to, 0)] {
                 let flags = NativeBlockUpdateFlags::NEIGHBORS;
                 assert!(game.native_level_set_block(level, pos, block, flags));
-                let mut fields = ModBlockEntityFields {
-                    id: "test:battery".into(),
-                    ..Default::default()
-                };
+                let mut fields = ModBlockEntityFields::default();
                 fields
                     .nbt
                     .insert(JavaString::from("energy"), Tag::Int(energy));
-                let entity = BlockEntity::Mod(Box::new(ModBlockEntity::new(fields)));
+                let entity =
+                    BlockEntity::Mod(Box::new(ModBlockEntity::new("test:battery".into(), fields)));
                 game.world
                     .block_entities
                     .insert((pos[0], pos[1], pos[2]), entity);
             }
             let moved = |game: &mut Game<'_>, side, max, commit: bool| {
-                let host: &mut dyn Host = game;
+                let host: &mut dyn ServerHost = game;
                 let source = level.capability(host, &ENERGY, from, None).unwrap();
                 let target = level.capability(host, &ENERGY, to, side).unwrap();
                 host.transaction(|host, tx| {
@@ -242,7 +346,7 @@ mod tests {
                 })
             };
             let held = |game: &mut Game<'_>| {
-                let host: &mut dyn Host = game;
+                let host: &mut dyn ServerHost = game;
                 [from, to].map(|pos| {
                     let buffer = level.capability(host, &ENERGY, pos, None).unwrap();
                     buffer.amount(host)

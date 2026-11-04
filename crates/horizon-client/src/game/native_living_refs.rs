@@ -1,11 +1,16 @@
 //! Living entities for native server mods, through a `LivingRef`
 //! (docs/native-mods.md, "Entity and level handles", #7387): the equipment
-//! of mobs, players and armor stands. Reads return `None`, writes false, for
-//! a stale handle or on a client.
+//! of mobs, players and armor stands, throwing a stack, and whether a mob
+//! is tamed. Reads return `None`, writes false, for a stale handle or on a
+//! client; the exception is the reads marked side `both` (`living`, `equipment`,
+//! `hand_item`, `health`, `max_health`, and `effect`/`effects`), which on a
+//! client answer for the local player from the client's own copy.
 use super::Game;
 use super::commands::{Target, items::Owner};
+use crate::mobs::Who;
 use horizon_client::first_person::Hand;
 use horizon_client::items::ItemStack;
+use horizon_client::mobs::Mob;
 use horizon_client::mod_api::{EntityRef, EquipmentSlot, LivingRef};
 
 /// A player's armour slots (`armor`, head first) by equipment slot.
@@ -50,6 +55,12 @@ fn slot_name(slot: EquipmentSlot) -> &'static str {
     }
 }
 
+/// `LivingEntity.isAlive`'s health test: above 0, so a NaN health loaded from
+/// a save is not alive either.
+fn alive_at(health: f32) -> bool {
+    health > 0.0
+}
+
 fn equipment_stack(stack: Option<ItemStack>) -> Option<ItemStack> {
     stack.filter(|s| s.count > 0 && &*s.item != "minecraft:air")
 }
@@ -69,19 +80,30 @@ impl Game<'_> {
     /// The entity as a living entity (vanilla's `LivingEntity`: a mob, a
     /// player, an armor stand or the dragon), or None for another kind or a
     /// stale handle.
+    ///
+    /// On a client, only the local player is one: the client keeps the others'
+    /// equipment, effects and health only as far as it draws them.
     pub(super) fn native_living(&self, entity: EntityRef) -> Option<LivingRef> {
         let living = LivingRef::new(entity);
-        self.native_living_target(living).map(|_| living)
+        self.native_living_read_target(living).map(|_| living)
+    }
+    /// What a living handle names for a read that works on both sides: the
+    /// server's entity, or on a client the local player (`Minecraft.player`),
+    /// whose state is the client's copy of what the server sent.
+    pub(super) fn native_living_read_target(&self, living: LivingRef) -> Option<Target> {
+        if self.is_logical_server() {
+            return self.native_living_target(living);
+        }
+        match self.native_client_entity_target(living.entity())? {
+            Target::Player => Some(Target::Player),
+            _ => None,
+        }
     }
     /// The effective value of an attribute on a living entity. None for an
     /// unknown or absent attribute, an unavailable entity, or on a client.
     /// Mobs, armor stands and the dragon return None until they have live
     /// attribute maps.
-    pub(super) fn native_living_attribute_value(
-        &mut self,
-        living: LivingRef,
-        id: &str,
-    ) -> Option<f64> {
+    pub(super) fn native_living_attribute_value(&self, living: LivingRef, id: &str) -> Option<f64> {
         self.native_living_attribute(
             living,
             id,
@@ -91,46 +113,240 @@ impl Game<'_> {
 
     /// The base value of an attribute, before modifiers. Mobs, armor stands
     /// and the dragon return None until they have live attribute maps.
-    pub(super) fn native_living_attribute_base(
-        &mut self,
-        living: LivingRef,
-        id: &str,
-    ) -> Option<f64> {
+    pub(super) fn native_living_attribute_base(&self, living: LivingRef, id: &str) -> Option<f64> {
         self.native_living_attribute(living, id, horizon_world::attribute_map::ValueKind::Base)
     }
 
     fn native_living_attribute(
-        &mut self,
+        &self,
         living: LivingRef,
         name: &str,
         kind: horizon_world::attribute_map::ValueKind,
     ) -> Option<f64> {
-        let player = match self.native_living_target(living)? {
-            Target::Player => self.player.as_mut()?,
-            Target::Guest(conn) => self
-                .lan
-                .as_mut()?
-                .hub
-                .guest_mut(conn)?
-                .motion
-                .as_deref_mut()?,
+        self.native_target_attribute(self.native_living_target(living)?, name, kind)
+    }
+
+    fn native_target_attribute(
+        &self,
+        target: Target,
+        name: &str,
+        kind: horizon_world::attribute_map::ValueKind,
+    ) -> Option<f64> {
+        let player = match target {
+            Target::Player => self.player.as_ref()?,
+            Target::Guest(conn) => self.command_guest(conn)?.motion.as_deref()?,
             _ => return None,
         };
         let key = player.attributes.key(name)?;
         player.attributes.value(Some(key), kind).ok()
     }
 
+    /// The entity's health (`LivingEntity.getHealth`; Paper's
+    /// `Damageable#getHealth`). During a player's turn only that player
+    /// resolves: the hub is out for their action, and other players'
+    /// handles read `None` until it is back.
+    pub(super) fn native_living_health(&self, living: LivingRef) -> Option<f32> {
+        match self.native_living_read_target(living)? {
+            Target::Player => Some(self.player.as_ref()?.health.health()),
+            Target::Guest(conn) => Some(self.command_guest(conn)?.health),
+            Target::Mob(id) => self
+                .mobs
+                .iter()
+                .find(|m| m.id == id && !m.removed)
+                .map(|m| m.health),
+            // An armor stand carries the fixed 20 the game gives it: lava
+            // does not hurt it and splash water reads the very field.
+            Target::Stand(id) => self
+                .armor_stands
+                .iter()
+                .find(|a| a.id == id)
+                .map(|a| a.health),
+            Target::Dragon(id) => self
+                .dragon
+                .as_ref()
+                .filter(|d| d.id == id)
+                .map(|d| d.health),
+            _ => None,
+        }
+    }
+    /// The entity's maximum health (`LivingEntity.getMaxHealth`; Paper's
+    /// `Damageable#getMaxHealth`). Players and guests read their attribute
+    /// map; a mob, an armor stand and the dragon their own fields (the
+    /// armor stand the fixed 20 the game seeds it with, the dragon its
+    /// 200) until live attribute maps cover them.
+    pub(super) fn native_living_max_health(&self, living: LivingRef) -> Option<f32> {
+        let target = self.native_living_read_target(living)?;
+        match target {
+            Target::Player | Target::Guest(_) => self
+                .native_target_attribute(
+                    target,
+                    "minecraft:max_health",
+                    horizon_world::attribute_map::ValueKind::Computed,
+                )
+                .map(|max| max as f32),
+            Target::Mob(id) => self
+                .mobs
+                .iter()
+                .find(|m| m.id == id && !m.removed)
+                .map(|m| m.attrs.max_health),
+            Target::Stand(_) => Some(20.0),
+            Target::Dragon(_) => Some(super::dragon::MAX_HEALTH),
+            _ => None,
+        }
+    }
+    /// Whether the entity is alive (`LivingEntity.isAlive`; Paper's
+    /// `Entity#isDead` is its inverse). A dying mob, mid death
+    /// animation, is not.
+    pub(super) fn native_living_alive(&self, living: LivingRef) -> Option<bool> {
+        self.native_living_health(living).map(alive_at)
+    }
+
+    /// Sets the entity's health (`LivingEntity.setHealth`; Paper's
+    /// `Damageable#setHealth`), cut to its maximum health. No heal or damage
+    /// hook runs. False for a stale handle, a non-finite value, an armor stand
+    /// or the dragon.
+    pub(super) fn native_living_set_health(&mut self, living: LivingRef, health: f32) -> bool {
+        if !health.is_finite() {
+            return false;
+        }
+        match self.native_living_target(living) {
+            Some(t @ (Target::Player | Target::Guest(_))) => self
+                .for_player(t, |g| {
+                    let p = g.player.as_mut()?;
+                    let max = p.attribute("minecraft:max_health").ok()? as f32;
+                    p.set_health(health.min(max), false).ok()
+                })
+                .flatten()
+                .is_some(),
+            Some(Target::Mob(id)) => {
+                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
+                    return false;
+                };
+                m.health = health.clamp(0.0, m.attrs.max_health);
+                m.needs_sync = true;
+                true
+            }
+            _ => false,
+        }
+    }
+    /// Heals the entity by `amount` (`LivingEntity.heal`), through the
+    /// `living_heal` hook, which may change or cancel it. A dead or dying
+    /// entity isn't healed, and health stops at the maximum. False for a stale
+    /// handle, a non-finite amount, a zero-health entity, an armor stand or the dragon.
+    pub(super) fn native_living_heal(&mut self, living: LivingRef, amount: f32) -> bool {
+        if !amount.is_finite()
+            || !self
+                .native_living_health(living)
+                .is_some_and(|health| health > 0.0)
+        {
+            return false;
+        }
+        match self.native_living_target(living) {
+            Some(t @ (Target::Player | Target::Guest(_))) => self
+                .for_player(t, |g| {
+                    g.apply_effect_action(horizon_client::effects::EffectAction::Heal(amount));
+                })
+                .is_some(),
+            Some(Target::Mob(id)) => {
+                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
+                    return false;
+                };
+                m.heal(amount);
+                m.needs_sync = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// `LivingEntity.getKillCredit`: the remembered player takes precedence,
+    /// even if the player cannot be resolved; otherwise the last hurting mob.
+    /// Unlike vanilla, a mob that changed dimension cannot be resolved.
+    pub(super) fn native_living_kill_credit(&self, living: LivingRef) -> Option<EntityRef> {
+        let credit = match self.native_living_target(living)? {
+            Target::Player => self.combat.player_credit(self.world.game_time),
+            Target::Guest(conn) => self
+                .guest_combat
+                .get(&conn)
+                .and_then(|combat| combat.player_credit(self.world.game_time)),
+            Target::Mob(id) => self.last_hurt_by_player.get(&id).copied(),
+            _ => None,
+        };
+        if let Some(credit) = credit {
+            let conn = self.resolve_player_credit(credit)?;
+            let id = self.player_entity_id_by_connection(conn)?;
+            return self.native_entity(u32::try_from(id).ok()?);
+        }
+        self.native_living_last_attacker(living)
+    }
+
+    /// `LivingEntity.getLastHurtByMob`: the entity that last hurt this one,
+    /// within a hundred ticks of the hurt (the window of
+    /// `CombatTracker.getKiller`'s credit and a mob's hurt-by memory, as
+    /// `armadillo.rs` reads it). None for a stale handle, a window that has
+    /// passed, an attacker that is gone, an armor stand, the dragon or a
+    /// client.
+    pub(super) fn native_living_last_attacker(&self, living: LivingRef) -> Option<EntityRef> {
+        match self.native_living_target(living)? {
+            Target::Player => self
+                .combat
+                .kill_credit(self.world.game_time)
+                .and_then(|id| self.native_entity(id)),
+            Target::Guest(conn) => self
+                .guest_combat
+                .get(&conn)?
+                .kill_credit(self.world.game_time)
+                .and_then(|id| self.native_entity(id)),
+            Target::Mob(id) => {
+                let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
+                let who =
+                    m.ai.last_hurt_by
+                        .filter(|_| m.age as i32 - m.ai.last_hurt_by_time <= 100)?;
+                let attacker = match who {
+                    Who::Mob(id) => Some(id),
+                    // A player's hurt carries no id in `Who`: the hit's
+                    // record names the player (`last_hurt_by_player`), the
+                    // hub the guest's entity. The acting guest is resolved
+                    // without the hub, which their turn takes out; the
+                    // host's own record is displaced for that turn — the
+                    // guest's body stands in as `player`, so the host's id
+                    // is out of reach (the same None the other players'
+                    // handles read while the hub is out).
+                    Who::Player => {
+                        let conn =
+                            self.resolve_player_credit(*self.last_hurt_by_player.get(&id)?)?;
+                        match conn {
+                            None if self.lan_acting.is_some() => None,
+                            None => Some(self.player.as_ref()?.entity_id as u32),
+                            Some(conn) if self.lan_acting == Some(conn) => {
+                                Some(self.lan_acting_entity?)
+                            }
+                            Some(conn) => Some(
+                                self.lan
+                                    .iter()
+                                    .flat_map(|h| h.hub.guests.iter())
+                                    .find(|g| g.conn == conn)?
+                                    .entity_id as u32,
+                            ),
+                        }
+                    }
+                }?;
+                self.native_entity(attacker)
+            }
+            _ => None,
+        }
+    }
+
     /// The stack in `slot` (`LivingEntity.getItemBySlot`). Players, guests,
-    /// mobs and armor stands store main hand, off hand, head, chest, legs and
-    /// feet. Players, guests and mobs also store body and saddle. Dragon
-    /// equipment and armor-stand body and saddle storage are not yet
-    /// modeled. None means empty, unsupported or stale.
+    /// mobs, armor stands and the dragon store all eight slots. An armor
+    /// stand's body and saddle are storage only: vanilla's `canUseSlot`
+    /// refuses them for interaction. None means empty, unsupported or stale.
     pub(super) fn native_living_equipment(
         &self,
         living: LivingRef,
         slot: EquipmentSlot,
     ) -> Option<ItemStack> {
-        match self.native_living_target(living)? {
+        match self.native_living_read_target(living)? {
             Target::Player => player_slot(
                 &self.inventory,
                 self.selected,
@@ -158,8 +374,15 @@ impl Game<'_> {
                 .iter()
                 .find(|a| a.id == id)?
                 .equipment
-                .get(slot as usize)?
-                .clone(),
+                .get(slot as usize)
+                .cloned(),
+            Target::Dragon(id) => self
+                .dragon
+                .as_ref()
+                .filter(|d| d.id == id)?
+                .equipment
+                .get(slot as usize)
+                .cloned(),
             _ => None,
         }
     }
@@ -176,13 +399,14 @@ impl Game<'_> {
         self.native_living_equipment(living, slot)
     }
     /// Puts `stack` in `slot` (`LivingEntity.setItemSlot`); None, air or a
-    /// zero count empties it. Players, guests, mobs and armor stands store
-    /// main hand, off hand, head, chest, legs and feet. Players, guests and
-    /// mobs also store body and saddle. Dragon equipment and armor-stand body
-    /// and saddle storage are not yet modeled. False means unsupported or stale.
+    /// zero count empties it. Players, guests, mobs, armor stands and the
+    /// dragon store all eight slots. An armor stand stores body and saddle
+    /// too: `ArmorStand.canUseSlot` only stops interaction, and
+    /// `LivingEntity.setItemSlot` keeps whatever it is given. False means
+    /// unsupported or stale.
     /// This is a direct write: it takes effect and is final immediately, even
-    /// inside `host.transaction`. Any equip/unequip event and equip sound also
-    /// happen immediately.
+    /// inside `host.transaction`. A mob's write makes any equip/unequip event
+    /// and equip sound immediately; a stand's or the dragon's makes neither.
     pub(super) fn native_living_set_equipment(
         &mut self,
         living: LivingRef,
@@ -193,26 +417,8 @@ impl Game<'_> {
             return false;
         };
         let stack = equipment_stack(stack);
+        let equippable = stack.as_ref().and_then(|s| self.equippable_slot_sound(s));
         if let Target::Mob(id) = t {
-            let equippable = stack.as_ref().and_then(|s| {
-                let name = horizon_client::item_sync::equippable_slot(s, self.items())?;
-                let equip_slot = super::dispenser::Slot::from_name(&name)?;
-                let patched = s.data().and_then(|d| d.other("minecraft:equippable"));
-                let sound = if let Some(component) = patched {
-                    match component.get("equip_sound") {
-                        Some(horizon_world::nbt::Tag::String(sound)) => {
-                            Some(sound.to_string_lossy())
-                        }
-                        _ => None,
-                    }
-                } else {
-                    self.items()
-                        .get(&s.item)
-                        .and_then(|i| i.equip_sound.clone())
-                }
-                .unwrap_or_else(|| "minecraft:item.armor.equip_generic".into());
-                Some((equip_slot, sound))
-            });
             let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) else {
                 return false;
             };
@@ -238,35 +444,558 @@ impl Game<'_> {
                         })
                         .flatten()
                 });
-                if let Some(sound) = sound {
-                    self.audio.play(&sound, Some([at.x, at.y, at.z]), 1.0, 1.0);
-                }
                 let ctx = self.who_context(Some(horizon_client::mobs::Who::Mob(id)), None);
-                self.post_game_event(
-                    if equippable.is_some() {
-                        "minecraft:equip"
-                    } else {
-                        "minecraft:unequip"
-                    },
-                    [at.x, at.y, at.z],
-                    ctx,
-                );
+                self.equip_item_effects([at.x, at.y, at.z], sound, equippable.is_some(), ctx);
             }
             return true;
         }
-        match self
+        // `LivingEntity.onEquipItem` for the entities that keep no equip state
+        // of their own: the stand and the dragon (not silent, never spectators).
+        let (old, at, first_tick) = match t {
+            Target::Stand(id) => self.armor_stands.iter().find(|a| a.id == id).map(|a| {
+                (
+                    a.equipment.get(slot as usize).cloned(),
+                    a.position,
+                    a.first_tick,
+                )
+            }),
+            Target::Dragon(id) => self.dragon.as_ref().filter(|d| d.id == id).map(|d| {
+                (
+                    d.equipment.get(slot as usize).cloned(),
+                    d.position,
+                    d.first_tick(),
+                )
+            }),
+            _ => None,
+        }
+        .map_or((None, None, true), |(old, at, first)| {
+            (old, Some(at), first)
+        });
+        let written = match self
             .slots_named(&Owner::Entity(t), slot_name(slot))
             .as_slice()
         {
-            [s] => self.slot_set(s, stack),
+            [s] => self.slot_set(s, stack.clone()),
             _ => false,
+        };
+        if let (true, Some(at), false) = (written, at, first_tick) {
+            let same = match (&old, &stack) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.same_item_same_components(b),
+                _ => false,
+            };
+            if !same {
+                let sound = equippable.as_ref().and_then(|(equip_slot, sound)| {
+                    (*equip_slot as usize == slot as usize).then(|| sound.clone())
+                });
+                let (Target::Stand(id) | Target::Dragon(id)) = t else {
+                    unreachable!("only a stand or the dragon gets here")
+                };
+                let ctx_who = Some(horizon_client::mobs::Who::Mob(id));
+                let ctx = self.who_context(ctx_who, None);
+                self.equip_item_effects([at.x, at.y, at.z], sound, equippable.is_some(), ctx);
+            }
         }
+        written
+    }
+
+    /// The slot and sound `stack`'s `equippable` component names
+    /// (`Equippable.slot`, `equipSound`).
+    pub(super) fn equippable_slot_sound(
+        &self,
+        stack: &ItemStack,
+    ) -> Option<(super::dispenser::Slot, String)> {
+        let name = horizon_client::item_sync::equippable_slot(stack, self.items())?;
+        let equip_slot = super::dispenser::Slot::from_name(&name)?;
+        let sound = match stack.data().and_then(|d| d.other("minecraft:equippable")) {
+            Some(component) => match component.get("equip_sound") {
+                Some(horizon_world::nbt::Tag::String(sound)) => Some(sound.to_string_lossy()),
+                _ => None,
+            },
+            None => self
+                .items()
+                .get(&stack.item)
+                .and_then(|i| i.equip_sound.clone()),
+        }
+        .unwrap_or_else(|| "minecraft:item.armor.equip_generic".into());
+        Some((equip_slot, sound))
+    }
+
+    /// The effects of `LivingEntity.onEquipItem` once the guards passed (server
+    /// side, not a spectator, not the first tick, another item): the equip
+    /// sound when there is one, and the `equip` (the stack is equippable) or
+    /// `unequip` game event.
+    fn equip_item_effects(
+        &mut self,
+        at: [f64; 3],
+        sound: Option<String>,
+        equips: bool,
+        ctx: horizon_client::sculk::Context,
+    ) {
+        if let Some(sound) = sound {
+            self.audio.play(&sound, Some(at), 1.0, 1.0);
+        }
+        self.post_game_event(
+            if equips {
+                "minecraft:equip"
+            } else {
+                "minecraft:unequip"
+            },
+            at,
+            ctx,
+        );
+    }
+    /// Throws `stack`, which the mod holds, from the eyes (`LivingEntity.drop`,
+    /// `ServerPlayer.drop`), never through a slot: along the view with a
+    /// main-hand swing, or with `throw_randomly` scattered with none, as a
+    /// death's drops. `include_thrower_name` sets the thrower, and a player's
+    /// throw along the view then counts in its stats and fires `item_dropped`.
+    /// None for an empty stack, a stand or the dragon, a stale handle, or an
+    /// item a mod kept out. API @API:living_refs@.
+    pub(super) fn native_living_drop(
+        &mut self,
+        living: LivingRef,
+        stack: ItemStack,
+        throw_randomly: bool,
+        include_thrower_name: bool,
+    ) -> Option<EntityRef> {
+        let target = self.native_living_target(living)?;
+        let stack = equipment_stack(Some(stack))?;
+        let mut item = None;
+        match target {
+            Target::Mob(id) => {
+                if !throw_randomly {
+                    self.native_living_swing(living, Hand::Main, true);
+                }
+                item = self.native_mob_drop(id, stack, throw_randomly, include_thrower_name);
+            }
+            Target::Player | Target::Guest(_) => {
+                self.native_as_living_player(target, |g| {
+                    item = g.native_player_drop(stack, throw_randomly, include_thrower_name);
+                });
+            }
+            _ => {}
+        }
+        Some(EntityRef::new(living.entity().epoch(), item?))
+    }
+    /// `TamableAnimal.isTame`, `AbstractHorse.isTamed`: None for a kind that
+    /// can't be tamed or a stale handle. API @API:living_refs@.
+    pub(super) fn native_living_is_tamed(&self, living: LivingRef) -> Option<bool> {
+        self.native_tamable(living).map(|m| m.extra.tame)
+    }
+    /// The owner's UUID (`OwnableEntity.getOwnerReference`): None for a wild
+    /// mob, a kind that can't be tamed, or a stale handle. API @API:living_refs@.
+    pub(super) fn native_living_owner(&self, living: LivingRef) -> Option<u128> {
+        let owner = self.native_tamable(living)?.extra.owner?;
+        Some(horizon_client::lan::playerdata::ints_uuid(owner))
+    }
+    /// The mob a handle names, when it is a `TamableAnimal` or an `AbstractHorse`.
+    fn native_tamable(&self, living: LivingRef) -> Option<&Mob> {
+        let Target::Mob(id) = self.native_living_target(living)? else {
+            return None;
+        };
+        self.mobs.iter().find(|m| m.id == id && m.is_tamable())
+    }
+    /// Runs `f` as the player `target` names: the one acting now, or a guest
+    /// in the level in place through `as_guest` (`native_as_player`). False
+    /// when it didn't run.
+    fn native_as_living_player(&mut self, target: Target, f: impl FnOnce(&mut Self)) -> bool {
+        let uuid = match target {
+            Target::Guest(conn) => match self.command_guest(conn) {
+                Some(g) if g.dimension == self.dim.id() => g.uuid,
+                _ => return false,
+            },
+            _ => self.native_acting_id(),
+        };
+        self.native_as_player(uuid, f)
+    }
+    /// The acting player's half of `native_living_drop`: the id of the item entity.
+    fn native_player_drop(
+        &mut self,
+        stack: ItemStack,
+        randomly: bool,
+        thrown_from_hand: bool,
+    ) -> Option<u32> {
+        if randomly {
+            let eye = self.eye_position()?;
+            self.throw_from_eyes(stack, eye, true, thrown_from_hand)
+        } else if thrown_from_hand {
+            self.player_drop(stack)
+        } else {
+            self.drop_plain(stack)
+        }
+    }
+    /// A mob's half of `native_living_drop`: the id of the item entity.
+    fn native_mob_drop(
+        &mut self,
+        id: u32,
+        stack: ItemStack,
+        randomly: bool,
+        thrown_from_hand: bool,
+    ) -> Option<u32> {
+        let m = self.mobs.iter_mut().find(|m| m.id == id)?;
+        let v = horizon_client::entities::drop_motion(&mut m.random, m.yaw, m.head_pitch, randomly);
+        let at = [m.position.x, m.eye_y() - f64::from(0.3f32), m.position.z];
+        let thrower = thrown_from_hand.then(|| self.uuid_for(id));
+        self.spawn_item(stack, at, v, 40);
+        let item = self.just_spawned_item()?;
+        item.thrower = thrower;
+        Some(item.id)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horizon_core::geometry::Vec3;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn immutable_host_attribute_read_refreshes_live_cache() {
+        use horizon_client::{mod_api::Host, motion::PlayerMotion};
+        use horizon_core::geometry::Vec3;
+        use horizon_world::attributes::{Modifier, Operation};
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let living = game.native_living(game.native_entity(20).unwrap()).unwrap();
+            let attributes = &mut game.player.as_mut().unwrap().attributes;
+            let key = attributes.key("minecraft:max_health").unwrap();
+            let instance = attributes.get_instance(Some(key.clone())).unwrap().unwrap();
+            assert_eq!(attributes.instance(&instance).unwrap().value(), 20.0);
+            attributes
+                .edit(&instance, |a, o| {
+                    a.add_transient(
+                        Modifier::new("test:bonus", 5.0, Operation::AddValue).unwrap(),
+                        o,
+                    )
+                })
+                .unwrap();
+            assert_eq!(attributes.cached_value(Some(&key)).unwrap(), 20.0);
+            let host: &dyn Host = game;
+            assert_eq!(
+                living.attribute_base(host, "minecraft:max_health"),
+                Some(20.0)
+            );
+            assert_eq!(
+                game.player
+                    .as_ref()
+                    .unwrap()
+                    .attributes
+                    .cached_value(Some(&key))
+                    .unwrap(),
+                20.0
+            );
+            assert_eq!(
+                living.attribute_value(host, "minecraft:max_health"),
+                Some(25.0)
+            );
+            assert_eq!(living.max_health(host), Some(25.0));
+            assert_eq!(living.attribute_value(host, "missing:attribute"), None);
+            assert_eq!(
+                game.player
+                    .as_ref()
+                    .unwrap()
+                    .attributes
+                    .cached_value(Some(&key))
+                    .unwrap(),
+                25.0
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn living_reads_answer_the_vanilla_defaults_and_a_gone_entity_reads_none() {
+        use horizon_client::entities::ArmorStand;
+        use horizon_client::mobs::Mob;
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, zombie, Vec3::ZERO, 0.0));
+            game.armor_stands.push(ArmorStand::new(13, Vec3::ZERO, 0.0));
+            let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
+            dragon.id = 14;
+            game.dragon = Some(dragon);
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            // The vanilla attribute defaults: a player and a zombie 20, an
+            // armor stand the 20 the game seeds it with, the dragon its 200.
+            for (id, health, max, alive) in [
+                (20u32, 20.0, 20.0, true),
+                (12, 20.0, 20.0, true),
+                (13, 20.0, 20.0, true),
+                (14, 200.0, 200.0, true),
+            ] {
+                let living = game.native_living(game.native_entity(id).unwrap()).unwrap();
+                assert_eq!(living.health(game), Some(health), "health of {id}");
+                assert_eq!(living.max_health(game), Some(max), "max of {id}");
+                assert_eq!(living.alive(game), Some(alive), "alive of {id}");
+            }
+            // A dead dragon: isAlive is health above zero.
+            let dragon_handle = game.native_living(game.native_entity(14).unwrap()).unwrap();
+            game.dragon.as_mut().unwrap().health = 0.0;
+            assert_eq!(dragon_handle.health(game), Some(0.0));
+            assert_eq!(dragon_handle.alive(game), Some(false));
+            // The entities gone: every read answers None.
+            game.player = None;
+            game.lan_acting_uuid = None;
+            game.lan_acting_entity = None;
+            game.mobs[0].removed = true;
+            game.armor_stands.clear();
+            game.dragon = None;
+            for id in [20u32, 12, 13, 14] {
+                let handle = game.native_entity(id).and_then(|er| game.native_living(er));
+                assert!(handle.is_none(), "handle of {id} after it is gone");
+            }
+            assert_eq!(dragon_handle.health(game), None);
+            assert_eq!(dragon_handle.max_health(game), None);
+            assert_eq!(dragon_handle.alive(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn kill_credit_prefers_the_player_reference_and_never_falls_back_when_unresolved() {
+        use horizon_client::mobs::{Damage, Mob};
+        use horizon_core::geometry::Vec3;
+
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            let wolf = game.res.mob_types().get("minecraft:wolf").unwrap().clone();
+            game.mobs.push(Mob::new(100, pig, Vec3::ZERO, 0.0));
+            let mut wolf = Mob::new(101, wolf, Vec3::ZERO, 0.0);
+            wolf.extra.tame = true;
+            wolf.extra.owner = Some(horizon_client::lan::playerdata::uuid_ints(12));
+            game.mobs.push(wolf);
+            game.mobs[0].ai.last_hurt_by = Some(Who::Mob(101));
+            game.mobs[0].ai.last_hurt_by_time = game.mobs[0].age as i32;
+            let living = game
+                .native_living(game.native_entity(100).unwrap())
+                .unwrap();
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(101));
+
+            // A player hit followed by a mob hit keeps the player credit.
+            game.as_guest(12, |game| game.remember_mob_player_credit(100))
+                .unwrap();
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
+            // A tame wolf's hit also records its owner's reference.
+            game.resolve_player_responsible(100, Damage::mob(101, [0.0; 3]));
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
+            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(12));
+            game.lan.as_mut().unwrap().hub.guests[0].placed = false;
+            assert_eq!(living.kill_credit(game), None);
+
+            // Once the player reference expires, the mob can be credited.
+            game.last_hurt_by_player.remove(&100);
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(101));
+            // A mob that has left this level is no longer resolvable by its old ID.
+            game.mobs[1].removed = true;
+            assert_eq!(living.kill_credit(game), None);
+            game.mobs[1].removed = false;
+            game.mobs[0].age += 101;
+            assert_eq!(living.kill_credit(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mobs_last_attacker_names_a_mob_the_host_and_none_when_displaced() {
+        use horizon_client::mobs::Mob;
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(Mob::new(12, pig, Vec3::ZERO, 0.0));
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(15, zombie, Vec3::ZERO, 0.0));
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.player.as_mut().unwrap().entity_id = 20;
+            // The host's own turn: the uuid is acting, no guest connection.
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let pig_living = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            // A mob's hit names the mob's own id.
+            game.mobs[0].ai.last_hurt_by = Some(Who::Mob(15));
+            game.mobs[0].ai.last_hurt_by_time = game.mobs[0].age as i32;
+            assert_eq!(pig_living.last_attacker(game).map(|a| a.id()), Some(15));
+            // The host's hit, read in the host's own turn: the host's handle.
+            game.mobs[0].ai.last_hurt_by = Some(Who::Player);
+            game.last_hurt_by_player
+                .insert(12, super::super::combat::PlayerCredit(123));
+            assert_eq!(pig_living.last_attacker(game).map(|a| a.id()), Some(20));
+            // The same record inside a guest's turn: the host's displaced
+            // body is out of reach, so the attacker reads None.
+            game.lan_acting = Some(7);
+            game.lan_acting_uuid = Some(456);
+            assert_eq!(pig_living.last_attacker(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn set_health_can_store_zero() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, zombie, Vec3::ZERO, 0.0));
+            let living = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            assert!(living.set_health(game, 8.0));
+            assert_eq!(living.health(game), Some(8.0));
+            let accepted = living.set_health(game, 0.0);
+            assert_eq!((accepted, living.health(game)), (true, Some(0.0)));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn heal_uses_the_vanilla_signed_sum() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, zombie, Vec3::ZERO, 0.0));
+            let living = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            assert!(living.set_health(game, 10.0));
+            assert!(living.heal(game, 2.0));
+            assert_eq!(living.health(game), Some(12.0));
+            let _ = living.heal(game, -4.0);
+            assert_eq!(living.health(game), Some(8.0));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn absorbed_player_hit_still_remembers_the_living_attacker() {
+        use horizon_client::mobs::Mob;
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(15, zombie, Vec3::ZERO, 0.0));
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let source = game
+                .motion
+                .health
+                .damage
+                .id("minecraft:mob_attack")
+                .unwrap();
+            let mut attackers = Vec::new();
+            let mut health = Vec::new();
+            for absorption in [0.0, 8.0] {
+                game.combat = Default::default();
+                let mut player = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+                player.entity_id = 20;
+                player
+                    .set_modifier(
+                        "minecraft:max_absorption",
+                        "test:absorption",
+                        8.0,
+                        "add_value",
+                        true,
+                    )
+                    .unwrap();
+                player.set_health(absorption, true).unwrap();
+                game.player = Some(player);
+                game.note_attacker("minecraft:mob_attack", 15);
+                let rules = game.world.health_rules;
+                let level = super::super::entity::damage_level_of!(game);
+                let player = game.player.as_mut().unwrap();
+                assert!(
+                    player
+                        .hurt_caused_by(
+                            level,
+                            &game.motion.health,
+                            rules,
+                            source,
+                            4.0,
+                            None,
+                            true,
+                            15
+                        )
+                        .unwrap()
+                        .hurt
+                );
+                let events = std::mem::take(&mut player.events);
+                game.record_combat(&events);
+                let living = game.native_living(game.native_entity(20).unwrap()).unwrap();
+                health.push(living.health(game));
+                let host: &dyn crate::mod_api::Host = game;
+                attackers.push(living.last_attacker(host).map(|attacker| attacker.id()));
+            }
+            assert_eq!(
+                health,
+                vec![Some(16.0), Some(20.0)],
+                "damage/absorption control"
+            );
+            assert_eq!(attackers, vec![Some(15), Some(15)]);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn raw_health_write_can_change_a_dead_entity_but_heal_cannot() {
+        use horizon_client::mobs::Mob;
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(Mob::new(12, pig, Vec3::ZERO, 0.0));
+            // Dying, mid death animation: not removed, but not alive.
+            game.mobs[0].health = 0.0;
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.player.as_mut().unwrap().entity_id = 20;
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let mob_living = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            assert!(!mob_living.heal(game, 10.0));
+            assert_eq!(mob_living.health(game), Some(0.0));
+            assert!(mob_living.set_health(game, 10.0));
+            assert_eq!(mob_living.health(game), Some(10.0));
+            // A raw write also reaches a zero-health player.
+            game.player
+                .as_mut()
+                .unwrap()
+                .set_health(0.0, false)
+                .unwrap();
+            let player_living = game.native_living(game.native_entity(20).unwrap()).unwrap();
+            assert!(!player_living.heal(game, 10.0));
+            assert_eq!(player_living.health(game), Some(0.0));
+            assert!(player_living.set_health(game, 10.0));
+            assert_eq!(player_living.health(game), Some(10.0));
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -336,6 +1065,67 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn stand_and_dragon_equipment_writes_run_on_equip_item() {
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let mut stand = horizon_client::entities::ArmorStand::new(16, Vec3::ZERO, 0.0);
+            stand.id = 16;
+            game.armor_stands.push(stand);
+            let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
+            dragon.id = 17;
+            game.dragon = Some(dragon);
+            let stand = game.native_living(game.native_entity(16).unwrap()).unwrap();
+            let dragon = game.native_living(game.native_entity(17).unwrap()).unwrap();
+            game.audio.capture = Some(Vec::new());
+            super::super::dispense_fixture::start_recording();
+            let helmet = ItemStack::new("minecraft:iron_helmet", 1);
+            // Before its first tick an entity makes no sound and no event.
+            assert!(game.native_living_set_equipment(
+                stand,
+                EquipmentSlot::Head,
+                Some(helmet.clone())
+            ));
+            assert!(game.native_living_set_equipment(stand, EquipmentSlot::Head, None));
+            assert!(game.audio.capture.as_ref().unwrap().is_empty());
+            game.tick_armor_stands().unwrap();
+            game.dragon.as_mut().unwrap().ticks = 1;
+            // An equippable item in its own slot: sound and `equip`; the same
+            // item again changes nothing.
+            for _ in 0..2 {
+                assert!(game.native_living_set_equipment(
+                    stand,
+                    EquipmentSlot::Head,
+                    Some(helmet.clone())
+                ));
+            }
+            // A stored body armor: sound and `equip`, body is storage only.
+            let body = ItemStack::new("minecraft:diamond_horse_armor", 1);
+            assert!(game.native_living_set_equipment(stand, EquipmentSlot::Body, Some(body)));
+            // Not equippable: `unequip` and no sound.
+            let stone = ItemStack::new("minecraft:stone", 1);
+            assert!(game.native_living_set_equipment(
+                stand,
+                EquipmentSlot::Saddle,
+                Some(stone.clone())
+            ));
+            // The dragon the same.
+            let chest = ItemStack::new("minecraft:iron_chestplate", 1);
+            assert!(game.native_living_set_equipment(dragon, EquipmentSlot::Chest, Some(chest)));
+            assert!(game.native_living_set_equipment(dragon, EquipmentSlot::Saddle, Some(stone)));
+            assert_eq!(game.audio.capture.as_ref().unwrap().len(), 3);
+            let events = super::super::dispense_fixture::stop_recording();
+            let count = |name: &str| events.iter().filter(|e| e.ends_with(name)).count();
+            assert_eq!(count("minecraft:equip"), 3);
+            assert_eq!(count("minecraft:unequip"), 2);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mob_equipment_writes_keep_full_stacks() {
         use horizon_client::mobs::Mob;
         use horizon_core::geometry::Vec3;
@@ -359,7 +1149,12 @@ mod tests {
                 zombie.equipment(game, EquipmentSlot::Head),
                 Some(helmet.clone())
             );
-            assert_eq!(game.mobs[0].extra.armor[0], Some(helmet.clone()));
+            assert_eq!(
+                game.mobs[0]
+                    .extra
+                    .slot_stack(horizon_items::equipment::HEAD),
+                Some(&helmet)
+            );
             let mut shield = ItemStack::new("minecraft:shield", 2);
             shield.damage = 11;
             assert!(game.native_living_set_equipment(
@@ -445,11 +1240,42 @@ mod tests {
             dragon.id = 15;
             game.dragon = Some(dragon);
             let dragon = game.native_living(game.native_entity(15).unwrap()).unwrap();
-            assert!(!game.native_living_set_equipment(
-                dragon,
-                EquipmentSlot::Saddle,
-                Some(ItemStack::new("minecraft:saddle", 1))
-            ));
+            // The dragon and an armor stand store all eight slots, full
+            // stacks included, and save them through the real codecs.
+            let mut stand = horizon_client::entities::ArmorStand::new(16, Vec3::ZERO, 0.0);
+            stand.id = 16;
+            game.armor_stands.push(stand);
+            let stand = game.native_living(game.native_entity(16).unwrap()).unwrap();
+            for living in [dragon, stand] {
+                for slot in EquipmentSlot::ALL {
+                    let mut stack = ItemStack::new("minecraft:stone", 3);
+                    stack.damage = 5 + slot as u32;
+                    stack.data_mut().custom_name =
+                        Some(horizon_world::nbt::Tag::String(slot_name(slot).into()));
+                    assert!(game.native_living_set_equipment(living, slot, Some(stack.clone())));
+                    assert_eq!(game.native_living_equipment(living, slot), Some(stack));
+                }
+            }
+            let saved = game.dragon.as_ref().unwrap().to_nbt([0; 4], None);
+            let loaded = super::super::dragon::Dragon::from_nbt(&saved, 0).unwrap();
+            assert_eq!(loaded.equipment, game.dragon.as_ref().unwrap().equipment);
+            let stored = game.armor_stands.last().unwrap();
+            let saved = horizon_client::entity_nbt::armor_stand_to_nbt(stored, [0; 4], None);
+            let loaded = horizon_client::entity_nbt::armor_stand_from_nbt(&saved, 16).unwrap();
+            assert_eq!(loaded.equipment, stored.equipment);
+            for living in [dragon, stand] {
+                assert!(game.native_living_set_equipment(living, EquipmentSlot::Saddle, None));
+                assert_eq!(
+                    game.native_living_equipment(living, EquipmentSlot::Saddle),
+                    None
+                );
+            }
+            // An empty dragon saves no `equipment` key, a stale one included.
+            for slot in EquipmentSlot::ALL {
+                assert!(game.native_living_set_equipment(dragon, slot, None));
+            }
+            let stale = game.dragon.as_ref().unwrap().to_nbt([0; 4], Some(&saved));
+            assert!(stale.get("equipment").is_none());
         });
     }
 
@@ -499,6 +1325,70 @@ mod tests {
     }
 
     #[test]
+    fn alive_is_health_above_zero_as_in_vanilla() {
+        assert!(alive_at(0.5));
+        assert!(!alive_at(0.0));
+        assert!(!alive_at(-1.0));
+        assert!(!alive_at(f32::NAN));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn armor_stand_first_tick_equipment_change_fires_after_base_tick() {
+        use crate::mod_api::{self, Hooks, LivingEquipmentChangeEvent, ModEntry, ServerHost};
+        struct Reequip;
+        #[mod_api::__subscriptions]
+        impl Hooks for Reequip {
+            fn living_equipment_change(
+                &self,
+                host: &mut dyn ServerHost,
+                event: &mut LivingEquipmentChangeEvent<'_>,
+            ) {
+                if event.entity == 18 && event.slot == "mainhand" {
+                    let entity = host.entity(event.entity).unwrap();
+                    let living = host.living(entity).unwrap();
+                    assert!(living.set_equipment(
+                        host,
+                        EquipmentSlot::Head,
+                        Some(ItemStack::new("minecraft:iron_helmet", 1)),
+                    ));
+                }
+            }
+        }
+        mod_api::testing::with_mods(
+            vec![ModEntry::new("first_tick_equipment", Box::new(Reequip))].into(),
+            || {
+                super::super::native_entity_refs::tests::with_game(|game| {
+                    let mut stand = horizon_client::entities::ArmorStand::new(
+                        18,
+                        Vec3::new(0.5, 70.0, 0.5),
+                        0.0,
+                    );
+                    stand.no_gravity = true;
+                    stand.equipment[0] = Some(ItemStack::new("minecraft:stone", 1));
+                    game.armor_stands.push(stand);
+                    game.audio.capture = Some(Vec::new());
+                    super::super::dispense_fixture::start_recording();
+                    game.tick_armor_stands().unwrap();
+                    let events = super::super::dispense_fixture::stop_recording();
+                    assert_eq!(
+                        game.armor_stands[0].equipment[5],
+                        Some(ItemStack::new("minecraft:iron_helmet", 1)),
+                        "real listener/handle write control",
+                    );
+                    assert!(!game.armor_stands[0].first_tick);
+                    let sounds = game.audio.capture.as_ref().unwrap().len();
+                    let equips = events
+                        .iter()
+                        .filter(|e| e.ends_with("minecraft:equip"))
+                        .count();
+                    assert_eq!((sounds, equips), (1, 1));
+                });
+            },
+        );
+    }
+
+    #[test]
     fn air_and_zero_count_are_empty_on_write() {
         assert!(equipment_stack(Some(ItemStack::new("minecraft:air", 1))).is_none());
         assert!(equipment_stack(Some(ItemStack::new("minecraft:stone", 0))).is_none());
@@ -542,6 +1432,159 @@ mod tests {
             at(EquipmentSlot::Saddle).as_deref(),
             Some("minecraft:saddle")
         );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_wolf_throws_and_reads_tamed_and_owner() {
+        use super::super::{
+            Audio, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
+        };
+        use horizon_client::{chunk::Chunk, entities::ArmorStand, mod_api::NativeAuthority};
+        use horizon_core::geometry::Vec3;
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        let chunk = std::sync::Arc::new(Chunk::empty(0, 0));
+        game.world.chunks.insert((0, 0), chunk);
+        game.native_lifecycle
+            .begin_open(NativeAuthority::IntegratedServer);
+        let id = game
+            .spawn_mob("minecraft:wolf", [2.5, 64.0, 2.5], true)
+            .unwrap();
+        let wolf = game.native_living(game.native_entity(id).unwrap()).unwrap();
+        assert_eq!(game.native_living_is_tamed(wolf), Some(false));
+        assert_eq!(game.native_living_owner(wolf), None);
+        let m = game.mobs.iter_mut().find(|m| m.id == id).unwrap();
+        (m.extra.tame, m.extra.owner) = (true, Some([1, 2, 3, 4]));
+        assert_eq!(game.native_living_is_tamed(wolf), Some(true));
+        assert_eq!(
+            game.native_living_owner(wolf),
+            Some(0x1_0000_0002_0000_0003_0000_0004)
+        );
+
+        let bone = ItemStack::new("minecraft:bone", 1);
+        assert!(
+            game.native_living_drop(wolf, ItemStack::new("minecraft:air", 1), false, true)
+                .is_none()
+        );
+        let item = game
+            .native_living_drop(wolf, bone.clone(), false, true)
+            .unwrap();
+        assert_eq!(
+            game.native_entity_kind(item).as_deref(),
+            Some("minecraft:item")
+        );
+        let wolf_uuid = game.uuid_for(id);
+        let thrown = game.dropped.last().unwrap();
+        let eye = game.mobs.iter().find(|m| m.id == id).unwrap().eye_y();
+        assert_eq!(thrown.position.y, eye - f64::from(0.3f32));
+        assert_eq!((thrown.pickup_delay, thrown.thrower), (40, Some(wolf_uuid)));
+        // The drop swung: one tick on, that swing goes on.
+        let m = game.mobs.iter_mut().find(|m| m.id == id).unwrap();
+        assert!(m.ai.swinging);
+        m.ai.swing_time = 1;
+        assert!(!game.native_living_swing(wolf, Hand::Main, true));
+        let scattered = game.native_living_drop(wolf, bone, true, false).unwrap();
+        assert_ne!(scattered, item);
+        assert_eq!(game.dropped.last().unwrap().velocity.y, f64::from(0.2f32));
+        assert_eq!(game.dropped.last().unwrap().thrower, None);
+
+        game.armor_stands
+            .push(ArmorStand::new(90, Vec3::new(0.5, 64.0, 0.5), 0.0));
+        let stand = game.native_living(game.native_entity(90).unwrap()).unwrap();
+        assert_eq!(game.native_living_is_tamed(stand), None);
+        let apple = ItemStack::new("minecraft:apple", 1);
+        assert!(
+            game.native_living_drop(stand, apple, false, false)
+                .is_none()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn player_mod_drop_matches_drop_key_motion() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::ZERO,
+                )
+                .unwrap(),
+            );
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            game.yaw = 37.0;
+            game.pitch = -21.0;
+            game.world.random = horizon_core::random::LegacyRandom::new(12345);
+            let item = ItemStack::new("minecraft:apple", 1);
+            game.inventory[game.selected] = Some(item.clone());
+            game.drop_held(true);
+            let key_velocity = game.dropped.last().unwrap().velocity;
+            game.world.random = horizon_core::random::LegacyRandom::new(12345);
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(42);
+            let player = game.native_living(game.native_entity(42).unwrap()).unwrap();
+            let id = game
+                .native_living_drop(player, item, false, true)
+                .unwrap()
+                .id();
+            let mod_velocity = game
+                .dropped
+                .iter()
+                .find(|entity| entity.id == id)
+                .unwrap()
+                .velocity;
+            assert_eq!(key_velocity, mod_velocity);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn armor_stand_drop_does_not_swing() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.armor_stands
+                .push(horizon_client::entities::ArmorStand::new(
+                    90,
+                    horizon_core::geometry::Vec3::ZERO,
+                    0.0,
+                ));
+            let stand = game.native_living(game.native_entity(90).unwrap()).unwrap();
+            let before = game.swings_started;
+            assert!(
+                game.native_living_drop(stand, ItemStack::new("minecraft:apple", 1), false, false)
+                    .is_none()
+            );
+            assert_eq!(game.swings_started, before);
+            assert!(game.dropped.is_empty());
+        });
     }
 
     #[test]

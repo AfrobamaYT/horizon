@@ -667,7 +667,10 @@ impl Game<'_> {
                     .iter()
                     .find(|m| m.id == id)
                     .and_then(|m| m.extra.owner)
-                    .and_then(|u| self.target_with_uuid(u))
+                    // A guest owner too, not only the player in place.
+                    .and_then(|u| {
+                        self.target_by_uuid(horizon_client::lan::playerdata::ints_uuid(u))
+                    })
                     .filter(|owner| {
                         matches!(
                             owner,
@@ -775,11 +778,15 @@ impl Game<'_> {
                             horizon_client::mobs::Who::Player => {
                                 // LivingEntity.getLastHurtByMob is the player
                                 // who hit it, not whichever client is reading it.
-                                match self.last_hurt_by_player.get(&id) {
+                                match self
+                                    .last_hurt_by_player
+                                    .get(&id)
+                                    .and_then(|credit| self.resolve_player_credit(*credit))
+                                {
                                     Some(Some(conn))
-                                        if attacker && self.lan_acting != Some(*conn) =>
+                                        if attacker && self.lan_acting != Some(conn) =>
                                     {
-                                        Target::Guest(*conn)
+                                        Target::Guest(conn)
                                     }
                                     _ => Target::Player,
                                 }
@@ -808,6 +815,11 @@ impl Game<'_> {
     /// in it; the one the level still holds is the entity.
     pub(in crate::game) fn target_with_uuid(&self, uuid: [i32; 4]) -> Option<Target> {
         if Some(uuid) == self.level.player_uuid {
+            if self.native_command_filter {
+                return self
+                    .native_player_ref(horizon_client::lan::playerdata::ints_uuid(uuid))
+                    .and_then(|player| self.native_entity_target(player.entity()));
+            }
             return Some(Target::Player);
         }
         self.persist.uuids.iter().find_map(|(&id, found)| {

@@ -1,0 +1,35 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "living_add_effect", "side": "server",
+      "target": "horizon_client::game::native_living_effects::Game<'_>::native_living_add_effect",
+      "receiver": "living"
+    },
+    {
+      "name": "living_effect", "side": "both",
+      "target": "horizon_client::game::native_living_effects::Game<'_>::native_living_effect",
+      "receiver": "living"
+    },
+    {
+      "name": "living_effects", "side": "both",
+      "target": "horizon_client::game::native_living_effects::Game<'_>::native_living_effects",
+      "receiver": "living"
+    },
+    {
+      "name": "living_remove_effect", "side": "server",
+      "target": "horizon_client::game::native_living_effects::Game<'_>::native_living_remove_effect",
+      "receiver": "living"
+    },
+    {
+      "name": "living_remove_all_effects", "side": "server",
+      "target": "horizon_client::game::native_living_effects::Game<'_>::native_living_remove_all_effects",
+      "receiver": "living"
+    },
+    {
+      "name": "living_potion_affected", "side": "server",
+      "target": "horizon_client::game::native_living_effects::Game<'_>::native_living_potion_affected",
+      "receiver": "living"
+    }
+  ]
+}

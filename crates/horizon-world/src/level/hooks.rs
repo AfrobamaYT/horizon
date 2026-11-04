@@ -1,7 +1,7 @@
 //! `neighborChanged`, `onPlace`, `affectNeighborsAfterRemoval` and
 //! `updateIndirectNeighbourShapes` for the overriding vanilla classes.
 use super::{
-    LevelAccess, LevelEvent, Sim,
+    LevelAccess, LevelEvent, NeighbourUpdate, Sim,
     classes::Class,
     states::BlockId,
     update::{below, rel},
@@ -293,8 +293,33 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
     }
 
-    /// `BlockState.affectNeighborsAfterRemoval`.
+    /// `BlockState.affectNeighborsAfterRemoval`: the block's own class first, as an override's
+    /// `super` call, then the updates a mod's part asked for, in the order it asked.
     pub fn affect_neighbors_after_removal(
+        &mut self,
+        state: BlockStateId,
+        pos: BlockPos,
+        moved: bool,
+    ) {
+        self.class_affect_neighbors_after_removal(state, pos, moved);
+        let mut updates = Vec::new();
+        self.level
+            .affect_neighbors_after_removal(pos, state, moved, &mut updates);
+        let block = self.b.block(state);
+        for update in updates {
+            match update {
+                NeighbourUpdate::OutputSignal => {
+                    self.update_neighbour_for_output_signal(pos, block)
+                }
+                NeighbourUpdate::Neighbours => self.update_neighbors_at(pos, block),
+                NeighbourUpdate::NeighboursExcept(skip) => {
+                    self.update_neighbors_at_except(pos, block, skip)
+                }
+            }
+        }
+    }
+
+    fn class_affect_neighbors_after_removal(
         &mut self,
         state: BlockStateId,
         pos: BlockPos,

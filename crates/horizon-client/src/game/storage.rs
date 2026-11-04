@@ -54,7 +54,7 @@ impl Game<'_> {
         };
         self.world.block_entities.get_or_insert_with(key, || entity);
         self.container = Some(key);
-        self.screen = super::Screen::Inventory;
+        self.set_screen(super::Screen::Inventory);
         self.capture(false);
         self.right = false;
     }
@@ -301,7 +301,7 @@ impl Game<'_> {
         });
         if !near {
             self.close_container();
-            self.screen = super::Screen::Playing;
+            self.set_screen(super::Screen::Playing);
             self.capture(true);
         }
     }
@@ -321,13 +321,27 @@ impl Game<'_> {
         let range = self.reach() + 4.0;
         if !(table && horizon_client::lan::guest::within_block_range(eye, range, pos)) {
             self.close_container();
-            self.screen = super::Screen::Playing;
+            self.set_screen(super::Screen::Playing);
             self.capture(true);
         }
     }
     /// The number of slots of the open container.
     pub(super) fn container_size(&self) -> usize {
         self.container_parts().iter().map(|p| p.1).sum()
+    }
+    pub(super) fn container_slot(&self, mut n: usize) -> &Option<ItemStack> {
+        for (pos, size) in self.container_parts() {
+            if n < size {
+                return self
+                    .world
+                    .block_entities
+                    .get(&pos)
+                    .and_then(|e| e.slots().get(n))
+                    .unwrap_or(&self.scratch_slot);
+            }
+            n -= size;
+        }
+        &self.scratch_slot
     }
     /// Container slot `n` (menu slot `300 + n`).
     pub(super) fn container_slot_mut(&mut self, mut n: usize) -> &mut Option<ItemStack> {

@@ -9,6 +9,7 @@ use super::{
     control::MoveKind,
     goals::{Cx, Goal, JUMP, LOOK, MOVE, goal_clone},
 };
+use crate::health::DamageLevel;
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
@@ -259,6 +260,8 @@ mod knockback_sync_tests {
     /// does, so a guest sees a cube with a block knocked about at once.
     #[test]
     fn a_knocked_cube_with_a_block_syncs_at_once() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         load_archetype_items(&HashMap::from([(
             "minecraft:sulfur_cube_archetype/explosive".to_owned(),
             HashSet::from(["minecraft:tnt".to_owned()]),
@@ -268,7 +271,7 @@ mod knockback_sync_tests {
         let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
         m.extra.set_body(Some("minecraft:tnt".into()));
         assert!(!m.needs_sync);
-        m.damage(5.0, Damage::player([2.0, 0.0, 0.0]));
+        m.damage(level, 5.0, Damage::player([2.0, 0.0, 0.0]));
         assert!(m.velocity.x < 0.0, "velocity {:?}", m.velocity);
         assert!(m.needs_sync);
     }
@@ -342,10 +345,12 @@ mod burning_arrow_tests {
     /// `entity.tnt.primed`, then the archetype's hit sound.
     #[test]
     fn a_knock_and_a_lit_fuse_both_sound() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut events = Vec::new();
         let ran = crate::mobs::world::with_test_world(&[], |w, _| {
             let mut m = cube(Some("minecraft:tnt"));
-            m.damage(5.0, Damage::player([2.0, 0.0, 0.0]));
+            m.damage(level, 5.0, Damage::player([2.0, 0.0, 0.0]));
             assert!(burning_arrow_hit(&mut m));
             ai_step(&mut m, w, &mut events);
         });
@@ -392,6 +397,8 @@ mod immune_tests {
     /// loses no health to any of them (and `hurtServer` still answers true), a cube without one does.
     #[test]
     fn a_cube_with_a_block_shrugs_off_the_whole_tag() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         for kind in [
             DamageKind::FallingAnvil,
             DamageKind::FallingBlock,
@@ -405,10 +412,10 @@ mod immune_tests {
             let mut m = cube(Some("minecraft:dirt"));
             let health = m.health;
             // `SulfurCube.hurtServer` returns true for these, though no health is lost.
-            assert!(m.damage(1.0, Damage::of(kind)), "{kind:?}");
+            assert!(m.damage(level, 1.0, Damage::of(kind)), "{kind:?}");
             assert_eq!(m.health, health, "{kind:?}");
             let mut m = cube(None);
-            assert!(m.damage(1.0, Damage::of(kind)), "{kind:?}");
+            assert!(m.damage(level, 1.0, Damage::of(kind)), "{kind:?}");
             assert_eq!(m.health, health - 1.0, "{kind:?}");
         }
     }
@@ -447,9 +454,11 @@ mod immune_tests {
     /// outside the tag (`magic`) a cube with a block is hurt.
     #[test]
     fn a_cube_with_a_block_takes_magic() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = cube(Some("minecraft:dirt"));
         let health = m.health;
-        assert!(m.damage(1.0, Damage::of(DamageKind::Magic)));
+        assert!(m.damage(level, 1.0, Damage::of(DamageKind::Magic)));
         assert_eq!(m.health, health - 1.0);
     }
 }
@@ -582,7 +591,12 @@ pub fn immune_to(source: &Damage) -> bool {
 /// `hurtServer`: fire or `#is_explosion` (a firework rocket's burst too)
 /// light an explosive cube; with a block it shrugs off blows, falls and
 /// explosions and is only knocked about.
-pub fn accepts_damage(m: &mut Mob, source: &Damage, amount: f32) -> bool {
+pub fn accepts_damage(
+    m: &mut Mob,
+    level: &mut DamageLevel<'_>,
+    source: &Damage,
+    amount: f32,
+) -> bool {
     if !has_body(m) {
         return true;
     }
@@ -596,7 +610,7 @@ pub fn accepts_damage(m: &mut Mob, source: &Damage, amount: f32) -> bool {
     if immune_to(source) {
         // `dealDefaultKnockback`, unless the damage type is tagged no_knockback.
         if !source.no_knockback() {
-            deal_default_knockback(m, source, amount);
+            deal_default_knockback(m, level, source, amount);
         }
         return false;
     }
@@ -739,7 +753,7 @@ fn launch(
 /// `LivingEntity.dealDefaultKnockback` for a cube with a block: from where the blow came
 /// (`source.getSourcePosition()`) with `knockback(0.4, ...)`. A source with a causing entity goes
 /// through `SulfurCube.knockback`; one with none (a cactus, a fall) through `super.knockback`.
-fn deal_default_knockback(m: &mut Mob, source: &Damage, damage: f32) {
+fn deal_default_knockback(m: &mut Mob, level: &mut DamageLevel<'_>, source: &Damage, damage: f32) {
     // A projectile knocks the way it travelled (`calculateHorizontalHurtKnockbackDirection`),
     // else from the source's position.
     let (xd, zd) = match m.projectile_motion.take() {
@@ -751,7 +765,7 @@ fn deal_default_knockback(m: &mut Mob, source: &Damage, damage: f32) {
     if source.attacker.is_some() {
         knockback(m, (xd, zd), source.from, damage, None);
     } else {
-        m.knockback(f64::from(0.4_f32), xd, zd, source);
+        m.knockback(level, f64::from(0.4_f32), xd, zd, source);
     }
 }
 /// `SulfurCube.knockback` with a block and a causing entity: the archetype's powers, turned by
@@ -1104,12 +1118,14 @@ mod tnt_rule_tests {
 
     #[test]
     fn no_fuse_is_lit_while_tnt_does_not_explode() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         // primeTime checks the tnt_explodes rule: no fuse, no invulnerability,
         // and no draw for the short fuse.
         let mut m = tnt_cube();
         let state = m.random.state();
         set_tnt_explodes(false);
-        m.damage(5.0, Damage::of(DamageKind::Explosion));
+        m.damage(level, 5.0, Damage::of(DamageKind::Explosion));
         let lit = prime(&mut m, true);
         let (unprimed, vulnerable) = (!primed(&m), !m.invulnerable_flag);
         set_tnt_explodes(true);
@@ -1160,6 +1176,8 @@ mod fuse_anim_tests {
 
     #[test]
     fn a_primed_cube_is_still_knocked_about() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         // SulfurCube.hurtServer runs the immune knockback before
         // LivingEntity's invulnerability check, and priming makes it invulnerable.
         load_archetype_items(&HashMap::from([(
@@ -1171,7 +1189,7 @@ mod fuse_anim_tests {
         assert!(prime(&mut m, false));
         assert!(m.invulnerable_flag);
         let (health, fuse_left) = (m.health, fuse(&m));
-        m.damage(5.0, crate::mobs::Damage::player([2.0, 0.0, 0.0]));
+        m.damage(level, 5.0, crate::mobs::Damage::player([2.0, 0.0, 0.0]));
         assert!(m.velocity.x < 0.0, "velocity {:?}", m.velocity);
         assert_eq!(m.health, health);
         assert_eq!(fuse(&m), fuse_left);
@@ -1194,6 +1212,8 @@ mod fuse_anim_tests {
 
     #[test]
     fn a_rockets_burst_primes_a_tnt_cube_that_shrugs_it_off() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         // `fireworks` is in #is_explosion, so it lights the short fuse
         // (`PrimedTnt.getRandomShortFuse`: 15 to 44 of 120 ticks), and so in
         // #sulfur_cube_with_block_immune_to; it is not in #no_knockback.
@@ -1207,14 +1227,14 @@ mod fuse_anim_tests {
         let mut m = cube();
         m.extra.set_body(Some("minecraft:tnt".into()));
         let health = m.health;
-        m.damage(7.0, source);
+        m.damage(level, 7.0, source);
         assert!((15..45).contains(&fuse(&m)), "fuse {}", fuse(&m));
         assert_eq!(m.health, health);
         assert!(m.velocity.x < 0.0);
         // Without a block it takes the hit, records it and is knocked away
         // from the rocket.
         let mut m = cube();
-        m.damage(1.0, source);
+        m.damage(level, 1.0, source);
         assert_eq!(m.health, health - 1.0);
         assert_eq!(
             m.last_damage.map(|(d, _)| d.kind),

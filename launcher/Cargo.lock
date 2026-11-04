@@ -2639,12 +2639,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-anticheat"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
 name = "horizon-bench"
 version = "0.1.0"
 dependencies = [
  "horizon-telemetry",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "horizon-chat-filter"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]
@@ -2707,6 +2724,7 @@ dependencies = [
  "horizon-prepare",
  "horizon-protocol",
  "horizon-release-sign",
+ "horizon-server-launch",
  "horizon-telemetry",
  "horizon-theme",
  "horizon-world",
@@ -2762,6 +2780,8 @@ dependencies = [
  "horizon-shader-api",
  "log",
  "minisign-verify",
+ "png 0.18.1",
+ "semver",
  "serde",
  "serde_json",
  "sha2",
@@ -2818,6 +2838,32 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "ring",
+]
+
+[[package]]
+name = "horizon-server-files"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "horizon-core",
+ "horizon-protocol",
+ "horizon-world",
+ "log",
+ "ureq",
+]
+
+[[package]]
+name = "horizon-server-launch"
+version = "0.1.0"
+dependencies = [
+ "horizon-anticheat",
+ "horizon-chat-filter",
+ "horizon-core",
+ "horizon-server-files",
+ "serde",
+ "toml 1.1.8+spec-1.1.0",
+ "toml_edit 0.25.17+spec-1.1.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5925,6 +5971,7 @@ dependencies = [
  "indexmap",
  "toml_datetime 1.1.2+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 1.0.4",
 ]
 

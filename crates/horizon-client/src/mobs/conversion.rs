@@ -39,17 +39,10 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
     to.extra.passenger = from.extra.passenger;
     if params.keep_equipment {
         // Every slot, copyAndClear, and setDropChance from the old mob.
-        to.extra.set_main_hand(from.extra.main_hand.clone());
-        if let Some(stack) = from.extra.main_hand_stack() {
-            to.extra.set_main_hand_stack(Some(stack.clone()));
+        for slot in horizon_items::equipment::MAINHAND..=horizon_items::equipment::BODY {
+            to.extra
+                .set_slot_stack(slot, from.extra.slot_stack(slot).cloned());
         }
-        to.extra.off_hand = from.extra.off_hand.clone();
-        to.extra.head = from.extra.head.clone();
-        to.extra.set_body_stack(from.extra.body_stack().cloned());
-        to.extra.chest = from.extra.chest.clone();
-        to.extra.legs = from.extra.legs.clone();
-        to.extra.feet = from.extra.feet.clone();
-        to.extra.armor = from.extra.armor.clone();
         to.extra.gear = from.extra.gear.clone();
         to.extra.drop_chances = from.extra.drop_chances.clone();
     }
@@ -84,6 +77,7 @@ pub fn common(from: &Mob, to: &mut Mob, preserve_can_pick_up_loot: bool) {
         to.add_effect(effect, ticks, amplifier);
     }
     to.extra.hidden_effects = from.extra.hidden_effects.clone();
+    to.extra.effect_chains = from.extra.effect_chains.clone();
     to.extra.ambient_effects = from.extra.ambient_effects.clone();
     if from.is_baby() {
         super::finalize::set_baby(to, true);
@@ -156,7 +150,10 @@ mod tests {
             s.absorption = 3.5;
             s.extra
                 .set_main_hand_stack(Some(ItemStack::new("minecraft:bow", 1)));
-            s.extra.chest = Some("minecraft:chainmail_chestplate".into());
+            s.extra.set_slot_id(
+                horizon_items::equipment::CHEST,
+                Some("minecraft:chainmail_chestplate".into()),
+            );
             let mut offhand = ItemStack::new("minecraft:shield", 2);
             offhand.damage = 5;
             crate::mobs::finalize::set_item_stack(
@@ -182,7 +179,7 @@ mod tests {
                 Some("minecraft:bow")
             );
             assert_eq!(
-                st.extra.chest.as_deref(),
+                st.extra.slot_id(horizon_items::equipment::CHEST),
                 Some("minecraft:chainmail_chestplate")
             );
             assert_eq!(
@@ -207,8 +204,11 @@ mod tests {
                 },
             );
             assert!(
-                bare.extra.main_hand.is_none()
-                    && bare.extra.chest.is_none()
+                bare.extra.main_hand_id().is_none()
+                    && bare
+                        .extra
+                        .slot_stack(horizon_items::equipment::CHEST)
+                        .is_none()
                     && bare.extra.body_id().is_none()
             );
             assert_eq!(bare.custom_name.as_deref(), Some("Frosty"));

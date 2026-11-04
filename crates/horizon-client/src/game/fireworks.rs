@@ -415,6 +415,13 @@ impl Game<'_> {
                 };
                 r.free_flight(&mut scene);
             }
+            self.entity_powder_snow_particles(
+                r.previous,
+                r.position,
+                r.bounds(),
+                r.velocity,
+                false,
+            );
             // hitTargetOrDeflectSelf on an entity: a breeze turns it back
             // (ProjectileDeflection.REVERSE), anything else sets it off.
             // onHitBlock: only a rocket with explosions (hasExplosion) goes
@@ -509,7 +516,13 @@ impl Game<'_> {
                 let ran = self
                     .as_guest(conn, |g| g.rocket_hurt_mobs(&hits, owner, at))
                     .is_some();
-                if ran && let Some(host) = self.lan.as_mut() {
+                if ran
+                    && let Some(host) = self.lan.as_mut()
+                    && host
+                        .hub
+                        .guest(conn)
+                        .is_some_and(|guest| guest.participates_online())
+                {
                     for (id, _) in &hits {
                         if self.mobs.iter().any(|m| m.id == *id) {
                             host.mob_players.insert(*id, conn);
@@ -537,12 +550,16 @@ impl Game<'_> {
         });
         for &(id, amount) in hits {
             if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                let hurt = m.damage(amount, Damage::fireworks(attacker, at));
+                let hurt = m.damage(
+                    crate::game::entity::damage_level_of!(self),
+                    amount,
+                    Damage::fireworks(attacker, at),
+                );
                 // LivingEntity.hurtServer: a player's rocket makes them the
                 // last player to hurt it (`setLastHurtByPlayer`), so its death
                 // message names them and their item.
                 if hurt && attacker == Some(Who::Player) {
-                    self.last_hurt_by_player.insert(id, self.lan_acting);
+                    self.remember_mob_player_credit(id);
                 }
             }
         }

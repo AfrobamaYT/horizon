@@ -355,7 +355,7 @@ impl Goal for FollowPlayerRidden {
             f64::from(m.ai.zza),
         );
         m.move_relative(speed, input);
-        m.do_move(cx.w, cx.events);
+        m.do_move(cx.w, cx.level, cx.events);
         self.recalc -= 1;
         if self.recalc > 0 {
             return;
@@ -483,7 +483,7 @@ impl Goal for PlayWithItems {
         0
     }
     fn can_use(&mut self, m: &mut Mob, _cx: &mut Cx) -> bool {
-        m.extra.main_hand.is_some()
+        m.extra.main_hand_id().is_some()
     }
     fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
         drop_item(m, cx.events);
@@ -553,7 +553,7 @@ mod item_tests {
             "ahead at 0.3: {motion:?}"
         );
         assert_eq!(motion[1], 0.0, "level, so no climb");
-        assert!(m.extra.main_hand.is_none(), "the mouth is empty");
+        assert!(m.extra.main_hand_id().is_none(), "the mouth is empty");
     }
 }
 

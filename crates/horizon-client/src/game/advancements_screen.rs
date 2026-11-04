@@ -141,14 +141,14 @@ impl Game<'_> {
             from_pause,
             ..Default::default()
         };
-        self.screen = Screen::Advancements;
+        self.set_screen(Screen::Advancements);
         self.capture(false);
     }
     pub(super) fn close_advancements(&mut self) {
         if self.adv_ui.from_pause {
-            self.screen = Screen::Paused;
+            self.set_screen(Screen::Paused);
         } else {
-            self.screen = Screen::Playing;
+            self.set_screen(Screen::Playing);
             self.capture(true);
         }
     }

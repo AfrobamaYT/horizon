@@ -33,6 +33,13 @@ use horizon_protocol::{
 use horizon_world::entity_move::EntityMoveWorld;
 use winit::keyboard::KeyCode;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum MenuOpen {
+    Opened,
+    Cancelled,
+    NotAProvider,
+}
+
 /// Per-guest state of the gameplay code that lives outside `Guest`.
 #[derive(Default)]
 pub(super) struct GuestPlay {
@@ -443,7 +450,7 @@ impl Game<'_> {
         };
         std::mem::swap(
             &mut self.player_attachments,
-            self.guest_attachments.entry(g.uuid).or_default(),
+            self.guest_attachments.entry(g.conn).or_default(),
         );
         self.sculk.swap_player(&mut play.sculk);
         // The guest's own CombatTracker: damage to them is not the host's.
@@ -587,6 +594,7 @@ impl Game<'_> {
         std::mem::swap(&mut self.adv.unlocked, &mut g.recipes_unlocked);
         std::mem::swap(&mut self.level.recipe_book, &mut g.recipe_book);
         std::mem::swap(&mut self.level.player_extra, &mut g.saved);
+        std::mem::swap(&mut self.level.last_death, &mut g.last_death);
         std::mem::swap(&mut self.stats, &mut play.stats);
         std::mem::swap(&mut self.hook, &mut play.hook);
         let adv_loaded = std::mem::replace(&mut self.adv.loaded, true);
@@ -985,7 +993,7 @@ impl Game<'_> {
         let g = &mut host.hub.guests[i];
         std::mem::swap(
             &mut self.player_attachments,
-            self.guest_attachments.entry(g.uuid).or_default(),
+            self.guest_attachments.entry(g.conn).or_default(),
         );
         let left_vehicle = g.vehicle.filter(|_| guest_vehicle.is_none());
         if guest_vehicle.is_none() {
@@ -1014,6 +1022,7 @@ impl Game<'_> {
         std::mem::swap(&mut self.adv.unlocked, &mut g.recipes_unlocked);
         std::mem::swap(&mut self.level.recipe_book, &mut g.recipe_book);
         std::mem::swap(&mut self.level.player_extra, &mut g.saved);
+        std::mem::swap(&mut self.level.last_death, &mut g.last_death);
         std::mem::swap(&mut self.stats, &mut play.stats);
         std::mem::swap(&mut self.hook, &mut play.hook);
         self.adv.loaded = adv_loaded;
@@ -1290,12 +1299,13 @@ impl Game<'_> {
     /// Hand a container the guest opened over (ServerPlayer.openMenu);
     /// false when it is not one a guest can open.
     fn lan_open_container(&mut self, conn: u32, pos: (i32, i32, i32)) -> bool {
-        // A chest minecart, hopper minecart or chest boat keeps its slots
-        // under a placeholder key (`ContainerEntity`): the menu is the
-        // vehicle's own, not a block's.
         if pos.1 == super::minecarts::CART_KEY_Y {
             return self.lan_open_vehicle_container(conn, pos);
         }
+        !matches!(self.open_block_menu(conn, pos), MenuOpen::NotAProvider)
+    }
+
+    pub(super) fn open_block_menu(&mut self, conn: u32, pos: (i32, i32, i32)) -> MenuOpen {
         let name = &self
             .res
             .facts()
@@ -1330,13 +1340,13 @@ impl Game<'_> {
             (menu, Slots::Block(pos))
         } else {
             let Some(BlockEntity::Chest(items)) = self.world.block_entities.get(&pos) else {
-                return false;
+                return MenuOpen::NotAProvider;
             };
             let menu = match items.len() {
                 27 => "minecraft:generic_9x3",
                 9 => "minecraft:generic_3x3",
                 5 => "minecraft:hopper",
-                _ => return false,
+                _ => return MenuOpen::NotAProvider,
             };
             (menu, Slots::Block(pos))
         };
@@ -1356,22 +1366,22 @@ impl Game<'_> {
                     None if self.mod_menu_at(k).is_some() => {
                         format!("block.{}", name.replace(':', "."))
                     }
-                    None => return false,
+                    None => return MenuOpen::NotAProvider,
                 };
                 horizon_client::containers::display_name(custom(k), &key)
             }
             // Opened by a mod (`native_open_menu`), never here.
-            Slots::Native => return false,
+            Slots::Native => return MenuOpen::NotAProvider,
         };
         let Some(host) = self.lan.as_ref() else {
-            return false;
+            return MenuOpen::NotAProvider;
         };
         let Some(items) = host
             .hub
             .guest(conn)
             .and_then(|g| slots.read(&self.world, g))
         else {
-            return false;
+            return MenuOpen::NotAProvider;
         };
         // The block entity's createMenu: a shulker box opens a ShulkerBoxMenu
         // (not a 9x3 ChestMenu), whose slots refuse shulker boxes.
@@ -1395,7 +1405,7 @@ impl Game<'_> {
             _ => [None, None],
         };
         let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
-            return false;
+            return MenuOpen::NotAProvider;
         };
         let mut locked = false;
         for key in halves.iter().flatten().copied() {
@@ -1405,7 +1415,7 @@ impl Game<'_> {
         }
         if locked {
             let Some(host) = self.lan.as_mut() else {
-                return false;
+                return MenuOpen::NotAProvider;
             };
             host.hub.send_to(
                 conn,
@@ -1438,25 +1448,25 @@ impl Game<'_> {
                 source as i32,
                 None,
             );
-            return false;
+            return MenuOpen::NotAProvider;
         }
         // A mod menu type only for a client that has it: as
         // `ServerPlayer.openMenu` with no menu, nothing opens.
         let Some(host) = self.lan.as_ref() else {
-            return false;
+            return MenuOpen::NotAProvider;
         };
         let brand = host.hub.guest(conn).map_or("", |g| g.brand.as_str());
         if !horizon_client::containers::menu_reaches(brand, menu) {
-            return false;
+            return MenuOpen::NotAProvider;
         }
         // The mods may stop the menu; the click is spent.
         if !self.guest_may_open(conn, menu, Some([pos.0, pos.1, pos.2])) {
-            return true;
+            return MenuOpen::Cancelled;
         }
         let mut cancel = false;
         self.native_inventory_block_start(uuid, &name, [pos.0, pos.1, pos.2], &mut cancel);
         if cancel {
-            return false;
+            return MenuOpen::NotAProvider;
         }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(conn);
@@ -1465,7 +1475,7 @@ impl Game<'_> {
         let counts_openers = matches!(slots, Slots::Block(_) | Slots::Double(_, _));
         let hidden = self.native_hidden_slots(pos, items.len());
         let Some(host) = self.lan.as_mut() else {
-            return false;
+            return MenuOpen::NotAProvider;
         };
         host.hub
             .open_container(conn, menu, title, pos, slots, items);
@@ -1478,10 +1488,14 @@ impl Game<'_> {
         // around, the opener included (`playSound(null, …)`, which the capture
         // relay sends on to the guests). Without it the host's copy never
         // learned of the open, so a guest's box opened silently.
-        if counts_openers && self.container_openers_changed(pos, true) {
+        // A spectator never joins the openers (`startOpen` returns on
+        // `player.isSpectator()`): its menu opens but the lid stays shut, no
+        // sound plays, and `stopOpen` has nothing to decrement, which is why
+        // the count must not be raised here either (#8517).
+        if counts_openers && !spectator && self.container_openers_changed(pos, true) {
             self.container_edge_sound(pos, true);
         }
-        true
+        MenuOpen::Opened
     }
 
     /// `ContainerEntity.interactWithContainerVehicle` for a guest: the menu
@@ -3653,7 +3667,18 @@ impl Game<'_> {
         }
         // The chat filter's mute commands (game/chat_filter.rs), on servers that filter.
         if super::chat_filter::MUTE_COMMANDS.contains(&words[0]) && host.hub.chat_filter_on() {
-            self.guest_mute_command(conn, &words);
+            if let Some(mut host) = self.lan.take() {
+                self.guest_mute_command(&mut host, conn, &words);
+                self.lan = Some(host);
+            }
+            return;
+        }
+        // Horizon's `/tempban` (game/tempban.rs), on dedicated servers.
+        if super::tempban::TEMPBAN_COMMANDS.contains(&words[0]) && self.server_lists.is_some() {
+            if let Some(mut host) = self.lan.take() {
+                self.guest_tempban_command(&mut host, conn, &words);
+                self.lan = Some(host);
+            }
             return;
         }
         // A native mod's command, for every player its level allows,
@@ -3844,7 +3869,7 @@ impl Game<'_> {
         } else {
             self.ui.registries.players.clone()
         };
-        players.extend(host.hub.guests.iter().map(|g| g.name.clone()));
+        players.extend(host.hub.online_players().map(|g| g.name.clone()));
         let (ops, banned_players, banned_ips, whitelisted) = match &self.server_lists {
             Some(lists) => {
                 let l = lists.lock().unwrap();
@@ -3941,8 +3966,7 @@ impl Game<'_> {
             return;
         }
         // PlayerList.respawn replaces the player, retaining only opted-in data.
-        let uuid = host.hub.guests[i].uuid;
-        if let Some(attachments) = self.guest_attachments.get_mut(&uuid)
+        if let Some(attachments) = self.guest_attachments.get_mut(&conn)
             && let Ok(copy) = attachments.copy_on_death()
         {
             *attachments = copy;
@@ -4341,7 +4365,7 @@ impl Game<'_> {
 
     /// `ServerPlayer.die` for a guest whose health has run out: the death
     /// message, the loot and experience, the death screen.
-    fn guest_die(&mut self, gi: usize, conn: u32) {
+    pub(super) fn guest_die(&mut self, gi: usize, conn: u32) {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
@@ -4505,7 +4529,7 @@ impl Game<'_> {
                     self.guest_combat
                         .get_mut(&conn)
                         .and_then(|c| c.take_hurt_by_player(now))
-                        .and_then(|c| self.lan.as_ref().and_then(|host| c.uuid(host)))
+                        .and_then(|c| self.resolve_player_credit(c).map(|_| c.0))
                 };
                 let reward = self.living_experience_drop(
                     id as u32,
@@ -4529,22 +4553,27 @@ impl Game<'_> {
         };
         let now = self.world.game_time;
         let combat = self.guest_combat.get(&conn);
-        let who = combat.and_then(|c| c.kill_credit(now)).and_then(|id| {
-            if self.lan_acting.is_none()
-                && self
-                    .player
-                    .as_ref()
-                    .is_some_and(|p| p.entity_id as u32 == id)
-            {
-                Some(None)
-            } else {
-                host.hub
-                    .guests
-                    .iter()
-                    .find(|g| g.entity_id as u32 == id)
-                    .map(|g| Some(g.conn))
-            }
-        });
+        let player_credit = combat.and_then(|c| c.player_credit(now));
+        let who = if let Some(credit) = player_credit {
+            self.resolve_player_credit(credit)
+        } else {
+            combat.and_then(|c| c.kill_credit(now)).and_then(|id| {
+                if self.lan_acting.is_none()
+                    && self
+                        .player
+                        .as_ref()
+                        .is_some_and(|p| p.entity_id as u32 == id)
+                {
+                    Some(None)
+                } else {
+                    host.hub
+                        .guests
+                        .iter()
+                        .find(|g| g.entity_id as u32 == id)
+                        .map(|g| Some(g.conn))
+                }
+            })
+        };
         let Some(who) = who else { return };
         let (damage, attacker) = combat
             .and_then(|c| c.killing_blow())
@@ -4924,6 +4953,36 @@ impl Game<'_> {
         }
     }
 
+    /// `LivingEntity.checkAutoSpinAttack` for a server's copy of a Riptide
+    /// spinner (it runs before `aiStep`'s countdown clears the damage): the
+    /// first mob touching the player's box takes `Player.attack` with the
+    /// spin's damage and the spin ends. A `ServerPlayer` is client
+    /// authoritative, so its `aiStep` does not travel and both boxes vanilla
+    /// passes are the current one: no sweep over the tick's moves.
+    pub(super) fn server_spin_attack(&mut self) {
+        let Some(p) = self.player.as_ref() else {
+            return;
+        };
+        if p.auto_spin_attack_ticks <= 0 {
+            return;
+        }
+        let swept = p.bounds();
+        let riding = self.riding;
+        let Some(index) = first_spin_target(
+            swept,
+            riding,
+            self.mobs.iter().map(|m| (m.id, m.removed, m.bounds())),
+        ) else {
+            return;
+        };
+        self.attack_mob(index);
+        if let Some(p) = self.player.as_mut() {
+            p.auto_spin_attack_ticks = 0;
+            p.auto_spin_attack_dmg = 0.0;
+            p.velocity = p.velocity.scale(-0.2);
+        }
+    }
+
     /// The guest's body on the server each tick: ServerPlayer.tick's damage
     /// clock and Entity.baseTick's fluid phase (burning), then for each move
     /// the guest made ServerGamePacketListenerImpl.handleMovePlayer's jump
@@ -4969,6 +5028,12 @@ impl Game<'_> {
         let dimensions = g.dimensions();
         let (sneaking, sleeping) = (g.sneaking, g.sleeping);
         let riding = g.vehicle.is_some();
+        if g.motion
+            .as_ref()
+            .is_some_and(|m| m.auto_spin_attack_ticks > 0)
+        {
+            self.as_guest(conn, |game| game.server_spin_attack());
+        }
         let in_wall = !sleeping && self.in_wall(at, dimensions);
         let mut soul = None;
         let mut jumps = 0;
@@ -5115,7 +5180,7 @@ impl Game<'_> {
                 return (Vec::new(), None);
             };
             let _ = player.peaceful_regeneration(rules);
-            let _ = player.food_tick(health, rules);
+            let _ = player.food_tick(crate::game::entity::damage_level_of!(game), health, rules);
             events.append(&mut player.events);
             player.carry_client_movement(tick_movement);
             let _ = MotionWorld {
@@ -6152,10 +6217,47 @@ mod tests {
 
     #[test]
     #[ignore = "requires prepared game resources"]
-    fn block_part_picks_on_the_server_and_for_a_guest() {
+    fn block_menu_click_keeps_spent_action_on_cancellation() {
+        use horizon_client::{
+            chunk::Chunk, lan::guest::GuestKind, mod_api::NativeBlockUpdateFlags,
+        };
+        use std::sync::Arc;
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let chest = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:chest")
+                .unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [0, 64, 0],
+                chest,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            assert!(!game.lan_open_container(12, (2, 64, 0)));
+            game.lan.as_mut().unwrap().hub.guests[0].kind = GuestKind::Fake;
+            assert!(game.lan_open_container(12, (0, 64, 0)));
+            assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_none());
+            game.lan.as_mut().unwrap().hub.guests[0].kind = GuestKind::Network;
+            assert!(game.lan_open_container(12, (0, 64, 0)));
+            assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_some());
+        });
+    }
+
+    #[test]
+    #[ignore = "requires prepared game resources"]
+    fn block_parts_pick_and_use_on_the_server_and_for_a_guest() {
         use super::super::{lan::LanSettings, native_entity_refs::tests::with_game};
         use crate::mod_api::{
-            self, BlockPart, CloneItemStackEvent, Hooks, Host, ItemStack, Registrar,
+            self, BlockPart, CloneItemStackEvent, Flow, Hooks, Host, ItemPart, ItemStack,
+            NativeInteractionResult as Answer, Registrar, ServerHost, UseItemOnEvent, UseOnEvent,
+            UseWithoutItemEvent,
         };
         use horizon_client::{
             chunk::Chunk,
@@ -6168,6 +6270,7 @@ mod tests {
         };
 
         struct Picker(Arc<Mutex<Vec<bool>>>);
+        #[mod_api::horizon_part]
         impl BlockPart for Picker {
             fn clone_item_stack(
                 &self,
@@ -6180,23 +6283,109 @@ mod tests {
                     .then(|| ItemStack::new("minecraft:diamond", 1))
             }
         }
-        struct Mod(Arc<Mutex<Vec<bool>>>);
+        #[derive(Clone)]
+        struct User {
+            answer: Arc<Mutex<Option<Answer>>>,
+            replace_with: Arc<Mutex<Option<horizon_world::registry::BlockStateId>>>,
+            empty_answer: Arc<Mutex<Option<Answer>>>,
+            empty_food: Arc<Mutex<Option<i32>>>,
+            empty_clicks: Arc<Mutex<Vec<(horizon_world::registry::BlockStateId, u128)>>>,
+            clicks: Arc<Mutex<Vec<(u128, crate::first_person::Hand)>>>,
+            item_uses: Arc<AtomicUsize>,
+        }
+        #[mod_api::horizon_part]
+        impl BlockPart for User {
+            fn use_item_on(
+                &self,
+                host: &mut dyn ServerHost,
+                event: &mut UseItemOnEvent<'_>,
+            ) -> Option<Answer> {
+                let replacement = self.replace_with.lock().unwrap().take();
+                if let Some(state) = replacement {
+                    let level = host.level("minecraft:overworld").unwrap();
+                    assert!(level.set_block(
+                        host,
+                        event.click.pos,
+                        state,
+                        mod_api::NativeBlockUpdateFlags::KNOWN_SHAPE,
+                    ));
+                }
+                self.clicks
+                    .lock()
+                    .unwrap()
+                    .push((event.click.player, event.click.hand));
+                *self.answer.lock().unwrap()
+            }
+            fn use_without_item(
+                &self,
+                host: &mut dyn ServerHost,
+                event: &mut UseWithoutItemEvent<'_>,
+            ) -> Option<Answer> {
+                assert_eq!(event.click.hand, crate::first_person::Hand::Main);
+                if let Some(level) = self.empty_food.lock().unwrap().take() {
+                    let player = host.player(event.click.player).unwrap();
+                    assert!(player.set_food_level(host, level));
+                }
+                self.empty_clicks
+                    .lock()
+                    .unwrap()
+                    .push((event.state, event.click.player));
+                *self.empty_answer.lock().unwrap()
+            }
+        }
+        // The held items' own `Item.useOn`, counted, taking the click.
+        #[mod_api::horizon_part]
+        impl ItemPart for User {
+            fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
+                self.item_uses
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Flow::Cancel
+            }
+        }
+        struct Mod {
+            picks: Arc<Mutex<Vec<bool>>>,
+            user: User,
+        }
+        #[mod_api::__subscriptions]
         impl Hooks for Mod {
-            fn register(&self, r: &mut Registrar) {
-                r.block_part("minecraft:stone", Picker(self.0.clone()));
-                r.block_part("minecraft:beehive", Picker(self.0.clone()));
-                r.block_part("minecraft:chest", Picker(self.0.clone()));
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+                r.block_part("minecraft:stone", Picker(self.picks.clone()));
+                r.block_part("minecraft:beehive", Picker(self.picks.clone()));
+                r.block_part("minecraft:chest", Picker(self.picks.clone()));
+                r.block_part("minecraft:lever", self.user.clone());
+                r.block_part("minecraft:cauldron", self.user.clone());
+                r.block_part("minecraft:jukebox", self.user.clone());
+                r.block_part("minecraft:decorated_pot", self.user.clone());
+                r.block_part("minecraft:redstone_ore", self.user.clone());
+                r.block_part("minecraft:chiseled_bookshelf", self.user.clone());
+                r.block_part("minecraft:cake", self.user.clone());
+                r.item_part("minecraft:stick", self.user.clone());
+                r.item_part("minecraft:water_bucket", self.user.clone());
+                r.item_part("minecraft:stone", self.user.clone());
             }
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
+        let user = User {
+            answer: Arc::new(Mutex::new(Some(Answer::Success))),
+            replace_with: Arc::new(Mutex::new(None)),
+            empty_answer: Arc::new(Mutex::new(None)),
+            empty_food: Arc::new(Mutex::new(None)),
+            empty_clicks: Arc::new(Mutex::new(Vec::new())),
+            clicks: Arc::new(Mutex::new(Vec::new())),
+            item_uses: Arc::new(AtomicUsize::new(0)),
+        };
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
             "picker",
-            Box::new(Mod(seen.clone())),
+            Box::new(Mod {
+                picks: seen.clone(),
+                user: user.clone(),
+            }),
         )]
         .into();
         mod_api::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
                 game.world
                     .chunks
                     .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
@@ -6252,6 +6441,362 @@ mod tests {
                 guest.placed = true;
                 guest.game_mode = 1;
                 game.lan.as_mut().unwrap().hub.guests.push(guest);
+
+                // BlockState.useItemOn replaces the template. Only TryWithEmptyHand
+                // reaches useWithoutItem, which toggles this lever on the main hand.
+                use crate::first_person::Hand;
+                use std::sync::atomic::Ordering::SeqCst;
+                let lever = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:lever")
+                    .unwrap();
+                let hit = super::super::Hit {
+                    pos: [0, 64, 4],
+                    face: [0, 1, 0],
+                    point: [0.5, 65.0, 4.5],
+                    inside: false,
+                };
+                game.world.set(0, 64, 4, lever).unwrap();
+                game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
+                for (answer, item_uses, powered, swings) in [
+                    (Answer::Success, 0, false, 1),
+                    (Answer::SuccessServer, 0, false, 1),
+                    (Answer::Consume, 0, false, 0),
+                    (Answer::Pass, 1, false, 1),
+                    (Answer::Fail, 2, false, 1),
+                    (Answer::TryWithEmptyHand, 2, true, 1),
+                ] {
+                    *user.answer.lock().unwrap() = Some(answer);
+                    game.swing = Default::default();
+                    let before = game.swings_started;
+                    let empty_before = user.empty_clicks.lock().unwrap().len();
+                    assert!(game.use_hand(Some(&hit)).unwrap());
+                    assert_eq!(
+                        user.empty_clicks.lock().unwrap().len() - empty_before,
+                        usize::from(answer == Answer::TryWithEmptyHand),
+                    );
+                    assert_eq!(game.inventory[game.selected].as_ref().unwrap().count, 1);
+                    assert_eq!(game.swings_started - before, swings);
+                    assert_eq!(user.item_uses.load(SeqCst), item_uses);
+                    assert_eq!(game.world.block(0, 64, 4) != lever, powered);
+                }
+                let calls = user.clicks.lock().unwrap().len();
+                game.world.set(0, 64, 4, stone).unwrap();
+                assert!(game.use_hand(Some(&hit)).unwrap());
+                assert_eq!(user.item_uses.load(SeqCst), 3);
+                assert_eq!(user.clicks.lock().unwrap().len(), calls);
+
+                // A block-specific useItemOn is replaced too, before its bucket exchange.
+                let cauldron = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:cauldron")
+                    .unwrap();
+                let full = game
+                    .with_props(
+                        game.pack
+                            .assets
+                            .registry
+                            .default_state("minecraft:water_cauldron")
+                            .unwrap(),
+                        &[("level", "3")],
+                    )
+                    .unwrap();
+                let cauldron_hit = super::super::Hit {
+                    pos: [5, 64, 4],
+                    point: [5.5, 65.0, 4.5],
+                    ..hit
+                };
+                game.creative = false;
+                for (answer, expected, bucket, item_calls) in [
+                    (Some(Answer::Success), cauldron, "minecraft:water_bucket", 3),
+                    (None, full, "minecraft:bucket", 3),
+                    (Some(Answer::Pass), cauldron, "minecraft:water_bucket", 4),
+                ] {
+                    game.world.set(5, 64, 4, cauldron).unwrap();
+                    game.inventory[game.selected] =
+                        Some(ItemStack::new("minecraft:water_bucket", 1));
+                    *user.answer.lock().unwrap() = answer;
+                    assert!(game.use_hand(Some(&cauldron_hit)).unwrap());
+                    assert_eq!(game.world.block(5, 64, 4), expected);
+                    let held = game.inventory[game.selected].as_ref().unwrap();
+                    assert_eq!((&*held.item, held.count), (bucket, 1));
+                    assert_eq!(user.item_uses.load(SeqCst), item_calls);
+                }
+
+                // TRY_WITH_EMPTY_HAND still ejects a jukebox's disc, not just its
+                // level-only success result: the game owns that side effect.
+                let jukebox = game
+                    .with_props(
+                        game.pack
+                            .assets
+                            .registry
+                            .default_state("minecraft:jukebox")
+                            .unwrap(),
+                        &[("has_record", "true")],
+                    )
+                    .unwrap();
+                game.world.set(6, 64, 4, jukebox).unwrap();
+                game.world.block_entities.insert(
+                    (6, 64, 4),
+                    horizon_client::containers::BlockEntity::Jukebox(
+                        horizon_client::containers::Jukebox {
+                            items: [Some(ItemStack::new("minecraft:music_disc_13", 1))],
+                            ticks: 0,
+                            playing: false,
+                        },
+                    ),
+                );
+                let jukebox_hit = super::super::Hit {
+                    pos: [6, 64, 4],
+                    point: [6.5, 65.0, 4.5],
+                    ..hit
+                };
+                *user.answer.lock().unwrap() = Some(Answer::TryWithEmptyHand);
+                *user.empty_answer.lock().unwrap() = Some(Answer::Success);
+                assert!(game.use_hand(Some(&jukebox_hit)).unwrap());
+                assert!(matches!(
+                    game.world.block_entities.get(&(6, 64, 4)),
+                    Some(horizon_client::containers::BlockEntity::Jukebox(j)) if j.record().is_some()
+                ));
+                *user.empty_answer.lock().unwrap() = None;
+                let calls = user.clicks.lock().unwrap().len();
+                assert!(game.use_hand(Some(&jukebox_hit)).unwrap());
+                assert_eq!(user.clicks.lock().unwrap().len(), calls + 1);
+                assert!(matches!(
+                    game.world.block_entities.get(&(6, 64, 4)),
+                    Some(horizon_client::containers::BlockEntity::Jukebox(j)) if j.record().is_none()
+                ));
+                assert!(
+                    game.dropped
+                        .iter()
+                        .any(|item| &*item.stack.item == "minecraft:music_disc_13")
+                );
+                assert_eq!(user.item_uses.load(SeqCst), 4);
+
+                // ServerPlayerGameMode uses the state it read before useItemOn,
+                // even when that method replaces the block before asking for empty use.
+                let floor_lever = game.with_props(lever, &[("face", "floor")]).unwrap();
+                let powered = game
+                    .with_props(floor_lever, &[("powered", "true")])
+                    .unwrap();
+                let cobblestone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:cobblestone")
+                    .unwrap();
+                let replaced_hit = super::super::Hit {
+                    pos: [8, 64, 4],
+                    point: [8.5, 65.0, 4.5],
+                    ..hit
+                };
+                game.world.set(8, 63, 4, stone).unwrap();
+                game.world.set(8, 64, 4, floor_lever).unwrap();
+                *user.replace_with.lock().unwrap() = Some(cobblestone);
+                *user.answer.lock().unwrap() = Some(Answer::TryWithEmptyHand);
+                assert!(game.use_hand(Some(&replaced_hit)).unwrap());
+                assert_eq!(game.world.block(8, 64, 4), powered);
+                assert_eq!(user.item_uses.load(SeqCst), 4);
+
+                assert_eq!(
+                    user.empty_clicks
+                        .lock()
+                        .unwrap()
+                        .last()
+                        .map(|(state, _)| *state),
+                    Some(floor_lever)
+                );
+
+                // Every supplied empty result replaces the lever; TRY is not retried.
+                let mut item_uses = 4;
+                for answer in [
+                    Answer::Success,
+                    Answer::SuccessServer,
+                    Answer::Consume,
+                    Answer::Pass,
+                    Answer::Fail,
+                    Answer::TryWithEmptyHand,
+                ] {
+                    game.world.set(8, 64, 4, floor_lever).unwrap();
+                    *user.empty_answer.lock().unwrap() = Some(answer);
+                    let calls = user.empty_clicks.lock().unwrap().len();
+                    let before = game.swings_started;
+                    assert!(game.use_hand(Some(&replaced_hit)).unwrap());
+                    assert_eq!(
+                        game.swings_started - before,
+                        u32::from(answer != Answer::Consume)
+                    );
+                    assert_eq!(game.world.block(8, 64, 4), floor_lever);
+                    assert_eq!(user.empty_clicks.lock().unwrap().len(), calls + 1);
+                    if matches!(
+                        answer,
+                        Answer::Pass | Answer::Fail | Answer::TryWithEmptyHand
+                    ) {
+                        item_uses += 1;
+                    }
+                    assert_eq!(user.item_uses.load(SeqCst), item_uses);
+                }
+
+                // The template's TRY reaches the part too; the off hand never does.
+                *user.answer.lock().unwrap() = None;
+                *user.empty_answer.lock().unwrap() = Some(Answer::Success);
+                assert!(game.use_hand(Some(&replaced_hit)).unwrap());
+                assert_eq!(game.world.block(8, 64, 4), floor_lever);
+                *user.answer.lock().unwrap() = Some(Answer::TryWithEmptyHand);
+                game.hand = Hand::Off;
+                game.offhand = Some(ItemStack::new("minecraft:stick", 1));
+                let calls = user.empty_clicks.lock().unwrap().len();
+                assert!(game.use_hand(Some(&replaced_hit)).unwrap());
+                assert_eq!(user.empty_clicks.lock().unwrap().len(), calls);
+                item_uses += 1;
+                assert_eq!(user.item_uses.load(SeqCst), item_uses);
+                game.hand = Hand::Main;
+                game.offhand = None;
+
+                // Ore's item-method PASS must not be mistaken for TRY.
+                let ore = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:redstone_ore")
+                    .unwrap();
+                game.world.set(11, 64, 4, ore).unwrap();
+                game.inventory[game.selected] = Some(ItemStack::new("minecraft:stone", 1));
+                let ore_hit = super::super::Hit {
+                    pos: [11, 64, 4],
+                    point: [11.5, 65.0, 4.5],
+                    ..hit
+                };
+                *user.answer.lock().unwrap() = None;
+                let calls = user.empty_clicks.lock().unwrap().len();
+                assert!(game.use_hand(Some(&ore_hit)).unwrap());
+                assert_eq!(user.empty_clicks.lock().unwrap().len(), calls);
+                item_uses += 1;
+                assert_eq!(user.item_uses.load(SeqCst), item_uses);
+                assert_eq!(
+                    game.world.block(11, 64, 4),
+                    game.with_props(ore, &[("lit", "true")]).unwrap()
+                );
+                *user.answer.lock().unwrap() = Some(Answer::TryWithEmptyHand);
+                game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
+
+                // The hook precedes the pot's wobble and the bookshelf's removal.
+                let pot = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:decorated_pot")
+                    .unwrap();
+                game.world.set(10, 64, 4, pot).unwrap();
+                let pot_hit = super::super::Hit {
+                    pos: [10, 64, 4],
+                    point: [10.5, 65.0, 4.5],
+                    ..hit
+                };
+                assert!(game.use_hand(Some(&pot_hit)).unwrap());
+                assert!(!game.be_anims.pots.contains_key(&pot_hit.pos));
+                *user.empty_answer.lock().unwrap() = None;
+                assert!(game.use_hand(Some(&pot_hit)).unwrap());
+                assert!(game.be_anims.pots.contains_key(&pot_hit.pos));
+                let shelf = game
+                    .with_props(
+                        game.pack
+                            .assets
+                            .registry
+                            .default_state("minecraft:chiseled_bookshelf")
+                            .unwrap(),
+                        &[("facing", "north"), ("slot_0_occupied", "true")],
+                    )
+                    .unwrap();
+                game.world.set(9, 64, 4, shelf).unwrap();
+                let mut books = Box::<horizon_client::containers::ChiseledBookshelf>::default();
+                books.items[0] = Some(ItemStack::new("minecraft:book", 1));
+                game.world.block_entities.insert(
+                    (9, 64, 4),
+                    horizon_client::containers::BlockEntity::ChiseledBookshelf(books),
+                );
+                let shelf_hit = super::super::Hit {
+                    pos: [9, 64, 4],
+                    face: [0, 0, -1],
+                    point: [9.75, 64.75, 4.0],
+                    inside: false,
+                };
+                *user.empty_answer.lock().unwrap() = Some(Answer::Success);
+                assert!(game.use_hand(Some(&shelf_hit)).unwrap());
+                assert!(matches!(
+                    game.world.block_entities.get(&(9, 64, 4)),
+                    Some(horizon_client::containers::BlockEntity::ChiseledBookshelf(b)) if b.items[0].is_some()
+                ));
+                *user.empty_answer.lock().unwrap() = None;
+                assert!(game.use_hand(Some(&shelf_hit)).unwrap());
+                assert!(matches!(
+                    game.world.block_entities.get(&(9, 64, 4)),
+                    Some(horizon_client::containers::BlockEntity::ChiseledBookshelf(b)) if b.items[0].is_none()
+                ));
+
+                // The real guest packet reaches empty use with the guest's UUID.
+                game.world.set(0, 64, 4, lever).unwrap();
+                game.lan.as_mut().unwrap().hub.guests[0].inventory[0] =
+                    Some(ItemStack::new("minecraft:stick", 1));
+                *user.answer.lock().unwrap() = Some(Answer::TryWithEmptyHand);
+                *user.empty_answer.lock().unwrap() = Some(Answer::Success);
+                game.lan_guest_packet(
+                    12,
+                    play::Serverbound::UseItemOn(play::UseItemOn {
+                        hand: 0,
+                        pos: hit.pos,
+                        face: 1,
+                        cursor: [0.5, 1.0, 0.5],
+                        inside: false,
+                        world_border: false,
+                        sequence: 1,
+                    }),
+                );
+                assert_eq!(user.clicks.lock().unwrap().last(), Some(&(12, Hand::Main)));
+                assert_eq!(user.empty_clicks.lock().unwrap().last(), Some(&(lever, 12)));
+                assert_eq!(user.item_uses.load(SeqCst), item_uses);
+                assert_eq!(game.world.block(0, 64, 4), lever);
+
+                // A delegating Part's food write precedes vanilla's canEat check.
+                let cake = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:cake")
+                    .unwrap();
+                let bitten = game.with_props(cake, &[("bites", "1")]).unwrap();
+                *user.empty_answer.lock().unwrap() = None;
+                for (food_write, expected, food, item_calls) in [
+                    (None, bitten, 12, item_uses),
+                    (Some(20), cake, 20, item_uses + 1),
+                ] {
+                    game.world.set(0, 64, 4, cake).unwrap();
+                    let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
+                    guest.game_mode = 0;
+                    guest.food = 10;
+                    *user.empty_food.lock().unwrap() = food_write;
+                    game.lan_guest_packet(
+                        12,
+                        play::Serverbound::UseItemOn(play::UseItemOn {
+                            hand: 0,
+                            pos: hit.pos,
+                            face: 1,
+                            cursor: [0.5, 1.0, 0.5],
+                            inside: false,
+                            world_border: false,
+                            sequence: 2,
+                        }),
+                    );
+                    assert_eq!(game.world.block(0, 64, 4), expected);
+                    assert_eq!(game.lan.as_ref().unwrap().hub.guests[0].food, food);
+                    assert_eq!(user.item_uses.load(SeqCst), item_calls);
+                }
+                game.lan.as_mut().unwrap().hub.guests[0].game_mode = 1;
+                game.world.set(0, 64, 4, stone).unwrap();
                 game.lan_guest_packet(
                     12,
                     play::Serverbound::PickItemFromBlock(play::PickItemFromBlock {
@@ -6338,6 +6883,146 @@ mod tests {
                 );
                 assert_eq!(*seen.lock().unwrap(), [true, false, true]);
             })
+        });
+    }
+
+    #[test]
+    #[ignore = "requires prepared game resources"]
+    fn block_part_use_item_on_consumes_once() {
+        use super::super::native_entity_refs::tests::with_game;
+        use crate::mod_api::{
+            self, BlockPart, Hooks, NativeInteractionResult as Answer, Registrar, ServerHost,
+            UseItemOnEvent,
+        };
+        use horizon_client::chunk::Chunk;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering::SeqCst},
+        };
+
+        #[derive(Clone)]
+        struct BlockUse(Arc<AtomicUsize>);
+        #[mod_api::horizon_part]
+        impl BlockPart for BlockUse {
+            fn use_item_on(
+                &self,
+                _: &mut dyn ServerHost,
+                _: &mut UseItemOnEvent<'_>,
+            ) -> Option<Answer> {
+                self.0.fetch_add(1, SeqCst);
+                Some(Answer::Success)
+            }
+        }
+        #[mod_api::__subscriptions]
+        impl Hooks for BlockUse {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+                r.block_part("minecraft:lever", self.clone());
+            }
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "block_use",
+            Box::new(BlockUse(calls.clone())),
+        )]
+        .into();
+        mod_api::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let registry = game.pack.assets.registry;
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                let lever = game
+                    .with_props(
+                        registry.default_state("minecraft:lever").unwrap(),
+                        &[("face", "floor")],
+                    )
+                    .unwrap();
+                game.world.set(0, 63, 4, stone).unwrap();
+                game.world.set(0, 64, 4, lever).unwrap();
+                let hit = super::super::Hit {
+                    pos: [0, 64, 4],
+                    face: [0, 1, 0],
+                    point: [0.5, 65.0, 4.5],
+                    inside: false,
+                };
+                assert!(game.use_hand(Some(&hit)).unwrap());
+                assert_eq!(game.world.block(0, 64, 4), lever);
+                assert_eq!(calls.load(SeqCst), 1);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "requires prepared game resources"]
+    fn replacing_empty_note_block_use_does_not_award_vanilla_stats() {
+        use super::super::native_entity_refs::tests::with_game;
+        use crate::mod_api::{
+            self, BlockPart, Hooks, NativeInteractionResult as Answer, Registrar, ServerHost,
+            UseWithoutItemEvent,
+        };
+        use horizon_client::chunk::Chunk;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering::SeqCst},
+        };
+
+        #[derive(Clone)]
+        struct Replacement(Arc<AtomicBool>);
+        #[mod_api::horizon_part]
+        impl BlockPart for Replacement {
+            fn use_without_item(
+                &self,
+                _: &mut dyn ServerHost,
+                _: &mut UseWithoutItemEvent<'_>,
+            ) -> Option<Answer> {
+                self.0.load(SeqCst).then_some(Answer::Success)
+            }
+        }
+        #[mod_api::__subscriptions]
+        impl Hooks for Replacement {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+                r.block_part("minecraft:note_block", self.clone());
+            }
+        }
+        let replace = Arc::new(AtomicBool::new(true));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "empty_note_replacement",
+            Box::new(Replacement(replace.clone())),
+        )]
+        .into();
+        mod_api::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let note = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:note_block")
+                    .unwrap();
+                game.world.set(0, 64, 4, note).unwrap();
+                let hit = super::super::Hit {
+                    pos: [0, 64, 4],
+                    face: [0, 1, 0],
+                    point: [0.5, 65.0, 4.5],
+                    inside: false,
+                };
+                assert!(game.use_hand(Some(&hit)).unwrap());
+                assert_eq!(game.world.block(0, 64, 4), note);
+                assert_eq!(game.stats.get("custom", "minecraft:tune_noteblock"), 0);
+
+                // Delegating still runs the actual method and awards its stat.
+                replace.store(false, SeqCst);
+                assert!(game.use_hand(Some(&hit)).unwrap());
+                assert_ne!(game.world.block(0, 64, 4), note);
+                assert_eq!(game.stats.get("custom", "minecraft:tune_noteblock"), 1);
+            });
         });
     }
 
@@ -6597,6 +7282,51 @@ mod aim_point_tests {
         assert_eq!(
             visible_aim_point(EYE, LO, HI, behind_top_slab),
             visible_aim_point(EYE, LO, HI, behind_top_slab)
+        );
+    }
+}
+
+/// The first target `(id, removed, bounds)` whose box meets the swept box,
+/// skipping removed ones and the vehicle the player rides.
+fn first_spin_target(
+    swept: Aabb,
+    riding: Option<u32>,
+    mut targets: impl Iterator<Item = (u32, bool, Aabb)>,
+) -> Option<usize> {
+    targets.position(|(id, removed, b)| !removed && Some(id) != riding && b.intersects(swept))
+}
+
+#[cfg(test)]
+mod spin_target_tests {
+    use super::first_spin_target;
+    use horizon_core::geometry::{Aabb, Vec3};
+
+    fn cube(x: f64) -> Aabb {
+        Aabb::new(Vec3::new(x, 0.0, 0.0), Vec3::new(x + 1.0, 1.0, 1.0))
+    }
+
+    /// The spin hits the first mob in the swept box, not a removed one, the
+    /// vehicle, or one out of reach.
+    #[test]
+    fn the_spin_picks_the_first_live_mob_in_the_sweep() {
+        let swept = Aabb::new(Vec3::new(0.0, 0.0, 0.0), Vec3::new(3.0, 1.0, 1.0));
+        let targets = [
+            (1, false, cube(10.0)),
+            (2, true, cube(1.0)),
+            (3, false, cube(1.5)),
+            (4, false, cube(2.0)),
+        ];
+        assert_eq!(
+            first_spin_target(swept, None, targets.iter().copied()),
+            Some(2)
+        );
+        assert_eq!(
+            first_spin_target(swept, Some(3), targets.iter().copied()),
+            Some(3)
+        );
+        assert_eq!(
+            first_spin_target(swept, None, targets[..2].iter().copied()),
+            None
         );
     }
 }

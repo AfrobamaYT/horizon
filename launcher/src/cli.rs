@@ -213,6 +213,9 @@ enum ModpackCmd {
     /// Play a ported pack as its own profile
     Play {
         pack: String,
+        /// Allow missing original Java asset/data jars to be downloaded from Modrinth
+        #[arg(long)]
+        allow_jar_downloads: bool,
         #[arg(long)]
         version: Option<String>,
     },
@@ -742,6 +745,9 @@ enum Cmd {
     },
     /// Start the client (needs a signed-in Microsoft account that owns Minecraft: Java Edition)
     Play {
+        /// Allow missing original Java asset/data jars to be downloaded from Modrinth
+        #[arg(long)]
+        allow_jar_downloads: bool,
         #[arg(long)]
         version: Option<String>,
         /// The instance to play (its name or id; default: the selected one). A Java instance
@@ -771,6 +777,9 @@ enum Cmd {
     },
     /// Run a dedicated server here; type commands into its console
     Server {
+        /// Allow missing original Java asset/data jars to be downloaded from Modrinth
+        #[arg(long)]
+        allow_jar_downloads: bool,
         /// The server's folder (default: the one the launcher uses)
         #[arg(long)]
         dir: Option<PathBuf>,
@@ -780,11 +789,11 @@ enum Cmd {
         #[arg(long)]
         accept_eula: bool,
     },
-    /// Native mods (docs/native-mods.md): compile mixin bundles against the instance's exact
+    /// Native mods (docs/native-mods.md): compile flat Rust mod projects against the instance's exact
     /// Horizon source revision with the launcher's own Rust, as the version the instance then
     /// plays. Not sandboxed: the mods' code runs with your rights
     NativeBuild {
-        /// A mod folder (horizon-mixin.toml, or an unpacked .hmod), or a folder of them
+        /// A mod folder (horizon-mod.toml with [native], Cargo.toml and src/), or a folder of them
         /// (default: the native mods installed and turned on in the instance)
         folder: Option<PathBuf>,
         /// Export mode: build a standalone dedicated-server engine into this folder instead of
@@ -797,6 +806,10 @@ enum Cmd {
             requires = "folder"
         )]
         server_output: Option<PathBuf>,
+        /// Allow exact-hash jar downloads into the local cache for the server export;
+        /// jar bytes are never included in the exported folder
+        #[arg(long, requires = "server_output")]
+        allow_jar_downloads: bool,
         /// The instance whose installed native mods to build, and which then plays the build
         /// (default: the selected one)
         #[arg(long)]
@@ -835,7 +848,8 @@ enum Cmd {
     /// newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port
     /// ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language
     /// system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent
-    /// violet|blue|teal|green|amber|red|pink, background PATH (a picture behind Home; "default"
+    /// violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any
+    /// hue), background PATH (a picture behind Home; "default"
     /// shows Horizon's landscape), native-profile performance|dev|release (the profile native
     /// mods build with: performance is incremental, dev rebuilds a mod quickest for a slow game,
     /// release is slowest to build and slightly faster to play)
@@ -1039,7 +1053,7 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
             s.accent = Accent::parse(value).ok_or_else(|| {
                 let names: Vec<_> = Accent::ALL.iter().map(|a| a.name()).collect();
                 format!(
-                    "{value}: say {} or a hue in degrees (0 to 360)",
+                    "{value}: say {}, a colour like #2563eb or a hue in degrees (0 to 360)",
                     names.join(", ")
                 )
             })?
@@ -1124,7 +1138,13 @@ pub fn run() -> Option<i32> {
     let result = match command {
         Cmd::Mcp | Cmd::AgentConfig { .. } if no_ai => Err(horizon_core::no_ai::REFUSAL.into()),
         Cmd::Mcp => crate::mcp::serve(),
-        command => execute(command, cli.json),
+        command => {
+            let result = execute(command, cli.json);
+            // A game it started has ended (attached) or none did (an error): a session file it
+            // didn't read goes now.
+            account::discard_unread_sessions();
+            result
+        }
     };
     Some(match result {
         Ok(()) => 0,
@@ -1252,6 +1272,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
         Cmd::NativeBuild {
             folder,
             server_output,
+            allow_jar_downloads,
             instance,
             version,
             update,
@@ -1281,7 +1302,14 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                     None => native_mods::base_for(None, &backend::installed(), update)
                         .ok_or_else(|| tr("No version is installed yet."))?,
                 };
-                let built = native_mods::build_server(&base, &folder, &output, profile, steps)?;
+                let built = native_mods::build_server(
+                    &base,
+                    &folder,
+                    &output,
+                    profile,
+                    allow_jar_downloads,
+                    steps,
+                )?;
                 let built = std::path::absolute(&built).unwrap_or(built);
                 let path = built.display().to_string();
                 println!(
@@ -1365,6 +1393,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             println!("{tag} is prepared.");
         }
         Cmd::Play {
+            allow_jar_downloads,
             version,
             instance,
             world,
@@ -1455,6 +1484,12 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             let vars = instance.vars(cmd.get_program());
             cmd.envs(vars.iter().map(|(k, v)| (k, v)));
             horizon_launcher::launch::limit_memory(&mut cmd, &instance.launch);
+            horizon_launcher::jars::prepare_launch(
+                &mut cmd,
+                &instance.launch,
+                horizon_launcher::jars::Permission::headless(allow_jar_downloads),
+            )
+            .map_err(|error| error.to_string())?;
             let played = attached(horizon_launcher::launch::wrap(cmd, &instance.launch));
             if let Err(e) = instances::record_play(&instance.id, started.elapsed()) {
                 eprintln!("Play time not saved: {e}");
@@ -1466,11 +1501,19 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             dir,
             version,
             accept_eula,
+            allow_jar_downloads,
         } => {
             let tag = backend::resolve_version(version.as_deref())?;
             let dir = backend::server_dir(dir);
             // The server inherits this terminal, so typed lines reach its console.
-            attached(backend::server(&tag, &dir, accept_eula)?)?
+            let mut cmd = backend::server(&tag, &dir, accept_eula)?;
+            horizon_launcher::jars::prepare_launch(
+                &mut cmd,
+                &Default::default(),
+                horizon_launcher::jars::Permission::headless(allow_jar_downloads),
+            )
+            .map_err(|error| error.to_string())?;
+            attached(cmd)?
         }
         Cmd::Notes { tag } => {
             let r = backend::release_notes(tag.as_deref())?;
@@ -3585,9 +3628,19 @@ fn modpack(action: ModpackCmd, as_json: bool) -> Result<(), String> {
                 log,
             )?)
         }
-        ModpackCmd::Play { pack, version } => {
+        ModpackCmd::Play {
+            pack,
+            version,
+            allow_jar_downloads,
+        } => {
             let mut cmd = backend::client(&backend::resolve_version(version.as_deref())?)?;
             modpacks::apply_profile(&mut cmd, &work(&pack)?)?;
+            horizon_launcher::jars::prepare_launch(
+                &mut cmd,
+                &Default::default(),
+                horizon_launcher::jars::Permission::headless(allow_jar_downloads),
+            )
+            .map_err(|error| error.to_string())?;
             attached(cmd)?
         }
         ModpackCmd::Remove { pack } => modpacks::remove(&work(&pack)?)?,
@@ -3790,6 +3843,21 @@ mod tests {
             }
             _ => panic!("expected native-build"),
         }
+        assert!(matches!(
+            parse(&[
+                "mods",
+                "--server-output",
+                "engine-out",
+                "--allow-jar-downloads"
+            ])
+            .unwrap()
+            .command,
+            Some(Cmd::NativeBuild {
+                allow_jar_downloads: true,
+                ..
+            })
+        ));
+        assert!(parse(&["mods", "--allow-jar-downloads"]).is_err());
         // The mod folder is explicit in export mode: no default from an instance.
         assert!(parse(&["--server-output", "engine-out"]).is_err());
         // Export mode never touches an instance.

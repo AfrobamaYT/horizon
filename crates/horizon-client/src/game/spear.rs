@@ -229,9 +229,11 @@ impl Game<'_> {
         if deals_knockback {
             let (xd, zd) = self.extra_knockback_direction();
             let source = Damage::spear(from);
-            self.mobs[index].knockback(0.4, xd, zd, &source);
+            let level = crate::game::entity::damage_level_of!(self);
+            self.mobs[index].knockback(level, 0.4, xd, zd, &source);
             let (strength, _) = self.extra_knockback(&kind, 0.0);
-            self.mobs[index].knockback(f64::from(strength), xd, zd, &source);
+            let level = crate::game::entity::damage_level_of!(self);
+            self.mobs[index].knockback(level, f64::from(strength), xd, zd, &source);
             // ...and the attacker stops sprinting.
             self.stop_sprint_after_extra_knockback();
         }
@@ -283,13 +285,13 @@ impl Game<'_> {
                 state: None,
                 at: [feet[0], feet[1] + height * 0.5, feet[2]],
                 spread: [0.1, 0.0, 0.1],
-                speed: 0.2,
+                speed: [0.2; 3],
                 count: (actual * 0.5) as u32 as i32,
                 randomization: 0,
             });
         }
         if hurt {
-            self.last_hurt_by_player.insert(id, self.lan_acting);
+            self.remember_mob_player_credit(id);
         }
         if let Some(p) = self.player.as_mut()
             && !self.creative
@@ -389,9 +391,12 @@ impl Game<'_> {
                 .find(|m| m.id == id as u32 && m.extra.using_item > 0);
             let item = mob.and_then(|m| {
                 if m.extra.using_off_hand {
-                    m.extra.off_hand.clone()
+                    horizon_client::mobs::finalize::item(m, horizon_client::mobs::finalize::OFFHAND)
                 } else {
-                    m.extra.main_hand.clone()
+                    horizon_client::mobs::finalize::item(
+                        m,
+                        horizon_client::mobs::finalize::MAINHAND,
+                    )
                 }
             });
             (item, mob.map(|m| m.position))

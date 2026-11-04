@@ -472,15 +472,8 @@ impl Game<'_> {
             }
             m.random = LegacyRandom::new(spec.seed);
             // EntityType.create equips nothing (that is finalizeSpawn's job).
-            for slot in [
-                &mut m.extra.main_hand,
-                &mut m.extra.off_hand,
-                &mut m.extra.head,
-                &mut m.extra.chest,
-                &mut m.extra.legs,
-                &mut m.extra.feet,
-            ] {
-                *slot = None;
+            for slot in horizon_items::equipment::MAINHAND..=horizon_items::equipment::HEAD {
+                m.extra.set_slot_stack(slot, None);
             }
             if s.trace_events {
                 horizon_client::mobs::warden::finalize(&mut m, false, &mut Vec::new());
@@ -740,9 +733,13 @@ impl Game<'_> {
                         .map(|p| [p.position.x, p.position.y, p.position.z])
                         .unwrap_or_default();
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                        m.damage(amount, horizon_client::mobs::Damage::player(at));
+                        m.damage(
+                            crate::game::entity::damage_level_of!(self),
+                            amount,
+                            horizon_client::mobs::Damage::player(at),
+                        );
                     }
-                    self.last_hurt_by_player.insert(id, self.lan_acting);
+                    self.remember_mob_player_credit(id);
                 }
                 "set" => {
                     let n = |i: usize| words[i].parse::<i32>().unwrap_or(0);

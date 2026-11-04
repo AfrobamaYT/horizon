@@ -136,6 +136,16 @@ pub fn jump_sound(m: &Mob) -> &'static str {
         _ => "entity.horse.jump",
     }
 }
+/// `PlayerRideableJumping.getPlayerJumpPendingScale`: the charge `data` out of
+/// 100 as the scale a mount leaps or dashes with (a full bar is 1.0 and the
+/// shortest is 0.4).
+pub fn jump_pending_scale(data: i32) -> f32 {
+    if data >= 90 {
+        1.0
+    } else {
+        0.4 + 0.4 * data as f32 / 90.0
+    }
+}
 /// `AbstractHorse.onPlayerJump`: a released jump bar lets the horse slide on
 /// the rider's keys (`allowStandSliding`) and makes it rear.
 pub fn on_player_jump(m: &mut Mob) {
@@ -1085,11 +1095,12 @@ mod tests {
                 let mut m = horse(Species::Horse);
                 m.extra.variant3 = 100;
                 m.random = LegacyRandom::new(seed);
-                let mut level_random = LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
+                let level = &mut test_level.level();
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w: &world,
-                    lr: &mut level_random,
+                    level,
                     events: &mut events,
                 };
                 RunAroundLikeCrazy.tick(&mut m, &mut cx);
@@ -1143,11 +1154,16 @@ mod tests {
         Mob::new(id, kind, Vec3::new(f64::from(id), 64.0, 0.0), 0.0)
     }
     /// Hits `n` fresh mobs of a species once each; how many reared.
-    fn rears(species: Species, name: &str, n: u32) -> u32 {
+    fn rears(
+        level: &mut crate::health::DamageLevel<'_>,
+        species: Species,
+        name: &str,
+        n: u32,
+    ) -> u32 {
         (1..=n)
             .filter(|&id| {
                 let mut m = equine(id, species, name);
-                assert!(m.damage(1.0, Damage::player([0.0, 64.0, 0.0])));
+                assert!(m.damage(level, 1.0, Damage::player([0.0, 64.0, 0.0])));
                 m.extra.counter == 20
             })
             .count() as u32
@@ -1155,8 +1171,10 @@ mod tests {
 
     #[test]
     fn a_hurt_horse_rears_one_hit_in_three() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         // AbstractHorse.hurtServer: nextInt(3) == 0 -> standIfPossible (#3432).
-        let n = rears(Species::Horse, "minecraft:horse", 300);
+        let n = rears(level, Species::Horse, "minecraft:horse", 300);
         assert!((60..=140).contains(&n), "{n} of 300 hits reared");
     }
 
@@ -1175,9 +1193,11 @@ mod tests {
 
     #[test]
     fn llamas_and_camels_never_rear_when_hurt() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         // Llama and Camel: canPerformRearing is false.
-        assert_eq!(rears(Species::Llama, "minecraft:llama", 60), 0);
-        assert_eq!(rears(Species::Camel, "minecraft:camel", 60), 0);
+        assert_eq!(rears(level, Species::Llama, "minecraft:llama", 60), 0);
+        assert_eq!(rears(level, Species::Camel, "minecraft:camel", 60), 0);
     }
 
     /// `SkeletonHorse.getSwimSound`: an undead horse has its own water sounds,

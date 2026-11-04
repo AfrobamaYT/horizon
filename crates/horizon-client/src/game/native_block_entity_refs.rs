@@ -5,7 +5,7 @@ use super::{Game, transactions::After};
 use horizon_client::{
     block_entity_nbt,
     containers::BlockEntity,
-    mod_api::{BlockEntityRef, LevelRef},
+    mod_api::{BlockEntityRef, BlockEntityTypeKey, LevelRef, PlayerRef},
     save,
     world::World,
 };
@@ -31,12 +31,49 @@ impl Game<'_> {
         self.native_block_entity_target(entity).map(|_| entity)
     }
 
+    /// Opens a block entity's menu for a connected player (`ServerPlayer.openMenu`).
+    /// Returns false for a stale or wrong-level handle, a non-provider, a cancelled
+    /// open, or an unconnected player such as a fake player.
+    pub(super) fn native_player_open_block_menu(
+        &mut self,
+        player: PlayerRef,
+        entity: BlockEntityRef,
+    ) -> bool {
+        if self.player_handle_read(player).is_none()
+            || !self.native_level_in_place(entity.level)
+            || self.native_block_entity_target(entity).is_none()
+        {
+            return false;
+        }
+        let Some(conn) = self.lan.as_ref().and_then(|host| {
+            host.hub
+                .guests
+                .iter()
+                .find(|guest| {
+                    guest.uuid == player.uuid
+                        && guest.placed
+                        && guest.dimension == entity.level.dimension()
+                })
+                .map(|guest| guest.conn)
+        }) else {
+            return false;
+        };
+        let [x, y, z] = entity.position;
+        matches!(
+            self.open_block_menu(conn, (x, y, z)),
+            super::lan_actions::MenuOpen::Opened
+        )
+    }
+
     /// The block entity's type (`BlockEntity.getType`).
-    pub(super) fn native_block_entity_kind(&self, entity: BlockEntityRef) -> Option<&str> {
+    pub(super) fn native_block_entity_kind(
+        &self,
+        entity: BlockEntityRef,
+    ) -> Option<BlockEntityTypeKey> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
         let [x, y, z] = entity.position;
         let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
-        Some(save::block_entity_id(block_entity, block))
+        BlockEntityTypeKey::registered(save::block_entity_id(block_entity, block))
     }
 
     /// The block entity's position.
@@ -93,6 +130,26 @@ impl Game<'_> {
         entity: BlockEntityRef,
         data: Compound,
     ) -> bool {
+        self.write_block_entity_data(entity, data, false)
+    }
+
+    /// Replaces the saved payload, retaining identity and position metadata.
+    /// Uses the same transactional load and client update path as `merge_data`.
+    /// False for a missing or stale block entity, unsupported data, or no change.
+    pub(super) fn native_block_entity_replace_data(
+        &mut self,
+        entity: BlockEntityRef,
+        data: Compound,
+    ) -> bool {
+        self.write_block_entity_data(entity, data, true)
+    }
+
+    fn write_block_entity_data(
+        &mut self,
+        entity: BlockEntityRef,
+        data: Compound,
+        replace: bool,
+    ) -> bool {
         let Some((key, block)) = self.native_block_entity_write_target(entity) else {
             return false;
         };
@@ -113,7 +170,20 @@ impl Game<'_> {
         else {
             return false;
         };
-        let merged = horizon_client::data_cmd::merged(&old, &nbt);
+        let base = if replace {
+            let mut metadata = Compound::new();
+            if let Tag::Compound(fields) = &old {
+                for key in ["id", "x", "y", "z"] {
+                    if let Some(value) = fields.get(&key.into()) {
+                        metadata.insert(key.into(), value.clone());
+                    }
+                }
+            }
+            Tag::Compound(metadata)
+        } else {
+            old.clone()
+        };
+        let merged = horizon_client::data_cmd::merged(&base, &nbt);
         if merged == old {
             return false;
         }
@@ -249,6 +319,8 @@ fn loaded_block_entity(world: &World, [x, y, z]: [i32; 3]) -> Option<&BlockEntit
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::HostTransaction;
+    use crate::mod_api::ServerHost;
     use horizon_client::chunk::Chunk;
     use horizon_world::registry::BlockStateId;
     use std::sync::Arc;
@@ -300,10 +372,81 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn player_opens_provider_and_refuses_non_provider() {
+        use horizon_client::mod_api::NativeBlockUpdateFlags;
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            for (x, name) in [
+                (0, "minecraft:chest"),
+                (2, "minecraft:furnace"),
+                (4, "minecraft:oak_sign"),
+            ] {
+                let state = game.pack.assets.registry.default_state(name).unwrap();
+                assert!(game.native_level_set_block(
+                    level,
+                    [x, 64, 0],
+                    state,
+                    NativeBlockUpdateFlags::NEIGHBORS
+                ));
+            }
+            let player = game.native_player_ref(12).unwrap();
+            let chest = game.native_block_entity_ref(level, [0, 64, 0]).unwrap();
+            let furnace = game.native_block_entity_ref(level, [2, 64, 0]).unwrap();
+            let sign = game.native_block_entity_ref(level, [4, 64, 0]).unwrap();
+            use super::super::lan_actions::MenuOpen;
+            assert!(!player.open_menu(game, sign));
+            assert_eq!(
+                game.open_block_menu(999, (0, 64, 0)),
+                MenuOpen::NotAProvider
+            );
+            game.world
+                .block_entities
+                .insert((0, 64, 0), BlockEntity::Chest(vec![None; 2]));
+            assert!(!player.open_menu(game, chest));
+            game.world
+                .block_entities
+                .insert((0, 64, 0), BlockEntity::Chest(vec![None; 27]));
+            let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
+            let dimension =
+                std::mem::replace(&mut guest.dimension, "minecraft:the_nether".to_owned());
+            assert!(!player.open_menu(game, chest));
+            game.lan.as_mut().unwrap().hub.guests[0].dimension = dimension;
+            let host = game.lan.take();
+            assert!(!player.open_menu(game, chest));
+            assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::NotAProvider);
+            game.lan = host;
+            game.lan.as_mut().unwrap().hub.guests[0].kind =
+                horizon_client::lan::guest::GuestKind::Fake;
+            assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::Cancelled);
+            assert!(!player.open_menu(game, chest));
+            game.lan.as_mut().unwrap().hub.guests[0].kind =
+                horizon_client::lan::guest::GuestKind::Network;
+            assert!(player.open_menu(game, chest));
+            assert!(player.open_menu(game, furnace));
+            game.world.block_entities.remove(&(2, 64, 0));
+            assert!(!player.open_menu(game, furnace));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn writes_merge_data_name_and_roll_back_with_a_transaction() {
-        use super::super::native_entity_refs::tests::with_game;
-        use horizon_client::mod_api::{Host, NativeBlockUpdateFlags};
-        with_game(|game| {
+        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
+        use horizon_client::mod_api::NativeBlockUpdateFlags;
+        if run_fresh_cases(
+            "game::native_block_entity_refs::tests::writes_merge_data_name_and_roll_back_with_a_transaction",
+            "HORIZON_VANILLA_BE_REGISTRY_CHILD",
+            &["vanilla"],
+        ) {
+            return;
+        }
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let root = super::super::mods::content_root(&base, &Default::default()).unwrap();
+        with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
@@ -329,7 +472,10 @@ mod tests {
                 compound(&format!("{{id:\"minecraft:furnace\",x:9,{}", &stick[1..]))
             ));
             assert_eq!(slot3(game), Some(3));
-            assert_eq!(chest.kind(game), Some("minecraft:chest"));
+            assert_eq!(
+                chest.kind(game).as_ref().map(|kind| kind.id()),
+                Some("minecraft:chest")
+            );
             assert_eq!(chest.position(game), Some([0, 64, 0]));
             assert!(!chest.merge_data(game, compound(stick)), "no change");
             assert!(chest.merge_data(game, compound("{Items:[]}")));
@@ -350,7 +496,7 @@ mod tests {
             assert_eq!(chest.name(game), None);
 
             // An abort puts back data and name; a commit keeps them.
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let aborted: Result<(), ()> = host.transaction(|host, _| {
                 assert!(chest.merge_data(host, compound(stick)));
                 assert!(chest.set_name(host, Some("Gone")));
@@ -360,7 +506,7 @@ mod tests {
             assert_eq!(aborted, Err(()));
             assert_eq!((slot3(game), chest.name(game)), (None, None));
             assert!(game.transactions.is_empty());
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let committed: Result<(), ()> = host.transaction(|host, _| {
                 assert!(chest.merge_data(host, compound(stick)));
                 assert!(chest.set_name(host, Some("Kept")));
@@ -371,6 +517,15 @@ mod tests {
                 (slot3(game), chest.name(game)),
                 (Some(3), Some("Kept".to_owned()))
             );
+
+            // Merge preserves omitted data; replacement clears the name and items.
+            assert!(chest.merge_data(game, compound("{CustomName:\"Changed\"}")));
+            assert_eq!(slot3(game), Some(3));
+            assert_eq!(chest.name(game), Some("Changed".to_owned()));
+            game.world.block_log = Some(Vec::new());
+            assert!(chest.replace_data(game, compound("{}")));
+            assert_eq!((slot3(game), chest.name(game)), (None, None));
+            assert_eq!(game.world.block_log, Some(vec![(0, 64, 0)]));
 
             // Clients are told: the block log names the position, and the chunk is dirty.
             game.world.block_log = Some(Vec::new());
@@ -384,6 +539,7 @@ mod tests {
 
             // A removed block entity is a stale handle.
             game.world.block_entities.remove(&(0, 64, 0));
+            assert!(!chest.replace_data(game, compound("{}")));
             assert!(!chest.set_changed(game));
             assert!(!chest.merge_data(game, compound(stick)));
             assert!(!chest.set_name(game, Some("x")));
@@ -395,7 +551,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_abort_puts_back_the_lock_and_the_loot_table_roll() {
         use super::super::native_entity_refs::tests::with_game;
-        use horizon_client::mod_api::{Host, NativeBlockUpdateFlags};
+        use horizon_client::mod_api::NativeBlockUpdateFlags;
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -411,7 +567,7 @@ mod tests {
             let table = compound("{LootTable:\"minecraft:chests/simple_dungeon\"}");
             let before = game.world.block_entity_extras(key);
 
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let aborted: Result<(), ()> = host.transaction(|host, _| {
                 assert!(chest.merge_data(host, lock.clone()));
                 assert!(chest.merge_data(host, table.clone()));
@@ -421,7 +577,7 @@ mod tests {
             assert_eq!(game.world.block_entity_extras(key), before);
             assert!(game.world.block_lock(key).is_none());
 
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let committed: Result<(), ()> = host.transaction(|host, _| {
                 assert!(chest.merge_data(host, lock.clone()));
                 assert!(chest.merge_data(host, table.clone()));
@@ -430,6 +586,90 @@ mod tests {
             assert_eq!(committed, Ok(()));
             assert!(game.world.block_lock(key).is_some());
             assert_ne!(game.world.block_entity_extras(key), before);
+        });
+    }
+
+    /// `LevelWriteHost::set_block` in a level hook: the block entity goes with
+    /// its block and comes with the new one, as the Host's write does.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_level_hook_set_block_replaces_whole_states_and_their_block_entities() {
+        use super::super::mod_api_host::LevelTicks;
+        use super::super::native_entity_refs::tests::with_game;
+        use crate::mod_api::{LevelWriteHost, NativeBlockUpdateFlags};
+        use horizon_world::chunk::BlockState;
+
+        fn write(
+            game: &mut Game<'_>,
+            pos: [i32; 3],
+            state: BlockStateId,
+            flags: NativeBlockUpdateFlags,
+        ) -> bool {
+            game.with_level(|_, level, ticks| {
+                LevelWriteHost::set_block(&mut LevelTicks { level, ticks }, pos, state, flags)
+            })
+        }
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let state = |name: &str, age: Option<&str>| {
+                registry
+                    .resolve(&BlockState {
+                        name: name.into(),
+                        properties: age
+                            .map(|age| ("age".into(), age.into()))
+                            .into_iter()
+                            .collect(),
+                    })
+                    .unwrap()
+            };
+            let stone = state("minecraft:stone", None);
+            let chest = state("minecraft:chest", None);
+            let young = state("minecraft:wheat", Some("0"));
+            let grown = state("minecraft:wheat", Some("7"));
+            let flags = NativeBlockUpdateFlags::NEIGHBORS | NativeBlockUpdateFlags::KNOWN_SHAPE;
+            let key = (0, 64, 0);
+
+            assert!(write(game, [0, 64, 0], stone, flags));
+            assert!(game.world.block_entities.get(&key).is_none());
+            assert!(write(game, [0, 64, 0], chest, flags));
+            assert!(matches!(
+                game.world.block_entities.get(&key),
+                Some(BlockEntity::Chest(_))
+            ));
+            assert!(write(game, [0, 64, 0], stone, flags));
+            assert_eq!(game.world.block(0, 64, 0), stone);
+            assert!(game.world.block_entities.get(&key).is_none());
+
+            // A crop's whole-state growth: no block entity, and a repeat changes nothing.
+            assert!(write(game, [0, 64, 0], young, flags));
+            assert!(write(game, [0, 64, 0], grown, flags));
+            assert_eq!(game.world.block(0, 64, 0), grown);
+            assert!(game.world.block_entities.get(&key).is_none());
+            assert!(!write(game, [0, 64, 0], grown, flags));
+
+            // Unloaded, outside the build height and invalid: refused, nothing loaded.
+            let chunks = game.world.chunks.len();
+            assert!(!write(game, [16, 64, 0], stone, flags));
+            assert!(!write(game, [0, 10000, 0], stone, flags));
+            assert!(!write(game, [0, 64, 0], BlockStateId(u32::MAX), flags));
+            assert_eq!(game.world.chunks.len(), chunks);
+            assert_eq!(game.world.block(0, 64, 0), grown);
+
+            // The same Host write still creates the block entity.
+            assert!(game.native_set_block("minecraft:overworld", [1, 64, 0], chest, flags.bits()));
+            assert!(matches!(
+                game.world.block_entities.get(&(1, 64, 0)),
+                Some(BlockEntity::Chest(_))
+            ));
+
+            // A client's copy of the level is not the server's.
+            game.options.dedicated = None;
+            assert!(!write(game, [0, 64, 0], stone, flags));
+            assert_eq!(game.world.block(0, 64, 0), grown);
         });
     }
 }

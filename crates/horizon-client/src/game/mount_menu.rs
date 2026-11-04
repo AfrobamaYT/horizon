@@ -151,7 +151,7 @@ impl Game<'_> {
         self.station = None;
         self.container = None;
         self.craft_size = 2;
-        self.screen = Screen::Inventory;
+        self.set_screen(Screen::Inventory);
         self.capture(false);
     }
     /// E while riding a tamed mount opens its inventory instead of the player's.
@@ -210,7 +210,7 @@ impl Game<'_> {
         });
         if !valid {
             self.close_container();
-            self.screen = Screen::Playing;
+            self.set_screen(Screen::Playing);
             self.capture(true);
         }
     }
@@ -344,6 +344,14 @@ impl Game<'_> {
                 })
             }
             _ => None,
+        }
+    }
+    pub(super) fn mount_slot(&self, i: usize) -> &Option<ItemStack> {
+        match self.mount_menu.open.as_ref() {
+            Some(open) if i == SADDLE => &open.saddle,
+            Some(open) if i == ARMOR => &open.armor,
+            Some(open) if i >= CHEST && i - CHEST < CHEST_SIZE => &open.items[i - CHEST],
+            _ => &self.scratch_slot,
         }
     }
     pub(super) fn mount_slot_mut(&mut self, i: usize) -> &mut Option<ItemStack> {

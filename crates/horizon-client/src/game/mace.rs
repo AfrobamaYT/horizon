@@ -186,31 +186,6 @@ impl Game<'_> {
         let held = self.held().cloned();
         let aim = self.attacker_aim(source.attacker);
         let kind = self.mobs[index].kind.id.clone();
-        let mut amount = amount;
-        // After the invulnerability guard, as `LivingIncomingDamageEvent` fires.
-        if crate::mod_api::listened(crate::mod_api::HookId::LivingIncomingDamageV2)
-            && !self.mobs[index].refuses_damage(&source)
-        {
-            let victim = &self.mobs[index];
-            let position = victim.position;
-            let view = super::view_vector(victim.head_yaw, victim.head_pitch);
-            let mut canceled = false;
-            self.native_living_incoming_damage_v2(
-                victim.id as i32,
-                &kind,
-                super::creatures::source_damage_type(source),
-                self.player.as_ref().map_or(0, |player| player.entity_id),
-                source.from,
-                [position.x, position.y, position.z],
-                view,
-                held.as_ref(),
-                &mut amount,
-                &mut canceled,
-            );
-            if canceled {
-                return false;
-            }
-        }
         let ctx = EffectContext {
             this: Some(&kind),
             attacker: Some("minecraft:player"),
@@ -225,9 +200,8 @@ impl Game<'_> {
             ..Default::default()
         };
         let enchantments = &world_stations!(self).enchantments;
-        let random = &mut self.world.random;
         // CombatRules.getDamageAfterAbsorb: EnchantmentHelper.modifyArmorEffectiveness.
-        let mut breach = |fraction: f32| {
+        let mut breach = |fraction: f32, random: &mut horizon_core::random::LegacyRandom| {
             enchantments.modify_value(
                 held.as_ref(),
                 "minecraft:armor_effectiveness",
@@ -240,7 +214,12 @@ impl Game<'_> {
         // The causing entity's aim, for what turns a blow by where it points
         // (`SulfurCube.knockback`).
         self.mobs[index].attacker_aim = aim;
-        let hurt = self.mobs[index].damage_with(amount, source, Some(&mut breach));
+        let hurt = self.mobs[index].damage_with(
+            crate::game::entity::damage_level_of!(self),
+            amount,
+            source,
+            Some(&mut breach),
+        );
         self.mobs[index].attacker_aim = None;
         if hurt && self.mobs[index].health != old_health {
             self.mob_damage_event(self.mobs[index].id);
@@ -405,7 +384,7 @@ impl Game<'_> {
         ];
         self.level_event_at(2013, on_pos, 750);
         let heavy = if fall > HEAVY_THRESHOLD { 2.0 } else { 1.0 };
-        let player = self.level.player_uuid.or(Some([0, 0, 0, 1]));
+        let player = Some(self.acting_uuid());
         for m in self.mobs.iter_mut().filter(|m| {
             target != Spared::Mob(m.id) && m.alive() && !m.removed && !ally_of_player(m, player)
         }) {
@@ -513,7 +492,7 @@ impl Game<'_> {
         };
         let base = sweep_base_damage(ratio, attribute, scale);
         let (xd, zd) = self.extra_knockback_direction();
-        let uuid = self.level.player_uuid.or(Some([0, 0, 0, 1]));
+        let uuid = Some(self.acting_uuid());
         let allies = self.player_allies();
         // getEntitiesOfClass walks the entity sections (x, then z, then y)
         // under the box, each in the order its entities were added.
@@ -566,11 +545,12 @@ impl Game<'_> {
                     damage_type: "minecraft:player_attack",
                     causing: horizon_client::health::knockback_attacker(),
                     direct: horizon_client::health::knockback_attacker(),
+                    position: None,
                 };
-                if horizon_client::health::knockback_canceled(
-                    horizon_client::health::Hurting::ArmorStand(id as i32, source),
-                    &mut knock,
-                ) || knock.strength <= 0.0
+                let level = crate::game::entity::damage_level_of!(self);
+                let pushed = horizon_client::health::Hurting::ArmorStand(id as i32, source);
+                if horizon_client::health::knockback_canceled(level.reborrow(), pushed, &mut knock)
+                    || knock.strength <= 0.0
                 {
                     continue;
                 }
@@ -608,9 +588,9 @@ impl Game<'_> {
                 if old_health > 0.0 && !self.mobs[i].alive() {
                     self.native_kill_event(i);
                 }
-                self.mobs[i].knockback(0.4, xd, zd, &source);
-                self.last_hurt_by_player
-                    .insert(self.mobs[i].id, self.lan_acting);
+                let level = crate::game::entity::damage_level_of!(self);
+                self.mobs[i].knockback(level, 0.4, xd, zd, &source);
+                self.remember_mob_player_credit(self.mobs[i].id);
                 self.post_attack(i);
             }
         }

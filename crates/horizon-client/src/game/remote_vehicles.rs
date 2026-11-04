@@ -462,15 +462,21 @@ impl Game<'_> {
             client: false,
         });
         let mut mob = self.mobs.remove(i);
-        let mut random = self.world.random.clone();
+        let mut lent = horizon_client::health::LentLevel::take(&mut self.world);
         let mut events = Vec::new();
         {
             let world = self.mob_world_base(&[]);
-            mob.tick(&world, &mut random, &mut events);
+            let mut level = horizon_client::health::DamageLevel::lent(
+                &self.world,
+                self.pack.assets.registry,
+                &mut lent,
+            )
+            .predicted();
+            mob.tick(&world, &mut level, &mut events);
         }
         // Only the server's packets take the mount away.
         mob.removed = false;
-        self.world.random = random;
+        lent.give_back(&mut self.world);
         self.mobs.insert(i, mob);
         // #4821: footstep, gallop, breathe, splash and landing sounds from mob.tick
         let _ = self.handle_mob_events(events);

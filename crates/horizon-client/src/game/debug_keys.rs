@@ -41,7 +41,7 @@ impl DebugHost for Host<'_, '_> {
         if without_menu && g.screen == Screen::Playing {
             g.pause_menu = !g.has_singleplayer_server() || g.is_published();
             g.pause_focus = None;
-            g.screen = Screen::Paused;
+            g.set_screen(Screen::Paused);
             g.capture(false);
             g.mining = None;
         }
@@ -550,7 +550,9 @@ impl Game<'_> {
     }
     /// `LocalPlayer.isReducedDebugInfo`: the server's rule or the option.
     pub(super) fn reduced_debug_info(&self) -> bool {
-        self.settings.reduced_debug_info || self.ui.rules.bool("reduced_debug_info")
+        self.settings.reduced_debug_info
+            || self.ui.rules.bool("reduced_debug_info")
+            || self.remote.as_ref().is_some_and(|r| r.reduced_debug_info)
     }
     /// `DebugScreenEntryList.isCurrentlyEnabled` for an entry's path.
     pub(super) fn debug_entry(&self, path: &str) -> bool {
@@ -954,7 +956,7 @@ impl Game<'_> {
         let lerp = |a: f64, b: f64| a + f64::from(alpha) * (b - a);
         let lerpf = |a: f32, b: f32| a + alpha * (b - a);
         for m in self.mobs.iter() {
-            if m.removed || m.invisible || m.has_effect("minecraft:invisibility") {
+            if m.removed || m.is_invisible() {
                 continue;
             }
             let pos = [

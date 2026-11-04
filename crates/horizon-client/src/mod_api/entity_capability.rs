@@ -2,20 +2,23 @@
 //! answer a capability, such as [`ENTITY_ITEMS`], beside the game's own (NeoForge's
 //! `Capabilities.Item.ENTITY`). A player's inventory is the game's own answer for a player.
 use super::{
-    Capability, ComponentId, EntityProvider, EntityRef, Host, ItemPlace, ItemResource,
-    PREVENT_ARMOR_CHANGE, ProvidedBy, ResourceHandler, Tag, Transaction, backend_of,
+    Capability, ComponentId, Direction, EnergyHandler, EntityProvider, EntityRef, FluidResource,
+    Host, ItemPlace, ItemResource, PREVENT_ARMOR_CHANGE, ProvidedBy, ResourceHandler, ServerHost,
+    Tag, Transaction, backend_of,
 };
 use std::marker::PhantomData;
 
-/// An entity capability: its name, the handler trait `T` it answers with, and the game's own
-/// provider, if the game has one.
-pub struct EntityCapabilityKey<T: ?Sized + 'static> {
+/// An entity capability: its name, the handler trait `T` it answers with, the context `C` a
+/// lookup passes its providers (NeoForge's `EntityCapability<T, C>`: `()` where NeoForge's is
+/// `Void`, the side asked about where it is `@Nullable Direction`), and the game's own provider,
+/// if the game has one.
+pub struct EntityCapabilityKey<T: ?Sized + 'static, C: 'static = ()> {
     pub name: &'static str,
-    default: Option<fn(&mut dyn Host, EntityRef) -> Option<Box<T>>>,
-    handler: PhantomData<fn() -> Box<T>>,
+    default: Option<fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>>>,
+    handler: PhantomData<fn(C) -> Box<T>>,
 }
 
-impl<T: ?Sized + 'static> EntityCapabilityKey<T> {
+impl<T: ?Sized + 'static, C: 'static> EntityCapabilityKey<T, C> {
     /// A mod's own entity capability, answered only by the providers registered for it.
     pub const fn new(name: &'static str) -> Self {
         Self {
@@ -34,7 +37,7 @@ impl<T: ?Sized + 'static> EntityCapabilityKey<T> {
 pub const ENTITY_ITEMS: EntityCapabilityKey<dyn ResourceHandler<ItemResource>> =
     EntityCapabilityKey {
         name: "horizon:entity_items",
-        default: Some(|host, entity| {
+        default: Some(|host, entity, ()| {
             if entity.kind(host)? != "minecraft:player" {
                 let size = backend_of(host)?.entity_container_size(entity.id())?;
                 return Some(Box::new(ContainerItems { entity, size }));
@@ -45,15 +48,47 @@ pub const ENTITY_ITEMS: EntityCapabilityKey<dyn ResourceHandler<ItemResource>> =
         handler: PhantomData,
     };
 
+/// An entity's items as automation reaches them, as NeoForge 26.3's
+/// `Capabilities.Item.ENTITY_AUTOMATION`, asked for the side of the entity a hopper reaches it
+/// from. The game answers it for a chest or hopper minecart and a chest boat, the container
+/// entities `EntitySelector.CONTAINER_ENTITY_SELECTOR` picks, with the slots [`ENTITY_ITEMS`]
+/// gives them; a player and a chested mount are not reached by automation.
+pub const ENTITY_AUTOMATION: EntityCapabilityKey<
+    dyn ResourceHandler<ItemResource>,
+    Option<Direction>,
+> = EntityCapabilityKey {
+    name: "horizon:entity_automation",
+    default: Some(|host, entity, _| {
+        let size = backend_of(host)?.entity_automation_size(entity.id())?;
+        Some(Box::new(ContainerItems { entity, size }))
+    }),
+    handler: PhantomData,
+};
+
+/// An entity's energy, as NeoForge 26.3's `Capabilities.Energy.ENTITY`, asked for the side of
+/// the entity a lookup reaches it from, or none for no particular side. Vanilla has no entity
+/// that holds energy, so only mods answer it.
+pub const ENTITY_ENERGY: EntityCapabilityKey<dyn EnergyHandler, Option<Direction>> =
+    EntityCapabilityKey::new("horizon:entity_energy");
+/// An entity's fluids, as NeoForge 26.3's `Capabilities.Fluid.ENTITY`, asked for the side of
+/// the entity a lookup reaches it from, or none for no particular side. Vanilla has no entity
+/// that holds a fluid, so only mods answer it.
+pub const ENTITY_FLUIDS: EntityCapabilityKey<
+    dyn ResourceHandler<FluidResource>,
+    Option<Direction>,
+> = EntityCapabilityKey::new("horizon:entity_fluids");
+
 impl EntityRef {
-    /// `key`'s handler for this entity (`Entity.getCapability`): the first provider to answer, of
-    /// those mods registered for its type `before_game`, the game's own, and the mods' others,
-    /// each in registration order. None for a stale handle and for an entity outside the level
-    /// in place: no provider is asked for one.
-    pub fn capability<T: ?Sized + 'static>(
+    /// `key`'s handler for this entity (`Entity.getCapability`), its providers given `context`
+    /// (`()` for [`ENTITY_ITEMS`], the side asked about for [`ENTITY_AUTOMATION`],
+    /// [`ENTITY_ENERGY`] and [`ENTITY_FLUIDS`]): the first provider to answer, of those mods registered for its type
+    /// `before_game`, the game's own, and the mods' others, each in registration order. None for
+    /// a stale handle and for an entity outside the level in place: no provider is asked for one.
+    pub fn capability<T: ?Sized + 'static, C: Copy + 'static>(
         self,
-        host: &mut dyn Host,
-        key: &EntityCapabilityKey<T>,
+        host: &mut dyn ServerHost,
+        key: &EntityCapabilityKey<T, C>,
+        context: C,
     ) -> Option<Capability<T>> {
         if !self.level(host)?.in_place(host) {
             return None;
@@ -61,12 +96,12 @@ impl EntityRef {
         let mut game = None;
         let parts = super::providers(ProvidedBy::Entity, key.name, host, |host| self.kind(host));
         super::answered(
-            super::ask_providers::<EntityProvider<T>, T>(
+            super::ask_providers::<EntityProvider<T, C>, T>(
                 parts,
                 host,
-                |provider, host| provider(host, self),
+                |provider, host| provider(host, self, context),
                 |host| {
-                    game = key.default.and_then(|default| default(host, self));
+                    game = key.default.and_then(|default| default(host, self, context));
                     game.is_some()
                 },
             ),
@@ -99,17 +134,17 @@ impl ContainerItems {
 }
 
 impl ResourceHandler<ItemResource> for ContainerItems {
-    fn size(&self, _: &mut dyn Host) -> usize {
+    fn size(&self, _: &mut dyn ServerHost) -> usize {
         self.size
     }
-    fn resource(&self, host: &mut dyn Host, index: usize) -> Option<ItemResource> {
+    fn resource(&self, host: &mut dyn ServerHost, index: usize) -> Option<ItemResource> {
         self.place(host, index)?.resource(host)
     }
-    fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
+    fn amount(&self, host: &mut dyn ServerHost, index: usize) -> u32 {
         self.place(host, index)
             .map_or(0, |place| place.amount(host))
     }
-    fn capacity(&self, host: &mut dyn Host, index: usize, resource: &ItemResource) -> u32 {
+    fn capacity(&self, host: &mut dyn ServerHost, index: usize, resource: &ItemResource) -> u32 {
         match self.place(host, index) {
             Some(_) => max_stack(host, resource),
             None => 0,
@@ -117,7 +152,7 @@ impl ResourceHandler<ItemResource> for ContainerItems {
     }
     fn insert(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &ItemResource,
@@ -131,7 +166,7 @@ impl ResourceHandler<ItemResource> for ContainerItems {
     }
     fn extract(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &ItemResource,
@@ -178,7 +213,7 @@ impl PlayerItems {
 /// Puts up to `amount` of `resource` at `place`, into what fits there and no further: an
 /// empty place or one with the same item, up to `limit`.
 fn fill(
-    host: &mut dyn Host,
+    host: &mut dyn ServerHost,
     tx: &Transaction,
     place: &ItemPlace,
     resource: &ItemResource,
@@ -229,17 +264,17 @@ fn equips(host: &dyn Host, resource: &ItemResource, slot: &str) -> bool {
 }
 
 impl ResourceHandler<ItemResource> for PlayerItems {
-    fn size(&self, _: &mut dyn Host) -> usize {
+    fn size(&self, _: &mut dyn ServerHost) -> usize {
         OFF_HAND + 1
     }
-    fn resource(&self, host: &mut dyn Host, index: usize) -> Option<ItemResource> {
+    fn resource(&self, host: &mut dyn ServerHost, index: usize) -> Option<ItemResource> {
         self.place(host, index)?.resource(host)
     }
-    fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
+    fn amount(&self, host: &mut dyn ServerHost, index: usize) -> u32 {
         self.place(host, index)
             .map_or(0, |place| place.amount(host))
     }
-    fn capacity(&self, host: &mut dyn Host, index: usize, resource: &ItemResource) -> u32 {
+    fn capacity(&self, host: &mut dyn ServerHost, index: usize, resource: &ItemResource) -> u32 {
         match index
             .checked_sub(MAIN)
             .and_then(|armour| ARMOUR.get(armour))
@@ -253,7 +288,7 @@ impl ResourceHandler<ItemResource> for PlayerItems {
     }
     fn insert(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &ItemResource,
@@ -267,7 +302,7 @@ impl ResourceHandler<ItemResource> for PlayerItems {
     }
     fn extract(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &ItemResource,
@@ -291,7 +326,7 @@ impl ResourceHandler<ItemResource> for PlayerItems {
     /// the armour.
     fn insert_any(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         resource: &ItemResource,
         amount: u32,

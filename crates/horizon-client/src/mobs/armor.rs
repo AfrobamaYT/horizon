@@ -106,6 +106,8 @@ mod tests {
 
     #[test]
     fn effective_mob_armor_controls_damage_and_fractional_armor_floors() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         for (armor, toughness, source, expected) in [
             (20.0, 8.0, DamageKind::Cactus, 999039),
             (0.0, 8.0, DamageKind::Cactus, 996000),
@@ -113,7 +115,7 @@ mod tests {
             (20.0, 8.0, DamageKind::SonicBoom, 996000),
         ] {
             let mut mob = pig(armor, toughness);
-            assert!(mob.damage(4.0, Damage::of(source)));
+            assert!(mob.damage(level, 4.0, Damage::of(source)));
             assert_eq!((f64::from(mob.health) * 1000.0) as i32, expected);
         }
     }
@@ -121,9 +123,12 @@ mod tests {
     #[test]
     fn equipment_and_covered_shell_are_counted_once_before_effective_limits() {
         let mut mob = pig(20.0, 8.0);
-        mob.extra.head = Some("minecraft:diamond_helmet".into());
+        mob.extra.set_slot_id(
+            horizon_items::equipment::HEAD,
+            Some("minecraft:diamond_helmet".into()),
+        );
         assert_eq!(values(&mob), (23.0, 10.0));
-        mob.extra.head = None;
+        mob.extra.set_slot_id(horizon_items::equipment::HEAD, None);
         Arc::make_mut(&mut mob.kind).species = Species::Shulker;
         let map = mob.extra.armor_attributes.as_deref_mut().unwrap();
         let key = map.catalog().id("minecraft:armor").unwrap();

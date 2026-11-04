@@ -8,8 +8,10 @@ pub(super) struct HookSources {
     pub part_traits: BTreeMap<&'static str, String>,
     pub fills: Vec<Fill>,
     pub hook_ids: String,
+    pub hook_constants: String,
     pub hook_count: usize,
     pub render_hook_ids: String,
+    pub render_hook_constants: String,
     pub render_hook_count: usize,
 }
 
@@ -19,8 +21,10 @@ pub(super) fn emit(
     methods: &[syn::ItemFn],
 ) -> Result<HookSources, String> {
     let mut hook_ids = String::new();
+    let mut hook_constants = String::new();
     let mut hook_count = 0;
     let mut render_hook_ids = String::new();
+    let mut render_hook_constants = String::new();
     let mut render_hook_count = 0;
     let mut traits = String::new();
     let mut dispatch = String::new();
@@ -97,13 +101,13 @@ pub(super) fn emit(
                 }
             }
         }
-        let is_level = hook["target"]
-            .as_str()
-            .is_some_and(|target| target.contains("::GameLevel<"));
+        let is_level = host_param::is_level(hook);
         let ticks = is_level
             && args.iter().any(|(name, ty)| {
                 name == "ticks" && ty.to_token_stream().to_string() == "& mut Ticks"
             });
+        host_param::validate(hook, name, is_level, receiver_mut, ticks)?;
+        let context = host_param::context_param(hook, &mut args)?;
         if ticks {
             args.retain(|(name, _)| name != "ticks");
         }
@@ -148,12 +152,23 @@ pub(super) fn emit(
         } else {
             String::new()
         };
-        let host = host_param::host_param(hook, receiver_mut, ticks).map(|param| {
-            (
-                fresh_name(if is_level { "level" } else { "host" }, &mut used),
-                param,
-            )
-        });
+        let host = context
+            .or_else(|| host_param::host_param(hook, receiver_mut, ticks))
+            .map(|param| {
+                (
+                    fresh_name(
+                        if hook.context.is_some() {
+                            "context"
+                        } else if is_level {
+                            "level"
+                        } else {
+                            "host"
+                        },
+                        &mut used,
+                    ),
+                    param,
+                )
+            });
         // A scoped hook's parts: the trait its method goes on, and the lookup
         // of the parts attached to the thing its `key` argument names.
         let scoped = match (api.get("scope"), api.get("key")) {
@@ -180,13 +195,19 @@ pub(super) fn emit(
                         let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
                             return Err(format!("{name} has no level to name {key}'s block"));
                         };
-                        format!("{table}(|| {level}.state_block({key}))")
+                        if hook.side == HelperSide::Both {
+                            format!(
+                                "{table}(|| match &{level} {{ LevelSide::Server({level}) | LevelSide::Client({level}) => {level}.state_block({key}), }})"
+                            )
+                        } else {
+                            format!("{table}(|| {level}.state_block({key}))")
+                        }
                     }
                     "& ItemStack" => format!("{table}(|| Some(&*{key}.item))"),
                     "& str" => format!("{table}(|| Some({key}))"),
                     // An entity's type id need not be its block's: its own table.
                     "& ModBlockEntity" | "& mut ModBlockEntity" => {
-                        format!("block_entity_kind(|| Some(&*{key}.id))")
+                        format!("block_entity_kind(|| Some({key}.id()))")
                     }
                     other => return Err(format!("key {key} of {name} has type {other}")),
                 };
@@ -195,18 +216,19 @@ pub(super) fn emit(
             _ => return Err(format!("{name} needs both scope and key, or neither")),
         };
         let event = fresh_name("event", &mut used);
-        let event_type = format!(
-            "{}Event",
-            name.split('_')
-                .map(|word| word[..1].to_uppercase() + &word[1..])
-                .collect::<String>()
-        );
+        let event_type = format!("{}Event", hook_id(name));
         let hook_id = event_type.strip_suffix("Event").unwrap();
         if is_render {
             render_hook_ids.push_str(&format!("{hook_id},\n"));
+            render_hook_constants.push_str(&format!(
+                "pub const {name}: Option<super::RenderHookId> = Some(super::RenderHookId::{hook_id});\n"
+            ));
             render_hook_count += 1;
         } else {
             hook_ids.push_str(&format!("{hook_id},\n"));
+            hook_constants.push_str(&format!(
+                "pub const {name}: Option<super::HookId> = Some(super::HookId::{hook_id});\n"
+            ));
             hook_count += 1;
         }
         let mut trait_params = vec!["&self".to_owned()];
@@ -214,8 +236,19 @@ pub(super) fn emit(
         let mut call_args = Vec::new();
         if let Some((name, param)) = &host {
             trait_params.push(format!("{name}: {}", param.ty));
-            dispatch_params.push(format!("{name}: {}", param.ty));
-            call_args.push(name.clone());
+            let by_side = param.ty == "HostSide" || param.ty == "LevelSide";
+            dispatch_params.push(format!(
+                "{}{name}: {}",
+                if by_side { "mut " } else { "" },
+                param.ty
+            ));
+            call_args.push(if by_side {
+                format!("{name}.reborrow()")
+            } else if param.ty.starts_with("&mut ") {
+                format!("&mut *{name}")
+            } else {
+                name.clone()
+            });
         }
 
         let mut lifetimes = EventLifetimes::default();
@@ -225,7 +258,13 @@ pub(super) fn emit(
         let collected = output.as_ref().filter(|_| contract == "collect");
         for (name, ty) in args.iter().chain(collected) {
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
-            let (field, scalar) = lifetimes.field(ty);
+            let mutable_entity = ty.to_token_stream().to_string() == "& mut ModBlockEntity";
+            let field_ty = if mutable_entity {
+                syn::parse_quote!(ModBlockEntityView<'_>)
+            } else {
+                (**ty).clone()
+            };
+            let (field, scalar) = lifetimes.field(&field_ty);
             let visibility = if event_type == "ApplyEffectTickEvent" && name == "changes" {
                 "pub(super)"
             } else {
@@ -238,6 +277,8 @@ pub(super) fn emit(
             if scalar {
                 inits.push(format!("{name}: *{name}"));
                 write_back.push_str(&format!("*{name} = {event}.{name};"));
+            } else if mutable_entity {
+                inits.push(format!("{name}: ModBlockEntityView::new({name})"));
             } else {
                 inits.push(name.clone());
             }
@@ -296,38 +337,33 @@ pub(super) fn emit(
             HelperSide::Both => "both",
         };
         method_source.push_str(&format!("/// Side: {side}.\n"));
+        // A scoped hook is its part's method alone: a global moment beside it is its own hook.
+        let callee = if scoped.is_some() { "part" } else { "mod" };
         match (contract, out) {
             ("cancel", Some(out)) => method_source.push_str(&format!(
-                "///\n/// Return `Flow::Cancel` to take it: this sets `{out}`, and later mods are skipped.\n"
+                "///\n/// Return `Flow::Cancel` to take it: this sets `{out}`, and later {callee}s are skipped.\n"
             )),
             ("replace", Some(out)) => method_source.push_str(&format!(
-                "///\n/// Return `Some` to set `{out}`; the first mod returning `Some` wins.\n"
+                "///\n/// Return `Some` to set `{out}`; the first {callee} returning `Some` wins.\n"
             )),
             ("collect", Some(out)) => method_source.push_str(&format!(
-                "///\n/// Every mod gets `{event}.{out}` in order and may add, change or remove {out}.\n"
+                "///\n/// Every {callee} gets `{event}.{out}` in order and may add, change or remove {out}.\n"
             )),
             _ => {}
         }
-        if let Some((part_trait, _)) = &scoped {
-            part_traits
+        method_source.push_str(&format!(
+            "fn {name}({trait_params}){result} {{ {unused} {default} }}\n"
+        ));
+        match &scoped {
+            Some((part_trait, _)) => part_traits
                 .entry(*part_trait)
                 .or_default()
-                .push_str(&format!(
-                    "{method_source}fn {name}({trait_params}){result} {{ {unused} {default} }}\n"
-                ));
+                .push_str(&method_source),
+            None => traits.push_str(&method_source),
         }
-        let (domain, id_enum) = if is_render {
-            ("Render", "RenderHookId")
-        } else {
-            ("Gameplay", "HookId")
-        };
-        let report = format!(
-            "horizon_client_core::subscribers::default_called(horizon_client_core::subscribers::Domain::{domain}, {id_enum}::{hook_id} as usize, self);"
-        );
-        method_source.push_str(&format!(
-            "fn {name}({trait_params}){result} {{ {report} {unused} {default} }}\n"
-        ));
-        traits.push_str(&method_source);
+        let trait_name = scoped
+            .as_ref()
+            .map_or(trait_name, |(part_trait, _)| part_trait);
         dispatch.push_str(&format!(
             "/// What [`{trait_name}::{name}`] is told. Fields may be added: the struct is `#[non_exhaustive]`.\n#[non_exhaustive]\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
@@ -338,7 +374,7 @@ pub(super) fn emit(
         } else {
             format!("super::entered(HookId::{hook_id}, \"{name}\")")
         };
-        // One callee's call: a mod's, then a scoped hook's parts' after the mods.
+        // One callee's call: a mod's, or a scoped hook's part's.
         let call = |callee: &str, exit: &str| match contract {
             "cancel" => format!(
                 "if matches!({callee}.{name}({invoke}), Flow::Cancel) {{ *{o} = true; {exit}; }}",
@@ -358,24 +394,16 @@ pub(super) fn emit(
                     call(&mod_item, "break")
                 ),
             ),
-            Some((_, lookup)) => {
+            Some((_, lookup)) => (
                 // The parts are looked up first: the key may be moved into the event.
-                let calls = format!(
-                    "for {mod_item} in {each} {{ {} }} for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",
-                    call(&mod_item, "break 'hook"),
-                    call(&part_item, "break 'hook"),
-                );
-                (
-                    format!(
-                        "let {part_table} = super::parts(\"{name}\"); let {part_list} = {part_table}.{lookup}; if {part_list}.is_empty() && !super::listened(HookId::{hook_id}) {{ return; }}"
-                    ),
-                    if matches!(contract, "cancel" | "replace") {
-                        format!("'hook: {{ {calls} }}")
-                    } else {
-                        calls
-                    },
-                )
-            }
+                format!(
+                    "\nif !super::has_part_hook(HookId::{hook_id}) {{ return; }} let {part_table} = super::parts(\"{name}\"); let {part_list} = {part_table}.for_hook(HookId::{hook_id}).map_or(&[][..], |table| table.{lookup}); if {part_list}.is_empty() {{ return; }}"
+                ),
+                format!(
+                    "for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",
+                    call(&part_item, "break"),
+                ),
+            ),
         };
         let body = match contract {
             "cancel" => format!(
@@ -407,8 +435,10 @@ pub(super) fn emit(
         part_traits,
         fills,
         hook_ids,
+        hook_constants,
         hook_count,
         render_hook_ids,
+        render_hook_constants,
         render_hook_count,
     })
 }

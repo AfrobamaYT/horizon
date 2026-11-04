@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "bonemeal",
+      "side": "both",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_bonemeal",
+      "neoforge": "BonemealEvent",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
+    }
+  ]
+}

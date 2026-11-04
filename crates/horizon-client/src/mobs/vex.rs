@@ -9,6 +9,7 @@ use super::{
         Cx, Float, Goal, HurtByTarget, LookAtPlayer, MOVE, NearestTarget, goal_clone, reduced,
     },
 };
+use crate::health::DamageLevel;
 use horizon_core::geometry::trig::Mth;
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use std::f32::consts::PI;
@@ -212,7 +213,7 @@ pub fn travel(m: &mut Mob) -> bool {
     true
 }
 /// `Vex.tick`: the limited life costs a heart a second once spent.
-pub fn ai_step(m: &mut Mob, w: &super::MobWorld) {
+pub fn ai_step(m: &mut Mob, w: &super::MobWorld, level: &mut DamageLevel<'_>) {
     m.extra.point = m
         .target_info(w)
         .map(|t| [t.position.x, t.position.y, t.position.z]);
@@ -220,7 +221,7 @@ pub fn ai_step(m: &mut Mob, w: &super::MobWorld) {
         m.extra.egg_time -= 1;
         if m.extra.egg_time == 0 {
             m.extra.egg_time = 20;
-            m.damage(1.0, Damage::of(DamageKind::Generic));
+            m.damage(level, 1.0, Damage::of(DamageKind::Generic));
         }
     }
 }
@@ -234,7 +235,10 @@ pub fn anim(m: &Mob, s: &State, p: &mut Poses) {
     if m.extra.flag {
         p.xrot("body", 0.0);
         // setArmsCharging
-        let (right, left) = (m.extra.main_hand.is_some(), m.extra.off_hand.is_some());
+        let (right, left) = (
+            m.extra.main_hand_id().is_some(),
+            m.extra.off_hand_id().is_some(),
+        );
         if !right && !left {
             p.xrot("right_arm", -1.221_730_5);
             p.yrot("right_arm", PI / 12.0);

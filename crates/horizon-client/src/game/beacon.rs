@@ -419,7 +419,7 @@ impl Game<'_> {
     }
     fn close_beacon_screen(&mut self) {
         self.close_container();
-        self.screen = super::Screen::Playing;
+        self.set_screen(super::Screen::Playing);
         self.capture(true);
     }
     /// `BeaconMenu.updateEffects`: spend the payment and set the powers. On

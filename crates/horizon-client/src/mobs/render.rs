@@ -992,6 +992,18 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
     humanoid_armor(m, &mut v);
     v
 }
+/// `HumanoidArmorLayer.renderArmorPiece`: a baby wears the `humanoid_baby`
+/// layer type for every slot (leggings included), an adult the leggings layer
+/// for its legs and the `humanoid` one otherwise.
+fn humanoid_layer_folder(baby: bool, layer: &str) -> &'static str {
+    if baby {
+        "humanoid_baby"
+    } else if layer == "leggings" {
+        "humanoid_leggings"
+    } else {
+        "humanoid"
+    }
+}
 /// `HumanoidArmorLayer`: the armour models of the mob's main model with the
 /// equipment textures (leather tinted, with its overlay).
 fn humanoid_armor(m: &Mob, v: &mut Vec<Layer>) {
@@ -1000,7 +1012,8 @@ fn humanoid_armor(m: &Mob, v: &mut Vec<Layer>) {
         return;
     }
     let e = &m.extra;
-    if e.head.is_none() && e.chest.is_none() && e.legs.is_none() && e.feet.is_none() {
+    use horizon_items::equipment::{ARMOR, CHEST, FEET, HEAD, LEGS};
+    if ARMOR.iter().all(|&slot| e.slot_stack(slot).is_none()) {
         return;
     }
     let (model, _) = body(m);
@@ -1008,13 +1021,14 @@ fn humanoid_armor(m: &Mob, v: &mut Vec<Layer>) {
         return;
     };
     let slots = [
-        (&m.extra.head, &m.extra.armor[0], "helmet"),
-        (&m.extra.chest, &m.extra.armor[1], "chestplate"),
-        (&m.extra.legs, &m.extra.armor[2], "leggings"),
-        (&m.extra.feet, &m.extra.armor[3], "boots"),
+        (HEAD, "helmet"),
+        (CHEST, "chestplate"),
+        (LEGS, "leggings"),
+        (FEET, "boots"),
     ];
-    for (item, stack, layer) in slots {
-        let Some(name) = item.as_deref().and_then(|i| i.strip_prefix("minecraft:")) else {
+    for (slot, layer) in slots {
+        let stack = e.slot_stack(slot);
+        let Some(name) = stack.and_then(|s| s.item.strip_prefix("minecraft:")) else {
             continue;
         };
         let Some(material) = name.strip_suffix(layer).and_then(|n| n.strip_suffix('_')) else {
@@ -1025,16 +1039,12 @@ fn humanoid_armor(m: &Mob, v: &mut Vec<Layer>) {
             "turtle" => "turtle_scute",
             other => other,
         };
-        let folder = if layer == "leggings" {
-            "humanoid_leggings"
-        } else {
-            "humanoid"
-        };
+        let folder = humanoid_layer_folder(m.is_baby(), layer);
         let model = interned(format_args!("{base}#{layer}"));
         // EquipmentLayerRenderer.getColorForLayer: the leather layer takes
         // the stack's dye colour, the colour it has when undyed otherwise.
         let tint = if asset == "leather" {
-            armor_tint(Some(0xA06540), stack.as_ref())
+            armor_tint(Some(0xA06540), stack)
         } else {
             0xFFFF_FFFF
         };
@@ -1500,7 +1510,7 @@ pub fn render_with(
 ) {
     // The invisibility effect hides the model (a drinking wandering trader);
     // an illusioner shows its four mirror images instead.
-    if super::trader::is_invisible(m) {
+    if m.is_invisible() {
         if m.species() == Species::Illusioner {
             let age = m.age as f32 + alpha;
             for (i, off) in super::illusioner::offsets(m, alpha).iter().enumerate() {
@@ -1539,7 +1549,7 @@ pub fn render_skinned(
     out: &mut Vec<Vertex>,
     skin: &mut super::skin::Skin,
 ) {
-    if super::trader::is_invisible(m) {
+    if m.is_invisible() {
         render_with(m, alpha, camera, atlas, light, data, &[], out);
         return;
     }
@@ -1612,7 +1622,7 @@ pub fn ears(
     data: &MobData,
     out: &mut Vec<Vertex>,
 ) {
-    if super::trader::is_invisible(m) {
+    if m.is_invisible() {
         return;
     }
     let Some(model) = m.kind.layer("player#ears") else {
@@ -1961,10 +1971,12 @@ fn render_visible(
     let body_animation = custom_body.and_then(|c| c.animation.as_ref());
     let model = match custom_body {
         Some(custom) => custom.model.clone(),
+        // 3D skin layers: the player's own outer layer, one slab per painted
+        // texel (`mobs::skin_layers`), in place of the flat inflated box.
         None => m
-            .kind
-            .layer(&model_key)
-            .cloned()
+            .skin_3d
+            .clone()
+            .or_else(|| m.kind.layer(&model_key).cloned())
             .unwrap_or_else(|| m.kind.model.clone()),
     };
     let texture = cem_texture(custom_body, &texture, atlas);
@@ -2598,7 +2610,7 @@ pub fn held_item_transform(
     // WitchItemLayer.applyTranslation: a potion is held at the nose, any other
     // item as CrossedArmsItemLayer holds it; only the main hand's item is drawn.
     if m.species() == Species::Witch {
-        let item = m.extra.main_hand.as_deref()?;
+        let item = m.extra.main_hand_id()?;
         if left != m.main_arm_left() {
             return None;
         }
@@ -2617,7 +2629,7 @@ pub fn held_item_transform(
     // CrossedArmsItemLayer (villagers and wandering traders): the main hand's
     // item over the folded arms.
     if matches!(m.species(), Species::Villager | Species::WanderingTrader) {
-        m.extra.main_hand.as_deref()?;
+        m.extra.main_hand_id()?;
         if left != m.main_arm_left() {
             return None;
         }
@@ -2632,8 +2644,7 @@ pub fn held_item_transform(
     if m.extra.swing_stab && swing_left == left {
         let forward = m
             .extra
-            .main_hand
-            .as_deref()
+            .main_hand_id()
             .and_then(crate::spear::Kinetic::of)
             .map_or(0.0, |k| k.forward_movement);
         t *= crate::spear::third_person_attack_item(s.swing, forward);
@@ -2642,11 +2653,10 @@ pub fn held_item_transform(
     if super::spear_use::is_using_item(m)
         && m.extra.using_off_hand == off_hand
         && let Some(kinetic) = (if off_hand {
-            &m.extra.off_hand
+            m.extra.off_hand_id()
         } else {
-            &m.extra.main_hand
+            m.extra.main_hand_id()
         })
-        .as_deref()
         .and_then(crate::spear::Kinetic::of)
     {
         let time_held = m.extra.using_item as f32 + s.partial;
@@ -2656,23 +2666,65 @@ pub fn held_item_transform(
 }
 
 /// `ArmedEntityRenderState.extractArmedEntityRenderState`: each arm's item
-/// model reads the stack held by that arm. Only the main hand currently
-/// retains a full stack; the off hand must not inherit its item or components.
+/// model reads the stack held by that arm: each hand has its own slot, so
+/// the off hand never inherits the main hand's item or components.
 pub fn held_item_stack(extra: &super::Extra, off_hand: bool) -> Option<crate::items::ItemStack> {
-    let item = if off_hand {
-        extra.off_hand.as_ref()?
-    } else {
-        if let Some(stack) = extra.main_hand_stack() {
-            return Some(stack.clone());
-        }
-        extra.main_hand.as_ref()?
-    };
-    Some(crate::items::ItemStack::new(item, 1))
+    use horizon_items::equipment::{MAINHAND, OFFHAND};
+    extra
+        .slot_stack(if off_hand { OFFHAND } else { MAINHAND })
+        .cloned()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A baby zombie's armour reads the `humanoid_baby` textures for every
+    /// slot, not the adult `humanoid`/`humanoid_leggings` ones (#7302).
+    #[test]
+    fn a_baby_zombies_armour_uses_the_humanoid_baby_textures() {
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = Species::Zombie;
+        let model = kind.model.clone();
+        kind.layers.insert("zombie_baby#main".into(), model);
+        let mut mob = Mob::new(
+            1,
+            std::sync::Arc::new(kind),
+            horizon_core::geometry::Vec3::ZERO,
+            0.0,
+        );
+        mob.extra.age = -24000;
+        use horizon_items::equipment::{FEET, HEAD, LEGS};
+        let armour = |name: &str| Some(horizon_client::items::ItemStack::new(name, 1));
+        mob.extra
+            .equipment
+            .set(HEAD, armour("minecraft:iron_helmet"));
+        mob.extra
+            .equipment
+            .set(LEGS, armour("minecraft:iron_leggings"));
+        mob.extra
+            .equipment
+            .set(FEET, armour("minecraft:leather_boots"));
+        let mut layers = Vec::new();
+        humanoid_armor(&mob, &mut layers);
+        let textures: Vec<&str> = layers.iter().map(|l| &*l.texture).collect();
+        assert_eq!(
+            textures,
+            [
+                "entity/equipment/humanoid_baby/iron",
+                "entity/equipment/humanoid_baby/iron",
+                "entity/equipment/humanoid_baby/leather",
+                "entity/equipment/humanoid_baby/leather_overlay",
+            ]
+        );
+        mob.extra.age = 0;
+        let mut adult = Vec::new();
+        humanoid_armor(&mob, &mut adult);
+        assert_eq!(
+            &*adult[1].texture,
+            "entity/equipment/humanoid_leggings/iron"
+        );
+    }
 
     #[test]
     fn creeper_swelling_uses_local_fuse_and_keeps_java_zero_division() {
@@ -2701,7 +2753,10 @@ mod tests {
         let mut main = ItemStack::new("minecraft:crossbow", 1);
         main.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Main hand".into()));
         extra.set_main_hand_stack(Some(main));
-        extra.off_hand = Some("minecraft:crossbow".into());
+        extra.set_slot_id(
+            horizon_items::equipment::OFFHAND,
+            Some("minecraft:crossbow".into()),
+        );
         assert_eq!(
             held_item_stack(&extra, false)
                 .unwrap()
@@ -2717,7 +2772,10 @@ mod tests {
         );
         // An admiring piglin holds gold beside its crossbow. Both the item
         // id and the model components must come from the appropriate hand.
-        extra.off_hand = Some("minecraft:gold_ingot".into());
+        extra.set_slot_id(
+            horizon_items::equipment::OFFHAND,
+            Some("minecraft:gold_ingot".into()),
+        );
         assert_eq!(
             &*held_item_stack(&extra, true).unwrap().item,
             "minecraft:gold_ingot"
@@ -2726,7 +2784,7 @@ mod tests {
             &*held_item_stack(&extra, false).unwrap().item,
             "minecraft:crossbow"
         );
-        extra.off_hand = None;
+        extra.set_slot_id(horizon_items::equipment::OFFHAND, None);
         assert!(held_item_stack(&extra, true).is_none());
     }
 

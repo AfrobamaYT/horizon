@@ -82,6 +82,18 @@ impl Game<'_> {
     /// How many slots the inventory of entity `entity` in the level in place has, as
     /// `entity_slots` reaches them: none for an entity without one, and on a client.
     pub(super) fn native_entity_container_size(&self, entity: u32) -> Option<usize> {
+        self.native_entity_automation_size(entity).or_else(|| {
+            let m = self
+                .mobs
+                .iter()
+                .find(|m| m.id == entity && m.extra.chested)?;
+            Some(super::mount_menu::mount_columns(m) * 3)
+        })
+    }
+    /// How many slots the container entity `entity` of the level in place shows automation
+    /// (`EntitySelector.CONTAINER_ENTITY_SELECTOR`: chest and hopper minecarts, chest boats; a
+    /// chested mount is not one): none for any other entity, and on a client.
+    pub(super) fn native_entity_automation_size(&self, entity: u32) -> Option<usize> {
         if self.remote.is_some() {
             return None;
         }
@@ -89,14 +101,8 @@ impl Game<'_> {
             let container = matches!(c.kind, CartKind::Chest | CartKind::Hopper);
             return container.then_some(c.items.len());
         }
-        if let Some(b) = self.boats.iter().find(|b| b.id == entity) {
-            return b.chest.then_some(b.items.len());
-        }
-        let m = self
-            .mobs
-            .iter()
-            .find(|m| m.id == entity && m.extra.chested)?;
-        Some(super::mount_menu::mount_columns(m) * 3)
+        let b = self.boats.iter().find(|b| b.id == entity)?;
+        b.chest.then_some(b.items.len())
     }
     /// `EntityType.is(TagKey)`: whether `entity_type` (`minecraft:player`) is in the entity
     /// type tag `tag` (`minecraft:cannot_be_pushed_onto_boats`).
@@ -170,7 +176,7 @@ impl Game<'_> {
             if self.native_menu_storage(*menu, *slot).is_none() {
                 return 0;
             }
-            self.journal_menus(menu.player.uuid());
+            self.journal_menus(menu.player);
             if let Some(held) = self.native_menu_storage(*menu, *slot) {
                 fill(held, &mut rest);
             }
@@ -266,7 +272,7 @@ impl Game<'_> {
             if took == 0 {
                 return 0;
             }
-            self.journal_menus(menu.player.uuid());
+            self.journal_menus(menu.player);
             if let Some(held) = self.native_menu_storage(*menu, *slot) {
                 *held = held.as_ref().map(|h| left(h, took)).filter(|h| h.count > 0);
             }
@@ -334,11 +340,14 @@ impl Game<'_> {
 mod tests {
     use super::super::BlockEntity;
     use super::super::native_entity_refs::tests::with_game;
+    use crate::mod_api::HostTransaction;
+    use crate::mod_api::ServerHost;
     use horizon_client::{
         items::ItemStack,
         lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
-        mod_api::{ENTITY_ITEMS, Host, ItemPlace, ItemResource, MenuRef},
+        mod_api::{ENTITY_AUTOMATION, ENTITY_ITEMS, ItemPlace, ItemResource, MenuRef},
     };
+    use horizon_core::geometry::Direction;
     use horizon_protocol::packets::configuration::ClientInformation;
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
 
@@ -434,7 +443,7 @@ mod tests {
             let slot = |slot| ItemPlace::PlayerSlot { player: 123, slot };
             // Up to a bucket from the cauldron at `at` into the bucket in `slot`, or back.
             let moved = |game: &mut super::Game<'_>, at, slot: &ItemPlace, into_bucket| {
-                let host: &mut dyn Host = game;
+                let host: &mut dyn ServerHost = game;
                 let block = level.capability(host, &FLUIDS, at, None).unwrap();
                 let bucket = slot.capability(host, &ITEM_FLUIDS).unwrap();
                 let (from, to) = match into_bucket {
@@ -495,7 +504,7 @@ mod tests {
             let water = ItemResource::of(&ItemStack::new("minecraft:water_bucket", 1));
 
             // Aborted, the guest's inventory is as it was, and the host's was never touched.
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let _ = host.transaction(|host, tx| {
                 assert_eq!(slot.exchange(host, tx, &water, 1), 1);
                 assert_eq!(slot.amount(host), 2);
@@ -505,7 +514,7 @@ mod tests {
             assert_eq!(game.inventory, host_before);
 
             // Committed, the guest keeps two buckets and gets the filled one.
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let _ = host.transaction(|host, tx| Ok::<_, ()>(slot.exchange(host, tx, &water, 1)));
             let after = guest_inventory(game);
             assert_eq!(after[0], Some(ItemStack::new("minecraft:bucket", 2)));
@@ -526,11 +535,11 @@ mod tests {
         with_game(|game| {
             open_to_lan(game);
             game.lan.as_mut().unwrap().hub.guests.push(guest(1));
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let items = host
                 .entity(20)
                 .unwrap()
-                .capability(host, &ENTITY_ITEMS)
+                .capability(host, &ENTITY_ITEMS, ())
                 .unwrap();
             let pumpkin = ItemResource::of(&ItemStack::new("minecraft:carved_pumpkin", 1));
             let wrote =
@@ -548,11 +557,11 @@ mod tests {
             player.game_mode = 1;
             player.inventory[0] = Some(ItemStack::new("minecraft:stick", 60));
             game.lan.as_mut().unwrap().hub.guests.push(player);
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let items = host
                 .entity(20)
                 .unwrap()
-                .capability(host, &ENTITY_ITEMS)
+                .capability(host, &ENTITY_ITEMS, ())
                 .unwrap();
             let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
             assert_eq!(
@@ -583,13 +592,13 @@ mod tests {
                 CartKind::Chest,
                 horizon_core::geometry::Vec3::ZERO,
             ));
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let entity = host.entity(500).unwrap();
-            let items = entity.capability(host, &ENTITY_ITEMS).unwrap();
+            let items = entity.capability(host, &ENTITY_ITEMS, ()).unwrap();
             game.persist.removals.push(Target::Cart(500));
-            assert!(entity.capability(game, &ENTITY_ITEMS).is_none());
+            assert!(entity.capability(game, &ENTITY_ITEMS, ()).is_none());
             let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let wrote =
                 host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 0, &sticks, 1)));
             assert_eq!(wrote, Ok(0));
@@ -609,15 +618,15 @@ mod tests {
                 .push(("minecraft:binding_curse".into(), 1));
             player.armor[0] = Some(helmet.clone());
             game.lan.as_mut().unwrap().hub.guests.push(player);
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let items = host
                 .entity(20)
                 .unwrap()
-                .capability(host, &ENTITY_ITEMS)
+                .capability(host, &ENTITY_ITEMS, ())
                 .unwrap();
             let helmet = ItemResource::of(&helmet);
             assert_eq!(items.amount(host, 39), 1);
-            let take = |host: &mut dyn Host| {
+            let take = |host: &mut dyn ServerHost| {
                 host.transaction(|host, tx| Ok::<_, ()>(items.extract(host, tx, 39, &helmet, 1)))
             };
             assert_eq!(take(host), Ok(0));
@@ -635,11 +644,11 @@ mod tests {
         with_game(|game| {
             open_to_lan(game);
             game.lan.as_mut().unwrap().hub.guests.push(guest(1));
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let items = host
                 .entity(20)
                 .unwrap()
-                .capability(host, &ENTITY_ITEMS)
+                .capability(host, &ENTITY_ITEMS, ())
                 .unwrap();
             let helmet = ItemResource::of(&ItemStack::new("minecraft:iron_helmet", 1))
                 .with_component(
@@ -672,13 +681,13 @@ mod tests {
                 CartKind::Chest,
                 horizon_core::geometry::Vec3::ZERO,
             ));
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let entity = host.entity(500).unwrap();
-            let items = entity.capability(host, &ENTITY_ITEMS).unwrap();
+            let items = entity.capability(host, &ENTITY_ITEMS, ()).unwrap();
             game.native_lifecycle.begin_close();
             game.native_lifecycle.world_close_final();
-            assert!(entity.capability(game, &ENTITY_ITEMS).is_none());
-            let host: &mut dyn Host = game;
+            assert!(entity.capability(game, &ENTITY_ITEMS, ()).is_none());
+            let host: &mut dyn ServerHost = game;
             let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
             let wrote =
                 host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 0, &sticks, 1)));
@@ -702,7 +711,7 @@ mod tests {
         commit: bool,
     ) -> u32 {
         let resource = ItemResource::of(&ItemStack::new(item, 1));
-        let host: &mut dyn Host = game;
+        let host: &mut dyn ServerHost = game;
         let mut moved = 0;
         let _ = host.transaction(|host, tx| {
             moved = match amount > 0 {
@@ -760,9 +769,9 @@ mod tests {
                 )
             };
             let before = held(game);
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let emerald = ItemResource::of(&ItemStack::new("minecraft:emerald", 1));
-            let moved = |host: &mut dyn Host, commit: bool| {
+            let moved = |host: &mut dyn ServerHost, commit: bool| {
                 host.transaction(|host, tx| {
                     let took = menu.cursor().extract(host, tx, &emerald, 9);
                     let went = [&chest, &inventory, &hotbar]
@@ -776,7 +785,7 @@ mod tests {
             };
             assert_eq!(moved(host, false), Err((9, [3, 3, 3])));
             assert_eq!(held(game), before);
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             assert_eq!(moved(host, true), Ok((9, [3, 3, 3])));
             let three = Some(ItemStack::new("minecraft:emerald", 3));
             assert_eq!(held(game), (three.clone(), three.clone(), three, None));
@@ -831,7 +840,7 @@ mod tests {
             for place in [&first, &hotbar] {
                 assert_eq!(write(game, place, "minecraft:stick", 1, true), 0);
                 assert_eq!(write(game, place, "minecraft:stick", -1, true), 0);
-                let host: &mut dyn Host = game;
+                let host: &mut dyn ServerHost = game;
                 let swapped =
                     host.transaction(|host, tx| Ok::<_, ()>(place.exchange(host, tx, &stick, 1)));
                 assert_eq!(swapped, Ok(0));
@@ -888,7 +897,7 @@ mod tests {
                     .craft_result
                     .clone()
             };
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let aborted = host.transaction(|host, tx| {
                 assert_eq!(grid.insert(host, tx, &log, 1), 1);
                 Err::<(), ()>(())
@@ -896,7 +905,7 @@ mod tests {
             assert!(aborted.is_err());
             let g = &game.lan.as_ref().unwrap().hub.guests[0];
             assert_eq!((g.craft_grid[0].clone(), result(game)), (None, None));
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let committed = host.transaction(|host, tx| {
                 assert_eq!(grid.insert(host, tx, &log, 1), 1);
                 // Not yet: the result is made once, at the commit.
@@ -939,7 +948,7 @@ mod tests {
             let again = open(game);
             assert_eq!(write(game, &shop, "minecraft:diamond", 1, true), 0);
             assert_eq!(write(game, &shop, "minecraft:diamond", -1, true), 0);
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             assert_eq!(shop.stack(host), None);
             let fresh = ItemPlace::MenuSlot {
                 menu: again,
@@ -983,7 +992,7 @@ mod tests {
             assert_eq!(write(game, &fuel, "minecraft:stick", 70, true), 64);
             // `FurnaceResultSlot.mayPlace` is false.
             assert_eq!(write(game, &result, "minecraft:iron_ingot", 1, true), 0);
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let bucket = ItemStack::new("minecraft:bucket", 1);
             assert_eq!(menu.slot_holds(host, 1, &bucket), Some(1));
             assert_eq!(menu.slot_holds(host, 2, &bucket), Some(0));
@@ -1007,7 +1016,7 @@ mod tests {
             assert_eq!(stale.carried(game), None);
             assert_eq!(write(game, &stale.cursor(), "minecraft:stick", -1, true), 0);
             assert_eq!(write(game, &stale.cursor(), "minecraft:stick", 1, true), 0);
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             assert_eq!(stale.cursor().stack(host), None);
             let fresh = menu_of(game).cursor();
             assert_eq!(write(game, &fresh, "minecraft:stick", -1, true), 1);
@@ -1026,7 +1035,7 @@ mod tests {
                 ItemPlace::MenuSlot { menu, slot: 2 },
             );
             let log = ItemResource::of(&ItemStack::new("minecraft:oak_log", 1));
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let committed = host.transaction(|host, tx| {
                 assert_eq!(grid.insert(host, tx, &log, 1), 1);
                 let child = host.transaction(|host, tx| {
@@ -1067,9 +1076,9 @@ mod tests {
             player.inventory[2] = Some(ItemStack::new("minecraft:stone", 1));
             game.lan.as_mut().unwrap().hub.guests.push(player);
             let before = inventories(game);
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let entity = host.entity(20).unwrap();
-            let items = entity.capability(host, &ENTITY_ITEMS).unwrap();
+            let items = entity.capability(host, &ENTITY_ITEMS, ()).unwrap();
             assert_eq!(items.size(host), 41);
             let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
             let aborted = host.transaction(|host, tx| {
@@ -1081,7 +1090,7 @@ mod tests {
 
             // `Inventory.add`: onto the selected stack (4 more), then the same item in order
             // (54 more), then the first empty slot (the other 12); not onto the stone.
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let went =
                 host.transaction(|host, tx| Ok::<_, ()>(items.insert_any(host, tx, &sticks, 70)));
             assert_eq!(went, Ok(70));
@@ -1091,7 +1100,7 @@ mod tests {
             assert_eq!(after[0], Some(ItemStack::new("minecraft:stick", 12)));
             assert_eq!(after[2], Some(ItemStack::new("minecraft:stone", 1)));
             // Index 39 is the head: a stick doesn't go there.
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let head =
                 host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 39, &sticks, 1)));
             assert_eq!(head, Ok(0));
@@ -1104,10 +1113,10 @@ mod tests {
     /// Two guests' trade on a menu, as the docs' recipe has it: each offer's index must still
     /// hold exactly what was offered, and goes whole to the other player, or nothing moves.
     fn trade(game: &mut super::Game<'_>, a: &[Offer], b: &[Offer]) -> Result<(), ()> {
-        let host: &mut dyn Host = game;
-        let items = |host: &mut dyn Host, id| {
+        let host: &mut dyn ServerHost = game;
+        let items = |host: &mut dyn ServerHost, id| {
             let entity = host.entity(id).unwrap();
-            entity.capability(host, &ENTITY_ITEMS).unwrap()
+            entity.capability(host, &ENTITY_ITEMS, ()).unwrap()
         };
         let (seller, buyer) = (items(host, 20), items(host, 21));
         host.transaction(|host, tx| {
@@ -1216,10 +1225,10 @@ mod tests {
             let position = horizon_core::geometry::Vec3::new(0.5, 65.0, 0.5);
             game.carts
                 .push(Minecart::new(500, CartKind::Chest, position));
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let cart = host.entity(500).unwrap();
             assert_eq!(cart.kind(host).as_deref(), Some("minecraft:chest_minecart"));
-            let items = cart.capability(host, &ENTITY_ITEMS).unwrap();
+            let items = cart.capability(host, &ENTITY_ITEMS, ()).unwrap();
             assert_eq!(items.size(host), 27);
             let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
             let aborted = host.transaction(|host, tx| {
@@ -1228,7 +1237,7 @@ mod tests {
             });
             assert!(aborted.is_err());
             assert!(game.carts[0].items.iter().all(Option::is_none));
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let went =
                 host.transaction(|host, tx| Ok::<_, ()>(items.insert_any(host, tx, &sticks, 70)));
             assert_eq!(went, Ok(70));
@@ -1243,9 +1252,364 @@ mod tests {
             // A plain minecart has no items.
             game.carts
                 .push(Minecart::new(501, CartKind::Rideable, position));
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let plain = host.entity(501).unwrap();
-            assert!(plain.capability(host, &ENTITY_ITEMS).is_none());
+            assert!(plain.capability(host, &ENTITY_ITEMS, ()).is_none());
+        });
+    }
+    /// A mod's `ENTITY_AUTOMATION` handler: one slot of up to 64 items, with the sides it was
+    /// asked for.
+    #[derive(Clone, Default)]
+    struct Bin {
+        held: Arc<std::sync::Mutex<Option<(String, u32)>>>,
+        sides: Arc<std::sync::Mutex<Vec<Option<Direction>>>>,
+    }
+
+    impl horizon_client::mod_api::ResourceHandler<ItemResource> for Bin {
+        fn size(&self, _: &mut dyn ServerHost) -> usize {
+            1
+        }
+        fn resource(&self, _: &mut dyn ServerHost, _: usize) -> Option<ItemResource> {
+            let held = self.held.lock().unwrap();
+            held.as_ref()
+                .map(|(item, _)| ItemResource::of(&ItemStack::new(item, 1)))
+        }
+        fn amount(&self, _: &mut dyn ServerHost, _: usize) -> u32 {
+            self.held.lock().unwrap().as_ref().map_or(0, |(_, n)| *n)
+        }
+        fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
+            64
+        }
+        fn insert(
+            &self,
+            _: &mut dyn ServerHost,
+            _: &horizon_client::mod_api::Transaction,
+            _: usize,
+            resource: &ItemResource,
+            amount: u32,
+        ) -> u32 {
+            let item = resource.to_stack(1).item.to_string();
+            let mut held = self.held.lock().unwrap();
+            match held.as_mut() {
+                Some((have, n)) if *have == item => {
+                    let went = amount.min(64 - *n);
+                    *n += went;
+                    went
+                }
+                Some(_) => 0,
+                None => {
+                    let went = amount.min(64);
+                    *held = Some((item, went));
+                    went
+                }
+            }
+        }
+        fn extract(
+            &self,
+            _: &mut dyn ServerHost,
+            _: &horizon_client::mod_api::Transaction,
+            _: usize,
+            resource: &ItemResource,
+            amount: u32,
+        ) -> u32 {
+            let item = resource.to_stack(1).item.to_string();
+            let mut held = self.held.lock().unwrap();
+            let Some((_, n)) = held.as_mut().filter(|(have, _)| *have == item) else {
+                return 0;
+            };
+            let came = amount.min(*n);
+            *n -= came;
+            if *n == 0 {
+                *held = None;
+            }
+            came
+        }
+    }
+
+    /// Runs `test` with a mod answering `ENTITY_AUTOMATION` for pigs with `bin`.
+    fn with_bin_pigs(bin: &Bin, test: impl FnOnce(&mut super::Game<'_>)) {
+        use horizon_client::mod_api::{self, Hooks, ModEntry, Mods, Registrar};
+        struct Pigs(Bin);
+        #[mod_api::__subscriptions]
+        impl Hooks for Pigs {
+            fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+                let bin = self.0.clone();
+                r.entity_capability(&ENTITY_AUTOMATION, "minecraft:pig", move |_, _, side| {
+                    bin.sides.lock().unwrap().push(side);
+                    Some(Box::new(bin.clone()))
+                });
+            }
+        }
+        let mods: Mods = vec![ModEntry::new("pigs", Box::new(Pigs(bin.clone())))].into();
+        horizon_client::mod_api::install_parts(&mods).unwrap();
+        horizon_client::mod_api::testing::with_mods(mods, || with_game(test));
+    }
+
+    /// A hopper at (0, 64, 0) facing `facing` holding `stack`, in an otherwise empty world.
+    fn hopper_with(game: &mut super::Game<'_>, facing: &str, stack: Option<ItemStack>) {
+        use horizon_client::chunk::Chunk;
+        game.options.dedicated = Some(Vec::new());
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        let base = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:hopper")
+            .unwrap();
+        let state = game.with_props(base, &[("facing", facing)]).unwrap();
+        game.world.set(0, 64, 0, state).unwrap();
+        let mut slots = vec![None; 5];
+        slots[0] = stack;
+        game.world
+            .block_entities
+            .insert((0, 64, 0), BlockEntity::Chest(slots));
+    }
+
+    fn pig(game: &mut super::Game<'_>, id: u32, y: f64) {
+        let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+        game.mobs.push(horizon_client::mobs::Mob::new(
+            id,
+            kind,
+            horizon_core::geometry::Vec3::new(0.5, y, 0.5),
+            0.0,
+        ));
+    }
+
+    fn hopper_slot(game: &super::Game<'_>) -> Option<ItemStack> {
+        match game.world.block_entities.get(&(0, 64, 0)) {
+            Some(BlockEntity::Chest(slots)) => slots[0].clone(),
+            _ => panic!("the hopper is gone"),
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_hopper_pushes_into_a_mod_entity_below_it_through_the_side_it_faces() {
+        let bin = Bin::default();
+        with_bin_pigs(&bin, |game| {
+            hopper_with(game, "down", Some(ItemStack::new("minecraft:stick", 3)));
+            pig(game, 700, 63.0);
+            game.hopper_try_move_items((0, 64, 0));
+            assert_eq!(
+                *bin.held.lock().unwrap(),
+                Some(("minecraft:stick".into(), 1))
+            );
+            assert_eq!(
+                hopper_slot(game),
+                Some(ItemStack::new("minecraft:stick", 2))
+            );
+            // The hopper reaches the pig from above: its top.
+            let sides = bin.sides.lock().unwrap();
+            assert!(!sides.is_empty());
+            assert!(sides.iter().all(|side| *side == Some(Direction::Up)));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_hopper_pulls_from_a_mod_entity_above_it_through_its_bottom() {
+        let bin = Bin::default();
+        *bin.held.lock().unwrap() = Some(("minecraft:stick".into(), 5));
+        with_bin_pigs(&bin, |game| {
+            hopper_with(game, "down", None);
+            pig(game, 700, 65.0);
+            game.hopper_try_move_items((0, 64, 0));
+            assert_eq!(
+                hopper_slot(game),
+                Some(ItemStack::new("minecraft:stick", 1))
+            );
+            assert_eq!(
+                *bin.held.lock().unwrap(),
+                Some(("minecraft:stick".into(), 4))
+            );
+            let sides = bin.sides.lock().unwrap();
+            assert!(!sides.is_empty());
+            assert!(sides.iter().all(|side| *side == Some(Direction::Down)));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_hopper_still_fills_a_chest_minecart_and_a_player_is_not_reached() {
+        use super::super::minecarts::{CartKind, Minecart};
+        let bin = Bin::default();
+        with_bin_pigs(&bin, |game| {
+            open_to_lan(game);
+            hopper_with(game, "down", Some(ItemStack::new("minecraft:stick", 3)));
+            let position = horizon_core::geometry::Vec3::new(0.5, 63.0, 0.5);
+            game.carts
+                .push(Minecart::new(500, CartKind::Chest, position));
+            // A guest standing in the same cell, and no pig anywhere.
+            let mut player = guest(1);
+            player.position = [0.5, 63.0, 0.5];
+            game.lan.as_mut().unwrap().hub.guests.push(player);
+            let host: &mut dyn ServerHost = game;
+            let player = host.entity(20).unwrap();
+            assert!(
+                player
+                    .capability(host, &ENTITY_AUTOMATION, Some(Direction::Up))
+                    .is_none()
+            );
+            game.hopper_try_move_items((0, 64, 0));
+            assert_eq!(
+                game.carts[0].items[0],
+                Some(ItemStack::new("minecraft:stick", 1))
+            );
+            assert_eq!(
+                hopper_slot(game),
+                Some(ItemStack::new("minecraft:stick", 2))
+            );
+            assert!(bin.held.lock().unwrap().is_none());
+        });
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_dropper_puts_into_a_mod_entity_in_front_of_it() {
+        use horizon_client::chunk::Chunk;
+        let bin = Bin::default();
+        with_bin_pigs(&bin, |game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let base = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:dropper")
+                .unwrap();
+            let dropper = game.with_props(base, &[("facing", "down")]).unwrap();
+            game.world.set(0, 64, 0, dropper).unwrap();
+            let mut slots = vec![None; 9];
+            slots[4] = Some(ItemStack::new("minecraft:stick", 2));
+            game.world
+                .block_entities
+                .insert((0, 64, 0), BlockEntity::Chest(slots));
+            pig(game, 700, 63.0);
+            let dropped = game.dropped.len();
+            game.dispense_from(horizon_core::position::BlockPos::new(0, 64, 0), dropper)
+                .unwrap();
+            assert_eq!(
+                *bin.held.lock().unwrap(),
+                Some(("minecraft:stick".into(), 1))
+            );
+            assert_eq!(game.dropped.len(), dropped);
+            match game.world.block_entities.get(&(0, 64, 0)) {
+                Some(BlockEntity::Chest(slots)) => {
+                    assert_eq!(slots[4], Some(ItemStack::new("minecraft:stick", 1)));
+                }
+                _ => panic!("the dropper is gone"),
+            }
+            let sides = bin.sides.lock().unwrap();
+            assert!(!sides.is_empty());
+            assert!(sides.iter().all(|side| *side == Some(Direction::Up)));
+        });
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_crafter_puts_into_a_mod_entity_and_dispenses_only_what_it_refuses() {
+        use horizon_client::{chunk::Chunk, mod_api::NativeBlockUpdateFlags};
+        use horizon_core::{position::BlockPos, random::RandomSource as _};
+
+        let bin = Bin::default();
+        with_bin_pigs(&bin, |game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let base = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:crafter")
+                .unwrap();
+            let crafter = game
+                .with_props(base, &[("orientation", "down_east")])
+                .unwrap();
+            let level = game.native_level("minecraft:overworld").unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [0, 64, 0],
+                crafter,
+                NativeBlockUpdateFlags::NONE
+            ));
+            pig(game, 700, 63.0);
+            for (before, after, refused) in [(0, 4, 0), (62, 64, 2), (64, 64, 4)] {
+                *bin.held.lock().unwrap() =
+                    (before > 0).then(|| ("minecraft:stick".into(), before));
+                let Some(BlockEntity::Crafter(c)) = game.world.block_entities.get_mut(&(0, 64, 0))
+                else {
+                    panic!("the placed crafter is missing");
+                };
+                c.items[0] = Some(ItemStack::new("minecraft:oak_planks", 1));
+                c.items[3] = Some(ItemStack::new("minecraft:oak_planks", 1));
+                let dropped = game.dropped.len();
+                let mut random = game.world.random.clone();
+                game.dispense_from(BlockPos::new(0, 64, 0), crafter)
+                    .unwrap();
+                assert_eq!(
+                    *bin.held.lock().unwrap(),
+                    Some(("minecraft:stick".into(), after))
+                );
+                let Some(BlockEntity::Crafter(c)) = game.world.block_entities.get(&(0, 64, 0))
+                else {
+                    panic!("the crafter is gone");
+                };
+                assert!(c.items.iter().all(Option::is_none));
+                let output = &game.dropped[dropped..];
+                if refused == 0 {
+                    assert!(output.is_empty());
+                    // One candidate-selection draw, including a single candidate, and no
+                    // dispensing draws when the handler took the whole result.
+                    random.next_int_bound(1).unwrap();
+                    assert_eq!(game.world.random.clone().next_long(), random.next_long());
+                } else {
+                    assert_eq!(output.len(), 1);
+                    assert_eq!(output[0].stack, ItemStack::new("minecraft:stick", refused));
+                }
+            }
+            assert!(!game.world.block_entities.contains_key(&(0, 63, 0)));
+            let sides = bin.sides.lock().unwrap();
+            assert!(!sides.is_empty());
+            assert!(sides.iter().all(|side| *side == Some(Direction::Up)));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_without_an_automation_provider_leaves_hoppers_on_the_vanilla_path() {
+        use horizon_client::mod_api::{
+            self, ENTITY_ENERGY, Hooks, ModEntry, Mods, Registrar, has_entity_providers,
+        };
+        use horizon_core::random::RandomSource as _;
+        struct Energy;
+        #[mod_api::__subscriptions]
+        impl Hooks for Energy {
+            fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+                r.entity_capability(&ENTITY_ENERGY, "minecraft:pig", |_, _, _| None);
+            }
+        }
+        let mods: Mods = vec![ModEntry::new("energy", Box::new(Energy))].into();
+        mod_api::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            assert!(!has_entity_providers(&ENTITY_AUTOMATION));
+            with_game(|game| {
+                hopper_with(game, "down", Some(ItemStack::new("minecraft:stick", 3)));
+                pig(game, 700, 63.0);
+                let mut before = game.world.random.clone();
+                game.hopper_try_move_items((0, 64, 0));
+                // Nothing to reach, and no draw made: no container entity was a candidate.
+                assert_eq!(
+                    hopper_slot(game),
+                    Some(ItemStack::new("minecraft:stick", 3))
+                );
+                assert_eq!(
+                    game.world.random.clone().next_int_bound(1 << 30),
+                    before.next_int_bound(1 << 30)
+                );
+            });
         });
     }
 }

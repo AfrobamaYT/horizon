@@ -1,12 +1,14 @@
 {
   "hooks": [],
   "helpers": [
-    { "name": "block_entity", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_ref" },
+    { "name": "block_entity", "side": "both", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_ref" },
+    { "name": "player_open_menu", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_player_open_block_menu", "receiver": "player", "doc": "Opens a block entity's menu for a connected player, returning true only when it opens. Stale or wrong-level handles, non-providers, cancelled opens and unconnected players return false." },
     { "name": "block_entity_kind", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_kind", "receiver": "block_entity" },
     { "name": "block_entity_position", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_position", "receiver": "block_entity" },
     { "name": "block_entity_level", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_level", "receiver": "block_entity" },
     { "name": "block_entity_data", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_data", "receiver": "block_entity" },
     { "name": "block_entity_merge_data", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_merge_data", "receiver": "block_entity" },
+    { "name": "block_entity_replace_data", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_replace_data", "receiver": "block_entity" },
     { "name": "block_entity_set_changed", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_set_changed", "receiver": "block_entity" },
     { "name": "block_entity_name", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_name", "receiver": "block_entity" },
     { "name": "block_entity_set_name", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_set_name", "receiver": "block_entity" }

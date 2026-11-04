@@ -88,6 +88,8 @@ pub(super) struct Parked {
     raiding: Raiding,
     sculk: SculkState,
     creaking: CreakingState,
+    /// Natural spawning's candidate cache: each level keeps its own players' squares.
+    spawn_scratch: super::natural_spawning::SpawnScratch,
     /// Server ticks since a player was last in the level.
     idle: u32,
 }
@@ -141,6 +143,15 @@ impl Levels {
             .map(|(_, level)| &level.world)
     }
 
+    /// The world of the level not in place whose dimension is `dimension`, to
+    /// change.
+    pub(super) fn parked_world_mut_of(&mut self, dimension: &str) -> Option<&mut World> {
+        self.parked
+            .iter_mut()
+            .find(|(dim, _)| dim.id() == dimension)
+            .map(|(_, level)| &mut level.world)
+    }
+
     /// The streaming of the level not in place whose dimension is `dimension`.
     pub(super) fn parked_streaming_of(&self, dimension: &str) -> Option<&Streaming> {
         self.parked
@@ -164,11 +175,6 @@ impl Levels {
     /// The worlds of the levels not in place.
     pub(super) fn parked_worlds(&self) -> impl Iterator<Item = &World> {
         self.parked.values().map(|level| &level.world)
-    }
-
-    /// The world of the level not in place, in `dim`, to change.
-    pub(super) fn parked_world_mut(&mut self, dim: Dim) -> Option<&mut World> {
-        self.parked.get_mut(&dim).map(|level| &mut level.world)
     }
 
     /// The level not in place, in `dim`.
@@ -261,6 +267,7 @@ impl Game<'_> {
             raiding: Default::default(),
             sculk: Default::default(),
             creaking: Default::default(),
+            spawn_scratch: Default::default(),
             idle: 0,
         })
     }
@@ -327,6 +334,7 @@ impl Game<'_> {
         self.raiding.swap_level(&mut p.raiding);
         self.sculk.swap_level(&mut p.sculk);
         self.creaking.swap_level(&mut p.creaking);
+        swap(&mut self.spawn_scratch, &mut p.spawn_scratch);
         // What only the client draws starts over.
         self.particles.clear();
         self.pickups.clear();
@@ -439,8 +447,13 @@ impl Game<'_> {
         // `ServerTickStart` before that level work, where NeoForge fires
         // `ServerTickEvent.Pre`. A paused pass and a held server tick nothing.
         let running = (!paused && !self.agent.hold_server).then(|| self.clock.world_runs());
+        let server = self.serving.is_some() || self.options.dedicated.is_some();
+        // A config edited while the server is paused (empty) still reloads.
+        if server {
+            self.native_configs_poll();
+        }
         if let Some(running) = running
-            && (self.serving.is_some() || self.options.dedicated.is_some())
+            && server
         {
             self.native_lifecycle_server_tick_start(running);
         }
@@ -546,14 +559,16 @@ impl Game<'_> {
             .map(|(end, start)| (end - start).as_secs_f32() * 1000.0);
         // Taken every tick: nothing else takes this thread's spans.
         let spans = horizon_client::spans::take();
+        let notes = horizon_client::spans::take_notes();
         if let Some(threshold) = self.options.spikes
             && wall > threshold
         {
             let cpu = cpu.map_or_else(String::new, |c| format!(", cpu {c:.1} ms"));
             log::info!(
-                "Horizon: slow tick {wall:.1} ms{cpu} ({} mobs): {}",
+                "Horizon: slow tick {wall:.1} ms{cpu} ({} mobs): {}{}",
                 self.mobs.len(),
-                horizon_client::spans::describe(&spans)
+                horizon_client::spans::describe(&spans),
+                slowest_steps(&notes)
             );
         }
         record(wall, cpu, spans);
@@ -709,11 +724,13 @@ impl Game<'_> {
         }
         self.levels.heard_open.push(dim);
         self.native_level_load(dim.id());
+        self.validate_mod_chunk_tickets(dim);
     }
 
     /// The mods hear `dim`'s level close (`LevelEvent.Unload`), once for
     /// each open they heard.
     fn native_level_closed(&mut self, dim: Dim) {
+        self.remove_level_fake_players(dim.id());
         let Some(i) = self.levels.heard_open.iter().position(|d| *d == dim) else {
             return;
         };
@@ -744,4 +761,17 @@ impl Game<'_> {
         }
         self.enter_level(back)
     }
+}
+
+/// A slow tick's line's end: the steps it noted as its slowest (`spans::note`), whose packets
+/// or which player's event, or nothing.
+fn slowest_steps(notes: &[(f32, String)]) -> String {
+    if notes.is_empty() {
+        return String::new();
+    }
+    let list: Vec<String> = notes
+        .iter()
+        .map(|(ms, what)| format!("{what} {ms:.1}"))
+        .collect();
+    format!("; slowest: {}", list.join(", "))
 }

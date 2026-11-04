@@ -100,9 +100,8 @@ pub struct ChunkEncoder {
     coder: Arc<SectionCoder>,
     /// Block entity type id per state (-1 for none).
     entity_types: Vec<i32>,
-    /// Whether the state is a mod block's: its type is the block's own, and
-    /// it has a block entity only when the mod made one.
-    mod_entities: Vec<bool>,
+    /// A native state's declared type, sent only for a matching instance.
+    mod_entities: Vec<Option<Arc<str>>>,
     /// The mods' update tags (`native_block_entity_update_tag`).
     pub mod_update_tag: Option<ModUpdateTag>,
     /// The block registry id of each state's block, for BlockEvent.
@@ -367,11 +366,122 @@ impl Warm {
     }
 }
 
+/// Columns below which their bodies are written on the tick's thread alone.
+const BODIES_MIN: usize = 4;
+
+/// A column's body with what reads the level done: its sections' bytes, its
+/// heightmaps and its block entities. What is left, the light layers and the
+/// writing, reads only its own sections, so any thread can finish it.
+struct Prepared {
+    x: i32,
+    z: i32,
+    heightmaps: ColumnHeightmaps,
+    wires: Vec<Arc<[u8]>>,
+    /// The block entities as `List<BlockEntityInfo>` writes them.
+    tags: Vec<u8>,
+    /// The level's sections of the column.
+    sections: Vec<Arc<Section>>,
+    around: SectionMask,
+    sky: bool,
+}
+impl Prepared {
+    /// The body as `Clientbound::encode` gives it for LevelChunkWithLight,
+    /// written once into a buffer of its final size.
+    fn write(&self) -> Vec<u8> {
+        let lights = light_sections(&self.sections, self.around, SectionLight::of);
+        let buffer: usize = self.wires.iter().map(|w| w.len()).sum();
+        // The masks, counts and lengths fit the 64 bytes.
+        let size = 64
+            + self
+                .heightmaps
+                .iter()
+                .map(|(_, h)| 10 + 8 * h.len())
+                .sum::<usize>()
+            + buffer
+            + self.tags.len()
+            + lights.len() * 2 * (2048 + 3);
+        let mut w = Writer {
+            data: Vec::with_capacity(size),
+        };
+        w.varint(horizon_protocol::ids::play::clientbound::LEVEL_CHUNK_WITH_LIGHT);
+        w.i32(self.x);
+        w.i32(self.z);
+        Heightmaps::write(&*self.heightmaps, &mut w);
+        w.varint(buffer as i32);
+        for wire in &self.wires {
+            w.bytes(wire);
+        }
+        w.bytes(&self.tags);
+        write_light(&lights, self.sky, &mut w);
+        w.data
+    }
+}
+
+/// Bodies to finish, each taken by whichever thread is free first. A body
+/// another thread is still writing is waited for (`OnceLock::get_or_init`).
+struct Bodies {
+    columns: Vec<Prepared>,
+    next: AtomicUsize,
+    done: Vec<OnceLock<std::sync::Mutex<Vec<u8>>>>,
+}
+impl Bodies {
+    /// Take work until none is left.
+    fn run(&self) {
+        loop {
+            let i = self.next.fetch_add(1, Ordering::Relaxed);
+            let Some(column) = self.columns.get(i) else {
+                return;
+            };
+            self.done[i].get_or_init(|| std::sync::Mutex::new(column.write()));
+        }
+    }
+}
+
+/// What the warm-up threads take.
+#[derive(Clone)]
+enum Job {
+    Warm(Arc<Warm>),
+    Bodies(Arc<Bodies>),
+}
+impl Job {
+    fn run(&self) {
+        match self {
+            Self::Warm(job) => job.run(),
+            Self::Bodies(job) => job.run(),
+        }
+    }
+    /// Whether this is the job behind `ptr`.
+    fn is(&self, ptr: *const ()) -> bool {
+        match self {
+            Self::Warm(job) => Arc::as_ptr(job).cast::<()>() == ptr,
+            Self::Bodies(job) => Arc::as_ptr(job).cast::<()>() == ptr,
+        }
+    }
+}
+
 /// The warm-up threads (one per core besides the tick's) and the job they
-/// take: its number, and the job while it has sections left to take.
+/// take: its number, and the job while it has work left to take.
 struct WarmPool {
-    job: std::sync::Mutex<(u64, Option<Arc<Warm>>)>,
+    job: std::sync::Mutex<(u64, Option<Job>)>,
     ready: std::sync::Condvar,
+}
+impl WarmPool {
+    /// Hand `job` to the threads.
+    fn post(&self, job: Job) {
+        {
+            let mut slot = self.job.lock().unwrap();
+            slot.0 += 1;
+            slot.1 = Some(job);
+        }
+        self.ready.notify_all();
+    }
+    /// Everything of the job behind `ptr` is claimed: it leaves the slot.
+    fn clear(&self, ptr: *const ()) {
+        let mut slot = self.job.lock().unwrap();
+        if slot.1.as_ref().is_some_and(|j| j.is(ptr)) {
+            slot.1 = None;
+        }
+    }
 }
 
 /// The warm-up threads, started the first time; none on a single core or
@@ -437,6 +547,22 @@ impl ChunkEncoder {
         biome_names: &[String],
         biome_registry: &[String],
     ) -> Self {
+        Self::with_types(
+            states,
+            builtin,
+            biome_names,
+            biome_registry,
+            crate::block_entity_types::current(),
+        )
+    }
+
+    fn with_types(
+        states: impl IntoIterator<Item = (Arc<str>, bool, Option<crate::blocks::SignForm>)>,
+        builtin: &Builtin,
+        biome_names: &[String],
+        biome_registry: &[String],
+        declared: Option<&crate::block_entity_types::BlockEntityTypes>,
+    ) -> Self {
         let types = builtin.get("minecraft:block_entity_type");
         let blocks = builtin.get("minecraft:block");
         let mut flags = Vec::new();
@@ -455,23 +581,18 @@ impl ChunkEncoder {
                     f |= FLUID;
                 }
             }
-            // A mod block's block entity type is named after the block
-            // (`mod_content`: registries.json), unless it is one of vanilla's.
-            let vanilla = sign.map(crate::blocks::SignForm::block_entity_type);
-            let modded = !name.starts_with("minecraft:") && vanilla.is_none();
-            let t = if modded {
-                Some(&*name)
-            } else {
-                vanilla.or_else(|| block_entity_type(&name))
-            }
-            .and_then(|t| types.and_then(|ids| ids.id(t)))
-            .unwrap_or(-1);
+            let modded = declared.and_then(|d| d.type_for(&name));
+            let t = modded
+                .or_else(|| sign.map(crate::blocks::SignForm::block_entity_type))
+                .or_else(|| block_entity_type(&name))
+                .and_then(|t| types.and_then(|ids| ids.id(t)))
+                .unwrap_or(-1);
             if t >= 0 {
                 f |= ENTITY;
             }
             flags.push(f);
             entity_types.push(t);
-            mod_entities.push(modded && t >= 0);
+            mod_entities.push(modded.map(Arc::from));
             block_ids.push(blocks.and_then(|b| b.id(&name)).unwrap_or(0));
         }
         let biome_ids = biome_names
@@ -607,6 +728,18 @@ impl ChunkEncoder {
             .filter(|t| **t >= 0)
             .copied()
     }
+    /// Native entities must match the state's declared type, for chunks and updates alike.
+    pub fn entity_matches(&self, state: u32, entity: Option<&BlockEntity>) -> bool {
+        match self
+            .mod_entities
+            .get(state as usize)
+            .and_then(Option::as_deref)
+        {
+            Some(kind) => matches!(entity, Some(BlockEntity::Mod(m)) if m.id() == kind),
+            None => !matches!(entity, Some(BlockEntity::Mod(_))),
+        }
+    }
+
     /// The update tag of the block entity at `pos` (`getUpdateTag`): a
     /// mod's from its hook, a vanilla one's from [`entity_tag`].
     pub fn update_tag(&self, pos: (i32, i32, i32), entity: &BlockEntity) -> Option<Tag> {
@@ -750,20 +883,9 @@ impl ChunkEncoder {
             return;
         };
         let job = Arc::new(job);
-        {
-            let mut slot = pool.job.lock().unwrap();
-            slot.0 += 1;
-            slot.1 = Some(job.clone());
-        }
-        pool.ready.notify_all();
+        pool.post(Job::Warm(job.clone()));
         job.run();
-        // Everything is claimed: the job leaves the slot.
-        {
-            let mut slot = pool.job.lock().unwrap();
-            if slot.1.as_ref().is_some_and(|j| Arc::ptr_eq(j, &job)) {
-                slot.1 = None;
-            }
-        }
+        pool.clear(Arc::as_ptr(&job).cast());
         self.keep(&job);
     }
 
@@ -840,36 +962,72 @@ impl ChunkEncoder {
         block_entities: &HashMap<(i32, i32, i32), BlockEntity>,
         around: SectionMask,
     ) -> Vec<u8> {
+        self.prepare(chunk, block_entities, around).write()
+    }
+
+    /// What of a column's body reads the level or the caches.
+    fn prepare(
+        &self,
+        chunk: &Chunk,
+        block_entities: &HashMap<(i32, i32, i32), BlockEntity>,
+        around: SectionMask,
+    ) -> Prepared {
         let (wires, entities) = self.blocks(chunk, block_entities);
         let heightmaps = self.heightmaps_of(chunk);
-        let lights = self.light_sections(chunk, around);
-        let buffer: usize = wires.iter().map(|w| w.len()).sum();
         // Before the light: their tags' size is only known once written.
         let mut tags = Writer::new();
         List::<BlockEntityInfo>::write(&entities, &mut tags);
-        // The masks, counts and lengths fit the 64 bytes.
-        let size = 64
-            + heightmaps
-                .iter()
-                .map(|(_, h)| 10 + 8 * h.len())
-                .sum::<usize>()
-            + buffer
-            + tags.data.len()
-            + lights.len() * 2 * (2048 + 3);
-        let mut w = Writer {
-            data: Vec::with_capacity(size),
-        };
-        w.varint(horizon_protocol::ids::play::clientbound::LEVEL_CHUNK_WITH_LIGHT);
-        w.i32(chunk.x);
-        w.i32(chunk.z);
-        Heightmaps::write(&*heightmaps, &mut w);
-        w.varint(buffer as i32);
-        for wire in &wires {
-            w.bytes(wire);
+        Prepared {
+            x: chunk.x,
+            z: chunk.z,
+            heightmaps,
+            wires,
+            tags: tags.data,
+            sections: chunk.sections[self.sections.clone()].to_vec(),
+            around,
+            sky: self.sky,
         }
-        w.bytes(&tags.data);
-        write_light(&lights, self.sky, &mut w);
-        w.data
+    }
+
+    /// [`Self::body_with`] for each of `chunks`, in their order. What reads
+    /// the level is done here, column by column as `body_with` does; the
+    /// light layers and the writing, most of a body's cost, go to the warm-up
+    /// threads too when there are enough columns. This thread takes bodies
+    /// as well and waits only for the ones still being written.
+    pub fn bodies_with(
+        &self,
+        chunks: &[&Chunk],
+        world: &crate::world::World,
+        protos: &dyn Fn(i32, i32) -> Option<SectionMask>,
+    ) -> Vec<Vec<u8>> {
+        let columns: Vec<Prepared> = chunks
+            .iter()
+            .map(|c| self.prepare(c, &world.block_entities, self.around(c, world, protos)))
+            .collect();
+        let pool = if columns.len() >= BODIES_MIN {
+            warm_pool()
+        } else {
+            None
+        };
+        let Some(pool) = pool else {
+            return columns.iter().map(Prepared::write).collect();
+        };
+        let job = Arc::new(Bodies {
+            done: columns.iter().map(|_| OnceLock::new()).collect(),
+            columns,
+            next: AtomicUsize::new(0),
+        });
+        pool.post(Job::Bodies(job.clone()));
+        job.run();
+        pool.clear(Arc::as_ptr(&job).cast());
+        job.columns
+            .iter()
+            .zip(&job.done)
+            .map(|(c, done)| {
+                let body = done.get_or_init(|| std::sync::Mutex::new(c.write()));
+                std::mem::take(&mut *body.lock().unwrap())
+            })
+            .collect()
     }
 
     /// ClientboundLightUpdatePacket for the light sections over `changed` (a
@@ -970,9 +1128,7 @@ impl ChunkEncoder {
                 let wy = chunk.min_y() + (i as i32) * 16 + y;
                 let pos = (chunk.x * 16 + x, wy, chunk.z * 16 + z);
                 let entity = block_entities.get(&pos);
-                // A mod block whose mod made no block entity has none to send.
-                if self.mod_entities[state as usize] && !matches!(entity, Some(BlockEntity::Mod(_)))
-                {
+                if !self.entity_matches(state, entity) {
                     continue;
                 }
                 entity_infos.push(BlockEntityInfo {
@@ -1442,20 +1598,56 @@ mod tests {
         assert_eq!(sent(&chunk), scan(&chunk));
     }
 
-    /// A mod block's block entity goes out with its block's own type and the
-    /// tag its mod gives; a mod block whose mod made none is left out.
+    /// Shared types are resolved per state; undeclared and stale entities stay off the wire.
     #[test]
-    fn mod_block_entities_carry_their_blocks_type_and_the_mods_tag() {
+    fn shared_block_entity_types_supply_chunks_updates_and_detached_encoders() {
+        use crate::block_entity_types::BlockEntityTypes;
         let builtin = Builtin::parse(
             r#"{"minecraft:block_entity_type": {"entries": {
                 "minecraft:chest": {"protocol_id": 1},
+                "minecraft:sign": {"protocol_id": 7},
                 "test:machine": {"protocol_id": 49},
                 "test:casing": {"protocol_id": 50}}}}"#,
         )
         .unwrap();
-        let states =
-            ["minecraft:air", "test:machine", "test:casing"].map(|n| (Arc::<str>::from(n), false));
-        let mut encoder = ChunkEncoder::new(states, &builtin, &[], &[]);
+        let types = BlockEntityTypes::new(
+            [
+                ("test:press".into(), "test:machine".into()),
+                ("test:mill".into(), "test:machine".into()),
+            ]
+            .into(),
+            builtin
+                .get("minecraft:block_entity_type")
+                .unwrap()
+                .names
+                .clone(),
+        );
+        let states = [
+            "minecraft:air",
+            "test:press",
+            "test:mill",
+            "test:press",
+            "test:casing",
+        ]
+        .map(|n| {
+            (
+                Arc::<str>::from(n),
+                false,
+                (n == "test:press").then_some(crate::blocks::SignForm {
+                    hanging: false,
+                    wall: false,
+                }),
+            )
+        });
+        let mut encoder = ChunkEncoder::with_types(states, &builtin, &[], &[], Some(&types));
+        for state in [1, 2, 3] {
+            assert_eq!(encoder.entity_type(state), Some(49));
+        }
+        assert_eq!(
+            encoder.entity_type(4),
+            None,
+            "no implicit type=block fallback"
+        );
         encoder.mod_update_tag = Some(|pos, entity| {
             let mut tag = Compound::new();
             tag.insert(
@@ -1467,25 +1659,56 @@ mod tests {
         });
         let mut chunk = Chunk::empty(0, 0);
         chunk.set(1, MIN_Y + 2, 3, 1);
-        chunk.set(5, MIN_Y + 2, 5, 2);
-        let mut machine = ModBlockEntity::new(crate::containers::ModBlockEntityFields {
-            id: "test:machine".into(),
-            ..Default::default()
-        });
+        chunk.set(5, MIN_Y + 2, 5, 4);
+        chunk.set(2, MIN_Y + 2, 3, 2);
+        chunk.set(3, MIN_Y + 2, 3, 3);
+        chunk.set(4, MIN_Y + 2, 3, 1); // declared, but no instance
+        let mut machine = ModBlockEntity::new("test:machine".into(), Default::default());
         machine.nbt.insert("active".into(), Tag::Byte(1));
         machine.nbt.insert("recipe".into(), Tag::Int(7));
-        let block_entities =
-            HashMap::from([((1, MIN_Y + 2, 3), BlockEntity::Mod(Box::new(machine)))]);
+        let mut block_entities = HashMap::from([
+            (
+                (1, MIN_Y + 2, 3),
+                BlockEntity::Mod(Box::new(machine.clone())),
+            ),
+            ((2, MIN_Y + 2, 3), BlockEntity::Mod(Box::new(machine))),
+            (
+                (3, MIN_Y + 2, 3),
+                BlockEntity::Mod(Box::new(ModBlockEntity::new(
+                    "test:wrong".into(),
+                    Default::default(),
+                ))),
+            ),
+        ]);
+        assert!(!encoder.entity_matches(1, None));
+        assert!(!encoder.entity_matches(3, block_entities.get(&(3, MIN_Y + 2, 3))));
         let infos = encoder.encode(&chunk, &block_entities).chunk.block_entities;
-        assert_eq!(infos.len(), 1, "the casing has no block entity");
-        assert_eq!((infos[0].kind, infos[0].y), (49, (MIN_Y + 2) as i16));
-        let mut expected = Compound::new();
-        expected.insert("active".into(), Tag::Byte(1));
-        expected.insert("x".into(), Tag::Int(1));
-        assert_eq!(infos[0].tag, Tag::Compound(expected));
+        assert_eq!(infos.len(), 2, "only the two matching entities are sent");
+        for info in &infos {
+            assert_eq!((info.kind, info.y), (49, (MIN_Y + 2) as i16));
+            let mut expected = Compound::new();
+            expected.insert("active".into(), Tag::Byte(1));
+            expected.insert("x".into(), Tag::Int(i32::from(info.packed_xz as u8 >> 4)));
+            assert_eq!(info.tag, Tag::Compound(expected));
+        }
         // As does an encoder for saved chunks past the view distance (`lan::far`).
         let far = encoder.detached().encode(&chunk, &block_entities);
-        assert_eq!(far.chunk.block_entities[0].tag, infos[0].tag);
+        assert_eq!(far.chunk.block_entities.len(), 2);
+        for info in far.chunk.block_entities {
+            let original = infos
+                .iter()
+                .find(|i| i.packed_xz == info.packed_xz)
+                .unwrap();
+            assert_eq!(info.tag, original.tag);
+        }
+        // The alternate property state of press uses the same type.
+        block_entities.insert(
+            (3, MIN_Y + 2, 3),
+            block_entities[&(1, MIN_Y + 2, 3)].clone(),
+        );
+        let all = encoder.encode(&chunk, &block_entities).chunk.block_entities;
+        assert_eq!(all.len(), 3);
+        assert!(all.iter().all(|e| e.kind == 49));
         // An empty tag is not sent either (BlockEntityInfo.create).
         encoder.mod_update_tag = Some(|_, _| Some(Compound::new()));
         let infos = encoder.encode(&chunk, &block_entities).chunk.block_entities;

@@ -1,7 +1,7 @@
 //! Living damage-source bypass, armor and resistance/protection dispatch.
 use crate::{
     combat_rules::{self, ArmorWorld},
-    living_damage::{STAT_LIMIT, positive, stat_amount},
+    living_damage::{MagicAbsorb, STAT_LIMIT, positive, stat_amount},
 };
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Bypass {
@@ -36,13 +36,18 @@ pub fn after_armor<W: DamageReductionWorld>(world: &mut W, damage: f32) -> Resul
     let toughness = world.toughness_attribute()? as f32;
     combat_rules::after_armor(world, damage, armor, toughness)
 }
+/// `getDamageAfterMagicAbsorb`: Resistance, then protection enchantments.
 pub fn after_magic<W: DamageReductionWorld>(
     world: &mut W,
     mut damage: f32,
-) -> Result<f32, W::Error> {
+) -> Result<MagicAbsorb, W::Error> {
     if world.bypasses(Bypass::Effects)? {
-        return Ok(damage);
+        return Ok(MagicAbsorb {
+            damage,
+            mob_effects: 0.0,
+        });
     }
+    let mut mob_effects = 0.0;
     if world.has_resistance()? && !world.bypasses(Bypass::Resistance)? {
         let reduction = world
             .resistance_amplifier()?
@@ -52,6 +57,7 @@ pub fn after_magic<W: DamageReductionWorld>(
         let original = damage;
         damage = positive((damage * remainder as f32) / 25.0);
         let resisted = original - damage;
+        mob_effects = resisted;
         if resisted > 0.0 && resisted < STAT_LIMIT {
             if world.victim_is_server_player() {
                 world.award_resisted(stat_amount(resisted))?;
@@ -61,10 +67,16 @@ pub fn after_magic<W: DamageReductionWorld>(
         }
     }
     if damage <= 0.0 {
-        return Ok(0.0);
+        return Ok(MagicAbsorb {
+            damage: 0.0,
+            mob_effects,
+        });
     }
     if world.bypasses(Bypass::Enchantments)? {
-        return Ok(damage);
+        return Ok(MagicAbsorb {
+            damage,
+            mob_effects,
+        });
     }
     let protection = if let Some(level) = world.server_level()? {
         world.damage_protection(level)?
@@ -74,5 +86,8 @@ pub fn after_magic<W: DamageReductionWorld>(
     if protection > 0.0 {
         damage = combat_rules::after_magic(damage, protection);
     }
-    Ok(damage)
+    Ok(MagicAbsorb {
+        damage,
+        mob_effects,
+    })
 }

@@ -26,7 +26,7 @@ Feature → files → harness for the most-changed areas: [docs/architecture.md]
 - Everything players run is Rust. Python/Java only for dev tools and harness drivers in `tools/`.
 - Horizon-only features follow [docs/design-system.md](docs/design-system.md) and are off by default where
   they would change the vanilla look.
-- Small PRs (< ~500 lines). Labels: `feature` (players get something new), `skip-release` (they see no
+- One concern per PR, at whatever size it needs; no line limit on the fork. Labels: `feature` (players get something new), `skip-release` (they see no
   change), none for a fix. Agents never add `release-now`: the maintainer decides it. Merges ship in batches of 5, or after
   6 hours ([docs/release-flow.md](docs/release-flow.md)).
 - Contributors first: `gh pr list --state open --search <area>` before you start; never duplicate theirs.
@@ -59,8 +59,15 @@ break**, and every change to it follows these rules. Reviews block a PR that bre
   hooks. Items, fluids and energy go through Parts under transactions. Commands, players, messages and
   scheduling are small service traits reached from `Host`; attachments live on handles. Don't add a
   method to `Host` that has a natural receiver.
-- **Versions are the exact build.** A mod is built against one game build and the loader checks that build
-  id. `.hmod` is the one package format.
+- **One dependency model, two build targets.** Native and wasm mods share exactly the same dependency
+  model; the only difference is the build target. `[dependencies]` in `horizon-mod.toml` (required and
+  optional, semver on `horizon-mod.toml` versions, dependency-ordered dispatch, a mod publishing functions
+  and statics its dependents call) means the same for both: native links through Cargo, wasm through the
+  runtime's linker, and one copy of a library is shared by its dependents. No wasm-only packaging unit or
+  multi-mod bundle, and no rule that holds for one target only. A change to the dependency model lands
+  for both targets in the same PR.
+- **Versions are the exact build for native mods.** A native mod is built against one game build and the
+  loader checks that build id; a wasm mod links by interface instead. `.hmod` is the one package format.
 - **DRY.** One implementation per behaviour: reuse the existing helper, write path or generator rule, and
   let the catalog and generator own repetition instead of hand-written match arms.
 - **SOLID.** Each module, trait and handle has one job; traits stay small and split by side and concern;

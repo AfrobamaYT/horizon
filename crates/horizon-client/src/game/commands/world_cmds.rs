@@ -187,16 +187,14 @@ impl Game<'_> {
                     Some(Target::Mob(i)) => Some(Some(i)),
                     _ => Some(None),
                 };
-                // resolvePlayerResponsibleForDamage: the causing player, by entity id,
-                // for a native mod's experience drop.
+                // resolvePlayerResponsibleForDamage: remember the causing player's UUID.
                 let by_player = match cause.or(by) {
-                    _ if horizon_client::mod_api::mods().is_empty() => None,
                     Some(Target::Player) => self.lan_acting,
                     Some(Target::Guest(conn)) => Some(conn),
                     _ => None,
                 }
                 .and_then(|conn| self.command_guest(conn))
-                .map(|g| crate::game::combat::PlayerCredit::Entity(g.entity_id as u32));
+                .map(|g| crate::game::combat::PlayerCredit(g.uuid));
                 let now = self.world.game_time;
                 self.for_player(target, |g| {
                     if g.spectator() {
@@ -260,15 +258,14 @@ impl Game<'_> {
 
     /// Retain the mob hit's causing-player connection after the hit is accepted.
     fn command_damage_mob(&mut self, id: u32, amount: f32, damage: Damage) -> bool {
-        let hurt = self
-            .mobs
-            .iter_mut()
-            .find(|m| m.id == id)
-            .is_some_and(|m| m.damage(amount, damage));
+        let hurt =
+            self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+                m.damage(crate::game::entity::damage_level_of!(self), amount, damage)
+            });
         if hurt {
             self.resolve_player_responsible(id, damage);
             if damage.attacker == Some(Who::Player) {
-                self.last_hurt_by_player.insert(id, self.lan_acting);
+                self.remember_mob_player_credit(id);
                 if let Some(host) = self.lan.as_mut() {
                     match self.lan_acting {
                         Some(conn) => {
@@ -970,10 +967,7 @@ impl Game<'_> {
             }
             Target::Mob(_) | Target::Stand(_)
                 if !(matches!(target, Target::Mob(_))
-                    && matches!(
-                        short.as_str(),
-                        "max_health" | "movement_speed" | "attack_damage"
-                    )) =>
+                    && finalize::command_attr(short.as_str()).is_some()) =>
             {
                 let op = ctx
                     .literals
@@ -992,28 +986,28 @@ impl Game<'_> {
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob_id) else {
                     return Ok(0);
                 };
-                // Core mob attributes also have cached gameplay fields.
-                let slot: Option<f64> = match short.as_str() {
-                    "max_health" => Some(if id == "attribute.base.get" {
-                        finalize::base_value(m, Attr::MaxHealth)
-                    } else {
-                        finalize::value(m, Attr::MaxHealth)
-                    }),
-                    "movement_speed" => Some(if id == "attribute.base.get" {
-                        finalize::base_value(m, Attr::MovementSpeed)
-                    } else {
-                        m.attrs.speed
-                    }),
-                    "attack_damage" => Some(if id == "attribute.base.get" {
-                        finalize::base_value(m, Attr::AttackDamage)
-                    } else {
-                        f64::from(m.attrs.attack_damage)
-                    }),
-                    _ => None,
-                };
-                let Some(current) = slot else {
+                // The attributes the mob's gameplay reads live in `finalize`;
+                // the command edits that store, never a copy of it.
+                let Some(attr) = finalize::command_attr(short.as_str())
+                    .filter(|a| finalize::default_value(m, *a).is_some())
+                else {
                     return Err(no_attribute(&name, &description));
                 };
+                let current = if id == "attribute.base.get" {
+                    finalize::base_value(m, attr)
+                } else if attr == Attr::MovementSpeed {
+                    m.attrs.speed
+                } else {
+                    finalize::value(m, attr)
+                };
+                let no_modifier = text_error(
+                    "commands.attribute.failed.no_modifier",
+                    &[
+                        description.clone(),
+                        name.clone(),
+                        Text::literal(modifier_id.clone()),
+                    ],
+                );
                 match id {
                     "attribute.get" | "attribute.base.get" => {
                         let k = if id == "attribute.get" {
@@ -1028,17 +1022,9 @@ impl Game<'_> {
                         Ok((current * scale) as i32)
                     }
                     "attribute.base.set" => {
-                        match short.as_str() {
-                            "max_health" => {
-                                // AttributeInstance keeps the raw base, clamps only
-                                // the effective value, and does not change Health.
-                                finalize::set_base(m, Attr::MaxHealth, value_arg);
-                            }
-                            "movement_speed" => {
-                                finalize::set_base(m, Attr::MovementSpeed, value_arg)
-                            }
-                            _ => finalize::set_base(m, Attr::AttackDamage, value_arg),
-                        }
+                        // AttributeInstance keeps the raw base and clamps only the
+                        // effective value; Health is unchanged.
+                        finalize::set_base(m, attr, value_arg);
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.set.success",
                             &[description, name, java_double_text(value_arg)],
@@ -1046,39 +1032,60 @@ impl Game<'_> {
                         Ok(1)
                     }
                     "attribute.base.reset" => {
-                        match short.as_str() {
-                            "max_health" => {
-                                let default = f64::from(m.kind.max_health);
-                                finalize::set_base(m, Attr::MaxHealth, default);
-                            }
-                            "movement_speed" => {
-                                let default = m.kind.speed;
-                                finalize::set_base(m, Attr::MovementSpeed, default);
-                            }
-                            _ => {
-                                let default = f64::from(m.kind.attack_damage);
-                                finalize::set_base(m, Attr::AttackDamage, default);
-                            }
-                        }
-                        let v = match short.as_str() {
-                            "max_health" => finalize::base_value(m, Attr::MaxHealth),
-                            "movement_speed" => finalize::base_value(m, Attr::MovementSpeed),
-                            _ => finalize::base_value(m, Attr::AttackDamage),
-                        };
+                        let default = finalize::default_value(m, attr).unwrap_or_default();
+                        finalize::set_base(m, attr, default);
+                        let v = finalize::base_value(m, attr);
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.reset.success",
                             &[description, name, java_double_text(v)],
                         ));
                         Ok(1)
                     }
-                    _ => Err(text_error(
-                        "commands.attribute.failed.no_modifier",
-                        &[
-                            description.clone(),
-                            name.clone(),
-                            Text::literal(modifier_id.clone()),
-                        ],
-                    )),
+                    "attribute.modifier.add" => {
+                        if finalize::has_modifier(m, attr, &modifier_id) {
+                            return Err(text_error(
+                                "commands.attribute.failed.modifier_already_present",
+                                &[Text::literal(modifier_id.clone()), description, name],
+                            ));
+                        }
+                        let op = match ctx.literals.last().map(String::as_str) {
+                            Some("add_multiplied_base") => finalize::Op::AddMultipliedBase,
+                            Some("add_multiplied_total") => finalize::Op::AddMultipliedTotal,
+                            _ => finalize::Op::AddValue,
+                        };
+                        finalize::add_modifier(m, attr, modifier_id.clone(), value_arg, op);
+                        self.feedback(Text::translate(
+                            "commands.attribute.modifier.add.success",
+                            &[Text::literal(modifier_id.clone()), description, name],
+                        ));
+                        Ok(1)
+                    }
+                    "attribute.modifier.remove" => {
+                        if !finalize::has_modifier(m, attr, &modifier_id) {
+                            return Err(no_modifier);
+                        }
+                        finalize::remove_modifier(m, attr, &modifier_id);
+                        self.feedback(Text::translate(
+                            "commands.attribute.modifier.remove.success",
+                            &[Text::literal(modifier_id.clone()), description, name],
+                        ));
+                        Ok(1)
+                    }
+                    _ => {
+                        let Some(v) = finalize::modifier_amount(m, attr, &modifier_id) else {
+                            return Err(no_modifier);
+                        };
+                        self.feedback(Text::translate(
+                            "commands.attribute.modifier.value.get.success",
+                            &[
+                                Text::literal(modifier_id.clone()),
+                                description,
+                                name,
+                                java_double_text(v),
+                            ],
+                        ));
+                        Ok((v * scale) as i32)
+                    }
                 }
             }
             _ => Err(text_error(
@@ -1302,98 +1309,12 @@ impl Game<'_> {
             }
             up = self.ride_vehicle(v);
         }
-        let rider = match target {
-            Target::Mob(id) => Some(id),
-            _ => None,
-        };
-        let generic = || {
-            err(
+        if !self.start_riding_target(target, vehicle, true) {
+            return Err(err(
                 "commands.ride.mount.failure.generic",
                 &[&name.plain(), &vehicle_name.plain()],
-            )
-        };
-        // Only players and mobs ride.
-        if !(target == Target::Player || rider.is_some()) {
-            return Err(generic());
-        }
-        // `RideCommand.mount` forces the ride (`startRiding(vehicle, true, true)`),
-        // which skips `canRide` and `canAddPassenger`: a boat under water still
-        // takes the rider. Horizon's boats seat at most `max_passengers`, so a
-        // full boat still refuses. Minecarts carry only players here: Horizon's
-        // carts have no mob passengers yet.
-        match vehicle {
-            Target::Boat(id) => {
-                let Some(i) = self.boats.iter().position(|b| b.id == id) else {
-                    return Err(generic());
-                };
-                if self.boat_passengers(id) >= self.boats[i].max_passengers() {
-                    return Err(generic());
-                }
-                if let Some(rider) = rider {
-                    if !self.try_mount_mob(rider, id) {
-                        return Err(generic());
-                    }
-                } else {
-                    if !self.native_may_board(id) {
-                        return Err(generic());
-                    }
-                    self.riding = Some(id);
-                    self.yaw = self.boats[i].yaw;
-                    // sendEventAndTriggers: START_RIDING_TRIGGER.
-                    self.trigger_player("minecraft:started_riding");
-                }
-                self.feedback(Text::translate(
-                    "commands.ride.mount.success",
-                    &[name, vehicle_name],
-                ));
-                return Ok(1);
-            }
-            Target::Cart(id) => {
-                if target != Target::Player
-                    || self.ridden_by_guest(id)
-                    || !self.native_may_board(id)
-                {
-                    return Err(generic());
-                }
-                self.riding = Some(id);
-                self.trigger_player("minecraft:started_riding");
-                self.feedback(Text::translate(
-                    "commands.ride.mount.success",
-                    &[name, vehicle_name],
-                ));
-                return Ok(1);
-            }
-            _ => {}
-        }
-        // Mobs carry players and mobs.
-        let Target::Mob(mob_id) = vehicle else {
-            return Err(generic());
-        };
-        if !self.mobs.iter().any(|m| m.id == mob_id && m.alive()) {
-            return Err(generic());
-        }
-        if let Some(rider) = rider {
-            // Entity.startRiding.
-            if !self.try_mount_mob(rider, mob_id) {
-                return Err(generic());
-            }
-            self.feedback(Text::translate(
-                "commands.ride.mount.success",
-                &[name, vehicle_name],
             ));
-            return Ok(1);
         }
-        if !self.native_may_board(mob_id) {
-            return Err(generic());
-        }
-        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob_id) {
-            m.extra.flag = false;
-            m.extra.counter = 0;
-            self.yaw = m.yaw;
-        }
-        self.riding = Some(mob_id);
-        self.mount.jump_ticks = 0;
-        self.mount.jump_scale = 0.0;
         self.feedback(Text::translate(
             "commands.ride.mount.success",
             &[name, vehicle_name],
@@ -1405,6 +1326,7 @@ impl Game<'_> {
     pub(super) fn ride_vehicle(&self, t: Target) -> Option<Target> {
         let id = match t {
             Target::Player => self.riding?,
+            Target::Guest(conn) => self.command_guest(conn)?.vehicle?,
             Target::Mob(id) => self.mobs.iter().find(|m| m.id == id)?.extra.mount?,
             _ => return None,
         };

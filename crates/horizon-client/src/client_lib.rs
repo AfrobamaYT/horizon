@@ -7,6 +7,7 @@ pub mod ambience;
 pub mod animate_tick;
 pub mod arrows;
 pub mod block_contact;
+pub mod powder_snow;
 pub use horizon_client_render::{
     assets, atlas_sources, audio, auth, ban_notice, bidi, biome, block_edit, block_entities,
     block_entity_anim, block_entity_render, block_sprites, bluemap, bluemap_detect, border_render,
@@ -94,7 +95,6 @@ pub mod motion;
 pub mod multiplayer;
 pub mod music;
 pub mod native_client_hooks;
-pub mod native_data;
 pub mod net;
 pub mod nether_portal;
 pub mod no_resources;
@@ -140,6 +140,7 @@ pub mod win_screen;
 pub mod world_spawn;
 pub use horizon_client_core::Result;
 pub use horizon_client_core::block_entity_nbt;
+pub use horizon_client_core::block_entity_types;
 pub use horizon_client_core::bossbar;
 pub use horizon_client_core::component;
 pub use horizon_client_core::fastutil_order;

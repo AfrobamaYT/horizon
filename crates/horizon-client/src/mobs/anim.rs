@@ -833,13 +833,9 @@ pub fn setup(
             // trident in its main arm.
             let throwing = m.kind.anim == Anim::Drowned
                 && m.ai.aggressive
-                && m.extra.main_hand.as_deref() == Some("minecraft:trident");
+                && m.extra.main_hand_id() == Some("minecraft:trident");
             // HumanoidMobRenderer.getArmPose: the arm holding a spear (at rest too).
-            let spear = m
-                .extra
-                .main_hand
-                .as_deref()
-                .and_then(crate::spear::Kinetic::of);
+            let spear = m.extra.main_hand_id().and_then(crate::spear::Kinetic::of);
             let main = if throwing {
                 ArmPose::ThrowTrident
             } else if spear.is_some() {
@@ -861,7 +857,7 @@ pub fn setup(
                 }
             }
             h.zombie = Some(m.ai.aggressive);
-            h.holding = m.extra.main_hand.is_some();
+            h.holding = m.extra.main_hand_id().is_some();
             h.crouching = m.extra.crouching;
             h.passenger = m.extra.passenger;
             humanoid(p, s, &h);
@@ -873,11 +869,11 @@ pub fn setup(
             }
         }
         Anim::Skeleton | Anim::Humanoid { zombie_arms: false } => {
-            let bow = m.extra.main_hand.as_deref() == Some("minecraft:bow");
+            let bow = m.extra.main_hand_id() == Some("minecraft:bow");
             let player = matches!(m.kind.anim, Anim::Humanoid { .. });
             let right = if bow && m.ai.aggressive {
                 ArmPose::Bow
-            } else if player && m.extra.main_hand.is_some() {
+            } else if player && m.extra.main_hand_id().is_some() {
                 ArmPose::Item
             } else {
                 ArmPose::Empty
@@ -885,15 +881,14 @@ pub fn setup(
             let using_main = m.extra.using_item > 0 && !m.extra.using_off_hand;
             let using_off = m.extra.using_item > 0 && m.extra.using_off_hand;
             // AvatarRenderer.getArmPose: an arm holding a spear (at rest too).
-            let spear_in = |hand: &Option<std::sync::Arc<str>>| {
-                hand.as_deref()
-                    .filter(|_| player)
-                    .and_then(crate::spear::Kinetic::of)
-            };
-            let (main_spear, off_spear) =
-                (spear_in(&m.extra.main_hand), spear_in(&m.extra.off_hand));
+            let spear_in =
+                |hand: Option<&str>| hand.filter(|_| player).and_then(crate::spear::Kinetic::of);
+            let (main_spear, off_spear) = (
+                spear_in(m.extra.main_hand_id()),
+                spear_in(m.extra.off_hand_id()),
+            );
             let pose = if player {
-                match m.extra.main_hand.as_deref() {
+                match m.extra.main_hand_id() {
                     Some(_) if using_main && m.extra.blocking => ArmPose::Block,
                     Some("minecraft:bow") if using_main => ArmPose::Bow,
                     Some("minecraft:trident") if using_main => ArmPose::ThrowTrident,
@@ -913,16 +908,16 @@ pub fn setup(
             } else {
                 right
             };
-            let off = if player && m.extra.off_hand.is_some() && !pose.affects_offhand() {
+            let off = if player && m.extra.off_hand_id().is_some() && !pose.affects_offhand() {
                 if off_spear.is_some() {
                     ArmPose::Spear
                 } else if using_off && m.extra.blocking {
                     ArmPose::Block
-                } else if using_off && m.extra.off_hand.as_deref() == Some("minecraft:spyglass") {
+                } else if using_off && m.extra.off_hand_id() == Some("minecraft:spyglass") {
                     ArmPose::Spyglass
-                } else if using_off && m.extra.off_hand.as_deref() == Some("minecraft:goat_horn") {
+                } else if using_off && m.extra.off_hand_id() == Some("minecraft:goat_horn") {
                     ArmPose::TootHorn
-                } else if using_off && m.extra.off_hand.as_deref() == Some("minecraft:brush") {
+                } else if using_off && m.extra.off_hand_id() == Some("minecraft:brush") {
                     ArmPose::Brush
                 } else {
                     ArmPose::Item
@@ -1443,7 +1438,10 @@ mod flight_pose_tests {
             version: 0,
         };
         let mut m = player();
-        m.extra.main_hand = Some("minecraft:shield".into());
+        m.extra.set_slot_id(
+            horizon_items::equipment::MAINHAND,
+            Some("minecraft:shield".into()),
+        );
         m.extra.using_item = 20;
         m.extra.blocking = true;
         setup(&m, &state, &mut p, &HashMap::new());
@@ -1452,7 +1450,10 @@ mod flight_pose_tests {
         assert!((p.get("right_arm")[4] + FRAC_PI_6).abs() < 1e-6);
         // An item that does not block attacks leaves the arm holding it.
         let mut m = player();
-        m.extra.main_hand = Some("minecraft:stick".into());
+        m.extra.set_slot_id(
+            horizon_items::equipment::MAINHAND,
+            Some("minecraft:stick".into()),
+        );
         m.extra.using_item = 20;
         let mut p = Poses {
             map: ["head", "right_arm", "left_arm"]
@@ -1494,7 +1495,10 @@ mod flight_pose_tests {
             version: 0,
         };
         let mut m = player();
-        m.extra.main_hand = Some("minecraft:brush".into());
+        m.extra.set_slot_id(
+            horizon_items::equipment::MAINHAND,
+            Some("minecraft:brush".into()),
+        );
         m.extra.using_item = 20;
         let mut p = make();
         setup(&m, &state, &mut p, &HashMap::new());
@@ -1503,7 +1507,10 @@ mod flight_pose_tests {
         assert_eq!(p.get("right_arm")[4], 0.0);
         // An item with no use animation keeps the ITEM pose: BRUSH cannot leak.
         let mut m = player();
-        m.extra.main_hand = Some("minecraft:stick".into());
+        m.extra.set_slot_id(
+            horizon_items::equipment::MAINHAND,
+            Some("minecraft:stick".into()),
+        );
         m.extra.using_item = 20;
         let mut p = make();
         setup(&m, &state, &mut p, &HashMap::new());
@@ -1513,8 +1520,14 @@ mod flight_pose_tests {
         // brush in the off hand is BRUSH on the left arm, and the main hand
         // keeps its ITEM pose (the two must not swap).
         let mut m = player();
-        m.extra.main_hand = Some("minecraft:stick".into());
-        m.extra.off_hand = Some("minecraft:brush".into());
+        m.extra.set_slot_id(
+            horizon_items::equipment::MAINHAND,
+            Some("minecraft:stick".into()),
+        );
+        m.extra.set_slot_id(
+            horizon_items::equipment::OFFHAND,
+            Some("minecraft:brush".into()),
+        );
         m.extra.using_item = 20;
         m.extra.using_off_hand = true;
         let mut p = make();

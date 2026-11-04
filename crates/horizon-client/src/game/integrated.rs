@@ -349,6 +349,8 @@ impl Game<'_> {
         creative: bool,
         create: Option<&WorldOptions>,
     ) -> Result<()> {
+        // The window's mod configs before the server's, as on NeoForge.
+        self.native_configs_client_start();
         self.client_logging_out();
         let auth = horizon_client::auth::current();
         let player = auth
@@ -717,6 +719,10 @@ impl Game<'_> {
         ready: &Sender<Ready>,
         opening: Opening,
     ) -> Result<()> {
+        // The mods' server configs, read before the server starts.
+        if let Ok(dir) = std::env::current_dir() {
+            self.native_configs_server_start(&dir.join("saves").join(&launch.folder), false);
+        }
         // MinecraftServer.loadLevel's start: nothing is loaded yet.
         self.native_server_about_to_start(false);
         self.native_lifecycle_open_started();
@@ -731,7 +737,6 @@ impl Game<'_> {
         }
         let saved = Box::new(self.level.clone());
         // IntegratedServer runs the server mods; the window the client mods.
-        self.mods.dev = self.options.dev_mods.clone();
         startup::time("server.start_mods", || self.start_mods());
         // Math.max(2, options.renderDistance): past vanilla's 32 when the
         // window's render distance is (Horizon's options go to 64).
@@ -830,6 +835,7 @@ impl Game<'_> {
         self.native_lifecycle.begin_close();
         // MinecraftServer.stopServer's start: everyone is still here.
         self.native_server_stopping(false);
+        self.native_configs_server_stop();
         self.native_players_leaving();
         // IntegratedServer.stopServer: teardownPublishedState.
         if let Some(s) = self.serving.take() {

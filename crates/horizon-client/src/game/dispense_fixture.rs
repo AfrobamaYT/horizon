@@ -476,13 +476,18 @@ impl Game<'_> {
                 f64::from(pos.y) + 1.0,
                 f64::from(pos.z) + 0.5,
             );
+            let state = self.world.block(pos.x, pos.y, pos.z);
             let result = self.with_level(|b, level, ticks| {
                 b.use_without_item(
                     level,
                     ticks,
-                    pos,
-                    horizon_core::geometry::Direction::Up,
-                    hit,
+                    state,
+                    horizon_core::geometry::BlockHit {
+                        block: pos,
+                        direction: horizon_core::geometry::Direction::Up,
+                        location: hit,
+                        inside: false,
+                    },
                     player,
                 )
             });
@@ -955,15 +960,8 @@ impl Game<'_> {
         let mut mob = Mob::new(id, t, at, yaw);
         // EntityType.create equips nothing (that is finalizeSpawn's job).
         mob.extra.set_body_stack(None);
-        for slot in [
-            &mut mob.extra.main_hand,
-            &mut mob.extra.off_hand,
-            &mut mob.extra.head,
-            &mut mob.extra.chest,
-            &mut mob.extra.legs,
-            &mut mob.extra.feet,
-        ] {
-            *slot = None;
+        for slot in horizon_items::equipment::MAINHAND..=horizon_items::equipment::HEAD {
+            mob.extra.set_slot_stack(slot, None);
         }
         let s = mob.species();
         let flag = |name: &str| e[name].as_bool().unwrap_or(false);

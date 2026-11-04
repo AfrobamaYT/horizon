@@ -109,7 +109,7 @@ impl Game<'_> {
                     search,
                     scroll: Scroll::default(),
                 });
-                self.screen = Screen::DebugOptions;
+                self.set_screen(Screen::DebugOptions);
                 self.pause_menu = true;
                 self.capture(false);
                 self.mining = None;
@@ -120,7 +120,7 @@ impl Game<'_> {
     /// `Screen.onClose`: back to the game.
     pub(super) fn close_debug_options(&mut self) {
         self.debug_options = None;
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         self.capture(true);
     }
     /// The header's title row and warning (`init`'s vertical layout,

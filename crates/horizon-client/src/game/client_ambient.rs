@@ -179,7 +179,7 @@ impl Game<'_> {
                 continue;
             }
             let size = (f64::from(m.width()), f64::from(m.height()));
-            let invisible = m.invisible || m.has_effect("minecraft:invisibility");
+            let invisible = m.is_invisible();
             if m.extra.effect_particles.is_empty() {
                 // A mob of this game: its own effects, visible and not ambient.
                 if m.extra.effects.is_empty() {

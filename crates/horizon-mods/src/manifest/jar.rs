@@ -76,6 +76,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn manifest_jar_list_defaults_empty_and_survives_package_roundtrip_in_order() {
+        use super::super::{Manifest, Package};
+        let base = "id = 'port'\nname = 'Port'\nversion = '1'\napi = '0.2'\ncapabilities = ['registries']\n";
+        assert!(Manifest::parse(base).unwrap().jar.is_empty());
+        let text = format!(
+            "{base}[[jar]]\nid = 'first_jar'\nversion = '1'\nsha512 = '{}'\n[[jar]]\nid = 'fabric-api'\nversion = '2'\nsha512 = '{}'\n",
+            "0".repeat(128),
+            "1".repeat(128)
+        );
+        let manifest = Manifest::parse(&text).unwrap();
+        assert_eq!(
+            manifest.jar.iter().map(JarRef::id).collect::<Vec<_>>(),
+            ["first_jar", "fabric-api"]
+        );
+        let bytes = Package::write_files(&text, &[]).unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        assert_eq!(Package::read_zip(&mut archive).unwrap().manifest, manifest);
+        assert!(Manifest::parse(&format!("{text}loader = 'fabric'\n")).is_err());
+    }
+
+    #[test]
     fn manifest_refs_preserve_original_ids_and_refuse_invalid_boundary_values() {
         let hash = "0123456789abcdef".repeat(8);
         for id in ["fabric-api", "neo_mod", "_1", "1mod", &"a".repeat(64)] {

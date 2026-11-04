@@ -198,17 +198,12 @@ impl Game<'_> {
         )
     }
     /// `HumanoidArmorLayer` for another player's model: the armour it wears
-    /// (`extra.head` .. `extra.feet`).
+    /// (`extra.equipment`, head to feet).
     pub(super) fn worn_armor_layers(&self, m: &Mob) -> Vec<(&Part, [f32; 4], u32, u32, bool)> {
         let e = &m.extra;
         self.armor_layers(
-            [
-                (e.head.as_deref(), e.armor[0].as_ref()),
-                (e.chest.as_deref(), e.armor[1].as_ref()),
-                (e.legs.as_deref(), e.armor[2].as_ref()),
-                (e.feet.as_deref(), e.armor[3].as_ref()),
-            ]
-            .map(|(item, stack)| item.map(|i| (i, stack))),
+            horizon_items::equipment::ARMOR
+                .map(|slot| e.slot_stack(slot).map(|stack| (&*stack.item, Some(stack)))),
         )
     }
     /// The layers of the armour items `worn` (with their stacks when known,
@@ -301,22 +296,24 @@ impl Game<'_> {
         let items = self.items();
         let mut wanted: Vec<TrimTexture> = Vec::new();
         let guests = self.lan.iter().flat_map(|host| host.hub.guests.iter());
-        let stacks = self
-            .armor
-            .iter()
-            .chain(guests.flat_map(|g| g.armor.iter()))
-            .chain(self.mobs.iter().flat_map(|m| m.extra.armor.iter()))
-            .zip(
-                ["helmet", "chestplate", "leggings", "boots"]
-                    .into_iter()
-                    .cycle(),
-            )
-            .chain(self.armor_stands.iter().flat_map(|a| {
-                [5usize, 4, 3, 2]
-                    .map(|slot| &a.equipment[slot])
-                    .into_iter()
-                    .zip(["helmet", "chestplate", "leggings", "boots"])
-            }));
+        let stacks =
+            self.armor
+                .iter()
+                .chain(guests.flat_map(|g| g.armor.iter()))
+                .chain(self.mobs.iter().flat_map(|m| {
+                    horizon_items::equipment::ARMOR.map(|slot| &m.extra.equipment[slot])
+                }))
+                .zip(
+                    ["helmet", "chestplate", "leggings", "boots"]
+                        .into_iter()
+                        .cycle(),
+                )
+                .chain(self.armor_stands.iter().flat_map(|a| {
+                    [5usize, 4, 3, 2]
+                        .map(|slot| &a.equipment[slot])
+                        .into_iter()
+                        .zip(["helmet", "chestplate", "leggings", "boots"])
+                }));
         for (stack, layer) in stacks {
             let Some(stack) = stack.as_ref().filter(|s| s.extra.is_some()) else {
                 continue;
@@ -813,6 +810,7 @@ impl Game<'_> {
                 self.armor_stands[i].previous_yaw = self.armor_stands[i].yaw;
                 continue;
             }
+            self.armor_stands[i].first_tick = false;
             self.armor_stand_location_effects(i, false);
             let a = &mut self.armor_stands[i];
             a.previous = a.position;
@@ -867,6 +865,16 @@ impl Game<'_> {
                 self.armor_stand_location_effects(i, true);
             }
             self.armor_stand_turtle_eggs(i, landed)?;
+            let a = &self.armor_stands[i];
+            if !a.marker && !a.no_gravity {
+                self.entity_powder_snow_particles(
+                    a.previous,
+                    a.position,
+                    a.bounds(),
+                    a.velocity,
+                    true,
+                );
+            }
             let a = &mut self.armor_stands[i];
             if let Some(damage_type) =
                 a.environment_tick(&self.world, self.res.facts(), self.pack.assets.registry)
@@ -1414,7 +1422,7 @@ impl Game<'_> {
             && let Some(eye) = self.eye_position()
         {
             // Player.drop(stack, false): thrown from the eyes, no thrower.
-            self.throw_from_eyes(rest, eye, false);
+            self.throw_from_eyes(rest, eye, false, false);
         }
         // The attribute modifiers of a worn piece come from the server's
         // ClientboundUpdateAttributesPacket on a client.
@@ -1694,6 +1702,34 @@ mod burn_drop_tests {
         let (pos, drops) = broken_armor_stand_equipment(stand);
         assert_eq!(pos, [-1, 5, 0]);
         assert_eq!(drops, vec![kept]);
+    }
+    #[test]
+    fn a_broken_stand_pops_body_and_saddle_after_the_other_six_slots() {
+        use horizon_items::equipment::{BODY, HEAD, MAINHAND, SADDLE};
+        let mut stand = ArmorStand::new(1, Vec3::new(0.5, 4.0, 0.5), 0.0);
+        let stacks: Vec<_> = [SADDLE, BODY, HEAD, MAINHAND]
+            .into_iter()
+            .map(|slot| {
+                let mut stack = ItemStack::new("minecraft:stone", 1 + slot as u32);
+                stack.damage = slot as u32;
+                stand.equipment[slot] = Some(stack.clone());
+                (slot, stack)
+            })
+            .collect();
+        let (_, drops) = broken_armor_stand_equipment(stand);
+        let order = |slots: [usize; 4]| {
+            slots
+                .map(|s| {
+                    stacks
+                        .iter()
+                        .find(|(slot, _)| *slot == s)
+                        .unwrap()
+                        .1
+                        .clone()
+                })
+                .to_vec()
+        };
+        assert_eq!(drops, order([MAINHAND, HEAD, BODY, SADDLE]));
     }
 }
 #[cfg(test)]

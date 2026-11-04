@@ -596,7 +596,7 @@ pub struct Streaming {
     pub radius: i32,
     /// Chunks kept loaded whatever the distance: the `/forceload`ed ones and
     /// those a mod holds a ticket for. Changed only through `set_forced_area`,
-    /// `clear_forced`, `set_mod_forced` and `load_forced`.
+    /// `clear_forced`, `set_mod_forced` and `load_forced`, through `settle`.
     pub forced: HashSet<(i32, i32)>,
     /// The `/forceload`ed chunks, the ones saved in `chunk_tickets.dat`.
     commanded: HashSet<(i32, i32)>,
@@ -1333,6 +1333,14 @@ impl Streaming {
                 gone,
                 world.layout().sections() as i32,
             );
+        }
+        // `ChunkTaskPriorityQueue.release` for each of them (`ChunkTaskDispatcher`'s
+        // `release(col, true)` from the chunk's unload): the jobs still queued for a
+        // column go with it instead of running for a level they no longer belong to.
+        if !gone.is_empty()
+            && let Ok(mut queue) = self.shared.queue.lock()
+        {
+            release_columns(&mut queue, gone);
         }
         for &(x, z) in gone {
             self.lit.remove(&(x, z));
@@ -2608,22 +2616,28 @@ impl Streaming {
     /// Release every `/forceload`ed chunk (`/forceload remove all`, a game-test
     /// batch's end). Chunks a mod holds a ticket for stay forced.
     pub fn clear_forced(&mut self) {
-        self.commanded.clear();
-        self.forced.clear();
-        self.forced.extend(self.mod_tickets.chunks());
+        let cleared: Vec<_> = self.commanded.drain().collect();
+        for chunk in cleared {
+            self.settle(chunk);
+        }
     }
     /// The level's saved forced state: `/forceload`'s chunks, and the mods'
-    /// tickets of the mods `loaded` accepts (the rest are discarded).
-    pub fn load_forced(
-        &mut self,
-        commanded: HashSet<(i32, i32)>,
-        tickets: Vec<ModTicket>,
-        loaded: impl Fn(&str) -> bool,
-    ) {
-        self.mod_tickets = ModTickets::from_saved(tickets, loaded);
+    /// tickets (of controllers that are registered), which wait in
+    /// `take_loaded_tickets`.
+    pub fn load_forced(&mut self, commanded: HashSet<(i32, i32)>, tickets: Vec<ModTicket>) {
+        self.mod_tickets = ModTickets::from_saved(tickets);
         self.commanded = commanded;
-        self.forced.clone_from(&self.commanded);
-        self.forced.extend(self.mod_tickets.chunks());
+        self.forced.clear();
+        let held: Vec<_> = self.commanded.iter().copied().collect();
+        for chunk in held {
+            self.settle(chunk);
+        }
+    }
+    /// The mods' tickets read from the save, which hold nothing until the
+    /// mods have validated them and the survivors are put back with
+    /// `set_mod_forced`.
+    pub fn take_loaded_tickets(&mut self) -> Vec<ModTicket> {
+        self.mod_tickets.take_loaded()
     }
     /// The `/forceload`ed chunks.
     pub fn commanded(&self) -> &HashSet<(i32, i32)> {
@@ -2637,18 +2651,26 @@ impl Streaming {
     /// chunk stays forced while `/forceload` or any ticket holds it; one
     /// newly forced is ranked for decoration as `/forceload add` does.
     pub fn set_mod_forced(&mut self, ticket: ModTicket, forced: bool) -> bool {
-        let (x, z) = ticket.chunk;
+        let chunk = ticket.chunk;
         let changed = if forced {
             self.mod_tickets.insert(ticket)
         } else {
             self.mod_tickets.remove(&ticket)
         };
-        if forced && self.forced.insert((x, z)) {
-            self.rank_forced(x, z, x, z);
-        } else if !forced && !self.commanded.contains(&(x, z)) && !self.mod_tickets.holds((x, z)) {
-            self.forced.remove(&(x, z));
+        if self.settle(chunk) {
+            self.rank_forced(chunk.0, chunk.1, chunk.0, chunk.1);
         }
         changed
+    }
+    /// Bring `forced` in line with who holds `chunk`: true when it just
+    /// became forced. The one writer of `forced`.
+    fn settle(&mut self, chunk: (i32, i32)) -> bool {
+        if self.commanded.contains(&chunk) || self.mod_tickets.holds(chunk) {
+            self.forced.insert(chunk)
+        } else {
+            self.forced.remove(&chunk);
+            false
+        }
     }
     /// `ServerLevel.setChunkForced` over chunks `(x0, z0)..=(x1, z1)`, x then
     /// z: `each` hears whether each chunk changed in `/forceload`'s set. An
@@ -2663,14 +2685,11 @@ impl Streaming {
         for x in x0..=x1 {
             for z in z0..=z1 {
                 let changed = if forced {
-                    self.forced.insert((x, z));
                     self.commanded.insert((x, z))
                 } else {
-                    if !self.mod_tickets.holds((x, z)) {
-                        self.forced.remove(&(x, z));
-                    }
                     self.commanded.remove(&(x, z))
                 };
+                self.settle((x, z));
                 each(x, z, changed);
             }
         }
@@ -3224,6 +3243,25 @@ fn rank_again(queue: &mut BinaryHeap<Queued>, distance: impl Fn(i32, i32) -> i64
         }
     }
     *queue = BinaryHeap::from(jobs);
+}
+/// `ChunkTaskPriorityQueue.release(pos, clearQueue=true)`: the jobs queued for the
+/// `gone` columns are dropped, so a view that moved or shrank does not wait behind the
+/// generation of the chunks it left. A job without a column (a save, meshes to free)
+/// stays, as vanilla keeps the tasks of a chunk that is still loaded. Returns how many
+/// jobs went.
+fn release_columns(queue: &mut BinaryHeap<Queued>, gone: &FxHashSet<(i32, i32)>) -> usize {
+    if queue.is_empty() || gone.is_empty() {
+        return 0;
+    }
+    let queued = std::mem::take(queue).into_vec();
+    let before = queued.len();
+    let kept: Vec<Queued> = queued
+        .into_iter()
+        .filter(|job| !job.at.is_some_and(|at| gone.contains(&at)))
+        .collect();
+    let released = before - kept.len();
+    *queue = BinaryHeap::from(kept);
+    released
 }
 /// Whether the 3x3 a light job for (x, z) reads is all there: every
 /// neighbour a finished column, or a decorated proto chunk past the area
@@ -3852,6 +3890,59 @@ mod tests {
         let moved = ranges((19, 0));
         rank_again(&mut queue, |x, z| moved.priority(x, z));
         assert_eq!(queue.pop().and_then(|q| q.at), Some((20, 0)));
+    }
+
+    /// `ChunkTaskPriorityQueue.release`: a column that unloaded keeps no queued job, so
+    /// a teleport or a smaller render distance does not spend its workers on the world
+    /// it left; the other columns' jobs and the jobs without a column (saves, meshes to
+    /// free) stay, in the same order.
+    #[test]
+    fn a_released_column_keeps_no_queued_job() {
+        let generate = |x, z, priority, order| Queued {
+            priority,
+            at: Some((x, z)),
+            bias: 0,
+            order,
+            job: Job::Generate(x, z),
+        };
+        let save = |order| Queued {
+            priority: i64::MIN,
+            at: None,
+            bias: 0,
+            order,
+            job: Job::Save(Vec::new()),
+        };
+        let queued = || {
+            BinaryHeap::from(vec![
+                generate(0, 0, 0, 1),
+                generate(0, 0, 4, 2),
+                generate(1, 0, 8, 3),
+                generate(9, 9, 12, 4),
+                save(5),
+            ])
+        };
+        let pops = |mut queue: BinaryHeap<Queued>| {
+            std::iter::from_fn(move || queue.pop())
+                .map(|q| q.at)
+                .collect::<Vec<_>>()
+        };
+        // Nothing goes for a column that is still loaded, or for nothing at all.
+        let mut queue = queued();
+        assert_eq!(release_columns(&mut queue, &FxHashSet::default()), 0);
+        assert_eq!(
+            release_columns(&mut queue, &[(20, 20)].into_iter().collect()),
+            0
+        );
+        assert_eq!(queue.len(), 5);
+        // Both of (0, 0)'s jobs go, its neighbour's and the save stay.
+        let gone: FxHashSet<(i32, i32)> = [(0, 0)].into_iter().collect();
+        assert_eq!(release_columns(&mut queue, &gone), 2);
+        assert_eq!(pops(queue), [None, Some((1, 0)), Some((9, 9))]);
+        // Every column leaving at once: only the jobs without one are left.
+        let mut queue = queued();
+        let all: FxHashSet<(i32, i32)> = [(0, 0), (1, 0), (9, 9)].into_iter().collect();
+        assert_eq!(release_columns(&mut queue, &all), 4);
+        assert_eq!(pops(queue), [None]);
     }
 
     /// The light and mesh stages submit bounded work, the nearest first:

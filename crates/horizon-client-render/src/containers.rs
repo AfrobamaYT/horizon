@@ -1,6 +1,7 @@
 //! Container block entities: chests/barrels (27 slots) and the three furnace
 //! kinds, ticking as `AbstractFurnaceBlockEntity.serverTick` with fuel times
 //! from the data-driven `context_int_provider`/`context_float_provider` files.
+
 pub use crate::chunk::block_entity::{
     Banner, Beacon, BlockEntity, Brushable, Campfire, ChiseledBookshelf, Crafter, CreakingHeart,
     EndGateway, Furnace, FurnaceKind, Jukebox, Lectern, MOD_MENUS, ModBlockEntity,
@@ -440,8 +441,7 @@ impl BlockEntity {
     /// only when its type is in the block's set, and drops it for the
     /// block's own otherwise. Each kind fits the blocks `for_block` maps to
     /// it (a furnace is its kind's, a sign only its standing or hanging
-    /// kind); a mod block's own can't tell its block here, so a non-vanilla
-    /// name is trusted — a name change drops it either way.
+    /// kind); native types use the accepted declaration's valid blocks.
     pub fn fits(&self, name: &str) -> bool {
         match self {
             Self::Chest(items) => container_size(name) == Some(items.len()),
@@ -454,7 +454,7 @@ impl BlockEntity {
             Self::Skull(_) => is_skull(name),
             Self::Banner(_) => name.ends_with("_banner"),
             Self::Shelf(_) => name == "minecraft:shelf" || name.ends_with("_shelf"),
-            Self::Mod(_) => !name.starts_with("minecraft:"),
+            Self::Mod(m) => crate::block_entity_types::type_for(name) == Some(m.id()),
             Self::Beehive(_) => matches!(name, "minecraft:beehive" | "minecraft:bee_nest"),
             Self::Campfire(_) => {
                 matches!(name, "minecraft:campfire" | "minecraft:soul_campfire")
@@ -517,7 +517,7 @@ impl BlockEntity {
             Self::Campfire(_) => "minecraft:campfire",
             Self::ChiseledBookshelf(_) => "minecraft:chiseled_bookshelf",
             Self::Shelf(_) => "minecraft:shelf",
-            Self::Mod(m) => &m.id,
+            Self::Mod(m) => m.id(),
             Self::PotentSulfur(_) => "minecraft:potent_sulfur",
             Self::StructureBlock(_) => "minecraft:structure_block",
             Self::JigsawBlock(_) => "minecraft:jigsaw",

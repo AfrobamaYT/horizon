@@ -8,7 +8,7 @@ use horizon_client::{
     items::ItemStack, save,
 };
 use horizon_world::{
-    level::classes::Class,
+    level::{Behaviours, classes::Class},
     nbt::{Compound, JavaString, Tag},
     registry::BlockStateId,
 };
@@ -63,6 +63,21 @@ fn clone_item<'a>(name: &str, block_item: &'a str) -> &'a str {
     }
 }
 
+fn picked_item<'a>(
+    behaviours: &'a Behaviours,
+    state: BlockStateId,
+    item: &'a str,
+) -> Option<&'a str> {
+    let plant = behaviours.data(state);
+    let potted = plant
+        .is(Class::FlowerPot)
+        .then_some(plant.link)
+        .flatten()
+        .map(|block| &*behaviours.block_data(block).item)
+        .filter(|item| *item != "minecraft:air");
+    Some(potted.unwrap_or(item)).filter(|item| *item != "minecraft:air")
+}
+
 impl Game<'_> {
     /// The block entity at `key` as vanilla saves it, with its custom name.
     fn saved_block_entity(&self, key: (i32, i32, i32)) -> Option<Tag> {
@@ -77,6 +92,30 @@ impl Game<'_> {
             map.insert("CustomName".into(), Tag::String(name.as_str().into()));
         }
         block_entity_nbt::canonical(&tag)
+    }
+
+    /// The `CustomName` a block entity loads from `tag`
+    /// (`BaseContainerBlockEntity.loadAdditional`): kept beside the model in
+    /// `block_names`, and dropped when the tag has none. Banners and signs
+    /// keep their name themselves. True when the name changed.
+    pub(super) fn load_block_name(
+        &mut self,
+        key: (i32, i32, i32),
+        entity: &BlockEntity,
+        tag: &Tag,
+    ) -> bool {
+        if matches!(entity, BlockEntity::Banner(_) | BlockEntity::Sign(_)) {
+            return false;
+        }
+        let name = save::text(tag.get("CustomName"));
+        if self.world.block_names.get(&key) == name.as_ref() {
+            return false;
+        }
+        match name {
+            Some(name) => self.world.block_names.insert(key, name),
+            None => self.world.block_names.remove(&key),
+        };
+        true
     }
 
     /// `BlockState.getCloneItemStack` of the block at `pos`, then, with
@@ -116,20 +155,10 @@ impl Game<'_> {
                 _ => "minecraft:piston",
             });
         let item = clone_item(&facts.name, head.unwrap_or(&facts.item));
-        if item == "minecraft:air" {
-            return None;
-        }
         // FlowerPotBlock.getCloneItemStack: a potted plant picks as that plant
         // (`new ItemStack(potted)`), an empty pot as the pot itself.
-        let behaviours = self.res.behaviours();
-        let plant = behaviours.data(state);
-        let plant_item = plant
-            .is(Class::FlowerPot)
-            .then_some(plant.link)
-            .flatten()
-            .map(|block| behaviours.block_data(block).item.clone())
-            .filter(|item| &**item != "minecraft:air");
-        let mut stack = ItemStack::new(plant_item.as_deref().unwrap_or(item), 1);
+        let item = picked_item(self.res.behaviours(), state, item)?;
+        let mut stack = ItemStack::new(item, 1);
         let mut patch = Compound::new();
         // BeehiveBlock.getCloneItemStack: the honey level as the item's block state.
         if include_data
@@ -259,6 +288,20 @@ impl Game<'_> {
         }
     }
 
+    /// `BlockItem.updateBlockEntityComponents` on a client's level, for the
+    /// block it predicts at `pos`: the block entity takes the stack's
+    /// components but not its `block_entity_data` (`updateCustomBlockEntityTag`
+    /// returns on a client), so a copied sign's editor opens with its text (#8102).
+    pub(super) fn apply_predicted_item(&mut self, pos: [i32; 3], stack: &ItemStack) {
+        let mut stack = stack.clone();
+        if stack.data().is_some() {
+            stack
+                .data_mut()
+                .set_other(block_entity_item::BLOCK_ENTITY_DATA, None);
+        }
+        self.apply_placed_item(pos, &stack, false);
+    }
+
     /// `BlockItem.updateCustomBlockEntityTag` and `updateBlockEntityComponents`
     /// for the block entity just placed at `pos` from `stack`; `game_master`:
     /// the placer can use game master blocks (a dispenser can't).
@@ -277,7 +320,9 @@ impl Game<'_> {
         if placed == saved {
             return;
         }
-        let Some((_, mut entity)) = save::decode_block_entity(&placed) else {
+        let block = self.world.block(pos[0], pos[1], pos[2]);
+        let name = &self.res.facts().get(block).name;
+        let Some((_, mut entity)) = save::decode_block_entity_for_block(&placed, name) else {
             return;
         };
         // The new crafter's state flag (CrafterBlock.newBlockEntity), which
@@ -287,13 +332,7 @@ impl Game<'_> {
         {
             new.state_triggered = old.state_triggered;
         }
-        // Banners and signs keep their name themselves.
-        if !matches!(entity, BlockEntity::Banner(_) | BlockEntity::Sign(_)) {
-            match save::text(placed.get("CustomName")) {
-                Some(name) => self.world.block_names.insert(key, name),
-                None => self.world.block_names.remove(&key),
-            };
-        }
+        self.load_block_name(key, &entity, &placed);
         self.world.block_entities.insert(key, entity);
         self.update_spawner_display(key);
     }
@@ -301,7 +340,40 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::clone_item;
+    use super::{clone_item, picked_item};
+
+    #[test]
+    fn a_potted_plant_picks_its_plant_and_an_empty_pot_the_pot() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("block-behaviours.json").exists() {
+            return;
+        }
+        let registry = horizon_world::level::data::load_registry(&root).unwrap();
+        let behaviours = horizon_world::level::Behaviours::load(&registry, &root).unwrap();
+        let pick = |block: &str, own: &'static str| {
+            let state = registry.default_state(block).unwrap();
+            picked_item(&behaviours, state, own).map(str::to_owned)
+        };
+        assert_eq!(
+            pick("minecraft:potted_dandelion", "minecraft:air").as_deref(),
+            Some("minecraft:dandelion")
+        );
+        assert_eq!(
+            pick("minecraft:potted_oak_sapling", "minecraft:air").as_deref(),
+            Some("minecraft:oak_sapling")
+        );
+        assert_eq!(
+            pick("minecraft:flower_pot", "minecraft:flower_pot").as_deref(),
+            Some("minecraft:flower_pot")
+        );
+        assert_eq!(
+            pick("minecraft:stone", "minecraft:stone").as_deref(),
+            Some("minecraft:stone")
+        );
+        assert_eq!(pick("minecraft:fire", "minecraft:air"), None);
+    }
 
     /// `StemBlock.getCloneItemStack` and `AttachedStemBlock.getCloneItemStack`:
     /// pumpkin and melon stems, attached or not, pick the seed they grew from;
@@ -355,5 +427,154 @@ mod tests {
             clone_item("minecraft:cake", "minecraft:cake"),
             "minecraft:cake"
         );
+    }
+
+    /// A mod block entity's data rides its item through the game: Ctrl+Pick
+    /// Block (`addBlockDataToItem`) puts it on the stack, placing the stack
+    /// (`BlockItem.updateCustomBlockEntityTag`) loads it into the new block
+    /// entity, and `/give` takes the declared type and refuses an unknown one.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_block_entity_rides_its_item_through_the_game() {
+        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
+        use super::components;
+        use horizon_client::{
+            chunk::Chunk,
+            containers::BlockEntity,
+            mod_api::{self, *},
+        };
+        use std::sync::Arc;
+
+        const CHILD: &str = "HORIZON_MOD_BLOCK_ENTITY_ITEM_CHILD";
+        if run_fresh_cases(
+            "game::block_items::tests::a_mod_block_entity_rides_its_item_through_the_game",
+            CHILD,
+            &["game"],
+        ) {
+            return;
+        }
+        const CRATE: &str = "item_test:crate";
+        struct Crate;
+        #[mod_api::horizon_part]
+        impl BlockPart for Crate {}
+        #[mod_api::horizon_part]
+        impl BlockEntityPart for Crate {
+            fn block_entity(
+                &self,
+                _: LevelSide<'_>,
+                _: &mut BlockEntityEvent<'_>,
+            ) -> Option<Compound> {
+                Some(Compound::from([("Amount".into(), Tag::Int(0))]))
+            }
+        }
+        struct TestMod;
+        #[horizon_client::mod_api::__subscriptions]
+        impl Hooks for TestMod {
+            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+                let kind = registrar
+                    .block_entity_type("crate")
+                    .blocks(&[CRATE])
+                    .build();
+                registrar
+                    .block_entity_part(&kind, Crate)
+                    .expect("native type");
+            }
+            fn blocks(
+                &self,
+                _context: &horizon_client::mod_api::RegistrationContext<'_>,
+                event: &mut BlocksEvent<'_>,
+            ) {
+                event.blocks.push(horizon_mods::content::Block {
+                    id: CRATE.into(),
+                    template: "minecraft:white_banner".into(),
+                    item: true,
+                    ..Default::default()
+                });
+            }
+        }
+        let mods: Mods = Arc::from([ModEntry::new("item_test", Box::new(TestMod))]);
+        horizon_client::mod_api::install(mods.clone());
+        horizon_client::mod_api::install_parts(&mods).unwrap();
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let root = super::super::mods::content_root(&base, &Default::default()).unwrap();
+        with_game_at(root, |game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level(game.dim.id()).unwrap();
+            let state = game.pack.assets.registry.default_state(CRATE).unwrap();
+            for x in [1, 2] {
+                assert!(game.native_level_set_block(
+                    level,
+                    [x, 64, 0],
+                    state,
+                    NativeBlockUpdateFlags::NONE
+                ));
+            }
+            let Some(BlockEntity::Mod(first)) = game.world.block_entities.get_mut(&(1, 64, 0))
+            else {
+                panic!("no mod block entity");
+            };
+            first.nbt.insert("Amount".into(), Tag::Int(2000));
+            // A component it was placed with (`BlockEntity.components`).
+            let name =
+                Compound::from([("minecraft:custom_name".into(), Tag::String("Box".into()))]);
+            first
+                .nbt
+                .insert("components".into(), Tag::Compound(name.clone()));
+
+            let picked = game.picked_stack([1, 64, 0], true).expect("picked");
+            assert_eq!(&*picked.item, CRATE);
+            let patch = components(&picked);
+            let data = patch
+                .get(&"minecraft:block_entity_data".into())
+                .expect("data");
+            assert_eq!(data.get("id"), Some(&Tag::String(CRATE.into())));
+            assert_eq!(data.get("Amount"), Some(&Tag::Int(2000)));
+            assert_eq!(data.get("x"), None);
+            assert_eq!(data.get("components"), None);
+            assert_eq!(
+                patch.get(&"minecraft:custom_name".into()),
+                Some(&Tag::String("Box".into()))
+            );
+            // Without Ctrl the item carries nothing.
+            let plain = game.picked_stack([1, 64, 0], false).expect("picked");
+            assert!(!components(&plain).contains_key(&"minecraft:block_entity_data".into()));
+
+            game.apply_placed_item([2, 64, 0], &picked, false);
+            let Some(BlockEntity::Mod(second)) = game.world.block_entities.get(&(2, 64, 0)) else {
+                panic!("placing replaced the mod block entity");
+            };
+            assert_eq!(second.nbt.get(&"Amount".into()), Some(&Tag::Int(2000)));
+            assert_eq!(
+                second.nbt.get(&"components".into()),
+                Some(&Tag::Compound(name))
+            );
+
+            // The game's own command tree and registries, as a world opens
+            // them; this headless game has no player for the give to reach, so
+            // the parse, where the data's type is checked, is what runs.
+            game.build_registries();
+            game.ui.registries.permission = 4;
+            let commands = horizon_client::command::vanilla::game_dispatcher_with_features(
+                &game.level.enabled_features,
+            );
+            let give = |kind: &str| {
+                let command =
+                    format!("give @s {CRATE}[block_entity_data={{id:\"{kind}\",Amount:7}}]");
+                commands
+                    .parse(&command, &game.ui.registries)
+                    .executable()
+                    .map(|_| ())
+                    .map_err(|e| e.message.plain())
+            };
+            assert_eq!(give(CRATE), Ok(()));
+            assert!(
+                give("item_test:nope")
+                    .unwrap_err()
+                    .contains("item_test:nope")
+            );
+        });
     }
 }

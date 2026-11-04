@@ -91,6 +91,41 @@ fn slime_at(world: &World, facts: &BlockFacts, x: i32, y: i32, z: i32) -> bool {
 mod fluids;
 pub use fluids::update_entity_fluids;
 
+/// `LivingEntity.createItemStackToDrop`'s motion for a stack thrown by an
+/// entity facing `yaw` and `pitch` (degrees), from that entity's random:
+/// `randomly` scatters it in any direction (a death's drops), else it goes
+/// along the view (the drop key).
+pub fn drop_motion(
+    r: &mut impl horizon_core::random::RandomSource,
+    yaw: f32,
+    pitch: f32,
+    randomly: bool,
+) -> [f64; 3] {
+    use horizon_core::{
+        geometry::trig::{DEG_TO_RAD, cos, sin},
+        jmath,
+    };
+    let tau = std::f32::consts::TAU;
+    if randomly {
+        let pow = r.next_float() * 0.5;
+        let dir = f64::from(r.next_float() * tau);
+        return [
+            f64::from(-sin(dir) * pow),
+            f64::from(0.2f32),
+            f64::from(cos(dir) * pow),
+        ];
+    }
+    let (x, y) = (f64::from(pitch * DEG_TO_RAD), f64::from(yaw * DEG_TO_RAD));
+    let (sin_x, cos_x, sin_y, cos_y) = (sin(x), cos(x), sin(y), cos(y));
+    let dir = f64::from(r.next_float() * tau);
+    let pow = f64::from(0.02 * r.next_float());
+    [
+        f64::from(-sin_y * cos_x * 0.3) + jmath::cos(dir) * pow,
+        f64::from(-sin_x * 0.3 + 0.1 + (r.next_float() - r.next_float()) * 0.1),
+        f64::from(cos_y * cos_x * 0.3) + jmath::sin(dir) * pow,
+    ]
+}
+
 #[derive(Clone, Debug)]
 pub struct ItemEntity {
     /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
@@ -1357,8 +1392,10 @@ pub struct ArmorStand {
     pub yaw: f32,
     /// `yBodyRotO`: the body's yaw at the start of the tick.
     pub previous_yaw: f32,
-    /// mainhand, offhand, feet, legs, chest, head (EquipmentSlot order).
-    pub equipment: [Option<crate::items::ItemStack>; 6],
+    /// Every `EquipmentSlot`, by ordinal: mainhand, offhand, feet, legs, chest,
+    /// head, body, saddle. Vanilla's `canUseSlot` refuses body and saddle only
+    /// for interaction; `setItemSlot` and the save keep them.
+    pub equipment: horizon_items::equipment::Equipment,
     pub small: bool,
     pub show_arms: bool,
     pub no_base_plate: bool,
@@ -1389,7 +1426,9 @@ pub struct ArmorStand {
     /// Travel accumulated for `LivingEntity.checkFallDamage`'s landing callback.
     pub enchantment_fall_distance: f64,
     /// Last equipment seen by `collectEquipmentChanges`; not saved to NBT.
-    pub enchantment_equipment: [Option<ItemStack>; 6],
+    pub enchantment_equipment: horizon_items::equipment::Equipment,
+    /// `Entity.firstTick`: true until its first tick has run.
+    pub first_tick: bool,
     /// `Entity.mainSupportingBlockPos` after the last move.
     pub support: horizon_world::ground_support::GroundState,
 }
@@ -1562,6 +1601,7 @@ impl ArmorStand {
             enchantment_block: None,
             enchantment_fall_distance: 0.0,
             enchantment_equipment: Default::default(),
+            first_tick: true,
             support: Default::default(),
         }
     }
@@ -3559,3 +3599,26 @@ crate::impl_joined!(
     Cushion,
     ItemFrame
 );
+
+#[cfg(test)]
+mod drop_motion_tests {
+    use super::drop_motion;
+    use horizon_core::random::{LegacyRandom, RandomSource};
+
+    /// A scattered drop takes two floats and rises at 0.2; one along the view
+    /// (south, level) takes four and goes about 0.3 along +z.
+    #[test]
+    fn drops_scatter_or_follow_the_view_in_vanillas_draws() {
+        let (mut r, mut after) = (LegacyRandom::new(7), LegacyRandom::new(7));
+        let v = drop_motion(&mut r, 90.0, 30.0, true);
+        let pow = f64::from(after.next_float() * 0.5);
+        after.next_float();
+        assert_eq!(v[1], f64::from(0.2f32));
+        assert!((v[0].hypot(v[2]) - pow).abs() < 1.0e-3);
+        let v = drop_motion(&mut r, 0.0, 0.0, false);
+        (0..4).for_each(|_| _ = after.next_float());
+        assert!(v[0].abs() <= 0.02 && (v[2] - 0.3).abs() <= 0.02, "{v:?}");
+        assert!((v[1] - 0.1).abs() <= 0.1, "{v:?}");
+        assert_eq!(r.next_int(), after.next_int());
+    }
+}

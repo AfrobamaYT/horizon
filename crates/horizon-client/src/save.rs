@@ -640,7 +640,7 @@ pub use horizon_items::item_nbt::{
 };
 /// Whether a mod block entity is temporarily out of the world for its tick.
 pub fn block_entity_placeholder(entity: &crate::containers::BlockEntity) -> bool {
-    matches!(entity, crate::containers::BlockEntity::Mod(m) if m.id.is_empty())
+    matches!(entity, crate::containers::BlockEntity::Mod(m) if m.id().is_empty())
 }
 
 /// The block entity type ID for the block it sits in (a chest-like container
@@ -665,7 +665,7 @@ pub fn encode_block_entity(
     use crate::containers::BlockEntity;
     if let BlockEntity::Mod(m) = e {
         let mut map = m.nbt.clone();
-        map.insert("id".into(), string(&m.id));
+        map.insert("id".into(), string(m.id()));
         if m.items.iter().any(Option::is_some) {
             map.insert("Items".into(), encode_items(&m.items));
         }
@@ -930,16 +930,29 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     } else {
         items.clear();
     }
-    Some(
+    Some(crate::containers::ModBlockEntity::new(
+        id,
         crate::containers::ModBlockEntityFields {
-            id,
             nbt,
             items,
             data: Vec::new(),
-        }
-        .into(),
-    )
+        },
+    ))
 }
+/// Decode an entity at a known block, refusing undeclared IDs and invalid native membership.
+/// Vanilla decoding remains unchanged; only declared native types override templates.
+pub fn decode_block_entity_for_block(
+    tag: &Tag,
+    block: &str,
+) -> Option<((i32, i32, i32), crate::containers::BlockEntity)> {
+    let decoded = decode_block_entity(tag)?;
+    let actual = match &decoded.1 {
+        crate::containers::BlockEntity::Mod(m) => Some(m.id()),
+        _ => None,
+    };
+    (actual == crate::block_entity_types::type_for(block)).then_some(decoded)
+}
+
 pub fn decode_block_entity(tag: &Tag) -> Option<((i32, i32, i32), crate::containers::BlockEntity)> {
     use crate::containers::BlockEntity;
     let int = |k: &str| number(tag.get(k)).map(|v| v as i32);
@@ -1787,10 +1800,16 @@ fn decode_column(
     if let Some(Tag::List(entities)) = tag.get("block_entities") {
         for e in entities {
             let int = |k: &str| number(e.get(k)).map(|v| v as i32);
-            if let (Some(x), Some(y), Some(z)) = (int("x"), int("y"), int("z")) {
+            let decoded = if let (Some(x), Some(y), Some(z)) = (int("x"), int("y"), int("z")) {
                 extras.block_entity_order.push((x, y, z));
-            }
-            match decode_block_entity(e) {
+                let state = chunk.block(x & 15, y, z & 15);
+                registry
+                    .state(state)
+                    .and_then(|block| decode_block_entity_for_block(e, &block.name))
+            } else {
+                None
+            };
+            match decoded {
                 Some(mut be) => {
                     if let Ok(Some(data)) = attachment_compound(e.get(ATTACHMENTS_KEY)) {
                         extras.block_entity_attachments.push((
@@ -2430,7 +2449,7 @@ pub struct SaveDir {
     /// What older chunks are upgraded with, found on the first one read.
     datafix_context: OnceLock<Option<DatafixContext>>,
 }
-fn mod_ticket_to_nbt(ticket: &ModTicket) -> Tag {
+fn mod_ticket_to_nbt(ticket: &ModTicket, controller: &str) -> Tag {
     let owner = match ticket.owner {
         TicketOwner::Block(pos) => ("block", Tag::IntArray(pos.to_vec())),
         TicketOwner::Entity(uuid) => (
@@ -2439,16 +2458,21 @@ fn mod_ticket_to_nbt(ticket: &ModTicket) -> Tag {
         ),
     };
     Tag::compound([
-        ("mod", Tag::String(ticket.mod_id.as_str().into())),
+        ("controller", Tag::String(controller.into())),
         ("owner", Tag::compound([owner])),
         (
             "chunk_pos",
             Tag::IntArray(vec![ticket.chunk.0, ticket.chunk.1]),
         ),
+        (
+            "natural_spawning",
+            Tag::Byte(i8::from(ticket.natural_spawning)),
+        ),
     ])
 }
-fn mod_ticket_from_nbt(tag: &Tag) -> Option<ModTicket> {
-    let Some(Tag::String(mod_id)) = tag.get("mod") else {
+/// A saved ticket: the id of the controller that held it, and the ticket without its slot.
+fn mod_ticket_from_nbt(tag: &Tag) -> Option<(String, ModTicket)> {
+    let Some(Tag::String(controller)) = tag.get("controller") else {
         return None;
     };
     let owner = tag.get("owner")?;
@@ -2463,11 +2487,16 @@ fn mod_ticket_from_nbt(tag: &Tag) -> Option<ModTicket> {
     let Some(Tag::IntArray(pos)) = tag.get("chunk_pos") else {
         return None;
     };
-    let mod_id = mod_id.to_string().ok()?;
-    (pos.len() == 2).then(|| ModTicket {
-        mod_id,
-        owner,
-        chunk: (pos[0], pos[1]),
+    let controller = controller.to_string().ok()?;
+    (pos.len() == 2).then(|| {
+        let ticket = ModTicket {
+            controller: 0,
+            owner,
+            chunk: (pos[0], pos[1]),
+            // Tickets saved without the flag don't force natural spawning.
+            natural_spawning: matches!(tag.get("natural_spawning"), Some(Tag::Byte(b)) if *b != 0),
+        };
+        (controller, ticket)
     })
 }
 fn is_forced_ticket(ticket: &Tag) -> bool {
@@ -2615,20 +2644,55 @@ impl SaveDir {
     }
     /// The chunk tickets of mods (`data/horizon/mod_chunk_tickets.dat`), kept
     /// out of vanilla's `chunk_tickets.dat` because vanilla decodes its ticket
-    /// types through a registry. A ticket that doesn't read is skipped.
-    pub fn load_mod_tickets(&self) -> Vec<ModTicket> {
+    /// types through a registry. Each is saved under its controller's id;
+    /// `slot_of` gives the slot of an id a loaded mod registered. A ticket of
+    /// any other id (a mod that is gone, or a file from before controllers) is
+    /// dropped with a warning, as NeoForge drops a controller nobody registers,
+    /// and one that doesn't read is skipped.
+    pub fn load_mod_tickets(&self, slot_of: impl Fn(&str) -> Option<u32>) -> Vec<ModTicket> {
         let Some(root) = read_dat(&self.mod_tickets_path()) else {
             return Vec::new();
         };
         let Some(Tag::List(tickets)) = root.get("data").and_then(|data| data.get("tickets")) else {
             return Vec::new();
         };
-        tickets.iter().filter_map(mod_ticket_from_nbt).collect()
+        let mut dropped = std::collections::BTreeSet::new();
+        let loaded = tickets
+            .iter()
+            .filter_map(|tag| {
+                let Some((controller, ticket)) = mod_ticket_from_nbt(tag) else {
+                    log::warn!("Dropping a saved mod chunk ticket that has no readable controller");
+                    return None;
+                };
+                let Some(slot) = slot_of(&controller) else {
+                    dropped.insert(controller);
+                    return None;
+                };
+                Some(ModTicket {
+                    controller: slot,
+                    ..ticket
+                })
+            })
+            .collect();
+        for controller in dropped {
+            log::warn!(
+                "Dropping the saved chunk tickets of ticket controller {controller}: no loaded mod registers it"
+            );
+        }
+        loaded
     }
-    /// Save the tickets of mods; nothing while there are none and never were.
-    pub fn save_mod_tickets(&self, tickets: &ModTickets) -> Result<()> {
+    /// Save the tickets of mods under their controllers' ids (`id_of` gives the id of a slot);
+    /// nothing while there are none and never were.
+    pub fn save_mod_tickets(
+        &self,
+        tickets: &ModTickets,
+        id_of: impl Fn(u32) -> Option<&'static str>,
+    ) -> Result<()> {
         let path = self.mod_tickets_path();
-        let list: Vec<Tag> = tickets.to_save().map(mod_ticket_to_nbt).collect();
+        let list: Vec<Tag> = tickets
+            .to_save()
+            .filter_map(|t| Some(mod_ticket_to_nbt(t, id_of(t.controller)?)))
+            .collect();
         if list.is_empty() && !path.exists() {
             return Ok(());
         }
@@ -5043,22 +5107,10 @@ fn decode_lod_surfaces(
         }
     }
     // Spans are pushed top down, so the reverse puts the topmost last, as
-    // `Column::from_chunk` leaves them. Open water is then lit as open sky,
-    // exactly as the live path does: without it a saved column kept each
-    // water block's own faded skylight and drew a dark band through the sea
-    // where saved columns met the generator's (`grid`'s stride limit).
-    // Only where there is a sky to be lit by: the Nether's water must not
-    // gain skylight it never had.
-    let is_water = |state| {
-        sky_light
-            && assets
-                .registry
-                .state(state)
-                .is_some_and(|block| block.name == "minecraft:water")
-    };
+    // `Column::from_chunk` leaves them. Water keeps the chunk's own light,
+    // a level less per block, as the generator's far columns shade it.
     for column in &mut *columns {
         column.spans.reverse();
-        column.light_open_water_where(is_water);
     }
     Some(Arc::from(columns))
 }
@@ -5867,20 +5919,6 @@ mod tests {
         let underwater = surfaces[4 * 16 + 4].surface.unwrap();
         assert_eq!((underwater.height, underwater.state), (55, sand));
         assert_eq!(underwater.water, Some((64, water)));
-        // Open water reads as open sky, as the generator's far columns do.
-        // Saved columns that kept each block's own faded skylight drew a dark
-        // band through the sea where the two met.
-        let sea = &surfaces[4 * 16 + 4].spans;
-        let lit: Vec<_> = sea
-            .iter()
-            .filter(|span| span.state == water)
-            .map(|span| span.light & 0xf0)
-            .collect();
-        assert!(!lit.is_empty(), "the column keeps its water spans");
-        assert!(
-            lit.iter().all(|sky| *sky == 0xf0),
-            "saved open water is lit as open sky, got {lit:?}"
-        );
         let chorus_column = &surfaces[2 * 16 + 12];
         assert_eq!(
             chorus_column
@@ -6392,6 +6430,75 @@ mod tests {
         assert_eq!(again.update_tag(), spawner.update_tag());
     }
     #[test]
+    fn native_saved_ids_must_match_the_declared_block_membership() {
+        // The production registry is immutable. Exercise its real readers in a fresh process.
+        const CHILD: &str = "HORIZON_TEST_NATIVE_SAVED_MEMBERSHIP";
+        if std::env::var_os(CHILD).is_none() {
+            assert!(
+                std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "save::tests::native_saved_ids_must_match_the_declared_block_membership",
+                        "--nocapture"
+                    ])
+                    .env(CHILD, "1")
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            return;
+        }
+        use crate::block_entity_types::{self, BlockEntityTypes};
+        block_entity_types::install(BlockEntityTypes::new(
+            [
+                ("test:press".into(), "test:machine".into()),
+                ("test:mill".into(), "test:machine".into()),
+                ("test:board".into(), "test:other".into()),
+            ]
+            .into(),
+            vec!["test:machine".into(), "test:other".into()],
+        ))
+        .unwrap();
+        let tag = |id: &str| {
+            horizon_world::nbt::parse_snbt(&format!(r#"{{id:"{id}",x:1,y:64,z:2,energy:900L}}"#,))
+                .unwrap()
+                .0
+        };
+        for block in ["test:press", "test:mill"] {
+            let (_, entity) = decode_block_entity_for_block(&tag("test:machine"), block).unwrap();
+            assert!(entity.fits(block));
+            assert_eq!(entity.id(), "test:machine");
+            let crate::containers::BlockEntity::Mod(m) = entity else {
+                panic!("not native");
+            };
+            assert_eq!(m.nbt.get(&"energy".into()), Some(&Tag::Long(900)));
+            for id in [
+                "test:press",
+                "test:other",
+                "test:unknown",
+                "minecraft:banner",
+            ] {
+                assert!(
+                    decode_block_entity_for_block(&tag(id), block).is_none(),
+                    "{id}"
+                );
+            }
+        }
+        for block in [
+            "test:casing",
+            "test:board",
+            "other:press",
+            "minecraft:stone",
+        ] {
+            assert!(decode_block_entity_for_block(&tag("test:machine"), block).is_none());
+        }
+        assert!(
+            decode_block_entity_for_block(&tag("minecraft:banner"), "minecraft:white_banner")
+                .is_some()
+        );
+    }
+
+    #[test]
     fn mod_block_entity_round_trips() {
         let saved = horizon_world::nbt::parse_snbt(
             r#"{id:"gtmod:macerator",x:5,y:-60,z:12,energy:1200L,progress:7,Items:[{Slot:0b,id:"minecraft:iron_ore",count:3}]}"#,
@@ -6403,7 +6510,7 @@ mod tests {
         let crate::containers::BlockEntity::Mod(m) = &back else {
             panic!("not a mod's");
         };
-        assert_eq!(m.id, "gtmod:macerator");
+        assert_eq!(m.id(), "gtmod:macerator");
         // The mod sees its own fields only.
         for key in ["id", "x", "y", "z"] {
             assert!(!m.nbt.contains_key(&key.into()), "{key}");
@@ -7916,6 +8023,248 @@ mod tests {
                 "{address} {seed}: chunks read with a surface"
             );
             let _ = fs::remove_dir_all(&own);
+        }
+    }
+}
+
+/// Far-terrain floating-cell census on a real save: `HORIZON_TEST_RESOURCES`
+/// (prepared data), `HORIZON_FAR_SAVE` (a world folder), `HORIZON_FAR_SEED`
+/// and `HORIZON_FAR_AT` ("x,z", the camera). Samples the tiles each level
+/// draws around the camera as the far sampler gives them (saved chunks up to
+/// 16 blocks a cell, the seed beyond) and counts components of drawn cells
+/// that touch neither the world's bottom nor the tile's halo.
+#[cfg(test)]
+mod far_census {
+    use super::*;
+    use crate::lod::Column;
+    use crate::streaming::ChunkGenerator;
+
+    #[derive(Default, Debug)]
+    struct Census {
+        tiles: usize,
+        floating: usize,
+        cells: usize,
+        kinds: std::collections::BTreeMap<&'static str, usize>,
+        water_over_air: usize,
+    }
+
+    fn kind(name: &str) -> &'static str {
+        if name.ends_with("_leaves") {
+            "leaves"
+        } else if name.ends_with("_log") || name.ends_with("_wood") || name.contains("stem") {
+            "log"
+        } else if name == "minecraft:water" || name == "minecraft:lava" {
+            "fluid"
+        } else if name.contains("snow") || name.contains("ice") {
+            "snow/ice"
+        } else {
+            "ground"
+        }
+    }
+
+    /// `columns`: `side` x `side`, the outer ring a halo.
+    fn count(
+        columns: &[Column],
+        side: usize,
+        name: &dyn Fn(horizon_world::registry::BlockStateId) -> String,
+        out: &mut Census,
+        origin: (i32, i32, i32),
+    ) {
+        // Runs of touching spans, per column: (min, max, top state).
+        let runs: Vec<Vec<(i16, i16, horizon_world::registry::BlockStateId)>> = columns
+            .iter()
+            .map(|column| {
+                let mut runs: Vec<(i16, i16, _)> = Vec::new();
+                for span in column.spans.iter().filter(|s| s.min < s.max) {
+                    match runs.last_mut() {
+                        Some(run) if run.1 == span.min => {
+                            run.1 = span.max;
+                            run.2 = span.state;
+                        }
+                        _ => runs.push((span.min, span.max, span.state)),
+                    }
+                }
+                runs
+            })
+            .collect();
+        let mut first = Vec::with_capacity(runs.len());
+        let mut total = 0;
+        for column in &runs {
+            first.push(total);
+            total += column.len();
+        }
+        let mut parent: Vec<usize> = (0..total).collect();
+        fn find(parent: &mut [usize], mut i: usize) -> usize {
+            while parent[i] != i {
+                parent[i] = parent[parent[i]];
+                i = parent[i];
+            }
+            i
+        }
+        let union = |parent: &mut Vec<usize>, a: usize, b: usize| {
+            let (a, b) = (find(parent, a), find(parent, b));
+            if a != b {
+                parent[a] = b;
+            }
+        };
+        for z in 0..side {
+            for x in 0..side {
+                let i = z * side + x;
+                for j in [
+                    (x + 1 < side).then(|| i + 1),
+                    (z + 1 < side).then(|| i + side),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    for (a, &(lo, hi, _)) in runs[i].iter().enumerate() {
+                        for (b, &(other_lo, other_hi, _)) in runs[j].iter().enumerate() {
+                            // Cells meeting at an edge (an acacia's
+                            // diagonal branch) look joined too.
+                            if lo <= other_hi && other_lo <= hi {
+                                union(&mut parent, first[i] + a, first[j] + b);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Per component: grounded, touches the halo, cells, top state.
+        let mut grounded = vec![false; total];
+        let mut halo = vec![false; total];
+        let mut cells = vec![0usize; total];
+        let mut top = vec![None; total];
+        let mut at = vec![(0, 0); total];
+        for z in 0..side {
+            for x in 0..side {
+                let i = z * side + x;
+                let ring = x == 0 || z == 0 || x + 1 == side || z + 1 == side;
+                for (a, &(lo, hi, state)) in runs[i].iter().enumerate() {
+                    let root = find(&mut parent, first[i] + a);
+                    grounded[root] |= i32::from(lo) <= crate::chunk::MIN_Y;
+                    halo[root] |= ring;
+                    cells[root] += 1;
+                    if top[root].is_none_or(|(y, _)| hi > y) {
+                        top[root] = Some((hi, state));
+                        at[root] = (
+                            origin.0 + x as i32 * origin.2,
+                            origin.1 + z as i32 * origin.2,
+                        );
+                    }
+                }
+                if !ring {
+                    let spans = &columns[i].spans;
+                    for (k, span) in spans.iter().enumerate() {
+                        let n = name(span.state);
+                        if kind(&n) == "fluid" && (k == 0 || spans[k - 1].max < span.min) {
+                            out.water_over_air += 1;
+                            if std::env::var_os("HORIZON_FAR_DEBUG").is_some() {
+                                println!(
+                                    "  fluid over air at {} {} y {}..{} {n}",
+                                    origin.0 + x as i32 * origin.2,
+                                    origin.1 + z as i32 * origin.2,
+                                    span.min,
+                                    span.max
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for root in 0..total {
+            if find(&mut parent, root) != root || grounded[root] || halo[root] {
+                continue;
+            }
+            out.floating += 1;
+            out.cells += cells[root];
+            let (y, state) = top[root].unwrap();
+            *out.kinds.entry(kind(&name(state))).or_default() += 1;
+            if std::env::var_os("HORIZON_FAR_DEBUG").is_some() {
+                println!(
+                    "  floating at {:?} top {y} {} ({} cells)",
+                    at[root],
+                    name(state),
+                    cells[root]
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires prepared data and a save (see the module docs)"]
+    fn far_floating_cells_per_level() {
+        let var = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("{name}"));
+        let root = PathBuf::from(var("HORIZON_TEST_RESOURCES"));
+        let world = PathBuf::from(var("HORIZON_FAR_SAVE"));
+        let seed: i64 = var("HORIZON_FAR_SEED").parse().unwrap();
+        let at: Vec<i32> = var("HORIZON_FAR_AT")
+            .split(',')
+            .map(|n| n.trim().parse().unwrap())
+            .collect();
+        let assets = Arc::new(crate::assets::Assets::load(&root).expect("assets"));
+        let biomes = Arc::new(Biomes::load(&root).expect("biomes"));
+        let registry = assets.registry;
+        let terrain = Arc::new(
+            crate::vanillagen::VanillaTerrain::new(&root.join("worldgen"), registry, &biomes, seed)
+                .expect("terrain"),
+        );
+        let save = Arc::new(SaveDir::new(
+            world.join("dimensions/minecraft/overworld"),
+            LevelShape::OVERWORLD,
+        ));
+        let generator = Arc::new(Persistent {
+            inner: terrain,
+            save: save.clone(),
+            registry: assets.clone(),
+            biomes: biomes.clone(),
+        });
+        let mut sampler = ChunkGenerator::lod_sampler(generator);
+        let name = |state| {
+            registry
+                .state(state)
+                .map_or_else(String::new, |s| s.name.to_string())
+        };
+        let limit: usize = std::env::var("HORIZON_FAR_TILES")
+            .ok()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(48);
+        for level in 1..=6u8 {
+            let size = 16 << level;
+            let width = size / 16;
+            // The ring this level is drawn in (`Plan::visit` splits a tile
+            // closer than 8 of its widths).
+            let (near, far) = (8 * size, 16 * size);
+            let mut tiles = Vec::new();
+            for tz in (at[1] - far).div_euclid(size)..=(at[1] + far).div_euclid(size) {
+                for tx in (at[0] - far).div_euclid(size)..=(at[0] + far).div_euclid(size) {
+                    let (cx, cz) = (tx * size + size / 2, tz * size + size / 2);
+                    let d = (((cx - at[0]) as f64).powi(2) + ((cz - at[1]) as f64).powi(2)).sqrt();
+                    if d >= f64::from(near) && d < f64::from(far) {
+                        tiles.push((tx, tz));
+                    }
+                }
+            }
+            let step = tiles.len().div_ceil(limit).max(1);
+            let mut saved = Census::default();
+            let mut seeded = Census::default();
+            let started = std::time::Instant::now();
+            for &(tx, tz) in tiles.iter().step_by(step) {
+                let (x, z) = (tx * size - width, tz * size - width);
+                let columns = sampler.grid(x, z, width, 18);
+                let all_saved = width <= SAVED_LOD_STRIDE
+                    && (x.div_euclid(16)..=(x + 18 * width - 1).div_euclid(16)).all(|cx| {
+                        (z.div_euclid(16)..=(z + 18 * width - 1).div_euclid(16))
+                            .all(|cz| save.lod_surfaces_shared(cx, cz, &assets, &biomes).is_some())
+                    });
+                let out = if all_saved { &mut saved } else { &mut seeded };
+                out.tiles += 1;
+                count(&columns, 18, &name, out, (x, z, width));
+            }
+            println!(
+                "level {level} (cells {width}, {near}..{far} blocks, {:.1}s): saved {saved:?} | seed {seeded:?}",
+                started.elapsed().as_secs_f32()
+            );
         }
     }
 }

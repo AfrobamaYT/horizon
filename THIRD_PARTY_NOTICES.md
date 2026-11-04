@@ -1,5 +1,12 @@
 # Third-party notices
 
+## horizon-mixins
+
+The raw injection schema in `crates/horizon-mods/src/manifest.rs` is adapted from
+[horizon-mixins](https://github.com/horizon-rust/horizon-mixins/tree/ddd9700b21997c95d95ac6ee5ecafe3830cf622a),
+Copyright (c) 2026 levzzz, under the MIT license
+(`crates/horizon-mods/HORIZON_MIXINS_LICENSE`).
+
 ## wgpu-hal
 
 `third_party/wgpu-hal` is [wgpu-hal](https://github.com/gfx-rs/wgpu) 30.0.1 by the gfx-rs
@@ -13,6 +20,9 @@ Apache-2.0; both licenses are in that folder (`LICENSE.MIT`, `LICENSE.APACHE`).
 `third_party/naga` is [naga](https://github.com/gfx-rs/wgpu) 30.0.1 by the gfx-rs developers, with
 fixes to its GLSL frontend that shader packs need, each applied in the commit that needed it. It is licensed under MIT or Apache-2.0; both licenses
 are in that folder (`LICENSE.MIT`, `LICENSE.APACHE`).
+
+The GLSL frontend also resets the common type for each comma-separated declarator so one
+variable's array specifier does not change later variables.
 
 ## libmimalloc-sys and mimalloc
 

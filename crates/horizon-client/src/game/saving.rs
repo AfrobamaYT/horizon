@@ -33,7 +33,10 @@ impl Game<'_> {
     /// mods' in Horizon's own `mod_chunk_tickets.dat`.
     pub(super) fn save_chunk_tickets(&self) -> Result<()> {
         self.save.save_forced_chunks(self.streaming.commanded())?;
-        self.save.save_mod_tickets(self.streaming.mod_tickets())
+        self.save
+            .save_mod_tickets(self.streaming.mod_tickets(), |slot| {
+                horizon_client::mod_api::TicketController::from_slot(slot).map(|c| c.id())
+            })
     }
     pub(super) fn begin_closing_save(&mut self, quit: bool) -> Result<()> {
         if let Some(save) = &mut self.pending_save {
@@ -55,6 +58,10 @@ impl Game<'_> {
             // Minecraft.disconnect: the client logs out before its server halts.
             self.client_logging_out();
         }
+        // Stop client-side terrain work before the integrated server is shut down. The
+        // server's own stop path aborts its workers, but the window's streaming registration
+        // is dropped only after the event loop exits and would otherwise wait for queued work.
+        self.streaming.abort_generation();
         if let Some(integrated) = &self.integrated {
             integrated.request_stop();
             self.pending_save = Some(ClosingSave {
@@ -85,7 +92,6 @@ impl Game<'_> {
             self.award_custom_stat("leave_game", 1);
             self.lan_close(false);
             self.free_player_beds()?;
-            self.streaming.abort_generation();
             self.pending_save = Some(ClosingSave {
                 quit,
                 close: true,

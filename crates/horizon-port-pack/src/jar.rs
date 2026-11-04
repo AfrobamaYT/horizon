@@ -50,6 +50,7 @@ pub struct JarIdentity {
 }
 
 /// Read a NeoForge or Fabric jar's own identity, refusing missing or invalid metadata.
+/// Each metadata entry is limited to 1 MiB after decompression.
 pub fn read_identity(path: &Path) -> Result<JarIdentity, String> {
     let (info, loader) = read_inner(path, true)?;
     let loader = loader.expect("strict metadata always has a loader");
@@ -88,14 +89,24 @@ fn read_inner(path: &Path, strict: bool) -> Result<(JarInfo, Option<JarLoader>),
     let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("{}: {e}", path.display()))?;
     let text =
         |zip: &mut zip::ZipArchive<fs::File>, name: &str| -> Result<Option<String>, String> {
-            let mut entry = match zip.by_name(name) {
+            let entry = match zip.by_name(name) {
                 Ok(entry) => entry,
                 Err(zip::result::ZipError::FileNotFound) => return Ok(None),
                 Err(e) if strict => return Err(format!("{}: {name}: {e}", path.display())),
                 Err(_) => return Ok(None),
             };
+            const MAX_METADATA_BYTES: u64 = 1024 * 1024;
+            let limit = if strict {
+                MAX_METADATA_BYTES + 1
+            } else {
+                u64::MAX
+            };
             let mut s = String::new();
-            match entry.read_to_string(&mut s) {
+            match entry.take(limit).read_to_string(&mut s) {
+                Ok(_) if strict && s.len() as u64 > MAX_METADATA_BYTES => Err(format!(
+                    "{}: {name}: metadata exceeds {MAX_METADATA_BYTES} bytes",
+                    path.display()
+                )),
                 Ok(_) => Ok(Some(s)),
                 Err(e) if strict => Err(format!("{}: {name}: {e}", path.display())),
                 Err(_) => Ok(None),
@@ -130,7 +141,9 @@ fn read_inner(path: &Path, strict: bool) -> Result<(JarInfo, Option<JarLoader>),
         (info, None)
     };
     // `version = "${file.jarVersion}"` is filled in from the manifest at load.
-    if info.version == "${file.jarVersion}" || (!strict && info.version.starts_with("${")) {
+    if (loader == Some(JarLoader::NeoForge) && info.version == "${file.jarVersion}")
+        || (!strict && info.version.starts_with("${"))
+    {
         info.version = text(&mut zip, "META-INF/MANIFEST.MF")?
             .and_then(|m| manifest_value(&m, "Implementation-Version"))
             .unwrap_or_default();
@@ -155,6 +168,7 @@ fn read_inner(path: &Path, strict: bool) -> Result<(JarInfo, Option<JarLoader>),
 
 /// A main-section attribute of `META-INF/MANIFEST.MF`.
 fn manifest_value(manifest: &str, key: &str) -> Option<String> {
+    let manifest = manifest.replace("\r\n", "\n").replace('\r', "\n");
     let mut value: Option<String> = None;
     for line in manifest.lines().take_while(|line| !line.is_empty()) {
         if let Some(continuation) = line.strip_prefix(' ') {
@@ -165,7 +179,7 @@ fn manifest_value(manifest: &str, key: &str) -> Option<String> {
             break;
         } else if let Some((name, contents)) = line.split_once(':') {
             if name.eq_ignore_ascii_case(key) {
-                value = Some(contents.trim_start().to_owned());
+                value = Some(contents.strip_prefix(' ').unwrap_or(contents).to_owned());
             }
         }
     }
@@ -414,6 +428,47 @@ mod tests {
     }
 
     #[test]
+    fn manifest_version_continuations_are_read_in_the_main_section_only() {
+        let metadata = "[[mods]]\nmodId = 'ruby'\nversion = '${file.jarVersion}'\n";
+        let folded = synthetic_jar(
+            "folded-version",
+            &[
+                ("META-INF/neoforge.mods.toml", metadata),
+                (
+                    "META-INF/MANIFEST.MF",
+                    "Manifest-Version: 1.0\r\nimplementation-version: 1.2-\r\n snapshot\r\nNext-Attribute: ignored\r\n\r\nName: file\r\nImplementation-Version: wrong\r\n",
+                ),
+            ],
+        );
+        assert_eq!(read(&folded.0).unwrap().version, "1.2-snapshot");
+        assert_eq!(read_identity(&folded.0).unwrap().version, "1.2-snapshot");
+        let lone_cr = synthetic_jar(
+            "cr-version",
+            &[
+                ("META-INF/neoforge.mods.toml", metadata),
+                (
+                    "META-INF/MANIFEST.MF",
+                    "Manifest-Version: 1.0\rImplementation-Version:  2.3-\r build\r\rName: file\rImplementation-Version: wrong\r",
+                ),
+            ],
+        );
+        assert_eq!(read(&lone_cr.0).unwrap().version, " 2.3-build");
+        assert_eq!(read_identity(&lone_cr.0).unwrap().version, " 2.3-build");
+        let named = synthetic_jar(
+            "named-section-only",
+            &[
+                ("META-INF/neoforge.mods.toml", metadata),
+                (
+                    "META-INF/MANIFEST.MF",
+                    "Manifest-Version: 1.0\r\n\r\nName: file\r\nImplementation-Version: wrong\r\n",
+                ),
+            ],
+        );
+        assert_eq!(read(&named.0).unwrap().version, "");
+        assert!(read_identity(&named.0).is_err());
+    }
+
+    #[test]
     fn strict_identity_uses_loader_metadata_and_never_filename() {
         let fabric = synthetic_jar(
             "different-filename",
@@ -503,34 +558,6 @@ mod tests {
     }
 
     #[test]
-    fn manifest_version_continuations_are_read_in_the_main_section_only() {
-        let metadata = "[[mods]]\nmodId = 'ruby'\nversion = '${file.jarVersion}'\n";
-        let folded = synthetic_jar(
-            "folded-version",
-            &[
-                ("META-INF/neoforge.mods.toml", metadata),
-                (
-                    "META-INF/MANIFEST.MF",
-                    "Manifest-Version: 1.0\r\nimplementation-version: 1.2-\r\n snapshot\r\nNext-Attribute: ignored\r\n\r\nName: file\r\nImplementation-Version: wrong\r\n",
-                ),
-            ],
-        );
-        assert_eq!(read_identity(&folded.0).unwrap().version, "1.2-snapshot");
-        assert_eq!(read(&folded.0).unwrap().version, "1.2-snapshot");
-        let named = synthetic_jar(
-            "named-section-only",
-            &[
-                ("META-INF/neoforge.mods.toml", metadata),
-                (
-                    "META-INF/MANIFEST.MF",
-                    "Manifest-Version: 1.0\r\n\r\nName: file\r\nImplementation-Version: wrong\r\n",
-                ),
-            ],
-        );
-        assert!(read_identity(&named.0).is_err());
-    }
-
-    #[test]
     fn strict_metadata_does_not_apply_inventory_tolerance() {
         let malformed = synthetic_jar(
             "duplicate-key",
@@ -553,6 +580,22 @@ mod tests {
         );
         assert_eq!(read(&unresolved.0).unwrap().version, "1.0");
         assert!(read_identity(&unresolved.0).is_err());
+    }
+
+    #[test]
+    fn fabric_versions_never_borrow_neoforges_manifest_placeholder() {
+        let jar = synthetic_jar(
+            "fabric-placeholder",
+            &[
+                (
+                    "fabric.mod.json",
+                    r#"{"id":"fabric-api","version":"${file.jarVersion}"}"#,
+                ),
+                ("META-INF/MANIFEST.MF", "Implementation-Version: 1.0\n\n"),
+            ],
+        );
+        assert_eq!(read(&jar.0).unwrap().version, "1.0");
+        assert!(read_identity(&jar.0).is_err());
     }
 
     #[test]
@@ -759,6 +802,29 @@ mandatory = true
             (fabric_info.mod_id.as_str(), fabric_info.version.as_str()),
             ("fabric", "fabric-version")
         );
+    }
+
+    #[test]
+    fn strict_identity_bounds_decompressed_metadata_without_changing_inventory() {
+        for size in [1_048_576, 1_048_577] {
+            let mut metadata = br#"{"id":"bounded","version":"1","description":""#.to_vec();
+            metadata.resize(size - 2, b'x');
+            metadata.extend_from_slice(b"\"}");
+            let jar = synthetic_jar("metadata-boundary", &[("fabric.mod.json", metadata)]);
+            let identity = read_identity(&jar.0);
+            if size == 1_048_576 {
+                let identity = identity.unwrap();
+                assert_eq!(identity.id, "bounded");
+                assert_eq!(identity.version, "1");
+            } else {
+                let error = identity.unwrap_err();
+                assert!(
+                    error.contains("fabric.mod.json: metadata exceeds 1048576 bytes"),
+                    "{error}"
+                );
+            }
+            assert_eq!(read(&jar.0).unwrap().mod_id, "bounded");
+        }
     }
 
     #[test]

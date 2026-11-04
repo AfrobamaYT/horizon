@@ -12,6 +12,7 @@ use super::{
     nav::NavKind,
 };
 use crate::blocks::Fluid;
+use crate::health::DamageLevel;
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use std::collections::HashMap;
 
@@ -160,13 +161,19 @@ fn sound(m: &Mob, name: &'static str, events: &mut Vec<MobEvent>) {
     events.push(MobEvent::Sound(name, m.center(), 1.0, 1.0));
 }
 /// `AbstractNautilus.travelInWater`: its own speed, no fluid drag but 0.9.
-pub fn travel(m: &mut Mob, w: &MobWorld, input: Vec3, events: &mut Vec<MobEvent>) -> bool {
+pub fn travel(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    input: Vec3,
+    events: &mut Vec<MobEvent>,
+) -> bool {
     if !m.fluids.in_water {
         return false;
     }
     let speed = m.ai.speed;
     m.move_relative(speed, input);
-    m.do_move(w, events);
+    m.do_move(w, level, events);
     m.velocity = Vec3::new(m.velocity.x * 0.9, m.velocity.y * 0.9, m.velocity.z * 0.9);
     true
 }
@@ -205,6 +212,21 @@ pub fn ridden(m: &mut Mob) {
             rider.jump = 0.0;
         }
     }
+}
+/// `AbstractNautilus.onPlayerJump` and the momentum `handleStartJump` starts:
+/// a saddled nautilus that is not in its dash cooldown keeps the released
+/// jump bar's scale on the rider, and its next `tickRidden` dashes with it
+/// (`executeRidersJump`). Returns whether the jump was taken.
+pub fn on_player_jump(m: &mut Mob, data: i32) -> bool {
+    // `if (isSaddled() && dashCooldown <= 0) playerJumpPendingScale = ...`
+    if !m.extra.saddled() || m.extra.anim_ticks > 0 {
+        return false;
+    }
+    let Some(rider) = m.rider.as_mut() else {
+        return false;
+    };
+    rider.jump = super::equine::jump_pending_scale(data);
+    true
 }
 /// `executeRidersJump` (with `handleStartJump`'s sound): along the rider's
 /// look, 1.2 in water and 0.5 on land.
@@ -634,10 +656,11 @@ mod tests {
             );
             m.ai.target = Some(Who::Player);
             let mut goal = Charge::new(0.5);
-            let mut lr = horizon_core::random::LegacyRandom::new(1);
+            let mut test_level = crate::health::TestLevel::new(1);
+            let level = &mut test_level.level();
             let mut cx = Cx {
                 w: &w,
-                lr: &mut lr,
+                level,
                 events: &mut events,
             };
             goal.tick(&mut m, &mut cx);
@@ -661,5 +684,57 @@ mod tests {
         // It turns to the target, which is straight ahead at +z (yaw 0): sin = 0, -cos = -1.
         assert!(x.abs() < 1e-3 && (z + 1.0).abs() < 1e-3, "{x} {z}");
         assert!(!events.iter().any(|e| matches!(e, MobEvent::Push { .. })));
+    }
+
+    /// A saddled nautilus with a rider looking south (`+z`), from the trip's
+    /// own `MobType`, so no prepared resources are needed.
+    fn ridden() -> Mob {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let k = Arc::make_mut(&mut kind);
+        k.id = "minecraft:nautilus".into();
+        k.species = Species::Nautilus;
+        k.width = 0.9;
+        k.height = 0.9;
+        let mut m = Mob::new(7, kind, Vec3::new(1.5, 40.0, -2.5), 0.0);
+        m.set_saddle(Some(crate::items::ItemStack::new("minecraft:saddle", 1)));
+        m.rider = Some(super::super::equine::Rider {
+            yaw: 0.0,
+            pitch: 0.0,
+            ..Default::default()
+        });
+        m
+    }
+
+    /// `AbstractNautilus.onPlayerJump` keeps the released bar's scale (0.4 to
+    /// 1.0, none while the dash clock runs) and `tickRidden` spends it:
+    /// `executeRidersJump` pushes along the rider's look at 0.5 on land,
+    /// starts the 40-tick clock, raises DASH and queues the dash sound.
+    #[test]
+    fn the_dash_runs_off_the_scale_the_released_bar_left() {
+        let mut m = ridden();
+        assert!(on_player_jump(&mut m, 100));
+        assert_eq!(m.rider.expect("the rider stays on").jump, 1.0);
+        super::super::equine::ridden_step(&mut m);
+        assert_eq!(
+            m.rider.expect("the rider stays on").jump,
+            0.0,
+            "the scale is spent"
+        );
+        assert_eq!(m.extra.anim_ticks, DASH_COOLDOWN);
+        assert!(m.extra.flag2, "DASH");
+        assert_eq!(m.extra.scratch[1], 1, "the dash sound plays next tick");
+        let k = 0.5 * m.movement_speed();
+        assert!(
+            (m.velocity.z - k).abs() < 1.0e-9 && m.velocity.x.abs() < 1.0e-9,
+            "a dash along +z: {:?} against {k}",
+            m.velocity
+        );
+        // A dash still in its cooldown takes nothing (`dashCooldown > 0`), and
+        // neither does an unsaddled nautilus.
+        assert!(!on_player_jump(&mut m, 50));
+        m.extra.anim_ticks = 0;
+        m.extra.set_saddled(false);
+        assert!(!on_player_jump(&mut m, 50));
+        assert_eq!(m.rider.expect("the rider stays on").jump, 0.0);
     }
 }

@@ -1,7 +1,6 @@
 //! Read-only handles to supported server menus.
 use super::{
     Game,
-    commands::Target,
     lan_crafting::{load_player, machine_menu},
 };
 use horizon_client::{
@@ -16,13 +15,37 @@ use horizon_client::{
 };
 
 impl Game<'_> {
+    fn native_client_menu_name(&self, menu: MenuRef) -> Option<&str> {
+        let remote = self.remote.as_ref().filter(|remote| remote.logged_in)?;
+        let epoch = self.native_lifecycle.epoch()?;
+        (menu.player.entity.epoch() == epoch
+            && menu.player.entity.id() == u32::try_from(remote.entity_id).ok()?
+            && menu.player.uuid == remote.profile
+            && menu.generation == remote.menu.generation
+            && menu.window == remote.menu.as_ref().map_or(0, |entry| entry.0))
+        .then_some(())?;
+        Some(
+            remote
+                .menu
+                .as_ref()
+                .map_or("inventory", |entry| entry.1.as_str()),
+        )
+    }
+
+    /// The local player in a logged-in client world.
+    pub(super) fn native_local_player(&self) -> Option<PlayerRef> {
+        let remote = self.remote.as_ref().filter(|remote| remote.logged_in)?;
+        self.native_player_ref(remote.profile)
+    }
+
     fn native_menu_guest(&self, menu: MenuRef) -> Option<&Guest> {
-        (self.native_player_ref(menu.player.uuid())? == menu.player).then_some(())?;
-        let Target::Guest(conn) = self.native_entity_target(menu.player.entity())? else {
+        let super::native_server::PlayerRead::Guest(guest) =
+            self.player_handle_read(menu.player)?
+        else {
             return None;
         };
         let host = self.lan.as_ref()?;
-        let guest = host.hub.guest(conn)?;
+        (host.hub.holder_guest(guest.uuid, self.dim.id())?.conn == guest.conn).then_some(())?;
         (guest.menu_generation == menu.generation).then_some(())?;
         if let Some(open) = &guest.menu {
             (open.window == menu.window && open.hidden.is_empty()).then_some(guest)
@@ -47,12 +70,24 @@ impl Game<'_> {
     /// workstations, lecterns, mounts and menus with hidden slots; also refuses
     /// clients, stale players and players whose state is swapped out.
     pub(super) fn native_menu_ref(&self, player: PlayerRef) -> Option<MenuRef> {
-        let host = self.lan.as_ref()?;
-        let guest = host
-            .hub
-            .guests
-            .iter()
-            .find(|g| g.placed && g.uuid == player.uuid())?;
+        if self.remote.is_some() {
+            let remote = self.remote.as_ref()?;
+            (self.native_local_player()? == player).then_some(())?;
+            let name = remote
+                .menu
+                .as_ref()
+                .map_or("inventory", |entry| entry.1.as_str());
+            Self::menu_slot(name, 0)?;
+            return Some(MenuRef {
+                player,
+                window: remote.menu.as_ref().map_or(0, |entry| entry.0),
+                generation: remote.menu.generation,
+            });
+        }
+        let super::native_server::PlayerRead::Guest(guest) = self.player_handle_read(player)?
+        else {
+            return None;
+        };
         let menu = MenuRef {
             player,
             window: guest.menu.as_ref().map_or(0, |m| m.window),
@@ -86,6 +121,10 @@ impl Game<'_> {
 
     /// Number of slots in AbstractContainerMenu.slots.
     pub(super) fn native_menu_slot_count(&self, menu: MenuRef) -> Option<usize> {
+        if self.remote.is_some() {
+            let name = self.native_client_menu_name(menu)?;
+            return Some((0..).map_while(|slot| Self::menu_slot(name, slot)).count());
+        }
         let guest = self.native_menu_guest(menu)?;
         Some(guest.menu.as_ref().map_or(46, |m| m.size + 36))
     }
@@ -148,6 +187,11 @@ impl Game<'_> {
     /// Full stack at a menu index. Outer None means unavailable or out of
     /// range; Some(None) means an empty slot.
     pub(super) fn native_menu_slot(&self, menu: MenuRef, slot: usize) -> Option<Option<ItemStack>> {
+        if self.remote.is_some() {
+            let name = self.native_client_menu_name(menu)?;
+            let index = Self::menu_slot(name, i32::try_from(slot).ok()?)?;
+            return Some(self.slot_view(index));
+        }
         let backing = self.native_menu_slot_backing(menu, slot)?;
         let guest = self.native_menu_guest(menu)?;
         Some(match backing {
@@ -241,7 +285,11 @@ impl Game<'_> {
             .lan
             .iter_mut()
             .flat_map(|host| host.hub.guests.iter_mut());
-        let g = guests.find(|g| g.placed && g.uuid == menu.player.uuid())?;
+        let g = guests.find(|g| {
+            g.placed
+                && g.uuid == menu.player.uuid()
+                && g.entity_id as u32 == menu.player.entity().id()
+        })?;
         match backing {
             MenuSlotBacking::Ender(n) => g.ender_items.get_mut(n),
             MenuSlotBacking::CraftGrid(n) => g.craft_grid.get_mut(n),
@@ -252,6 +300,10 @@ impl Game<'_> {
 
     /// Carried (cursor) stack; outer None means unavailable.
     pub(super) fn native_menu_carried(&self, menu: MenuRef) -> Option<Option<ItemStack>> {
+        if self.remote.is_some() {
+            self.native_client_menu_name(menu)?;
+            return Some(self.carried.clone());
+        }
         Some(self.native_menu_guest(menu)?.carried.clone())
     }
 }

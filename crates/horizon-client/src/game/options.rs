@@ -121,7 +121,7 @@ impl Game<'_> {
         // Gameplay keys must not stay held behind the options screen, where
         // bindings can also change before the physical key is released.
         self.keys.clear();
-        self.screen = Screen::Options;
+        self.set_screen(Screen::Options);
         self.options_from_title = from_title;
         self.options_to_game = false;
         let minecart_improvements = self.minecart_improvements();
@@ -346,13 +346,14 @@ impl Game<'_> {
                 Event::Close => {
                     self.settings.save(&Self::options_path());
                     let to_game = std::mem::take(&mut self.options_to_game);
-                    self.screen = if std::mem::take(&mut self.options_to_world_options) {
+                    let back = if std::mem::take(&mut self.options_to_world_options) {
                         Screen::WorldOptions
                     } else if self.options_from_title || to_game {
                         Screen::Playing
                     } else {
                         Screen::Paused
                     };
+                    self.set_screen(back);
                     if to_game {
                         self.capture(true);
                     }
@@ -531,6 +532,13 @@ impl Game<'_> {
             font.japanese = s.japanese_glyphs;
             font.reset_cache();
             self.ui.chat.rescale(&self.gui.atlas);
+        }
+        // 3D skin layers: a skin's slabs are built when it is resolved, so a
+        // change here rebuilds the players already on screen (the Options
+        // screen keeps resolving them every frame; this covers the console
+        // and a setting restored from options.txt at start).
+        if self.title.is_none() {
+            self.update_remote_skins();
         }
     }
     /// `Window.updateFullscreenState`: a fullscreen change made by the window

@@ -12,7 +12,9 @@ use horizon_client::{
     Result,
     containers::{BlockEntity, HOPPER_SLOTS, ModContainer},
     items::{ItemStack, Items},
-    mod_api::{self, BlockSide, Capability, Host, ItemResource, ResourceHandler},
+    mod_api::{
+        self, BlockSide, Capability, ENTITY_AUTOMATION, EntityRef, ItemResource, ResourceHandler,
+    },
     world::World,
 };
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
@@ -20,9 +22,23 @@ use horizon_world::{
     level::{Behaviours, LevelAccess},
     registry::BlockStateId,
 };
-use std::sync::Arc;
+use std::{ops::ControlFlow, sync::Arc};
 
 type Pos = (i32, i32, i32);
+
+/// What item automation reaches among the entities at its target (`ENTITY_AUTOMATION`).
+enum AutomationEntity {
+    /// A container entity the game answers for, by id: reached as a vanilla container.
+    Container(u32),
+    /// An entity a mod's provider answers for, with its handler.
+    Part(EntityRef, Capability<dyn ResourceHandler<ItemResource>>),
+}
+
+/// A block or entity destination, reached through its slots or a mod's handler.
+enum ContainerTarget<'a> {
+    View(&'a View),
+    Part(Capability<dyn ResourceHandler<ItemResource>>),
+}
 
 /// `HopperBlockEntity` transient state (`TransferCooldown`, `tickedGameTime`).
 #[derive(Clone, Copy, Debug)]
@@ -209,7 +225,7 @@ impl Containers<'_> {
         // ticking now is out of the world (an empty id marks its place): what
         // went into its place would be lost when it comes back.
         if let BlockEntity::Mod(m) = entity {
-            if m.id.is_empty() {
+            if m.id().is_empty() {
                 return None;
             }
             let container = Arc::clone(self.world.block_entities.mod_container(state.0)?);
@@ -788,6 +804,7 @@ impl Game<'_> {
             return;
         }
         self.native_prepare_hopper_transfer([pos.0, pos.1, pos.2]);
+        let c = self.containers();
         let mut changed = false;
         if !c.is_empty(&view) {
             changed = self.hopper_eject(pos, &view);
@@ -933,7 +950,7 @@ impl Game<'_> {
     ) -> u32 {
         let resource = ItemResource::of(stack);
         mod_api::run_transaction(self, |game, tx| {
-            let host: &mut dyn Host = game;
+            let host: &mut dyn horizon_client::mod_api::ServerHost = game;
             let went = part.insert_any(host, tx, &resource, stack.count);
             match part.checked(went, stack.count, &at) {
                 Some(0) | None => Err(()),
@@ -951,7 +968,7 @@ impl Game<'_> {
     }
     /// `InventoryMoveItemEvent` for `item` going from `source` to `destination`, where one end
     /// is a capability part: whether a mod canceled the move.
-    fn part_move_canceled(&self, source: [i32; 3], destination: [i32; 3], item: &str) -> bool {
+    fn part_move_canceled(&mut self, source: [i32; 3], destination: [i32; 3], item: &str) -> bool {
         let mut cancel = false;
         self.native_inventory_move_item(source, destination, item, &mut cancel);
         cancel
@@ -1004,7 +1021,7 @@ impl Game<'_> {
                 continue;
             }
             let moved = mod_api::run_transaction(self, |game, tx| {
-                let host: &mut dyn Host = game;
+                let host: &mut dyn horizon_client::mod_api::ServerHost = game;
                 let came = part.extract(host, tx, slot, &resource, 1);
                 if part.checked(came, 1, &at) != Some(1) {
                     return Err(());
@@ -1045,16 +1062,27 @@ impl Game<'_> {
             );
             return self.eject_into(pos, hopper, &target, face);
         }
-        let Some(id) = self.entity_container_at([
-            f64::from(front.0) + 0.5,
-            f64::from(front.1) + 0.5,
-            f64::from(front.2) + 0.5,
-        ]) else {
+        let Some(found) = self.automation_entity_at(
+            [
+                f64::from(front.0) + 0.5,
+                f64::from(front.1) + 0.5,
+                f64::from(front.2) + 0.5,
+            ],
+            face,
+        ) else {
             return false;
         };
-        self.native_hopper_inventory_search([pos.0, pos.1, pos.2], None, Some(id));
-        self.with_entity_container(id, |g, target| g.eject_into(pos, hopper, target, face))
-            .unwrap_or(false)
+        match found {
+            AutomationEntity::Container(id) => {
+                self.native_hopper_inventory_search([pos.0, pos.1, pos.2], None, Some(id));
+                self.with_entity_container(id, |g, target| g.eject_into(pos, hopper, target, face))
+                    .unwrap_or(false)
+            }
+            AutomationEntity::Part(entity, part) => {
+                self.native_hopper_inventory_search([pos.0, pos.1, pos.2], None, Some(entity.id()));
+                self.eject_into_part(hopper, &part, [front.0, front.1, front.2])
+            }
+        }
     }
     /// Where a container is in the world for the mods: its block, or the block a chest
     /// boat or minecart is in (its view sits under a placeholder key).
@@ -1176,18 +1204,20 @@ impl Game<'_> {
         }
         let c = self.containers();
         let Some(source) = c.view(above, false) else {
-            let id = self.entity_container_at(at)?;
-            self.native_hopper_inventory_search(
-                [
-                    hopper.parts[0].0.0,
-                    hopper.parts[0].0.1,
-                    hopper.parts[0].0.2,
-                ],
-                None,
-                Some(id),
-            );
-            return self
-                .with_entity_container(id, |g, source| g.suck_from_slots(None, source, hopper));
+            let found = self.automation_entity_at(at, Direction::Down)?;
+            let (x, y, z) = hopper.parts[0].0;
+            return match found {
+                AutomationEntity::Container(id) => {
+                    self.native_hopper_inventory_search([x, y, z], None, Some(id));
+                    self.with_entity_container(id, |g, source| {
+                        g.suck_from_slots(None, source, hopper)
+                    })
+                }
+                AutomationEntity::Part(entity, part) => {
+                    self.native_hopper_inventory_search([x, y, z], None, Some(entity.id()));
+                    Some(self.suck_from_part(&part, [above.0, above.1, above.2], hopper))
+                }
+            };
         };
         self.native_hopper_inventory_search(
             [
@@ -1198,6 +1228,7 @@ impl Game<'_> {
             Some([above.0, above.1, above.2]),
             None,
         );
+        let c = self.containers();
         if let Kind::Composter(level) = source.kind {
             if level != 8 {
                 return Some(false);
@@ -1267,11 +1298,9 @@ impl Game<'_> {
         }
         false
     }
-    /// `HopperBlockEntity.getEntityContainer`: one of the alive container
-    /// entities (`EntitySelector.CONTAINER_ENTITY_SELECTOR`: chest and hopper
-    /// minecarts, chest boats) whose box meets the 1x1x1 box around `at`,
-    /// picked at random.
-    fn entity_container_at(&mut self, at: [f64; 3]) -> Option<u32> {
+    /// The alive container entities (`EntitySelector.CONTAINER_ENTITY_SELECTOR`: chest and
+    /// hopper minecarts, chest boats) whose box meets the 1x1x1 box around `at`.
+    fn container_entities_at(&self, at: [f64; 3]) -> Vec<u32> {
         let meets = |b: horizon_core::geometry::Aabb| {
             let (lo, hi) = (b.min_position(), b.max_position());
             lo.x < at[0] + 0.5
@@ -1298,28 +1327,84 @@ impl Game<'_> {
                 .filter(|b| b.chest && meets(b.bounds()))
                 .map(|b| b.id),
         );
-        if found.is_empty() {
+        found
+    }
+    /// The index `RandomSource.nextInt(len)` picks of `len` candidates: the level's one draw,
+    /// none for no candidate.
+    fn pick_index(&mut self, len: usize) -> Option<usize> {
+        if len == 0 {
             return None;
         }
-        let pick = self
-            .world
-            .random
-            .next_int_bound(found.len() as i32)
-            .unwrap_or(0);
-        found.get(pick as usize).copied()
+        let pick = self.world.random.next_int_bound(len as i32).unwrap_or(0);
+        Some(pick as usize)
     }
-    /// Runs `f` on the block container at `pos`, or an entity container there.
+    /// The entity item automation reaches around `at` from `side`, through `ENTITY_AUTOMATION`: one of
+    /// the container entities the game has there, and, once a mod registered a provider for it,
+    /// the entities whose mod provider answers it, picked at random as `getEntityContainer` picks, the one draw.
+    /// A game container entity a mod provider answers ahead of the game is reached through
+    /// that answer. With no mod providing `ENTITY_AUTOMATION`, only vanilla containers are
+    /// considered: nothing more is looked up.
+    fn automation_entity_at(&mut self, at: [f64; 3], side: Direction) -> Option<AutomationEntity> {
+        let vanilla = self.container_entities_at(at);
+        if !mod_api::has_entity_providers(&ENTITY_AUTOMATION) {
+            let pick = self.pick_index(vanilla.len())?;
+            return Some(AutomationEntity::Container(vanilla[pick]));
+        }
+        let mut found: Vec<AutomationEntity> = Vec::new();
+        let context = Some(side);
+        let ask = |game: &mut Self, entity: EntityRef, has_game_answer: bool| {
+            let providers = mod_api::entity_providers(&ENTITY_AUTOMATION, &*game, entity, context)?;
+            providers.ask(game, has_game_answer)
+        };
+        for &id in &vanilla {
+            let entity = self.native_entity(id);
+            match entity.and_then(|entity| Some((entity, ask(self, entity, true)?))) {
+                Some((entity, part)) => found.push(AutomationEntity::Part(entity, part)),
+                None => found.push(AutomationEntity::Container(id)),
+            }
+        }
+        if let Some(level) = self.native_level_here() {
+            let min = [at[0] - 0.5, at[1] - 0.5, at[2] - 0.5];
+            let max = [at[0] + 0.5, at[1] + 0.5, at[2] + 0.5];
+            for entity in self
+                .native_level_entities_in(level, min, max)
+                .unwrap_or_default()
+            {
+                if !vanilla.contains(&entity.id())
+                    && let Some(part) = ask(self, entity, false)
+                {
+                    found.push(AutomationEntity::Part(entity, part));
+                }
+            }
+        }
+        let pick = self.pick_index(found.len())?;
+        Some(found.swap_remove(pick))
+    }
+    /// Runs `f` on the block container at `pos`, or one entity there, with providers taking
+    /// the game's slots' place when registered ahead of them.
     fn with_container_at<R>(
         &mut self,
         pos: Pos,
-        f: impl FnOnce(&mut Self, &View) -> R,
+        side: Direction,
+        f: impl FnOnce(&mut Self, ContainerTarget<'_>) -> R,
     ) -> Option<R> {
-        if let Some(view) = self.containers().view(pos, false) {
-            return Some(f(self, &view));
+        if let Some(part) = self.item_part_at(pos, side) {
+            return Some(f(self, ContainerTarget::Part(part)));
         }
-        let id =
-            self.entity_container_at([pos.0 as f64 + 0.5, pos.1 as f64 + 0.5, pos.2 as f64 + 0.5])?;
-        self.with_entity_container(id, f)
+        if let Some(view) = self.containers().view(pos, false) {
+            return Some(f(self, ContainerTarget::View(&view)));
+        }
+        let centre = [
+            f64::from(pos.0) + 0.5,
+            f64::from(pos.1) + 0.5,
+            f64::from(pos.2) + 0.5,
+        ];
+        match self.automation_entity_at(centre, side)? {
+            AutomationEntity::Container(id) => {
+                self.with_entity_container(id, |game, view| f(game, ContainerTarget::View(view)))
+            }
+            AutomationEntity::Part(_, part) => Some(f(self, ContainerTarget::Part(part))),
+        }
     }
     /// Runs `f` on a container entity's items as a container, under the
     /// placeholder key its menu uses (the open menu's copy when it is open),
@@ -1512,38 +1597,40 @@ impl Game<'_> {
         else {
             return Ok(());
         };
-        let Some(stack) = self.containers().get(&view, slot).cloned() else {
+        let Some(mut stack) = self.containers().get(&view, slot).cloned() else {
             return Ok(());
         };
         let target = offset(key, facing);
-        if dropper && let Some(part) = self.item_part_at(target, facing.opposite()) {
-            // NeoForge's `dropperInsertHook`: a part in front is offered one item in the
-            // container's place, taken from the slot as it is once the part took it; what it
-            // refuses stays.
-            let one = ItemStack { count: 1, ..stack };
-            let at = [target.0, target.1, target.2];
-            self.put_into_part(&part, at, &one, |game, _| {
-                game.take_one_journaled(&view, slot)
-            });
-            self.container_changed(key);
-            return Ok(());
-        }
         let remaining = if dropper {
-            let inserted = self.with_container_at(target, |game, into| {
-                let one = ItemStack {
-                    count: 1,
-                    ..stack.clone()
-                };
-                let inserted = game
-                    .add_item(None, into, one, Some(facing.opposite()))
-                    .is_none();
-                if inserted {
-                    game.view_changed(into);
+            let side = facing.opposite();
+            let inserted = self.with_container_at(target, side, |game, into| match into {
+                ContainerTarget::View(into) => {
+                    let one = ItemStack {
+                        count: 1,
+                        ..stack.clone()
+                    };
+                    let inserted = game.add_item(None, into, one, Some(side)).is_none();
+                    if inserted {
+                        game.view_changed(into);
+                    }
+                    ControlFlow::Continue(inserted)
                 }
-                inserted
+                ContainerTarget::Part(part) => {
+                    // `dropperInsertHook`: the handler's writes and taking one from the
+                    // live source slot share a transaction, including feedback into it.
+                    stack.count = 1;
+                    game.put_into_part(&part, [target.0, target.1, target.2], &stack, |game, _| {
+                        game.take_one_journaled(&view, slot)
+                    });
+                    ControlFlow::Break(())
+                }
             });
             match inserted {
-                Some(inserted) => Some(ItemStack {
+                Some(ControlFlow::Break(())) => {
+                    self.container_changed(key);
+                    return Ok(());
+                }
+                Some(ControlFlow::Continue(inserted)) => Some(ItemStack {
                     count: stack.count - u32::from(inserted),
                     ..stack
                 })
@@ -1976,9 +2063,9 @@ mod capacity_tests {
 
 #[cfg(test)]
 mod part_front_tests {
-    use super::super::native_entity_refs::tests::with_game;
+    use super::super::native_entity_refs::tests::{declared_part_root, with_game_at};
     use horizon_client::chunk::Chunk;
-    use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
+    use horizon_client::containers::BlockEntity;
     use horizon_client::items::ItemStack;
     use horizon_client::mod_api::NativeBlockUpdateFlags;
     use horizon_core::position::BlockPos;
@@ -1998,8 +2085,12 @@ mod part_front_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_part_handing_a_crafters_output_back_into_its_grid_loses_none() {
-        with_game(|game| {
-            let _mods = horizon_client::mod_api::part_tests::game_thread();
+        let Some(root) = declared_part_root(
+            "game::machines::part_front_tests::a_part_handing_a_crafters_output_back_into_its_grid_loses_none",
+        ) else {
+            return;
+        };
+        with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
@@ -2018,13 +2109,18 @@ mod part_front_tests {
                 crafter,
                 NativeBlockUpdateFlags::NEIGHBORS
             ));
-            game.world.block_entities.insert(
-                (1, 64, 8),
-                BlockEntity::Mod(Box::new(ModBlockEntity::new(ModBlockEntityFields {
-                    id: "test:pipe".into(),
-                    ..Default::default()
-                }))),
-            );
+            let pipe = game
+                .pack
+                .assets
+                .registry
+                .default_state("test:pipe")
+                .unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [1, 64, 8],
+                pipe,
+                NativeBlockUpdateFlags::NONE
+            ));
             if let Some(BlockEntity::Crafter(c)) = game.world.block_entities.get_mut(&(2, 64, 8)) {
                 c.items[3] = Some(stack("minecraft:oak_planks", 1));
                 c.items[6] = Some(stack("minecraft:oak_planks", 1));
@@ -2054,8 +2150,12 @@ mod part_front_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_part_handing_a_droppers_item_back_into_it_loses_none() {
-        with_game(|game| {
-            let _mods = horizon_client::mod_api::part_tests::game_thread();
+        let Some(root) = declared_part_root(
+            "game::machines::part_front_tests::a_part_handing_a_droppers_item_back_into_it_loses_none",
+        ) else {
+            return;
+        };
+        with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
@@ -2072,13 +2172,18 @@ mod part_front_tests {
                 dropper,
                 NativeBlockUpdateFlags::NEIGHBORS
             ));
-            game.world.block_entities.insert(
-                (1, 64, 8),
-                BlockEntity::Mod(Box::new(ModBlockEntity::new(ModBlockEntityFields {
-                    id: "test:pipe".into(),
-                    ..Default::default()
-                }))),
-            );
+            let pipe = game
+                .pack
+                .assets
+                .registry
+                .default_state("test:pipe")
+                .unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [1, 64, 8],
+                pipe,
+                NativeBlockUpdateFlags::NONE
+            ));
             if let Some(BlockEntity::Chest(items)) = game.world.block_entities.get_mut(&(2, 64, 8))
             {
                 items[0] = Some(stack("minecraft:stick", 2));
@@ -2107,8 +2212,12 @@ mod part_front_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_dropper_and_a_crafter_put_into_a_mod_part_in_front_of_them() {
-        with_game(|game| {
-            let _mods = horizon_client::mod_api::part_tests::game_thread();
+        let Some(root) = declared_part_root(
+            "game::machines::part_front_tests::a_dropper_and_a_crafter_put_into_a_mod_part_in_front_of_them",
+        ) else {
+            return;
+        };
+        with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
@@ -2132,13 +2241,6 @@ mod part_front_tests {
                 .default_state("minecraft:chest")
                 .unwrap();
             let flags = NativeBlockUpdateFlags::NEIGHBORS;
-            let mod_part = |id: &str| {
-                let fields = ModBlockEntityFields {
-                    id: id.into(),
-                    ..Default::default()
-                };
-                BlockEntity::Mod(Box::new(ModBlockEntity::new(fields)))
-            };
             let chest_items =
                 |game: &super::Game<'_>, z| match game.world.block_entities.get(&(2, 64, z)) {
                     Some(BlockEntity::Chest(items)) => {
@@ -2150,7 +2252,13 @@ mod part_front_tests {
                 for (x, block) in [(0, dropper), (2, chest)] {
                     assert!(game.native_level_set_block(level, [x, 64, z], block, flags));
                 }
-                game.world.block_entities.insert((1, 64, z), mod_part(part));
+                let state = game.pack.assets.registry.default_state(part).unwrap();
+                assert!(game.native_level_set_block(
+                    level,
+                    [1, 64, z],
+                    state,
+                    NativeBlockUpdateFlags::NONE
+                ));
                 if let Some(BlockEntity::Chest(items)) =
                     game.world.block_entities.get_mut(&(0, 64, z))
                 {
@@ -2173,7 +2281,13 @@ mod part_front_tests {
                 for (x, block) in [(0, crafter), (2, chest)] {
                     assert!(game.native_level_set_block(level, [x, 64, z], block, flags));
                 }
-                game.world.block_entities.insert((1, 64, z), mod_part(part));
+                let state = game.pack.assets.registry.default_state(part).unwrap();
+                assert!(game.native_level_set_block(
+                    level,
+                    [1, 64, z],
+                    state,
+                    NativeBlockUpdateFlags::NONE
+                ));
                 if let Some(BlockEntity::Crafter(c)) =
                     game.world.block_entities.get_mut(&(0, 64, z))
                 {

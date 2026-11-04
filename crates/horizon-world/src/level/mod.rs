@@ -79,7 +79,9 @@
 //! // Player actions:
 //! behaviours.place_block(&mut level, &mut ticks, &PlaceContext { clicked_pos, face, hit, inside: false,
 //!     yaw, pitch, sneaking, item: "minecraft:oak_stairs".into(), can_use_game_master_blocks: false });
-//! behaviours.use_without_item(&mut level, &mut ticks, pos, face, hit, player_context);
+//! let state = level.block_state(pos);
+//! let block_hit = horizon_core::geometry::BlockHit { block: pos, direction: face, location: hit, inside: false };
+//! behaviours.use_without_item(&mut level, &mut ticks, state, block_hit, player_context);
 //! behaviours.player_destroy_block(&mut level, &mut ticks, pos, creative, correct_tool);
 //! // Falling-block entity landed:
 //! behaviours.falling_block_landed(&mut level, &mut ticks, landing_pos, carried_state, false);
@@ -139,6 +141,19 @@ pub use bonemeal::TemplateSettings;
 pub use buckets::BucketContent;
 pub use data::{BlockData, ItemBinding, ItemKind, Named, Props, PushReaction, StateFacts, Tags};
 pub use falling::Landing;
+
+/// A neighbour update a block asks for when it is removed, each the one vanilla's own removal
+/// uses (`Level.updateNeighborsAt`, `updateNeighborsAtExceptFromFacing`,
+/// `updateNeighbourForOutputSignal`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NeighbourUpdate {
+    /// `Level.updateNeighbourForOutputSignal`: comparators beside the position re-read.
+    OutputSignal,
+    /// `Level.updateNeighborsAt`: all six neighbours hear the block changed.
+    Neighbours,
+    /// `Level.updateNeighborsAtExceptFromFacing`: all neighbours but the one in the direction.
+    NeighboursExcept(Direction),
+}
 pub use interact::{InteractionResult, PlayerContext, PlayerEffect, UseBranch, hit_slot};
 pub use pistons::{BlockEventData, MovingPiston};
 pub use place::{PlaceContext, PlaceOutcome, PlacementContext};
@@ -499,6 +514,18 @@ pub trait LevelAccess {
     /// the growth schedules, as `before_update_shape` hands them. The default
     /// does nothing.
     fn perform_bonemeal(&mut self, _ticks: &mut Ticks, _pos: BlockPos, _state: BlockStateId) {}
+    /// `Block.affectNeighborsAfterRemoval` of a mod's part for the block `state` that stood
+    /// at `pos` (`moved`: pushed by a piston), after the block's own class ran: the updates it
+    /// asks for go in `updates` in order, and the level runs them. It is inside the level's
+    /// write, so it cannot write. The default asks for nothing.
+    fn affect_neighbors_after_removal(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _moved: bool,
+        _updates: &mut Vec<NeighbourUpdate>,
+    ) {
+    }
     /// `BlockState.updateShape` for `state` at `pos` after its neighbour in
     /// `direction` became `neighbour`, before the block computes it. `state`
     /// may not be in the level yet (a piston landing it). A state put in
@@ -690,6 +717,37 @@ pub trait LevelAccess {
     /// `BlockState.isSignalSource` once the library answered `vanilla`: the
     /// answer to use. The default keeps it.
     fn adjust_signal_source(&self, _state: BlockStateId, vanilla: bool) -> bool {
+        vanilla
+    }
+    /// Whether a signal query needs the weak-power block hook.
+    fn has_weak_power_hook(&self) -> bool {
+        false
+    }
+    /// Override `SignalGetter.getSignal`'s conductor check for a block.
+    fn adjust_should_check_weak_power(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _direction: Direction,
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
+    /// Whether redstone wire connection queries need the level hook.
+    fn has_redstone_wire_connection_hook(&self) -> bool {
+        false
+    }
+    /// `BlockBehaviour.shouldRedstoneWireConnectTo` once the library answered
+    /// `vanilla` for the block `state` at `pos`, `direction` pointing from the
+    /// wire toward its neighbour (None for a block above or below):
+    /// whether redstone wire connects. The default keeps it.
+    fn adjust_should_redstone_wire_connect_to(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _direction: Option<Direction>,
+        vanilla: bool,
+    ) -> bool {
         vanilla
     }
     /// `BlockState.hasAnalogOutputSignal` once the library answered `vanilla`:
@@ -1171,6 +1229,16 @@ impl Behaviours {
         pos: BlockPos,
     ) {
         self.sim(level, ticks).entity_inside(pos);
+    }
+    /// Whether [`Self::entity_inside`] may do anything at a block of `state`:
+    /// the entity-sensing blocks' classes it looks for. At any other block it
+    /// only reads the state.
+    pub fn senses_entities(&self, state: BlockStateId) -> bool {
+        let data = self.data(state);
+        data.is(classes::Class::BasePressurePlate)
+            || data.is(classes::Class::DetectorRail)
+            || data.is(classes::Class::Button)
+            || data.is(classes::Class::TripWire)
     }
     /// `LilyPadBlock.entityInside` for a boat whose box is inside `pos`.
     pub fn boat_inside<L: LevelAccess + ?Sized>(

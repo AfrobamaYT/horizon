@@ -1,0 +1,21 @@
+{
+  "hooks": [
+    {
+      "name": "screen_exclusion_areas",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_exclusion_areas",
+      "side": "client",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "collect",
+        "out": "areas"
+      }
+    }
+  ],
+  "helpers": [
+    {
+      "name": "screen_exclusion",
+      "side": "client",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_exclusion"
+    }
+  ]
+}

@@ -1231,8 +1231,12 @@ impl MotionWorld<'_, '_, '_> {
         // The resident scene accepts the resolved local movement directly.
         // Vanilla dispatches this separately from travel, on packet acceptance.
         self.check_movement_statistics(previous.vector_to(self.player.position))?;
-        self.player
-            .food_tick(&self.resources.health, self.scene.health_rules)
+        let rules = self.scene.health_rules;
+        self.player.food_tick(
+            &mut crate::health::DamageLevel::of(self.scene, self.assets.registry),
+            &self.resources.health,
+            rules,
+        )
     }
     pub fn controlled_simulation_tick(&mut self, keys: crate::sprint::Keys) -> Result<()> {
         self.controlled_simulation_tick_with_sprint_window(keys, 7)
@@ -1463,7 +1467,13 @@ impl MotionWorld<'_, '_, '_> {
             crate::health::HealthEvent::FreezeDamage(1.0),
         ));
         let rules = self.scene.health_rules;
-        self.player.hurt(&self.resources.health, rules, id, 1.0)?;
+        self.player.hurt(
+            &mut crate::health::DamageLevel::of(self.scene, self.assets.registry),
+            &self.resources.health,
+            rules,
+            id,
+            1.0,
+        )?;
         Ok(())
     }
     /// `Entity.applyEffectsFromBlocks` for the blocks Horizon's player reacts
@@ -1568,7 +1578,7 @@ impl MotionWorld<'_, '_, '_> {
                 }
             }
         }
-        let mut visited = std::collections::HashSet::new();
+        let mut visited = crate::fast_hash::FxHashSet::default();
         let mut entered = Vec::new();
         for movement in &movements {
             let mut from = movement.from;
@@ -1655,7 +1665,7 @@ impl MotionWorld<'_, '_, '_> {
         &mut self,
         from: Vec3,
         to: Vec3,
-        visited: &mut std::collections::HashSet<i64>,
+        visited: &mut crate::fast_hash::FxHashSet<i64>,
         entered: &mut Vec<(i32, BlockPos)>,
         max_iterations: i32,
         damage_only: bool,
@@ -1672,6 +1682,10 @@ impl MotionWorld<'_, '_, '_> {
         let mut hits = Vec::new();
         let mut iterations = 0;
         let alive = !self.player.health.dead_or_dying();
+        // Nothing below changes a block, so each is read once, as the sweep
+        // visits it, and air (`state.isAir()`, the most of a path) is
+        // passed over there instead of being kept for the loop.
+        let (scene, registry) = (&*self.scene, self.assets.registry);
         horizon_core::geometry::sweep_intersected_blocks(
             from,
             to,
@@ -1682,23 +1696,25 @@ impl MotionWorld<'_, '_, '_> {
                     return false;
                 }
                 iterations = iteration;
-                hits.push((iteration, p));
+                let state = scene.block(p.x, p.y, p.z);
+                let air = registry.state(state).is_none_or(|d| {
+                    matches!(
+                        d.name.as_str(),
+                        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
+                    )
+                });
+                if !air {
+                    hits.push((iteration, p, state));
+                }
                 true
             },
         )
         .map_err(|e| format!("block sweep: {e:?}"))?;
-        for (step, p) in hits {
-            let state = self.block(p);
+        for (step, p, state) in hits {
             let Some(definition) = self.assets.registry.state(state) else {
                 continue;
             };
             let name = definition.name.as_str();
-            if matches!(
-                name,
-                "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
-            ) {
-                continue;
-            }
             let powder_snow = name == "minecraft:powder_snow";
             // A filled cauldron's content top in blocks: the lava's 15/16
             // (LavaCauldronBlock.FILLED_SHAPE), or a layered cauldron's
@@ -1951,7 +1967,13 @@ impl MotionWorld<'_, '_, '_> {
                 crate::health::HealthEvent::SweetBerryBushDamage(1.0),
             ));
             let rules = self.scene.health_rules;
-            self.player.hurt(&self.resources.health, rules, id, 1.0)?;
+            self.player.hurt(
+                &mut crate::health::DamageLevel::of(self.scene, self.assets.registry),
+                &self.resources.health,
+                rules,
+                id,
+                1.0,
+            )?;
         }
         Ok(())
     }
@@ -2093,7 +2115,13 @@ impl MotionWorld<'_, '_, '_> {
                     .id("minecraft:fly_into_wall")
                     .ok_or("missing fly_into_wall damage type")?;
                 let rules = self.scene.health_rules;
-                self.player.hurt(&self.resources.health, rules, id, dmg)?;
+                self.player.hurt(
+                    &mut crate::health::DamageLevel::of(self.scene, self.assets.registry),
+                    &self.resources.health,
+                    rules,
+                    id,
+                    dmg,
+                )?;
                 if self.player.server_copy {
                     self.player.wall_hit_events = Some(first..self.player.events.len());
                 }
@@ -2936,6 +2964,42 @@ fn fly_into_wall_damage(before: f64, after: f64) -> f32 {
     ((before - after) * 10.0 - 3.0) as f32
 }
 
+/// `Entity.getBlockSpeedFactor` for a kind that keeps no motion world of its
+/// own (mobs, boats): the factor of the block at `position`, else of the one
+/// below it, through the same port the player's move uses.
+pub fn block_speed_factor_at(
+    world: &World,
+    properties: &BoundMovementProperties,
+    position: Vec3,
+    supporting_block: Option<BlockPos>,
+) -> f32 {
+    struct Blocks<'a>(&'a World);
+    impl MovementBlockProvider for Blocks<'_> {
+        type Error = ();
+        fn movement_block_state(&mut self, p: BlockPos) -> std::result::Result<BlockStateId, ()> {
+            Ok(self.0.block(p.x, p.y, p.z))
+        }
+    }
+    let location = movement_support::MovementLocation {
+        position,
+        block_position: BlockPos::new(
+            position.x.floor() as i32,
+            position.y.floor() as i32,
+            position.z.floor() as i32,
+        ),
+        supporting_block,
+    };
+    let mut view = Blocks(world);
+    movement_support::block_speed_factor(
+        &mut RegistryMovementWorld {
+            properties,
+            world: &mut view,
+        },
+        location,
+    )
+    .unwrap_or(1.0)
+}
+
 #[cfg(test)]
 mod tests {
     /// The glide's collision damage: a third of a block a tick lost is 0.0 and
@@ -3701,6 +3765,8 @@ mod tests {
 
     #[test]
     fn creative_and_spectator_preserve_hunger_when_switching_from_survival() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::env::var_os("HORIZON_TEST_RESOURCES")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| {
@@ -3728,7 +3794,7 @@ mod tests {
                 for _ in 0..160 {
                     player.cause_food_exhaustion(0.2);
                     player
-                        .food_tick(&resources.health, Default::default())
+                        .food_tick(level, &resources.health, Default::default())
                         .unwrap();
                 }
                 assert_eq!(player.health.food.food, food);
@@ -3743,7 +3809,7 @@ mod tests {
                 player.health.food.exhaustion = 5.0;
                 player.health.food.timer = 79;
                 player
-                    .food_tick(&resources.health, Default::default())
+                    .food_tick(level, &resources.health, Default::default())
                     .unwrap();
                 assert_eq!(player.health.food.food, (food - 1).max(0));
                 assert_eq!(player.health.food.exhaustion, 1.0);
@@ -3760,7 +3826,7 @@ mod tests {
                 player.health.food.exhaustion = 5.0;
                 player.health.food.timer = 79;
                 player
-                    .food_tick(&resources.health, Default::default())
+                    .food_tick(level, &resources.health, Default::default())
                     .unwrap();
                 assert_eq!(player.health.food.food, (food - 1).max(0));
                 assert_eq!(player.health.health(), if food <= 1 { 19.0 } else { 20.0 });
@@ -3770,6 +3836,8 @@ mod tests {
 
     #[test]
     fn player_fire_damage_queues_hurt_sound_only_for_fresh_hits() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::env::var_os("HORIZON_TEST_RESOURCES")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| {
@@ -3792,7 +3860,7 @@ mod tests {
                 .unwrap();
             assert!(
                 player
-                    .hurt(&resources.health, Default::default(), source, 1.0)
+                    .hurt(level, &resources.health, Default::default(), source, 1.0)
                     .unwrap()
             );
             assert_eq!(
@@ -3811,7 +3879,7 @@ mod tests {
             player.events.clear();
             assert!(
                 !player
-                    .hurt(&resources.health, Default::default(), source, 1.0)
+                    .hurt(level, &resources.health, Default::default(), source, 1.0)
                     .unwrap()
             );
             assert!(
@@ -3832,7 +3900,7 @@ mod tests {
             player.events.clear();
             assert!(
                 !player
-                    .hurt(&resources.health, Default::default(), source, 1.0)
+                    .hurt(level, &resources.health, Default::default(), source, 1.0)
                     .unwrap()
             );
             assert!(
@@ -3846,7 +3914,14 @@ mod tests {
         let source = resources.health.damage.id("minecraft:mob_attack").unwrap();
         assert!(
             player
-                .hurt_blocking(&resources.health, Default::default(), source, 2.0, None)
+                .hurt_blocking(
+                    level,
+                    &resources.health,
+                    Default::default(),
+                    source,
+                    2.0,
+                    None
+                )
                 .unwrap()
                 .hurt
         );
@@ -3862,7 +3937,7 @@ mod tests {
         let mut dying = PlayerMotion::new(&resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
         assert!(
             dying
-                .hurt(&resources.health, Default::default(), source, 100.0)
+                .hurt(level, &resources.health, Default::default(), source, 100.0)
                 .unwrap()
         );
         assert!(dying.health.dead_or_dying());
@@ -3899,6 +3974,7 @@ mod tests {
         };
         let outcome = player
             .hurt_blocking(
+                level,
                 &resources.health,
                 Default::default(),
                 source,
@@ -3927,7 +4003,7 @@ mod tests {
         }
         assert!(
             player
-                .hurt(&resources.health, Default::default(), source, 4.0)
+                .hurt(level, &resources.health, Default::default(), source, 4.0)
                 .unwrap()
         );
         assert_eq!(player.health.hurt_animation_time, 10);
@@ -3935,6 +4011,7 @@ mod tests {
         assert!(
             !player
                 .hurt_blocking(
+                    level,
                     &resources.health,
                     Default::default(),
                     source,
@@ -3952,7 +4029,7 @@ mod tests {
         starving.health.food.food = 0;
         starving.health.food.timer = 79;
         starving
-            .food_tick(&resources.health, Default::default())
+            .food_tick(level, &resources.health, Default::default())
             .unwrap();
         assert_eq!(starving.health.health(), 19.0);
         assert_eq!(

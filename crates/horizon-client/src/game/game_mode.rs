@@ -114,7 +114,7 @@ impl Game<'_> {
             }
         }
         if mode == GameMode::Spectator && self.screen == Screen::Inventory {
-            self.screen = Screen::Playing;
+            self.set_screen(Screen::Playing);
         }
     }
 }

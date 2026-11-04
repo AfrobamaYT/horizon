@@ -187,6 +187,28 @@ impl Game<'_> {
                 self.set_default_game_mode(state.game_mode);
                 return json!({ "value": GAME_MODES[state.game_mode as usize] });
             }
+            "serversettings/operator_user_permission_level" => {
+                return json!({ "value": state.op_level });
+            }
+            "serversettings/operator_user_permission_level/set" => {
+                let Some(level) = body["value"]
+                    .as_i64()
+                    .and_then(|value| i32::try_from(value).ok())
+                    .filter(|level| (0..=4).contains(level))
+                else {
+                    return json!({
+                        "error": "operator user permission level must be an integer between 0 and 4"
+                    });
+                };
+                rpc(format!(
+                    "Update operator user permission level from {} to {}",
+                    state.op_level, level
+                ));
+                state.op_level = level;
+                state.lists.lock().unwrap().op_level = level;
+                self.store_property("op-permission-level", level.to_string());
+                return json!({ "value": state.op_level });
+            }
             "serversettings/force_game_mode" => {
                 return json!({ "value": state.force_game_mode });
             }
@@ -221,6 +243,60 @@ impl Game<'_> {
                 self.store_property("allow-flight", allow.to_string());
                 return json!({
                     "value": self.lan.as_ref().is_some_and(|host| host.hub.config.allow_flight)
+                });
+            }
+            "serversettings/hide_online_players" => {
+                return json!({
+                    "value": self
+                        .lan
+                        .as_ref()
+                        .is_some_and(|host| host.hub.lan.shared.hide_online_players())
+                });
+            }
+            "serversettings/hide_online_players/set" => {
+                let Some(hide) = body["value"].as_bool() else {
+                    return json!({ "error": "hide online players must be a boolean" });
+                };
+                let current = self
+                    .lan
+                    .as_ref()
+                    .is_some_and(|host| host.hub.lan.shared.hide_online_players());
+                rpc(format!(
+                    "Update hide online players from {current} to {hide}"
+                ));
+                self.set_hide_online_players(hide);
+                self.store_property("hide-online-players", hide.to_string());
+                return json!({
+                    "value": self
+                        .lan
+                        .as_ref()
+                        .is_some_and(|host| host.hub.lan.shared.hide_online_players())
+                });
+            }
+            "serversettings/status_replies" => {
+                return json!({
+                    "value": self
+                        .lan
+                        .as_ref()
+                        .is_some_and(|host| host.hub.lan.shared.enable_status())
+                });
+            }
+            "serversettings/status_replies/set" => {
+                let Some(enable) = body["value"].as_bool() else {
+                    return json!({ "error": "status replies must be a boolean" });
+                };
+                let current = self
+                    .lan
+                    .as_ref()
+                    .is_some_and(|host| host.hub.lan.shared.enable_status());
+                rpc(format!("Update status replies from {current} to {enable}"));
+                self.set_status_replies(enable);
+                self.store_property("enable-status", enable.to_string());
+                return json!({
+                    "value": self
+                        .lan
+                        .as_ref()
+                        .is_some_and(|host| host.hub.lan.shared.enable_status())
                 });
             }
             "serversettings/player_idle_timeout" => {
@@ -536,14 +612,7 @@ impl Game<'_> {
         rpc(format!("Add ip '{}' to ban list", ban.user));
         let ip = ban.user.clone();
         state.lists.lock().unwrap().ip_bans.add(ban);
-        let banned: Vec<u128> = self.lan.as_ref().map_or_else(Vec::new, |h| {
-            h.hub
-                .guests
-                .iter()
-                .filter(|g| g.address.ip().to_string() == ip)
-                .map(|g| g.uuid)
-                .collect()
-        });
+        let banned = self.ip_ban_players(&ip);
         for uuid in banned {
             self.kick_uuid(uuid, translatable("multiplayer.disconnect.ip_banned", &[]));
         }
@@ -595,6 +664,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
+            .filter(|g| g.participates_online())
             .find(|g| match (id, name) {
                 (Some(id), _) => g.uuid == id,
                 (None, Some(name)) => g.name.eq_ignore_ascii_case(name),
@@ -650,6 +720,30 @@ fn management_ip_ban(entry: &Value, ip: String) -> IpBan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn management_online_skips_fake_players_by_name_and_id() {
+        crate::game::native_guest_turn_tests::with_guests(|game| {
+            let level = game.native_level("minecraft:overworld").unwrap();
+            game.native_fake_player(level, 100, "robot").unwrap();
+            assert_eq!(game.management_online(&json!({"name": "robot"})), None);
+            assert_eq!(game.management_online(&json!({"id": "64"})), None);
+            assert_eq!(
+                game.management_online(&json!({"name": "GUEST12"})),
+                Some((12, "127.0.0.1".into()))
+            );
+            // Id takes precedence, with no fallback from a fake id to a real name.
+            assert_eq!(
+                game.management_online(&json!({"id": "c", "name": "robot"})),
+                Some((12, "127.0.0.1".into()))
+            );
+            assert_eq!(
+                game.management_online(&json!({"id": "64", "name": "guest12"})),
+                None
+            );
+        });
+    }
 
     #[test]
     fn a_game_rule_is_written_as_vanillas_typed_codec_does() {

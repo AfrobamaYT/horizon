@@ -10,6 +10,7 @@ use super::{
     splash_water::thrown_block_hit,
 };
 use horizon_assets::item_model::DisplayContext;
+use horizon_client::health::DamageLevel;
 use horizon_client::{
     block_entity_render::vertex_light,
     brewing,
@@ -491,6 +492,32 @@ fn thrown_kind(stack: &ItemStack) -> &'static str {
     }
 }
 
+/// `BottleItem.use`: find a living `AreaEffectCloud` owned by an `EnderDragon`
+/// within the player's box grown by 2, and shrink its radius by 0.5.
+pub(super) fn collect_dragon_breath(
+    player_box: Aabb,
+    clouds: &mut [super::dragon::Breath],
+) -> bool {
+    let search_box = player_box.inflate(Vec3::new(2.0, 2.0, 2.0));
+    if let Some(c) = clouds.iter_mut().find(|c| {
+        if !c.from_dragon || c.potion.is_some() || super::dragon::breath_expired(c.age, c.duration)
+        {
+            return false;
+        }
+        let r = f64::from(c.radius);
+        let cloud_box = Aabb::new(
+            Vec3::new(c.at[0] - r, c.at[1], c.at[2] - r),
+            Vec3::new(c.at[0] + r, c.at[1] + 0.5, c.at[2] + r),
+        );
+        search_box.intersects(cloud_box)
+    }) {
+        c.radius = (c.radius - 0.5).max(0.0);
+        true
+    } else {
+        false
+    }
+}
+
 impl Game<'_> {
     /// Right-click with a potion, splash/lingering potion or glass bottle.
     pub(super) fn use_potion_item(&mut self, stack: &ItemStack) -> horizon_client::Result<bool> {
@@ -556,6 +583,25 @@ impl Game<'_> {
                 Ok(true)
             }
             "minecraft:glass_bottle" => {
+                // `BottleItem.use`: before the water check, it looks for a living
+                // AreaEffectCloud owned by an EnderDragon within the player's box
+                // grown by 2. If one is found, it shrinks the cloud's radius by 0.5,
+                // plays item.bottle.fill_dragonbreath at the player, emits
+                // GameEvent.FLUID_PICKUP, and turns one bottle into dragon_breath.
+                if let Some(player) = self.player.as_ref()
+                    && collect_dragon_breath(player.bounds(), &mut self.breath_clouds)
+                {
+                    let player_pos = [player.position.x, player.position.y, player.position.z];
+                    self.audio.play(
+                        "minecraft:item.bottle.fill_dragonbreath",
+                        Some(player_pos),
+                        1.0,
+                        1.0,
+                    );
+                    self.post_entity_event("minecraft:fluid_pickup", Who::Player);
+                    self.fill_held(ItemStack::new("minecraft:dragon_breath", 1));
+                    return Ok(true);
+                }
                 let Some(hit) = self.pick_fluid() else {
                     return Ok(false);
                 };
@@ -631,7 +677,7 @@ impl Game<'_> {
             && let Some(eye) = self.eye_position()
         {
             // `player.drop(stack, false)`.
-            self.throw_from_eyes(rest, eye, false);
+            self.throw_from_eyes(rest, eye, false, false);
         }
     }
     /// Drinking a potion while right-click is held; true when handled.
@@ -770,7 +816,11 @@ impl Game<'_> {
                             // `LivingEntity.addEffect` refuses nothing here; the
                             // tick hurts with magic (6 << amp) or heals (4 << amp).
                             if (effect == "instant_damage") != inverted {
-                                m.damage((6 << amp.min(30)) as f32, Damage::of(DamageKind::Magic));
+                                m.damage(
+                                    crate::game::entity::damage_level_of!(self),
+                                    (6 << amp.min(30)) as f32,
+                                    Damage::of(DamageKind::Magic),
+                                );
                             } else {
                                 m.heal((4 << amp.min(30)) as f32);
                             }
@@ -825,7 +875,14 @@ impl Game<'_> {
                 let mut canceled = false;
                 if !creative
                     && let Some(id) = self.motion.health.damage.id(source)
-                    && let Ok(o) = p.hurt_blocking(&self.motion.health, rules, id, amount, None)
+                    && let Ok(o) = p.hurt_blocking(
+                        crate::game::entity::damage_level_of!(self),
+                        &self.motion.health,
+                        rules,
+                        id,
+                        amount,
+                        None,
+                    )
                 {
                     canceled = o.canceled;
                 }
@@ -836,7 +893,13 @@ impl Game<'_> {
                     && p.health.health() > 1.0
                     && let Some(id) = self.motion.health.damage.id("minecraft:magic")
                 {
-                    let _ = p.hurt(&self.motion.health, rules, id, 1.0);
+                    let _ = p.hurt(
+                        crate::game::entity::damage_level_of!(self),
+                        &self.motion.health,
+                        rules,
+                        id,
+                        1.0,
+                    );
                 }
             }
             EffectAction::Exhaust(amount) => {
@@ -1007,6 +1070,19 @@ impl Game<'_> {
             let _ = p.set_health(current.max(target), true);
         }
         self.mod_effect_added(id, None, amp, new);
+        changed
+    }
+    /// Removes one effect, or all effects, and refreshes the player's derived state.
+    pub(super) fn remove_player_effects(&mut self, effect: Option<&str>) -> bool {
+        let before = self.potions.effects.list.len();
+        self.potions
+            .effects
+            .list
+            .retain(|e| effect.is_some_and(|id| e.id != id));
+        let changed = self.potions.effects.list.len() != before;
+        if changed {
+            self.apply_effect_status();
+        }
         changed
     }
     /// `LivingEntity.addEffect` for a content mod's effect: its
@@ -1255,6 +1331,11 @@ impl Game<'_> {
                 return false;
             }
             t.position = next;
+            let bounds = Aabb::new(
+                next.add_vector(Vec3::new(-0.125, 0.0, -0.125)),
+                next.add_vector(Vec3::new(0.125, 0.25, 0.125)),
+            );
+            self.entity_powder_snow_particles(t.previous, next, bounds, t.velocity, false);
             t.age < 1200 && t.position.y > -128.0
         });
         self.potions.thrown = thrown;
@@ -1392,6 +1473,7 @@ impl Game<'_> {
             age: 0,
             duration: 300,
             from_dragon: false,
+            victims: Vec::new(),
             potion: Some(PotionCloud {
                 effects,
                 hidden,
@@ -1468,7 +1550,7 @@ impl Game<'_> {
                                 |base: i32| (0.5 * f64::from(base << amp) + 0.5) as i32 as f32;
                             if (*id == "instant_damage") != inverted {
                                 let harm = m.potion_harm(amount(6));
-                                m.hurt(harm, Some(at), &mut self.world.random);
+                                m.hurt(crate::game::entity::damage_level_of!(self), harm, Some(at));
                             } else {
                                 m.heal(amount(4));
                             }
@@ -1760,6 +1842,7 @@ impl Game<'_> {
                     age: 0,
                     duration: 600,
                     from_dragon: false,
+                    victims: Vec::new(),
                     potion: Some(PotionCloud {
                         effects: def.effects.to_vec(),
                         hidden: Vec::new(),
@@ -1811,7 +1894,11 @@ impl Game<'_> {
                 let m = &mut self.mobs[i];
                 if harm {
                     let harm = m.potion_harm((intensity * f64::from(6 << amp) + 0.5) as i32 as f32);
-                    m.hurt(harm, Some([at.x, at.y, at.z]), &mut self.world.random);
+                    m.hurt(
+                        crate::game::entity::damage_level_of!(self),
+                        harm,
+                        Some([at.x, at.y, at.z]),
+                    );
                 } else {
                     m.heal((intensity * f64::from(4 << amp) + 0.5) as i32 as f32);
                 }
@@ -1876,6 +1963,28 @@ impl Game<'_> {
             [self.cursor.0 as i32, self.cursor.1 as i32],
         )
     }
+    /// The rectangle `draw_inventory_effects` covers, none with no effects
+    /// or too little room right of the window.
+    pub(super) fn inventory_effects_rect(
+        &self,
+        batch: &HudBatch,
+        origin: [f32; 2],
+        image_width: f32,
+    ) -> Option<[f32; 4]> {
+        let panels = inventory_effects::panels(
+            batch.width as i32,
+            [origin[0] as i32, origin[1] as i32],
+            image_width as i32,
+            &self.potions.effects.list,
+            self.clock.rate(),
+            &|key| self.pack.names.display_get(key),
+            &|text| self.gui.atlas.font.width(text).ceil() as i32,
+        );
+        let first = panels.first()?;
+        let width = panels.iter().map(|p| p.width).max()?;
+        let height = (panels.len() as i32 - 1) * first.spacing + 32;
+        Some([first.x as f32, first.y as f32, width as f32, height as f32])
+    }
     /// Effects saved in level.dat (`Player.active_effects`).
     pub(super) fn restore_effects(&mut self) {
         self.potions = PotionState::default();
@@ -1893,6 +2002,7 @@ impl Game<'_> {
 impl horizon_client::mobs::ModEffectTicks for Game<'_> {
     fn tick_mod_effect(
         &self,
+        level: &mut DamageLevel<'_>,
         effect: &str,
         mob: &mut Mob,
         tick_count: i32,
@@ -1916,7 +2026,7 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
             match change {
                 EffectTickChange::Heal(amount) => mob.heal(amount),
                 EffectTickChange::Hurt(source, amount) => {
-                    mob.damage(amount, Damage::of(source.mob_kind()));
+                    mob.damage(level, amount, Damage::of(source.mob_kind()));
                 }
                 _ => {}
             }
@@ -1943,8 +2053,9 @@ mod tests {
     use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};
 
     fn effect_test_mod() {
-        use horizon_client::mod_api::*;
+        use horizon_client::mod_api::{self, *};
         struct TestMod;
+        #[mod_api::__subscriptions]
         impl Hooks for TestMod {
             fn should_apply_effect_tick_this_tick(
                 &self,
@@ -1974,8 +2085,8 @@ mod tests {
         static ONCE: std::sync::Once = std::sync::Once::new();
         ONCE.call_once(|| {
             brewing::register_mod_effects([("test:effect".into(), 0, brewing::Category::Neutral)]);
-            let _ =
-                horizon_client::health::HURT_SERVER.set(super::super::native_hooks::hurt_server);
+            let _ = horizon_client::health::HURT_SERVER
+                .set(super::super::native_hooks::incoming_damage);
         });
     }
 
@@ -2020,6 +2131,8 @@ mod tests {
     fn mod_tick_kills_mob_through_death_and_drops() {
         effect_test_mod();
         super::super::native_entity_refs::tests::with_game(|game| {
+            // Death drops read the server's loot, which a world open loads.
+            game.load_server_loot();
             use horizon_client::chunk::Chunk;
             use std::sync::Arc;
             game.world
@@ -2032,7 +2145,8 @@ mod tests {
                 .unwrap()
                 .clone();
             let mut mob = Mob::new(12, kind, Vec3::new(1.0, 64.0, 1.0), 0.0);
-            mob.extra.main_hand = Some(Arc::from("minecraft:iron_sword"));
+            mob.extra
+                .set_main_hand(Some(Arc::from("minecraft:iron_sword")));
             mob.extra.drop_chances = Some(Box::new([2.0; 8]));
             mob.add_effect(brewing::effect("test:effect").unwrap().id, 10, 2);
             game.mobs.push(mob);
@@ -2190,5 +2304,127 @@ mod tests {
         assert_eq!(nausea_blend_added(&ending, false), (0.0, 0.0));
         let infinite = EffectInstance::new("nausea", -1, 0);
         assert_eq!(nausea_blend_added(&infinite, false), (1.0, 1.0));
+    }
+
+    /// `BottleItem.use`: collecting dragon's breath from an ender dragon's cloud (#8054).
+    #[test]
+    fn glass_bottle_collects_dragon_breath_from_dragon_cloud() {
+        let player_box = Aabb::new(Vec3::new(-0.3, 64.0, -0.3), Vec3::new(0.3, 65.8, 0.3));
+        let mut clouds = vec![super::super::dragon::Breath {
+            id: 1,
+            at: [1.0, 64.0, 0.0],
+            radius: 5.0,
+            age: 0,
+            duration: 200,
+            from_dragon: true,
+            victims: Vec::new(),
+            potion: None,
+        }];
+        assert!(collect_dragon_breath(player_box, &mut clouds));
+        assert_eq!(clouds[0].radius, 4.5);
+        assert!(collect_dragon_breath(player_box, &mut clouds));
+        assert_eq!(clouds[0].radius, 4.0);
+    }
+
+    /// `BottleItem.use`: clouds that are expired, non-dragon, lingering potions,
+    /// or out of reach cannot be bottled (#8054).
+    #[test]
+    fn glass_bottle_ignores_non_dragon_or_expired_or_out_of_range_clouds() {
+        let player_box = Aabb::new(Vec3::new(-0.3, 64.0, -0.3), Vec3::new(0.3, 65.8, 0.3));
+        // Non-dragon cloud (`from_dragon: false`).
+        let mut non_dragon = vec![super::super::dragon::Breath {
+            id: 1,
+            at: [0.0, 64.0, 0.0],
+            radius: 3.0,
+            age: 0,
+            duration: 600,
+            from_dragon: false,
+            victims: Vec::new(),
+            potion: None,
+        }];
+        assert!(!collect_dragon_breath(player_box, &mut non_dragon));
+        assert_eq!(non_dragon[0].radius, 3.0);
+
+        // Lingering potion cloud (`potion: Some(...)`).
+        let mut lingering = vec![super::super::dragon::Breath {
+            id: 2,
+            at: [0.0, 64.0, 0.0],
+            radius: 3.0,
+            age: 0,
+            duration: 600,
+            from_dragon: true,
+            victims: Vec::new(),
+            potion: Some(PotionCloud {
+                effects: Vec::new(),
+                hidden: Vec::new(),
+                ambient: Vec::new(),
+                radius_per_tick: -3.0 / 600.0,
+                color: 0,
+                victims: Vec::new(),
+                source: Text::empty(),
+            }),
+        }];
+        assert!(!collect_dragon_breath(player_box, &mut lingering));
+        assert_eq!(lingering[0].radius, 3.0);
+
+        // Its last tick before the wait-shifted end still holds breath
+        // (`tickCount - waitTime < duration`).
+        let mut last = vec![super::super::dragon::Breath {
+            id: 3,
+            at: [0.0, 64.0, 0.0],
+            radius: 5.0,
+            age: 219,
+            duration: 200,
+            from_dragon: true,
+            victims: Vec::new(),
+            potion: None,
+        }];
+        assert!(collect_dragon_breath(player_box, &mut last));
+        assert_eq!(last[0].radius, 4.5);
+
+        // Expired cloud (`tickCount - waitTime >= duration`).
+        let mut expired = vec![super::super::dragon::Breath {
+            id: 3,
+            at: [0.0, 64.0, 0.0],
+            radius: 5.0,
+            age: 220,
+            duration: 200,
+            from_dragon: true,
+            victims: Vec::new(),
+            potion: None,
+        }];
+        assert!(!collect_dragon_breath(player_box, &mut expired));
+        assert_eq!(expired[0].radius, 5.0);
+
+        // Out of horizontal reach: cloud at 10 blocks away with radius 1:
+        // cloud X range [9.0, 11.0], player inflated X range [-2.3, 2.3] -> no overlap.
+        let mut far = vec![super::super::dragon::Breath {
+            id: 4,
+            at: [10.0, 64.0, 0.0],
+            radius: 1.0,
+            age: 0,
+            duration: 200,
+            from_dragon: true,
+            victims: Vec::new(),
+            potion: None,
+        }];
+        assert!(!collect_dragon_breath(player_box, &mut far));
+        assert_eq!(far[0].radius, 1.0);
+
+        // Out of vertical reach: cloud at Y=64.0 (Y bounds [64.0, 64.5]),
+        // player at Y=67.0 (inflated Y bounds [65.0, 70.8] does not reach 64.5).
+        let high_player = Aabb::new(Vec3::new(-0.3, 67.0, -0.3), Vec3::new(0.3, 68.8, 0.3));
+        let mut ground_cloud = vec![super::super::dragon::Breath {
+            id: 5,
+            at: [0.0, 64.0, 0.0],
+            radius: 1.0,
+            age: 0,
+            duration: 200,
+            from_dragon: true,
+            victims: Vec::new(),
+            potion: None,
+        }];
+        assert!(!collect_dragon_breath(high_player, &mut ground_cloud));
+        assert_eq!(ground_cloud[0].radius, 1.0);
     }
 }

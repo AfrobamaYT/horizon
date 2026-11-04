@@ -353,18 +353,18 @@ impl Game<'_> {
         match hit {
             0 => {
                 self.pause_focus = None;
-                self.screen = Screen::Playing;
+                self.set_screen(Screen::Playing);
                 self.capture(true);
             }
             1 => self.open_options(false),
             3 => self.open_stats(),
             4 => self.open_advancements(true),
             9 => self.open_world_options(),
-            10 => self.screen = Screen::Friends,
+            10 => self.set_screen(Screen::Friends),
             // DialogConnectionAccess.openDialog(Dialogs.SERVER_LINKS).
             11 => {
                 self.links_ui.scroll = 0.0;
-                self.screen = Screen::ServerLinks;
+                self.set_screen(Screen::ServerLinks);
             }
             // ConfirmLinkScreen.confirmLink(this, CommonLinks...) on the pause screen.
             12 => self.confirm_trusted_link(BUGS_LINK, Screen::Paused),
@@ -377,7 +377,7 @@ impl Game<'_> {
             14 => {
                 if let Some((_, dialog)) = self.pause_screen_additions() {
                     self.pause_focus = None;
-                    self.screen = Screen::Playing;
+                    self.set_screen(Screen::Playing);
                     self.capture(true);
                     self.show_dialog(&dialog);
                 }

@@ -372,7 +372,10 @@ name = "cargo-horizon-mod"
 version = "0.1.0"
 dependencies = [
  "horizon-mods",
+ "horizon-port-pack",
  "serde_json",
+ "sha2",
+ "toml",
  "zip",
 ]
 
@@ -1336,6 +1339,7 @@ dependencies = [
  "horizon-hdr",
  "horizon-items",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
  "horizon-mods",
  "horizon-narrator",
  "horizon-optifine",
@@ -1427,6 +1431,7 @@ dependencies = [
  "horizon-world",
  "log",
  "miniz_oxide 0.8.9",
+ "mio",
  "naga",
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
@@ -1443,6 +1448,7 @@ dependencies = [
  "ureq",
  "wgpu",
  "winit",
+ "xxhash-rust",
  "zip",
 ]
 
@@ -1468,6 +1474,8 @@ dependencies = [
  "horizon-hdr",
  "horizon-items",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
+ "horizon-mods",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -1599,7 +1607,17 @@ version = "0.1.0"
 dependencies = [
  "horizon-client-core",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
  "serde_json",
+]
+
+[[package]]
+name = "horizon-mod-api-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1609,6 +1627,8 @@ dependencies = [
  "horizon-shader-api",
  "log",
  "minisign-verify",
+ "png",
+ "semver",
  "serde",
  "serde_json",
  "sha2",
@@ -1706,13 +1726,12 @@ dependencies = [
  "base64",
  "chrono",
  "getrandom 0.3.4",
- "horizon-anticheat",
  "horizon-bench",
- "horizon-chat-filter",
  "horizon-core",
  "horizon-mcp",
  "horizon-release-sign",
  "horizon-server-files",
+ "horizon-server-launch",
  "libc",
  "p12-keystore",
  "png",
@@ -1723,7 +1742,6 @@ dependencies = [
  "sha1",
  "sha2",
  "toml",
- "toml_edit",
  "ureq",
  "windows-sys 0.61.2",
  "zip",
@@ -1739,6 +1757,20 @@ dependencies = [
  "horizon-world",
  "log",
  "ureq",
+]
+
+[[package]]
+name = "horizon-server-launch"
+version = "0.1.0"
+dependencies = [
+ "horizon-anticheat",
+ "horizon-chat-filter",
+ "horizon-core",
+ "horizon-server-files",
+ "serde",
+ "toml",
+ "toml_edit",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2311,6 +2343,18 @@ checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
 dependencies = [
  "adler2",
  "simd-adler32",
+]
+
+[[package]]
+name = "mio"
+version = "1.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1788edb87fdc09c7e26304471e2f5be8cdefb1b6930d6e3985fc02ff53bf86ee"
+dependencies = [
+ "libc",
+ "log",
+ "wasi",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3517,6 +3561,10 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "serde"

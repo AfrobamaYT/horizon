@@ -10,8 +10,10 @@
 //! - `check <file> [--json]`: what the registry checks of a submission
 //!   (`.hmod`, `.hpack`, resource pack `.zip`, `.hshader`).
 //! - `registry build|review|check|list`: the registry repository's CI.
+//! - `use-jar <path>`: list an exact original Java jar as a passive asset/data source.
 use horizon_mods::{Content, Manifest, Package, manifest::MANIFEST};
 mod check;
+mod jar;
 mod registry;
 
 use std::{
@@ -30,10 +32,11 @@ fn main() -> ExitCode {
         Some("build") => build().map(|p| {
             println!("Built {}", p.display());
         }),
-        Some("run") => run(&args[1..]),
+        Some("run") => run(&args[1..]).map_err(|e| e.to_string()),
         Some("check") => check(&args[1..]),
         Some("registry") => registry::main(&args[1..]),
-        _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native [--horizon <commit>]] | build | run [--game <horizon-client>] [-- <game args>] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | registry build|review|check|list".into()),
+        Some("use-jar") => jar::run(&args[1..]),
+        _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native [--horizon <commit>]] | build | run [--game <horizon-client>] [-- <game args>] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | registry build|review|check|list | use-jar <path>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -138,68 +141,40 @@ fn new(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// A native trait mod's bundle in `dir` (docs/native-mods.md, "Trait mods"): its
-/// `horizon-mixin.toml` and an `[api]` crate with one hook. It is what the launcher
-/// builds (`native-build <dir>`) and packs as `native/` of a `.hmod`
-/// (docs/api/mod-files.md). `horizon` pins the Horizon commit it is made for.
+/// A flat native trait mod project, pinned to the Horizon commit it is made for.
 fn new_native(
     dir: &Path,
     id: &str,
     horizon: Option<&str>,
     fill: impl Fn(&str) -> String,
 ) -> Result<(), String> {
-    // `[mod] id`, as `horizon-native.json` needs it: the template keeps to its characters.
     if id.len() > 64 {
         return Err(format!("mod id {id}: 64 characters at most"));
     }
     let horizon = horizon.ok_or("native projects require --horizon <40 hex digits>")?;
-    if !horizon_mods::index::native::revision(horizon) {
+    if !horizon_mods::manifest::revision(horizon) {
         return Err("--horizon: a Horizon commit is 40 lowercase hex digits".into());
     }
-    let compatibility = format!("[compatibility]\nhorizon_revision = \"{horizon}\"\n");
     let rev = format!(", rev = \"{horizon}\"");
+    let manifest = format!(
+        "{}\n[native]\ngame = \"26.3\"\nhorizon = \"{horizon}\"\nmixins = \"{}\"\n",
+        include_str!("../template/content/horizon-mod.toml"),
+        horizon_mods::index::native::MIXINS_REV,
+    );
     let files = [
-        (
-            "native/horizon-mixin.toml",
-            include_str!("../template/native/horizon-mixin.toml"),
-        ),
-        (
-            "native/rust/Cargo.toml",
-            include_str!("../template/native/api.toml"),
-        ),
-        (
-            "native/rust/src/lib.rs",
-            include_str!("../template/native/lib.rs"),
-        ),
-        (
-            MANIFEST,
-            include_str!("../template/content/horizon-mod.toml"),
-        ),
+        ("Cargo.toml", include_str!("../template/native/api.toml")),
+        ("src/lib.rs", include_str!("../template/native/lib.rs")),
+        (MANIFEST, manifest.as_str()),
         (".gitignore", include_str!("../template/gitignore")),
     ];
     for (file, text) in files {
         let to = dir.join(file);
         std::fs::create_dir_all(to.parent().expect("a file in the mod"))
             .map_err(|e| e.to_string())?;
-        let text = fill(text)
-            .replace("{compatibility}", &compatibility)
-            .replace("{rev}", &rev);
+        let text = fill(text).replace("{rev}", &rev);
         std::fs::write(&to, text).map_err(|e| format!("{}: {e}", to.display()))?;
     }
-    let manifest = horizon_mods::index::native::Manifest {
-        schema: 1,
-        id: id.into(),
-        version: "0.1.0".into(),
-        game: "26.3".into(),
-        horizon: horizon.into(),
-        mixins: horizon_mods::index::native::MIXINS_REV.into(),
-    };
-    std::fs::write(
-        dir.join(horizon_mods::index::native::MANIFEST),
-        serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    for folder in ["assets", "data", "native/data"] {
+    for folder in ["assets", "data"] {
         std::fs::create_dir_all(dir.join(folder)).map_err(|e| e.to_string())?;
     }
     println!(
@@ -217,42 +192,13 @@ fn build() -> Result<PathBuf, String> {
 }
 
 fn build_in(root: &Path) -> Result<PathBuf, String> {
-    if root.join(horizon_mods::index::native::MANIFEST).is_file() {
-        let text = std::fs::read(root.join(horizon_mods::index::native::MANIFEST))
-            .map_err(|e| e.to_string())?;
-        let manifest: horizon_mods::index::native::Manifest =
-            serde_json::from_slice(&text).map_err(|e| e.to_string())?;
-        let bytes = horizon_mods::index::native::Bundle::pack_directory(root, &manifest)?;
-        let path = root
-            .join("target/horizon-mod")
-            .join(format!("{}.hmod", manifest.id));
-        std::fs::create_dir_all(path.parent().expect("package directory"))
-            .map_err(|e| e.to_string())?;
-        let partial = path.with_extension("hmod.partial");
-        std::fs::write(&partial, bytes).map_err(|e| e.to_string())?;
-        std::fs::rename(partial, &path).map_err(|e| e.to_string())?;
-        return Ok(path);
-    }
-    let manifest_text = std::fs::read_to_string(root.join(MANIFEST))
-        .map_err(|e| format!("{MANIFEST}: {e} (run this in a mod's folder)"))?;
-    let manifest = Manifest::parse(&manifest_text)?;
-    if root.join("Cargo.toml").exists() {
-        return Err("a Cargo.toml: code mods are native now (docs/native-mods.md)".into());
-    }
-    // Content owns the packaged path list; the writer checks exactly those entries.
-    let content = Content::read(root, &manifest)?;
-    let mut reader = content.reader()?;
-    let mut files = Vec::with_capacity(content.files.len());
-    for name in &content.files {
-        files.push((name.as_str(), reader.read(name)?));
-    }
-    let files: Vec<(&str, &[u8])> = files.iter().map(|(n, b)| (*n, b.as_slice())).collect();
+    let package = Package::read(root)?;
+    let bytes = Package::pack_directory(root)?;
     let dir = root.join("target/horizon-mod");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join(format!("{}.hmod", manifest.id));
+    let path = dir.join(format!("{}.hmod", package.manifest.id));
     // Write then rename, so a running game never reads half a file.
     let partial = path.with_extension("hmod.partial");
-    let bytes = Package::write_files(&manifest_text, &files)?;
     std::fs::write(&partial, bytes).map_err(|e| e.to_string())?;
     std::fs::rename(&partial, &path).map_err(|e| e.to_string())?;
     Ok(path)
@@ -289,8 +235,37 @@ fn check(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn run(args: &[String]) -> Result<(), String> {
-    let path = build()?;
+#[derive(Debug)]
+enum RunError {
+    CodeMod,
+    Build(String),
+    Launch { game: String, error: std::io::Error },
+    Exit(std::process::ExitStatus),
+}
+
+impl std::fmt::Display for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CodeMod => f.write_str(
+                "code mods run through the launcher's native build: horizon-launcher native-build . --trust-native-code (docs/native-mods.md)",
+            ),
+            Self::Build(error) => f.write_str(error),
+            Self::Launch { game, error } => write!(
+                f,
+                "{game}: {error} (pass --game <path to horizon-client> or set HORIZON_CLIENT)"
+            ),
+            Self::Exit(status) => write!(f, "the game exited with {status}"),
+        }
+    }
+}
+
+impl std::error::Error for RunError {}
+
+fn run(args: &[String]) -> Result<(), RunError> {
+    if Path::new("Cargo.toml").is_file() {
+        return Err(RunError::CodeMod);
+    }
+    let path = build().map_err(RunError::Build)?;
     let game = flag(args, "--game")
         .map(str::to_string)
         .or_else(|| std::env::var("HORIZON_CLIENT").ok())
@@ -302,13 +277,8 @@ fn run(args: &[String]) -> Result<(), String> {
         .arg(&path)
         .args(extra)
         .status()
-        .map_err(|e| {
-            format!("{game}: {e} (pass --game <path to horizon-client> or set HORIZON_CLIENT)")
-        })?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| format!("the game exited with {status}"))
+        .map_err(|error| RunError::Launch { game, error })?;
+    status.success().then_some(()).ok_or(RunError::Exit(status))
 }
 
 #[cfg(test)]
@@ -433,23 +403,23 @@ mod tests {
             commit.into(),
         ];
         new(&args).unwrap();
-        let api = std::fs::read_to_string(path.join("native/rust/Cargo.toml")).unwrap();
+        let api = std::fs::read_to_string(path.join("Cargo.toml")).unwrap();
         assert!(api.contains(&format!("rev = \"{commit}\"")), "{api}");
         let hmod = build_in(&path).unwrap();
         let bundle = horizon_mods::index::native::Bundle::read(&hmod).unwrap();
         assert_eq!(bundle.manifest.id, "machine_mod");
         let names: Vec<_> = bundle.files.keys().map(String::as_str).collect();
-        assert_eq!(
-            names,
-            [
-                "horizon-native.json",
-                "native/horizon-mixin.toml",
-                "native/rust/Cargo.toml",
-                "native/rust/src/lib.rs"
-            ]
-        );
+        assert_eq!(names, ["Cargo.toml", "horizon-mod.toml", "src/lib.rs"]);
         assert!(path.join("horizon-mod.toml").is_file());
-        for old in ["api", "mixins", "content", "horizon-mixin.toml"] {
+        for old in [
+            "api",
+            "mixins",
+            "content",
+            "native",
+            "rust",
+            "horizon-native.json",
+            "horizon-mixin.toml",
+        ] {
             assert!(!path.join(old).exists());
         }
         assert_eq!(

@@ -55,10 +55,16 @@ pub(crate) struct TestLevel {
     /// What `adjust_signal` answers at a position: the weak and direct signal,
     /// and the only direction they go in, if any.
     pub signals: HashMap<BlockPos, (i32, i32, Option<Direction>)>,
+    /// Overrides the conductor check for individual signal queries.
+    pub weak_power: HashMap<BlockPos, bool>,
+    pub weak_power_directions: std::cell::RefCell<Vec<Direction>>,
     /// What `adjust_analog_output` answers at a position, for the states in
     /// `analog_states` (`adjust_has_analog_output`).
     pub analog: HashMap<BlockPos, i32>,
     pub analog_states: HashSet<BlockStateId>,
+    /// What `adjust_should_redstone_wire_connect_to` answers at a position: whether
+    /// redstone wire connects there.
+    pub wire_connect: HashMap<BlockPos, bool>,
     /// What `before_fire_odds` answers for a state.
     pub fire_odds: HashMap<BlockStateId, (i32, i32)>,
     /// What `before_smoke_source` answers for a state.
@@ -83,8 +89,11 @@ impl TestLevel {
             air: b.air(),
             random: LegacyRandom::new(42),
             signals: HashMap::new(),
+            weak_power: HashMap::new(),
+            weak_power_directions: std::cell::RefCell::new(Vec::new()),
             analog: HashMap::new(),
             analog_states: HashSet::new(),
+            wire_connect: HashMap::new(),
             time: 0,
             day_time: 0,
             events: Vec::new(),
@@ -108,6 +117,31 @@ impl LevelAccess for TestLevel {
     }
     fn adjust_has_analog_output(&self, state: BlockStateId, vanilla: bool) -> bool {
         vanilla || self.analog_states.contains(&state)
+    }
+    fn has_weak_power_hook(&self) -> bool {
+        !self.weak_power.is_empty()
+    }
+    fn adjust_should_check_weak_power(
+        &self,
+        pos: BlockPos,
+        _state: BlockStateId,
+        direction: Direction,
+        vanilla: bool,
+    ) -> bool {
+        self.weak_power_directions.borrow_mut().push(direction);
+        self.weak_power.get(&pos).copied().unwrap_or(vanilla)
+    }
+    fn has_redstone_wire_connection_hook(&self) -> bool {
+        !self.wire_connect.is_empty()
+    }
+    fn adjust_should_redstone_wire_connect_to(
+        &self,
+        pos: BlockPos,
+        _state: BlockStateId,
+        _direction: Option<Direction>,
+        vanilla: bool,
+    ) -> bool {
+        self.wire_connect.get(&pos).copied().unwrap_or(vanilla)
     }
     fn adjust_analog_output(
         &self,
@@ -465,6 +499,116 @@ fn neighbor_observation_follows_dispatch_order() {
     assert_eq!(
         level.seen.borrow().last(),
         Some(&(BlockPos::new(3, 4, 5), b.air(), changed, true))
+    );
+}
+
+/// A level that hears every `neighborChanged`, and answers `affectNeighborsAfterRemoval` for a
+/// mod's part with three requests when `asks`.
+struct Asker {
+    inner: TestLevel,
+    seen: std::cell::RefCell<Vec<BlockPos>>,
+    asks: bool,
+}
+impl LevelAccess for Asker {
+    fn block_state(&self, pos: BlockPos) -> BlockStateId {
+        self.inner.block_state(pos)
+    }
+    fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
+        self.inner.set_raw(pos, state)
+    }
+    fn is_loaded(&self, pos: BlockPos) -> bool {
+        self.inner.is_loaded(pos)
+    }
+    fn random(&mut self) -> &mut LegacyRandom {
+        self.inner.random()
+    }
+    fn game_time(&self) -> i64 {
+        self.inner.game_time()
+    }
+    fn observe_neighbor_changed(&self, pos: BlockPos, _: BlockStateId, _: BlockId, _: bool) {
+        self.seen.borrow_mut().push(pos);
+    }
+    fn affect_neighbors_after_removal(
+        &self,
+        _: BlockPos,
+        _: BlockStateId,
+        _: bool,
+        updates: &mut Vec<super::NeighbourUpdate>,
+    ) {
+        if self.asks {
+            updates.extend([
+                super::NeighbourUpdate::NeighboursExcept(Direction::Up),
+                super::NeighbourUpdate::OutputSignal,
+                super::NeighbourUpdate::Neighbours,
+            ]);
+        }
+    }
+}
+
+/// The positions told of a neighbour change when `state` is removed from the origin.
+fn removal_notices(f: &Fixture, state: BlockStateId, asks: bool) -> Vec<BlockPos> {
+    let b = &f.behaviours;
+    let mut level = Asker {
+        inner: TestLevel::new(b),
+        seen: Default::default(),
+        asks,
+    };
+    let mut ticks = Ticks::new(0);
+    b.sim(&mut level, &mut ticks)
+        .affect_neighbors_after_removal(state, BlockPos::new(0, 0, 0), false);
+    level.seen.into_inner()
+}
+
+#[test]
+fn a_part_asks_for_neighbour_updates_in_the_order_it_asked() {
+    let Some(f) = fixture() else { return };
+    let stone = f.registry.default_state("minecraft:stone").unwrap();
+    let at = |x, y, z| BlockPos::new(x, y, z);
+    // Stone has no updates of its own: five neighbours without the one above, no comparator to
+    // hear the output signal, then all six.
+    assert_eq!(
+        removal_notices(f, stone, true),
+        [
+            at(-1, 0, 0),
+            at(1, 0, 0),
+            at(0, -1, 0),
+            at(0, 0, -1),
+            at(0, 0, 1),
+            at(-1, 0, 0),
+            at(1, 0, 0),
+            at(0, -1, 0),
+            at(0, 1, 0),
+            at(0, 0, -1),
+            at(0, 0, 1),
+        ]
+    );
+}
+
+#[test]
+fn a_parts_updates_follow_the_blocks_own_as_an_override_calling_super() {
+    let Some(f) = fixture() else { return };
+    // A powered lever tells its neighbours when removed: those come first, the part's after.
+    let lever = f
+        .registry
+        .resolve(&BlockState {
+            name: "minecraft:lever".into(),
+            properties: [("face", "wall"), ("facing", "east"), ("powered", "true")]
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .into(),
+        })
+        .unwrap();
+    let own = removal_notices(f, lever, false);
+    let both = removal_notices(f, lever, true);
+    assert!(!own.is_empty());
+    assert_eq!(both[..own.len()], own);
+    assert_eq!(both.len(), own.len() + 11);
+    assert_eq!(
+        both[own.len()..],
+        removal_notices(
+            f,
+            f.registry.default_state("minecraft:stone").unwrap(),
+            true
+        )
     );
 }
 
@@ -1162,6 +1306,64 @@ fn redstone_lever_wire_and_lamp() {
 }
 
 #[test]
+fn weak_power_hook_controls_indirect_signal_at_its_block() {
+    let mut w = world!();
+    let glass = w.id("glass", &[]);
+    let stone = w.id("stone", &[]);
+    let pos = BlockPos::new(4, 1, 0);
+    let source = BlockPos::new(5, 1, 0);
+    w.put(pos, glass);
+    w.level.signals.insert(source, (0, 15, None));
+    let signal = |w: &mut World<'_>| {
+        w.f.behaviours
+            .sim(&mut w.level, &mut w.ticks)
+            .signal(pos, Direction::East)
+    };
+    assert_eq!(signal(&mut w), 0);
+    w.level.weak_power.insert(pos, true);
+    assert_eq!(signal(&mut w), 15);
+    assert_eq!(
+        *w.level.weak_power_directions.borrow(),
+        vec![Direction::East]
+    );
+    w.put(pos, stone);
+    w.level.weak_power.insert(pos, false);
+    assert_eq!(signal(&mut w), 0);
+    w.level.weak_power.clear();
+    assert_eq!(signal(&mut w), 15);
+}
+
+#[test]
+fn wire_connects_only_to_the_block_that_answers_should_redstone_wire_connect_to() {
+    let mut w = world!();
+    w.floor(0, 20, "stone");
+    let wire = w.id("redstone_wire", &[]);
+    let glass = w.id("glass", &[]);
+    w.set(BlockPos::new(4, 1, 0), glass);
+    w.set(BlockPos::new(5, 1, 0), wire);
+    w.set(BlockPos::new(6, 1, 0), glass);
+    let pos = BlockPos::new(5, 1, 0);
+    let connection = |w: &mut World<'_>| {
+        w.f.behaviours
+            .sim(&mut w.level, &mut w.ticks)
+            .wire_connection_state(wire, pos)
+    };
+    let before = connection(&mut w);
+    assert_eq!(
+        w.f.registry.state(before).unwrap().properties["east"],
+        "none"
+    );
+    w.level.wire_connect.insert(BlockPos::new(6, 1, 0), true);
+    let connected = connection(&mut w);
+    assert_eq!(
+        w.f.registry.state(connected).unwrap().properties["east"],
+        "side"
+    );
+    w.level.wire_connect.remove(&BlockPos::new(6, 1, 0));
+    assert_eq!(connection(&mut w), before);
+}
+
+#[test]
 fn repeater_delays_and_torch_inverts() {
     let mut w = world!();
     w.floor(0, 10, "stone");
@@ -1275,12 +1477,17 @@ impl World<'_> {
             f64::from(pos.y) + 0.5,
             f64::from(pos.z),
         );
+        let state = self.level.block_state(pos);
         self.f.behaviours.use_without_item(
             &mut self.level,
             &mut self.ticks,
-            pos,
-            Direction::North,
-            hit,
+            state,
+            horizon_core::geometry::BlockHit {
+                block: pos,
+                direction: Direction::North,
+                location: hit,
+                inside: false,
+            },
             player,
         )
     }
@@ -1299,12 +1506,17 @@ impl World<'_> {
             f64::from(pos.y) + 0.5,
             f64::from(pos.z),
         );
+        let state = self.level.block_state(pos);
         self.f.behaviours.use_item_on_branch(
             &mut self.level,
             &mut self.ticks,
-            pos,
-            Direction::North,
-            hit,
+            state,
+            horizon_core::geometry::BlockHit {
+                block: pos,
+                direction: Direction::North,
+                location: hit,
+                inside: false,
+            },
             player,
             item,
         )
@@ -1338,9 +1550,12 @@ impl World<'_> {
         self.f.behaviours.use_item_on(
             &mut self.level,
             &mut self.ticks,
-            pos,
-            Direction::North,
-            hit,
+            horizon_core::geometry::BlockHit {
+                block: pos,
+                direction: Direction::North,
+                location: hit,
+                inside: false,
+            },
             player,
             item,
         )
@@ -2222,8 +2437,11 @@ fn replacing_moving_piston_skips_the_same_effects_with_or_without_flag() {
         ));
         assert!(w.b().set_block(&mut w.level, &mut w.ticks, pos, air, flags));
         assert_eq!(w.get(pos), air);
-        // Current engine behavior, not vanilla: horizon-rust/horizon#7863.
-        assert_eq!(w.get(base), air);
+        assert_eq!(
+            w.get(base),
+            extended,
+            "setBlock over the head keeps the extended base"
+        );
         assert!(!w.ticks.moving_pistons.iter().any(|(p, _)| *p == pos));
     }
 }
@@ -3867,4 +4085,69 @@ fn a_refused_portal_leaves_the_fire_in_its_frame() {
             expected
         );
     }
+}
+
+#[test]
+fn a_rail_on_a_block_a_piston_pushes_pops_off() {
+    // PistonBaseBlock.moveBlocks writes the arriving blocks as `moving_piston`
+    // and then updates the neighbours of every source cell. The rail on the
+    // second stone asks whether that cell supports it: vanilla reads the moving
+    // block's shape offset by `progress - 1`, a whole block back at progress 0,
+    // so nothing holds the rail and it pops, though another stone arrives under
+    // it (dynamic_support pins the moving shape's support against vanilla).
+    let mut w = world!();
+    w.floor(0, 10, "stone");
+    let piston = w.id("piston", &[("facing", "east")]);
+    let stone = w.id("stone", &[]);
+    let rail = w.id("rail", &[]);
+    let power = w.id("redstone_block", &[]);
+    let piston_pos = BlockPos::new(0, 1, 0);
+    let rail_pos = BlockPos::new(2, 2, 0);
+    w.set(piston_pos, piston);
+    w.set(BlockPos::new(1, 1, 0), stone);
+    w.set(BlockPos::new(2, 1, 0), stone);
+    w.set(rail_pos, rail);
+    w.set(BlockPos::new(-1, 1, 0), power);
+    for _ in 0..4 {
+        w.full_tick();
+    }
+    assert_eq!(w.prop(piston_pos, "extended"), "true");
+    assert_eq!(w.name(BlockPos::new(2, 1, 0)), "stone[]");
+    assert_eq!(w.name(BlockPos::new(3, 1, 0)), "stone[]");
+    assert_eq!(w.name(rail_pos), "air[]");
+}
+
+#[test]
+fn a_rail_riding_on_slime_stays_on_it() {
+    // #8111: the slime block carries the rail on top of it. The rail's block
+    // entity can finish while the slime's still holds `moving_piston` at
+    // progress 1, whose shape is the slime block in its cell, so the rail is
+    // supported both ways.
+    let mut w = world!();
+    w.floor(0, 10, "stone");
+    let piston = w.id("sticky_piston", &[("facing", "east")]);
+    let slime = w.id("slime_block", &[]);
+    let rail = w.id("rail", &[]);
+    let power = w.id("redstone_block", &[]);
+    let air = w.b().air();
+    let piston_pos = BlockPos::new(0, 1, 0);
+    let power_pos = BlockPos::new(-1, 1, 0);
+    w.set(piston_pos, piston);
+    w.set(BlockPos::new(1, 1, 0), slime);
+    w.set(BlockPos::new(1, 2, 0), rail);
+    w.set(power_pos, power);
+    for _ in 0..4 {
+        w.full_tick();
+    }
+    assert_eq!(w.prop(piston_pos, "extended"), "true");
+    assert_eq!(w.name(BlockPos::new(2, 1, 0)), "slime_block[]");
+    let pushed = w.name(BlockPos::new(2, 2, 0));
+    assert!(pushed.starts_with("rail"), "pushed: got {pushed}");
+    w.set(power_pos, air);
+    for _ in 0..4 {
+        w.full_tick();
+    }
+    assert_eq!(w.prop(piston_pos, "extended"), "false");
+    let pulled = w.name(BlockPos::new(1, 2, 0));
+    assert!(pulled.starts_with("rail"), "pulled back: got {pulled}");
 }

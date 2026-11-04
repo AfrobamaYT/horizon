@@ -129,7 +129,7 @@ impl StartupMenu {
             game.ui.options = std::mem::take(&mut self.options);
             game.ui.options.resource_error =
                 game.ui.options.resource_error.take().or(resource_error);
-            game.screen = Screen::Options;
+            game.set_screen(Screen::Options);
             game.options_from_title = true;
             game.dragging = self.dragging;
         }
@@ -352,42 +352,40 @@ pub(super) fn spawn_loader(
     let (sender, receiver) = std::sync::mpsc::channel();
     let settings = settings.clone();
     let vanilla_root = vanilla_root.to_path_buf();
-    let dev_mods = options.dev_mods.clone();
+    let mod_sources = options.mods.clone();
     let world = launch_world(options).map(str::to_owned);
     let progress = progress.clone();
     let handle = std::thread::Builder::new()
         .name("resource-loader".into())
         .spawn(move || {
             let mut pack_error = None;
-            let root = packs::startup_root(
-                &vanilla_root,
-                &settings.resource_packs,
-                &[],
-                &settings.mods.enabled,
-                &dev_mods,
-            )
-            .unwrap_or_else(|error| {
-                pack_error = Some(error.to_string());
-                mods::content_root(&vanilla_root, &settings.mods.enabled, &dev_mods)
-            });
-            let result = load_resources(
-                root,
-                world.as_deref(),
-                &vanilla_root,
-                &settings,
-                started,
-                true,
-                false,
-                &progress,
-                &mut |gui, root| {
-                    let _ = sender.send(LoaderMsg::Ui(gui, root.to_path_buf()));
-                },
-            )
-            .map(|mut loaded| {
-                loaded.pack_error = loaded.pack_error.or(pack_error);
-                loaded
-            })
-            .map_err(|error| error.to_string());
+            let root =
+                packs::startup_root(&vanilla_root, &settings.resource_packs, &[], &mod_sources)
+                    .or_else(|error| {
+                        pack_error = Some(error.to_string());
+                        mods::content_root(&vanilla_root, &mod_sources)
+                    });
+            let result = root
+                .and_then(|root| {
+                    load_resources(
+                        root,
+                        world.as_deref(),
+                        &vanilla_root,
+                        &settings,
+                        started,
+                        true,
+                        false,
+                        &progress,
+                        &mut |gui, root| {
+                            let _ = sender.send(LoaderMsg::Ui(gui, root.to_path_buf()));
+                        },
+                    )
+                })
+                .map(|mut loaded| {
+                    loaded.pack_error = loaded.pack_error.or(pack_error);
+                    loaded
+                })
+                .map_err(|error| error.to_string());
             let _ = sender.send(LoaderMsg::Done(result));
         })?;
     Ok((receiver, handle))

@@ -6,6 +6,7 @@ use super::{
     Game,
     entity::{Blast, Entity, EntityHandle, with_entity, with_entity_mut},
 };
+use horizon_client::health::DamageLevel;
 use horizon_client::{
     Result,
     blocks::Fluid,
@@ -205,6 +206,7 @@ struct Hit {
 
 /// Apply blast damage when the mob's team and wither immunity allow it.
 fn hurt_mob(
+    level: &mut DamageLevel<'_>,
     m: &mut horizon_client::mobs::Mob,
     hurtable: bool,
     cause: Option<horizon_client::mobs::Species>,
@@ -213,7 +215,7 @@ fn hurt_mob(
     let shielded =
         cause.is_some_and(|c| horizon_client::mobs::wither::shielded_from(m.species(), c));
     if hurtable && !shielded {
-        m.damage(amount, source);
+        m.damage(level, amount, source);
     }
 }
 
@@ -494,6 +496,7 @@ impl Game<'_> {
         if let Some((id, name)) = attacker.filter(|_| !creative && !spectator && hurtable) {
             self.note_named_attacker(damage_type, *id, name.clone());
         }
+        let rules = self.world.health_rules;
         if let Some(p) = self.player.as_mut()
             && let Some(id) = self.motion.health.damage.id(damage_type)
         {
@@ -502,8 +505,9 @@ impl Game<'_> {
                 && !spectator
                 && hurtable
                 && let Ok(o) = p.hurt_caused_by(
+                    crate::game::entity::damage_level_of!(self),
                     &self.motion.health,
-                    self.world.health_rules,
+                    rules,
                     id,
                     amount,
                     blocking,
@@ -531,7 +535,9 @@ impl Game<'_> {
                     p.velocity.z + push[2],
                 );
                 if !(creative && flying) {
-                    pushed = (!p.health.sync_velocity).then_some(push);
+                    // ServerExplosion.hitPlayers: the packet carries the push even when the hurt
+                    // also marks the velocity (its motion packet follows).
+                    pushed = Some(push);
                 }
             }
         }
@@ -541,6 +547,7 @@ impl Game<'_> {
                 damage_type,
                 causing: attacker.map_or(0, |(id, _)| *id as i32),
                 direct: 0,
+                position: None,
             };
             self.after_block(outcome, (None, false), source);
         }
@@ -708,7 +715,13 @@ impl Game<'_> {
                         // `EXPLOSION_KNOCKBACK_RESISTANCE`, not `KNOCKBACK_RESISTANCE`:
                         // its base is 0 for every mob type, so iron golems and
                         // ravagers are pushed.
-                        hurt_mob(m, hurtable, cause, (amount, source));
+                        hurt_mob(
+                            crate::game::entity::damage_level_of!(self),
+                            m,
+                            hurtable,
+                            cause,
+                            (amount, source),
+                        );
                     }
                     // 5 health, destroyed by the explosion damage (nether stars resist).
                     EntityHandle::Item(i) => {
@@ -1247,6 +1260,8 @@ mod tests {
 
     #[test]
     fn a_mob_that_refuses_the_hit_is_still_pushed() {
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         use horizon_client::mobs::{Damage, DamageKind, Mob, Species};
         let hit = (10.0, Damage::of(DamageKind::Explosion));
         let push = Vec3::new(0.5, 0.25, -0.5);
@@ -1262,7 +1277,7 @@ mod tests {
         // An ordinary mob is hurt and pushed.
         let mut m = mob(1, Species::Zombie);
         let health = m.health;
-        hurt_mob(&mut m, true, None, hit);
+        hurt_mob(level, &mut m, true, None, hit);
         m.push_from_explosion(push);
         assert!(m.health < health);
         pushed(&m);
@@ -1270,21 +1285,21 @@ mod tests {
         let mut m = mob(2, Species::Zombie);
         m.invulnerable_flag = true;
         let health = m.health;
-        hurt_mob(&mut m, true, None, hit);
+        hurt_mob(level, &mut m, true, None, hit);
         m.push_from_explosion(push);
         assert_eq!(m.health, health);
         pushed(&m);
         // A team mate of the exploding mob is not hurt, but pushed.
         let mut m = mob(3, Species::Zombie);
         let health = m.health;
-        hurt_mob(&mut m, false, None, hit);
+        hurt_mob(level, &mut m, false, None, hit);
         m.push_from_explosion(push);
         assert_eq!(m.health, health);
         pushed(&m);
         // A wither shrugs off a blast an undead caused, and is pushed.
         let mut m = mob(4, Species::Wither);
         let health = m.health;
-        hurt_mob(&mut m, true, Some(Species::Skeleton), hit);
+        hurt_mob(level, &mut m, true, Some(Species::Skeleton), hit);
         m.push_from_explosion(push);
         assert_eq!(m.health, health);
         pushed(&m);

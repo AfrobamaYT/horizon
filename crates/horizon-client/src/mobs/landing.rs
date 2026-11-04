@@ -6,6 +6,7 @@
 //! ENDS-WHEN: the landing registry covers a mob's whole fall and this adapter is merged into crate::landing.
 use super::{DamageKind, Mob, MobEvent, MobWorld};
 use crate::collisions::SceneCollisions;
+use crate::health::DamageLevel;
 use horizon_core::{
     geometry::{Aabb, Vec3, VoxelShape},
     position::BlockPos,
@@ -21,19 +22,20 @@ use horizon_world::{
 };
 
 /// A mob mid-landing: the block under it is at `pos`, the fall was `distance`.
-pub(super) struct MobLanding<'a, 'w> {
+pub(super) struct MobLanding<'a, 'w, 'l> {
     pub mob: &'a mut Mob,
     pub w: &'a MobWorld<'w>,
+    pub level: &'a mut DamageLevel<'l>,
     pub events: &'a mut Vec<MobEvent>,
     pub pos: [i32; 3],
 }
-impl MobLanding<'_, '_> {
+impl MobLanding<'_, '_, '_> {
     fn at(&self) -> [f64; 3] {
         let p = self.mob.position;
         [p.x, p.y, p.z]
     }
 }
-impl BlockPushWorld for MobLanding<'_, '_> {
+impl BlockPushWorld for MobLanding<'_, '_, '_> {
     type Error = String;
     fn collision_shape(&mut self, state: BlockStateId, p: BlockPos) -> Result<VoxelShape, String> {
         let mut scene = SceneCollisions {
@@ -66,7 +68,7 @@ impl BlockPushWorld for MobLanding<'_, '_> {
         Ok(())
     }
 }
-impl BlockLandingWorld for MobLanding<'_, '_> {
+impl BlockLandingWorld for MobLanding<'_, '_, '_> {
     type DamageSource = DamageKind;
     /// The sound event, or none for a sound a mob's landing never makes.
     type Sound = Option<&'static str>;
@@ -131,9 +133,14 @@ impl BlockLandingWorld for MobLanding<'_, '_> {
         source: DamageKind,
     ) -> Result<bool, String> {
         let contact = Some((self.w, self.pos));
-        Ok(self
-            .mob
-            .cause_fall_damage_at(distance, multiplier, self.events, contact, source))
+        Ok(self.mob.cause_fall_damage_at(
+            self.level,
+            distance,
+            multiplier,
+            self.events,
+            contact,
+            source,
+        ))
     }
     fn known_sound(&self, sound: LandingSound) -> Option<&'static str> {
         match sound {

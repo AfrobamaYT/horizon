@@ -120,16 +120,16 @@ pub fn has_active_raid(m: &Mob) -> bool {
 }
 /// `Raider.isCaptain`: the banner on the head of a patrol leader.
 ///
-/// The worn stack (`extra.armor[0]`) carries the ominous components so a
+/// The worn stack (`extra.equipment`'s head) carries the ominous components so a
 /// client that only got `SetEquipment` (no `PatrolLeader` NBT) still draws
 /// the patterned banner (#4567).
 pub fn is_captain(m: &Mob) -> bool {
-    if m.extra.head.as_deref() != Some(BANNER) {
+    if m.extra.head_id() != Some(BANNER) {
         return false;
     }
     state(m).is_some_and(|s| s.patrol_leader)
-        || m.extra.armor[0]
-            .as_ref()
+        || m.extra
+            .slot_stack(horizon_items::equipment::HEAD)
             .and_then(|s| s.data())
             .is_some_and(|d| d.ominous_banner)
 }
@@ -186,11 +186,11 @@ pub fn find_patrol_target_from(m: &mut Mob, [x, y, z]: [i32; 3]) {
 }
 /// The leader's ominous banner and saved head drop chance of 2.0.
 ///
-/// Also keeps the full ominous stack in `armor[0]` so `SetEquipment` sends
+/// The head holds the full ominous stack so `SetEquipment` sends
 /// the patterned banner to clients (`Raid.getOminousBannerInstance`).
 pub fn wear_banner(m: &mut Mob) {
-    m.extra.head = Some(BANNER.into());
-    m.extra.armor[0] = Some(ominous_banner());
+    m.extra
+        .set_slot_stack(horizon_items::equipment::HEAD, Some(ominous_banner()));
     // Raid.setLeader and PatrollingMonster.finalizeSpawn: EquipmentSlot.HEAD.
     super::finalize::set_drop_chance(m, 5, 2.0);
 }
@@ -746,10 +746,10 @@ mod tests {
         state_mut(&mut m).patrol_leader = true;
         super::super::finalize::set_drop_chance(&mut m, 1, 0.65);
         wear_banner(&mut m);
-        assert_eq!(m.extra.head.as_deref(), Some(BANNER));
+        assert_eq!(m.extra.head_id(), Some(BANNER));
         assert!(
-            m.extra.armor[0]
-                .as_ref()
+            m.extra
+                .slot_stack(horizon_items::equipment::HEAD)
                 .and_then(|s| s.data())
                 .is_some_and(|d| d.ominous_banner)
         );
@@ -768,7 +768,7 @@ mod tests {
         // Client that only saw SetEquipment: no PatrolLeader, still a captain.
         state_mut(&mut m).patrol_leader = false;
         assert!(is_captain(&m));
-        m.extra.armor[0] = None;
+        m.extra.set_slot_stack(horizon_items::equipment::HEAD, None);
         assert!(!is_captain(&m));
     }
     #[test]

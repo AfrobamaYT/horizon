@@ -1,0 +1,15 @@
+{
+  "hooks": [],
+  "helpers": [
+    {"name": "block_state_in_tag", "side": "server", "target": "horizon_client::game::native_world_read::Game<'_>::native_block_state_in_tag"},
+    {"name": "tag_members", "side": "server", "target": "horizon_client::game::native_world_read::Game<'_>::native_tag_members"},
+    {"name": "state_outline", "side": "both", "target": "horizon_client::game::native_world_read::Game<'_>::native_state_outline"},
+    {"name": "state_fluid_state", "side": "both", "target": "horizon_client::game::native_world_read::Game<'_>::native_state_fluid_state"},
+    {"name": "fluid_in_tag", "side": "server", "target": "horizon_client::game::native_world_read::Game<'_>::native_fluid_in_tag"},
+    {
+      "name": "level_fluid_state", "side": "server",
+      "target": "horizon_client::game::native_world_read::Game<'_>::native_level_fluid_state",
+      "receiver": "level"
+    }
+  ]
+}

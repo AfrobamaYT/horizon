@@ -20,6 +20,7 @@ use super::{
     villager_brain::{Slot, Tracker, Visible, WalkTarget, compute_path, reached},
     warden::{self, Pose},
 };
+use crate::health::DamageLevel;
 use horizon_core::{
     geometry::Vec3,
     random::{LegacyRandom, RandomSource},
@@ -346,9 +347,9 @@ fn activities(seed: i64) -> Vec<Entry> {
 }
 
 /// What behaviours read and emit during a brain tick.
-pub struct Bx<'a, 'w> {
+pub struct Bx<'a, 'w, 'l> {
     pub w: &'a MobWorld<'w>,
-    pub lr: &'a mut LegacyRandom,
+    pub level: &'a mut DamageLevel<'l>,
     pub events: &'a mut Vec<MobEvent>,
     pub now: i64,
 }
@@ -368,7 +369,7 @@ pub(super) fn mem_ref(m: &Mob) -> Option<&Memories> {
 }
 
 /// `Brain.tick` (from `Warden.customServerAiStep`).
-pub fn tick(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom, events: &mut Vec<MobEvent>) {
+pub fn tick(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut Vec<MobEvent>) {
     if m.extra.warden.is_none() {
         return;
     }
@@ -381,7 +382,7 @@ pub fn tick(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom, events: &mut Vec<M
     let mut list = std::mem::take(&mut st.brain.list);
     let mut cx = Bx {
         w,
-        lr,
+        level,
         events,
         now: w.game_time,
     };
@@ -636,7 +637,7 @@ impl B {
                 if !swim_condition(m) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::SetWardenLookTarget(r) => one(r, || {
@@ -658,7 +659,7 @@ impl B {
                 if !mem(m).look_target.present() {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::MoveToTargetSink {
@@ -683,7 +684,7 @@ impl B {
                 let reached = reached(m, cx.w, &walk);
                 if !reached && compute_path(m, cx.w, cx.now, &walk, path, speed, cant_reach) {
                     *last_target = walk.target.block(cx.w);
-                    t.begin(cx.lr, cx.now);
+                    t.begin(cx.level.random(), cx.now);
                     // start
                     mem(m).path.set_opt(path.clone());
                     m.nav_move_to_path(cx.w, path.clone(), f64::from(*speed));
@@ -701,7 +702,7 @@ impl B {
                 if !mm.is_emerging.present() || mm.walk_target.present() {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 warden::set_pose(m, Pose::Emerging);
                 sound(m, "entity.warden.emerge", 5.0, 1.0, cx.events);
                 true
@@ -717,7 +718,7 @@ impl B {
                 if !(m.on_ground || liquid) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 if m.on_ground {
                     warden::set_pose(m, Pose::Digging);
                     sound(m, "entity.warden.dig", 5.0, 1.0, cx.events);
@@ -754,7 +755,7 @@ impl B {
                 }
                 mm.is_sniffing.set(());
                 // UniformInt.of(100, 200).sample(level.getRandom())
-                let cooldown = 100 + cx.lr.next_int_bound(101).unwrap_or(0);
+                let cooldown = 100 + cx.level.random().next_int_bound(101).unwrap_or(0);
                 let mm = mem(m);
                 mm.sniff_cooldown.set_ttl((), i64::from(cooldown));
                 mm.walk_target.clear();
@@ -798,7 +799,7 @@ impl B {
                 true
             }),
             B::DoNothing(t) => {
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::GoToDisturbance(r) => one(r, || {
@@ -812,8 +813,8 @@ impl B {
                 // Vec3i.closerThan(body.blockPosition(), 2)
                 if dist_sqr(p, block_of(m.position)) >= 4 {
                     // GoToTargetLocation.getNearbyPos: the level random.
-                    let dx = cx.lr.next_int_bound(3).unwrap_or(0) - 1;
-                    let dz = cx.lr.next_int_bound(3).unwrap_or(0) - 1;
+                    let dx = cx.level.random().next_int_bound(3).unwrap_or(0) - 1;
+                    let dz = cx.level.random().next_int_bound(3).unwrap_or(0) - 1;
                     let near = [p[0] + dx, p[1], p[2] + dz];
                     let mm = mem(m);
                     mm.look_target.set(Tracker::Block(near));
@@ -833,7 +834,7 @@ impl B {
                 {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 sound(m, "entity.warden.sniff", 5.0, 1.0, cx.events);
                 true
             }
@@ -845,7 +846,7 @@ impl B {
                 let Some(target) = mm.roar_target.value() else {
                     return false;
                 };
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 let mm = mem(m);
                 mm.roar_sound_delay.set_ttl((), ROAR_SOUND_DELAY);
                 mm.walk_target.clear();
@@ -930,7 +931,7 @@ impl B {
                 if !close {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 let mm = mem(m);
                 mm.attack_cooling_down
                     .set_ttl(true, i64::from(SONIC_DURATION));
@@ -962,7 +963,7 @@ impl B {
                 }
                 mem(m).look_target.set(Tracker::Entity(target, true));
                 m.swing();
-                warden::do_hurt_target(m, target, w, cx.lr, cx.events);
+                warden::do_hurt_target(m, target, w, cx.level, cx.events);
                 mem(m)
                     .attack_cooling_down
                     .set_ttl(true, MELEE_ATTACK_COOLDOWN);
@@ -1101,7 +1102,7 @@ impl B {
                     && !reached(m, cx.w, &walk)
                     && m.ai.nav.stuck
                 {
-                    *cooldown = cx.lr.next_int_bound(40).unwrap_or(0);
+                    *cooldown = cx.level.random().next_int_bound(40).unwrap_or(0);
                 }
                 m.nav_stop();
                 let mm = mem(m);
@@ -1188,12 +1189,12 @@ fn swim_condition(m: &Mob) -> bool {
     m.fluids.water > m.fluid_jump_threshold() || m.fluids.in_lava
 }
 /// The `Cx` the mob library's attacks take.
-pub(super) fn cx<'a, 'w>(
+pub(super) fn cx<'a, 'w, 'l>(
     w: &'a MobWorld<'w>,
-    lr: &'a mut LegacyRandom,
+    level: &'a mut DamageLevel<'l>,
     events: &'a mut Vec<MobEvent>,
-) -> Cx<'a, 'w> {
-    Cx { w, lr, events }
+) -> Cx<'a, 'w, 'l> {
+    Cx { w, level, events }
 }
 
 // ---- Printing ---------------------------------------------------------------
