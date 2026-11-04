@@ -53,6 +53,7 @@ use horizon_client::{
     first_person::Hand,
     health::{HurtSource, Hurting, Knock, ShieldBlock},
     hud::{HudBatch, rgba},
+    item_tooltip::TooltipDisplay,
     items::ItemStack,
     keybinds,
     lan::menu::Slots,
@@ -193,6 +194,15 @@ impl Game<'_> {
 pub(super) use horizon_world::level::flags;
 
 impl GameLevel<'_> {
+    /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`),
+    /// fired inside the write that creates it (`LevelChunk.setBlockState`), on
+    /// a server and on a client of one. The declaration owns the type id; no
+    /// answer starts with an empty compound. The level is read-only, as
+    /// `newBlockEntity` gets no level.
+    #[inline(always)]
+    pub(super) fn native_block_entity(&self, block: &str, entity: &mut Option<Compound>) {
+        mod_api::dispatch_block_entity(super::mod_api_host::level_side(self), block, entity);
+    }
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side.
     #[inline(always)]
     pub(super) fn native_hopper_pickup_item(
@@ -2044,11 +2054,6 @@ impl Game<'_> {
     /// act on it when it is yours.
     pub(super) fn native_panel_event(&mut self, mod_id: &str, event: &NativePanelEvent) {
         mod_api::dispatch_panel_event(self, mod_id, event);
-    }
-    /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`).
-    /// The declaration owns the type id; no answer starts with an empty compound.
-    pub(super) fn native_block_entity(&mut self, block: &str, entity: &mut Option<Compound>) {
-        mod_api::dispatch_block_entity(mod_api::HostSide::of(self), block, entity);
     }
     /// Whether block `block`'s block entity ticks (`EntityBlock.getTicker`):
     /// set `ticks` when it is yours. Asked for each of the block's states
@@ -5307,6 +5312,36 @@ impl Game<'_> {
     pub(super) fn native_tooltip(&self, stack: &ItemStack, lines: &mut Vec<(Text, u32)>) {
         mod_api::dispatch_tooltip(self, stack, lines);
     }
+    /// `ItemTooltipEvent`: the whole tooltip of `stack` (`ItemStack.getTooltipLines`),
+    /// once its name, the item's own lines, the components' lines, the
+    /// advanced lines and the operator warning are in `lines`, each with a
+    /// colour as `rgba` packs it (`u32::MAX` keeps the text's own). Add,
+    /// change, reorder or remove lines. `player` and `player_entity_id` are
+    /// the local player's, `display` the stack's `minecraft:tooltip_display`,
+    /// `advanced` (F3+H) and `creative` (a creative tab's own slot) its
+    /// `TooltipFlag`. Asked each frame the tooltip shows, never for one the
+    /// stack hides or a crossbow's loaded projectile. Client-side.
+    pub(super) fn native_item_tooltip(
+        &self,
+        player: u128,
+        player_entity_id: i32,
+        stack: &ItemStack,
+        display: &TooltipDisplay<'_>,
+        advanced: bool,
+        creative: bool,
+        lines: &mut Vec<(Text, u32)>,
+    ) {
+        mod_api::dispatch_item_tooltip(
+            self,
+            player,
+            player_entity_id,
+            stack,
+            display,
+            advanced,
+            creative,
+            lines,
+        );
+    }
     /// Change a tooltip box's background and border gradient colors, as ARGB.
     /// Stack is None for tooltips not associated with an item.
     pub(super) fn native_tooltip_color(
@@ -7417,13 +7452,22 @@ impl GameLevel<'_> {
         let b = self.behaviours;
         b.set_block(self, ticks, at, id, flags)
     }
+    /// `EntityBlock.newBlockEntity` of block `name`: a declared mod type
+    /// starts with the data `native_block_entity` gives, a mod's sign, else
+    /// Horizon's own. The one place both whole-block write paths make it.
+    pub(super) fn new_block_entity(&self, name: &str) -> Option<BlockEntity> {
+        let mut nbt = None;
+        if horizon_client::block_entity_types::type_for(name).is_some() {
+            self.native_block_entity(name, &mut nbt);
+        }
+        block_entity_for_block(self.registry, self.facts, name, nbt.unwrap_or_default())
+    }
     /// Replaces the block at `pos` with `state` through `Level.setBlock`, as
     /// `Game::native_set_block` does for the Host, from a hook that gets the
     /// level's `ticks`: the old block's block entity is removed and the new
     /// block's is created in the write (`LevelChunk.setBlockState`), and the
-    /// write's level events stay queued for the caller, in order. A mod block
-    /// entity starts with empty data: `native_block_entity` needs a `Host`,
-    /// which a level hook has not. True when the block changed; false off an
+    /// write's level events stay queued for the caller, in order; a mod block
+    /// entity starts with the data `native_block_entity` gives. True when the block changed; false off an
     /// authoritative server, for a position that is not loaded or outside the
     /// build height, an invalid state, or an unchanged state. Never loads a
     /// chunk.
@@ -7446,8 +7490,7 @@ impl GameLevel<'_> {
         let changed = b.set_block(self, ticks, at, state, flags);
         let landed = self.world.block(pos[0], pos[1], pos[2]);
         if let Some(name) = block_entity_to_create(self.facts, changed, previous, state, landed)
-            && let Some(entity) =
-                block_entity_for_block(self.registry, self.facts, &name, Compound::default())
+            && let Some(entity) = self.new_block_entity(&name)
         {
             put_block_entity(self.world, pos, entity);
         }
@@ -7538,7 +7581,7 @@ fn block_entity_for_block(
     name: &str,
     initial: Compound,
 ) -> Option<BlockEntity> {
-    if let Some(kind) = horizon_client::containers::block_entity_types::type_for(name) {
+    if let Some(kind) = horizon_client::block_entity_types::type_for(name) {
         return Some(BlockEntity::Mod(Box::new(ModBlockEntity::new(
             kind.to_owned(),
             ModBlockEntityFields {
@@ -7657,17 +7700,8 @@ impl Game<'_> {
         {
             return false;
         }
-        let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        let previous = self.world.block(pos[0], pos[1], pos[2]);
         let changed =
-            self.with_level(|b, level, ticks| b.set_block(level, ticks, at, state, flags));
-        let landed = self.world.block(pos[0], pos[1], pos[2]);
-        if let Some(name) =
-            block_entity_to_create(self.res.facts(), changed, previous, state, landed)
-            && let Some(entity) = self.new_block_entity(&name)
-        {
-            put_block_entity(&mut self.world, pos, entity);
-        }
+            self.with_level(|_, level, ticks| level.native_set_block(ticks, pos, state, flags));
         let _ = self.process_level_events();
         changed
     }
@@ -8939,18 +8973,19 @@ impl Game<'_> {
         }
     }
     /// `EntityBlock.newBlockEntity` of block `name`: Horizon's own, else a
-    /// native mod's.
+    /// native mod's, made as a write of the level creates it
+    /// (`GameLevel::new_block_entity`). Only a declared mod type builds the
+    /// level.
     pub(super) fn new_block_entity(&mut self, name: &str) -> Option<BlockEntity> {
-        let mut nbt = None;
-        if horizon_client::containers::block_entity_types::type_for(name).is_some() {
-            self.native_block_entity(name, &mut nbt);
+        if horizon_client::block_entity_types::type_for(name).is_none() {
+            return block_entity_for_block(
+                self.pack.assets.registry,
+                self.res.facts(),
+                name,
+                Compound::default(),
+            );
         }
-        block_entity_for_block(
-            self.pack.assets.registry,
-            self.res.facts(),
-            name,
-            nbt.unwrap_or_default(),
-        )
+        self.with_level(|_, level, _| level.new_block_entity(name))
     }
     /// The containers of the mod blocks' block entities, by block state
     /// (`native_block_entity_container`), checked.
@@ -9438,23 +9473,27 @@ impl Game<'_> {
     pub(super) fn list_native_mods(&mut self) {
         let mut mods = Vec::new();
         self.native_mods(&mut mods);
-        // A WebAssembly mod of the same id: the native row stands for it,
-        // and alone toggles its `mod.<id>` line.
+        let native = self.mods.native.clone();
         self.settings
             .mods
             .installed
-            .retain(|row| row.native.is_none() && !mods.iter().any(|m| m.id == row.id));
-        for m in mods {
+            .retain(|row| row.native.is_none() && !native.built().iter().any(|m| m.id == row.id));
+        for package in native.packages() {
+            let m = &package.manifest;
             let mut buttons = Vec::new();
             self.native_settings(&m.id, &mut buttons);
             let page = NativePage {
-                keys: m.keys,
+                keys: mods
+                    .iter_mut()
+                    .find(|page| page.id == m.id)
+                    .map(|page| std::mem::take(&mut page.keys))
+                    .unwrap_or_default(),
                 buttons,
             };
             self.settings.mods.installed.push(Installed {
-                id: m.id,
-                title: m.title,
-                description: m.description,
+                id: m.id.clone(),
+                title: [m.name.as_str(), " ", m.version.as_str()].concat(),
+                description: m.description.clone(),
                 problem: None,
                 dev: false,
                 native: Some(page),
@@ -9756,7 +9795,7 @@ mod tests {
         impl BlockEntityPart for Press {
             fn block_entity(
                 &self,
-                _: HostSide<'_>,
+                _: LevelSide<'_>,
                 _: &mut BlockEntityEvent<'_>,
             ) -> Option<Compound> {
                 Some(Compound::from([("energy".into(), Tag::Long(6300))]))
@@ -9857,7 +9896,8 @@ mod tests {
         horizon_client::mod_api::install(mods.clone());
         horizon_client::mod_api::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root = super::super::mods::content_root(&base, &Default::default(), &[]);
+        let root =
+            super::super::mods::content_root(&base, &Default::default(), &Default::default());
         if invalid {
             let error = root.unwrap_err().to_string();
             assert!(error.contains("be_test:shared"), "{error}");
@@ -9870,7 +9910,7 @@ mod tests {
             assert!(error.contains("be_user"), "{error}");
             assert!(error.contains("unknown block entity type"), "{error}");
             assert!(error.contains(id), "{error}");
-            assert!(horizon_client::containers::block_entity_types::current().is_none());
+            assert!(horizon_client::block_entity_types::current().is_none());
             return;
         }
         assert_eq!(keys.shared.get(), keys.own.get());
@@ -9955,6 +9995,23 @@ mod tests {
                 );
                 assert_eq!(saved.get("energy"), Some(&Tag::Long(6302)));
             }
+
+            // A level hook's `LevelWriteHost::set_block` fires the same hook in its write.
+            let first = game.pack.assets.registry.default_state(FIRST).unwrap();
+            let written = game.with_level(|_, level, ticks| {
+                LevelWriteHost::set_block(
+                    &mut super::super::mod_api_host::LevelTicks { level, ticks },
+                    [5, 64, 0],
+                    first,
+                    NativeBlockUpdateFlags::NONE,
+                )
+            });
+            assert!(written);
+            let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&(5, 64, 0)) else {
+                panic!("a level write did not create the declared block entity");
+            };
+            assert_eq!(entity.id(), "be_test:shared");
+            assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
         });
     }
 

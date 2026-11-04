@@ -953,7 +953,6 @@
   "Others look like plain players to you. Also in the game's Horizon settings.": "Drugi ti izgledaju kao obični igrači. Također u Horizon postavkama igre.",
   "Show other players' auras and trails": "Prikaži aure i tragove drugih igrača",
   "Off by default. Also in the game's Horizon settings.": "Zadano isključeno. Također u Horizon postavkama igre.",
-  "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "Ovaj izvorni kod igre nema čitljiv predložak izvorne ulazne točke. Ažurirajte Horizon i ponovno izgradite modove za ovu igru.",
   "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.": "Izvornoj izgradnji {version} nedostaje valjan zapis native-mods.json. Ponovno je izgradite iz instalirane verzije Horizona.",
   "Friend": "Prijatelj",
   "Friends on the same Wi-Fi: Multiplayer, Add server, paste.": "Prijatelji na istom Wi-Fiju: Više igrača, Dodaj poslužitelj, zalijepi.",
@@ -1040,5 +1039,10 @@
   "SHA-512 mismatch at {path}: expected {expected}, got {actual}. Replace this cache entry with the exact original file, or remove it and retry with --allow-jar-downloads.": "SHA-512 se ne podudara na {path}: očekivano {expected}, dobiveno {actual}. Zamijenite ovaj zapis predmemorije točnom izvornom datotekom ili ga uklonite i pokušajte ponovno uz --allow-jar-downloads.",
   "SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.": "SHA-512 {hash} označava i {first_id} {first_version} i {second_id} {second_version}.",
   "no exact file on Modrinth": "na Modrinthu nema točne datoteke",
-  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}"
+  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
+  "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Ovaj izvorni kod igre nema predložak unosa izvornog inventara. Ažurirajte Horizon i ponovo izgradite modove za ovu igru.",
+  "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml nema naziv paketa.",
+  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml nema ovisnost horizon-client.",
+  "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client traži {fields}. Izgradnje poslužitelja su bez sučelja; značajkama horizon-clienta upravlja pokretač. Uklonite features i koristite default-features = false ili ga izostavite.",
+  "{mod}: {error}": "{mod}: {error}"
 }

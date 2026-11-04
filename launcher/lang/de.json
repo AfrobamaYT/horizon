@@ -953,7 +953,6 @@
   "Others look like plain players to you. Also in the game's Horizon settings.": "Andere sehen für dich wie normale Spieler aus. Auch in den Horizon-Einstellungen des Spiels.",
   "Show other players' auras and trails": "Auren und Spuren anderer Spieler zeigen",
   "Off by default. Also in the game's Horizon settings.": "Standardmäßig aus. Auch in den Horizon-Einstellungen des Spiels.",
-  "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "Dieser Spielquellcode enthält keine lesbare native Einstiegsvorlage. Aktualisiere Horizon und baue die Mods für dieses Spiel neu.",
   "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.": "Dem nativen Build {version} fehlt ein gültiger native-mods.json-Eintrag. Baue ihn aus einer installierten Horizon-Version neu.",
   "Friend": "Freund",
   "Friends on the same Wi-Fi: Multiplayer, Add server, paste.": "Freunde im selben WLAN: Mehrspieler, Server hinzufügen, einfügen.",
@@ -1040,5 +1039,10 @@
   "SHA-512 mismatch at {path}: expected {expected}, got {actual}. Replace this cache entry with the exact original file, or remove it and retry with --allow-jar-downloads.": "SHA-512 stimmt unter {path} nicht überein: erwartet {expected}, erhalten {actual}. Ersetze diesen Cache-Eintrag durch die genaue Originaldatei oder entferne ihn und versuche es mit --allow-jar-downloads erneut.",
   "SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.": "SHA-512 {hash} bezeichnet sowohl {first_id} {first_version} als auch {second_id} {second_version}.",
   "no exact file on Modrinth": "keine exakt passende Datei auf Modrinth",
-  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}"
+  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
+  "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Dieser Spiel-Quellcode hat keine Einstiegsvorlage für das native Inventar. Horizon aktualisieren und die Mods gegen dieses Spiel neu bauen.",
+  "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml hat keinen Paketnamen.",
+  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml hat keine horizon-client-Abhängigkeit.",
+  "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client verlangt {fields}. Server-Builds sind headless; die Launcher-Instanz verwaltet die Features von horizon-client. Entfernen Sie features und verwenden Sie default-features = false oder lassen Sie es weg.",
+  "{mod}: {error}": "{mod}: {error}"
 }

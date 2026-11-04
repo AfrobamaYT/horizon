@@ -77,6 +77,20 @@ struct Fields<'a> {
     out: Compound,
 }
 impl<'a> Fields<'a> {
+    /// Every key of `tag` but the metadata the tail of `canonical` writes.
+    fn custom(&mut self, tag: &Tag) {
+        if let Tag::Compound(c) = tag {
+            for (k, v) in c {
+                let key = k.to_string_lossy();
+                if !matches!(
+                    key.as_str(),
+                    "id" | "x" | "y" | "z" | "keepPacked" | "components"
+                ) {
+                    self.out.insert(k.clone(), v.clone());
+                }
+            }
+        }
+    }
     fn put(&mut self, key: &str, value: Tag) {
         self.out.insert(key.into(), value);
     }
@@ -360,6 +374,12 @@ pub const TYPES: [&str; 47] = [
 /// The two types added after the ones above in 26.3.
 pub const NEWEST: [&str; 2] = ["minecraft:copper_golem_statue", "minecraft:potent_sulfur"];
 
+/// Whether `id` is in the `minecraft:block_entity_type` registry: one of
+/// vanilla's, or one a mod declared.
+pub fn is_known_type(id: &str) -> bool {
+    TYPES.iter().chain(&NEWEST).any(|k| *k == id) || crate::block_entity_types::declared(id)
+}
+
 /// The block entity as vanilla would save it after loading `tag` (a full block
 /// entity compound with `id`, `x`, `y`, `z`); None for an unknown type or a tag
 /// without a position.
@@ -370,6 +390,23 @@ pub fn canonical(tag: &Tag) -> Option<Tag> {
         input: tag,
         out: Compound::new(),
     };
+    // A mod's type: its own fields as loaded (`saveAdditional`), the
+    // position, and its component patch only when it has one, as a mod block
+    // entity is saved in a chunk.
+    if crate::block_entity_types::declared(&id) {
+        f.custom(tag);
+        let mut out = f.out;
+        out.insert("id".into(), string(&id));
+        out.insert("x".into(), Tag::Int(x));
+        out.insert("y".into(), Tag::Int(y));
+        out.insert("z".into(), Tag::Int(z));
+        if let Some(c @ Tag::Compound(patch)) = tag.get("components")
+            && !patch.is_empty()
+        {
+            out.insert("components".into(), c.clone());
+        }
+        return Some(Tag::Compound(out));
+    }
     match id.as_str() {
         "minecraft:furnace" | "minecraft:smoker" | "minecraft:blast_furnace" => {
             f.base_container();
@@ -678,17 +715,7 @@ pub fn canonical(tag: &Tag) -> Option<Tag> {
             // and defaulted by vanilla; they are kept as loaded. No `spawn_data` is
             // added: an absent one loads as Optional.empty and is not stored, and
             // an empty entity would keep the spawner from ever picking a mob.
-            if let Tag::Compound(c) = tag {
-                for (k, v) in c {
-                    let key = k.to_string_lossy();
-                    if !matches!(
-                        key.as_str(),
-                        "id" | "x" | "y" | "z" | "keepPacked" | "components"
-                    ) {
-                        f.out.insert(k.clone(), v.clone());
-                    }
-                }
-            }
+            f.custom(tag);
         }
         "minecraft:vault" => {
             // `VaultConfig.DEFAULT` (when the config is absent): the trial key and the
