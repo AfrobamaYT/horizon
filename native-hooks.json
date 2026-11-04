@@ -198,14 +198,6 @@
       "target": "horizon_client::game::native_claimed_items::Game<'_>::native_poll", "side": "client"
     },
     {
-      "name": "update_output_neighbors",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_update_output_neighbors", "side": "server"
-    },
-    {
-      "name": "update_signal_neighbors",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_update_signal_neighbors", "side": "server"
-    },
-    {
       "name": "block_entity_sync",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_entity_sync", "side": "server"
     },
@@ -879,7 +871,7 @@
       }
     },
     {
-      "name": "block_signal", "doc": "The redstone signal the block `state` at `pos` gives on its `face`, the\nside that touches the block reading it: `BlockState.getDirectSignal`\nwhen `direct` (what passes through a block it touches, as a lever's\ndoes), else `getSignal`. `signal` holds vanilla's answer: change it when\nthe block is yours (0 to 15; anything else is clamped). Asked very often,\nfrom inside the level's update, so answer from your own state: check the\nblock first, and don't read or change the world here. When the answer\nchanges, and once the block is placed, call\n`native_update_signal_neighbors`. Authoritative servers only.", "side": "server",
+      "name": "block_signal", "doc": "The redstone signal the block `state` at `pos` gives on its `face`, the\nside that touches the block reading it: `BlockState.getDirectSignal`\nwhen `direct` (what passes through a block it touches, as a lever's\ndoes), else `getSignal`. `signal` holds vanilla's answer: change it when\nthe block is yours (0 to 15; anything else is clamped). Asked very often,\nfrom inside the level's update, so answer from your own state: check the\nblock first, and don't read or change the world here. When the answer\nchanges, and once the block is placed, call\n`level.update_neighbors(host, pos, state, NeighbourUpdate::Neighbours)`. Authoritative\nservers only.", "side": "server",
       "version": 1,
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_signal",
       "mod_api": {
@@ -1073,7 +1065,7 @@
       }
     },
     {
-      "name": "analog_output", "doc": "`BlockState.getAnalogOutputSignal`: the signal a comparator reads from\nthe block `state` at `pos`, `face` the side that touches the comparator\n(or the conductor in front of it). `output` holds vanilla's answer:\nchange it when the block is yours (0 to 15; anything else is clamped).\nAsked only for blocks `native_has_analog_output` answered for, from\ninside the level's update: don't change the world here. When the\nanswer changes without the block's state changing, call\n`native_update_output_neighbors`; a change of state through\n`native_set_block` or `native_set_block_property` (neighbour updates\non) tells the comparators itself, as vanilla's `Level.setBlock` does.\nAuthoritative servers only.", "side": "server",
+      "name": "analog_output", "doc": "`BlockState.getAnalogOutputSignal`: the signal a comparator reads from\nthe block `state` at `pos`, `face` the side that touches the comparator\n(or the conductor in front of it). `output` holds vanilla's answer:\nchange it when the block is yours (0 to 15; anything else is clamped).\nAsked only for blocks `native_has_analog_output` answered for, from\ninside the level's update: don't change the world here. When the\nanswer changes without the block's state changing, call\n`level.update_neighbors(host, pos, state, NeighbourUpdate::OutputSignal)`; a change of\nstate through\n`native_set_block` or `native_set_block_property` (neighbour updates\non) tells the comparators itself, as vanilla's `Level.setBlock` does.\nAuthoritative servers only.", "side": "server",
       "version": 1,
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_analog_output",
       "mod_api": {
