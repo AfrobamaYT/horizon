@@ -28,6 +28,7 @@ mod dependencies;
 mod inject;
 mod inject_cache;
 mod package;
+mod prebuilt;
 
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
@@ -151,6 +152,8 @@ pub enum Plan {
     Incremental(Vec<String>),
     /// Nothing built yet in this profile: the whole game compiles.
     First,
+    /// The mods compile against the prebuilt game (#589); the game doesn't compile.
+    Prebuilt,
 }
 
 impl Plan {
@@ -162,6 +165,7 @@ impl Plan {
                 &[("changes", &changes.join("; "))],
             ),
             Self::First => tr("First build: the whole game (several minutes)").into(),
+            Self::Prebuilt => tr("Prebuilt game: only the mods compile (seconds)").into(),
         }
     }
 
@@ -171,6 +175,7 @@ impl Plan {
             Self::UpToDate => "up to date",
             Self::Incremental(_) => "incremental",
             Self::First => "first build",
+            Self::Prebuilt => "prebuilt",
         }
     }
 }
@@ -1065,6 +1070,10 @@ pub enum Step {
     },
     /// The mods' own crates checked against Horizon's `Cargo.lock`.
     Crates,
+    /// The prebuilt game at a revision downloads (once).
+    PrebuiltGame(String),
+    /// The mods compile against the prebuilt game.
+    PrebuiltMods,
     Install,
     /// The build ended: seconds it took.
     Done {
@@ -1092,6 +1101,11 @@ impl Step {
             Self::Mixins => tr("Applying the mixins").into(),
             Self::CachedMixins => tr("Reusing patched game source").into(),
             Self::Crates => tr("Checking the mods' crates against Horizon's Cargo.lock").into(),
+            Self::PrebuiltGame(revision) => trf(
+                "Downloading the prebuilt game at {revision} (once)",
+                &[("revision", &revision[..7])],
+            ),
+            Self::PrebuiltMods => tr("Compiling the mods against the prebuilt game").into(),
             Self::Plan(plan, profile) => format!("{} ({})", plan.label(), profile.name()),
             Self::Compile {
                 done,
@@ -1558,7 +1572,22 @@ fn pipeline(
             .collect::<Result<_, String>>()?,
     };
     let exists = target.directory(&version).join(".installed").is_file();
-    let plan = classify(exists, last_record(target, profile).as_ref(), &now);
+    // The route, chosen before anything compiles: the prebuilt game when it serves these mods.
+    let prebuilt = if exists {
+        None
+    } else {
+        let game = match prebuilt::refusal(&projects, profile) {
+            Some(reason) => Err(reason),
+            None => prebuilt::fetch(&revision, target, || {
+                progress(Step::PrebuiltGame(revision.clone()))
+            })?,
+        };
+        game.map_err(|reason| log_warning(&reason.to_string())).ok()
+    };
+    let plan = match prebuilt {
+        Some(_) => Plan::Prebuilt,
+        None => classify(exists, last_record(target, profile).as_ref(), &now),
+    };
     progress(Step::Plan(plan.clone(), profile));
     let mut built = Built {
         version: version.clone(),
@@ -1566,13 +1595,53 @@ fn pipeline(
         profile,
         secs: 0,
     };
-    if !exists {
-        match target {
-            // The headless build links none of the sound or controller libraries: it needs
-            // only a C compiler and the C library's headers ([`rust_toolchain::linker_server`]).
-            Target::Client => rust_toolchain::linker()?,
-            Target::Server => rust_toolchain::linker_server()?,
-        }
+    let about = |route: &str| {
+        serde_json::json!({
+            "base": origin,
+            "horizon": revision,
+            "horizon_mixins": mixins,
+            "rust": rust_toolchain::VERSION,
+            "profile": profile.name(),
+            "route": route,
+            "target": target.name(),
+            "mods": mods.iter().map(|m| serde_json::json!({
+                "id": m.manifest.id,
+                "version": m.manifest.version,
+                "sha256": digests.get(&m.manifest.id).cloned().flatten(),
+            })).collect::<Vec<_>>(),
+        })
+    };
+    let linker = || match target {
+        // The headless build links none of the sound or controller libraries: it needs
+        // only a C compiler and the C library's headers ([`rust_toolchain::linker_server`]).
+        Target::Client => rust_toolchain::linker(),
+        Target::Server => rust_toolchain::linker_server(),
+    };
+    if let Some(game) = &prebuilt {
+        linker()?;
+        let rust = rust_toolchain::install(|f| progress(Step::Rust(f)))?;
+        progress(Step::PrebuiltMods);
+        let (binary, libraries) = prebuilt::compile(
+            &rust,
+            game,
+            &root().join("prebuilt-build"),
+            &projects,
+            &declared,
+            &resolution,
+        )
+        .map_err(blame)?;
+        progress(Step::Install);
+        install(
+            base,
+            &version,
+            target,
+            &binary,
+            &libraries,
+            &about("prebuilt"),
+            &ordered,
+        )?;
+    } else if !exists {
+        linker()?;
         let rust = rust_toolchain::install(|f| progress(Step::Rust(f)))?;
         let needs_mixins = mods.iter().any(Bundle::needs_mixins);
         progress(Step::Source(revision.clone()));
@@ -1700,20 +1769,15 @@ fn pipeline(
         save_record(target, profile, &now);
         let binary = target_dir.join(compiled.cargo().0).join(backend::CLIENT);
         progress(Step::Install);
-        let about = serde_json::json!({
-            "base": origin,
-            "horizon": revision,
-            "horizon_mixins": mixins,
-            "rust": rust_toolchain::VERSION,
-            "profile": compiled.name(),
-            "target": target.name(),
-            "mods": mods.iter().map(|m| serde_json::json!({
-                "id": m.manifest.id,
-                "version": m.manifest.version,
-                "sha256": digests.get(&m.manifest.id).cloned().flatten(),
-            })).collect::<Vec<_>>(),
-        });
-        install(base, &version, target, &binary, &about, &ordered)?;
+        install(
+            base,
+            &version,
+            target,
+            &binary,
+            &[],
+            &about("source"),
+            &ordered,
+        )?;
     } else {
         // Used again: it counts as the newest of the builds kept (`prune`).
         let _ = fs::write(target.directory(&version).join(".installed"), "");
@@ -1903,6 +1967,7 @@ fn install(
     version: &str,
     target: Target,
     binary: &Path,
+    libraries: &[PathBuf],
     about: &serde_json::Value,
     mods: &[Bundle],
 ) -> Result<(), String> {
@@ -1913,6 +1978,11 @@ fn install(
     copy_base(&from, &partial, target)?;
     let installed = partial.join(target.binary());
     fs::copy(binary, &installed).map_err(|e| format!("The built game: {e}"))?;
+    // The prebuilt game's libraries load from beside the executable.
+    for library in libraries {
+        let name = library.file_name().ok_or("invalid library path")?;
+        fs::copy(library, partial.join(name)).map_err(|e| format!("{}: {e}", library.display()))?;
+    }
     fs::write(partial.join("native-mods.json"), about.to_string()).map_err(|e| e.to_string())?;
     for bundle in mods {
         package::copy(
@@ -3026,6 +3096,7 @@ mod tests {
             version,
             Target::Server,
             &binary,
+            &[],
             &serde_json::json!({"target":"server"}),
             &[bundle],
         )

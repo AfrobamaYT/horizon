@@ -1175,5 +1175,19 @@
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (эбэтэр бырайыакка .mcp.json)",
   "← All servers": "← Бары сервердар",
   "← Newer": "← Саҥа",
-  "{error} Run `cargo horizon-mod update --horizon {commit}` in each mod's folder to pin it to this game, then build again.": "{error} Run `cargo horizon-mod update --horizon {commit}` in each mod's folder to pin it to this game, then build again."
+  "{error} Run `cargo horizon-mod update --horizon {commit}` in each mod's folder to pin it to this game, then build again.": "{error} Run `cargo horizon-mod update --horizon {commit}` in each mod's folder to pin it to this game, then build again.",
+    "Compiling the mods against the prebuilt game": "Compiling the mods against the prebuilt game",
+    "Downloading the prebuilt game at {revision} (once)": "Downloading the prebuilt game at {revision} (once)",
+    "Prebuilt game: only the mods compile (seconds)": "Prebuilt game: only the mods compile (seconds)",
+    "The prebuilt game for {revision} was made for another build ({commit}, {target}, {side}, {rustc}).": "The prebuilt game for {revision} was made for another build ({commit}, {target}, {side}, {rustc}).",
+    "The prebuilt game has no {crate}.": "The prebuilt game has no {crate}.",
+    "The prebuilt game {name} doesn't match its release's checksum. Try again.": "The prebuilt game {name} doesn't match its release's checksum. Try again.",
+    "no prebuilt game for this computer, so the game builds from source": "no prebuilt game for this computer, so the game builds from source",
+    "no prebuilt game for {revision}, so the game builds from source": "no prebuilt game for {revision}, so the game builds from source",
+    "the prebuilt game couldn't be downloaded ({why}), so the game builds from source": "the prebuilt game couldn't be downloaded ({why}), so the game builds from source",
+    "the {profile} profile builds the game from source; the prebuilt game is performance only": "the {profile} profile builds the game from source; the prebuilt game is performance only",
+    "{mod} depends on the crate {crate}, so the game builds from source": "{mod} depends on the crate {crate}, so the game builds from source",
+    "{mod} has a build script, so the game builds from source": "{mod} has a build script, so the game builds from source",
+    "{mod} injects into the game's code, so the game builds from source": "{mod} injects into the game's code, so the game builds from source",
+    "{mod} uses Cargo features, so the game builds from source": "{mod} uses Cargo features, so the game builds from source"
 }

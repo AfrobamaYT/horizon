@@ -14,9 +14,10 @@ cargo horizon-mod build             # only build: target/horizon-mod/my_mod.hmod
 cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks; --json for JSON
 ```
 
-- `new <path> [--name "Name"]` writes the content template. `--template native --horizon <commit>` writes
-  a flat trait mod instead: `horizon-mod.toml` with `[native]` pinned to that exact commit, root `Cargo.toml`
-  and `src/lib.rs`, and empty `assets/` and `data/` directories. Its root `impl Hooks` uses
+- `new <path> [--name "Name"]` writes the content template. `--template native` writes
+  a flat trait mod instead: `horizon-mod.toml` with `[native]` pinned to the newest prebuilt game's commit (or
+  `--horizon <commit>`'s) so the launcher downloads the game instead of building it, root `Cargo.toml`
+  and `src/lib.rs`, and empty `assets/` and `data/` directories. `update` repins it the same way. Its root `impl Hooks` uses
   `#[mod_api::horizon_mod]`. Compile it with `horizon-launcher native-build <path> --trust-native-code`
   ([trait mods](../concepts/trait-mods.md#trait-mods-draft)). Any other `--template` is refused.
 - `build` packs the checked project into `target/horizon-mod/<id>.hmod`: `horizon-mod.toml`, `assets/`,
