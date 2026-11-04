@@ -3423,7 +3423,7 @@ struct Game<'a> {
     /// State of `/spectate`, `/posteffect`, `/debug`, `/waypoint` and friends.
     cmds: commands::extra::CommandExtras,
     /// The retained server reload listeners of the last successful reload.
-    reload_resources: mod_api::ServerReloadResources,
+    reload_resources: mod_api::RetainedListeners,
     ui: chat::UiState,
     combat: combat::CombatTracker,
     /// Each guest's own `CombatTracker`, out of `combat` between turns.

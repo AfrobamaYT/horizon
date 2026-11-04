@@ -598,9 +598,14 @@ pub(super) fn host(
             } else {
                 "()".into()
             };
+            // A fallible export answers its error when the call doesn't run; the rest, nothing.
+            let no_answer = match &method.ret {
+                Ty::Result(..) => "|| Err(super::refused())",
+                _ => "super::NoAnswer::no_answer",
+            };
             writeln!(
                 code,
-                "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ let mut frame = super::Frame::default(); {frame} {prep} self.call(frame, |m, store| -> wasmtime::Result<_> {{ let {pattern} = m.horizon_mod_api_{iface}().call_{}(store, {})?; {back} Ok({value}) }}) }}",
+                "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ let mut frame = super::Frame::default(); {frame} {prep} self.call_or(frame, {no_answer}, |m, store| -> wasmtime::Result<_> {{ let {pattern} = m.horizon_mod_api_{iface}().call_{}(store, {})?; {back} Ok({value}) }}) }}",
                 rust_sig(types, method),
                 bound_ident(&wit_ident(&method.name)),
                 args.join(", ")

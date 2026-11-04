@@ -1891,7 +1891,10 @@ impl Game<'_> {
     /// Register server data reload listeners after packs are selected. The
     /// host gives registry access at registration, as
     /// `AddServerReloadListenersEvent.getRegistryAccess` does.
-    pub(super) fn native_add_server_reload_listeners(&self, listeners: &mut ServerReloadListeners) {
+    pub(super) fn native_add_server_reload_listeners(
+        &self,
+        listeners: &mut dyn ServerReloadListeners,
+    ) {
         mod_api::dispatch_add_server_reload_listeners(self, listeners);
     }
     /// Register client asset reload listeners before a reload stages its
@@ -1905,7 +1908,10 @@ impl Game<'_> {
     /// `native_client_resources_reloaded`. A listener that returns an error
     /// aborts the reload and keeps every listener's previous assets.
     /// Client-side.
-    pub(super) fn native_add_client_reload_listeners(&self, listeners: &mut ClientReloadListeners) {
+    pub(super) fn native_add_client_reload_listeners(
+        &self,
+        listeners: &mut dyn ClientReloadListeners,
+    ) {
         mod_api::dispatch_add_client_reload_listeners(self, listeners);
     }
     /// The server is assembling its data tables, as for

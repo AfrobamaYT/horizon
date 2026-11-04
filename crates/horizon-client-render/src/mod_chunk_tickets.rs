@@ -4,7 +4,7 @@
 //! each other's. `Streaming` keeps the union with `/forceload`'s chunks in its
 //! `forced` set, which is all loading and ticking read.
 pub use mod_api::mod_chunk_tickets::{
-    ModTicket, TicketOwner, TicketRemovals, TicketSet, TicketValidation,
+    ControllerTickets, ModTicket, TicketOwner, TicketSet, TicketValidation,
 };
 use std::collections::{BTreeSet, HashMap};
 

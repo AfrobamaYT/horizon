@@ -300,17 +300,18 @@ impl NoAnswer for crate::Flow {
 
 impl Running {
     /// Runs one call with `frame`'s hosts, charging its fuel to this mod. A refused call or a
-    /// trap answers `T::default()`, as no mod answering; a trap stops the whole group.
-    fn call<T: NoAnswer>(
+    /// trap answers `no_answer()`; a trap stops the whole group.
+    fn call_or<T>(
         self: &Arc<Self>,
         mut frame: Frame,
+        no_answer: impl FnOnce() -> T,
         f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
     ) -> T {
         let mut entered = match self.group.enter() {
             Ok(entered) => entered,
             Err(refused) => {
                 log::warn!("wasm mod {}: call refused: {refused:?}", self.id);
-                return T::no_answer();
+                return no_answer();
             }
         };
         let store = &mut *entered.store;
@@ -336,29 +337,37 @@ impl Running {
             Err(error) => {
                 self.group.poisoned.store(true, Ordering::Relaxed);
                 log::error!("wasm mod {} stopped its group: {error:#}", self.id);
-                T::no_answer()
+                no_answer()
             }
         }
     }
 }
 
+/// The error a fallible export answers when the mod's call didn't run (refused, or a trap).
+fn refused<E: From<(crate::Identifier, String)>>() -> E {
+    let mod_api = crate::Identifier::parse("horizon:wasm_mod").expect("a valid id");
+    E::from((mod_api, "the mod's call didn't run".into()))
+}
+
 impl WasmMod {
-    fn call<T: NoAnswer>(
+    fn call_or<T>(
         &self,
         frame: Frame,
+        no_answer: impl FnOnce() -> T,
         f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
     ) -> T {
-        self.module.call(frame, f)
+        self.module.call_or(frame, no_answer, f)
     }
 }
 
 impl WasmHandler {
-    fn call<T: NoAnswer>(
+    fn call_or<T>(
         &self,
         frame: Frame,
+        no_answer: impl FnOnce() -> T,
         f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
     ) -> T {
-        self.module.call(frame, f)
+        self.module.call_or(frame, no_answer, f)
     }
 }
 
@@ -597,7 +606,7 @@ pub fn instantiate(
             id,
             released: Mutex::new(Vec::new()),
         });
-        let names = module.call(Frame::default(), |m, store| {
+        let names = module.call_or(Frame::default(), Vec::new, |m, store| {
             m.horizon_mod_api_hooks().call_subscribed(store)
         });
         let hooks = WasmMod {

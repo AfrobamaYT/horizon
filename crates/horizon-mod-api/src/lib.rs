@@ -111,6 +111,12 @@ pub use server_reload::{
     ListenerKey, ServerReloadContext, ServerReloadListener, ServerReloadListeners,
     ServerReloadResources, VanillaServerListeners,
 };
+// hidden: the game's registries and store, not part of the mod surface
+#[doc(hidden)]
+pub use server_reload::{RetainedListeners, ServerListenerRegistry};
+// hidden: the game's registry, not part of the mod surface
+#[doc(hidden)]
+pub use client_reload::ClientListenerRegistry;
 
 pub use crate::biome::{BiomeColors, SpawnEntry};
 pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};

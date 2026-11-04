@@ -726,7 +726,7 @@ trailing `/`, or empty, `.` or `..` components. Converter fields and reload-view
 
 The prepare context is the pack view only, as vanilla's `ResourceManager`. Like vanilla's
 `SimplePreparableReloadListener`, `ServerReloadListener::prepare` parses and validates without
-changing live state and returns `ReloadApply::new(move || { /* publish parsed state */ })`.
+changing live state and returns `<dyn ReloadApply>::new(move || { /* publish parsed state */ })`.
 All listeners prepare before **any** apply runs. Do not read another listener's new published
 state in prepare: dependencies order both phases but do not remove this barrier. Publication
 cannot fail. As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a listener that
@@ -769,7 +769,7 @@ use mod_api::{
 #[derive(Default)]
 struct MachineData(Arc<RwLock<serde_json::Value>>);
 impl ServerReloadListener for MachineData {
-    fn prepare(&self, context: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+    fn prepare(&self, context: &ServerReloadContext) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
         let id = Identifier::parse("my_mod:press").unwrap();
         let next = match context.read(&id) {
             Some(bytes) => serde_json::from_slice(bytes)
@@ -777,7 +777,7 @@ impl ServerReloadListener for MachineData {
             None => serde_json::Value::Null,
         };
         let live = self.0.clone();
-        Ok(ReloadApply::new(move || *live.write().unwrap() = next))
+        Ok(<dyn ReloadApply>::new(move || *live.write().unwrap() = next))
     }
 }
 #[derive(Default)]
@@ -847,7 +847,7 @@ use mod_api::{
 #[derive(Default)]
 struct Theme(Arc<RwLock<serde_json::Value>>);
 impl ClientReloadListener for Theme {
-    fn prepare(&self, context: &ClientReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+    fn prepare(&self, context: &ClientReloadContext) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
         let id = Identifier::parse("my_mod:theme").unwrap();
         let next = match context.read(&id) {
             Some(bytes) => serde_json::from_slice(bytes)
@@ -855,7 +855,7 @@ impl ClientReloadListener for Theme {
             None => serde_json::Value::Null,
         };
         let live = self.0.clone();
-        Ok(ReloadApply::new(move || *live.write().unwrap() = next))
+        Ok(<dyn ReloadApply>::new(move || *live.write().unwrap() = next))
     }
 }
 #[derive(Default)]

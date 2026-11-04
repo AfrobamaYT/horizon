@@ -233,12 +233,12 @@ pub mod game {
         fn new() -> Self;
         fn finish(self) -> Result<crate::server_reload::OrderedServerReload, ReloadOrderError>;
     }
-    impl ServerReloadListenersOrder for ServerReloadListeners {
+    impl ServerReloadListenersOrder for crate::server_reload::ServerListenerRegistry {
         fn new() -> Self {
-            ServerReloadListeners::new()
+            crate::server_reload::ServerListenerRegistry::new()
         }
         fn finish(self) -> Result<crate::server_reload::OrderedServerReload, ReloadOrderError> {
-            ServerReloadListeners::finish(self)
+            crate::server_reload::ServerListenerRegistry::finish(self)
         }
     }
 
@@ -252,9 +252,9 @@ pub mod game {
             ReloadOrderError,
         >;
     }
-    impl ClientReloadListenersOrder for ClientReloadListeners {
+    impl ClientReloadListenersOrder for crate::client_reload::ClientListenerRegistry {
         fn new() -> Self {
-            ClientReloadListeners::new()
+            crate::client_reload::ClientListenerRegistry::new()
         }
         fn finish(
             self,
@@ -262,16 +262,16 @@ pub mod game {
             Vec<crate::reload::RegisteredListener<dyn ClientReloadListener>>,
             ReloadOrderError,
         > {
-            ClientReloadListeners::finish(self)
+            crate::client_reload::ClientListenerRegistry::finish(self)
         }
     }
 
     pub trait ServerReloadResourcesInstall {
         fn install(&mut self, retained: Vec<crate::server_reload::RetainedEntry>);
     }
-    impl ServerReloadResourcesInstall for ServerReloadResources {
+    impl ServerReloadResourcesInstall for crate::server_reload::RetainedListeners {
         fn install(&mut self, retained: Vec<crate::server_reload::RetainedEntry>) {
-            ServerReloadResources::install(self, retained)
+            crate::server_reload::RetainedListeners::install(self, retained)
         }
     }
 

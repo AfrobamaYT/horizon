@@ -87,6 +87,11 @@ pub(super) fn lower_owned(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         Ty::Option(item) if matches!(**item, Ty::Handler(..)) => {
             format!("{e}.map(|x| {})", lower_owned(types, item, "x"))
         }
+        Ty::Result(ok, err) if matches!(**ok, Ty::Handler(..)) => format!(
+            "match {e} {{ Ok(x) => Ok({}), Err(x) => Err({}) }}",
+            lower_owned(types, ok, "x"),
+            lower_or_unit(types, err, "(&x)")
+        ),
         ty => lower(types, ty, &format!("(&{e})")),
     }
 }

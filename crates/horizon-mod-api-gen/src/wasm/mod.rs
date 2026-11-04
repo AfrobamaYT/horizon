@@ -30,6 +30,9 @@ pub(super) const IMPORTS: &[&str] = &[
     "Registrar",
     "CapabilityProviders",
     "TicketValidation",
+    "ServerReloadListeners",
+    "ClientReloadListeners",
+    "ServerReloadResources",
 ];
 
 /// Imported traits a call never hands over, each reached through another's method instead.
@@ -39,6 +42,11 @@ pub(super) const REACHED: &[(&str, &str, &str)] = &[
         "CapabilityProviders",
         "host",
         "Ok(h.capability_providers())",
+    ),
+    (
+        "ServerReloadResources",
+        "server_host",
+        "Ok(h.reload_resources())",
     ),
     (
         "Backend",
@@ -56,6 +64,7 @@ pub(super) const REACHED: &[(&str, &str, &str)] = &[
 /// capability keys name join them (`exports`).
 const EXPORTS: &[&str] = &[
     "Hooks",
+    "ReloadApply",
     "BlockPart",
     "BlockEntityPart",
     "ItemPart",

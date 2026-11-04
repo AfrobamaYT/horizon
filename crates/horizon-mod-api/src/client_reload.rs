@@ -7,7 +7,7 @@ mod tests;
 
 use super::{
     FileToIdConverter, Identifier, ReloadApply, ReloadResourceError,
-    reload::{Boundary, ReloadCore, ReloadFiles},
+    reload::{Boundary, ReloadFiles},
     reload_order::ReloadOrderError,
 };
 use std::sync::{Arc, LazyLock};
@@ -47,7 +47,7 @@ impl VanillaClientListeners {
 /// data files or filesystem paths. Its fields are private so the view can grow.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ClientReloadContext {
-    files: ReloadFiles,
+    pub(crate) files: ReloadFiles,
 }
 impl ClientReloadContext {
     pub(crate) fn new(files: ReloadFiles) -> Self {
@@ -79,69 +79,90 @@ pub trait ClientReloadListener: Send + Sync + 'static {
     /// keeps every listener's previous assets. A panic in `prepare` or the
     /// returned apply is not recovered: it stops the game, and the crash report
     /// names the listener and the mod that registered it.
-    fn prepare(&self, context: &ClientReloadContext) -> Result<ReloadApply, ReloadResourceError>;
+    fn prepare(
+        &self,
+        context: &ClientReloadContext,
+    ) -> Result<Box<dyn ReloadApply>, ReloadResourceError>;
 }
 impl ClientReloadListener for Boundary {
-    fn prepare(&self, _: &ClientReloadContext) -> Result<ReloadApply, ReloadResourceError> {
-        Ok(ReloadApply::new(|| {}))
+    fn prepare(
+        &self,
+        _: &ClientReloadContext,
+    ) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
+        Ok(<dyn ReloadApply>::new(|| {}))
     }
 }
 
-/// A read-only registry/graph view with registration methods, rebuilt on each
-/// client reload. Listener names need not belong to the registering mod.
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct ClientReloadListeners {
-    core: ReloadCore<dyn ClientReloadListener>,
-}
-impl ClientReloadListeners {
-    pub(crate) fn new() -> Self {
-        Self {
-            core: ReloadCore::new(
-                VanillaClientListeners::first(),
-                VanillaClientListeners::model_manager(),
-                VanillaClientListeners::last(),
-                || -> Arc<dyn ClientReloadListener> { Arc::new(Boundary) },
-            ),
-        }
-    }
-    /// Register a unique listener and converter, e.g.
-    /// `FileToIdConverter::json("my_mod/ui")`.
-    pub fn add_listener(
+/// The client reload's listener registry, as `add_client_reload_listeners` hands it out: its
+/// registration methods and a read-only view of names and edges, rebuilt on each client reload.
+/// Listener names need not belong to the registering mod.
+pub trait ClientReloadListeners {
+    /// Register a unique listener and converter, e.g. `FileToIdConverter::json("machines")`.
+    /// Keep the `Arc` to read the listener's published state outside reloads.
+    fn add_listener(
         &mut self,
         id: Identifier,
         converter: FileToIdConverter,
-        listener: Arc<impl ClientReloadListener>,
+        listener: Arc<dyn ClientReloadListener>,
+    ) -> Result<(), ReloadOrderError>;
+    /// Require `first` before `second`; both names must already be registered.
+    fn add_dependency(
+        &mut self,
+        first: Identifier,
+        second: Identifier,
+    ) -> Result<(), ReloadOrderError>;
+    /// The registered names in registration order, boundaries included.
+    fn get_registry(&self) -> Vec<Identifier>;
+    /// The dependency edges as `(first, second)` names.
+    fn get_graph(&self) -> Vec<(Identifier, Identifier)>;
+    /// The name of the vanilla anchor preceding mod listeners by default.
+    fn get_last_vanilla_listener(&self) -> Identifier;
+}
+
+/// The game's [`ClientReloadListeners`].
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct ClientListenerRegistry {
+    core: super::reload::ReloadCore<dyn ClientReloadListener>,
+}
+impl ClientReloadListeners for ClientListenerRegistry {
+    fn add_listener(
+        &mut self,
+        id: Identifier,
+        converter: FileToIdConverter,
+        listener: Arc<dyn ClientReloadListener>,
     ) -> Result<(), ReloadOrderError> {
         self.core.add_listener(id, converter, listener)
     }
-    /// Require `first` before `second`; both names must already be registered.
-    pub fn add_dependency(
+    fn add_dependency(
         &mut self,
         first: Identifier,
         second: Identifier,
     ) -> Result<(), ReloadOrderError> {
         self.core.add_dependency(first, second)
     }
-    /// Names and listener objects in registration order, including boundaries.
-    pub fn get_registry(&self) -> impl Iterator<Item = (&Identifier, &dyn ClientReloadListener)> {
+    fn get_registry(&self) -> Vec<Identifier> {
+        self.core.registry().map(|(id, _)| id.clone()).collect()
+    }
+    fn get_graph(&self) -> Vec<(Identifier, Identifier)> {
         self.core
-            .registry()
-            .map(|(id, entry)| (id, entry.listener.as_ref()))
+            .graph()
+            .map(|(first, second)| (first.clone(), second.clone()))
+            .collect()
     }
-    /// Find a listener's registered name, or None for an unregistered object.
-    pub fn get_name_lookup(&self, listener: &dyn ClientReloadListener) -> Option<&Identifier> {
-        self.core.find_name(listener)
+    fn get_last_vanilla_listener(&self) -> Identifier {
+        VanillaClientListeners::model_manager()
     }
-    /// Read-only dependency edges as `(first, second)` names.
-    pub fn get_graph(&self) -> impl Iterator<Item = (&Identifier, &Identifier)> {
-        self.core.graph()
-    }
-    /// The vanilla anchor preceding mod listeners by default.
-    pub fn get_last_vanilla_listener(&self) -> &dyn ClientReloadListener {
-        self.get_registry()
-            .find(|(id, _)| **id == VanillaClientListeners::model_manager())
-            .unwrap()
-            .1
+}
+impl ClientListenerRegistry {
+    pub(crate) fn new() -> Self {
+        Self {
+            core: super::reload::ReloadCore::new(
+                VanillaClientListeners::first(),
+                VanillaClientListeners::model_manager(),
+                VanillaClientListeners::last(),
+                || -> Arc<dyn ClientReloadListener> { Arc::new(Boundary) },
+            ),
+        }
     }
     pub(crate) fn finish(
         self,
