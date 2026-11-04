@@ -531,7 +531,8 @@ or transactions. Declarations still go on each event or registrar.
   answers `successful` (`setSuccessful`), false unless the mod sets it, so a player's use still tries the water plant
   beside the clicked face. A mod growing only its own blocks answers the three questions above instead.
 
-- Mod-block entity contacts: `native_block_step_on`, `native_block_entity_inside` and `native_block_fall_on`. Each receives the server dimension, entity id/type, block state and position. The landing hook also receives fall distance and mutable calculated damage; zero prevents fall hurt and its generic fall sounds. Creative and fall-immune entities notify with zero and retain immunity. Invalid non-finite damage changes are ignored; negative damage is clamped to zero. Hooks run synchronously without `self`, like `native_living_incoming_damage`.
+- Mod-block entity contacts: `native_block_step_on` and `native_block_fall_on`. Each receives the server dimension, entity id/type, block state and position. The landing hook also receives fall distance and mutable calculated damage; zero prevents fall hurt and its generic fall sounds. Creative and fall-immune entities notify with zero and retain immunity. Invalid non-finite damage changes are ignored; negative damage is clamped to zero. Hooks run synchronously without `self`, like `native_living_incoming_damage`.
+- `Block.entityInside` is `BlockPart::entity_inside(host, event)` (`EntityInsideEvent { state, pos, entity, precise }`; `precise` is `Entity.checkInsideBlocks`' flag), the Part form of what `block_entity_inside` was; there is no global hook (NeoForge has no bus event for it). It fires for mobs, projectiles, dropped items and players on the server, with a `&mut dyn ServerHost`, once per entity and block per move, and only for a block state a Part listens for; with no listening Part nothing is recorded. The contacts are noted during the sweep and delivered after the entity-kind batch has ticked (mobs, then projectiles, then items), in the order they happened, so a Part's own writes and random draws come after the batch's later entities, not mid-sweep. A contact whose entity is gone (an item that merged later in the batch) or whose block changed is dropped. Players fire it too, after their turn. The `InsideBlockEffectApplier`, and the block's `getEntityInsideCollisionShape`/`insideBlock` shape that decides "inside", are not exposed (tracked on #44).
 
 - A consumable's effect of a mod's own kind. The item's `on_consume_effects` entry of a type in a namespace of its own reaches `native_consume_effect(kind, data)` when the
   item is consumed, on the server thread, for the acting player. The kind and the JSON the file wrote are there;
@@ -912,6 +913,8 @@ registration path.
 - `native_mouse_scrolling(scroll, accumulated, buttons, cursor, modifiers, canceled)` fires with a player in gameplay and no open screen/prompt/sleeping UI, after accumulation and before hotbar/spectator handling, including when no whole step has accumulated. scroll is x/y after discrete/sensitivity scaling (touchpad pixels normalized by 30), accumulated is the whole x/y pair, buttons are physical left/middle/right, cursor is the GUI position, and modifiers use GLFW bits. Cancel skips gameplay scrolling; accumulated whole steps remain consumed. Synthetic input follows the same gameplay scroll path; screen-scroll hooks are unchanged.
 
 - `native_screen_mouse_dragged_pre(screen, button, delta, modifiers, canceled)` runs before screen drag handlers for real nonzero pointer movements with a held button. The most recently pressed button is active until it releases; focus loss and splitscreen handoff clear it. Same screen exclusions and GLFW button/modifier encoding as the other screen input hooks. screen.mouse is the new GUI position; delta is movement in GUI pixels. Cancel skips screen drag handlers while retaining the new cursor position. Synthetic input and hover-only moves skip it.
+
+- The screen input Post hooks (`native_screen_mouse_button_pressed_post`, `native_screen_mouse_button_released_post`, `native_screen_mouse_dragged_post`, `native_screen_mouse_scrolled_post`, `native_screen_key_pressed_post`, `native_screen_key_released_post`, `native_screen_char_typed_post`) are NeoForge's `ScreenEvent.*.Post`, on the screens the `_pre` input hooks cover and only when the matching Pre did not cancel. They differ in when they fire. The mouse Posts fire after the screen's own arms ran, handled or not; unlike NeoForge's, the press and release carry no `wasClickHandled`/`wasReleaseHandled`, because Horizon's screens take their input without reporting it. The key and char Posts fire only when no screen arm took the input (vanilla's `keyPressed`/`charTyped` returning false), and their `canceled` marks it handled: a cancelled key press or release never reaches the game's key bindings. The char Post does not fire on Options and the title's own screens, whose text is routed in place. A Post fires on the screen open after the input was handled, so one that closed the screen fires nothing. With no mod subscribed, a Post does no work.
 
 - `native_mod_container_viewers(dimension, pos, viewers, previous)` is heard once each time the number of players with the mod container at `pos` open changes (vanilla's `ContainerOpenersCounter`, as a barrel keeps it): `previous` 0 is `onOpen`, `viewers` 0 is `onClose`, so a block can show itself open while `viewers` is not 0. It is counted every tick from the players' open menus, so a player who leaves without closing (a lost connection, death, another dimension, out of reach, the block gone) is heard too. On a server, with no player's state swapped in.
 
@@ -2176,6 +2179,24 @@ handle, an entity the client doesn't track and a level it doesn't show:
   `LivingEntity.collectEquipmentChanges` does (transient: never saved). The map is built when first needed. Mob
   behavior still reads the type's defaults, so a modifier does not yet change how a mob moves or hits, and an item's
   own `attribute_modifiers` component is not read yet, only the item type's.
+- The writes take players, guests (in their own turn), mobs and armor stands, and answer false for an attribute the
+  type lacks, the dragon (`/attribute` refuses it, and nothing reads its attributes yet), a stale handle, or on a
+  client. `living.add_attribute_modifier(host, id, modifier, lifetime)` is `AttributeInstance.addTransientModifier`
+  or `addPermanentModifier` (`ModifierLifetime`), refused when the attribute already has a modifier with that id
+  (vanilla throws) or the amount is not finite. `replace_attribute_modifier` puts the new one in place of the old
+  (`addOrUpdateTransientModifier`, `addOrReplacePermanentModifier`), and the new lifetime wins.
+  `remove_attribute_modifier(host, id, modifier_id)` is `removeModifier` (false when there was none), and
+  `set_attribute_base(host, id, base)` is `setBaseValue`. `AttributeModifier` holds the modifier's id, amount and
+  `AttributeOperation`. A permanent modifier and a base are saved with the entity; a transient modifier lasts until it
+  unloads. The writes take the one path `/attribute` takes, so they go where the game and the attribute sync read:
+  - a player's own attribute map;
+  - for a mob, the store of the nine attributes its behavior uses (max health, movement and flying speed, follow
+    range, attack damage, knockback resistance, jump strength, burning time, reinforcements), so it moves and hits by
+    them at once; its armor map for armor and toughness, which its damage reads; and for its other attributes, as
+    for an armor stand, the generic map `/attribute` reads and the sync sends.
+
+  The live map behind `attribute_value` takes the same write, so the reads agree with `/attribute`, and the entity's
+  save keeps it. A lower max health cuts a mob's health (`LivingEntity.onAttributeUpdated`).
 - `living.set_health(host, health)` is `LivingEntity.setHealth` (Paper's `Damageable#setHealth`), cut to the
   range from zero to the maximum, with no hook; a non-finite value is refused. This raw write can set zero
   or change a dead entity's health without running the death pipeline.

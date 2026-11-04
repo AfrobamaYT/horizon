@@ -78,8 +78,12 @@ impl Game<'_> {
                 }
             }
         }
-        for effect in &consumable.effects {
-            self.apply_consume_effect(effect);
+        // Consumable.onConsume applies these entries on the logical server only;
+        // the client's listener, particles and sounds above still run there.
+        if self.is_logical_server() {
+            for effect in &consumable.effects {
+                self.apply_consume_effect(effect, None, true);
+            }
         }
         let event = if consumable.animation == UseAnimation::Drink {
             "minecraft:drink"
@@ -122,12 +126,13 @@ impl Game<'_> {
             .map(|p| [p.position.x, p.position.y, p.position.z])
     }
     /// `TeleportRandomlyConsumeEffect.apply` for the local player.
-    pub(super) fn teleport_randomly(&mut self, teleport: &TeleportConsume) {
+    pub(super) fn teleport_randomly(&mut self, teleport: &TeleportConsume) -> bool {
         if self.player.is_none() {
-            return;
+            return false;
         }
         let dim = self.dim;
-        let Ok(_) = teleport.apply(&mut Teleporter(self), dim);
+        let Ok(result) = teleport.apply(&mut Teleporter(self), dim);
+        result
     }
     /// `LivingEntity.randomTeleport(x, y, z, true, avoid)`: down to the first
     /// block entities can teleport onto, inside the border, in a loaded chunk.
