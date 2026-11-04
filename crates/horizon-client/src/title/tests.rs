@@ -152,15 +152,24 @@ fn a_gated_title_asks_for_the_multiplayer_lists_steps() {
     f.click("Proceed");
     f.title.gated = true;
     f.click("Direct Connection");
-    assert!(matches!(f.title.mode, Mode::Multiplayer(Screen::List { .. })));
-    let next = f.title.take_requested().expect("Direct Connection is asked for");
+    assert!(matches!(
+        f.title.mode,
+        Mode::Multiplayer(Screen::List { .. })
+    ));
+    let next = f
+        .title
+        .take_requested()
+        .expect("Direct Connection is asked for");
     assert!(matches!(
         &next,
         Mode::Multiplayer(Screen::Direct { address }) if address == "localhost:25566"
     ));
     f.title.mode = next;
     f.title.escape();
-    assert!(matches!(f.title.mode, Mode::Multiplayer(Screen::Direct { .. })));
+    assert!(matches!(
+        f.title.mode,
+        Mode::Multiplayer(Screen::Direct { .. })
+    ));
     assert!(matches!(
         f.title.take_requested(),
         Some(Mode::Multiplayer(Screen::List { .. }))

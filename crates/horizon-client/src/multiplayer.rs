@@ -2017,7 +2017,14 @@ mod tests {
             let Outcome::Connect {
                 address: actual,
                 lan,
-            } = click(&mut screen, Some(40), 0.0, 0.0, (640.0, 480.0), Path::new(""))
+            } = click(
+                &mut screen,
+                Some(40),
+                0.0,
+                0.0,
+                (640.0, 480.0),
+                Path::new(""),
+            )
             else {
                 panic!("join did not connect")
             };
@@ -2491,13 +2498,27 @@ mod tests {
         let saved: Vec<String> = servers::load(&file).into_iter().map(|s| s.name).collect();
         assert_eq!(saved, ["b", "a", "c"]);
         // Top-left quarter of the second row: back up.
-        click(&mut screen, None, ix + 4.0, iy + ROW_HEIGHT + 4.0, size, &saves);
+        click(
+            &mut screen,
+            None,
+            ix + 4.0,
+            iy + ROW_HEIGHT + 4.0,
+            size,
+            &saves,
+        );
         assert_eq!(
             order(&screen),
             (vec!["a".into(), "b".into(), "c".into()], Some(0))
         );
         // The right half joins at once.
-        match click(&mut screen, None, ix + 20.0, iy + 2.0 * ROW_HEIGHT + 10.0, size, &saves) {
+        match click(
+            &mut screen,
+            None,
+            ix + 20.0,
+            iy + 2.0 * ROW_HEIGHT + 10.0,
+            size,
+            &saves,
+        ) {
             Outcome::Connect { address, lan } => {
                 assert_eq!(address, list[2].ip);
                 assert!(!lan);
