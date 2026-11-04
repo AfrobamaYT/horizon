@@ -1621,6 +1621,18 @@ mod tests {
                 .hooks,
         );
         super::sources(&root, super::FillMode::Require).unwrap();
+        // A target that allows too many arguments must take its declared parameters as a call.
+        let allowed = shipped.replace(
+            "    pub(super) fn native_use_on(",
+            "    #[allow(clippy::too_many_arguments)]\n    pub(super) fn native_use_on(",
+        );
+        std::fs::write(&hooks, &allowed).unwrap();
+        assert!(
+            super::sources(&root, super::FillMode::Require)
+                .unwrap_err()
+                .contains("use_on: native_use_on allows too_many_arguments")
+        );
+        std::fs::write(&hooks, &shipped).unwrap();
         std::fs::remove_dir_all(root).unwrap();
     }
 

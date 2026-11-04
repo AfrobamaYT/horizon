@@ -33,6 +33,7 @@ pub(super) fn emit(
     let mut render_dispatch = String::new();
     let mut part_traits: BTreeMap<&str, String> = BTreeMap::new();
     let mut fills = Vec::new();
+    let mut calls = String::new();
     for hook in hooks {
         let name = hook.name.as_str();
         let native = format!("native_{name}");
@@ -86,7 +87,7 @@ pub(super) fn emit(
         };
         let fill = needs_fill(&method, &call, in_game)?;
         let sig = &method.sig;
-        let mut args = Vec::new();
+        let mut native_args = Vec::new();
         let mut receiver_mut = None;
         for arg in &sig.inputs {
             match arg {
@@ -97,10 +98,53 @@ pub(super) fn emit(
                     let Pat::Ident(pat) = &*arg.pat else {
                         return Err(format!("unsupported argument in {name}"));
                     };
-                    args.push((pat.ident.to_string(), &*arg.ty));
+                    native_args.push((pat.ident.to_string(), &*arg.ty));
                 }
             }
         }
+        // A hook that declares its parameters is called with them as one `<Name>Call`.
+        let carrier = format!("{}Call", hook_id(name));
+        let declared = hook
+            .call
+            .iter()
+            .map(|(arg, ty)| Ok((arg.clone(), syn::parse_str::<Type>(ty)?)))
+            .collect::<Result<Vec<_>, syn::Error>>()
+            .map_err(|e| format!("{name}: {e}"))?;
+        let mut args: Vec<(String, &Type)> = if declared.is_empty() {
+            if method.attrs.iter().any(|attr| {
+                attr.path().is_ident("allow")
+                    && attr
+                        .to_token_stream()
+                        .to_string()
+                        .contains("too_many_arguments")
+            }) {
+                return Err(format!(
+                    "{name}: {native} allows too_many_arguments: declare the parameters on the hook in hooks/*.rs so it takes one {carrier}"
+                ));
+            }
+            native_args
+        } else {
+            let taken_ticks = native_args.iter().position(|(arg, _)| arg == "ticks");
+            let others: Vec<_> = native_args
+                .iter()
+                .filter(|(arg, _)| arg != "ticks")
+                .collect();
+            let [(call_arg, call_ty)] = others[..] else {
+                return Err(format!(
+                    "{name}: {native} takes its declared parameters as one `call: {carrier}`"
+                ));
+            };
+            if call_arg != "call" || !call_ty.to_token_stream().to_string().contains(&carrier) {
+                return Err(format!(
+                    "{name}: {native} takes its declared parameters as one `call: {carrier}`"
+                ));
+            }
+            taken_ticks
+                .map(|index| native_args[index].clone())
+                .into_iter()
+                .chain(declared.iter().map(|(arg, ty)| (arg.clone(), ty)))
+                .collect()
+        };
         let is_level = host_param::is_level(hook);
         let ticks = is_level
             && args.iter().any(|(name, ty)| {
@@ -111,6 +155,7 @@ pub(super) fn emit(
         if ticks {
             args.retain(|(name, _)| name != "ticks");
         }
+        let carried = args.clone();
         let mut used: HashSet<_> = args.iter().map(|(name, _)| name.clone()).collect();
         let mod_item = fresh_name("mod_hook", &mut used);
         let part_list = fresh_name("parts", &mut used);
@@ -307,6 +352,17 @@ pub(super) fn emit(
         if let Some((name, ty)) = output.as_ref().filter(|_| contract != Contract::Collect) {
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
         }
+        if !declared.is_empty() {
+            dispatch_params.truncate(usize::from(host.is_some()));
+            let (fields, generics) = carrier_fields(&carried);
+            dispatch_params.push(format!(
+                "call: calls::{carrier}{}",
+                if generics.is_empty() { "" } else { "<'_>" }
+            ));
+            calls.push_str(&format!(
+                "/// What the game passes `dispatch_{name}`: the hook's declared parameters.\n#[doc(hidden)]\n#[allow(missing_docs)]\npub struct {carrier}{generics} {{\n{fields}}}\n"
+            ));
+        }
         let (generics, elided) = match (lifetimes.a, lifetimes.b) {
             (_, true) => ("<'a, 'b>", "<'_, '_>"),
             (true, false) => ("<'a>", "<'_>"),
@@ -463,8 +519,19 @@ pub(super) fn emit(
         } else {
             format!("if !super::listened(HookId::{hook_id}) {{ return; }}")
         };
+        let unpack = if declared.is_empty() {
+            String::new()
+        } else {
+            let names: Vec<_> = carried.iter().map(|(arg, _)| arg.as_str()).collect();
+            format!("let calls::{carrier} {{ {} }} = call;\n", names.join(", "))
+        };
         dispatch.push_str(&format!(
-            "#[doc(hidden)] pub fn dispatch_{name}({dispatch_params}) {{ {early_return}\n{body} }}\n"
+            "#[doc(hidden)] pub fn dispatch_{name}({dispatch_params}) {{ {unpack}{early_return}\n{body} }}\n"
+        ));
+    }
+    if !calls.is_empty() {
+        dispatch.push_str(&format!(
+            "#[doc(hidden)]\n#[allow(missing_docs)]\npub mod calls {{\nuse super::*;\n{calls}}}\n"
         ));
     }
     Ok(HookSources {
@@ -481,6 +548,40 @@ pub(super) fn emit(
         render_hook_constants,
         render_hook_count,
     })
+}
+
+/// A carrier's fields, each type with its elided lifetimes named `'a`, and its generics.
+fn carrier_fields(args: &[(String, &Type)]) -> (String, &'static str) {
+    let mut lifetimes = CarrierLifetimes::default();
+    let fields = args
+        .iter()
+        .map(|(arg, ty)| {
+            let mut ty = (*ty).clone();
+            lifetimes.visit_type_mut(&mut ty);
+            format!("pub {arg}: {},\n", ty.to_token_stream())
+        })
+        .collect();
+    (fields, if lifetimes.used { "<'a>" } else { "" })
+}
+
+/// Names every reference and elided lifetime of a carrier's field types `'a`.
+#[derive(Default)]
+struct CarrierLifetimes {
+    used: bool,
+}
+
+impl VisitMut for CarrierLifetimes {
+    fn visit_type_reference_mut(&mut self, reference: &mut syn::TypeReference) {
+        self.used = true;
+        reference.lifetime = Some(syn::parse_quote!('a));
+        self.visit_type_mut(&mut reference.elem);
+    }
+    fn visit_lifetime_mut(&mut self, lifetime: &mut syn::Lifetime) {
+        if lifetime.ident == "_" {
+            self.used = true;
+            *lifetime = syn::parse_quote!('a);
+        }
+    }
 }
 
 /// `T` of an `Option<Answered<T>>` output, if that is its type.
