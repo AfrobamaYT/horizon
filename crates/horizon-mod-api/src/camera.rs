@@ -18,6 +18,7 @@ pub fn wrap_degrees(angle: f32) -> f32 {
 }
 /// What `AbstractClientPlayer.getFieldOfViewModifier` reads.
 #[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct FovPlayer {
     /// `Abilities.flying`.
     pub flying: bool,
@@ -29,6 +30,7 @@ pub struct FovPlayer {
     pub using: Option<(UseItem, i32)>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: a closed set the game matches without a wildcard
 pub enum UseItem {
     Bow,
     Spyglass,
@@ -37,6 +39,7 @@ pub enum UseItem {
 /// The camera entity as `Camera.alignWithEntity` and the field-of-view
 /// death and hurt effects see it.
 #[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct CameraEntity {
     pub position: [f64; 3],
     /// `xo`, `yo`, `zo`.
@@ -53,6 +56,7 @@ pub struct CameraEntity {
     pub mount: Option<(f32, f64)>,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct LivingCamera {
     pub scale: f32,
     pub camera_distance: f64,

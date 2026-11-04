@@ -36,6 +36,7 @@ pub fn native_ingredient_test(
     crate::dispatch_ingredient_test(kind, data, stack, accept);
 }
 /// Keep first-seen order, drop the rest.
+// hidden: a game-side helper, not part of the mod surface
 #[doc(hidden)]
 pub fn dedup_keep_order(items: &mut Vec<String>) {
     let mut seen = std::collections::HashSet::new();
@@ -44,6 +45,7 @@ pub fn dedup_keep_order(items: &mut Vec<String>) {
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
 #[derive(Clone, Debug)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct Ingredient {
     /// The items it accepts, however the source shape named them.
     pub items: HashSet<String>,
@@ -59,6 +61,7 @@ pub struct Ingredient {
 }
 /// How a shape's children combine at match time.
 #[derive(Clone, Debug)]
+// exhaustive: a closed set the game matches without a wildcard
 pub enum Shape {
     /// Any child matching the stack is enough.
     Compound,
@@ -215,6 +218,7 @@ impl Ingredient {
 }
 /// A recipe as its file says, whatever its type (vanilla's or a mod's own): the mod reads it.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct RecipeFile {
     /// `<namespace>:<path>`, its place under `data/<namespace>/recipe/`.
     pub id: String,

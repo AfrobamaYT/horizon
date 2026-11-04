@@ -65,6 +65,62 @@ pub(in crate::game) fn with_guests(test: impl FnOnce(&mut super::Game<'_>)) {
     });
 }
 
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn level_event_excludes_its_source_even_during_another_guests_turn() {
+    use horizon_client::lan::PlayerSender;
+    use horizon_world::level::{LevelEvent, LevelEventPlayer};
+
+    with_guests(|game| {
+        let mut receivers = Vec::new();
+        let host = game.lan.as_mut().unwrap();
+        host.owner = Some(super::lan::Owner {
+            uuid: 12,
+            saved: None,
+        });
+        for guest in &mut host.hub.guests {
+            let (tx, rx) = std::sync::mpsc::channel();
+            guest.sender = PlayerSender::new(tx, Arc::default());
+            receivers.push(rx);
+        }
+        game.audio.capture = Some(Vec::new());
+        game.as_guest(13, |game| {
+            game.lan_record_events(&[LevelEvent::LevelEvent {
+                id: 2001,
+                pos: horizon_core::position::BlockPos::new(3, 64, 5),
+                data: 1,
+                source: Some(LevelEventPlayer(12)),
+            }]);
+        })
+        .unwrap();
+        game.lan_flush_effects();
+        assert!(
+            receivers[0].try_recv().is_err(),
+            "integrated host is the source"
+        );
+        assert!(
+            receivers[1].try_recv().is_ok(),
+            "the acting guest receives another player's event"
+        );
+
+        game.lan_record_events(&[LevelEvent::LevelEvent {
+            id: 1500,
+            pos: horizon_core::position::BlockPos::new(3, 64, 5),
+            data: 1,
+            source: None,
+        }]);
+        game.lan_flush_effects();
+        assert!(
+            receivers[0].try_recv().is_ok(),
+            "host receives null-source event"
+        );
+        assert!(
+            receivers[1].try_recv().is_ok(),
+            "guest receives null-source event"
+        );
+    });
+}
+
 /// Before #228, the host was absent during a guest turn and B and the
 /// online list were invisible to native handles.
 #[test]

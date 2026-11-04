@@ -661,6 +661,12 @@ custom copy handler, conditional serialization, the `sendToPlayer` predicate,
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's
 receiver and documentation; a helper without `self` (`config_files`) takes
 `&self` in `Host`. Level services stay on the level hosts above.
+For item registry facts, `host.item_crafting_remainder(&stack)` returns a count-one
+plain remainder stack, or `None` when there is none or the item is unknown. Horizon
+currently stores only the remainder item id, not a template's count or components.
+`host.block_item("minecraft:stone")` returns its item registry name; an unknown block
+returns `None`, while a known block with no item returns `Some("minecraft:air")`.
+Both reads are available on either side.
 A helper's `receiver` also exposes it on that handle. Receivers come from public
 `*Ref` structs in `mod_api.rs`: `BlockEntityRef` gives `block_entity`, for example.
 Adding a handle requires no separate generator registration.

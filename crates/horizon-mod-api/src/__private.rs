@@ -22,6 +22,11 @@ pub use crate::phase::install_packages;
 #[cfg(any(test, feature = "testing"))]
 pub use crate::{part_table::tests as part_tests, phase::with_test_packages};
 
+/// The startup package inventory at an owning engine load boundary.
+pub fn loaded_mods() -> LoadedMods<'static> {
+    LoadedMods::new()
+}
+
 /// The data-pack and resource reloads the game runs.
 pub mod reload {
     pub use crate::reload::{
