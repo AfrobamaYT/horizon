@@ -2296,7 +2296,7 @@ impl Game<'_> {
     /// id is that namespace when it is on (your models, textures, loot and
     /// recipes are its files), else one of their own, with the template's
     /// look. Ids, saves and the check that a joining client has the same
-    /// blocks are the files' (docs/mods.md). Asked once at start, on every
+    /// blocks are the files' (docs/modding/src/how-to/content-mods.md). Asked once at start, on every
     /// side, before any resource loads: push the same ones every time, from
     /// nothing but your code. Declarations that don't pass the files' checks
     /// are logged and that namespace's are left out.
@@ -8482,10 +8482,10 @@ impl Game<'_> {
         batch.fill(&self.gui.atlas, x, y, w, h, rgba(r, g, b, a));
     }
     /// A mod's own RGBA image, uploaded into the HUD atlas slot
-    /// [`MOD_IMAGE_SPRITE`](crate::hud::MOD_IMAGE_SPRITE) and drawn with
+    /// `MOD_IMAGE_SPRITE` and drawn with
     /// `native_sprite`: its own source rectangle crops and stretches it. `rgba`
     /// is `width * height` pixels of four bytes, each side at most
-    /// [`MOD_IMAGE_SIZE`](crate::hud::MOD_IMAGE_SIZE); false when it is not that
+    /// `MOD_IMAGE_SIZE`; false when it is not that
     /// size. The upload costs a texture patch of the image, so send one when the
     /// image changed, not every frame.
     pub(super) fn native_mod_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> bool {

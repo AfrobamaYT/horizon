@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "screen_init_post",
+      "doc": "A screen was observed opening or changing rectangle, at most once per frame\n(`ScreenEvent.Init.Post`).",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_init_post",
       "neoforge": "ScreenEvent.Init.Post",
       "side": "client",

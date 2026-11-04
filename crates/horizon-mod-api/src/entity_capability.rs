@@ -13,6 +13,7 @@ use std::marker::PhantomData;
 /// `Void`, the side asked about where it is `@Nullable Direction`), and the game's own provider,
 /// if the game has one.
 pub struct EntityCapabilityKey<T: ?Sized + 'static, C: 'static = ()> {
+    /// The name.
     pub name: &'static str,
     default: Option<fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>>>,
     handler: PhantomData<fn(C) -> Box<T>>,
