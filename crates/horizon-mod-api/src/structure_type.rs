@@ -13,18 +13,9 @@
 //! game's own: the set's spacing, the structure's biomes and its
 //! `terrain_adaptation`, and the pieces ride the one piece mechanism the game
 //! has, next to a fortress piece's.
-use horizon_core::{
-    position::ChunkPos,
-    random::{LegacyRandom, WorldgenRandom},
-};
-use horizon_world::worldgen::structure::{
-    BoundingBox, legacy::PieceRandom, mod_types::ModStructureType,
-};
-use horizon_world::{
-    heightmap::HeightmapType,
-    nbt::Compound,
-    worldgen::{biome::BiomeId, placement::PlacementQueryError},
-};
+use horizon_core::random::LegacyRandom;
+use horizon_world::worldgen::structure::{BoundingBox, mod_types::ModStructureType};
+use horizon_world::{nbt::Compound, worldgen::placement::PlacementQueryError};
 use std::sync::Arc;
 
 /// A piece's placement failed; the generation of that piece stops there, as a
@@ -158,9 +149,18 @@ impl GenerationContext<'_> {
     }
 }
 
+/// The types the contexts' own signatures answer, re-exported so a mod's
+/// code names them through the API, never the engine's crates.
+pub use horizon_core::{position::ChunkPos, random::WorldgenRandom};
 /// The noise column a [`GenerationContext`](GenerationContext) reads:
 /// `ChunkGenerator.getBaseColumn`'s blocks, `Air` past its ends.
 pub use horizon_world::worldgen::structure::start::{NoiseBlock, NoiseColumn};
+/// The heightmap kinds a [`GenerationContext`](GenerationContext) queries,
+/// the noise biome a chunk's column holds and the piece's own random.
+pub use horizon_world::{
+    heightmap::HeightmapType,
+    worldgen::{biome::BiomeId, structure::legacy::PieceRandom},
+};
 
 /// The placement context a piece's
 /// [`post_process`](StructurePiece::post_process) and
@@ -426,8 +426,8 @@ pub fn installed_structure_types()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_world::nbt::Tag;
     use horizon_world::worldgen::structure::legacy::Result as PieceResult;
+    use mod_api::Tag;
 
     /// A type whose piece is a stone box of a size the config names, from the
     /// chunk's corner: what the adapter saves, it loads back.

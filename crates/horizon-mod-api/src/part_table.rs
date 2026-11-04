@@ -1324,7 +1324,7 @@ pub mod tests {
             }
             fn load_piece(
                 &self,
-                _: &horizon_world::nbt::Compound,
+                _: &mod_api::Compound,
             ) -> Option<Box<dyn mod_api::StructurePiece>> {
                 None
             }

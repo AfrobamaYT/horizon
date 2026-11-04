@@ -3644,8 +3644,8 @@ mod structure_type;
 /// The structure box a piece's `bounding_box` answers, in world blocks.
 pub use horizon_world::worldgen::structure::BoundingBox;
 pub use structure_type::{
-    FoundStructure, GenerationContext, NoiseBlock, NoiseColumn, PieceContext, StructureError,
-    StructurePiece, StructureType,
+    BiomeId, ChunkPos, FoundStructure, GenerationContext, HeightmapType, NoiseBlock, NoiseColumn,
+    PieceContext, PieceRandom, StructureError, StructurePiece, StructureType, WorldgenRandom,
 };
 mod part_table;
 #[cfg(any(test, feature = "testing"))]
