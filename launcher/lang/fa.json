@@ -1101,5 +1101,6 @@
   "{mod}: Cargo.toml has no horizon-client dependency.": "‏{mod}: فایل Cargo.toml وابستگی horizon-client ندارد.",
   "{mod}: Cargo.toml has no package name.": "‏{mod}: فایل Cargo.toml نام بسته ندارد.",
   "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "‏{mod}: ‏horizon-client درخواست {fields} دارد. ساخت‌های سرور رابط گرافیکی ندارند؛ لانچر ویژگی‌های horizon-client را مدیریت می‌کند. features را حذف کنید و از default-features = false استفاده کنید یا این تنظیم را ننویسید.",
-  "{mod}: {error}": "{mod}: {error}"
+  "{mod}: {error}": "{mod}: {error}",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "دریافت فرادادهٔ JAR ناموفق بود: {reason}. فایل‌های اصلی را دقیقاً در این مسیرهای حافظهٔ نهان قرار دهید، سپس دوباره تلاش کنید:\n"
 }

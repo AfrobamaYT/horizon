@@ -1101,5 +1101,6 @@
     "Save changes switches it. Nothing in its folder is deleted.": "Guardar cambios la cambia. No se borra nada de su carpeta.",
     "Its mods made for {loader} stay in its folder but won't load.": "Sus mods hechos para {loader} se quedan en su carpeta, pero no se cargarán.",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Sus mods hechos para Minecraft {from} se quedan en su carpeta; puede que algunos no carguen en {to}.",
-    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Sus mundos se guardaron con Minecraft {from}: {to} los actualiza para siempre y no puede abrirlos si es más antiguo."
+    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Sus mundos se guardaron con Minecraft {from}: {to} los actualiza para siempre y no puede abrirlos si es más antiguo.",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "No se pudieron consultar los metadatos de los JAR: {reason}. Coloca los archivos originales exactamente en estas rutas de caché y vuelve a intentarlo:\n"
 }
