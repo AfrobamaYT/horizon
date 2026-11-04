@@ -833,8 +833,10 @@ mod tests {
     fn group(wait: Duration) -> Arc<Group> {
         let engine = wasmtime::Engine::default();
         let limits = wasmtime::StoreLimitsBuilder::new().build();
-        let mut budgets = Budgets::default();
-        budgets.wait = wait;
+        let budgets = Budgets {
+            wait,
+            ..Budgets::default()
+        };
         Arc::new(Group::new(Store::new(&engine, State { limits }), budgets))
     }
 
