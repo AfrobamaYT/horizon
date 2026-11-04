@@ -3422,10 +3422,11 @@ mod avoid_entity_targeting_tests {
                 0.0,
             );
             let mut goal = AvoidEntity::new(Avoid::Player, 20.0, 1.0, 1.0);
-            let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+            let mut test_level = crate::health::TestLevel::new(0);
+            let mut events = Vec::new();
             let mut cx = Cx {
                 w: &world,
-                lr: &mut lr,
+                level: &mut test_level.level(),
                 events: &mut events,
             };
             let in_range = m.distance_sqr(player.position) <= 20.0 * 20.0;
