@@ -2098,7 +2098,7 @@ mod tests {
                 .find(|(_, u)| **u == uuid)
                 .map(|(id, _)| *id);
             let id = id.unwrap_or_else(|| panic!("{kind}: loaded without its UUID"));
-            let map = game.attachment_map_quiet(horizon_client::mod_api::Holder::Entity(id));
+            let map = game.attachment_map_quiet(mod_api::Holder::Entity(id));
             let map = map.unwrap_or_else(|e| panic!("{kind}: not a holder: {e:?}"));
             assert_eq!(map.get(&MARK), Ok(n), "{kind}: attachments not loaded");
             let tag = saved.iter().find(|t| entity_nbt::uuid(t) == Some(uuid));

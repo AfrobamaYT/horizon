@@ -14,18 +14,14 @@ use crate::{
     crafting::Recipes,
     items::{ItemStack, Items},
 };
+pub use mod_api::menu::{
+    AnvilCraft, AnvilUpdate, AnvilVanilla, CarriedAccess, GrindstonePlace, GrindstoneTake,
+    LogicalSide, MenuButtonContext, SlotView, StackedOnOther,
+};
 use std::sync::Arc;
 
 mod bundle;
 pub mod place;
-
-/// Identity and location of a player pressing a mod container button.
-pub struct MenuButtonContext {
-    pub player: u128,
-    pub player_entity_id: i32,
-    pub pos: [i32; 3],
-    pub id: i32,
-}
 
 /// `ServerPlayer.getRecipeBook`: whether the player knows a recipe.
 pub trait KnownRecipes {
@@ -304,23 +300,6 @@ struct Slot {
     role: Role,
 }
 
-/// The logical side on which a menu click runs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LogicalSide {
-    Client,
-    Server,
-}
-
-/// Operations on the clicked slot, including its placement and take rules.
-pub trait SlotView {
-    fn item(&self) -> Option<ItemStack>;
-    fn may_place(&self, stack: &ItemStack) -> bool;
-    fn may_pickup(&self) -> bool;
-    fn allow_modification(&self) -> bool;
-    fn safe_insert(&mut self, stack: Option<ItemStack>, count: u32) -> Option<ItemStack>;
-    fn safe_take(&mut self, count: u32, max: u32) -> Option<ItemStack>;
-}
-
 struct MenuSlotView<'a, 'e> {
     menu: &'a mut Menu,
     env: &'a Env<'e>,
@@ -353,32 +332,6 @@ impl SlotView for MenuSlotView<'_, '_> {
     fn safe_take(&mut self, count: u32, max: u32) -> Option<ItemStack> {
         self.menu.safe_take(self.env, self.slot, count, max)
     }
-}
-
-/// Access to the carried stack, as `createCarriedSlotAccess`.
-pub struct CarriedAccess<'a>(pub(crate) &'a mut Option<ItemStack>);
-
-impl CarriedAccess<'_> {
-    pub fn get(&self) -> Option<&ItemStack> {
-        self.0.as_ref()
-    }
-    pub fn set(&mut self, stack: Option<ItemStack>) {
-        *self.0 = stack;
-    }
-}
-
-/// A pickup click's slot and cursor, including empty stacks.
-pub struct StackedOnOther<'a> {
-    pub player: Option<u128>,
-    pub player_entity_id: Option<i32>,
-    pub slot: usize,
-    pub container: usize,
-    pub container_slot: usize,
-    pub primary: bool,
-    pub side: LogicalSide,
-    pub carried: CarriedAccess<'a>,
-    pub clicked: &'a mut dyn SlotView,
-    pub cancellation_result: bool,
 }
 
 /// NeoForge's `ItemStackedOnOtherEvent`, before either item override.
@@ -535,108 +488,6 @@ pub struct Anvil {
     pub only_renaming: bool,
 }
 
-/// What `AnvilUpdateEvent` asks about once `createResult` made vanilla's
-/// result with a left input, and what the mods may change: the `output`,
-/// its level `cost` and `material_cost`, the units of `right` used (0 or
-/// more than it holds: all of it), each starting at vanilla's.
-#[derive(Clone, Debug, PartialEq)]
-pub struct AnvilUpdate {
-    pub left: ItemStack,
-    pub right: Option<ItemStack>,
-    /// The rename box's text, `None` when the client sent none.
-    pub name: Option<String>,
-    /// Vanilla's result for these inputs (`getVanillaResult`), whatever
-    /// the mods set.
-    pub vanilla: AnvilVanilla,
-    pub output: Option<ItemStack>,
-    pub xp_cost: i32,
-    pub material_cost: i32,
-}
-
-/// `AnvilUpdateEvent.VanillaResult`: the output, level cost and material
-/// cost `createResult` made.
-#[derive(Clone, Debug, PartialEq)]
-pub struct AnvilVanilla {
-    pub output: Option<ItemStack>,
-    pub xp_cost: i32,
-    pub material_cost: i32,
-}
-
-impl AnvilUpdate {
-    /// The question about `vanilla`, the result `createResult` made from
-    /// these inputs and name: the output, level cost and material cost
-    /// start at its own.
-    pub fn new(
-        left: ItemStack,
-        right: Option<ItemStack>,
-        name: Option<String>,
-        vanilla: &crate::stations::AnvilResult,
-    ) -> Self {
-        let vanilla = AnvilVanilla {
-            output: vanilla.result.clone(),
-            xp_cost: vanilla.cost,
-            material_cost: i32::try_from(vanilla.repair_item_count_cost).unwrap_or(i32::MAX),
-        };
-        Self {
-            left,
-            right,
-            name,
-            output: vanilla.output.clone(),
-            xp_cost: vanilla.xp_cost,
-            material_cost: vanilla.material_cost,
-            vanilla,
-        }
-    }
-
-    /// The mods' answer, in place of `result`: a cancel leaves no result at
-    /// cost 0; otherwise their output, level cost (0 or more) and material
-    /// cost. A changed output is no longer only a rename.
-    pub fn answer(self, cancel: bool, result: &mut crate::stations::AnvilResult) {
-        if cancel {
-            *result = crate::stations::AnvilResult::default();
-            return;
-        }
-        result.only_renaming &= self.output == self.vanilla.output;
-        result.cost = self.xp_cost.max(0);
-        result.repair_item_count_cost = self.material_cost.max(0) as u32;
-        result.result = self.output;
-    }
-}
-
-/// What `GrindstoneEvent.OnPlaceItem` asks about once the inputs changed,
-/// and what the mods may set: an `output` (none until a mod sets one) and,
-/// with it, `xp` (-1 for vanilla's experience). `vanilla_output` is the
-/// vanilla's result, to read; set `output` to replace it.
-#[derive(Clone, Debug, PartialEq)]
-pub struct GrindstonePlace {
-    pub top: Option<ItemStack>,
-    pub bottom: Option<ItemStack>,
-    pub vanilla_output: Option<ItemStack>,
-    pub output: Option<ItemStack>,
-    pub xp: i32,
-}
-
-/// A grindstone result taken, as `GrindstoneEvent.OnTakeItem` reports it:
-/// the inputs, the experience (-1 for vanilla's, or what OnPlaceItem set)
-/// and what the inputs hold afterwards (empty, as vanilla's).
-#[derive(Clone, Debug, PartialEq)]
-pub struct GrindstoneTake {
-    pub top: Option<ItemStack>,
-    pub bottom: Option<ItemStack>,
-    pub xp: i32,
-    pub new_top: Option<ItemStack>,
-    pub new_bottom: Option<ItemStack>,
-}
-
-/// An anvil craft as `AnvilCraftEvent` reports it: the inputs and the result
-/// taken, before the crafting changed anything.
-#[derive(Clone, Debug, PartialEq)]
-pub struct AnvilCraft {
-    pub left: Option<ItemStack>,
-    pub right: Option<ItemStack>,
-    pub output: ItemStack,
-}
-
 /// An anvil menu before a click, for `Menu::anvil_cancel`: the anvil's three
 /// slots and cost, the player's slots and the cursor.
 #[derive(Clone, Debug, PartialEq)]
@@ -686,7 +537,7 @@ fn tidy(slot: &mut Option<ItemStack>) {
     }
 }
 
-/// Hook point for native mods (docs/native-mods.md, listed in `native-hooks.json`
+/// Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`
 /// with the game's): container slot `slot` of the content mod menu type `menu`
 /// (`data/<id>/horizon/menu/`) is asked whether it takes `stack`
 /// (`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).
@@ -4312,8 +4163,6 @@ pub(crate) mod tests {
                 living_fall: |_, _, _, _, _| {},
                 living_jump: |_, _| {},
                 ender_entity_teleport: |_, _, _, _, _| {},
-                ingredient: |_, _, _| {},
-                ingredient_test: |_, _, _, _| {},
             });
         assert!(installed.is_ok());
         let kind = Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {
@@ -4848,5 +4697,89 @@ pub(crate) mod tests {
             Some(("minecraft:red_shulker_box", 1)),
             "special recipe must craft with limited_crafting: true without being in known_recipes"
         );
+    }
+
+    /// A server host that answers nothing: the hooks here don't call it.
+    struct NoHost;
+    impl mod_api::Host for NoHost {}
+    impl mod_api::ServerHost for NoHost {}
+
+    /// Records what `player_brewed_potion` told it.
+    struct BrewWatcher(std::sync::Arc<std::sync::Mutex<Vec<(u128, i32, ItemStack)>>>);
+
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for BrewWatcher {
+        fn player_brewed_potion(
+            &self,
+            _host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::PlayerBrewedPotionEvent<'_>,
+        ) {
+            let seen = (event.player, event.player_entity_id, event.stack.clone());
+            self.0.lock().unwrap().push(seen);
+        }
+    }
+
+    /// `BrewingStandMenu.PotionSlot.onTake`: a pickup and a shift-click on a
+    /// bottle slot each tell a listening mod once, with the taken stack and
+    /// the player's UUID and entity id; with no listener nothing is kept.
+    #[test]
+    fn a_bottle_slot_take_tells_the_listener_once_with_the_player() {
+        let root = std::env::temp_dir().join(format!("horizon-brewed-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
+        let items = horizon_items::items::Items::for_tests(Default::default());
+        let overlay = &horizon_world::loot::PackOverlay::NONE;
+        let recipes = Recipes::load(&root, &items, overlay).unwrap();
+        let brewing = Brewing::load(&root, &items, overlay);
+        let _ = std::fs::remove_dir_all(&root);
+        let (banners, station_recipes) = (Default::default(), Default::default());
+        let (enchantments, names) = (Default::default(), Default::default());
+        let env = &Env {
+            player: Some(7),
+            player_entity_id: Some(41),
+            side: LogicalSide::Server,
+            items: &items,
+            recipes: &recipes,
+            brewing: &brewing,
+            banners: &banners,
+            station_recipes: &station_recipes,
+            enchantments: &enchantments,
+            names: &names,
+            trade: None,
+            maps: None,
+            limited_crafting: false,
+            known_recipes: None,
+        };
+        let potion = ItemStack::new("minecraft:potion", 1);
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mods: Vec<mod_api::ModEntry> = vec![mod_api::ModEntry::new(
+            "brew-watcher",
+            Box::new(BrewWatcher(seen.clone())),
+        )];
+        let mut host = NoHost;
+        mod_api::testing::with_mods(mods.into(), || {
+            for input in [Input::Pickup, Input::QuickMove] {
+                let mut menu = Menu::new(Kind::Brewing);
+                menu.set_slot(env, 0, Some(potion.clone()));
+                menu.click(env, 0, 0, input).unwrap();
+                // Without a listener the take is only the advancement's.
+                assert!(menu.brewed_potion_takes.is_empty(), "{input:?}");
+                assert_eq!(menu.brewed, std::slice::from_ref(&potion), "{input:?}");
+
+                let mut menu = Menu::new(Kind::Brewing);
+                menu.brewed_potion_hook = true;
+                menu.set_slot(env, 0, Some(potion.clone()));
+                menu.click(env, 0, 0, input).unwrap();
+                assert_eq!(
+                    menu.brewed_potion_takes,
+                    std::slice::from_ref(&potion),
+                    "{input:?}"
+                );
+                for stack in &menu.brewed_potion_takes {
+                    mod_api::dispatch_player_brewed_potion(&mut host, 7, 41, stack);
+                }
+            }
+        });
+        let told = (7, 41, potion);
+        assert_eq!(*seen.lock().unwrap(), [told.clone(), told]);
     }
 }

@@ -477,21 +477,23 @@ impl Game<'_> {
             return Ok(());
         }
         if self.serving.is_some() || self.options.dedicated.is_some() {
-            let start = horizon_client::mod_api::NativeExplosionStart {
-                dimension: self.dim.id(),
-                center,
-                radius,
-                fire: false,
-                interaction: horizon_client::mod_api::NativeBlockInteraction::TriggerBlock,
-                // `DamageSources.explosion(source, owner)`.
-                damage_type: if cause.source.is_some() && cause.owner.is_some() {
-                    "minecraft:player_explosion"
-                } else {
-                    "minecraft:explosion"
+            let start = mod_api::NativeExplosionStart::from(
+                mod_api::__private::built::NativeExplosionStart {
+                    dimension: self.dim.id(),
+                    center,
+                    radius,
+                    fire: false,
+                    interaction: mod_api::NativeBlockInteraction::TriggerBlock,
+                    // `DamageSources.explosion(source, owner)`.
+                    damage_type: if cause.source.is_some() && cause.owner.is_some() {
+                        "minecraft:player_explosion"
+                    } else {
+                        "minecraft:explosion"
+                    },
+                    source: cause.source,
+                    owner: cause.owner,
                 },
-                source: cause.source,
-                owner: cause.owner,
-            };
+            );
             if self.explosion_start_cancelled(&start) {
                 return Ok(());
             }
@@ -636,7 +638,7 @@ impl Game<'_> {
         at: glam::Vec3,
         light: u32,
         partial: f32,
-        out: &mut Vec<horizon_client::mesher::Vertex>,
+        out: &mut Vec<mod_api::render::Vertex>,
     ) {
         let Some(model) = self.entity_models.wind_charge.as_ref() else {
             return;

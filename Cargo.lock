@@ -1338,6 +1338,7 @@ dependencies = [
  "horizon-friends",
  "horizon-hdr",
  "horizon-items",
+ "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mods",
@@ -1418,6 +1419,7 @@ dependencies = [
  "horizon-hdr",
  "horizon-items",
  "horizon-mcp",
+ "horizon-mod-api",
  "horizon-mods",
  "horizon-narrator",
  "horizon-optifine",
@@ -1473,7 +1475,7 @@ dependencies = [
  "horizon-cosmetics",
  "horizon-hdr",
  "horizon-items",
- "horizon-mod-api-gen",
+ "horizon-mod-api",
  "horizon-mod-api-macros",
  "horizon-mods",
  "horizon-narrator",
@@ -1591,6 +1593,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-api"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam",
+ "horizon-assets",
+ "horizon-client-core",
+ "horizon-core",
+ "horizon-items",
+ "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
+ "horizon-mods",
+ "horizon-world",
+ "log",
+ "serde",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
 name = "horizon-mod-api-gen"
 version = "0.1.0"
 dependencies = [
@@ -1618,6 +1640,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "horizon-modding-examples"
+version = "0.0.0"
+dependencies = [
+ "horizon-mod-api",
 ]
 
 [[package]]

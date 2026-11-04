@@ -29,7 +29,7 @@ on what the stock client renders, never on a client mod.
 
 | Part | Where | What |
 |---|---|---|
-| Server hook points | this repository, `crates/horizon-client/src/game/native_hooks.rs` ([native-mods.md](native-mods.md)) | compiled against the installed game's exact source revision, empty when no mod hooks them |
+| Server hook points | this repository, `crates/horizon-client/src/game/native_hooks.rs` ([modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md)) | compiled against the installed game's exact source revision, empty when no mod hooks them |
 | The `smp` mod | [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods), `native/smp/` | a horizon-mixins bundle: `smp_store.rs`, `smp_economy.rs`, `smp_market.rs`... hold the rules and data (also the mod's own crate, with its tests, no game types), `glue.rs` and small helpers hook the points |
 | The official server's engine | built from a Horizon release's commit with the bundle applied | `horizon-server`'s `[engine] path` points at it; the rest of the server is unchanged |
 
@@ -43,7 +43,7 @@ claim.
 
 ### Hook points the SMP needs
 
-Each is added in its own pull request, documented in [native-mods.md](native-mods.md), and free when no mod hooks it
+Each is added in its own pull request, documented in [modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md), and free when no mod hooks it
 (an empty function). Where a contributor's pull request already adds one (block breaking and placing, item use:
 horizon-rust/horizon#4483, horizon-rust/horizon#4302), the SMP uses theirs.
 
@@ -151,7 +151,7 @@ with. The coin is a fresh random key from the system, never the world's random.
 
 ## Building the official server's engine
 
-A native mod is built into the game it runs in ([native-mods.md](native-mods.md)). For the server: the source of the
+A native mod is built into the game it runs in ([modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md)). For the server: the source of the
 release the server runs, `horizon-mixins apply` with the `smp` bundle, then the server build
 (`cargo build --release --no-default-features -p horizon-client`), and `horizon-server`'s `[engine] path` set to
 the result. When to deploy it on the official server is the owners' decision; the mod's README holds the exact

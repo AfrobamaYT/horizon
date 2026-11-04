@@ -1,5 +1,5 @@
 //! Writes to a living entity for native server mods, through a `LivingRef`
-//! (docs/native-mods.md, "Entity and level handles"): `LivingEntity.swing`,
+//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles"): `LivingEntity.swing`,
 //! the arrows and bee stingers stuck in a player (`setArrowCount`,
 //! `setStingerCount`, `removeArrowTime`, `removeStingerTime`),
 //! `Mob.setLeftHanded`, `Mob.setCanPickUpLoot` and `useItemRemaining`. Reads
@@ -7,7 +7,7 @@
 //! kind Horizon keeps no such state for (each doc says which).
 use super::{Game, combat::Stuck, commands::Target};
 use horizon_client::first_person::{Hand, SwingAnimation};
-use horizon_client::mod_api::LivingRef;
+use mod_api::LivingRef;
 
 impl Game<'_> {
     /// The UUID of the player a living handle names.
@@ -209,10 +209,10 @@ impl Game<'_> {
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use super::Stuck;
-    use horizon_client::first_person::Hand;
     use horizon_client::mobs::Mob;
-    use horizon_client::mod_api::{EntityRef, NativeWorldEpoch};
     use horizon_core::geometry::Vec3;
+    use mod_api::first_person::Hand;
+    use mod_api::{EntityRef, NativeWorldEpoch};
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -255,7 +255,7 @@ mod tests {
 
             let stale =
                 EntityRef::new(NativeWorldEpoch::new(zombie.entity().epoch().get() + 1), 12);
-            let stale = horizon_client::mod_api::LivingRef::new(stale);
+            let stale = mod_api::LivingRef::new(stale);
             assert!(!game.native_living_swing(stale, Hand::Main, true));
             assert!(!game.native_living_set_left_handed(stale, true));
             assert_eq!(game.native_living_can_pick_up_loot(stale), None);

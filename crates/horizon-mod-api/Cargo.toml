@@ -1,0 +1,36 @@
+[package]
+name = "horizon-mod-api"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "The mod API: hooks, hosts, handles and parts, for native and WebAssembly mods"
+
+[lib]
+name = "mod_api"
+
+[dependencies]
+horizon-core = { path = "../horizon-core" }
+horizon-world = { path = "../horizon-world" }
+horizon-items = { path = "../horizon-items" }
+horizon-client-core = { path = "../horizon-client-core" }
+horizon-assets = { path = "../horizon-assets" }
+horizon-mods = { path = "../horizon-mods", default-features = false }
+horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["raw_value"] }
+log = "0.4"
+bytemuck = { version = "1.24", features = ["derive"] }
+glam = "0.30"
+# The render hooks' types only: no backend, so the crate builds for wasm32.
+wgpu = { version = "30.0.1", default-features = false, features = ["std"] }
+
+[build-dependencies]
+horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
+
+[features]
+# Scoped mod installation for other crates' tests (`mod_api::testing`).
+testing = []
+
+[lints]
+workspace = true

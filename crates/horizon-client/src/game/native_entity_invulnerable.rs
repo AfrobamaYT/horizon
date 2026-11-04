@@ -1,5 +1,5 @@
 //! An entity's invulnerability for native server mods, through an
-//! `EntityRef` (docs/native-mods.md, "Entity and level handles"): the
+//! `EntityRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles"): the
 //! `Invulnerable` flag (`Entity.permanentlyInvulnerable`) and
 //! `LivingEntity.damageCooldownTime`, the ticks after a hit in which a
 //! weaker one does only the difference. Horizon has no counterpart yet of
@@ -7,7 +7,7 @@
 //! return None and writes false for a stale handle, on a client, and for a
 //! kind Horizon keeps no such state for.
 use super::{Game, commands::Target};
-use horizon_client::mod_api::EntityRef;
+use mod_api::EntityRef;
 
 impl Game<'_> {
     /// A player's body, where it is kept now.
@@ -103,8 +103,8 @@ impl Game<'_> {
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::mobs::Mob;
-    use horizon_client::mod_api::{EntityRef, NativeWorldEpoch};
     use horizon_core::geometry::Vec3;
+    use mod_api::{EntityRef, NativeWorldEpoch};
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

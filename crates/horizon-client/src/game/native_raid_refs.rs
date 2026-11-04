@@ -4,9 +4,9 @@
 use super::{Game, commands::Target};
 use horizon_client::{
     lan::playerdata::ints_uuid,
-    mod_api::{EntityRef, LevelRef, MobRef, NativeRaidStatus, RaidRef},
     raid::{Raid, Status},
 };
+use mod_api::{EntityRef, LevelRef, MobRef, NativeRaidStatus, RaidRef};
 
 impl Game<'_> {
     /// The raid a handle names now, or None for a stale or foreign one.
@@ -190,11 +190,9 @@ impl Game<'_> {
 mod tests {
     use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
     use super::*;
-    use horizon_client::{
-        mobs::{Mob, raider},
-        mod_api::NativeWorldEpoch,
-    };
+    use horizon_client::mobs::{Mob, raider};
     use horizon_core::geometry::Vec3;
+    use mod_api::NativeWorldEpoch;
 
     fn raider_mob(game: &mut Game<'_>, id: u32, raid: i32, wave: i32, health: f32) {
         let kind = game

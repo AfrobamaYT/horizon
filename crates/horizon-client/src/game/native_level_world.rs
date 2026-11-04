@@ -1,15 +1,15 @@
 //! A level's world settings for native server mods, through a `LevelRef`
-//! (docs/native-mods.md, "Entity and level handles", #7387): the seed, the
+//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): the seed, the
 //! difficulty, game rules and weather. They return `None` on a client or for
 //! a handle of an earlier open.
 use super::{Dim, Game};
 use horizon_client::command::vanilla::DIFFICULTIES;
-use horizon_client::mod_api::{FeatureFlags, GameRuleValue, LevelRef};
 use horizon_client::world::World;
 use horizon_core::position::BlockPos;
 use horizon_core::random::LegacyRandom;
 use horizon_world::level::{Dimension as LevelDimension, LevelAccess};
 use horizon_world::registry::BlockStateId;
+use mod_api::{FeatureFlags, GameRuleValue, LevelRef};
 
 fn weather_for_level(
     shape: horizon_client::chunk::LevelShape,
@@ -171,7 +171,7 @@ impl Game<'_> {
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::chunk::Chunk;
-    use horizon_client::mod_api::{FeatureFlags, LevelHost};
+    use mod_api::{FeatureFlags, LevelHost};
     use std::sync::Arc;
 
     /// A chunk of air with `biome` in every cell: full sky light everywhere.

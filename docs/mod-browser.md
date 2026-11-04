@@ -6,7 +6,7 @@ registry for Horizon's own mods, modpacks, resource packs and shader packs; see 
 
 ## What it offers
 
-Horizon doesn't run Java code ([mods.md](mods.md)). It ports what a Java mod
+Horizon doesn't run Java code ([mods.md](modding/src/how-to/content-mods.md)). It ports what a Java mod
 carries as data (blocks, items, recipes, loot tables, tags, worldgen, textures, names) with `horizon-port-pack`, and
 says before install which of the mod's features that leaves out. Horizon's own mods (content mods, `.hmod`, and native
 mods, `.hmod`) aren't on Modrinth or CurseForge yet (Modrinth has no `horizon` loader).
@@ -171,14 +171,14 @@ horizon-launcher mods remove faithful-32x
 ## Sources
 
 **Horizon's registry.** Content mods (`.hmod`), native mods (`.hmod`), modpacks (`.hpack`), resource packs and shader packs (`.hshader`) made for Horizon, reviewed as pull requests in
-[horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods) ([api/mod-index.md](api/mod-index.md)). The
+[horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods) ([modding/src/reference/registry-index.md](modding/src/reference/registry-index.md)). The
 launcher reads its `index.json` (`browser/horizon.rs`; `HORIZON_MOD_INDEX=<file or https address>` reads a test
 registry instead, whose files may then be on disk) at most every ten minutes, and keeps the last copy in
 `mod-browser/horizon-index.json`. Before a result is installed it shows whether its files are signed and, for a mod,
 what it may do, in the words of the game's Options > Mods. A download goes to `mod-browser/downloads/` and is moved
 into place only after `horizon_mods::index::check_file` passes (size, SHA-256, the author's signature when the project
 has a key, the file's own manifest against the index). A content mod becomes `horizon-mods/<id>.hmod`, turned on; a native mod becomes
-`horizon-native-mods/<id>.hmod`, and the launcher builds it into the game ([native-mods.md](native-mods.md));
+`horizon-native-mods/<id>.hmod`, and the launcher builds it into the game ([modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md));
 `mods disable` and `mods enable` switch it in `horizon-mods.txt`. When the index takes a file down, the launcher turns
 it off the next time it reads the index or starts the game, says why, and refuses to install it or turn it back on.
 A Horizon modpack (`.hpack`) installs as its own profile (`browser/horizon/pack.rs`): `horizon-packs/<id>/` holds the

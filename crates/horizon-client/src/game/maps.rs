@@ -12,6 +12,7 @@ use horizon_client::{
     mesher::Vertex,
 };
 use horizon_world::nbt::Tag;
+pub use mod_api::game::{NativeMapDecoration, NativeMapInfo};
 use std::collections::HashMap;
 
 /// What a decoration is filed under in `MapItemSavedData.decorations` (a
@@ -37,40 +38,6 @@ pub(super) struct Decoration {
     pub rot: u8,
     pub name: Option<String>,
     pub key: Key,
-}
-/// A map as a native mod sees it when `native_map_decorations` is asked.
-// Native mods read it; nothing in Horizon does.
-#[derive(Clone, Copy, Debug)]
-pub struct NativeMapInfo<'a> {
-    /// The map's id (`map_<id>`).
-    pub id: i32,
-    /// The map's centre block `[x, z]`.
-    pub center: [i32; 2],
-    /// `MapItemSavedData.scale`: a map pixel is `1 << scale` blocks.
-    pub scale: u8,
-    /// The dimension the map shows (`minecraft:overworld`).
-    pub dimension: &'a str,
-    pub locked: bool,
-    /// Whether it is drawn in an item frame, not held or on the cartography screen.
-    pub in_frame: bool,
-}
-/// An icon a native mod puts on a map: the same place and pose as vanilla's
-/// decorations (`MapDecoration`).
-#[derive(Clone, Debug, PartialEq)]
-pub struct NativeMapDecoration {
-    /// An atlas sprite: vanilla's `map/decorations/<name>`, or a content
-    /// mod's texture. An unknown sprite is left out.
-    pub sprite: String,
-    /// The position on the map in half map pixels, -128 (left, top) to 127.
-    /// For the world position `(wx, wz)`: `(wx - center_x) / (1 << scale) * 2`,
-    /// and the same for z, floored and clamped.
-    pub x: i8,
-    pub y: i8,
-    /// 0 to 15, in 22.5 degree steps clockwise (only the low four bits count).
-    pub rot: u8,
-    /// Whether it shows in an item frame and on the cartography screen
-    /// (`MapDecorationType.showOnItemFrame`); a held map shows all.
-    pub shown_on_frame: bool,
 }
 
 /// `MapBanner`: a banner a map marks, as `banners` saves it.

@@ -14,7 +14,6 @@ use horizon_client::{
     projectiles::{Projectile, ProjectileKind},
 };
 // Its old home, for mixin code that names it here.
-pub(super) use horizon_client::mod_api::NativeDispensed;
 use horizon_core::{
     geometry::{Aabb, Direction, Vec3},
     position::BlockPos,
@@ -25,6 +24,7 @@ use horizon_world::{
     level::{BucketContent, PlaceContext, PlaceOutcome},
     registry::BlockStateId,
 };
+pub(super) use mod_api::NativeDispensed;
 use std::sync::Arc;
 
 type Pos = (i32, i32, i32);
@@ -1460,6 +1460,7 @@ impl Game<'_> {
                     id: 1505,
                     pos: target_pos,
                     data: 15,
+                    source: None,
                 });
         }
         self.process_level_events()?;
@@ -2172,6 +2173,7 @@ impl Game<'_> {
                 id: 3003,
                 pos: Self::pos_of(target),
                 data: 0,
+                source: None,
             });
         self.process_level_events()?;
         self.audio.play(

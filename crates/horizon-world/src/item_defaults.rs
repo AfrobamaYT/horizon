@@ -235,6 +235,7 @@ mod tests {
         let context = crate::native_load_context::LoadContext::new(
             crate::native_load_context::DataLoadOrigin::ServerDataLoad,
             std::sync::Arc::new(inputs),
+            [],
         );
         let mut items = super::read(&root).unwrap();
         items.apply_native(&context);

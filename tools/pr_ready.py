@@ -80,7 +80,7 @@ MOD_API_INPUTS = ("native-hooks.json", "tools/native-hook-fragments/")
 # own crate with its own suite; a `--manifest-path` run keeps both out of the workspace selection above.
 DISPATCH_TESTS = "crates/horizon-mod-api-gen/dispatch-tests/Cargo.toml"
 DISPATCH_TEST_INPUTS = ("crates/horizon-mod-api-gen/", "crates/horizon-mod-api-macros/",
-                        "crates/horizon-client/src/mod_api", *MOD_API_INPUTS)
+                        "crates/horizon-mod-api/", *MOD_API_INPUTS)
 MOD_REGISTRY = "crates/horizon-mod-registry/Cargo.toml"
 
 def is_doc(path):
