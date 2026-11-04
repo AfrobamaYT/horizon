@@ -12421,6 +12421,7 @@ mod entity_inside_tests {
     }
 }
 
+#[cfg(test)]
 mod entity_place_tests {
     use super::*;
     use mod_api::{EntityPlaceEvent, Flow, Hooks, ModEntry, ServerHost, testing::with_mods};
