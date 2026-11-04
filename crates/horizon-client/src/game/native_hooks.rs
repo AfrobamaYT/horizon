@@ -6255,6 +6255,11 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_is_pathfindable(self, state, kind, pathfindable);
     }
+    /// Whether a mod hides `state` from the mesher (`hidden` starts false); asked once for every
+    /// state at join and on `native_refresh_render_visibility`. Client-side.
+    pub(super) fn native_block_render_visibility(&self, state: BlockStateId, hidden: &mut bool) {
+        mod_api::dispatch_block_render_visibility(self, state, hidden);
+    }
     /// `BlockBehaviour.getCloneItemStack`, asked by
     /// `ServerGamePacketListenerImpl.handlePickItemFromBlock`. `include_data`
     /// is true for a creative player picking with Ctrl. Leave `stack` unset to
