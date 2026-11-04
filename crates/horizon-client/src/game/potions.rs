@@ -849,7 +849,7 @@ impl Game<'_> {
                             // tick hurts with magic (6 << amp) or heals (4 << amp).
                             if (effect == "instant_damage") != inverted {
                                 m.damage(
-                                    crate::game::entity::damage_level_of!(self),
+                                    crate::game::entity::damage_level_of!(self, scoped),
                                     (6 << amp.min(30)) as f32,
                                     Damage::of(DamageKind::Magic),
                                 );
@@ -909,7 +909,7 @@ impl Game<'_> {
                 if !creative
                     && let Some(id) = self.motion.health.damage.id(source)
                     && let Ok(o) = p.hurt_blocking(
-                        crate::game::entity::damage_level_of!(self),
+                        crate::game::entity::damage_level_of!(self, scoped),
                         &self.motion.health,
                         rules,
                         id,
@@ -927,7 +927,7 @@ impl Game<'_> {
                     && let Some(id) = self.motion.health.damage.id("minecraft:magic")
                 {
                     let _ = p.hurt(
-                        crate::game::entity::damage_level_of!(self),
+                        crate::game::entity::damage_level_of!(self, scoped),
                         &self.motion.health,
                         rules,
                         id,
@@ -1603,7 +1603,7 @@ impl Game<'_> {
                                 // HealOrHarmMobEffect.applyInstantaneousEffect: indirectMagic(cloud, owner).
                                 let source = Damage::indirect_magic(owner, at);
                                 if m.damage_by(
-                                    crate::game::entity::damage_level_of!(self),
+                                    crate::game::entity::damage_level_of!(self, scoped),
                                     amount(6),
                                     source,
                                     "minecraft:area_effect_cloud",
@@ -1968,7 +1968,7 @@ impl Game<'_> {
                     let source = Damage::indirect_magic(owner.who(), [at.x, at.y, at.z]);
                     let id = m.id;
                     let hurt = m.damage_by(
-                        crate::game::entity::damage_level_of!(self),
+                        crate::game::entity::damage_level_of!(self, scoped),
                         harm,
                         source,
                         "minecraft:splash_potion",

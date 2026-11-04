@@ -4,6 +4,7 @@
 //! the block sound, attacker knockback (`blockedByItem`) and axes disabling
 //! the shield (`Player.blockUsingItem`, `BlocksAttacks.disable`).
 use super::Game;
+use horizon_client::health::Attack;
 use horizon_client::{
     health::{BlockOutcome, Blocking, HurtSource},
     items::ItemStack,
@@ -120,6 +121,7 @@ impl Game<'_> {
         outcome: BlockOutcome,
         (attacker, projectile): (Option<u32>, bool),
         source: HurtSource<'_>,
+        attack: &Attack,
     ) {
         let Some((slot, _)) = self.using else { return };
         let Some(stack) = self.stack_in(slot).cloned() else {
@@ -171,7 +173,7 @@ impl Game<'_> {
             if let Some((from, disable)) = self.combat.player_attacker {
                 let fully = outcome.fully_blocked;
                 let attacker = ([from[0], from[2]], disable);
-                self.blocked_by_attacker(&component, attacker, fully, at, source);
+                self.blocked_by_attacker(&component, attacker, fully, at, source, attack);
             }
             return;
         };
@@ -216,7 +218,7 @@ impl Game<'_> {
             let _ = self.handle_mob_events(events);
             return;
         }
-        self.blocked_by_attacker(&component, ([mx, mz], disable), fully, at, source);
+        self.blocked_by_attacker(&component, ([mx, mz], disable), fully, at, source, attack);
     }
 
     /// What a blocked melee hit does to the defender once the shield took
@@ -230,12 +232,13 @@ impl Game<'_> {
         fully: bool,
         at: Option<[f64; 3]>,
         source: HurtSource<'_>,
+        attack: &Attack,
     ) {
         // LivingEntity.blockedByItem: defender.knockback(0.5, defender - attacker,
         // source), which moves the defender along -(xd, zd).
         if !fully && let Some(p) = self.player.as_ref() {
             let (xd, zd) = (p.position.x - mx, p.position.z - mz);
-            self.knock_back_player(0.5, xd, zd, source);
+            self.knock_back_player(0.5, xd, zd, source, attack);
         }
         // BlocksAttacks.disable: item cooldown and stopUsingItem.
         let ticks = disable * component.disable_scale;
@@ -303,6 +306,7 @@ mod durability_tests {
                     direct: 0,
                     position: None,
                 },
+                &horizon_client::health::NO_ATTACK,
             );
             assert!(game.offhand.is_none());
             assert!(game.using.is_none());

@@ -22,7 +22,7 @@ use horizon_world::{
     synced_floats::{FloatValue, Observer, SyncedFloats},
 };
 pub use mod_api::health::{HurtSource, ShieldBlock, Victim};
-use std::{cell::Cell, fs, io, path::Path};
+use std::{fs, io, path::Path};
 pub(crate) type Attributes = LiveAttributes<Box<dyn horizon_world::attributes::live::Identities>>;
 pub(crate) type State = HurtState<DamageTypeId>;
 
@@ -96,6 +96,8 @@ pub struct DamageLevel<'a> {
     attachment_syncs: &'a mut crate::fast_hash::FxHashSet<horizon_world::attachments::Holder>,
     /// The game's hooks; none on a client predicting its own mount: they are the server's.
     hooks: Option<&'a DamageHooks>,
+    /// Who attacks in this hit and what they hold: the facts of the site that built the level.
+    attack: &'a Attack,
 }
 impl<'a> DamageLevel<'a> {
     /// The level of `world`, whose blocks `registry` names.
@@ -126,6 +128,7 @@ impl<'a> DamageLevel<'a> {
             attachments,
             attachment_syncs,
             hooks: Some(hooks),
+            attack: &NO_ATTACK,
         }
     }
     /// The level of `world`, with the random and attachments `lent` took out of it.
@@ -148,6 +151,7 @@ impl<'a> DamageLevel<'a> {
             attachments: &mut lent.attachments,
             attachment_syncs: &mut lent.attachment_syncs,
             hooks: Some(hooks),
+            attack: &NO_ATTACK,
         }
     }
     /// The same level on a client predicting a mob it rides: no damage hooks fire.
@@ -170,7 +174,16 @@ impl<'a> DamageLevel<'a> {
             attachments: self.attachments,
             attachment_syncs: self.attachment_syncs,
             hooks: self.hooks,
+            attack: self.attack,
         }
+    }
+    /// The same level for the hit `attack` describes.
+    pub fn attacked_by(self, attack: &'a Attack) -> Self {
+        Self { attack, ..self }
+    }
+    /// Who attacks in this hit and what they hold, for the damage hooks.
+    pub fn attack(&self) -> &'a Attack {
+        self.attack
     }
     /// The authoritative world's merged tag tables, if available.
     pub fn tags(&self) -> Option<&crate::items::Items> {
@@ -345,56 +358,34 @@ pub fn no_block(damage: f32) -> ShieldBlock {
     }
 }
 
-thread_local! {
-    static KNOCKBACK_ATTACKER: Cell<i32> = const { Cell::new(0) };
-    static KNOCKBACK_HELD: std::cell::RefCell<[Option<crate::items::ItemStack>; 2]> =
-        const { std::cell::RefCell::new([None, None]) };
-}
+/// What an attacker holds: the main hand and the off hand.
+pub type Held = [Option<crate::items::ItemStack>; 2];
 
-/// The entity behind the synchronous attack, or 0 outside an attack scope.
-pub fn knockback_attacker() -> i32 {
-    KNOCKBACK_ATTACKER.get()
+/// Who attacks in a hit and what they hold, as `living_knockback` and the weapon of
+/// `living_incoming_damage` name them. The site that starts the attack builds it (the game's
+/// `attack_of`) and lends it with the level the hit lands in ([`DamageLevel::attacked_by`]), so
+/// a nested attack has its own and nothing is left behind when it returns.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Attack {
+    /// The attacking entity's id, 0 for none.
+    pub attacker: i32,
+    /// What it holds, or none when it is not known (no native mod listens: the game only
+    /// records it then).
+    pub held: Held,
 }
-
-/// What the attacker holds in the main and off hand, or none when it is not known (or no
-/// native mod listens: the game only records it then).
-pub fn knockback_held() -> [Option<crate::items::ItemStack>; 2] {
-    KNOCKBACK_HELD.with(|held| held.borrow().clone())
-}
-
-/// `f` of what the attacker of the enclosing attack scope holds (main hand, off hand), or none
-/// when it is not known. Borrowed, not cloned.
-pub fn with_held<R>(f: impl FnOnce(&[Option<crate::items::ItemStack>; 2]) -> R) -> R {
-    KNOCKBACK_HELD.with_borrow(f)
-}
-
-/// `f` of the main-hand stack of `direct`, a hit's direct entity, when it is the attacker
-/// the enclosing attack scope recorded (`DamageSource.getWeaponItem`: the direct entity's
-/// weapon), else of none. Borrowed, not cloned.
-pub fn with_weapon_of<R>(direct: i32, f: impl FnOnce(Option<&crate::items::ItemStack>) -> R) -> R {
-    let known = direct != 0 && direct == KNOCKBACK_ATTACKER.get();
-    KNOCKBACK_HELD.with_borrow(|held| f(held[0].as_ref().filter(|_| known)))
-}
-
-/// Restore the previous attacker on return or unwind, including nested guest actions.
-pub fn knockback_from(entity: i32) -> impl Drop {
-    knockback_from_holding(entity, [None, None])
-}
-
-/// [`knockback_from`] that also records the attacker's held stacks (main hand, off hand).
-pub fn knockback_from_holding(
-    entity: i32,
-    held: [Option<crate::items::ItemStack>; 2],
-) -> impl Drop {
-    struct Restore(i32, [Option<crate::items::ItemStack>; 2]);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            KNOCKBACK_ATTACKER.set(self.0);
-            KNOCKBACK_HELD.with(|held| *held.borrow_mut() = std::mem::take(&mut self.1));
-        }
+/// The attack of a hit nobody started: environment damage, falls, a level built outside a hit.
+pub static NO_ATTACK: Attack = Attack {
+    attacker: 0,
+    held: [None, None],
+};
+impl Attack {
+    /// The main-hand stack of `direct`, a hit's direct entity, when it is the attacker
+    /// (`DamageSource.getWeaponItem`: the direct entity's weapon), else none.
+    pub fn weapon_of(&self, direct: i32) -> Option<&crate::items::ItemStack> {
+        self.held[0]
+            .as_ref()
+            .filter(|_| direct != 0 && direct == self.attacker)
     }
-    let held = KNOCKBACK_HELD.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), held));
-    Restore(KNOCKBACK_ATTACKER.replace(entity), held)
 }
 impl DamageLevel<'_> {
     /// Whether [`DamageHooks::knockback`] canceled the knockback (never without it). A
@@ -1418,25 +1409,17 @@ impl ServerPlayerHurtWorld for Environment<'_> {
 mod tests {
     use super::*;
     #[test]
-    fn knockback_attacker_scopes_restore_on_return_and_unwind() {
-        assert_eq!(super::knockback_attacker(), 0);
-        {
-            let _outer = super::knockback_from(7);
-            let panic = std::panic::catch_unwind(|| {
-                let _inner = super::knockback_from(9);
-                assert_eq!(super::knockback_attacker(), 9);
-                panic!("test unwind");
-            });
-            assert!(panic.is_err());
-            assert_eq!(super::knockback_attacker(), 7);
-            assert_eq!(
-                std::thread::spawn(super::knockback_attacker)
-                    .join()
-                    .unwrap(),
-                0
-            );
-        }
-        assert_eq!(super::knockback_attacker(), 0);
+    fn the_weapon_is_the_attackers_main_hand_only_for_its_own_hit() {
+        let sword = crate::items::ItemStack::new("minecraft:iron_sword", 1);
+        let attack = Attack {
+            attacker: 7,
+            held: [Some(sword.clone()), None],
+        };
+        assert_eq!(attack.weapon_of(7), Some(&sword));
+        // An arrow the attacker shot is the direct entity, not the attacker: no weapon.
+        assert_eq!(attack.weapon_of(9), None);
+        assert_eq!(attack.weapon_of(0), None);
+        assert_eq!(NO_ATTACK.weapon_of(0), None);
     }
     #[test]
     fn a_knockback_hook_cannot_make_the_push_nonfinite() {

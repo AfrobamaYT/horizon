@@ -554,8 +554,30 @@ macro_rules! entity_lists_of {
 }
 pub(super) use entity_lists_of;
 /// The level `$game` ticks, lent to a hit's damage hooks with its block registry and merged
-/// tag tables, so a mob or the player beside them can take the hit.
+/// tag tables, so a mob or the player beside them can take the hit. With `$attack` (an
+/// [`Attack`](horizon_client::health::Attack) the site took first), the level of that attack.
 macro_rules! damage_level_of {
+    // The level of the hit inside `Game::with_attack`: the attack that scope lends.
+    ($game:ident, scoped) => {
+        &mut horizon_client::health::DamageLevel::of(
+            &mut $game.world,
+            $game.pack.assets.registry,
+            Some(world_items!($game)),
+            Some(&$game.pack.block_registries),
+            &$game.damage_hooks,
+        )
+        .attacked_by($game.combat.attack())
+    };
+    ($game:ident, $attack:expr) => {
+        &mut horizon_client::health::DamageLevel::of(
+            &mut $game.world,
+            $game.pack.assets.registry,
+            Some(world_items!($game)),
+            Some(&$game.pack.block_registries),
+            &$game.damage_hooks,
+        )
+        .attacked_by($attack)
+    };
     ($game:ident) => {
         &mut horizon_client::health::DamageLevel::of(
             &mut $game.world,

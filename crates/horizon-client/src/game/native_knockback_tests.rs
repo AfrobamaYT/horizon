@@ -2,12 +2,10 @@
 //! as the attacker, what the attacker holds, what a mod may cancel, and thorns' wearer.
 use super::entity::damage_level_of;
 use super::native_entity_refs::tests::with_game;
-use horizon_client::health::{
-    Hurting, Knock, knockback_attacker, knockback_from, knockback_from_holding,
-};
+use horizon_client::health::{Attack, Hurting, Knock, NO_ATTACK};
 use horizon_client::items::ItemStack;
 use horizon_client::mobs::{Damage, DamageKind, Mob, Who};
-use horizon_core::geometry::Vec3;
+use horizon_core::{geometry::Vec3, random::RandomSource};
 use mod_api::{
     self, Hooks, HurtSource, LevelRandomHost, LivingIncomingDamageEvent, LivingKnockbackEvent,
 };
@@ -113,44 +111,45 @@ fn the_bridge_names_the_attacker_and_what_it_holds() {
             attacker: None,
             ..by_player
         };
-        let mut push = |pushed: Hurting<'_>| {
+        let mut push = |pushed: Hurting<'_>, attack: &Attack| {
             let mut knock = PUSH;
             let canceled = super::native_hooks::knockback(
-                damage_level_of!(game).reborrow(),
+                damage_level_of!(game, attack).reborrow(),
                 pushed,
                 &mut knock,
             );
             (canceled, knock)
         };
-        {
-            let _scope = knockback_from(7);
-            for pushed in [
-                Hurting::Mob(&mob, &by_player),
-                Hurting::Player(12, source(0)),
-            ] {
-                // The probe doubles the strength and mirrors the direction.
-                let (canceled, knock) = push(pushed);
-                assert!(!canceled);
-                assert_eq!(
-                    knock,
-                    Knock {
-                        strength: 0.8,
-                        x: -1.0,
-                        z: 0.0
-                    }
-                );
-            }
-            push(Hurting::Mob(&mob, &by_mob));
-            push(Hurting::Mob(&mob, &by_nobody));
-            push(Hurting::Dragon(12, source(5)));
-            push(Hurting::ArmorStand(12, source(0)));
+        let by_seven = Attack {
+            attacker: 7,
+            held: Default::default(),
+        };
+        for pushed in [
+            Hurting::Mob(&mob, &by_player),
+            Hurting::Player(12, source(0)),
+        ] {
+            // The probe doubles the strength and mirrors the direction.
+            let (canceled, knock) = push(pushed, &by_seven);
+            assert!(!canceled);
+            assert_eq!(
+                knock,
+                Knock {
+                    strength: 0.8,
+                    x: -1.0,
+                    z: 0.0
+                }
+            );
         }
-        {
-            let _held =
-                knockback_from_holding(7, [Some(ItemStack::new("minecraft:iron_sword", 1)), None]);
-            push(Hurting::Player(12, source(0)));
-        }
-        push(Hurting::Player(12, source(0)));
+        push(Hurting::Mob(&mob, &by_mob), &by_seven);
+        push(Hurting::Mob(&mob, &by_nobody), &by_seven);
+        push(Hurting::Dragon(12, source(5)), &by_seven);
+        push(Hurting::ArmorStand(12, source(0)), &by_seven);
+        let sword = Attack {
+            attacker: 7,
+            held: [Some(ItemStack::new("minecraft:iron_sword", 1)), None],
+        };
+        push(Hurting::Player(12, source(0)), &sword);
+        push(Hurting::Player(12, source(0)), &NO_ATTACK);
     });
     let sword = Some("minecraft:iron_sword".to_string());
     let attackers = [7, 7, 3, 99, 5, 7, 7, 0].map(|attacker| (attacker, None, None));
@@ -194,9 +193,148 @@ fn thorns_name_the_wearer_not_the_incoming_attacker() {
             .clone();
         game.mobs.push(Mob::new(42, kind, Vec3::ZERO, 0.0));
         // The mob's own hit on the player is in progress: its attack names it.
-        let _incoming = knockback_from(42);
-        game.thorns(42);
-        assert_eq!(knockback_attacker(), 42);
+        let incoming = game.attack_of(42);
+        game.with_attack(incoming, |game| {
+            game.thorns(42);
+            assert_eq!(game.current_attack().attacker, 42);
+        });
+        assert_eq!(game.current_attack(), NO_ATTACK);
     });
     assert_eq!(heard.incoming_causing, [7]);
+}
+
+fn player_with_sword(game: &mut super::Game<'_>) {
+    use horizon_client::motion::PlayerMotion;
+    let mut player = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+    player.entity_id = 7;
+    game.player = Some(player);
+    game.inventory[game.selected] = Some(ItemStack::new("minecraft:iron_sword", 1));
+}
+
+fn zombie_at(game: &mut super::Game<'_>, id: u32, at: Vec3) {
+    let kind = game
+        .res
+        .mob_types()
+        .get("minecraft:zombie")
+        .unwrap()
+        .clone();
+    game.mobs.push(Mob::new(id, kind, at, 0.0));
+}
+
+/// A player's melee hit goes `attack_mob` → `hurt_by_player` → `Mob::damage` → the hook:
+/// the hook names the player and the sword it holds, and nothing is left behind afterwards.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_player_melee_hit_names_the_player_and_the_held_sword() {
+    let heard = heard(|game, _| {
+        player_with_sword(game);
+        zombie_at(game, 42, Vec3::new(0.0, 0.0, 1.0));
+        game.attack_mob(0);
+        assert_eq!(game.current_attack(), NO_ATTACK);
+    });
+    let sword = Some("minecraft:iron_sword".to_string());
+    assert!(
+        heard.knocks.contains(&(7, sword, None)),
+        "heard {:?}",
+        heard.knocks
+    );
+    assert_eq!(heard.incoming_causing, [7]);
+}
+
+/// A sweep names the player and its sword too, for each mob it hits.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_sweep_names_the_player_and_the_held_sword() {
+    let heard = heard(|game, _| {
+        player_with_sword(game);
+        zombie_at(game, 42, Vec3::new(0.0, 0.0, 1.0));
+        let area = horizon_core::geometry::Aabb::new(
+            Vec3::new(-1.0, -1.0, -1.0),
+            Vec3::new(1.0, 2.0, 2.0),
+        );
+        game.sweep_damage(area, super::mace::Spared::Nothing, 1.0);
+    });
+    let sword = Some("minecraft:iron_sword".to_string());
+    // The hit's own push, then the sweep's 0.4 along the player's yaw.
+    assert_eq!(
+        heard.knocks,
+        [(7, sword.clone(), None), (7, sword, None)],
+        "heard {:?}",
+        heard.knocks
+    );
+}
+
+/// The attack the player-victim path lands in is lent by `with_attack`, restored when it
+/// returns, and not seen across a real guest swap (the guest's combat tracker has its own).
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn the_attack_scope_nests_restores_and_a_guest_swap_hides_it() {
+    let log = Arc::new(Mutex::new(Heard::default()));
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "probe",
+        Box::new(Probe(log.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        super::native_guest_turn_tests::with_guests(|game| {
+            player_with_sword(game);
+            let outer = game.attack_of(7);
+            assert_eq!(
+                outer.held[0],
+                Some(ItemStack::new("minecraft:iron_sword", 1))
+            );
+            game.with_attack(outer.clone(), |game| {
+                assert_eq!(game.current_attack(), outer);
+                let seen_by_guest = game
+                    .as_guest(12, |game| {
+                        assert_eq!(game.current_attack(), NO_ATTACK, "the outer attack leaked");
+                        let inner = Attack {
+                            attacker: 9,
+                            held: Default::default(),
+                        };
+                        game.with_attack(inner.clone(), |game| {
+                            assert_eq!(game.current_attack(), inner);
+                        });
+                        game.current_attack()
+                    })
+                    .unwrap();
+                assert_eq!(seen_by_guest, NO_ATTACK);
+                assert_eq!(game.current_attack(), outer, "the swap did not restore it");
+            });
+            assert_eq!(game.current_attack(), NO_ATTACK, "the scope leaked");
+        });
+    });
+}
+
+/// What the mob's own random gives next after a push with no direction (the push then draws a
+/// random one, after the hook): with or without a listening mod, and with the push canceled.
+fn next_draw_after_a_directionless_push(cancel: Option<bool>) -> i32 {
+    let drawn = Mutex::new(0);
+    let draw = |game: &mut super::Game<'_>| {
+        zombie_at(game, 42, Vec3::ZERO);
+        let hit = Damage::of(DamageKind::Generic);
+        let mut mob = game.mobs.pop().unwrap();
+        mob.knockback(damage_level_of!(game), 0.4, 0.0, 0.0, &hit);
+        *drawn.lock().unwrap() = mob.random.next_int();
+    };
+    match cancel {
+        None => with_game(draw),
+        Some(cancel) => {
+            let log = Arc::new(Mutex::new(Heard::default()));
+            log.lock().unwrap().cancel = cancel;
+            let mods: mod_api::Mods =
+                vec![mod_api::ModEntry::new("probe", Box::new(Probe(log)))].into();
+            mod_api::testing::with_mods(mods, || with_game(draw));
+        }
+    }
+    drawn.into_inner().unwrap()
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn the_push_draws_the_same_stream_with_and_without_a_mod_and_a_canceled_one_draws_nothing() {
+    let without = next_draw_after_a_directionless_push(None);
+    assert_eq!(next_draw_after_a_directionless_push(Some(false)), without);
+    let canceled = next_draw_after_a_directionless_push(Some(true));
+    assert_ne!(canceled, without, "a canceled push must not draw");
 }

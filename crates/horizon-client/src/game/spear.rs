@@ -201,7 +201,7 @@ impl Game<'_> {
         let Some(p) = self.player.as_ref() else {
             return false;
         };
-        let _attacker = self.knockback_scope(p.entity_id);
+        let attack = self.attack_of(p.entity_id);
         let from = [p.position.x, p.position.y, p.position.z];
         // The enchantments' share, scaled by the attack strength unless the
         // weapon is in use.
@@ -229,10 +229,10 @@ impl Game<'_> {
         if deals_knockback {
             let (xd, zd) = self.extra_knockback_direction();
             let source = Damage::spear(from);
-            let level = crate::game::entity::damage_level_of!(self);
+            let level = crate::game::entity::damage_level_of!(self, &attack);
             self.mobs[index].knockback(level, 0.4, xd, zd, &source);
             let (strength, _) = self.extra_knockback(&kind, 0.0);
-            let level = crate::game::entity::damage_level_of!(self);
+            let level = crate::game::entity::damage_level_of!(self, &attack);
             self.mobs[index].knockback(level, f64::from(strength), xd, zd, &source);
             // ...and the attacker stops sprinting.
             self.stop_sprint_after_extra_knockback();
