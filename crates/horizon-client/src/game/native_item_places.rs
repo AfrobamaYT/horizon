@@ -1509,6 +1509,76 @@ mod tests {
     }
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_crafter_puts_into_a_mod_entity_and_dispenses_only_what_it_refuses() {
+        use horizon_client::{chunk::Chunk, mod_api::NativeBlockUpdateFlags};
+        use horizon_core::{position::BlockPos, random::RandomSource as _};
+
+        let bin = Bin::default();
+        with_bin_pigs(&bin, |game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let base = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:crafter")
+                .unwrap();
+            let crafter = game
+                .with_props(base, &[("orientation", "down_east")])
+                .unwrap();
+            let level = game.native_level("minecraft:overworld").unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [0, 64, 0],
+                crafter,
+                NativeBlockUpdateFlags::NONE
+            ));
+            pig(game, 700, 63.0);
+            for (before, after, refused) in [(0, 4, 0), (62, 64, 2), (64, 64, 4)] {
+                *bin.held.lock().unwrap() =
+                    (before > 0).then(|| ("minecraft:stick".into(), before));
+                let Some(BlockEntity::Crafter(c)) = game.world.block_entities.get_mut(&(0, 64, 0))
+                else {
+                    panic!("the placed crafter is missing");
+                };
+                c.items[0] = Some(ItemStack::new("minecraft:oak_planks", 1));
+                c.items[3] = Some(ItemStack::new("minecraft:oak_planks", 1));
+                let dropped = game.dropped.len();
+                let mut random = game.world.random.clone();
+                game.dispense_from(BlockPos::new(0, 64, 0), crafter)
+                    .unwrap();
+                assert_eq!(
+                    *bin.held.lock().unwrap(),
+                    Some(("minecraft:stick".into(), after))
+                );
+                let Some(BlockEntity::Crafter(c)) = game.world.block_entities.get(&(0, 64, 0))
+                else {
+                    panic!("the crafter is gone");
+                };
+                assert!(c.items.iter().all(Option::is_none));
+                let output = &game.dropped[dropped..];
+                if refused == 0 {
+                    assert!(output.is_empty());
+                    // One candidate-selection draw, including a single candidate, and no
+                    // dispensing draws when the handler took the whole result.
+                    random.next_int_bound(1).unwrap();
+                    assert_eq!(game.world.random.clone().next_long(), random.next_long());
+                } else {
+                    assert_eq!(output.len(), 1);
+                    assert_eq!(output[0].stack, ItemStack::new("minecraft:stick", refused));
+                }
+            }
+            assert!(!game.world.block_entities.contains_key(&(0, 63, 0)));
+            let sides = bin.sides.lock().unwrap();
+            assert!(!sides.is_empty());
+            assert!(sides.iter().all(|side| *side == Some(Direction::Up)));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mod_without_an_automation_provider_leaves_hoppers_on_the_vanilla_path() {
         use horizon_client::mod_api::{
             self, ENTITY_ENERGY, Hooks, ModEntry, Mods, Registrar, has_entity_providers,
