@@ -848,7 +848,7 @@ fn effects_from_blocks(
                             let known_movement =
                                 w.controlling_player_movement.unwrap_or(m.velocity);
                             if let Some(velocity) =
-                                powder_snow_particle_velocity(known_movement, level_random)
+                                powder_snow_particle_velocity(known_movement, level.random())
                             {
                                 events.push(MobEvent::PowderSnowParticle {
                                     at: [m.position.x, f64::from(y + 1), m.position.z],
@@ -876,12 +876,12 @@ mod powder_snow_particle_tests {
     fn a_controlled_mount_uses_its_riders_known_movement() {
         let seed = (0..1000)
             .find(|seed| {
-                let mut random = LegacyRandom::new(*seed);
+                let mut random = horizon_core::random::LegacyRandom::new(*seed);
                 random.next_boolean()
             })
             .unwrap();
         let player_movement = Vec3::new(0.2, 0.0, 0.0);
-        let mut expected_random = LegacyRandom::new(seed);
+        let mut expected_random = horizon_core::random::LegacyRandom::new(seed);
         let expected =
             powder_snow_particle_velocity(player_movement, &mut expected_random).unwrap();
 
@@ -910,12 +910,12 @@ mod powder_snow_particle_tests {
                 w.controlling_player_movement = Some(player_movement);
                 let kind = std::sync::Arc::new(types.types["minecraft:horse"].clone());
                 let mut horse = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
-                horse.extra.saddled = true;
+                horse.extra.set_saddled(true);
                 horse.rider = Some(crate::mobs::equine::Rider::default());
-                let mut random = LegacyRandom::new(seed);
+                let mut level = crate::health::TestLevel::new(seed);
                 let mut events = Vec::new();
 
-                effects_from_blocks(&mut horse, &w, &mut random, &mut events);
+                effects_from_blocks(&mut horse, &w, &mut level.level(), &mut events);
 
                 assert!(events.iter().any(|event| matches!(
                     event,
@@ -4569,11 +4569,11 @@ mod iron_golem_push_tests {
                     Vec3::new(0.5, 64.0, 0.5),
                     0.0,
                 );
-                m.extra.main_hand = hand.map(Arc::from);
-                let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+                m.extra.set_main_hand(hand.map(Arc::from));
+                let (mut test_level, mut events) = (crate::health::TestLevel::new(0), Vec::new());
                 let mut cx = Cx {
                     w,
-                    lr: &mut lr,
+                    level: &mut test_level.level(),
                     events: &mut events,
                 };
                 do_hurt_target(&mut m, Who::Player, &mut cx);
