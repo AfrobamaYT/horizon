@@ -117,6 +117,7 @@ mod discord;
 mod dispense_fixture;
 mod dispenser;
 mod dragon;
+mod durability;
 mod dynamic_lights;
 mod enchant_effects;
 mod end;
@@ -13783,33 +13784,21 @@ impl Game<'_> {
         }
     }
     pub(super) fn damage_held(&mut self, amount: u32) {
-        if self.creative {
+        let Some(stack) = self.held().cloned() else {
+            return;
+        };
+        let (updated, broken) =
+            self.damage_equipment_stack(&stack, amount.min(i32::MAX as u32) as i32, true);
+        if self.held() != Some(&stack) {
             return;
         }
-        let amount = match self.held().cloned() {
-            Some(held) => self.wear(&held, amount),
-            None => amount,
-        };
-        let max = self
-            .held()
-            .and_then(|s| self.items().get(&s.item))
-            .map_or(0, |i| i.max_damage);
-        let cell = self.held_mut();
-        if let Some(stack) = cell.as_mut()
-            && max > 0
-        {
-            stack.damage += amount;
-            if stack.damage >= max {
-                let broken = stack.item.clone();
-                let gone = stack.clone();
-                *cell = None;
-                self.award_stat("broken", &broken, 1);
-                // LivingEntity.onEquippedItemBroken: the sound and the crumbs.
-                self.player_equipment_broke(
-                    horizon_world::player_inventory::EquipmentSlot::MainHand,
-                    &gone,
-                );
-            }
+        *self.held_mut() = updated;
+        if let Some(broken) = broken {
+            self.award_stat("broken", &broken.item, 1);
+            self.player_equipment_broke(
+                horizon_world::player_inventory::EquipmentSlot::MainHand,
+                &broken,
+            );
         }
     }
     /// `ItemStack.hurtWithoutBreaking`: Unbreaking applies, but the stack stops at
