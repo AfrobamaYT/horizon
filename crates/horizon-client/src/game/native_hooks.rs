@@ -65,10 +65,10 @@ pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProbl
 use mod_api::{
     self, Answered, ClientReloadListeners, EffectTickChange, EntityRef, EquipmentSlot,
     GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
-    NativeHandRender,
-    NativeItemDrop, NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood,
-    NativeProgressType, NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening,
-    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    NativeHandRender, NativeItemDrop, NativeLifecycleContext, NativeNoteBlockChange,
+    NativePlayerFood, NativeProgressType, NativeServerPlayer, PathComputationType,
+    RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase, TicketController,
+    ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
