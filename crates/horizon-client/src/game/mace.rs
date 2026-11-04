@@ -547,10 +547,10 @@ impl Game<'_> {
                     direct: horizon_client::health::knockback_attacker(),
                     position: None,
                 };
-                if horizon_client::health::knockback_canceled(
-                    horizon_client::health::Hurting::ArmorStand(id as i32, source),
-                    &mut knock,
-                ) || knock.strength <= 0.0
+                let level = crate::game::entity::damage_level_of!(self);
+                let pushed = horizon_client::health::Hurting::ArmorStand(id as i32, source);
+                if horizon_client::health::knockback_canceled(level.reborrow(), pushed, &mut knock)
+                    || knock.strength <= 0.0
                 {
                     continue;
                 }
@@ -588,7 +588,8 @@ impl Game<'_> {
                 if old_health > 0.0 && !self.mobs[i].alive() {
                     self.native_kill_event(i);
                 }
-                self.mobs[i].knockback(0.4, xd, zd, &source);
+                let level = crate::game::entity::damage_level_of!(self);
+                self.mobs[i].knockback(level, 0.4, xd, zd, &source);
                 self.last_hurt_by_player
                     .insert(self.mobs[i].id, self.lan_acting);
                 self.post_attack(i);
