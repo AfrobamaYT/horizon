@@ -300,6 +300,47 @@ pub fn state(
         .unwrap_or_else(|| registry.default_state("minecraft:air").unwrap())
 }
 
+/// The block-writing tail of `StructurePiece.placeBlock`, for pieces that
+/// place by absolute position (a mod's): set with flag 2, schedule the fluid
+/// the position held, and mark the blocks that must shape to their neighbours
+/// for a later pass. The chunk-box clipping stays with the caller, as
+/// vanilla's `placeBlock` keeps it in the piece.
+pub fn write_block(
+    world: &mut dyn PieceWorld,
+    resources: &StructureResources,
+    pos: [i32; 3],
+    state: BlockStateId,
+) -> Result<bool> {
+    world.set(pos, state, 2)?;
+    let fluid = world.fluid(pos)?;
+    if fluid.kind() != crate::fluid::FluidKind::Empty {
+        world.fluid_tick(pos, fluid.kind(), 0)?;
+    }
+    let name = resources
+        .registry
+        .state(state)
+        .map(|s| s.name.as_str())
+        .unwrap_or("");
+    if matches!(
+        name,
+        "minecraft:nether_brick_fence"
+            | "minecraft:torch"
+            | "minecraft:wall_torch"
+            | "minecraft:oak_fence"
+            | "minecraft:spruce_fence"
+            | "minecraft:dark_oak_fence"
+            | "minecraft:pale_oak_fence"
+            | "minecraft:acacia_fence"
+            | "minecraft:birch_fence"
+            | "minecraft:jungle_fence"
+            | "minecraft:ladder"
+            | "minecraft:iron_bars"
+    ) {
+        world.post_process(pos)?;
+    }
+    Ok(true)
+}
+
 /// A placed structure piece.
 pub trait LegacyPiece: std::fmt::Debug + Send + Sync {
     fn bounding_box(&self) -> BoundingBox;
@@ -459,29 +500,7 @@ impl PieceFrame {
         if self.rotation != Rotation::None {
             state = c.resources.transforms.rotate(state, self.rotation);
         }
-        c.world.set(pos, state, 2)?;
-        let fluid = c.world.fluid(pos)?;
-        if fluid.kind() != crate::fluid::FluidKind::Empty {
-            c.world.fluid_tick(pos, fluid.kind(), 0)?;
-        }
-        if matches!(
-            c.name(state),
-            "minecraft:nether_brick_fence"
-                | "minecraft:torch"
-                | "minecraft:wall_torch"
-                | "minecraft:oak_fence"
-                | "minecraft:spruce_fence"
-                | "minecraft:dark_oak_fence"
-                | "minecraft:pale_oak_fence"
-                | "minecraft:acacia_fence"
-                | "minecraft:birch_fence"
-                | "minecraft:jungle_fence"
-                | "minecraft:ladder"
-                | "minecraft:iron_bars"
-        ) {
-            c.world.post_process(pos)?;
-        }
-        Ok(true)
+        write_block(c.world, c.resources, pos, state)
     }
     pub fn get(&self, c: &mut PieceContext<'_>, x: i32, y: i32, z: i32) -> Result<BlockStateId> {
         let pos = self.world_pos(x, y, z);

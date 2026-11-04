@@ -19,6 +19,9 @@ pub use crate::part_table::{
     has_scoped_hook, install_parts, mark_game_thread, parts, resolve_parts,
 };
 pub use crate::phase::install_packages;
+/// The registered structure types, for the executable to hand to the engine's
+/// `StructureRegistry` before any world opens.
+pub use crate::structure_type::installed_structure_types;
 #[cfg(any(test, feature = "testing"))]
 pub use crate::{part_table::tests as part_tests, phase::with_test_packages};
 
