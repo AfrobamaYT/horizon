@@ -349,8 +349,8 @@ impl Game<'_> {
                 behind: None,
                 focus: None,
             });
+            game.capture(false);
         });
-        self.capture(false);
     }
 
     /// The command just clicked left this screen: if it asks, no returns there.
