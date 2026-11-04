@@ -3,7 +3,9 @@
 //! Raw injection schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
 mod jar;
+mod wasm;
 pub use jar::JarRef;
+pub use wasm::{MAX_WASM, Wasm, WasmError, sha512_of};
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -56,6 +58,8 @@ pub struct Manifest {
     pub jar: Vec<JarRef>,
     /// Exact build pins and optional raw injections for a code mod.
     pub native: Option<Native>,
+    /// A wasm mod's `mod.wasm`, its toolchain and what it was linked against.
+    pub wasm: Option<Wasm>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -232,7 +236,10 @@ impl Manifest {
                 return Err(format!("{MANIFEST}: invalid dependency id {id:?}"));
             }
         }
-        if m.native.is_none() && !m.dependencies.is_empty() {
+        if m.native.is_some() && m.wasm.is_some() {
+            return Err(format!("{MANIFEST}: a mod is [native] or [wasm], not both"));
+        }
+        if m.native.is_none() && m.wasm.is_none() && !m.dependencies.is_empty() {
             return Err(format!(
                 "{MANIFEST}: content mod dependencies are not supported yet"
             ));
@@ -348,12 +355,47 @@ impl Package {
         self.manifest.native.is_some()
     }
 
+    /// Whether the package carries Rust source: a native mod, or a wasm mod built from it.
+    fn has_source(&self) -> bool {
+        self.manifest.native.is_some()
+            || self
+                .manifest
+                .wasm
+                .as_ref()
+                .is_some_and(|w| w.built_with().is_none())
+    }
+
+    /// The package's `mod.wasm`, checked against its `[wasm]` section.
+    pub fn read_wasm(path: &Path) -> Result<Vec<u8>, String> {
+        let package = Self::read(path)?;
+        let wasm = package
+            .manifest
+            .wasm
+            .ok_or(WasmError::Undeclared.to_string())?;
+        let bytes = if path.is_dir() {
+            std::fs::read(path.join(WASM)).map_err(|e| format!("{WASM}: {e}"))?
+        } else {
+            let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+            let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+            let mut bytes = Vec::new();
+            zip.by_name(WASM)
+                .map_err(|_| WasmError::Missing.to_string())?
+                .take(MAX_WASM + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|e| format!("{WASM}: {e}"))?;
+            bytes
+        };
+        wasm.check(&bytes).map_err(|e| e.to_string())?;
+        Ok(bytes)
+    }
+
     /// Read a flat `.hmod` or project folder, without executing native code.
     pub fn read(path: &Path) -> Result<Self, String> {
         let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
         let mut icon = None;
         let mut has_cargo = false;
         let mut has_source = false;
+        let has_wasm;
         let toml = if metadata.is_dir() {
             for old in [
                 "horizon-native.json",
@@ -394,6 +436,7 @@ impl Package {
                 Err(e) => return Err(format!("icon.png: {e}")),
             }
             check_folder_file(path, MANIFEST)?;
+            has_wasm = std::fs::symlink_metadata(path.join(WASM)).is_ok();
             for (name, _) in crate::content::folder_files(path)? {
                 check_folder_file(path, &name)?;
             }
@@ -418,7 +461,12 @@ impl Package {
             let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
             return Self::read_zip(&mut zip);
         };
-        Self::from_parts(&toml, icon, has_cargo, has_source)
+        let package = Self::from_parts(&toml, icon, has_cargo, has_source, has_wasm)?;
+        if let Some(wasm) = &package.manifest.wasm {
+            let bytes = std::fs::read(path.join(WASM)).map_err(|e| format!("{WASM}: {e}"))?;
+            wasm.check(&bytes).map_err(|e| e.to_string())?;
+        }
+        Ok(package)
     }
 
     /// Read and validate an archive, including all selected source and resource entries.
@@ -426,6 +474,7 @@ impl Package {
         let mut icon = None;
         let mut has_cargo = false;
         let mut has_source = false;
+        let mut has_wasm = false;
         let mut entries = Vec::new();
         for i in 0..zip.len() {
             let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
@@ -444,6 +493,11 @@ impl Package {
                 continue;
             }
             has_cargo |= name == "Cargo.toml";
+            // The one executable a package may carry, checked against `[wasm]` below.
+            if name == WASM && matches!(mode & 0o170000, 0 | 0o100000) {
+                has_wasm = true;
+                continue;
+            }
             check_file(&name, mode, || Ok(&mut entry)).map_err(|e| e.to_string())?;
             if name == "icon.png" {
                 if icon.is_some() {
@@ -471,8 +525,17 @@ impl Package {
         if toml.len() as u64 > MAX_MANIFEST {
             return Err(format!("{MANIFEST}: over {} MiB", MAX_MANIFEST >> 20));
         }
-        let package = Self::from_parts(&toml, icon, has_cargo, has_source)?;
-        if package.manifest.native.is_some() {
+        let package = Self::from_parts(&toml, icon, has_cargo, has_source, has_wasm)?;
+        if let Some(wasm) = &package.manifest.wasm {
+            let mut bytes = Vec::new();
+            zip.by_name(WASM)
+                .map_err(|e| format!("{WASM}: {e}"))?
+                .take(MAX_WASM + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|e| format!("{WASM}: {e}"))?;
+            wasm.check(&bytes).map_err(|e| e.to_string())?;
+        }
+        if package.has_source() || package.manifest.wasm.is_some() {
             let mut names = std::collections::HashSet::new();
             let mut source_count = 0usize;
             let mut source_bytes = 0u64;
@@ -490,6 +553,7 @@ impl Package {
                 if !directory {
                     if name != MANIFEST
                         && name != "icon.png"
+                        && !(name == WASM && package.manifest.wasm.is_some())
                         && !name.starts_with("assets/")
                         && !name.starts_with("data/")
                         && !source_file(&name)
@@ -531,12 +595,19 @@ impl Package {
         icon: Option<crate::icon::Icon>,
         has_cargo: bool,
         has_source: bool,
+        has_wasm: bool,
     ) -> Result<Self, String> {
         let manifest = Manifest::parse(text)?;
-        if has_cargo != manifest.native.is_some() || has_source != has_cargo {
-            return Err("inconsistent native package declaration and source".into());
+        let package = Package { manifest, icon };
+        if has_cargo != package.has_source() || has_source != has_cargo {
+            return Err("inconsistent code package declaration and source".into());
         }
-        Ok(Package { manifest, icon })
+        match (has_wasm, package.manifest.wasm.is_some()) {
+            (true, false) => return Err(WasmError::Undeclared.to_string()),
+            (false, true) => return Err(WasmError::Missing.to_string()),
+            _ => {}
+        }
+        Ok(package)
     }
     /// Whether the mod at `path` (a `.hmod` or a folder) has a [`MANIFEST`].
     pub fn has_manifest(path: &Path) -> bool {
@@ -562,7 +633,12 @@ impl Package {
         if let Some(icon) = &self.icon {
             files.insert("icon.png".to_string(), icon.bytes().to_vec());
         }
-        if self.manifest.native.is_some() {
+        if let Some(wasm) = &self.manifest.wasm {
+            let bytes = std::fs::read(root.join(WASM)).map_err(|e| format!("{WASM}: {e}"))?;
+            wasm.check(&bytes).map_err(|e| e.to_string())?;
+            files.insert(WASM.to_owned(), bytes);
+        }
+        if self.has_source() {
             fn walk(
                 root: &Path,
                 dir: &Path,
@@ -640,7 +716,12 @@ impl Package {
         };
         put(MANIFEST, manifest_text.as_bytes())?;
         for (name, bytes) in files {
-            let source = manifest.native.is_some() && source_file(name) && plain_path(name);
+            let code = manifest.native.is_some() || manifest.wasm.is_some();
+            let source = code && source_file(name) && plain_path(name);
+            if *name == WASM && manifest.wasm.is_some() {
+                put(name, bytes)?;
+                continue;
+            }
             if *name != "icon.png" && !source {
                 crate::content::check_path(name)?;
             }
@@ -986,6 +1067,30 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn a_wasm_mod_carries_exactly_its_declared_module() {
+        let module = b"\0asm\x01\0\0\0".to_vec();
+        let text = format!(
+            "{}\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"1.99.1\"\nbuilt_with = \"test\"\n",
+            EXAMPLE.trim_end(),
+            sha512_of(&module)
+        );
+        let bytes = Package::write_files(&text, &[(WASM, &module)]).unwrap();
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
+        assert!(Package::read_zip(&mut zip).unwrap().manifest.wasm.is_some());
+        let error = Package::write_files(&text, &[(WASM, b"\0asm\x02\0\0\0")]).unwrap_err();
+        assert_eq!(error, WasmError::Hash.to_string());
+        assert_eq!(
+            Package::write_files(&text, &[]).unwrap_err(),
+            WasmError::Missing.to_string()
+        );
+        let both = format!(
+            "{text}\n[native]\ngame = \"g\"\nhorizon = \"{0}\"\nmixins = \"{0}\"\n",
+            "a".repeat(40)
+        );
+        assert!(Manifest::parse(&both).unwrap_err().contains("not both"));
+    }
+
+    #[test]
     fn content_round_trips_and_executable_files_are_refused() {
         use std::io::Write;
         let root = std::env::temp_dir().join(format!("horizon-mods-{}", std::process::id()));
@@ -1021,15 +1126,26 @@ capabilities = ["registries"]
             zip.write_all(bytes).unwrap();
             zip.finish().unwrap();
             let error = Package::read(&archive).err().unwrap();
-            assert!(
-                error.contains("unsupported executable file"),
-                "{name}: {error}"
-            );
+            // The one place a module may sit is refused for want of `[wasm]`.
+            let expected = if *name == WASM {
+                WasmError::Undeclared.to_string()
+            } else {
+                "unsupported executable file".to_string()
+            };
+            assert!(error.contains(&expected), "{name}: {error}");
             if name.starts_with("assets/") {
                 let error = Package::read(&dir).err().unwrap();
                 assert!(
                     error.contains("unsupported executable file"),
                     "{name}: {error}"
+                );
+            } else if name.trim_start_matches("./") == WASM {
+                // On disk `./mod.wasm` is the top-level module too.
+                let undeclared = WasmError::Undeclared.to_string();
+                assert_eq!(
+                    Package::read(&dir).err(),
+                    Some(undeclared),
+                    "unpackaged {name}"
                 );
             } else {
                 assert!(Package::read(&dir).is_ok(), "unpackaged {name}");

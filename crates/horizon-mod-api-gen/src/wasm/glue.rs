@@ -11,7 +11,6 @@ use super::ty::{
     Case, Def, Kind, List, Payload, Str, Ty, Types, bound_ident, bound_type, wit_ident,
 };
 use super::wit::{self, Signature, writable};
-use super::{EXPORTS, Method};
 use heck::ToSnakeCase;
 use std::fmt::Write;
 
@@ -640,9 +639,4 @@ pub(super) fn unpack(sig: &Signature) -> (String, Vec<String>) {
         _ => format!("({})", names.join(", ")),
     };
     (pattern, names)
-}
-
-/// Whether `method` is one a mod implements.
-pub(super) fn exported(method: &Method) -> bool {
-    EXPORTS.contains(&method.owner)
 }

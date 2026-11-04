@@ -8,7 +8,7 @@ use syn::{Fields, GenericArgument, Item, PathArguments, Type};
 
 /// A Rust type as it crosses: the WIT type it lowers to and how its values convert.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum Ty {
+pub(crate) enum Ty {
     Unit,
     /// A primitive: its Rust and WIT names.
     Prim(&'static str, &'static str),
@@ -30,7 +30,7 @@ pub(super) enum Ty {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum Str {
+pub(crate) enum Str {
     Owned,
     Borrowed,
     Static,
@@ -39,7 +39,7 @@ pub(super) enum Str {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum List {
+pub(crate) enum List {
     Vec,
     /// A map, as its container names it, crossing as a list of pairs.
     Map(&'static str),
@@ -50,7 +50,7 @@ pub(super) enum List {
 
 /// A named type's definition.
 #[derive(Debug)]
-pub(super) struct Def {
+pub(crate) struct Def {
     /// Its path as the generated glue names it (`mod_api::NativeBlockClick`).
     pub(super) rust: String,
     /// Its WIT name, also the bindings' type name in upper camel case.
@@ -61,7 +61,7 @@ pub(super) struct Def {
 }
 
 #[derive(Debug)]
-pub(super) enum Kind {
+pub(crate) enum Kind {
     Record(Vec<Field>),
     /// A tuple struct with public fields.
     TupleRecord(Vec<Ty>),
@@ -78,21 +78,21 @@ pub(super) enum Kind {
 }
 
 #[derive(Debug)]
-pub(super) struct Field {
+pub(crate) struct Field {
     pub(super) rust: String,
     pub(super) wit: String,
     pub(super) ty: Ty,
 }
 
 #[derive(Debug)]
-pub(super) struct Case {
+pub(crate) struct Case {
     pub(super) rust: String,
     pub(super) wit: String,
     pub(super) payload: Payload,
 }
 
 #[derive(Debug)]
-pub(super) enum Payload {
+pub(crate) enum Payload {
     None,
     Tuple(Vec<Ty>),
     /// Named fields, carried by a generated record named `record`.
@@ -131,7 +131,7 @@ pub(super) const CODECS: &[(&str, &str)] = &[
 ];
 
 /// The resolved types, by definition.
-pub(super) struct Types<'a> {
+pub(crate) struct Types<'a> {
     pub(super) index: Index<'a>,
     pub(super) defs: Vec<Def>,
     /// Why each def can't cross, if it can't (`wit::refuse`).
