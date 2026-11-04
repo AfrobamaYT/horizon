@@ -51,7 +51,7 @@ use horizon_client::{
     extras_hud::Corners,
     fast_hash::FxHashMap,
     first_person::Hand,
-    health::{DamageContainer, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock},
+    health::{DamageContainer, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock, Victim},
     hud::{HudBatch, rgba},
     items::ItemStack,
     keybinds,
@@ -6674,73 +6674,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_mob_effect_added(self, effect, entity, amplifier);
     }
-    /// `LivingEntity.hurtServer`, past its guards (invulnerable, dead, fire
-    /// with fire resistance), is about to hurt entity `entity` of type `kind`
-    /// (`minecraft:zombie`, `minecraft:player`) by `amount` of `damage_type`
-    /// (`minecraft:fall`), from the source's `causing` entity
-    /// (`DamageSource.getEntity`: the shooter of an arrow) and `direct` one
-    /// (`getDirectEntity`: the arrow), 0 for none or not known yet
-    /// (docs/native-mods.md). Change `amount`, or set `canceled`,
-    /// and nothing of `hurtServer` itself happens (no damage, hurt sound,
-    /// knockback, invulnerable time, statistics or criteria); the caller acts
-    /// as on a refused hit, except that a canceled hit on the ender dragon
-    /// still counts as landed (`EnderDragon.hurt` returns true whatever
-    /// `reallyHurt` did: the arrow is spent, the melee effects run). It runs
-    /// on the thread that ticks the world (the server thread): state shared with render thread hooks needs synchronising.
-    /// No `self`: the game is in the middle of the hit.
-    pub(super) fn native_living_incoming_damage(
-        entity: i32,
-        kind: &str,
-        damage_type: &str,
-        causing: i32,
-        direct: i32,
-        amount: &mut f32,
-        canceled: &mut bool,
-    ) {
-        mod_api::dispatch_living_incoming_damage(
-            entity,
-            kind,
-            damage_type,
-            causing,
-            direct,
-            amount,
-            canceled,
-        );
-    }
-    /// A player's weapon hit on a mob, before `Mob::damage_with` borrows the
-    /// victim: melee, sweep and spear hits, including LAN guests. Unlike v1,
-    /// this has a host and snapshots of the weapon, victim position/view and
-    /// DamageSource position. The acting player's network id is `causing`
-    /// (also the direct entity). Weapon enchantments include their levels.
-    /// Runs after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before v1; cancellation refuses
-    /// delivery. Other damage routes still only fire v1.
-    pub(super) fn native_living_incoming_damage_v2(
-        &mut self,
-        entity: i32,
-        kind: &str,
-        damage_type: &str,
-        causing: i32,
-        source_position: Option<[f64; 3]>,
-        victim_position: [f64; 3],
-        victim_view: [f64; 3],
-        weapon: Option<&ItemStack>,
-        amount: &mut f32,
-        canceled: &mut bool,
-    ) {
-        mod_api::dispatch_living_incoming_damage_v2(
-            self,
-            entity,
-            kind,
-            damage_type,
-            causing,
-            source_position,
-            victim_position,
-            victim_view,
-            weapon,
-            amount,
-            canceled,
-        );
-    }
     /// NeoForge's `LivingShieldBlockEvent`: entity `entity` of type `kind`
     /// (`minecraft:player`, `minecraft:zombie`) is hit for `damage` from `source` (its
     /// type and entities, as `native_living_incoming_damage` names them), and
@@ -6986,6 +6919,34 @@ pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
 pub(super) struct HitLevel<'a>(pub(super) DamageLevel<'a>);
 
 impl HitLevel<'_> {
+    /// NeoForge's `LivingIncomingDamageEvent`: `LivingEntity.hurtServer`, past its guards (an
+    /// invulnerable or dead entity, fire on a fire-resistant one), is about to hurt entity
+    /// `entity` of type `kind` (`minecraft:zombie`, `minecraft:player`) by `source`: its damage
+    /// type (`minecraft:fall`), causing entity (`DamageSource.getEntity`: the shooter of an
+    /// arrow), direct entity (`getDirectEntity`: the arrow), 0 for none or not known, and
+    /// where it comes from (`getSourcePosition`). `victim` is where the entity stands and
+    /// looks, and `weapon` the direct entity's weapon (`getWeaponItem`) when it is known.
+    /// `container` holds the damage before any reduction: change its `new_damage`, or the
+    /// invulnerability ticks a fresh hit leaves (vanilla's 20), or set `canceled` and nothing
+    /// of `hurtServer` happens (no damage, hurt sound, knockback, cooldown, statistics or
+    /// criteria); a canceled hit on the ender dragon still counts as landed (`EnderDragon.hurt`
+    /// returns true whatever `reallyHurt` did). It fires on every damage route, for players,
+    /// mobs and the ender dragon. The level is the hit's: its blocks, random and own
+    /// attachments; the hurt entity is in the middle of its hit.
+    pub(super) fn native_living_incoming_damage(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        victim: &Victim,
+        weapon: Option<&ItemStack>,
+        container: &mut DamageContainer,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_living_incoming_damage(
+            self, entity, kind, source, victim, weapon, container, canceled,
+        );
+    }
     /// NeoForge's `LivingDamageEvent.Pre`: `LivingEntity.actuallyHurt` of entity `entity` of
     /// type `kind` (`minecraft:player`, `minecraft:zombie`) by `source` (named as
     /// `native_living_incoming_damage` names it) has taken armor and magic, and the absorption
@@ -7020,6 +6981,33 @@ impl HitLevel<'_> {
     ) {
         mod_api::dispatch_living_damage_post(self, entity, kind, source, container);
     }
+}
+
+/// `native_living_incoming_damage` for the damage code (`health::HURT_SERVER`): whether it
+/// canceled the hit.
+pub(super) fn incoming_damage(
+    level: DamageLevel<'_>,
+    hurting: Hurting<'_>,
+    victim: Victim,
+    container: &mut DamageContainer,
+) -> bool {
+    if !mod_api::listened(mod_api::HookId::LivingIncomingDamage) {
+        return false;
+    }
+    let (entity, kind, source) = hurt_server_args(hurting);
+    let mut canceled = false;
+    horizon_client::health::with_weapon_of(source.direct, |weapon| {
+        HitLevel(level).native_living_incoming_damage(
+            entity,
+            kind,
+            &source,
+            &victim,
+            weapon,
+            container,
+            &mut canceled,
+        );
+    });
+    canceled
 }
 
 /// `native_living_damage_pre` for the damage code (`health::DAMAGE_PRE`).
@@ -7140,6 +7128,7 @@ pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
         damage_type,
         causing,
         direct,
+        ..
     } = source;
     let mut canceled = false;
     if !stand {
@@ -7204,27 +7193,6 @@ pub(super) fn block_contact(
     }
 }
 
-/// `native_living_incoming_damage` for the damage code (`health::HURT_SERVER`): whether
-/// it canceled the hit. Its one caller.
-pub(super) fn hurt_server(hurting: Hurting<'_>, amount: &mut f32) -> bool {
-    let (entity, kind, source) = hurt_server_args(hurting);
-    let HurtSource {
-        damage_type,
-        causing,
-        direct,
-    } = source;
-    let mut canceled = false;
-    Game::native_living_incoming_damage(
-        entity,
-        kind,
-        damage_type,
-        causing,
-        direct,
-        amount,
-        &mut canceled,
-    );
-    canceled
-}
 /// `native_living_incoming_damage`'s entity, entity type and source for a hit.
 fn hurt_server_args(hurting: Hurting<'_>) -> (i32, &str, HurtSource<'_>) {
     match hurting {
@@ -7235,17 +7203,20 @@ fn hurt_server_args(hurting: Hurting<'_>) -> (i32, &str, HurtSource<'_>) {
     }
 }
 /// A mob's damage as its `DamageSource`: the causing entity is known when it
-/// is a mob, and is the direct one too when it deals the damage itself.
+/// is a mob, or the player whose attack scope the hit lands in, and is the direct one too
+/// when it deals the damage itself.
 fn mob_source(damage: &Damage) -> HurtSource<'static> {
     let causing = match damage.attacker {
         Some(Who::Mob(id)) => id as i32,
-        _ => 0,
+        Some(Who::Player) => horizon_client::health::knockback_attacker(),
+        None => 0,
     };
     let melee = super::creatures::melee(damage.kind);
     HurtSource {
         damage_type: super::creatures::source_damage_type(*damage),
         causing,
         direct: if melee { causing } else { 0 },
+        position: damage.from,
     }
 }
 
@@ -10772,8 +10743,8 @@ mod tests {
         }
     }
 
-    /// The damage hook gets a mob's source from its damage: the causing mob,
-    /// the direct one when it deals the damage itself.
+    /// The damage hook gets a mob's source from its damage: the causing mob or attacking
+    /// player, the direct one when it deals the damage itself.
     #[test]
     fn the_damage_hook_names_the_source() {
         use super::{HurtSource, Hurting, hurt_server_args, mob_source};
@@ -10792,14 +10763,19 @@ mod tests {
         assert_eq!(source(K::Arrow, zombie), ("minecraft:arrow", 3, 0));
         let blast = source(K::Explosion, zombie);
         assert_eq!(blast, ("minecraft:player_explosion", 3, 0));
-        // A player behind a mob's hit isn't known yet, nor is a fall's source.
+        // A player behind a mob's hit is the one whose attack it lands in (none outside one);
+        // a fall has no source.
         let hit = source(K::PlayerAttack, Some(Who::Player));
         assert_eq!(hit, ("minecraft:player_attack", 0, 0));
+        let _attack = horizon_client::health::knockback_from(7);
+        let hit = source(K::PlayerAttack, Some(Who::Player));
+        assert_eq!(hit, ("minecraft:player_attack", 7, 7));
         assert_eq!(source(K::Fall, None), ("minecraft:fall", 0, 0));
         let arrow = HurtSource {
             damage_type: "minecraft:arrow",
             causing: 4,
             direct: 0,
+            position: None,
         };
         let player = (2, "minecraft:player", arrow);
         assert_eq!(hurt_server_args(Hurting::Player(2, arrow)), player);

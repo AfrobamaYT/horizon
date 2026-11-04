@@ -545,6 +545,7 @@ impl Game<'_> {
                 damage_type,
                 causing: attacker.map_or(0, |(id, _)| *id as i32),
                 direct: 0,
+                position: None,
             };
             self.after_block(outcome, (None, false), source);
         }

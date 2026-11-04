@@ -420,6 +420,15 @@ impl Mob {
         let water = w.fluid(p[0], p[1], p[2]) == crate::blocks::Fluid::Water;
         (!water && self.malus(w.path_type_static(p[0], p[1], p[2])) == 0.0).then_some(p)
     }
+    /// Where the mob stands and looks (`getViewVector(1)`: its head's pitch and yaw), as a
+    /// hit's [`crate::health::Victim`].
+    pub fn victim(&self) -> crate::health::Victim {
+        let view = horizon_world::view_direction::view_vector(self.head_pitch, self.head_yaw);
+        crate::health::Victim {
+            position: [self.position.x, self.position.y, self.position.z],
+            view: [view.x, view.y, view.z],
+        }
+    }
     /// `Entity.getViewVector(0)`: `calculateViewVector(xRotO, yHeadRotO)`.
     pub fn view_vector(&self) -> [f64; 3] {
         use horizon_core::geometry::trig::Mth;

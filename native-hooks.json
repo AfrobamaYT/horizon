@@ -951,7 +951,9 @@
     {
       "name": "living_incoming_damage", "side": "server",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_incoming_damage",
+      "target": "horizon_client::game::native_hooks::HitLevel<'_>::native_living_incoming_damage",
+      "neoforge": "LivingIncomingDamageEvent",
+      "host": "level",
       "mod_api": {
         "contract": "cancel",
         "out": "canceled"

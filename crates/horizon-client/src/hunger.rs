@@ -79,10 +79,12 @@ impl PlayerMotion {
         if self.client_side {
             return Ok(());
         }
+        let victim = self.victim();
         let h = &mut self.health;
         let mut world = TickWorld {
             level: level.reborrow(),
             entity: self.entity_id,
+            victim,
             resources,
             rules,
             invulnerable: self.invulnerable || self.spectator,
@@ -103,6 +105,7 @@ impl PlayerMotion {
 struct TickWorld<'a> {
     level: DamageLevel<'a>,
     entity: i32,
+    victim: crate::health::Victim,
     resources: &'a HealthResources,
     rules: HealthRules,
     invulnerable: bool,
@@ -178,6 +181,7 @@ impl FoodWorld for TickWorld<'_> {
         let mut environment = Environment {
             level: self.level.reborrow(),
             entity: self.entity,
+            victim: self.victim,
             causing: 0,
             invulnerable: false,
             client_loaded: self.client_loaded,

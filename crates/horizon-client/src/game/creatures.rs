@@ -60,6 +60,7 @@ pub(super) fn death_hurt_source(damage_type: &str, causing: u32) -> HurtSource<'
         damage_type,
         causing: causing as i32,
         direct,
+        position: None,
     }
 }
 
@@ -667,6 +668,7 @@ impl Game<'_> {
                 damage_type: name,
                 causing: 0,
                 direct: 0,
+                position: None,
             };
             let mut cancel = false;
             self.native_armor_hurt(None, id, &kind, &hit, &mut entries, &mut cancel);
@@ -2350,6 +2352,7 @@ impl Game<'_> {
                             damage_type: source_damage_type(source),
                             causing: 0,
                             direct: 0,
+                            position: None,
                         };
                         self.knock_back_player(power, x, z, source);
                     }
@@ -3926,6 +3929,7 @@ impl Game<'_> {
                     damage_type,
                     causing,
                     direct: 0,
+                    position: None,
                 };
                 default_push = Some(([xd, zd], source));
             }
@@ -3973,6 +3977,7 @@ impl Game<'_> {
                 damage_type,
                 causing,
                 direct: 0,
+                position: None,
             };
             self.after_block(outcome, (attacker, projectile), source);
         }
@@ -8554,6 +8559,7 @@ mod knockback_tests {
             damage_type: "minecraft:player_attack",
             causing: 5,
             direct: 5,
+            position: None,
         };
         let mut push = |entity, resistance: f64| {
             let mut p = horizon_client::motion::PlayerMotion::new(&resources, Vec3::ZERO).unwrap();

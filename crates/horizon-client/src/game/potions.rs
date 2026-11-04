@@ -2014,7 +2014,7 @@ mod tests {
         ONCE.call_once(|| {
             brewing::register_mod_effects([("test:effect".into(), 0, brewing::Category::Neutral)]);
             let _ =
-                horizon_client::health::HURT_SERVER.set(super::super::native_hooks::hurt_server);
+                horizon_client::health::HURT_SERVER.set(super::super::native_hooks::incoming_damage);
         });
     }
 

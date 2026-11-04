@@ -41,7 +41,7 @@ pub use crate::gfx::native_render::{
     BlockSpriteArrays, RenderHookId, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn,
     WorldDrawnEvent, render_hook_ids, wgpu,
 };
-pub use crate::health::{DamageContainer, HurtSource, Reduction, ShieldBlock};
+pub use crate::health::{DamageContainer, HurtSource, Reduction, ShieldBlock, Victim};
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
@@ -3340,85 +3340,6 @@ mod tests {
             let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
             assert_eq!(told, [block], "{block}");
         }
-    }
-
-    struct Backstab;
-
-    #[mod_api::__subscriptions]
-    impl Hooks for Backstab {
-        fn living_incoming_damage_v2(
-            &self,
-            host: &mut dyn ServerHost,
-            event: &mut LivingIncomingDamageV2Event<'_>,
-        ) -> Flow {
-            assert_eq!(event.causing, 7);
-            assert_eq!(event.kind, "minecraft:zombie");
-            assert_eq!(event.damage_type, "minecraft:player_attack");
-            if event.entity == 0 {
-                return Flow::Cancel;
-            }
-            let from = event.source_position.unwrap();
-            let behind = (0..3)
-                .map(|axis| (from[axis] - event.victim_position[axis]) * event.victim_view[axis])
-                .sum::<f64>()
-                < 0.0;
-            if behind {
-                let weapon = event.weapon.unwrap();
-                let level = weapon.enchantment_level("probe:backstab");
-                assert_eq!(weapon.enchantments().len(), 1);
-                event.amount *= level as f32;
-                let player = host.acting_player().unwrap();
-                host.action_bar(player.uuid, Text::literal("backstab"));
-            }
-            Flow::Continue
-        }
-    }
-
-    #[test]
-    fn damage_v2_exposes_weapon_geometry_and_host_without_changing_v1() {
-        let mods = [ModEntry::new("backstab", Box::new(Backstab))];
-        install(mods.into());
-        let mut weapon = stick();
-        weapon.enchant("probe:backstab", 3);
-        for (entity, source_z, expected, canceled_expected) in [
-            (1, -1.0, 12.0, false),
-            (1, 1.0, 4.0, false),
-            (0, -1.0, 4.0, true),
-        ] {
-            let mut host = Reader {
-                block: "minecraft:air",
-                lines: Vec::new(),
-            };
-            let mut amount = 4.0;
-            let mut canceled = false;
-            dispatch_living_incoming_damage_v2(
-                &mut host,
-                entity,
-                "minecraft:zombie",
-                "minecraft:player_attack",
-                7,
-                Some([0.0, 0.0, source_z]),
-                [0.0; 3],
-                [0.0, 0.0, 1.0],
-                Some(&weapon),
-                &mut amount,
-                &mut canceled,
-            );
-            assert_eq!((amount, canceled), (expected, canceled_expected));
-            assert_eq!(host.lines.len(), usize::from(expected == 12.0));
-        }
-        let mut amount = 4.0;
-        let mut canceled = false;
-        dispatch_living_incoming_damage(
-            1,
-            "minecraft:zombie",
-            "minecraft:player_attack",
-            7,
-            7,
-            &mut amount,
-            &mut canceled,
-        );
-        assert_eq!((amount, canceled), (4.0, false));
     }
 
     #[test]
