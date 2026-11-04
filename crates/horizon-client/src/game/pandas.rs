@@ -148,7 +148,7 @@ impl Game<'_> {
             {
                 // LivingEntity.jumpFromGround.
                 m.needs_sync = true;
-                let power = f64::from(m.jump_power());
+                let power = f64::from(m.jump_power(&self.loop_context));
                 if power > 1.0e-5 {
                     m.velocity.y = power.max(m.velocity.y);
                 }

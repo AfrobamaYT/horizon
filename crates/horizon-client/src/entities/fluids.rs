@@ -14,7 +14,7 @@ use horizon_world::{
         FluidSections, FluidTagId,
     },
     fluid::{FluidHeightWorld, FluidKind, FluidState},
-    fluid_flow::{FluidFlowWorld, flow_at},
+    fluid_flow::FluidFlowWorld,
     registry::BlockStateId,
 };
 type Error = std::convert::Infallible;
@@ -174,7 +174,7 @@ impl FluidInteractionWorld for EntityFluidWorld<'_> {
         f.camera_height_at(self, [p.x, p.y, p.z])
     }
     fn flow(&mut self, f: FluidState, p: BlockPos) -> Result<Vec3, Error> {
-        flow_at(self, f, p)
+        crate::motion::pushing_flow(self, f, p)
     }
 }
 impl FluidHeightWorld for EntityFluidWorld<'_> {

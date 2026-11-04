@@ -326,6 +326,7 @@ pub fn main() -> Result<()> {
                 resources: &resources,
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
             };
             match op["mode"].as_str().unwrap() {
                 "shift" => world.player.shift_key_down = op["value"].as_bool().unwrap(),

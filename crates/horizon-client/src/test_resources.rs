@@ -43,6 +43,17 @@ pub(crate) fn server_load() -> LoadContext {
     )
 }
 
+/// A server's loop context with no mods and no settings, shared by tests that build a
+/// motion or mob world.
+#[allow(
+    dead_code,
+    reason = "standalone probes that include this file may not build worlds"
+)]
+pub(crate) fn server_loop_context() -> &'static LoopContext {
+    static CONTEXT: std::sync::OnceLock<LoopContext> = std::sync::OnceLock::new();
+    CONTEXT.get_or_init(|| server_load().loop_context(LoopSide::Server, []))
+}
+
 /// A loop context of `side` with no mods and no settings, for menus under test.
 #[allow(
     dead_code,
