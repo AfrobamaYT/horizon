@@ -553,7 +553,7 @@
     {
       "name": "block_entity", "side": "both",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_entity",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_entity",
       "mod_api": {
         "contract": "replace",
         "out": "entity",

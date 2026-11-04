@@ -3351,7 +3351,8 @@ mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `set_block(pos, state, flags)` is `Level.setBlock` on a whole state, as `LevelRef::set_block` takes it: it
 removes the old block's block entity and creates the new block's in the write (`LevelChunk.setBlockState`), runs
 the neighbour and shape updates `flags` ask for, and queues the write's level events in order. A mod block entity
-it creates starts with empty data, because `native_block_entity` needs a `Host`. It returns true when the block
+it creates starts with the data the `block_entity` hook gives, which is fired in the write and receives the level
+(`LevelSide`, read-only: vanilla's `newBlockEntity` gets no level), as the `Host`'s `native_set_block` fires it. It returns true when the block
 changed, and false off an authoritative server, for a position that is not loaded or outside the build height,
 an invalid state, or the state the block already has. It never loads a chunk. The game owns
 the tick queue; mods do not pass it back to these helpers.
@@ -3480,7 +3481,9 @@ r.block_entity_part(&press, Press).expect("native block entity type");
 ```
 
 The builder qualifies the type ID with the registering mod's namespace. It owns the save ID, wire type
-and valid blocks; `block_entity` returns only initial `Compound` data (or none for an empty compound).
+and valid blocks; `block_entity` returns only initial `Compound` data (or none for an empty compound). It is fired
+inside the write that creates the entity (`LevelChunk.setBlockState`) and receives the read-only level, a `LevelSide`,
+on a server and on a client of one.
 Unknown blocks, duplicate types, overlapping membership and attempts to own a `minecraft:` block are
 refused at load. Refused native block, item or block entity declarations stop startup, as does unreadable
 known-components input; the game does not fall back to vanilla content. An explicitly declared mod

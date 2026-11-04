@@ -194,6 +194,15 @@ impl Game<'_> {
 pub(super) use horizon_world::level::flags;
 
 impl GameLevel<'_> {
+    /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`),
+    /// fired inside the write that creates it (`LevelChunk.setBlockState`), on
+    /// a server and on a client of one. The declaration owns the type id; no
+    /// answer starts with an empty compound. The level is read-only, as
+    /// `newBlockEntity` gets no level.
+    #[inline(always)]
+    pub(super) fn native_block_entity(&self, block: &str, entity: &mut Option<Compound>) {
+        mod_api::dispatch_block_entity(super::mod_api_host::level_side(self), block, entity);
+    }
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side.
     #[inline(always)]
     pub(super) fn native_hopper_pickup_item(
@@ -2045,11 +2054,6 @@ impl Game<'_> {
     /// act on it when it is yours.
     pub(super) fn native_panel_event(&mut self, mod_id: &str, event: &NativePanelEvent) {
         mod_api::dispatch_panel_event(self, mod_id, event);
-    }
-    /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`).
-    /// The declaration owns the type id; no answer starts with an empty compound.
-    pub(super) fn native_block_entity(&mut self, block: &str, entity: &mut Option<Compound>) {
-        mod_api::dispatch_block_entity(mod_api::HostSide::of(self), block, entity);
     }
     /// Whether block `block`'s block entity ticks (`EntityBlock.getTicker`):
     /// set `ticks` when it is yours. Asked for each of the block's states
@@ -7410,7 +7414,7 @@ impl GameLevel<'_> {
                 state,
                 at,
                 spread,
-                speed,
+                speed: [speed; 3],
                 count,
                 randomization: 0,
             });
@@ -7448,13 +7452,22 @@ impl GameLevel<'_> {
         let b = self.behaviours;
         b.set_block(self, ticks, at, id, flags)
     }
+    /// `EntityBlock.newBlockEntity` of block `name`: a declared mod type
+    /// starts with the data `native_block_entity` gives, a mod's sign, else
+    /// Horizon's own. The one place both whole-block write paths make it.
+    pub(super) fn new_block_entity(&self, name: &str) -> Option<BlockEntity> {
+        let mut nbt = None;
+        if horizon_client::block_entity_types::type_for(name).is_some() {
+            self.native_block_entity(name, &mut nbt);
+        }
+        block_entity_for_block(self.registry, self.facts, name, nbt.unwrap_or_default())
+    }
     /// Replaces the block at `pos` with `state` through `Level.setBlock`, as
     /// `Game::native_set_block` does for the Host, from a hook that gets the
     /// level's `ticks`: the old block's block entity is removed and the new
     /// block's is created in the write (`LevelChunk.setBlockState`), and the
-    /// write's level events stay queued for the caller, in order. A mod block
-    /// entity starts with empty data: `native_block_entity` needs a `Host`,
-    /// which a level hook has not. True when the block changed; false off an
+    /// write's level events stay queued for the caller, in order; a mod block
+    /// entity starts with the data `native_block_entity` gives. True when the block changed; false off an
     /// authoritative server, for a position that is not loaded or outside the
     /// build height, an invalid state, or an unchanged state. Never loads a
     /// chunk.
@@ -7477,8 +7490,7 @@ impl GameLevel<'_> {
         let changed = b.set_block(self, ticks, at, state, flags);
         let landed = self.world.block(pos[0], pos[1], pos[2]);
         if let Some(name) = block_entity_to_create(self.facts, changed, previous, state, landed)
-            && let Some(entity) =
-                block_entity_for_block(self.registry, self.facts, &name, Compound::default())
+            && let Some(entity) = self.new_block_entity(&name)
         {
             put_block_entity(self.world, pos, entity);
         }
@@ -7688,17 +7700,8 @@ impl Game<'_> {
         {
             return false;
         }
-        let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        let previous = self.world.block(pos[0], pos[1], pos[2]);
         let changed =
-            self.with_level(|b, level, ticks| b.set_block(level, ticks, at, state, flags));
-        let landed = self.world.block(pos[0], pos[1], pos[2]);
-        if let Some(name) =
-            block_entity_to_create(self.res.facts(), changed, previous, state, landed)
-            && let Some(entity) = self.new_block_entity(&name)
-        {
-            put_block_entity(&mut self.world, pos, entity);
-        }
+            self.with_level(|_, level, ticks| level.native_set_block(ticks, pos, state, flags));
         let _ = self.process_level_events();
         changed
     }
@@ -7722,10 +7725,7 @@ impl Game<'_> {
     /// or a wind turbine reads. Both 0 in the Nether and the End, which have
     /// no weather (`Level.canHaveWeather`).
     pub(super) fn native_weather(&self) -> (f32, f32) {
-        if self.dim != super::Dim::Overworld {
-            return (0.0, 0.0);
-        }
-        self.world.weather.levels(1.0)
+        self.weather_levels(1.0)
     }
     /// The world's time of day in ticks (`Level.getOverworldClockTime`), the
     /// same as `native_clock`'s `day_time`; it keeps counting past 24000, so
@@ -8968,18 +8968,19 @@ impl Game<'_> {
         }
     }
     /// `EntityBlock.newBlockEntity` of block `name`: Horizon's own, else a
-    /// native mod's.
+    /// native mod's, made as a write of the level creates it
+    /// (`GameLevel::new_block_entity`). Only a declared mod type builds the
+    /// level.
     pub(super) fn new_block_entity(&mut self, name: &str) -> Option<BlockEntity> {
-        let mut nbt = None;
-        if horizon_client::block_entity_types::type_for(name).is_some() {
-            self.native_block_entity(name, &mut nbt);
+        if horizon_client::block_entity_types::type_for(name).is_none() {
+            return block_entity_for_block(
+                self.pack.assets.registry,
+                self.res.facts(),
+                name,
+                Compound::default(),
+            );
         }
-        block_entity_for_block(
-            self.pack.assets.registry,
-            self.res.facts(),
-            name,
-            nbt.unwrap_or_default(),
-        )
+        self.with_level(|_, level, _| level.new_block_entity(name))
     }
     /// The containers of the mod blocks' block entities, by block state
     /// (`native_block_entity_container`), checked.
@@ -9788,7 +9789,7 @@ mod tests {
         impl BlockEntityPart for Press {
             fn block_entity(
                 &self,
-                _: HostSide<'_>,
+                _: LevelSide<'_>,
                 _: &mut BlockEntityEvent<'_>,
             ) -> Option<Compound> {
                 Some(Compound::from([("energy".into(), Tag::Long(6300))]))
@@ -9988,6 +9989,23 @@ mod tests {
                 );
                 assert_eq!(saved.get("energy"), Some(&Tag::Long(6302)));
             }
+
+            // A level hook's `LevelWriteHost::set_block` fires the same hook in its write.
+            let first = game.pack.assets.registry.default_state(FIRST).unwrap();
+            let written = game.with_level(|_, level, ticks| {
+                LevelWriteHost::set_block(
+                    &mut super::super::mod_api_host::LevelTicks { level, ticks },
+                    [5, 64, 0],
+                    first,
+                    NativeBlockUpdateFlags::NONE,
+                )
+            });
+            assert!(written);
+            let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&(5, 64, 0)) else {
+                panic!("a level write did not create the declared block entity");
+            };
+            assert_eq!(entity.id(), "be_test:shared");
+            assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
         });
     }
 
@@ -10637,7 +10655,8 @@ mod tests {
         let hunger_hooks = free_hooks(include_str!("../hunger.rs"));
         let landing_hooks = free_hooks(include_str!("../landing.rs"));
         let motion_hooks = free_hooks(include_str!("../motion.rs"));
-        let hub_hooks = free_hooks(include_str!("../lan/hub.rs"));
+        // The chat relay's (`horizon_client_lib::lan::hub::chat`).
+        let chat_hooks = free_hooks(include_str!("../lan/hub/chat.rs"));
         let ender_hooks = free_hooks(include_str!("../mobs/enderman.rs"));
         let declared: BTreeSet<_> = section
             .lines()
@@ -10657,7 +10676,7 @@ mod tests {
             .chain(hunger_hooks.iter().copied())
             .chain(landing_hooks.iter().copied())
             .chain(motion_hooks.iter().copied())
-            .chain(hub_hooks.iter().copied())
+            .chain(chat_hooks.iter().copied())
             .chain(ender_hooks.iter().copied())
             .collect();
         let mut names = BTreeSet::new();
@@ -10686,8 +10705,8 @@ mod tests {
                 format!("horizon_client_lib::landing::native_{name}")
             } else if motion_hooks.contains(name) {
                 format!("horizon_client_lib::motion::native_{name}")
-            } else if hub_hooks.contains(name) {
-                format!("horizon_client_lib::lan::hub::native_{name}")
+            } else if chat_hooks.contains(name) {
+                format!("horizon_client_lib::lan::hub::chat::native_{name}")
             } else if menu_hooks.contains(name) {
                 // menu.rs compiles into horizon-client-lib (#5446's
                 // split): horizon-mixins resolves the crate by its package.
