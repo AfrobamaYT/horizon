@@ -1498,14 +1498,12 @@ impl NativeActiveEffect {
 }
 
 /// The answer to `mob_effect_applicable`: whether an effect can land on an
-/// entity. `Default` defers to the vanilla tag check; `Allow` and `Deny`
-/// override it, as NeoForge's `MobEffectEvent.Applicable.Result` does.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// entity. An unanswered hook defers to the vanilla tag check; `Allow` and
+/// `Deny` override it, as NeoForge's `MobEffectEvent.Applicable.Result`
+/// does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EffectApplicable {
-    /// The vanilla tag check decides.
-    #[default]
-    Default,
     /// The effect lands, whatever the tags say.
     Allow,
     /// The effect is refused, whatever the tags say.

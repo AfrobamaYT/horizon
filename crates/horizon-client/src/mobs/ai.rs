@@ -2870,12 +2870,12 @@ pub(crate) fn tick_effects(
         if e.1 > 0 || e.1 == -1 {
             return true;
         }
-        // `MobEffectEvent.Expired`: an answered `keep` true keeps the effect.
-        let mut keep = None;
+        // `MobEffectEvent.Expired`: canceling the expiry keeps the effect.
+        let mut cancel = false;
         if let Some(mods) = mods {
-            mods.effect_expired(mob_id, e.0, e.2, &mut keep);
+            mods.effect_expired(mob_id, e.0, e.2, &mut cancel);
         }
-        keep == Some(true)
+        !cancel
     });
     if m.effects_dirty {
         let invisible = m.has_effect("minecraft:invisibility");

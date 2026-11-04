@@ -237,7 +237,7 @@ impl Game<'_> {
                 let name = name_amp.0;
                 // `MobEffectEvent.Remove`: refusing the removal keeps it.
                 let mut cancel = false;
-                self.native_mob_effect_remove(Some(id as i32), name, name_amp.1, &mut cancel);
+                self.native_mob_effect_remove(living, name, name_amp.1, &mut cancel);
                 if cancel {
                     return false;
                 }
@@ -272,12 +272,7 @@ impl Game<'_> {
                     .iter()
                     .filter(|(name, amplifier)| {
                         let mut cancel = false;
-                        self.native_mob_effect_remove(
-                            Some(id as i32),
-                            name,
-                            *amplifier,
-                            &mut cancel,
-                        );
+                        self.native_mob_effect_remove(living, name, *amplifier, &mut cancel);
                         cancel
                     })
                     .map(|(name, _)| *name)

@@ -1002,22 +1002,26 @@ impl Game<'_> {
         let mut effects = std::mem::take(&mut self.potions.effects);
         // `MobEffectEvent.Expired`: ask before the pass, for the effects at
         // zero ticks and the ones reaching it in this pass (the last tick of
-        // their countdown); a refused expiry keeps the effect at no ticks,
+        // their countdown); a canceled expiry keeps the effect at no ticks,
         // asking again next tick. Only on the server, where the effects tick.
         let keep_expired: Vec<&'static str> = if self.remote.is_none() {
+            let player = self.native_effect_living(None);
             effects
                 .list
                 .iter()
                 .filter(|e| matches!(e.duration, 0 | 1))
                 .filter(|e| {
-                    let mut keep = None;
+                    let Some(player) = player else {
+                        return false;
+                    };
+                    let mut cancel = false;
                     self.native_mob_effect_expired(
-                        None,
+                        player,
                         mob_effect_id(e.id).unwrap_or(e.id),
                         e.amplifier,
-                        &mut keep,
+                        &mut cancel,
                     );
-                    keep == Some(true)
+                    cancel
                 })
                 .map(|e| e.id)
                 .collect()
@@ -1125,8 +1129,8 @@ impl Game<'_> {
     /// Add an active effect to the player and update attributes / absorption.
     /// `LivingEntity.canBeAffected` with the `mob_effect_applicable` hook:
     /// the event fires first, for every effect, and `Allow` or `Deny`
-    /// decides; `Default` falls back to the vanilla tag check. `entity` is a
-    /// mob's `Entity.getId`, None for the player.
+    /// decides; unanswered, the vanilla tag check runs. `entity` is a mob's
+    /// `Entity.getId`, None for the player.
     pub(super) fn can_be_affected(
         &mut self,
         entity: Option<i32>,
@@ -1134,12 +1138,14 @@ impl Game<'_> {
         effect: &str,
     ) -> bool {
         let mut answered = None;
-        self.native_mob_effect_applicable(entity, kind, effect, &mut answered);
+        if let Some(living) = self.native_effect_living(entity) {
+            self.native_mob_effect_applicable(living, effect, &mut answered);
+        }
         match answered {
             Some(EffectApplicable::Allow) => true,
             Some(EffectApplicable::Deny) => false,
-            // `Default`, an unanswered hook, or a future variant defers to
-            // the vanilla tag check.
+            // An unanswered hook, or a future variant, defers to the
+            // vanilla tag check.
             _ => mob_can_be_affected(&self.res.stations().enchantments.entity_tags, kind, effect),
         }
     }
@@ -1180,12 +1186,14 @@ impl Game<'_> {
             // `MobEffectEvent.Remove`: refusing the removal keeps it, and the
             // next one is asked with this one still in place, as in vanilla.
             let mut cancel = false;
-            self.native_mob_effect_remove(
-                None,
-                mob_effect_id(id).unwrap_or(id),
-                amplifier,
-                &mut cancel,
-            );
+            if let Some(living) = self.native_effect_living(None) {
+                self.native_mob_effect_remove(
+                    living,
+                    mob_effect_id(id).unwrap_or(id),
+                    amplifier,
+                    &mut cancel,
+                );
+            }
             if cancel {
                 index += 1;
             } else {
@@ -2253,14 +2261,10 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
         }
         keep
     }
-    fn effect_expired(
-        &self,
-        mob: u32,
-        effect: &'static str,
-        amplifier: i32,
-        keep: &mut Option<bool>,
-    ) {
-        self.native_mob_effect_expired(Some(mob as i32), effect, amplifier, keep);
+    fn effect_expired(&self, mob: u32, effect: &'static str, amplifier: i32, cancel: &mut bool) {
+        if let Some(living) = self.native_effect_living(Some(mob as i32)) {
+            self.native_mob_effect_expired(living, effect, amplifier, cancel);
+        }
     }
 }
 

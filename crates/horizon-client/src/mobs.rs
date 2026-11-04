@@ -2879,15 +2879,9 @@ pub trait ModEffectTicks {
         amplifier: i32,
     ) -> bool;
     /// `MobEffectEvent.Expired`: `mob`'s `effect` (`amplifier` from 0)
-    /// counted down to nothing. The first mod to answer `keep` true refuses
-    /// the expiry: the effect stays at no ticks and asks again next tick.
-    fn effect_expired(
-        &self,
-        mob: u32,
-        effect: &'static str,
-        amplifier: i32,
-        keep: &mut Option<bool>,
-    );
+    /// counted down to nothing. A mod that cancels refuses the expiry: the
+    /// effect stays at no ticks and asks again next tick.
+    fn effect_expired(&self, mob: u32, effect: &'static str, amplifier: i32, cancel: &mut bool);
 }
 /// Native mod hooks the mob AI asks while it decides.
 pub trait MobHooks {
