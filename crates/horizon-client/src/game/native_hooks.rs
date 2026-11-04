@@ -1164,7 +1164,7 @@ impl GameLevel<'_> {
         entity: &ModBlockEntity,
         drops: &mut Vec<ItemStack>,
     ) {
-        mod_api::dispatch_pre_remove_side_effects(self, pos, state, entity, drops);
+        self.fire_pre_remove_side_effects(pos, state, entity, drops);
     }
 
     /// An authoritative server's `ServerLevel.tickChunk` is about to
@@ -3469,7 +3469,7 @@ impl Game<'_> {
         screen: &NativeScreenView<'_>,
         areas: &mut Vec<[f32; 4]>,
     ) {
-        mod_api::dispatch_screen_exclusion_areas(self, screen, areas);
+        self.fire_screen_exclusion_areas(screen, areas);
     }
     pub(super) fn track_drag_button(&mut self, button: MouseButton, pressed: bool) {
         // Any release ends the drag, as vanilla's `MouseHandler.onButton` clears `activeButton`:
