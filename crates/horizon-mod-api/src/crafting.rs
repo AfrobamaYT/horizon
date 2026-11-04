@@ -354,13 +354,14 @@ impl Ingredient {
 /// (vanilla's or a mod's own): its typed parts, and its file for whatever a
 /// mod's own type keeps there. Plain data.
 ///
-/// `ingredients` and `results` are filled for the vanilla types whose layout
-/// is fixed, in the order their file names them: a shaped recipe's pattern
-/// cells row by row (empty cells left out), a shapeless recipe's list, a
-/// cooking or stonecutting recipe's `ingredient`, a smithing recipe's
-/// `template`, `base` and `addition`, a transmute recipe's `input` and
-/// `material`, and `result` as `results[0]`. A mod's own type, and a
-/// vanilla one whose ingredients are code (firework, repair), leaves both
+/// A recipe the game could not parse (an ingredient it cannot read, no
+/// result) is not in force and is not listed.
+///
+/// `ingredients` and `results` are filled from the game's own parse of the
+/// shaped, shapeless and cooking types: a shaped recipe's pattern cells row
+/// by row (empty cells left out), a shapeless recipe's list, a cooking
+/// recipe's `ingredient`, and the result as `results[0]`. Any other type (a
+/// mod's own, stonecutting, smithing and the special ones) leaves both
 /// empty: read `json`.
 #[derive(Clone, Debug)]
 #[non_exhaustive]

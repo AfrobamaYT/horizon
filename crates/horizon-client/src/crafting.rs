@@ -1106,75 +1106,6 @@ const VANILLA_RECIPE_TYPES: [&str; 22] = [
     "minecraft:stonecutting",
 ];
 
-/// The ingredient fields of the vanilla recipe types with a fixed layout, in
-/// the order `Recipe::ingredients` lists them.
-fn ingredient_fields(kind: &str) -> &'static [&'static str] {
-    match kind {
-        "minecraft:smelting"
-        | "minecraft:blasting"
-        | "minecraft:smoking"
-        | "minecraft:campfire_cooking"
-        | "minecraft:stonecutting" => &["ingredient"],
-        "minecraft:smithing_transform" | "minecraft:smithing_trim" => {
-            &["template", "base", "addition"]
-        }
-        "minecraft:crafting_transmute" => &["input", "material"],
-        "minecraft:crafting_dye" => &["target", "dye"],
-        "minecraft:crafting_imbue" | "minecraft:crafting_special_bookcloning" => {
-            &["source", "material"]
-        }
-        "minecraft:crafting_special_mapextending" => &["map", "material"],
-        "minecraft:crafting_special_bannerduplicate" => &["banner"],
-        "minecraft:crafting_special_shielddecoration" => &["banner", "target"],
-        _ => &[],
-    }
-}
-/// `RecipeManager.getAllRecipesFor`'s recipe: `file` is what the pack wrote,
-/// `resolved` the same with mods' ingredient kinds answered.
-fn typed_recipe(
-    id: String,
-    kind: &str,
-    file: &Arc<Value>,
-    resolved: &Value,
-    items: &Items,
-) -> mod_api::Recipe {
-    let mut recipe = mod_api::Recipe::new(id, kind, file.clone());
-    recipe.group = resolved["group"].as_str().unwrap_or("").to_owned();
-    let ingredient = |v: &Value| Ingredient::parse(v, items);
-    recipe.ingredients = match kind {
-        "minecraft:crafting_shaped" => {
-            let rows = resolved["pattern"].as_array().into_iter().flatten();
-            rows.filter_map(Value::as_str)
-                .flat_map(str::chars)
-                .filter(|c| *c != ' ')
-                .filter_map(|c| ingredient(&resolved["key"][c.to_string()]))
-                .collect()
-        }
-        "minecraft:crafting_shapeless" => resolved["ingredients"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(ingredient)
-            .collect(),
-        _ => ingredient_fields(kind)
-            .iter()
-            .filter_map(|field| ingredient(&resolved[*field]))
-            .collect(),
-    };
-    recipe.results = recipe_result(&resolved["result"]).into_iter().collect();
-    if matches!(
-        kind,
-        "minecraft:smelting"
-            | "minecraft:blasting"
-            | "minecraft:smoking"
-            | "minecraft:campfire_cooking"
-    ) {
-        // The cooking table's own reading of a file (`Cooking`), so the two agree.
-        recipe.cooking_time = Some(resolved["cookingtime"].as_u64().unwrap_or(200) as u32);
-        recipe.experience = Some(resolved["experience"].as_f64().unwrap_or(0.0) as f32);
-    }
-    recipe
-}
 /// The type of a recipe the game doesn't craft itself: one outside `minecraft`.
 fn custom_type(v: &Value) -> Option<&str> {
     v["type"]
@@ -1509,6 +1440,7 @@ impl Recipes {
             resolved,
         } in &sources.recipes
         {
+            let mut entry = None;
             if let Some(kind) = json["type"]
                 .as_str()
                 .filter(|t| !t.starts_with("minecraft:") || VANILLA_RECIPE_TYPES.contains(t))
@@ -1518,12 +1450,12 @@ impl Recipes {
                 } else {
                     format!("minecraft:{name}")
                 };
-                by_type
-                    .entry(kind.to_owned())
-                    .or_default()
-                    .push(typed_recipe(id, kind, json, resolved, items));
+                entry = Some(mod_api::Recipe::new(id, kind, json.clone()));
             }
             if custom_type(json).is_some() {
+                if let Some(entry) = entry {
+                    by_type.entry(entry.kind.clone()).or_default().push(entry);
+                }
                 continue;
             }
             let v = &**resolved;
@@ -1532,6 +1464,8 @@ impl Recipes {
             let ing = |k: &str| Ingredient::parse(&v[k], items);
             let result = || Template::parse(&v["result"]);
             let special = |recipe: Option<Special>| recipe.map(Recipe::Special);
+            let cooked = cooking.len();
+            let mut parsed_by_game = true;
             let parsed: Option<Recipe> = match v["type"].as_str().unwrap_or("") {
                 "minecraft:crafting_shaped" => {
                     let pattern: Vec<Vec<char>> = v["pattern"]
@@ -1702,8 +1636,43 @@ impl Recipes {
                     }
                     None
                 }
-                _ => None,
+                _ => {
+                    parsed_by_game = false;
+                    None
+                }
             };
+            // `recipes_of_type` lists what the game parsed (a recipe it drops
+            // is not in force), typed from that one parse; a type it doesn't
+            // parse keeps only its file.
+            if let Some(mut entry) = entry {
+                entry.group = text("group");
+                match (&parsed, cooking.get(cooked)) {
+                    (Some(Recipe::Shaped { cells, result, .. }), _) => {
+                        entry.ingredients = cells.iter().flatten().cloned().collect();
+                        entry.results = vec![result.create()];
+                    }
+                    (
+                        Some(Recipe::Shapeless {
+                            ingredients,
+                            result,
+                        }),
+                        _,
+                    ) => {
+                        entry.ingredients = ingredients.clone();
+                        entry.results = vec![result.create()];
+                    }
+                    (_, Some(cook)) => {
+                        entry.ingredients = vec![cook.ingredient.clone()];
+                        entry.results = vec![cook.result.clone()];
+                        entry.cooking_time = Some(cook.time);
+                        entry.experience = Some(cook.experience);
+                    }
+                    _ => {}
+                }
+                if parsed.is_some() || cooking.len() > cooked || !parsed_by_game {
+                    by_type.entry(entry.kind.clone()).or_default().push(entry);
+                }
+            }
             if let Some(recipe) = parsed {
                 crafting.push((name.clone(), recipe));
             }
@@ -2041,6 +2010,52 @@ mod tests {
         assert_eq!(recipes.crafting.len(), 1);
         assert_eq!(recipes.crafting[0].0, "mymod:treated");
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// `recipes_of_type` lists what the game parsed, typed from that parse:
+    /// a shaped recipe with an unreadable key is in force nowhere, so it is
+    /// not listed, and the readable one carries its cells and result.
+    #[test]
+    fn recipes_of_type_lists_only_what_the_game_parsed() {
+        let recipe = |s: &str| {
+            let file = Arc::new(serde_json::from_str::<Value>(s).unwrap());
+            (file.clone(), file)
+        };
+        let named = |name: &str, s: &str| {
+            let (file, resolved) = recipe(s);
+            ResolvedRecipe {
+                name: format!("mymod:{name}"),
+                file,
+                resolved,
+            }
+        };
+        let sources = ResolvedSources {
+            recipes: vec![
+                named(
+                    "good",
+                    r#"{"type":"minecraft:crafting_shaped","group":"g","pattern":["AA"," A"],
+                        "key":{"A":"minecraft:stone"},"result":{"id":"minecraft:stick","count":2}}"#,
+                ),
+                named(
+                    "bad",
+                    r#"{"type":"minecraft:crafting_shaped","pattern":["AB"],
+                        "key":{"A":"minecraft:stone","B":{"type":"mymod:nope"}},
+                        "result":{"id":"minecraft:stick"}}"#,
+                ),
+            ],
+            ..ResolvedSources::default()
+        };
+        let items = Items::for_tests(HashMap::new());
+        let recipes =
+            Recipes::from_resolved(&std::env::temp_dir(), &items, &PackOverlay::NONE, &sources)
+                .unwrap();
+        let listed = &recipes.by_type["minecraft:crafting_shaped"];
+        assert_eq!(listed.len(), 1, "the dropped recipe is not listed");
+        assert_eq!(listed[0].id, "mymod:good");
+        assert_eq!(listed[0].group, "g");
+        assert_eq!(listed[0].ingredients.len(), 3, "its three filled cells");
+        assert_eq!(listed[0].results[0].item.as_ref(), "minecraft:stick");
+        assert_eq!(listed[0].results[0].count, 2);
     }
 
     /// NeoForge's standard ingredient shapes resolve to their flat item
