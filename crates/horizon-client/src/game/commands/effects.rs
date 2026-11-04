@@ -86,19 +86,18 @@ impl Game<'_> {
                     if !self.can_be_affected(Some(id as i32), &kind, name) {
                         false
                     } else {
-                        let applied = self.mobs.iter_mut().find(|m| m.id == id).map(|m| {
-                            let new = !m.has_effect(name);
-                            // `new MobEffectInstance(effect, duration, amplifier, false, particles)`.
-                            m.add_effect_with(name, duration, amplifier, false, particles);
-                            new
-                        });
-                        match applied {
-                            Some(new) => {
+                        self.mobs
+                            .iter_mut()
+                            .find(|m| m.id == id)
+                            .map(|m| {
+                                let new = !m.has_effect(name);
+                                // `new MobEffectInstance(effect, duration, amplifier, false, particles)`.
+                                let changed =
+                                    m.add_effect_with(name, duration, amplifier, false, particles);
                                 self.mod_effect_added(name, Some(id as i32), amplifier, new);
-                                true
-                            }
-                            None => false,
-                        }
+                                changed
+                            })
+                            .unwrap_or(false)
                     }
                 }
                 _ => continue,

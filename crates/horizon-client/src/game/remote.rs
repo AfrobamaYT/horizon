@@ -545,6 +545,9 @@ pub(super) struct Remote {
     pub(super) menu_title: Option<horizon_client::text::Text>,
     state_id: i32,
     use_target: Option<[i32; 3]>,
+    /// A mod menu's extra data, kept for the `OpenScreen` of its window that
+    /// follows (`horizon:menu_extra`).
+    menu_extra: Option<horizon_protocol::menu_extra::Message>,
     entities: HashMap<i32, Tracked>,
     lerps: HashMap<i32, Lerp>,
     /// The minecarts the server moves with `ClientboundMoveMinecartPacket`
@@ -1053,6 +1056,7 @@ impl Game<'_> {
             menu_title: None,
             state_id: 0,
             use_target: None,
+            menu_extra: None,
             entities: HashMap::new(),
             lerps: HashMap::new(),
             cart_lerps: HashMap::new(),
@@ -3144,6 +3148,18 @@ impl Game<'_> {
             // The synced attachments of a holder the server shows the window.
             C::CustomPayload(p) if p.channel == horizon_protocol::attachment_sync::CHANNEL => {
                 self.remote_attachment_sync(&p.data);
+            }
+            // A mod menu type's block and its mod's bytes, just before the
+            // menu's `OpenScreen`.
+            C::CustomPayload(p) if p.channel == horizon_protocol::menu_extra::CHANNEL => {
+                match horizon_protocol::menu_extra::decode(&p.data) {
+                    Ok(extra) => {
+                        if let Some(r) = self.remote.as_mut() {
+                            r.menu_extra = Some(extra);
+                        }
+                    }
+                    Err(e) => log::debug!("Horizon: a bad menu extra payload: {e}"),
+                }
             }
             // The server's recipes its native mods asked to send.
             C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::CONTENT_CHANNEL => {
@@ -6170,7 +6186,8 @@ impl Game<'_> {
             // at 10, the hurt tilt restarted every frame and shook the camera.
             player.health.advance_clock();
             if riding && !dead {
-                MotionWorld {
+                player.client_side = true;
+                let mut passenger = MotionWorld {
                     entities: &entity_collisions,
                     player: &mut *player,
                     scene: &mut self.world,
@@ -6183,6 +6200,9 @@ impl Game<'_> {
                     block_registries: None,
                 }
                 .passenger_pose_tick()?;
+                // LivingEntity.aiStep: a passenger freezes in powder snow too, and the
+                // frostbite overlay shows it (#8156).
+                passenger.passenger_block_effects_tick()?;
             }
         }
         // The server decides fire the window cannot predict (blaze fireballs,
@@ -9774,6 +9794,18 @@ impl Game<'_> {
             .as_mut()
             .and_then(|r| r.use_target.take())
             .map(|t| (t[0], t[1], t[2]));
+        // The server names a mod menu's block itself: it, not the last
+        // clicked block, is the one the menu is of. Only for this window:
+        // any other's is stale.
+        let extra = self
+            .remote
+            .as_mut()
+            .and_then(|r| r.menu_extra.take())
+            .filter(|e| e.window == p.container);
+        let target = extra
+            .as_ref()
+            .map(|e| (e.pos[0], e.pos[1], e.pos[2]))
+            .or(target);
         if menu == "minecraft:lectern" {
             // LecternScreen: the book and page come in the menu's content and data.
             if let Some(r) = self.remote.as_mut() {
@@ -9881,7 +9913,7 @@ impl Game<'_> {
             let key = target.filter(holds).unwrap_or((i32::MIN, 0, 0));
             self.world.block_entities.insert(key, entity);
             self.container = Some(key);
-            self.open_native_screen(key, target, p.container, &menu);
+            self.open_native_screen(key, target, p.container, &menu, extra);
             // A mod menu type shows through its mod's screen only: without one
             // (`MenuScreens.create` finds no screen) the window closes again.
             if self.mod_screen.is_none() && mod_type.is_some() {
@@ -11896,6 +11928,64 @@ mod tests {
         items::ItemStack,
     };
     use horizon_world::nbt::Tag;
+
+    /// A mod's chat goes out only from a joined player, and only what the
+    /// Chat option allows.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_chat_needs_a_joined_player_and_what_the_chat_option_allows() {
+        use super::super::{
+            Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
+        };
+        use horizon_protocol::connection::Pipe;
+
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES")
+                .expect("set HORIZON_TEST_RESOURCES to prepared resources"),
+        );
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!("no menu handoff"),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = ExecutionRole::Client;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+
+        assert!(game.native_send_chat("/warp spawn").is_err());
+        let (client, _server) = Pipe::pair();
+        game.connect_local(client, "ChatTest").unwrap();
+        assert!(game.native_send_chat("/warp spawn").is_err());
+        game.remote.as_mut().unwrap().joined = true;
+        assert!(game.native_send_chat("  ").is_err());
+        // Full, then Commands Only, then Hidden.
+        game.settings.chat_visibility = 0;
+        assert!(game.native_send_chat("hello").is_ok());
+        assert!(game.native_send_chat("/warp spawn").is_ok());
+        game.settings.chat_visibility = 1;
+        assert!(game.native_send_chat("hello").is_err());
+        assert!(game.native_send_chat("/warp spawn").is_ok());
+        game.settings.chat_visibility = 2;
+        assert!(game.native_send_chat("/warp spawn").is_err());
+    }
 
     /// `MultiPlayerGameMode.useItem`'s `shouldSwing`: the SUCCESS answers
     /// swing, CONSUME's do not (#6425).

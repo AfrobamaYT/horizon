@@ -732,6 +732,7 @@ impl Items {
         overlay: &PackOverlay,
         defaults: &ItemDefaults,
     ) -> Result<Self> {
+        let raw = horizon_world::item_defaults::shared(root)?;
         let entity_tags = load_tags(root, "entity_type", overlay)?;
         let path = root.join(MOD_CRAFT_REMAINDERS);
         let mod_remainders: HashMap<String, String> = match fs::read(&path) {
@@ -743,7 +744,7 @@ impl Items {
         };
         let mut items = HashMap::new();
         let mut order = Vec::new();
-        for (name, c) in defaults.entries() {
+        for (name, c) in raw.iter() {
             let id: Arc<str> = Arc::from(name.as_str());
             let tool = c["minecraft:tool"]["rules"]
                 .as_array()
