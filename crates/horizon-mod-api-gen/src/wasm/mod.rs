@@ -102,6 +102,33 @@ pub(super) fn held(owner: &str) -> bool {
     owner == "PlaceProvider" || (exports().contains(&owner) && !EXPORTS.contains(&owner))
 }
 
+/// The contexts of the load phase: the catalog's registration and data-load contexts and a
+/// resource reload's. A call given one reads and parses data, so it runs within the load limit
+/// (`Budgets::load`), not a hook call's.
+const LOAD_CONTEXTS: &[&str] = &[
+    "RegistrationContext",
+    "DataLoadContext",
+    "ServerReloadContext",
+    "ClientReloadContext",
+];
+
+/// Whether `method` is a load-phase call: one of its arguments is a load-phase context.
+pub(super) fn loads(types: &ty::Types<'_>, method: &Method) -> bool {
+    method.params.iter().any(|(_, ty)| {
+        let ty = match ty {
+            ty::Ty::Ref(inner, _) => &**inner,
+            ty => ty,
+        };
+        match ty {
+            ty::Ty::Dyn(name, _) => LOAD_CONTEXTS.contains(&name.as_str()),
+            ty::Ty::Named(def) => LOAD_CONTEXTS
+                .iter()
+                .any(|name| types.defs[*def].rust.rsplit("::").next() == Some(*name)),
+            _ => false,
+        }
+    })
+}
+
 /// A trait object that crosses without methods: a provider of a mod's own handler type,
 /// erased (`Arc<dyn Any + Send + Sync>`), which only mods of its group take back.
 pub(super) const ERASED: &str = "Any";
