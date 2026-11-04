@@ -1,6 +1,6 @@
 //! The playable game loop: streaming world, player simulation at 20 ticks/s,
 //! block interaction, inventory and HUD.
-use mod_api::__private::game::*;
+use mod_api::__private::game::PartsLookup;
 
 /// The content tables the world plays with, as field-level borrows: the
 /// world's data packs' over the game's own. The `Game::items`/`recipes`/
@@ -6892,6 +6892,9 @@ impl Game<'_> {
     /// then `useItem`. Whether the click ends here (it acted or failed).
     fn use_hand(&mut self, block_hit: Option<&Hit>) -> Result<bool> {
         self.use_failed = false;
+        // The click's target as it was decided, before the adventure gate
+        // below may drop the block for the item's own use.
+        let aimed_at_block = block_hit.is_some();
         // isSecondaryUseActive with something in either hand keeps blocks
         // from reacting.
         let sneaking = self.keys.contains(&KeyCode::ShiftLeft);
@@ -6924,6 +6927,20 @@ impl Game<'_> {
                     (use_block, use_item) = (NativeTriState::False, NativeTriState::False);
                 }
             }
+        }
+        // ServerPlayerGameMode.useItemOn: the held item's onItemUseFirst, when
+        // RightClickBlock didn't deny the item, ahead of the sneak gate and
+        // every block behaviour. Its answer ends the click for this hand.
+        if use_item.or(true)
+            && let Some(hit) = block_hit
+            && let Some(held) = self.held().cloned()
+            && let Some(answer) = self.item_use_first(hit, self.hand, &held)
+        {
+            if matches!(answer, Answer::Success | Answer::SuccessServer) {
+                self.swing_arm();
+            }
+            self.use_failed = answer == Answer::Fail;
+            return Ok(answer.consumes_action() || answer == Answer::Fail);
         }
         // ServerPlayerGameMode.useItemOn: after the spectator and sneak gates,
         // BlockState.useItemOn runs before every block-specific behaviour.
@@ -7257,7 +7274,7 @@ impl Game<'_> {
             }
         }
         if !claimed && !on_block {
-            if let Some(answer) = self.right_click_item(self.hand, &stack) {
+            if let Some(answer) = self.right_click_item(self.hand, &stack, aimed_at_block) {
                 if matches!(answer, Answer::Success | Answer::SuccessServer) {
                     self.swing_arm();
                 }

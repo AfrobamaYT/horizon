@@ -73,6 +73,12 @@ pub(super) fn tool_manifest(bundle: &Bundle) -> Result<(), String> {
             toml::Value::try_from(&bundle.native().injection).map_err(|e| e.to_string())?,
         );
     }
+    if !bundle.native().module.is_empty() {
+        manifest.insert(
+            "module".into(),
+            toml::Value::try_from(&bundle.native().module).map_err(|e| e.to_string())?,
+        );
+    }
     fs::write(
         bundle.dir.join(MANIFEST),
         toml::to_string(&manifest).map_err(|e| e.to_string())?,

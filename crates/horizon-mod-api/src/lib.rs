@@ -3477,7 +3477,8 @@ pub enum InteractionKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum UsePhase {
-    /// `onItemUseFirst`; reserved until that behaviour has a firing point.
+    /// `IItemExtension.onItemUseFirst`, before the item's Part and the
+    /// block's behaviour.
     ItemBeforeBlock,
     /// `BlockBehaviour.useItemOn`, before the block's Part and template.
     Block,
