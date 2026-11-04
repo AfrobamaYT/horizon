@@ -8371,7 +8371,7 @@ impl Game<'_> {
         if self.cooldowns.is_on_cooldown(&group) {
             return false;
         }
-        if let Some(answer) = self.right_click_item(hand, &held) {
+        if let Some(answer) = self.right_click_item(hand, &held, self.pick().is_some()) {
             let success = answer == mod_api::NativeInteractionResult::Success;
             if success {
                 self.with_hand(hand, Game::swing_arm);

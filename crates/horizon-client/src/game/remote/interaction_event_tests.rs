@@ -676,7 +676,7 @@ fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() 
                 game.forced_hit = Some(hit());
                 // Even a passing block remains a block target for Item.use.
                 assert!(
-                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1))
+                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1), true)
                         .is_none()
                 );
                 assert!(observer.0.lock().unwrap().steps.is_empty());
@@ -695,7 +695,7 @@ fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() 
                 ));
                 assert!(game.entity_targeted());
                 assert!(
-                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1))
+                    game.right_click_item(Hand::Main, &ItemStack::new("minecraft:stick", 1), false)
                         .is_none()
                 );
                 assert!(observer.0.lock().unwrap().steps.is_empty());

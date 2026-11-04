@@ -10224,15 +10224,18 @@ impl Game<'_> {
         answer.filter(|answer| *answer != NativeInteractionResult::Pass)
     }
     /// Air use only: a passing block or entity keeps its target, rather than
-    /// becoming a `RightClickItem` interaction.
+    /// becoming a `RightClickItem` interaction. `block_aimed` is the click's
+    /// own decided block target (the one `use_item_on_block` was asked about),
+    /// not a fresh ray cast.
     pub(super) fn right_click_item(
         &mut self,
         hand: Hand,
         stack: &ItemStack,
+        block_aimed: bool,
     ) -> Option<NativeInteractionResult> {
         if !mod_api::__private::listened(mod_api::HookId::RightClickItem)
             || self.entity_targeted()
-            || self.pick().is_some()
+            || block_aimed
         {
             return None;
         }
