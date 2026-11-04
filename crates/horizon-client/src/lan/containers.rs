@@ -555,6 +555,7 @@ impl Hub {
             container: items.as_deref_mut(),
             shulker,
             hidden: &hidden,
+            loop_context: &self.loop_context,
         };
         let (drops, changed) = menu::click(
             &mut view,

@@ -264,6 +264,9 @@ fn server_sync(sync: Arc<SyncData>, net: NetConfig) -> Server {
             max_players: 8,
             levels: Default::default(),
         },
+        Arc::new(
+            server_load().loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+        ),
     );
     Server {
         hub,
@@ -1658,7 +1661,7 @@ fn a_respawned_guest_is_immune_until_its_client_loads_the_world() {
         border: &border,
         streaming: None,
     };
-    s.hub.respawn(0, at, &ctx);
+    s.hub.respawn(0, at, None, &ctx);
     assert!(
         !s.hub.guests[0].client_loaded(),
         "a respawn unloads the client"

@@ -319,6 +319,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         };
         let new = self.state(pos);
         if new == state {
+            if update_flags & flags::UPDATE_CLIENTS != 0
+                && (!self.level.is_client_side() || update_flags & flags::UPDATE_INVISIBLE == 0)
+            {
+                self.level.send_block_updated(pos);
+            }
             if update_flags & flags::UPDATE_NEIGHBORS != 0 {
                 let old_block = self.block_of(old);
                 self.update_neighbors_at(pos, old_block);

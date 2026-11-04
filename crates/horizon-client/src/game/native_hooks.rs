@@ -539,9 +539,7 @@ impl Game<'_> {
 
 /// `Level.setBlock`'s flags, for the `native_set_block_property` helpers:
 /// `flags::UPDATE_CLIENTS` as a vanilla crop grows, `flags::UPDATE_ALL` as a
-/// furnace sets its `lit`. Horizon sends every write to players, so
-/// `UPDATE_CLIENTS`, `UPDATE_INVISIBLE` and `UPDATE_IMMEDIATE` change nothing
-/// yet.
+/// furnace sets its `lit`.
 pub(super) use horizon_world::level::flags;
 
 impl GameLevel<'_> {
@@ -648,6 +646,25 @@ impl GameLevel<'_> {
         mod_api::dispatch_neighbor_notify(self, dimension, pos, state, skipped_side, cancel);
     }
 
+    /// A fluid source at `pos` (`state`) is about to count towards turning
+    /// the flowing fluid beside it into a source (NeoForge's
+    /// `CreateFluidSourceEvent`, `FlowingFluid.getNewLiquid`): two counted
+    /// sources beside a block over a solid block or a source make it one.
+    /// Asked for each horizontal neighbour source, whenever the game works
+    /// out a block's new fluid, spread checks included: answer fast.
+    /// `can_convert` starts as the fluid's rule (`water_source_conversion`
+    /// or `lava_source_conversion`). Server-side.
+    #[inline(always)]
+    pub(super) fn native_create_fluid_source(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        can_convert: &mut bool,
+    ) {
+        mod_api::dispatch_create_fluid_source(self, dimension, pos, state, can_convert);
+    }
+
     /// A non-persistent leaf block at distance 7 is about to decay at `pos`.
     /// Set `cancel` to keep it. Server-side.
     #[inline(always)]
@@ -694,6 +711,41 @@ impl GameLevel<'_> {
         cancel: &mut bool,
     ) {
         mod_api::dispatch_block_grow_feature(self, dimension, pos, feature, cancel);
+    }
+
+    /// A crop-like block at `pos` is about to grow on a random tick
+    /// (NeoForge's `CropGrowEvent.Pre`): crops, stems, nether wart, cocoa,
+    /// sweet berries and bamboo at their own position; cactus and chorus
+    /// flowers at the block above; sugar cane at its own position; kelp,
+    /// weeping and twisting vines and cave vines at the block they grow
+    /// into. `state` is the growing block. Leave `result` at `Default` for
+    /// vanilla's own chance, or set `True` to grow now or `False` to stop
+    /// it (`DO_NOT_GROW`). Vanilla's random roll is drawn either way, in
+    /// vanilla's order. Server-side.
+    #[inline(always)]
+    pub(super) fn native_crop_grow_pre(
+        &mut self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        result: &mut NativeTriState,
+    ) {
+        mod_api::dispatch_crop_grow_pre(self, dimension, pos, state, result);
+    }
+
+    /// A crop-like block grew (NeoForge's `CropGrowEvent.Post`).
+    /// `original_state` is the block before it grew and `state` what is at
+    /// `pos` now. Sugar cane reports the new cane above it, and kelp and
+    /// vines the new head, as both states. Server-side.
+    #[inline(always)]
+    pub(super) fn native_crop_grow_post(
+        &mut self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        original_state: BlockStateId,
+        state: BlockStateId,
+    ) {
+        mod_api::dispatch_crop_grow_post(self, dimension, pos, original_state, state);
     }
 
     /// A block at `pos` is about to fade from `from` to `to` because of
@@ -7120,6 +7172,35 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_create_spawn_position(self, position, rotation, cancel);
     }
+    /// `PlayerRespawnPositionEvent`: where `player` respawns, once the server found it. The
+    /// `original_*` arguments are that point; the mods may change `level`, `position`, `yaw`,
+    /// `pitch` and `copy_original_spawn_position` (`game/respawn_position.rs` applies them).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn native_player_respawn_position(
+        &mut self,
+        player: PlayerRef,
+        original_level: LevelDimension,
+        original_position: [f64; 3],
+        missing_respawn_block: bool,
+        level: &mut LevelDimension,
+        position: &mut [f64; 3],
+        yaw: &mut f32,
+        pitch: &mut f32,
+        copy_original_spawn_position: &mut bool,
+    ) {
+        mod_api::dispatch_player_respawn_position(
+            self,
+            player,
+            original_level,
+            original_position,
+            missing_respawn_block,
+            level,
+            position,
+            yaw,
+            pitch,
+            copy_original_spawn_position,
+        );
+    }
     /// `player` (`name`) respawned (NeoForge's `PlayerRespawnEvent`): at the
     /// end of `PlayerList.respawn`, once they are placed and their health,
     /// food and experience reset, with their state swapped in. Once for each
@@ -7659,6 +7740,24 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_pickup_xp(self, player, dimension, orb, value, count, canceled);
+    }
+    /// An experience orb looks for a player to follow (NeoForge's
+    /// `XpOrbTargetingEvent`, `ExperienceOrb.followNearbyPlayer`), on a
+    /// server. `following` starts as the default: the nearest living player
+    /// within `scan_distance` (8) blocks who isn't a spectator, or `None`.
+    /// Set another player, or `None` to follow no one. The orb only goes
+    /// for a living player who isn't a spectator, in its level, and only
+    /// moves once they are within 8 blocks. Horizon looks again on every
+    /// orb tick (vanilla keeps the player it follows while they stay
+    /// within 8 blocks), so this is asked every tick for each orb: answer
+    /// fast.
+    pub(super) fn native_xp_orb_targeting(
+        &mut self,
+        orb: EntityRef,
+        scan_distance: f64,
+        following: &mut Option<PlayerRef>,
+    ) {
+        mod_api::dispatch_xp_orb_targeting(self, orb, scan_distance, following);
     }
     /// The selected damaged Mending `stack` and the proposed durability repair
     /// for `experience` points. The amount is clamped to the stack's current damage. Zero leaves the
@@ -8541,9 +8640,9 @@ impl GameLevel<'_> {
     /// `ticks` (`native_random_tick`, `native_tick_block`). A crop's random
     /// tick grows it with `flags::UPDATE_CLIENTS`: neighbours' shapes update,
     /// but no neighbour gets `neighborChanged` and comparators aren't told;
-    /// `flags::UPDATE_ALL` does both. Horizon sends every write to players
-    /// whatever the flags: `UPDATE_CLIENTS`, `UPDATE_INVISIBLE` and
-    /// `UPDATE_IMMEDIATE` change nothing yet. Any loaded position, not only
+    /// `flags::UPDATE_ALL` does both. `UPDATE_CLIENTS` sends a block update;
+    /// `UPDATE_INVISIBLE` suppresses its notification only on clients, as in
+    /// `Level.setBlock`. Any loaded position, not only
     /// the hook's; true when the block changed, false off an authoritative
     /// server, when the block has no such property or value, `pos` is not
     /// loaded, or the property already has `value` (no write, as
@@ -8611,6 +8710,19 @@ impl GameLevel<'_> {
             put_block_entity(self.world, pos, entity);
         }
         changed
+    }
+    /// `Level.removeBlock`: replace a block with its fluid's legacy block.
+    pub(super) fn native_remove_block(
+        &mut self,
+        ticks: &mut Ticks,
+        pos: [i32; 3],
+        moved: bool,
+    ) -> bool {
+        if !self.native_authoritative || !self.world.is_loaded_at(pos[0], pos[1], pos[2]) {
+            return false;
+        }
+        self.behaviours
+            .remove_block(self, ticks, BlockPos::new(pos[0], pos[1], pos[2]), moved)
     }
     /// Schedules a tick of `block` (a block name) at `pos` in `delay` game
     /// ticks, as a falling block's shape update schedules its fall
@@ -8830,9 +8942,8 @@ impl Game<'_> {
     }
     /// Sets a block in the current authoritative level through `Level.setBlock`.
     /// Returns false for another dimension, an invalid state, or no change.
-    /// `flags` selects vanilla's neighbour and shape updates; Horizon sends
-    /// every write to players whatever the flags. A block entity block gets
-    /// its block entity.
+    /// `flags` selects vanilla's neighbour, shape and client updates. A block
+    /// entity block gets its block entity.
     pub(super) fn native_set_block(
         &mut self,
         dimension: &str,
@@ -8982,7 +9093,7 @@ impl Game<'_> {
     }
     /// `native_set_block_property` with `Level.setBlock`'s `flags`, as a
     /// brewing stand's tick sets its bottles with `flags::UPDATE_CLIENTS`.
-    /// Players get the write whatever the flags (`flags`); false when this
+    /// Players get the write when `UPDATE_CLIENTS` is set; false when this
     /// window isn't a server, and in each case `native_set_block_property`
     /// returns false.
     pub(super) fn native_set_block_property_with(

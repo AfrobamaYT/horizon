@@ -1246,17 +1246,27 @@ impl Mob {
     /// LivingEntity.getFrictionInfluencedSpeed.
     fn friction_speed(&self, friction: f32) -> f32 {
         if self.on_ground {
+            let speed = self.speed();
             if friction > 0.6 {
-                self.ai.speed * (0.216_000_02 / (friction * friction * friction))
+                speed * (0.216_000_02 / (friction * friction * friction))
             } else {
-                self.ai.speed
+                speed
             }
         } else {
             self.flying_speed()
         }
     }
+    /// `LivingEntity.getSpeed`, through the `living_speed` hook.
+    fn speed(&self) -> f32 {
+        let mut speed = self.ai.speed;
+        crate::motion::native_living_speed(self.id, &self.kind.id, &mut speed);
+        speed
+    }
+    /// `LivingEntity.getFlyingSpeed`, through the `living_flying_speed` hook.
     fn flying_speed(&self) -> f32 {
-        0.02
+        let mut speed = 0.02;
+        crate::motion::native_living_flying_speed(self.id, &self.kind.id, &mut speed);
+        speed
     }
     /// `LivingEntity.getEffectiveGravity`: the gravity, floored to 0.01 while a
     /// Slow Falling mob is on its way down.
@@ -1485,7 +1495,7 @@ impl Mob {
             }
             if efficiency > 0.0 {
                 slow += (0.546_000_06 - slow) * efficiency;
-                speed += (self.ai.speed - speed) * efficiency;
+                speed += (self.speed() - speed) * efficiency;
             }
             self.move_relative(speed, input);
             self.do_move(w, level, events);
@@ -1640,8 +1650,11 @@ impl Mob {
         }
         crate::motion::native_living_jump(self.id, &self.kind.id);
     }
+    /// `LivingEntity.getJumpPower`, through the `living_jump_power` hook.
     pub fn jump_power(&self) -> f32 {
-        self.kind.jump_strength as f32
+        let mut power = self.kind.jump_strength as f32;
+        crate::motion::native_living_jump_power(self.id, &self.kind.id, &mut power);
+        power
     }
     /// LivingEntity.updateWalkAnimation (client calculateEntityAnimation).
     pub fn update_walk_animation(&mut self) {

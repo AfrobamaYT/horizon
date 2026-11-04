@@ -13,7 +13,7 @@ use std::{
 
 /// RecipeManager.RECIPE_PROPERTY_SETS: each set and the ingredients it takes
 /// from a recipe of the given type.
-const PROPERTY_SETS: &[(&str, &str, &[&str])] = &[
+pub(crate) const PROPERTY_SETS: &[(&str, &str, &[&str])] = &[
     ("smithing_addition", "smithing", &["addition"]),
     ("smithing_base", "smithing", &["base"]),
     ("smithing_template", "smithing", &["template"]),
@@ -179,7 +179,11 @@ fn normalize_ingredients(r: &mut Value, items: &horizon_client::items::Items) ->
 }
 
 /// The packet's payload for the network copy's recipes (`network_recipes`).
-pub fn update_recipes(all: &BTreeMap<String, Box<str>>, sync: &SyncData) -> Vec<u8> {
+pub fn update_recipes(
+    all: &BTreeMap<String, Box<str>>,
+    sync: &SyncData,
+    additions: &horizon_client::crafting::PropertyAdditions,
+) -> Vec<u8> {
     // The copy is already filtered and swapped (`network_recipes`); the
     // filters never run twice, so one swap cannot feed a later one again.
     // Parsing every recipe takes about a millisecond.
@@ -225,6 +229,14 @@ pub fn update_recipes(all: &BTreeMap<String, Box<str>>, sync: &SyncData) -> Vec<
                 }
             }
         }
+        // An item the registries do not know is left out (`item`).
+        set.extend(
+            additions
+                .get(key)
+                .into_iter()
+                .flatten()
+                .filter_map(|n| item(n)),
+        );
         w.string(&format!("minecraft:{key}"));
         w.varint(set.len() as i32);
         for id in set {
@@ -480,6 +492,58 @@ mod content_tests {
             );
             assert_eq!(heard.lock().unwrap().len(), 3);
             drop(client);
+        });
+    }
+
+    struct PropertyListener(std::sync::Arc<std::sync::Mutex<Vec<DataLoadOrigin>>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for PropertyListener {
+        fn recipe_property_sets(
+            &self,
+            context: &mod_api::DataLoadContext<'_>,
+            event: &mut mod_api::RecipePropertySetsEvent<'_>,
+        ) {
+            self.0.lock().unwrap().push(context.origin());
+            let add = |set: &str, items: &[&str]| {
+                mod_api::RecipePropertyAddition::new(
+                    set,
+                    items.iter().map(|i| (*i).to_owned()).collect(),
+                )
+            };
+            event.additions.push(add(
+                "minecraft:furnace_input",
+                &["minecraft:emerald", "minecraft:air"],
+            ));
+            event
+                .additions
+                .push(add("minecraft:no_such_set", &["minecraft:dirt"]));
+            event
+                .additions
+                .push(add("brewing_reagent", &["minecraft:diamond"]));
+        }
+    }
+
+    /// The `recipe_property_sets` hook is asked once per load with the load's
+    /// origin; the resolved set keeps the known sets' items (a set key with or
+    /// without `minecraft:`), drops air and unknown sets, and the furnace
+    /// takes what a mod added though no recipe names it.
+    #[test]
+    fn property_sets_are_asked_once_per_load_and_validated() {
+        let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "props",
+            Box::new(PropertyListener(heard.clone())),
+        )];
+        mod_api::testing::with_mods(mods.into(), || {
+            let resolved =
+                ResolvedSources::resolve(Vec::new(), &load(DataLoadOrigin::ServerDataLoad));
+            assert_eq!(*heard.lock().unwrap(), [DataLoadOrigin::ServerDataLoad]);
+            let added = &resolved.property_additions;
+            assert!(added.adds("furnace_input", "minecraft:emerald"));
+            assert!(!added.adds("furnace_input", "minecraft:air"));
+            assert!(added.adds("brewing_reagent", "minecraft:diamond"));
+            assert!(added.get("no_such_set").is_none());
+            assert!(!added.adds("smoker_input", "minecraft:emerald"));
         });
     }
 
