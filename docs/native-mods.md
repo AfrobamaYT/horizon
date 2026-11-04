@@ -1728,6 +1728,7 @@ registration path.
 - A timed world border size change finished: `native_world_border_bounds_change_finish()` fires after the border reaches its final size.
 
 - `Game::native_mod_image(width, height, rgba)`: a mod's own RGBA image, uploaded into the HUD atlas slot `horizon/modimage` (1024 by 1024) and drawn with `native_sprite`, whose source rectangle crops and stretches it, so a map or a schematic view needs no texture of its own. The slot is reserved only while a native mod is loaded, so a game without mods pays none of its 4 MiB. False for an image that is not `width * height` pixels of four bytes, is larger than the slot, or when there is no slot. Each upload is a texture patch of the image, so send one when the image changed, not every frame.
+- `Game::native_enchantments()` and `Game::native_enchantment_supports(id, item)`: every registered enchantment as `(id, max level, is a curse)` in registry order, and whether one can go on an item (`Enchantment.isSupportedItem`). What a recipe viewer lists for grindstone and anvil enchanting. NeoForge: the `enchantment` registry (`RegistryAccess.lookupOrThrow(Registries.ENCHANTMENT)`), `Enchantment.getMaxLevel`, `Enchantment.isSupportedItem`, the `minecraft:curse` tag. Client-side.
 - A living entity drowning (`native_living_drown`), with changeable drowning and damage, a read-only bubble count and cancellation.
 
 - A living entity's fall (`native_living_fall`), with changeable distance and multiplier and cancellation.

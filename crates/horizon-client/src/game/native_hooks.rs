@@ -8550,6 +8550,22 @@ impl Game<'_> {
     pub(super) fn native_cursor(&self) -> [f32; 2] {
         [self.cursor.0, self.cursor.1]
     }
+    /// Every registered enchantment as (id, max level, is a curse), in registry order.
+    pub(super) fn native_enchantments(&self) -> Vec<(String, u32, bool)> {
+        self.native_stations().enchantments.summary()
+    }
+    fn native_stations(&self) -> &horizon_client::stations::StationData {
+        match &self.world_tables {
+            Some(t) => &t.stations,
+            None => self.res.stations(),
+        }
+    }
+    /// Whether enchantment `id` can go on `item` (`Enchantment.isSupportedItem`).
+    pub(super) fn native_enchantment_supports(&self, id: &str, item: &str) -> bool {
+        self.native_stations()
+            .enchantments
+            .can_enchant(self.res.items(), id, item)
+    }
     /// The size of sprite `name` in its own pixels, if there is one.
     pub(super) fn native_sprite_size(&self, name: &str) -> Option<[f32; 2]> {
         let r = self.gui.atlas.sprites.get(name)?;

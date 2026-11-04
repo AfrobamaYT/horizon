@@ -337,6 +337,14 @@ impl Enchantments {
     pub fn is_curse(&self, id: &str) -> bool {
         self.in_tag("minecraft:curse", id)
     }
+    /// Every enchantment as (id, max level, curse), in registry order.
+    pub fn summary(&self) -> Vec<(String, u32, bool)> {
+        let curse = |id: &str| self.is_curse(id);
+        self.list
+            .iter()
+            .map(|e| (e.id.to_string(), e.max_level, curse(&e.id)))
+            .collect()
+    }
     pub fn translate(&self, key: &str) -> Option<&str> {
         self.lang.get(key).map(String::as_str)
     }
@@ -1268,6 +1276,14 @@ mod ignite_tests {
             index,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn summary_lists_id_max_level_and_curse() {
+        let mut reg = registry();
+        assert_eq!(reg.summary(), [("minecraft:fire_aspect".to_string(), 2, false)]);
+        reg.tags.insert("minecraft:curse".into(), vec![Arc::from("minecraft:fire_aspect")]);
+        assert!(reg.summary()[0].2);
     }
 
     #[test]

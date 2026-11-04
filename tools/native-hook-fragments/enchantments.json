@@ -1,0 +1,15 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "enchantments",
+      "side": "client",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_enchantments"
+    },
+    {
+      "name": "enchantment_supports",
+      "side": "client",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_enchantment_supports"
+    }
+  ]
+}
