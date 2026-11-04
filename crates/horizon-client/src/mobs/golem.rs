@@ -537,7 +537,7 @@ pub fn snow_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
             amount: 1.0,
         });
     }
-    if !w.mob_griefing {
+    if !w.can_grief(m.id) {
         return;
     }
     for i in 0..4 {

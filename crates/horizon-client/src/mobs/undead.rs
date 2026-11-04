@@ -1156,7 +1156,7 @@ impl Goal for AttackTurtleEgg {
     }
     /// RemoveBlockGoal.canUse
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        if !cx.w.mob_griefing {
+        if !cx.w.can_grief(m.id) {
             return false;
         }
         if self.base.next_start > 0 {

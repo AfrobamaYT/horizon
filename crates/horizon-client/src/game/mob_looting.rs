@@ -22,13 +22,18 @@ use horizon_core::{geometry::Vec3, random::RandomSource};
 impl Game<'_> {
     /// `Mob.aiStep`'s looting block, once per mob per tick.
     pub(super) fn tick_mob_looting(&mut self) {
-        if self.dropped.is_empty() || !self.ui.rules.bool("mob_griefing") {
+        let griefing = self.ui.rules.bool("mob_griefing");
+        if self.dropped.is_empty() || (!griefing && !self.grief_hooked()) {
             return;
         }
         let mut near = super::item_areas::ItemAreas::default();
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
-            if !m.can_pick_up_loot() || !m.alive() || m.removed {
+            if !m.can_pick_up_loot()
+                || !m.alive()
+                || m.removed
+                || !self.entity_grief(m.id, griefing)
+            {
                 continue;
             }
             // `Mob.ITEM_PICKUP_REACH`.

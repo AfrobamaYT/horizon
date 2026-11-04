@@ -107,7 +107,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     } else {
         m.attrs.speed + (max - m.attrs.speed) * 0.1
     };
-    if m.horizontal_collision && w.mob_griefing {
+    if m.horizontal_collision && w.can_grief(m.id) {
         let b = m
             .bounds()
             .inflate(horizon_core::geometry::Vec3::new(0.2, 0.2, 0.2));
@@ -144,7 +144,9 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     // Entity.checkInsideBlocks -> CropBlock.entityInside: a ravager walking
     // through a crop destroys it, drops and all, with mobGriefing; a pitcher
     // crop (PitcherCropBlock.entityInside) goes the same way, both halves.
-    if w.mob_griefing {
+    // NeoForge asks `canEntityGrief` for each crop, and reads the rule alone
+    // for a pitcher crop.
+    if w.mob_griefing || w.mob_hooks.is_some() {
         let b = m
             .bounds()
             .deflate(horizon_core::geometry::Vec3::new(1.0e-5, 1.0e-5, 1.0e-5));
@@ -152,15 +154,16 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         for x in lo.x.floor() as i32..=hi.x.floor() as i32 {
             for y in lo.y.floor() as i32..=hi.y.floor() as i32 {
                 for z in lo.z.floor() as i32..=hi.z.floor() as i32 {
-                    if matches!(
-                        w.block_name(x, y, z),
+                    let breaks = match w.block_name(x, y, z) {
                         "minecraft:wheat"
-                            | "minecraft:carrots"
-                            | "minecraft:potatoes"
-                            | "minecraft:beetroots"
-                            | "minecraft:torchflower_crop"
-                            | "minecraft:pitcher_crop"
-                    ) {
+                        | "minecraft:carrots"
+                        | "minecraft:potatoes"
+                        | "minecraft:beetroots"
+                        | "minecraft:torchflower_crop" => w.can_grief(m.id),
+                        "minecraft:pitcher_crop" => w.mob_griefing,
+                        _ => false,
+                    };
+                    if breaks {
                         events.push(MobEvent::BreakBlock {
                             pos: [x, y, z],
                             drop: true,

@@ -2686,7 +2686,7 @@ impl Goal for EatBlock {
             // MOB_GRIEFING (`ifeq 89`, `ifeq 182` in the bytecode); `Mob.ate`
             // runs either way, so a sheep still sheds its wool and ages up.
             if cx.w.has_tag("minecraft:edible_for_sheep", &here) {
-                if cx.w.mob_griefing {
+                if cx.w.can_grief(m.id) {
                     cx.events.push(MobEvent::BreakBlock {
                         pos: [x, y, z],
                         by: None,
@@ -2696,7 +2696,7 @@ impl Goal for EatBlock {
                 super::ai::ate(m);
             } else if cx.w.block_name(x, y - 1, z) == "minecraft:grass_block" {
                 // The particles and the dirt `setBlock` are the same gate.
-                if cx.w.mob_griefing {
+                if cx.w.can_grief(m.id) {
                     cx.events.push(MobEvent::SetBlockName {
                         mob: Some(m.id),
                         pos: [x, y - 1, z],
@@ -3147,6 +3147,14 @@ mod eat_block_tests {
     /// the sheep's own feet, so the goal takes the `destroyBlock` half; without
     /// it the sheep stands on the grass and takes the grass-to-dirt half.
     fn sheep_events(griefing: bool, tufts: bool) -> Option<Vec<MobEvent>> {
+        sheep_events_hooked(griefing, tufts, None)
+    }
+
+    fn sheep_events_hooked(
+        griefing: bool,
+        tufts: bool,
+        hooks: Option<&dyn crate::mobs::MobHooks>,
+    ) -> Option<Vec<MobEvent>> {
         let mut out = None;
         let build = |world: &mut crate::world::World,
                      registry: &horizon_world::registry::BlockRegistry| {
@@ -3169,6 +3177,9 @@ mod eat_block_tests {
             }
         };
         with_built_test_world_rules(&[], griefing, build, |w, types| {
+            let mut hooked = w.clone();
+            hooked.mob_hooks = hooks;
+            let w = &hooked;
             let kind = Arc::new(types.types["minecraft:sheep"].clone());
             let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
             let mut test_level = crate::health::TestLevel::new(0);
@@ -3209,6 +3220,33 @@ mod eat_block_tests {
         assert!(dirt(&on) > 0, "mob_griefing on: {}", dirt(&on));
         assert_eq!(dirt(&off), 0, "mob_griefing off must leave the grass alone");
         assert!(ate(&off) > 0, "the goal still runs with the rule off");
+    }
+
+    /// Grants griefing to mob 1 only: what a mod's `entity_mob_griefing` does.
+    struct GriefFor1;
+    impl crate::mobs::MobHooks for GriefFor1 {
+        fn enderman_anger_suppressed(&self, _: u32, _: &crate::mobs::PlayerView) -> bool {
+            false
+        }
+        fn can_grief(&self, mob: u32, rule: bool) -> bool {
+            rule || mob == 1
+        }
+    }
+
+    /// NeoForge's `canEntityGrief`: with the rule off, a mod's yes for this
+    /// sheep lets it eat the grass (and only through `MobWorld::can_grief`).
+    #[test]
+    fn a_mods_grief_answer_overrides_the_rule_for_its_mob() {
+        let Some(off) = sheep_events_hooked(false, false, Some(&GriefFor1)) else {
+            return;
+        };
+        let dirt = off
+            .iter()
+            .filter(
+                |e| matches!(e, MobEvent::SetBlockName { name, .. } if *name == "minecraft:dirt"),
+            )
+            .count();
+        assert!(dirt > 0, "the hook's yes eats the grass with the rule off");
     }
 
     /// The edible half of the same gate (`ifeq 89` skips

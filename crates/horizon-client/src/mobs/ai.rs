@@ -760,7 +760,7 @@ fn effects_from_blocks(
         // level's and comes only after those checks.
         if w.block_name(x, y, z) == "minecraft:turtle_egg"
             && !matches!(m.species(), Species::Turtle | Species::Bat)
-            && w.mob_griefing
+            && w.can_grief(m.id)
             && level.random().next_int_bound(100).unwrap_or(1) == 0
         {
             events.push(MobEvent::CrackTurtleEgg { pos: [x, y, z] });

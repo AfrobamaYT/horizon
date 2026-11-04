@@ -385,7 +385,7 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
     }
     if m.extra.counter2 > 0 {
         m.extra.counter2 -= 1;
-        if m.extra.counter2 == 0 && w.mob_griefing {
+        if m.extra.counter2 == 0 && w.can_grief(m.id) {
             let width = (m.width() / 2.0 + 1.0).floor() as i32;
             let height = m.height().floor() as i32;
             let b = [

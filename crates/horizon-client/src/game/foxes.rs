@@ -25,8 +25,8 @@ impl Game<'_> {
             }
             // `Mob.aiStep`: the items in the box grown by (1, 0, 1), in order.
             let reach = m.bounds().inflate(Vec3::new(1.0, 0.0, 1.0));
-            if griefing
-                && m.can_pick_up_loot()
+            if m.can_pick_up_loot()
+                && self.entity_grief(m.id, griefing)
                 && near.may_meet(&self.dropped, self.next_entity, reach)
             {
                 let mut j = 0;
@@ -87,8 +87,8 @@ impl Game<'_> {
             // `Mob.aiStep`: the items in the box grown by (1, 0, 1); `Dolphin.pickUpItem`
             // takes the whole stack when the mouth is empty (`Mob.canHoldItem` is true).
             let reach = m.bounds().inflate(Vec3::new(1.0, 0.0, 1.0));
-            if griefing
-                && m.can_pick_up_loot()
+            if m.can_pick_up_loot()
+                && self.entity_grief(m.id, griefing)
                 && near.may_meet(&self.dropped, self.next_entity, reach)
             {
                 let mut j = 0;

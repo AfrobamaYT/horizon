@@ -7844,6 +7844,11 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_enderman_anger(self, enderman, player, cancel);
     }
+    /// `EntityMobGriefingEvent` (`EventHooks.canEntityGrief`): may `entity`
+    /// change the world? `can_grief` starts as the `mob_griefing` rule.
+    pub(super) fn native_entity_mob_griefing(&self, entity: EntityRef, can_grief: &mut bool) {
+        mod_api::dispatch_entity_mob_griefing(self, entity, can_grief);
+    }
     /// `MobEffect.shouldApplyEffectTickThisTick` for a content mod's effect
     /// `effect` (`ruby:bleeding`), each tick a player or a mob has it, in
     /// `MobEffectInstance.tickServer` before it counts down: `tick_count` is
