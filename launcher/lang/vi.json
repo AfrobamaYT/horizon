@@ -1084,5 +1084,22 @@
   "Save changes switches it. Nothing in its folder is deleted.": "Lưu thay đổi sẽ chuyển nó. Không có gì trong thư mục của nó bị xóa.",
   "Its mods made for {loader} stay in its folder but won't load.": "Các mod làm cho {loader} vẫn ở trong thư mục của nó nhưng sẽ không được tải.",
   "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Các mod làm cho Minecraft {from} vẫn ở trong thư mục của nó; một số có thể không tải được trong {to}.",
-  "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Các thế giới của nó được lưu bởi Minecraft {from}: {to} nâng cấp chúng vĩnh viễn, và không mở được nếu là bản cũ hơn."
+  "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Các thế giới của nó được lưu bởi Minecraft {from}: {to} nâng cấp chúng vĩnh viễn, và không mở được nếu là bản cũ hơn.",
+  "A new world takes a minute the first time": "Lần đầu tạo thế giới mới mất một phút",
+  "Cannot read or write jar cache {path}: {error}. Check the file and its permissions before retrying.": "Không thể đọc hoặc ghi bộ nhớ đệm JAR {path}: {error}. Hãy kiểm tra tệp và quyền truy cập trước khi thử lại.",
+  "Download jars": "Tải tệp JAR",
+  "Download {count} original Java jars from Modrinth?": "Tải {count} tệp Java JAR gốc từ Modrinth?",
+  "Jar downloads were not allowed. Supply the original files at these exact cache paths, or pass --allow-jar-downloads:\n": "Chưa cho phép tải tệp JAR. Hãy cung cấp các tệp gốc tại chính xác các đường dẫn bộ nhớ đệm sau hoặc dùng --allow-jar-downloads:\n",
+  "Jar {id} {version}: {reason}. Put the original file with this exact SHA-512 at {path}, then retry.": "JAR {id} {version}: {reason}. Đặt tệp gốc có SHA-512 khớp chính xác này tại {path}, rồi thử lại.",
+  "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.": "Bản dựng mã máy {version} thiếu bản ghi native-mods.json hoặc bản ghi không hợp lệ. Hãy dựng lại từ một phiên bản Horizon đã cài đặt.",
+  "Only assets and data are used; Java code is never run. Each file is checked against the manifest's SHA-512.": "Chỉ sử dụng tài nguyên và dữ liệu; mã Java không bao giờ được thực thi. Mỗi tệp được kiểm tra theo SHA-512 trong tệp kê khai.",
+  "SHA-512 mismatch at {path}: expected {expected}, got {actual}. Replace this cache entry with the exact original file, or remove it and retry with --allow-jar-downloads.": "SHA-512 không khớp tại {path}: cần {expected}, nhận được {actual}. Thay mục bộ nhớ đệm này bằng đúng tệp gốc hoặc xóa nó và thử lại với --allow-jar-downloads.",
+  "SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.": "SHA-512 {hash} chỉ đến cả {first_id} {first_version} lẫn {second_id} {second_version}.",
+  "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Mã nguồn trò chơi này không có mẫu mục trong danh mục mod mã máy. Hãy cập nhật Horizon và dựng lại các mod cho trò chơi này.",
+  "no exact file on Modrinth": "không có tệp khớp chính xác trên Modrinth",
+  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
+  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml không có phần phụ thuộc horizon-client.",
+  "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml không có tên gói.",
+  "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client yêu cầu {fields}. Các bản dựng máy chủ không có giao diện đồ họa; trình khởi chạy quản lý các tính năng của horizon-client. Xóa features và dùng default-features = false hoặc bỏ qua thiết lập này.",
+  "{mod}: {error}": "{mod}: {error}"
 }

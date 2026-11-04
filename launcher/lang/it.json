@@ -1084,5 +1084,22 @@
   "Save changes switches it. Nothing in its folder is deleted.": "Salva modifiche la cambia. Nella sua cartella non viene eliminato nulla.",
   "Its mods made for {loader} stay in its folder but won't load.": "Le sue mod per {loader} restano nella sua cartella, ma non verranno caricate.",
   "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Le sue mod per Minecraft {from} restano nella sua cartella; alcune potrebbero non caricarsi in {to}.",
-  "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "I suoi mondi sono stati salvati da Minecraft {from}: {to} li aggiorna per sempre, e non può aprirli se è più vecchio."
+  "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "I suoi mondi sono stati salvati da Minecraft {from}: {to} li aggiorna per sempre, e non può aprirli se è più vecchio.",
+  "A new world takes a minute the first time": "Creare un nuovo mondo richiede un minuto la prima volta",
+  "Cannot read or write jar cache {path}: {error}. Check the file and its permissions before retrying.": "Impossibile leggere o scrivere la cache JAR {path}: {error}. Controlla il file e i suoi permessi prima di riprovare.",
+  "Download jars": "Scarica i file JAR",
+  "Download {count} original Java jars from Modrinth?": "Scaricare {count} file Java JAR originali da Modrinth?",
+  "Jar downloads were not allowed. Supply the original files at these exact cache paths, or pass --allow-jar-downloads:\n": "Il download dei file JAR non è stato autorizzato. Fornisci i file originali esattamente in questi percorsi della cache, oppure usa --allow-jar-downloads:\n",
+  "Jar {id} {version}: {reason}. Put the original file with this exact SHA-512 at {path}, then retry.": "JAR {id} {version}: {reason}. Metti il file originale con esattamente questo SHA-512 in {path}, poi riprova.",
+  "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.": "La build nativa {version} ha un record native-mods.json mancante o non valido. Ricompilala a partire da una versione di Horizon installata.",
+  "Only assets and data are used; Java code is never run. Each file is checked against the manifest's SHA-512.": "Vengono usati solo risorse e dati; il codice Java non viene mai eseguito. Ogni file viene verificato rispetto allo SHA-512 del manifesto.",
+  "SHA-512 mismatch at {path}: expected {expected}, got {actual}. Replace this cache entry with the exact original file, or remove it and retry with --allow-jar-downloads.": "SHA-512 non corrispondente in {path}: previsto {expected}, ottenuto {actual}. Sostituisci questa voce della cache con l'esatto file originale, oppure rimuovila e riprova con --allow-jar-downloads.",
+  "SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.": "Lo SHA-512 {hash} identifica sia {first_id} {first_version} sia {second_id} {second_version}.",
+  "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Questo codice sorgente del gioco non ha un modello per le voci dell'inventario nativo. Aggiorna Horizon e ricompila le mod per questo gioco.",
+  "no exact file on Modrinth": "nessun file con corrispondenza esatta su Modrinth",
+  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
+  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: in Cargo.toml manca una dipendenza da horizon-client.",
+  "{mod}: Cargo.toml has no package name.": "{mod}: in Cargo.toml manca il nome del pacchetto.",
+  "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client richiede {fields}. Le build server non hanno interfaccia grafica; il launcher gestisce le funzionalità di horizon-client. Rimuovi features e usa default-features = false oppure ometti questa impostazione.",
+  "{mod}: {error}": "{mod}: {error}"
 }
