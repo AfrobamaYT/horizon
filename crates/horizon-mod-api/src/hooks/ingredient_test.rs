@@ -6,11 +6,18 @@ pub trait Hooks {
     /// stack being matched, `accept` already true (the load-time list named
     /// the item). Set `accept` to false to refuse the stack — its components
     /// are the usual reason. The hook may be called many times a craft; the
-    /// answer must be the same for the same stack.
+    /// answer must be the same for the same stack. It is given the loop `context` of the side that runs the match (its registries, settings and mod list); it fires inside recipe matching, so it takes no `Host`.
     #[hook(
         side = "both",
         contract = "listen",
+        context = "loop",
+        version = 2,
         target = "mod_api::crafting::native_ingredient_test"
     )]
     fn ingredient_test();
+}
+
+pub trait Helpers {
+    #[helper(side = "both", backend = true)]
+    fn recipe_ingredient_test();
 }
