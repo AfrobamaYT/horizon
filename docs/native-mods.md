@@ -2816,6 +2816,9 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `host.block_entity(level, pos)` finds a block entity in a loaded chunk, including in parked levels;
   `kind`, `position`, `level` and `data` read it. A removed or temporarily taken-out entity reads `None`;
   a replacement at the same position resolves to the new entity, unlike vanilla's object identity.
+- `player.open_menu(host, block_entity)` opens its menu on the server and returns true only when opened. It returns
+  false for stale or wrong-level handles, non-providers, cancelled opens, and players without a connection (including
+  fake players), since no connection can receive the menu.
 - `level.block_shape(host, pos, kind)` reads block-local outline or collision boxes with an empty context. It returns
   `None` for a client, a stale handle, or a closed level; parked levels can be read.
 - `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered.
