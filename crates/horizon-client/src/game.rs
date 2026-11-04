@@ -1559,6 +1559,31 @@ impl LevelAccess for GameLevel<'_> {
         );
         connected
     }
+    fn has_fence_connection_hook(&self) -> bool {
+        self.native_authoritative
+            && mod_api::__private::has_scoped_hook(mod_api::HookId::FenceConnectsTo)
+    }
+    fn adjust_fence_connects_to(
+        &self,
+        pos: BlockPos,
+        fence: BlockStateId,
+        neighbour: BlockStateId,
+        direction: Direction,
+        face_solid: bool,
+        vanilla: bool,
+    ) -> bool {
+        let mut connected = vanilla;
+        self.native_fence_connects_to(
+            self.dimension,
+            pos,
+            fence,
+            neighbour,
+            direction,
+            face_solid,
+            &mut connected,
+        );
+        connected
+    }
     fn adjust_signal(
         &self,
         pos: BlockPos,

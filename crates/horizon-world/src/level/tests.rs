@@ -65,6 +65,11 @@ pub(crate) struct TestLevel {
     /// What `adjust_should_redstone_wire_connect_to` answers at a position: whether
     /// redstone wire connects there.
     pub wire_connect: HashMap<BlockPos, bool>,
+    /// What `adjust_fence_connects_to` answers for a neighbour state: whether
+    /// a fence connects an arm toward it.
+    pub fence_connect: HashMap<BlockStateId, bool>,
+    /// The directions `adjust_fence_connects_to` was asked about.
+    pub fence_directions: std::cell::RefCell<Vec<Direction>>,
     /// What `before_fire_odds` answers for a state.
     pub fire_odds: HashMap<BlockStateId, (i32, i32)>,
     /// What `before_smoke_source` answers for a state.
@@ -91,9 +96,11 @@ impl TestLevel {
             signals: HashMap::new(),
             weak_power: HashMap::new(),
             weak_power_directions: std::cell::RefCell::new(Vec::new()),
+            fence_directions: std::cell::RefCell::new(Vec::new()),
             analog: HashMap::new(),
             analog_states: HashSet::new(),
             wire_connect: HashMap::new(),
+            fence_connect: HashMap::new(),
             time: 0,
             day_time: 0,
             events: Vec::new(),
@@ -142,6 +149,24 @@ impl LevelAccess for TestLevel {
         vanilla: bool,
     ) -> bool {
         self.wire_connect.get(&pos).copied().unwrap_or(vanilla)
+    }
+    fn has_fence_connection_hook(&self) -> bool {
+        !self.fence_connect.is_empty()
+    }
+    fn adjust_fence_connects_to(
+        &self,
+        _pos: BlockPos,
+        _fence: BlockStateId,
+        neighbour: BlockStateId,
+        direction: Direction,
+        _face_solid: bool,
+        vanilla: bool,
+    ) -> bool {
+        self.fence_directions.borrow_mut().push(direction);
+        self.fence_connect
+            .get(&neighbour)
+            .copied()
+            .unwrap_or(vanilla)
     }
     fn adjust_analog_output(
         &self,
@@ -1362,6 +1387,37 @@ fn wire_connects_only_to_the_block_that_answers_should_redstone_wire_connect_to(
     );
     w.level.wire_connect.remove(&BlockPos::new(6, 1, 0));
     assert_eq!(connection(&mut w), before);
+}
+
+#[test]
+fn fence_connection_follows_fence_connects_to_both_ways() {
+    let mut w = world!();
+    let fence = w.id("oak_fence", &[]);
+    let stone = w.id("stone", &[]);
+    let glass = w.id("glass", &[]);
+    let pos = BlockPos::new(0, 1, 0);
+    let connects = |w: &mut World<'_>, neighbour, sturdy| {
+        w.f.behaviours
+            .sim(&mut w.level, &mut w.ticks)
+            .fence_connects_to(pos, fence, neighbour, sturdy, Direction::West)
+    };
+    // Vanilla: a sturdy face connects, a glass pane's face does not.
+    assert!(connects(&mut w, stone, true));
+    assert!(!connects(&mut w, glass, false));
+    // The hook denies what vanilla connects, and connects what it doesn't.
+    w.level.fence_connect.insert(stone, false);
+    w.level.fence_connect.insert(glass, true);
+    assert!(!connects(&mut w, stone, true));
+    assert!(connects(&mut w, glass, false));
+    // Vanilla's argument points from the neighbour to the fence; the hook is
+    // told the way from the fence to the neighbour.
+    assert_eq!(
+        *w.level.fence_directions.borrow().last().unwrap(),
+        Direction::East
+    );
+    // A state the hook doesn't answer keeps vanilla's answer.
+    let dirt = w.id("dirt", &[]);
+    assert!(connects(&mut w, dirt, true));
 }
 
 #[test]

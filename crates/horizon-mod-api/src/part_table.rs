@@ -1268,6 +1268,19 @@ pub mod tests {
         ) {
             event.connected = true;
         }
+
+        fn fence_connects_to(&self, _: &dyn LevelHost, event: &mut FenceConnectsToEvent) {
+            event.connected = false;
+        }
+    }
+
+    /// Makes an oak fence flip vanilla's answer toward the east and refuse every other side.
+    struct FenceRule;
+    #[mod_api::horizon_part]
+    impl BlockPart for FenceRule {
+        fn fence_connects_to(&self, _: &dyn LevelHost, event: &mut FenceConnectsToEvent) {
+            event.connected = event.direction == Direction::East && !event.connected;
+        }
     }
 
     /// The block entity of type `doubler:press_entity`, held by block `test:press`: it ticks, and
@@ -2749,6 +2762,21 @@ pub mod tests {
         mark_game_thread();
     }
 
+    /// Install a fence rule on oak fences for real-game tests: it flips vanilla's answer.
+    pub fn fence_game_thread() {
+        struct FenceMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for FenceMod {
+            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+                r.block_part("minecraft:oak_fence", FenceRule);
+            }
+        }
+        let mods: super::super::Mods = vec![ModEntry::new("fence_test", Box::new(FenceMod))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        mark_game_thread();
+    }
+
     /// Install a redstone connector on glass for real-game tests.
     pub fn redstone_game_thread() {
         struct RedstoneMod;
@@ -2856,6 +2884,26 @@ pub mod tests {
                 BlockPos::new(0, 64, 0),
                 BlockStateId(state),
                 Some(Direction::East),
+                &mut connected,
+            );
+            assert_eq!(connected, expected);
+        }
+    }
+
+    #[test]
+    fn fence_connection_is_answered_only_by_the_fences_own_part() {
+        game_thread();
+        resolve(&[]).unwrap();
+        for (state, expected) in [(3, false), (2, true)] {
+            let mut connected = true;
+            dispatch_fence_connects_to(
+                &Level,
+                LevelDimension::Overworld,
+                BlockPos::new(0, 64, 0),
+                BlockStateId(state),
+                BlockStateId(1),
+                Direction::West,
+                true,
                 &mut connected,
             );
             assert_eq!(connected, expected);
