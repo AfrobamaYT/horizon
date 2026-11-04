@@ -37,6 +37,12 @@ pub struct Sounds {
     pub hit: Arc<str>,
     pub fall: Arc<str>,
 }
+/// `SignBlockEntity.createDefaultSignText` of a content sign: the `DyeColor` id and glow.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SignTextDefaults {
+    pub color: u8,
+    pub glowing: bool,
+}
 #[derive(Clone, Debug)]
 pub struct StateFacts {
     pub name: Arc<str>,
@@ -251,6 +257,8 @@ pub struct BlockFacts {
     pub air: BlockStateId,
     /// Each sign block's `SignBlock.getWoodType` name.
     pub woods: HashMap<Arc<str>, Arc<str>>,
+    /// The text a new sign of a content block starts with, for the signs that declare it.
+    pub sign_texts: HashMap<Arc<str>, SignTextDefaults>,
 }
 impl BlockFacts {
     pub fn load(root: &Path, registry: &BlockRegistry) -> Result<Self> {
@@ -387,6 +395,21 @@ impl BlockFacts {
                 ))
             })
             .collect();
+        let sign_texts = behaviours["blocks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|b| {
+                let fields = &b["fields"];
+                Some((
+                    Arc::from(b["name"].as_str()?),
+                    SignTextDefaults {
+                        color: u8::try_from(fields["sign_text_color"].as_u64()?).ok()?,
+                        glowing: fields["sign_text_glow"].as_bool()?,
+                    },
+                ))
+            })
+            .collect();
         let mut names: HashMap<String, Arc<str>> = HashMap::new();
         let mut intern = |s: &str| -> Arc<str> {
             if let Some(name) = names.get(s) {
@@ -508,6 +531,7 @@ impl BlockFacts {
                     .default_state("minecraft:air")
                     .ok_or("missing air")?,
                 woods,
+                sign_texts,
             },
             extra,
         ))
@@ -518,6 +542,10 @@ impl BlockFacts {
     /// `SignBlock.getWoodType`'s name for a sign block.
     pub fn wood_type(&self, block: &str) -> Option<&str> {
         self.woods.get(block).map(|wood| &**wood)
+    }
+    /// A content sign's default text, when it declares one.
+    pub fn sign_text(&self, block: &str) -> Option<SignTextDefaults> {
+        self.sign_texts.get(block).copied()
     }
     pub fn is_air(&self, id: BlockStateId) -> bool {
         matches!(

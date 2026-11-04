@@ -192,6 +192,12 @@ signs `template_hanging_sign_rot_0` to `_rot_3`, `template_attached_hanging_sign
 `minecraft:wall_hanging_signs`, which vanilla's other sign tags and `minecraft:mineable/axe` include. Give the
 wall form a loot table of its own, or name it `<x>_wall_sign` so that it drops what `<x>_sign`'s table does.
 
+`sign_text_color` (a `DyeColor` name such as `"white"` or `"light_blue"`, black when unset) and `sign_text_glow`
+(`true` or `false`) are the text a new sign starts with, as `SignBlockEntity.createDefaultSignText` gives it, for a
+dark board whose black text would not read. They apply to the front and back text of a sign when it is placed, and
+dye and glow ink work on it as usual; a saved sign loads as vanilla's does. A sign and its `wall_block` declare the
+same values, so a sign does not change colour when it is hung on a wall.
+
 A block can override its targeting outline with `shapes` and independently override movement
 collision with `collision_shapes`. Both take the same table format. Boxes are
 `[minX,minY,minZ,maxX,maxY,maxZ]` in block units (one block is 1), at most 16 per shape.

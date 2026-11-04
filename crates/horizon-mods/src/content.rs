@@ -301,6 +301,10 @@ struct BlockFile {
     #[serde(default)]
     wall_block: Option<String>,
     #[serde(default)]
+    sign_text_color: Option<String>,
+    #[serde(default)]
+    sign_text_glow: Option<bool>,
+    #[serde(default)]
     base_block: Option<String>,
     #[serde(default = "yes")]
     item: bool,
@@ -348,6 +352,11 @@ pub struct Block {
     /// template is the matching wall sign and which has no item. The
     /// template's when unset.
     pub wall_block: Option<String>,
+    /// A sign's new text colour (`SignBlockEntity.createDefaultSignText`): a `DyeColor` name,
+    /// black when unset. Applies to a sign when it is placed, front and back.
+    pub sign_text_color: Option<String>,
+    /// Whether a new sign's text glows, false when unset.
+    pub sign_text_glow: Option<bool>,
     /// The block farmland turns into; the template's base when unset.
     pub base_block: Option<String>,
 }
@@ -455,6 +464,26 @@ pub struct MobEffect {
 
 /// the vanilla entity types a mod's type may copy: thrown item
 /// projectiles (`ThrowableItemProjectile`).
+/// Vanilla's `DyeColor` names, by id.
+pub const DYE_COLORS: [&str; 16] = [
+    "white",
+    "orange",
+    "magenta",
+    "light_blue",
+    "yellow",
+    "lime",
+    "pink",
+    "gray",
+    "light_gray",
+    "cyan",
+    "purple",
+    "blue",
+    "brown",
+    "green",
+    "red",
+    "black",
+];
+
 pub const ENTITY_TEMPLATES: [&str; 1] = ["minecraft:snowball"];
 
 /// an entity type the mod adds: a copy of a vanilla template's, thrown
@@ -832,6 +861,8 @@ impl Content {
                 thickness: file.thickness,
                 wood_type: file.wood_type,
                 wall_block: file.wall_block,
+                sign_text_color: file.sign_text_color,
+                sign_text_glow: file.sign_text_glow,
                 base_block: file.base_block,
             };
             check_block(&block).map_err(|e| format!("{name}: {e}"))?;
@@ -1155,6 +1186,17 @@ fn check_block(file: &Block) -> Result<(), String> {
             return Err("wood_type is a name, or namespace:path, in lower case".into());
         }
     }
+    if let Some(color) = &file.sign_text_color {
+        if !sign {
+            return Err("sign_text_color needs a vanilla sign template".into());
+        }
+        if !DYE_COLORS.contains(&color.as_str()) {
+            return Err("sign_text_color is a DyeColor name, such as white or light_blue".into());
+        }
+    }
+    if file.sign_text_glow.is_some() && !sign {
+        return Err("sign_text_glow needs a vanilla sign template".into());
+    }
     if let Some(wall) = &file.wall_block {
         if !sign || file.template.contains("_wall_") {
             return Err("wall_block needs a standing or ceiling sign template".into());
@@ -1197,6 +1239,17 @@ fn check_sign_walls(blocks: &[&Block]) -> Result<(), String> {
         if block.item {
             return Err(format!(
                 "{id}: wall_block {wall} has this sign's item, so its own \"item\" is false"
+            ));
+        }
+        fn text(b: &Block) -> (&str, bool) {
+            (
+                b.sign_text_color.as_deref().unwrap_or("black"),
+                b.sign_text_glow.unwrap_or(false),
+            )
+        }
+        if text(sign) != text(block) {
+            return Err(format!(
+                "{id}: wall_block {wall} declares a different sign_text_color or sign_text_glow"
             ));
         }
         if let Some(other) = paired.insert(wall, id) {
@@ -1455,6 +1508,8 @@ capabilities = ["registries"]
                 thickness: None,
                 wood_type: None,
                 wall_block: None,
+                sign_text_color: None,
+                sign_text_glow: None,
                 base_block: None,
             }]
         );
@@ -1951,6 +2006,27 @@ capabilities = ["registries"]
         ] {
             assert!(block(bad).unwrap_err().contains("wood_type"), "{bad}");
         }
+        let text = block(
+            r#"{"template": "minecraft:oak_sign", "sign_text_color": "light_blue", "sign_text_glow": true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            text.blocks[0].sign_text_color.as_deref(),
+            Some("light_blue")
+        );
+        assert_eq!(text.blocks[0].sign_text_glow, Some(true));
+        for bad in [
+            r#"{"template": "minecraft:stone", "sign_text_color": "white"}"#,
+            r#"{"template": "minecraft:oak_sign", "sign_text_color": "White"}"#,
+            r##"{"template": "minecraft:oak_sign", "sign_text_color": "#ffffff"}"##,
+        ] {
+            assert!(block(bad).unwrap_err().contains("sign_text_color"), "{bad}");
+        }
+        assert!(
+            block(r#"{"template": "minecraft:stone", "sign_text_glow": true}"#)
+                .unwrap_err()
+                .contains("sign_text_glow")
+        );
         for bad in [
             r#"{"template": "minecraft:stone", "wall_block": "ruby:notice_wall"}"#,
             r#"{"template": "minecraft:oak_wall_sign", "wall_block": "ruby:notice_wall", "item": false}"#,
@@ -2004,6 +2080,41 @@ capabilities = ["registries"]
         for absent in ["ruby:elsewhere", "other:wall", "minecraft:oak_wall_sign"] {
             refused("oak_sign", absent, wall, "not one of this mod's blocks");
         }
+        // A sign and the wall form it hangs as start with the same text, or it would change
+        // colour on a wall.
+        let pair = |sign_text: &str, wall_text: &str| {
+            let sign = format!(
+                r#"{{"template": "minecraft:oak_sign", "wall_block": "ruby:wall"{sign_text}}}"#
+            );
+            let wall =
+                format!(r#"{{"template": "minecraft:oak_wall_sign", "item": false{wall_text}}}"#);
+            let files: &[(&str, &[u8])] = &[
+                ("data/ruby/horizon/block/sign.json", sign.as_bytes()),
+                ("data/ruby/horizon/block/wall.json", wall.as_bytes()),
+            ];
+            hmod("sign-text", MANIFEST_TEXT, files)
+        };
+        let white = r#", "sign_text_color": "white""#;
+        assert!(pair(white, white).is_ok());
+        assert!(
+            pair(
+                "",
+                r#", "sign_text_color": "black", "sign_text_glow": false"#
+            )
+            .is_ok()
+        );
+        for (sign, wall) in [
+            (white, ""),
+            ("", white),
+            (white, r#", "sign_text_color": "red""#),
+        ] {
+            assert!(
+                pair(sign, wall)
+                    .unwrap_err()
+                    .contains("different sign_text")
+            );
+        }
+        assert!(pair(r#", "sign_text_glow": true"#, "").is_err());
 
         // Declared in code, the same; nothing is added.
         let block = |id: &str, template: &str, item, wall_block: Option<&str>| Block {
