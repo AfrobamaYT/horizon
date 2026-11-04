@@ -7,7 +7,7 @@ we have to the max") every job that can runs on our own machines, and GitHub's p
 
 | Runner | Machine | Labels | Takes |
 | --- | --- | --- | --- |
-| `ludodesktop-checks-1`…`-3` | ludodesktop (the maintainer's desktop, 24 threads), isolated user `gha` | `horizon-checks` | `checks`' `verify` and `launcher` for the pull requests whose number ends in 0 or 1, forks included, `mod-registry`, `telemetry-server`, `pack load bench` |
+| `ludodesktop-checks-1`…`-3` | ludodesktop (the maintainer's desktop, 24 threads), isolated user `gha` | `horizon-checks` | `checks`' `verify` and `launcher` for the pull requests whose number ends in 0 or 1, forks included, `mod-registry`, `pack load bench` |
 | `playhorizon-light-1`…`-12` | playhorizon (partner's server, 8 vCPU) | `horizon-light`, `playhorizon-light` | The bots that run main's own scripts: `pr labels`, `overlap note`, `cancel-on-close`, `claim command`, `triage command`, `mojang republish`, `nightly build`'s `answer`, and `checks`' `parity-scope` |
 | `playhorizon-ci-1`, `playhorizon-ci-2` | playhorizon | `playhorizon-ci` | Nothing routed since 2026-11-03 (they took `checks` of this repository's own pull requests with the old `SELF_HOSTED_CI=all`) |
 | `playhorizon-horizon`, `ludodesktop-horizon`, `ludodesktop-parity-2` | playhorizon, ludodesktop | `horizon-game` | Parity ([release-flow.md](release-flow.md#the-parity-job)) |
@@ -38,7 +38,7 @@ The desktop's runners are declared in the maintainer's NixOS configuration (his 
 The repository variable `SELF_HOSTED_CI` decides, from the next job queued (queued jobs keep the runner they asked
 for):
 
-| `SELF_HOSTED_CI` | Bots (`horizon-light`) | `checks`, `mod-registry`, `telemetry-server`, `pack load bench` (`horizon-checks`) |
+| `SELF_HOSTED_CI` | Bots (`horizon-light`) | `checks`, `mod-registry`, `pack load bench` (`horizon-checks`) |
 | --- | --- | --- |
 | unset (default) | ours | `verify`, `launcher`: ours for the pull requests ending in 0 or 1, GitHub's for the others and main's pushes; the rest ours |
 | `all` | ours | ours, every pull request |

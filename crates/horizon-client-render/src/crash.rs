@@ -1,8 +1,8 @@
 //! Crash reports, laid out like vanilla's CrashReport.getFriendlyReport: a comment, the time,
 //! a description, the error with its stack, then the details of the game and the machine.
 //! Written to `crash-reports/crash-<yyyy-MM-dd_HH.mm.ss>-client.txt` in the game folder when
-//! the main thread panics or `main` gets an error back. It leaves the machine only scrubbed, and
-//! only if the player allows crash reports (`telemetry`).
+//! the main thread panics or `main` gets an error back. It stays a local file: the player
+//! reads it and shares it by hand.
 pub use mod_api::crash::{
     NativeModCall, NativeModGuard, clear_detail, current_native_mod, enter_native_mod, set_detail,
 };
@@ -206,7 +206,7 @@ fn operating_system() -> String {
     } else if cfg!(target_os = "macos") {
         command_output("sw_vers", &["-productVersion"]).map(|v| format!("macOS {v}"))
     } else if cfg!(windows) {
-        horizon_telemetry::system::windows_version()
+        horizon_system::system::windows_version()
     } else {
         None
     };
@@ -221,11 +221,11 @@ fn operating_system() -> String {
 pub fn cpu() -> String {
     let threads = std::thread::available_parallelism().map_or(0, |n| n.get());
     let name = if cfg!(target_os = "linux") {
-        read("/proc/cpuinfo").and_then(|t| horizon_telemetry::system::linux_cpu_name(&t))
+        read("/proc/cpuinfo").and_then(|t| horizon_system::system::linux_cpu_name(&t))
     } else if cfg!(target_os = "macos") {
         command_output("sysctl", &["-n", "machdep.cpu.brand_string"])
     } else if cfg!(windows) {
-        horizon_telemetry::system::windows_cpu()
+        horizon_system::system::windows_cpu()
     } else {
         std::env::var("PROCESSOR_IDENTIFIER").ok()
     };
@@ -344,7 +344,6 @@ fn deliver(home: &Path, report: Report) -> Option<PathBuf> {
         ),
     );
     crate::logging::flush();
-    crate::telemetry::keep_crash(home, &report);
     // A player of a shared game folder (`--player-dir`) finds the report beside its own log.
     match report.save(crate::logging::player_dir_override().unwrap_or(home)) {
         Ok(path) => {
@@ -380,8 +379,7 @@ pub fn report_watchdog(home: &Path, side: &'static str, message: String) -> Opti
 
 /// The report for a game that went over the player's RAM limit (`ram_limit`), written by the
 /// watcher thread: it says nothing about where the memory went, so it carries no stack. The player
-/// chose this limit, so it is no bug to send (`telemetry::keep_crash`), and leaving that out ends
-/// the game seconds sooner: it keeps running, over its limit, until the report is written.
+/// chose this limit, and the game keeps running, over its limit, until the report is written.
 pub fn report_memory_limit(home: &Path, side: &'static str, message: String) {
     if REPORTED.swap(true, Ordering::SeqCst) {
         return;

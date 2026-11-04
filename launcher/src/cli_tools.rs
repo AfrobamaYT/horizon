@@ -396,8 +396,7 @@ mod tests {
             "modpack_import",
             "servers_create",
             "servers_run",
-            "data_status",
-            "data_bug",
+            "bug_report",
             "account_select",
             "benchmark",
         ] {

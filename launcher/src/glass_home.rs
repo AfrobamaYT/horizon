@@ -188,49 +188,12 @@ impl Launcher {
             },
             (None, None) => String::new(),
         };
-        let link = |id: &'static str, label: String| {
-            div()
-                .id(id)
-                .cursor_pointer()
-                .hover(|s| s.text_color(white(ink::FULL)))
-                .child(label)
-        };
-        let playing = self.playing.map(|count| {
-            let label = format!(
-                "· {}",
-                trf("{count} playing now", &[("count", &thousands(count))])
-            );
-            let url = telemetry::stats_url(&self.links.website);
-            link("playing-now", label).on_click(move |_: &ClickEvent, _, cx| {
-                if let Some(url) = &url {
-                    cx.open_url(url);
-                }
-            })
-        });
-        let official = self.official_players.map(|count| {
-            link(
-                "official-players",
-                format!(
-                    "· {}",
-                    trf(
-                        "{count} on the official SMP",
-                        &[("count", &thousands(count))]
-                    )
-                ),
-            )
-            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                this.go(Page::Servers);
-                cx.notify();
-            }))
-        });
         ui::text(15., FontWeight::NORMAL, ink::STRONG)
             .mt(px(16.))
             .flex()
             .flex_wrap()
             .gap(px(4.))
             .child(line)
-            .children(playing)
-            .children(official)
     }
 
     /// Play and its ⋯ menu (`PlayGroup`): Stop while the game runs, Update when the launcher's

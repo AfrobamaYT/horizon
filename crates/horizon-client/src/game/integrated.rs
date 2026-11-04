@@ -484,7 +484,6 @@ impl Game<'_> {
             // FileFixerProgressScreen's Cancel: the upgrade stopped, back to the title.
             Ok(Err(_)) if starting.handle.upgrade().is_canceled() => {
                 self.integrated_starting = None;
-                self.perf.cancel_world_opening();
                 return Ok(());
             }
             Ok(Err(e)) => {
@@ -728,7 +727,6 @@ impl Game<'_> {
         self.native_lifecycle_open_started();
         // `load_world`, with the world `serve` started preparing.
         startup::time("server.wait_rest", || self.join_world_rest())?;
-        self.perf.world_opening();
         let open_step = startup::step("server.open_world");
         self.finish_open_world(opening.world?.finish()?)?;
         drop(open_step);

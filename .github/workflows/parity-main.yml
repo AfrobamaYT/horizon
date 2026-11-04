@@ -18,8 +18,6 @@ concurrency:
   group: parity-main
   cancel-in-progress: false
 env:
-  # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
-  HORIZON_TELEMETRY_URL: "off"
 
 jobs:
   parity-main:

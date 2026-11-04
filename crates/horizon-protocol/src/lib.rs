@@ -24,6 +24,7 @@ mod resolver;
 pub use resolver::server_redirect;
 pub mod rsa;
 pub mod secure_chat;
+pub mod server_status;
 pub mod servers;
 pub mod text;
 

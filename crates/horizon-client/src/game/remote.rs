@@ -856,7 +856,6 @@ impl Game<'_> {
         lan: bool,
     ) -> Result<()> {
         self.reset_tutorial();
-        self.perf.world_opening();
         // A server's own biomes come over the connection; the last local
         // world's packed table must not name its ids. The window's own
         // server thread keeps the one it just set.
@@ -1160,7 +1159,6 @@ impl Game<'_> {
             return self.begin_closing_save(false);
         }
         self.client_logging_out();
-        self.finish_perf();
         if reason.is_none() {
             // Leaving on purpose: nothing for auto-reconnect to retry.
             self.extras_left();

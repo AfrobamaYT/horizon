@@ -27,7 +27,6 @@ pub fn main_with(
     };
     crate::gfx::native_render::set_mods_built_in(!native.built().is_empty());
     horizon_threads::configure_allocator();
-    horizon_client::telemetry::mark_start();
     horizon_client::spans::startup::init(std::time::Instant::now());
     let launch: crate::Result<_> = std::env::current_dir().map_err(Into::into).and_then(|cwd| {
         Ok(LaunchArguments::parse(
@@ -82,7 +81,7 @@ pub fn main_with(
     {
         (launch.context.game_dir.clone(), "server", "Server thread")
     } else {
-        // A player's own log stays separate; crash telemetry follows the shared home.
+        // A player's own log stays separate; crash reports follow the shared home.
         if let Some(dir) = launch.rest.iter().find_map(|arg| match arg {
             Argument::Value(name, value) if name == "--player-dir" => Some(value),
             _ => None,
