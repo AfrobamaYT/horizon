@@ -414,11 +414,15 @@ mod content_tests {
     }
 
     /// The `ingredient` hook hears each custom-ingredient occurrence once per
-    /// parse, with the origin of the load that owns the parse. A server open
-    /// parses the recipes (`Ingredient::parse`) and then builds the guests'
-    /// copy (`normalize_ingredients`), so each occurrence is heard twice with
+    /// parse, with the origin of the load that owns the parse. A server parses
+    /// the recipes (`Ingredient::parse`) and then builds the guests' copy
+    /// (`normalize_ingredients`), so each occurrence is heard again with
     /// `ServerDataLoad` until the copy reuses the server's parse; that change
-    /// flips the last assertion of this test on purpose.
+    /// flips the last assertion of this test on purpose. Measured in the game
+    /// per occurrence: an integrated open parses twice with `ServerDataLoad`
+    /// (the server thread and the sync copy) beside the window's
+    /// `ClientPreload` parse; a dedicated server parses three times (startup,
+    /// world open and the sync copy).
     #[test]
     fn ingredient_hook_hears_each_occurrence_once_per_parse_with_its_load_origin() {
         let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));

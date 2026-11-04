@@ -283,7 +283,7 @@ for #5501; a declaration alone will not make a recipe visible.
 A recipe's ingredient that names a type in a namespace outside `minecraft:` reaches
 `native_ingredient(context, kind, data, items)` at load time. Fill `items` with the item ids the
 ingredient matches (item ids only: components are not checked; a match-time hook follows
-separately). Duplicates are removed keeping first-seen order. The hook gets the `DataLoadContext` of the load that parses the recipes and hears each occurrence of the kind once per parse: the client's own recipe load has `origin()` `ClientPreload`, the server's `ServerDataLoad`. Until the guests' recipe copy reuses the server's parse, a server open parses twice, so filter on `ServerDataLoad` and expect two calls per occurrence there; the answer must be the same every time. An unclaimed kind leaves the list empty and the recipe fails, as an unknown kind does.
+separately). Duplicates are removed keeping first-seen order. The hook gets the `DataLoadContext` of the load that parses the recipes and hears each occurrence of the kind once per parse: the client's own recipe load has `origin()` `ClientPreload`, the server's `ServerDataLoad`. A server currently parses the recipes in more than one load, all `ServerDataLoad` (its recipe tables, the copy synchronised to guests, and on a dedicated server its startup load too), so expect repeated calls per occurrence there until those loads share one parse; the answer must be the same every time. An unclaimed kind leaves the list empty and the recipe fails, as an unknown kind does.
 
 ### Data files
 
