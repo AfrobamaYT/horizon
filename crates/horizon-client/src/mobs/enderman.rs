@@ -18,6 +18,7 @@ use horizon_core::{
     geometry::{Aabb, Vec3},
     random::RandomSource,
 };
+use horizon_world::native_load_context::LoopContext;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
 
 pub fn register(m: &mut Mob) {
@@ -48,7 +49,8 @@ pub fn register(m: &mut Mob) {
     m.set_malus(super::path::PathType::Water, -1.0);
 }
 /// Enderman.isBeingStaredBy: the player's look within a cone of 0.025 / distance
-/// of the eyes, with line of sight, and no carved pumpkin.
+/// of the eyes, with line of sight, and no carved pumpkin. Last, as in NeoForge,
+/// a mod may keep the enderman calm (`EnderManAngerEvent`).
 pub fn stared_at(m: &Mob, w: &MobWorld) -> bool {
     let Some(p) = &w.player else { return false };
     if !p.alive || p.head.as_deref() == Some("minecraft:carved_pumpkin") {
@@ -70,18 +72,22 @@ pub fn stared_at(m: &Mob, w: &MobWorld) -> bool {
             Vec3::new(p.eye[0], p.eye[1], p.eye[2]),
             Vec3::new(m.position.x, m.eye_y(), m.position.z),
         )
+        && !w
+            .mob_hooks
+            .is_some_and(|hooks| hooks.enderman_anger_suppressed(m.id, p))
 }
 /// An enderman or a shulker is about to teleport on its own
 /// (`EntityTeleportEvent.EnderEntity`). A mod may move `target` or cancel.
 #[inline(never)]
 pub fn native_ender_entity_teleport(
+    context: &LoopContext,
     entity: u32,
     kind: &str,
     from: [f64; 3],
     target: &mut [f64; 3],
     cancel: &mut bool,
 ) {
-    crate::native_client_hooks::ender_entity_teleport(entity, kind, from, target, cancel);
+    crate::native_client_hooks::ender_entity_teleport(context, entity, kind, from, target, cancel);
 }
 /// `LivingEntity.randomTeleport`'s target: `x` and `z` kept inside the
 /// world border (Mth.clamp, 1.0E-5F inside the far edges), then the block
@@ -130,6 +136,7 @@ pub fn teleport_to(
         let mut target = [x, y, z];
         let mut cancel = false;
         native_ender_entity_teleport(
+            w.loop_context,
             m.id,
             &m.kind.id,
             [m.position.x, m.position.y, m.position.z],
@@ -611,6 +618,15 @@ mod tests {
             let mut free = enderman();
             assert!((0..64).any(|_| teleport_random(&mut free, w, &mut events)));
             assert!(!events.is_empty());
+
+            // No mod installed: a teleport try draws its three values and nothing else.
+            let mut tried = enderman();
+            let mut expected = enderman().random;
+            teleport_random(&mut tried, w, &mut events);
+            expected.next_double();
+            expected.next_int_bound(64).unwrap();
+            expected.next_double();
+            assert_eq!(tried.random.next_int(), expected.next_int());
 
             let mut seated = enderman();
             seated.extra.passenger = true;

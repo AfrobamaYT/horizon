@@ -60,7 +60,7 @@ impl Game<'_> {
         // For mods (`render.frame-stats`, `native_frame_rate`).
         let now = self.extras_now();
         self.extras.fps.record(now, elapsed.as_secs_f32() * 1000.0);
-        self.native_frame(elapsed);
+        self.native_render_frame_pre(elapsed);
         self.recipes_received_now();
     }
     /// The frame counter for mods: fps, min, 1% low.
@@ -68,12 +68,15 @@ impl Game<'_> {
         let r = self.extras.fps.reading();
         (r.fps, r.min, r.low)
     }
-    /// Attack and use clicks in the last second, and whether each is held.
-    pub(super) fn mouse_reading(&mut self) -> ((u32, u32), [bool; 2]) {
+    /// Attack and use clicks in the last second.
+    pub(super) fn click_reading(&mut self) -> (u32, u32) {
         let now = self.extras_now();
         let [l, r] = &mut self.extras.cps;
-        let cps = (l.per_second(now) as u32, r.per_second(now) as u32);
-        (cps, self.extras.mouse)
+        (l.per_second(now) as u32, r.per_second(now) as u32)
+    }
+    /// Whether the attack and use buttons are held.
+    pub(super) fn mouse_held(&self) -> [bool; 2] {
+        self.extras.mouse
     }
     /// Auto-reconnect: a connection to `address` as `name` starts.
     pub(super) fn extras_connecting(&mut self, address: &str, name: &str, lan: bool) {
@@ -258,7 +261,7 @@ impl Game<'_> {
             };
             extras_hud::draw_minimap(batch, atlas, &mut corners, &look);
         }
-        self.native_hud(batch, &mut corners);
+        self.native_render_gui_post(batch, &mut corners);
     }
     /// The height the status effect icons take at the top right
     /// (`Hud.extractEffects`: beneficial at y 1, harmful at y 26).

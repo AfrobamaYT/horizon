@@ -1,0 +1,20 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "draw_model",
+      "side": "client",
+      "target": "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_model"
+    },
+    {
+      "name": "text_width",
+      "side": "client",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_text_width"
+    },
+    {
+      "name": "sprite_size",
+      "side": "client",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_sprite_size"
+    }
+  ]
+}

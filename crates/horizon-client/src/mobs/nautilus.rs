@@ -716,7 +716,7 @@ mod tests {
         let mut m = ridden();
         assert!(on_player_jump(&mut m, 100));
         assert_eq!(m.rider.expect("the rider stays on").jump, 1.0);
-        super::super::equine::ridden_step(&mut m);
+        super::super::equine::ridden_step(&mut m, crate::test_resources::server_loop_context());
         assert_eq!(
             m.rider.expect("the rider stays on").jump,
             0.0,

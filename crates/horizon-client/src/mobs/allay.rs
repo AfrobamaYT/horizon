@@ -370,9 +370,9 @@ pub fn travel(
     true
 }
 /// `Allay.aiStep` / `tick`: healing, cooldowns, the hold and spin clocks.
-pub fn ai_step(m: &mut Mob) {
+pub fn ai_step(m: &mut Mob, w: &MobWorld) {
     if m.alive() && m.age.is_multiple_of(10) {
-        m.heal(1.0);
+        m.heal(w.loop_context, 1.0);
     }
     for i in [2, 3] {
         if m.extra.ints[i] > 0 {

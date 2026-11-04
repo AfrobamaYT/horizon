@@ -190,8 +190,7 @@ impl Game<'_> {
     }
     /// Set a block in the level in place (`Level.setBlock`). Parked levels,
     /// stale handles, clients and unloaded or out-of-height positions return
-    /// false. Client-update and client-render flags are not supported; Horizon
-    /// sends every change to clients.
+    /// false. Client notification follows the supplied update flags.
     pub(super) fn native_level_set_block(
         &mut self,
         level: LevelRef,
@@ -203,6 +202,21 @@ impl Game<'_> {
             return false;
         }
         self.native_set_block(level.dimension(), pos, state, flags.bits())
+    }
+    /// Remove a block in place (`Level.removeBlock`), preserving its fluid.
+    pub(super) fn native_level_remove_block(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        moved: bool,
+    ) -> bool {
+        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+            return false;
+        }
+        let changed =
+            self.with_level(|_, level, ticks| level.native_remove_block(ticks, pos, moved));
+        let _ = self.process_level_events();
+        changed
     }
     /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
     /// dropping its resources. Parked levels and invalid positions return false.
@@ -572,6 +586,81 @@ pub(super) mod tests {
                 b.best_neighbor_signal(level, ticks, BlockPos::new(pos.x - 1, pos.y, pos.z))
             });
             assert_eq!(signal, 15);
+        });
+    }
+
+    /// A world with block `support` at (5, 64, 5) and a powered lever on its east face.
+    fn lever_on(game: &mut super::super::Game<'_>, support: &str) {
+        use horizon_client::chunk::Chunk;
+        use std::sync::Arc;
+
+        game.options.dedicated = Some(Vec::new());
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        let registry = game.pack.assets.registry;
+        let support = registry.default_state(support).unwrap();
+        let lever = registry
+            .resolve(&horizon_world::chunk::BlockState {
+                name: "minecraft:lever".into(),
+                properties: [("face", "wall"), ("facing", "east"), ("powered", "true")]
+                    .into_iter()
+                    .map(|(key, value)| (key.into(), value.into()))
+                    .collect(),
+            })
+            .unwrap();
+        game.world.set(5, 64, 5, support).unwrap();
+        game.world.set(6, 64, 5, lever).unwrap();
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_level_handle_reads_redstone_as_signal_getter_does() {
+        use horizon_core::geometry::Direction::{East, North, West};
+
+        with_game(|game| {
+            lever_on(game, "minecraft:stone");
+            let level = game.native_level(game.dim.id()).unwrap();
+            let (stone, lever, beside, far) = ([5, 64, 5], [6, 64, 5], [4, 64, 5], [5, 64, 9]);
+            // A powered lever: weak 15 every way, strong 15 only into the block it hangs on,
+            // which lies the way it faces from that block (LeverBlock.getDirectSignal).
+            assert_eq!(level.signal(game, lever, North), Some(15));
+            assert_eq!(level.direct_signal(game, lever, East), Some(15));
+            assert_eq!(level.direct_signal(game, lever, North), Some(0));
+            // Stone conducts the strong power to the block west of it.
+            assert_eq!(level.direct_signal_to(game, stone), Some(15));
+            assert_eq!(level.signal(game, stone, West), Some(15));
+            assert_eq!(level.best_neighbor_signal(game, beside), Some(15));
+            assert!(level.has_neighbor_signal(game, beside));
+            // Nothing gives strong power into `beside`, and nothing reaches `far`.
+            assert_eq!(level.direct_signal_to(game, beside), Some(0));
+            assert_eq!(level.best_neighbor_signal(game, far), Some(0));
+            assert!(!level.has_neighbor_signal(game, far));
+        });
+        // Glass is no conductor: the lever's power stops at it.
+        with_game(|game| {
+            lever_on(game, "minecraft:glass");
+            let level = game.native_level(game.dim.id()).unwrap();
+            assert_eq!(level.best_neighbor_signal(game, [4, 64, 5]), Some(0));
+            assert_eq!(level.signal(game, [5, 64, 5], West), Some(0));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_level_handle_reads_redstone_through_should_check_weak_power() {
+        use horizon_core::geometry::Direction::West;
+
+        // The fixture's part lets glass conduct (`should_check_weak_power`).
+        mod_api::__private::part_tests::weak_power_game_thread();
+        with_game(|game| {
+            lever_on(game, "minecraft:glass");
+            let level = game.native_level(game.dim.id()).unwrap();
+            assert_eq!(level.signal(game, [5, 64, 5], West), Some(15));
+            assert_eq!(level.best_neighbor_signal(game, [4, 64, 5]), Some(15));
+            // Strong power into the glass is its own; the part changes only what it conducts.
+            assert_eq!(level.direct_signal_to(game, [5, 64, 5]), Some(15));
+            assert_eq!(level.direct_signal_to(game, [4, 64, 5]), Some(0));
         });
     }
 
@@ -1385,7 +1474,16 @@ pub(super) mod tests {
                 integrated: false,
                 levels: Default::default(),
             };
-            let mut hub = Hub::new(lan, sync, encoder, config.clone());
+            let mut hub = Hub::new(
+                lan,
+                sync,
+                encoder,
+                config.clone(),
+                std::sync::Arc::new(
+                    crate::game::test_server_load()
+                        .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+                ),
+            );
             let motion = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
             let fake = Guest::connectionless(fake_id, 2, "fake".into(), 2, [0.0; 3], motion);
             assert!(fake.placed && fake.motion.is_some());
@@ -2462,6 +2560,65 @@ pub(super) mod tests {
             .registry
             .default_state("minecraft:air")
             .unwrap();
+        // Flag-aware writes log only client updates; ordinary World::set still logs by default.
+        game.world.block_log = Some(Vec::new());
+        assert!(game.native_level_set_block(
+            level,
+            [2, 64, 0],
+            stone,
+            NativeBlockUpdateFlags::NONE
+        ));
+        assert!(game.world.block_log.as_ref().unwrap().is_empty());
+        assert!(game.native_level_set_block(
+            level,
+            [3, 64, 0],
+            stone,
+            NativeBlockUpdateFlags::CLIENTS
+        ));
+        assert_eq!(game.world.block_log.as_ref().unwrap(), &vec![(3, 64, 0)]);
+        assert!(game.native_level_set_block(
+            level,
+            [4, 64, 0],
+            stone,
+            NativeBlockUpdateFlags::CLIENTS | NativeBlockUpdateFlags::INVISIBLE
+        ));
+        assert_eq!(
+            game.world.block_log.as_ref().unwrap(),
+            &vec![(3, 64, 0), (4, 64, 0)]
+        );
+        game.world.block_log = None;
+        let waterlogged = game
+            .pack
+            .assets
+            .registry
+            .resolve(&horizon_world::chunk::BlockState {
+                name: "minecraft:oak_slab".into(),
+                properties: [
+                    ("type".into(), "bottom".into()),
+                    ("waterlogged".into(), "true".into()),
+                ]
+                .into_iter()
+                .collect(),
+            })
+            .unwrap();
+        let water = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:water")
+            .unwrap();
+        for moved in [false, true] {
+            game.world.set(5, 64, 0, waterlogged).unwrap();
+            assert!(game.native_level_remove_block(level, [5, 64, 0], moved));
+            assert_eq!(game.world.block(5, 64, 0), water);
+            game.world.set(5, 64, 0, waterlogged).unwrap();
+            let removed = game.with_level(|_, level, ticks| {
+                let mut host = super::super::mod_api_host::LevelTicks { level, ticks };
+                mod_api::LevelWriteHost::remove_block(&mut host, [5, 64, 0], moved)
+            });
+            assert!(removed);
+            assert_eq!(game.world.block(5, 64, 0), water);
+        }
         let flags = NativeBlockUpdateFlags::NEIGHBORS;
         assert!(game.native_level_set_block(level, [0, 64, 0], stone, flags));
         assert_eq!(game.world.block(0, 64, 0), stone);

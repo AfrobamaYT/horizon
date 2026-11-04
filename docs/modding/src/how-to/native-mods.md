@@ -122,7 +122,7 @@ forms are in the modding book: [Injections](../injections.md).
 ### Named hook points
 
 `native-hooks.json` at the root of the source names each hook point and the version of its contract (signature,
-when it is called, what it does): `{"name": "hud", "version": 1, "target": "horizon_client::game::native_hooks::Game<'_>::native_hud"}`.
+when it is called, what it does): `{"name": "render_gui_post", "version": 1, "target": "horizon_client::game::native_hooks::Game<'_>::native_render_gui_post"}`.
 An injection names `hook` and `hook_version` instead of `target`, and horizon-mixins resolves it from the catalog
 of the source it applies to, so a hook point can move in the source without breaking the mods that use it. A name
 the catalog lacks is `E_HOOK_UNKNOWN` (the error lists the names it has), a version it lacks `E_HOOK_VERSION`. A
@@ -285,6 +285,71 @@ A recipe's ingredient that names a type in a namespace outside `minecraft:` reac
 `native_ingredient(context, kind, data, items)` at load time. Fill `items` with the item ids the
 ingredient matches (item ids only: components are not checked; a match-time hook follows
 separately). Duplicates are removed keeping first-seen order. The hook gets the `DataLoadContext` of the load that parses the recipes and hears each occurrence of the kind once per load, nested ones and ones under any slot a recipe reads an ingredient from included, before the load's tables parse the recipes: the client's own recipe load has `origin()` `ClientPreload`, the server's `ServerDataLoad`. A server loads its recipes once however many tables and copies read them (its recipe tables, the stations and the copy synchronised to guests, on a dedicated server too), and a `/reload` asks again once; a client that only joins a remote server is never told `ServerDataLoad`. The answer must be the same every time. An unclaimed kind leaves the list empty and the recipe fails, as an unknown kind does.
+
+### Structure types
+
+A structure type is a mod's code where a data pack names one: a structure JSON whose `"type"` is
+`"mymod:tower"` instead of a vanilla type generates by the mod's `StructureType` (vanilla's
+`StructureType`, whose `find_generation_point` returns the start and whose pieces are
+`StructurePiece`s, loaded by the `StructurePieceType` that `load_piece` is — NeoForge registers
+these in the registries `STRUCTURE_TYPE` and `STRUCTURE_PIECE`). Register it once, at startup, in
+`Hooks::register`; the id is in the mod's namespace, and a duplicate id, an id in another mod's
+namespace or an empty name stops the game at startup with a message naming the mod:
+
+```rust,ignore
+#[mod_api::horizon_mod]
+impl Hooks for MyMod {
+    fn register(&self, r: &mut Registrar, _: &RegistrationContext<'_>) {
+        r.register_structure_type("tower", Tower);
+    }
+}
+```
+
+There is no `Host` in world generation: starts build on worker threads and pieces place per chunk,
+so the type and its pieces see only two small contexts, `Send + Sync` and deterministic. The same
+seed gives the same pieces, and a type keeps no mutable state, because two workers can build
+neighbouring chunks at once.
+
+`StructureType::find_generation_point(&self, context: &mut GenerationContext)` answers
+`FoundStructure { position, pieces }` or `None` for "no start in this chunk". The
+`GenerationContext` is vanilla's `GenerationContext` over one chunk: the seed, the chunk, the
+random seeded as vanilla seeds it for the chunk (`setLargeFeatureSeed`), the height and
+base-column queries, the noise biomes and the valid-biome test, and the structure's own JSON
+config (`context.config()`). Everything around the type stays the game's: the structure set's
+spacing, the structure's `biomes` and `terrain_adaptation` are placed by the engine, exactly as
+for a fortress.
+
+Each piece is a `StructurePiece` (`Debug + Send + Sync`): `bounding_box`, `post_process` and
+`add_additional_save_data` are required, `after_place` (vanilla's `Structure.afterPlace`, on the
+first piece once per chunk, with every piece's current box) defaults to doing nothing. The
+`PieceContext` of `post_process` and `after_place` is the chunk being placed: `set_block` writes a
+block and drops a position outside the writable box silently, as vanilla's
+`StructurePiece.placeBlock` skips it; `block` and `height` read, `state`/`state_with` resolve a
+block by name and properties, `random` is the piece's `RandomSource`, `solid_render` asks whether
+a state draws as a solid block, and `entity` queues an entity from its saved NBT — its `id`, `Pos`
+and fields — which the generating chunk holds and the game finishes as a structure mob's
+(`Mob.finalizeSpawn` with `STRUCTURE` when the NBT keeps the `"horizon:finalize"` byte a structure
+template's entities carry). `block_entity` places a block entity from its NBT.
+
+Saving goes through the engine's `StructurePiece.createTag` — the type id, `BB`, `O`, `GD` —
+around the piece's `add_additional_save_data`. When the chunk loads back, the type's `load_piece`
+(the `StructurePieceType` loader) rebuilds the piece exactly as it was saved; there is no
+regeneration from the seed. `load_piece` is required: a type whose pieces cannot load cannot save
+a start that comes back.
+
+**Open question — the saved piece's id is the structure type's, not a piece type's.** Every piece
+of a type saves with that type's id, the `STRUCTURE_TYPE` id; Horizon has no separate
+`STRUCTURE_PIECE` registry, so there is no per-piece-kind id in the tag. A mod whose type has
+several kinds of pieces tells them apart in `load_piece` by its own saved data (a tag field its
+`add_additional_save_data` writes). The `O` (orientation) and `GD` (genDepth) fields are written
+as `-1` and `0` — the adapter has no orientation or depth to record — so a piece must not read
+them back as meaningful.
+
+The pieces ride the one piece mechanism the game has: they are legacy pieces behind an adapter, so
+the start cache, the cross-chunk placement, the beardifier and `/locate structure` treat a tower
+piece like a fortress piece's. `StructureRegistry` reads the registered types before it falls to
+`Unsupported`, so a data pack structure whose `"type"` no installed mod registers places nothing,
+exactly as before.
 
 ### Data files
 

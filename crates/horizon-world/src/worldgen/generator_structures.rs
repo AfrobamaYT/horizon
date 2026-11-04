@@ -259,10 +259,13 @@ impl StructureState {
         let (Some(resources), Some(raw)) = (&data.structures, &data.structure_resources) else {
             return Ok(None);
         };
-        let registry =
-            StructureRegistry::new(&raw.structures, &raw.sets, raw.pools.clone(), &|value| {
-                biome_set(data, value)
-            })?;
+        let registry = StructureRegistry::new(
+            &raw.structures,
+            &raw.sets,
+            raw.pools.clone(),
+            &|value| biome_set(data, value),
+            super::structure::mod_types::mod_structure_types(),
+        )?;
         let possible_sets = registry
             .sets
             .iter()
@@ -428,7 +431,7 @@ impl StructureState {
                     && let Some(pieces) = start
                         .pieces
                         .iter()
-                        .map(|piece| self.saved_pool_piece(piece))
+                        .map(|piece| self.saved_piece(piece))
                         .collect::<Option<Vec<_>>>()
                 {
                     return Some(Arc::new(StructureStart::new(index, def, chunk, pieces)));
@@ -490,6 +493,23 @@ impl StructureState {
         PoolPiece::from_saved(&tag_json(piece), &self.resources, &self.bindings)
             .ok()
             .map(Piece::Pool)
+    }
+    /// A saved piece, as `StructureStart.loadStaticStart` loads it: a jigsaw
+    /// piece from `PoolPiece::from_saved`, a mod type's piece from its
+    /// `load_piece` (the `StructurePieceType` is the loader), none otherwise.
+    fn saved_piece(&self, piece: &crate::nbt::Tag) -> Option<Piece> {
+        if let Some(pool) = self.saved_pool_piece(piece) {
+            return Some(pool);
+        }
+        let crate::nbt::Tag::Compound(map) = piece else {
+            return None;
+        };
+        let id = match map.get(&"id".into()) {
+            Some(crate::nbt::Tag::String(s)) => s.to_string_lossy(),
+            _ => return None,
+        };
+        let types = super::structure::mod_types::mod_structure_types();
+        types.get(&*id)?.load_piece(map).map(Piece::Legacy)
     }
     /// `starts_at`, or `None` when another worker is building them and
     /// `wait` is false.

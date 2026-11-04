@@ -385,6 +385,12 @@ pub trait LevelAccess {
     ) -> bool {
         true
     }
+    /// Whether the fluid source at `pos` (`state`) counts towards making a new
+    /// source beside it (NeoForge's `CreateFluidSourceEvent`). `vanilla` is
+    /// the fluid's own rule (`water_source_conversion`, `lava_source_conversion`).
+    fn create_fluid_source(&self, _pos: BlockPos, _state: BlockStateId, vanilla: bool) -> bool {
+        vanilla
+    }
     fn allow_block_ignite(&self, _pos: BlockPos, _cause: &'static str) -> bool {
         true
     }
@@ -400,6 +406,14 @@ pub trait LevelAccess {
     ) -> Option<std::borrow::Cow<'a, str>> {
         feature.map(std::borrow::Cow::Borrowed)
     }
+    /// Whether a crop-like block grows on this random tick (NeoForge's
+    /// `CommonHooks.canCropGrow`). `vanilla` is the game's own answer, its
+    /// random roll already drawn.
+    fn crop_grow_pre(&mut self, _pos: BlockPos, _state: BlockStateId, vanilla: bool) -> bool {
+        vanilla
+    }
+    /// A crop-like block grew (NeoForge's `CommonHooks.fireCropGrowPost`).
+    fn crop_grow_post(&mut self, _pos: BlockPos, _original: BlockStateId) {}
     fn allow_leaves_decay(&self, _pos: BlockPos) -> bool {
         true
     }
@@ -489,6 +503,13 @@ pub trait LevelAccess {
     }
     /// Observe a committed `Level.setBlock` state change, before its side effects.
     fn observe_block_changed(&self, _pos: BlockPos, _old: BlockStateId, _new: BlockStateId) {}
+    /// NeoForge's `NeighborNotifyEvent`: the block at `pos` is about to tell
+    /// its neighbours it changed (`ServerLevel.updateNeighborsAt`, or
+    /// `updateNeighborsAtExceptFromFacing` with the side it skips). True
+    /// cancels it: no neighbour hears. Must not alter the update queue.
+    fn neighbor_notify(&self, _pos: BlockPos, _skipped: Option<Direction>) -> bool {
+        false
+    }
     /// Observe `BlockState.handleNeighborChanged` before the block handles it.
     /// The default does nothing; implementations must not alter the update queue.
     fn observe_neighbor_changed(
@@ -647,6 +668,8 @@ pub trait LevelAccess {
     /// Storage write (`LevelChunkSection.setBlockState`). Returns the previous
     /// state, or None when nothing could be stored (unloaded chunk).
     fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId>;
+    /// Notify clients of a completed block write, when `UPDATE_CLIENTS` is set.
+    fn send_block_updated(&mut self, _pos: BlockPos) {}
     fn is_loaded(&self, pos: BlockPos) -> bool;
     /// Inclusive minimum and exclusive maximum build height.
     fn min_y(&self) -> i32 {
@@ -1425,7 +1448,43 @@ pub(crate) struct Sim<'a, L: LevelAccess + ?Sized> {
     /// neighbours (`getBlockSignal`).
     pub wire_signal_off: std::cell::Cell<bool>,
 }
+/// A read-only view of a level for the queries that change nothing: `SignalGetter`,
+/// and the block, shape and moving-piston reads its wire connections ask. `Sim`
+/// reads through one (`Sim::signals`), so a caller that holds the level shared, such
+/// as a mod's read, gets the game's own answer.
+pub struct Signals<'a, L: LevelAccess + ?Sized> {
+    pub(crate) b: &'a Behaviours,
+    pub(crate) level: &'a L,
+    pub(crate) ticks: &'a Ticks,
+    /// `RedstoneWireBlock.shouldSignal` is false while a wire samples its
+    /// neighbours (`getBlockSignal`).
+    pub(crate) wire_signal_off: bool,
+}
+impl<'a, L: LevelAccess + ?Sized> Sim<'a, L> {
+    /// This simulation's level, read-only.
+    pub(crate) fn signals(&self) -> Signals<'_, L> {
+        Signals {
+            b: self.b,
+            level: &*self.level,
+            ticks: &*self.ticks,
+            wire_signal_off: self.wire_signal_off.get(),
+        }
+    }
+}
 impl Behaviours {
+    /// `level` read through the game's `SignalGetter`, for a caller holding it shared.
+    pub fn signals<'a, L: LevelAccess + ?Sized>(
+        &'a self,
+        level: &'a L,
+        ticks: &'a Ticks,
+    ) -> Signals<'a, L> {
+        Signals {
+            b: self,
+            level,
+            ticks,
+            wire_signal_off: false,
+        }
+    }
     pub(crate) fn sim<'a, L: LevelAccess + ?Sized>(
         &'a self,
         level: &'a mut L,

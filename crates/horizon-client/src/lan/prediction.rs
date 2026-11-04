@@ -810,6 +810,8 @@ mod tests {
                 collision_binding: &binding,
                 resources: &resources,
                 tag_items: None,
+                block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
             })
         };
         // Settle on the floor first (or fall for a while).

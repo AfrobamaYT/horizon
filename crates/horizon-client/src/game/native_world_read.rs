@@ -232,6 +232,19 @@ mod tests {
                 .find(|recipe| recipe.id == "minecraft:iron_ingot_from_smelting_raw_iron")
                 .expect("vanilla's smelting recipe of raw iron");
             assert_eq!(iron.json["cookingtime"], 200);
+            assert_eq!(iron.cooking_time, Some(200));
+            assert_eq!(iron.experience, Some(0.7));
+            assert_eq!(iron.ingredients.len(), 1);
+            assert!(iron.ingredients[0].items.contains("minecraft:raw_iron"));
+            assert_eq!(iron.results[0].item.as_ref(), "minecraft:iron_ingot");
+            let bucket = game
+                .native_recipes_of_type("minecraft:crafting_shaped")
+                .iter()
+                .find(|recipe| recipe.id == "minecraft:bucket")
+                .expect("vanilla's bucket recipe");
+            assert_eq!(bucket.ingredients.len(), 3, "its pattern's three cells");
+            assert_eq!(bucket.results[0].item.as_ref(), "minecraft:bucket");
+            assert_eq!(bucket.cooking_time, None);
             assert!(
                 !game
                     .native_recipes_of_type("minecraft:campfire_cooking")
@@ -270,6 +283,17 @@ mod tests {
                 assert_eq!(
                     game.native_tag_members(registry, "oak_logs").as_deref(),
                     Some(&oak[..])
+                );
+            }
+            {
+                let host: &dyn mod_api::Host = game;
+                assert_eq!(
+                    host.tag_members(TagRegistry::Item, "oak_logs").as_deref(),
+                    Some(&oak[..])
+                );
+                assert_eq!(
+                    host.item_stack_in_tag(&ItemStack::new("minecraft:oak_log", 1), "oak_logs"),
+                    Some(true)
                 );
             }
             assert_eq!(
@@ -387,7 +411,27 @@ mod tests {
             });
             game.options.dedicated = Some(Vec::new());
             let bounds = game.native_level_height(level).unwrap();
-            game.with_level(|_, host, _| {
+            let parsed = game.native_block_state_id("minecraft:oak_slab[waterlogged=true]");
+            let default = game.native_block_state_default("minecraft:oak_slab");
+            game.with_level(|_, host, ticks| {
+                assert_eq!(
+                    host.block_state_id("minecraft:oak_slab[waterlogged=true]"),
+                    parsed
+                );
+                assert_eq!(host.block_state_default("minecraft:oak_slab"), default);
+                assert_eq!(host.block_state_id("minecraft:oak_slab[bad=true]"), None);
+                assert_eq!(host.block_state_default("missing:unknown"), None);
+                let wrapped = super::super::mod_api_host::LevelTicks {
+                    level: &*host,
+                    ticks,
+                };
+                assert_eq!(
+                    wrapped.block_state_id("minecraft:oak_slab[waterlogged=true]"),
+                    parsed
+                );
+                assert_eq!(wrapped.block_state_default("minecraft:oak_slab"), default);
+                assert_eq!(wrapped.block_state_id("minecraft:oak_slab[bad=true]"), None);
+                assert_eq!(wrapped.block_state_default("missing:unknown"), None);
                 assert_eq!(host.state_string(stone).as_deref(), Some("minecraft:stone"));
                 assert!(
                     host.state_string(slab)
@@ -423,7 +467,15 @@ mod tests {
                         &mut game.world,
                         game.pack.assets.registry,
                         Some(world_items!(game)),
+                        Some(&game.pack.block_registries),
                     ));
+                assert_eq!(
+                    hit.block_state_id("minecraft:oak_slab[waterlogged=true]"),
+                    parsed
+                );
+                assert_eq!(hit.block_state_default("minecraft:oak_slab"), default);
+                assert_eq!(hit.block_state_id("minecraft:oak_slab[bad=true]"), None);
+                assert_eq!(hit.block_state_default("missing:unknown"), None);
                 assert_eq!(hit.state_string(stone).as_deref(), Some("minecraft:stone"));
                 assert!(hit.state_string(slab).unwrap().contains("waterlogged=true"));
                 assert_eq!(hit.state_string(BlockStateId(u32::MAX)), None);
@@ -448,11 +500,21 @@ mod tests {
                         &mut game.world,
                         game.pack.assets.registry,
                         None,
+                        None,
                     ));
+                assert_eq!(hit.block_state_id("minecraft:stone"), None);
+                assert_eq!(hit.block_state_default("minecraft:stone"), None);
                 assert_eq!(hit.block_in_tag("minecraft:stone", "minecraft:logs"), None);
                 assert_eq!(hit.fluid_in_tag("minecraft:water", "minecraft:water"), None);
             }
             assert_eq!(game.world.chunks.len(), chunks, "nothing was loaded");
+            game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
+            let host: &dyn mod_api::Host = game;
+            assert_eq!(host.tag_members(TagRegistry::Item, "oak_logs"), None);
+            assert_eq!(
+                host.item_stack_in_tag(&ItemStack::new("minecraft:oak_log", 1), "oak_logs"),
+                None
+            );
             game.session_lock = None;
             let _ = std::fs::remove_dir_all(dir);
         });

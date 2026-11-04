@@ -2,9 +2,11 @@
   "hooks": [
     {
       "name": "player_tab_list_name_format",
-      "doc": "ServerPlayer.getTabListDisplayName: the name the Tab list shows for\n`player`, None to let the client choose it. Replace `display_name` to\nchange it.",
+      "doc": "ServerPlayer.getTabListDisplayName: the name the Tab list shows for\n`player`, None to let the client choose it. Replace `display_name` to\nchange it. It runs while the Tab list is built. Answer from the arguments and `context` alone, and fast: `context` holds the side, the registries and the settings of the resource generation, and a `/reload` builds the next one.",
+      "version": 2,
       "target": "horizon_client_lib::lan::hub::native_player_tab_list_name_format",
       "side": "server",
+      "context": "loop",
       "cancellable": false,
       "neoforge": "PlayerEvent.TabListNameFormat",
       "mod_api": {

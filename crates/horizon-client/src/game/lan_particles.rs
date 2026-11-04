@@ -940,7 +940,16 @@ mod tests {
             integrated: false,
             levels: Default::default(),
         };
-        let mut hub = Hub::new(lan, sync, encoder, hub_config);
+        let mut hub = Hub::new(
+            lan,
+            sync,
+            encoder,
+            hub_config,
+            std::sync::Arc::new(
+                crate::game::test_server_load()
+                    .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+            ),
+        );
 
         let (tx_near, rx_near) = std::sync::mpsc::channel();
         let mut near = Guest::new(

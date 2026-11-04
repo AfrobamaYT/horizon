@@ -106,31 +106,40 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
     {
         log::warn!("The enchantment level hook is already installed; keeping the first");
     }
-    if crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
-        menu_slot_rules: |menu, slot, stack, may_place, max_stack| {
-            mod_api::dispatch_menu_slot_rules(menu, slot, stack, may_place, max_stack);
+    if !crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
+        menu_slot_rules: |context, menu, slot, stack, may_place, max_stack| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_menu_slot_rules(&context, menu, slot, stack, may_place, max_stack);
         },
-        item_stacked_on_other: |event, canceled| {
-            mod_api::dispatch_item_stacked_on_other(event, canceled);
+        item_stacked_on_other: |context, event, canceled| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_item_stacked_on_other(&context, event, canceled);
         },
-        living_heal: |entity, amount, cancel| {
-            mod_api::dispatch_living_heal(entity, amount, cancel);
+        living_heal: |context, entity, amount, cancel| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_living_heal(&context, entity, amount, cancel);
         },
-        living_breathe: |entity, kind, can_breathe, consume, refill| {
-            mod_api::dispatch_living_breathe(entity, kind, can_breathe, consume, refill);
+        living_breathe: |context, entity, kind, can_breathe, consume, refill| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_living_breathe(&context, entity, kind, can_breathe, consume, refill);
         },
-        farmland_trample: |entity, pos, state, distance, cancel| {
-            mod_api::dispatch_farmland_trample(entity, pos, state, distance, cancel);
+        farmland_trample: |context, entity, pos, state, distance, cancel| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_farmland_trample(&context, entity, pos, state, distance, cancel);
         },
         has_mods: || !mod_api::mods().is_empty(),
-        player_name_format: |username, displayname| {
-            mod_api::dispatch_player_name_format(username, displayname);
+        player_name_format: |context, username, displayname| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_player_name_format(&context, username, displayname);
         },
-        player_tab_list_name_format: |player, name, display_name| {
-            mod_api::dispatch_player_tab_list_name_format(player, name, display_name);
+        player_tab_list_name_format: |context, player, name, display_name| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_player_tab_list_name_format(&context, player, name, display_name);
         },
-        living_drown: |entity, kind, is_drowning, damage_amount, bubble_count, cancel| {
+        living_drown: |context, entity, kind, is_drowning, damage_amount, bubble_count, cancel| {
+            let context = mod_api::LoopContext::new(context);
             mod_api::dispatch_living_drown(
+                &context,
                 entity,
                 kind,
                 is_drowning,
@@ -139,18 +148,37 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
                 cancel,
             );
         },
-        living_fall: |entity, kind, distance, multiplier, cancel| {
-            mod_api::dispatch_living_fall(entity, kind, distance, multiplier, cancel);
+        living_fall: |context, entity, kind, distance, multiplier, cancel| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_living_fall(&context, entity, kind, distance, multiplier, cancel);
         },
-        living_jump: |entity, kind| {
-            mod_api::dispatch_living_jump(entity, kind);
+        living_jump: |context, entity, kind| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_living_jump(&context, entity, kind);
         },
-        ender_entity_teleport: |entity, kind, from, target, cancel| {
-            mod_api::dispatch_ender_entity_teleport(entity, kind, from, target, cancel);
+        living_jump_power: |context, entity, kind, power| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_living_jump_power(&context, entity, kind, power);
         },
-    })
-    .is_err()
-    {
+        living_speed: |context, entity, kind, speed| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_living_speed(&context, entity, kind, speed);
+        },
+        living_flying_speed: |context, entity, kind, speed| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_living_flying_speed(&context, entity, kind, speed);
+        },
+        player_stays_on_ground_surface: |entity, staying| {
+            mod_api::dispatch_player_stays_on_ground_surface(entity, staying);
+        },
+        ender_entity_teleport: |context, entity, kind, from, target, cancel| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_ender_entity_teleport(&context, entity, kind, from, target, cancel);
+        },
+        fluid_flow: |fluid, pos, flow| {
+            mod_api::dispatch_fluid_flow(fluid, pos, flow);
+        },
+    }) {
         log::warn!("Native client hooks already installed; keeping the first callbacks");
     }
     raise_open_file_limit();

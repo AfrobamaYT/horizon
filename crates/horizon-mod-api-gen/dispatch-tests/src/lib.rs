@@ -28,6 +28,8 @@ mod tests {
         pub(super) struct Direction;
         #[derive(Clone, Copy)]
         pub(super) struct LevelDimension;
+        #[derive(Clone, Copy)]
+        pub(super) struct PlayerRef;
         pub(super) struct NeighbourUpdate;
         #[derive(Clone, Copy)]
         pub(super) struct PathComputationType;
@@ -180,6 +182,7 @@ mod tests {
         pub(super) struct NativeConfig;
         pub(super) struct NativeConfigFile;
         pub(super) struct RecipeBookCategory;
+        pub(super) struct RecipePropertyAddition;
         pub(super) struct NativeMapDecoration;
         pub(super) struct NativeMapInfo<'a>(pub &'a ());
         pub(super) struct NativePlayerRender<'a>(pub &'a ());
@@ -197,6 +200,9 @@ mod tests {
         pub(super) struct NativeLifecycleContext;
         pub(super) struct RegistrationContext<'a>(pub &'a str);
         pub(super) struct DataLoadContext<'a>(pub &'a str);
+        pub(super) struct LoopContext<'a>(pub &'a str);
+        pub(super) struct SoundPlay;
+        pub(super) struct ChannelRef;
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
         #[derive(Clone, Copy)]
@@ -698,7 +704,8 @@ mod tests {
         fn menu_subscribed(&self) -> &'static [Option<HookId>] {
             &[]
         }
-        fn menu_slot_rules(&self, event: &mut MenuSlotRulesEvent<'_>) {
+        fn menu_slot_rules(&self, context: &LoopContext<'_>, event: &mut MenuSlotRulesEvent<'_>) {
+            assert_eq!(context.0, "loop");
             event.may_place = false;
             event.max_stack = self.id;
         }
@@ -855,6 +862,7 @@ mod tests {
         });
         let (mut may_place, mut max_stack) = (true, 64);
         dispatch_menu_slot_rules(
+            &LoopContext("loop"),
             "test:menu",
             0,
             &ItemStack::default(),

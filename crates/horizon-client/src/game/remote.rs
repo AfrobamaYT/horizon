@@ -5898,9 +5898,7 @@ impl Game<'_> {
         // The rockets boosting this player tick after it, also while it waits
         // for chunks.
         self.tick_own_rockets();
-        // Client mods tick on any server, single player's own included.
         self.native_net.to_server = 0;
-        self.native_tick();
         // Far tiles the samplers asked for (`lod_net`).
         if let Some(r) = &self.remote {
             r.session.send_far_terrain();
@@ -6160,7 +6158,9 @@ impl Game<'_> {
                 assets: &self.pack.assets,
                 collision_binding: self.collision,
                 resources: self.motion,
+                loop_context: &self.loop_context,
                 tag_items: None,
+                block_registries: None,
             }
             .controlled_simulation_tick_with_sprint_window(keys, sprint_window)?;
         } else {
@@ -6176,7 +6176,9 @@ impl Game<'_> {
                     assets: &self.pack.assets,
                     collision_binding: self.collision,
                     resources: self.motion,
+                    loop_context: &self.loop_context,
                     tag_items: None,
+                    block_registries: None,
                 }
                 .passenger_pose_tick()?;
             }
@@ -12368,7 +12370,8 @@ mod tests {
         let env = Env {
             player: None,
             player_entity_id: None,
-            side: mod_api::menu::LogicalSide::Client,
+            loop_context: &crate::game::test_server_load()
+                .loop_context(horizon_world::native_load_context::LoopSide::Client, []),
             items: &items,
             recipes: &recipes,
             brewing: &brewing,

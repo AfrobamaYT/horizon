@@ -23,6 +23,44 @@ pub fn native_ingredient(
 ) {
     crate::dispatch_ingredient(&DataLoadContext::new(context), kind, data, items);
 }
+/// Items a mod adds to one of the recipe property sets: the items a furnace,
+/// blast furnace, smoker, campfire, smithing table slot or brewing stand slot
+/// accepts (`RecipeManager.RECIPE_PROPERTY_SETS`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RecipePropertyAddition {
+    /// The set's key, `minecraft:furnace_input` for instance.
+    pub set: String,
+    /// The item ids to add.
+    pub items: Vec<String>,
+}
+impl RecipePropertyAddition {
+    /// `items` added to the set named `set`.
+    pub fn new(set: impl Into<String>, items: Vec<String>) -> Self {
+        Self {
+            set: set.into(),
+            items,
+        }
+    }
+}
+/// Items a mod's own recipe type takes in a station slot, added to the
+/// recipe property sets (`RecipeManager.RECIPE_PROPERTY_SETS`): what a
+/// furnace, blast furnace, smoker, campfire, smithing table slot or brewing
+/// stand slot accepts, and what a client predicts it accepts. Push one
+/// `RecipePropertyAddition` per set to add to; the vanilla recipes' own
+/// items stay in. Called once per load, after the recipes are resolved, with
+/// the `DataLoadContext` of the load that owns them (`origin()`
+/// `ServerDataLoad` on a server, `ClientPreload` on a client's own load),
+/// and again after `/reload`. An unknown set key, an item that is air or
+/// not a registered item is logged and skipped. The answer must be the same
+/// every time.
+#[inline(never)]
+pub fn native_recipe_property_sets(
+    context: &LoadContext,
+    additions: &mut Vec<RecipePropertyAddition>,
+) {
+    crate::dispatch_recipe_property_sets(&DataLoadContext::new(context), additions);
+}
 /// A mod's own ingredient kind, matching a concrete stack at craft time:
 /// the ingredient's `test` calls here with the kind, its JSON and the
 /// stack being matched, `accept` already true (the load-time list named
@@ -312,11 +350,53 @@ impl Ingredient {
         }
     }
 }
-/// A recipe as its file says, whatever its type (vanilla's or a mod's own): the mod reads it.
-#[derive(Clone, Debug, PartialEq)]
-// exhaustive: the game builds it with a literal; mods only read it
-pub struct RecipeFile {
+/// A recipe in force (`RecipeManager.getAllRecipesFor`), whatever its type
+/// (vanilla's or a mod's own): its typed parts, and its file for whatever a
+/// mod's own type keeps there. Plain data.
+///
+/// A recipe the game could not parse (an ingredient it cannot read, no
+/// result) is not in force and is not listed.
+///
+/// `ingredients` and `results` are filled from the game's own parse of the
+/// shaped, shapeless and cooking types: a shaped recipe's pattern cells row
+/// by row (empty cells left out), a shapeless recipe's list, a cooking
+/// recipe's `ingredient`, and the result as `results[0]`. Any other type (a
+/// mod's own, stonecutting, smithing and the special ones) leaves both
+/// empty: read `json`.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct Recipe {
     /// `<namespace>:<path>`, its place under `data/<namespace>/recipe/`.
     pub id: String,
+    /// The recipe type, `minecraft:smelting` or `mymod:crusher`.
+    pub kind: String,
+    /// The recipe book group, empty for none.
+    pub group: String,
+    /// What it takes, as above.
+    pub ingredients: Vec<Ingredient>,
+    /// What it makes, as above.
+    pub results: Vec<ItemStack>,
+    /// Ticks a cooking recipe (`smelting`, `blasting`, `smoking`,
+    /// `campfire_cooking`) takes, its file's `cookingtime`; `None` for any
+    /// other type.
+    pub cooking_time: Option<u32>,
+    /// Experience a cooking recipe gives, `None` for any other type.
+    pub experience: Option<f32>,
+    /// The recipe's file, as the data pack wrote it.
     pub json: Arc<Value>,
+}
+impl Recipe {
+    /// The recipe `id` of type `kind` with its file `json`, the typed parts empty.
+    pub fn new(id: impl Into<String>, kind: impl Into<String>, json: Arc<Value>) -> Self {
+        Self {
+            id: id.into(),
+            kind: kind.into(),
+            group: String::new(),
+            ingredients: Vec::new(),
+            results: Vec::new(),
+            cooking_time: None,
+            experience: None,
+            json,
+        }
+    }
 }

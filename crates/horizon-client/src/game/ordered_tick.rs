@@ -162,17 +162,8 @@ impl Game<'_> {
                         continue;
                     };
                     let followed = followed.get_or_insert_with(|| self.orb_followed());
+                    let target = self.orb_target(i, followed);
                     let o = &mut self.orbs[i];
-                    let distance = |feet: &[f64; 3]| -> f64 {
-                        (feet[0] - o.position.x).powi(2)
-                            + (feet[1] - o.position.y).powi(2)
-                            + (feet[2] - o.position.z).powi(2)
-                    };
-                    let target = followed
-                        .iter()
-                        .filter(|(feet, _)| distance(feet) < 64.0)
-                        .min_by(|a, b| distance(&a.0).total_cmp(&distance(&b.0)))
-                        .map(|(_, target)| *target);
                     // An orb has no random of its own here: lava draws from one
                     // made on first use, apart from the level stream.
                     let random = &mut self.ordered.lava_random;

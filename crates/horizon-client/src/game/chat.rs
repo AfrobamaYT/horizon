@@ -61,15 +61,36 @@ impl Game<'_> {
         &mut self,
         base: Option<&horizon_client::command::Dispatcher>,
     ) -> horizon_client::command::Dispatcher {
-        let mut names = Vec::new();
-        self.native_commands(&mut names);
-        // The window answers this one itself, as it does a client mod's.
-        names.push(horizon_client::ram_limit::COMMAND);
         let base = match base {
             Some(tree) => tree,
             None => horizon_client::command::vanilla::game_dispatcher(),
         };
-        with_native_commands(base, &names)
+        let mut commands = Vec::new();
+        self.native_register_client_commands(&mut commands);
+        commands.retain(|command| {
+            let keep = command.level == 0;
+            if !keep {
+                log::warn!(
+                    "Horizon: a client command was left out: `{}` has an operator level",
+                    command.usage
+                );
+            }
+            keep
+        });
+        let (tree, _, problems) = super::native_server::command_tree(&commands, |name| {
+            base.find(name).is_some() || name == horizon_client::ram_limit::COMMAND
+        });
+        for problem in problems {
+            log::warn!("Horizon: a client command was left out: {problem}");
+        }
+        // The window answers `ram_limit` itself, as it does a client mod's.
+        let mut tree_with_mods = with_native_commands(base, &[horizon_client::ram_limit::COMMAND]);
+        super::native_server::register_dispatcher(
+            &mut tree_with_mods,
+            &tree,
+            horizon_client::command::MOD_COMMAND,
+        );
+        tree_with_mods
     }
 }
 
@@ -1757,6 +1778,45 @@ mod tests {
         for typed in ["ramlimit", "ramlimit 2048", "ramlimit off"] {
             assert!(tree.parse(typed, &reg).executable().is_ok(), "{typed}");
         }
+    }
+
+    /// A client command's usage becomes real nodes in the chat tree: its
+    /// argument is parsed (a wrong shape is red, as a vanilla command's would
+    /// be) and a run goes to `native_command` with the line as typed.
+    #[test]
+    fn a_client_commands_usage_is_parsed_by_the_chat_tree() {
+        let reg = Registries::default();
+        let vanilla = horizon_client::command::vanilla::game_dispatcher();
+        let commands = [mod_api::NativeCommand::new("xmode <mode:word>")];
+        let (tree, _, problems) = super::super::native_server::command_tree(&commands, |name| {
+            vanilla.find(name).is_some()
+        });
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut chat = vanilla.clone();
+        super::super::native_server::register_dispatcher(
+            &mut chat,
+            &tree,
+            horizon_client::command::MOD_COMMAND,
+        );
+        let parse = chat.parse("xmode fast", &reg);
+        assert_eq!(
+            parse.executable().unwrap().1,
+            horizon_client::command::MOD_COMMAND
+        );
+        assert!(
+            chat.parse("xmode", &reg).executable().is_err(),
+            "needs its mode"
+        );
+        assert!(
+            chat.parse("xmode fast extra", &reg).executable().is_err(),
+            "one word, not two"
+        );
+        // A name the game has is not taken over.
+        let (_, _, problems) = super::super::native_server::command_tree(
+            &[mod_api::NativeCommand::new("help <x:word>")],
+            |name| vanilla.find(name).is_some(),
+        );
+        assert_eq!(problems.len(), 1);
     }
 
     /// A native mod's command is in the tree the chat box uses (#456): known

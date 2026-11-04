@@ -1,7 +1,7 @@
 //! Block-state queries shared by the ported behaviour (`BlockStateBase`
 //! accessors and `Block` static helpers).
 use super::{
-    Behaviours, LevelAccess, Sim,
+    Behaviours, LevelAccess, Signals, Sim,
     classes::{Class, Interface},
     data::{BlockSet, state_flags},
     states::{BlockId, PropKey},
@@ -190,6 +190,53 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             None => super::data::ShapeInfo::default(),
         }
     }
+    /// `Block.canSupportRigidBlock(level, below)`.
+    pub fn can_support_rigid_block(&self, pos: BlockPos) -> bool {
+        if let Some(rigid) = self.moving_block_supports(pos, Direction::Up, SupportType::Rigid) {
+            return rigid;
+        }
+        self.b
+            .is_face_sturdy_rigid(self.support_state(pos), Direction::Up)
+    }
+    /// `Block.canSupportCenter(level, pos, direction)`.
+    pub fn can_support_center(&self, pos: BlockPos, direction: Direction) -> bool {
+        let state = self.support_state(pos);
+        if direction == Direction::Down && self.b.in_set(state, &self.b.tags.unstable_bottom_center)
+        {
+            return false;
+        }
+        if let Some(center) = self.moving_block_supports(pos, direction, SupportType::Center) {
+            return center;
+        }
+        self.b.is_face_sturdy_center(state, direction)
+    }
+    pub fn is_empty_block(&self, pos: BlockPos) -> bool {
+        self.b.is_air(self.state(pos))
+    }
+    /// `LevelReader.isWaterAt`: the fluid at `pos` is in the water tag.
+    pub fn is_water_at(&self, pos: BlockPos) -> bool {
+        self.b.is_water_fluid(self.fluid_at(pos).kind())
+    }
+    /// `Level.getRawBrightness(pos, darken)`.
+    pub fn raw_brightness(&self, pos: BlockPos, darken: i32) -> i32 {
+        super::raw_brightness(self.level, pos, darken)
+    }
+    /// `LevelReader.getMaxLocalRawBrightness(pos)`.
+    pub fn max_local_raw_brightness(&self, pos: BlockPos) -> i32 {
+        self.raw_brightness(pos, self.level.sky_darken())
+    }
+    pub(crate) fn below_state(&self, pos: BlockPos) -> BlockStateId {
+        self.state(below(pos))
+    }
+    pub(crate) fn rel_state(&self, pos: BlockPos, direction: Direction) -> BlockStateId {
+        self.state(rel(pos, direction))
+    }
+    pub(crate) fn is_inside_build_height(&self, y: i32) -> bool {
+        y >= self.level.min_y() && y < self.level.max_y()
+    }
+}
+
+impl<L: LevelAccess + ?Sized> Signals<'_, L> {
     /// The state whose cached support facts stand in for the block at `pos`.
     /// Vanilla reads a retracting piston's `moving_piston` block through its
     /// block entity, whose collision shape contains the extended base; the
@@ -255,54 +302,35 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
         self.b.is_face_sturdy(self.support_state(pos), direction)
     }
-    /// `Block.canSupportRigidBlock(level, below)`.
-    pub fn can_support_rigid_block(&self, pos: BlockPos) -> bool {
-        if let Some(rigid) = self.moving_block_supports(pos, Direction::Up, SupportType::Rigid) {
-            return rigid;
-        }
-        self.b
-            .is_face_sturdy_rigid(self.support_state(pos), Direction::Up)
-    }
-    /// `Block.canSupportCenter(level, pos, direction)`.
-    pub fn can_support_center(&self, pos: BlockPos, direction: Direction) -> bool {
-        let state = self.support_state(pos);
-        if direction == Direction::Down && self.b.in_set(state, &self.b.tags.unstable_bottom_center)
-        {
-            return false;
-        }
-        if let Some(center) = self.moving_block_supports(pos, direction, SupportType::Center) {
-            return center;
-        }
-        self.b.is_face_sturdy_center(state, direction)
-    }
-    pub fn is_empty_block(&self, pos: BlockPos) -> bool {
-        self.b.is_air(self.state(pos))
-    }
-    /// `LevelReader.isWaterAt`: the fluid at `pos` is in the water tag.
-    pub fn is_water_at(&self, pos: BlockPos) -> bool {
-        self.b.is_water_fluid(self.fluid_at(pos).kind())
-    }
-    /// `Level.getRawBrightness(pos, darken)`.
-    pub fn raw_brightness(&self, pos: BlockPos, darken: i32) -> i32 {
-        super::raw_brightness(self.level, pos, darken)
-    }
-    /// `LevelReader.getMaxLocalRawBrightness(pos)`.
-    pub fn max_local_raw_brightness(&self, pos: BlockPos) -> i32 {
-        self.raw_brightness(pos, self.level.sky_darken())
-    }
     pub fn is_redstone_conductor(&self, state: BlockStateId, _pos: BlockPos) -> bool {
         self.b.has_flag(state, state_flags::CONDUCTOR)
     }
     pub(crate) fn above_state(&self, pos: BlockPos) -> BlockStateId {
         self.state(above(pos))
     }
-    pub(crate) fn below_state(&self, pos: BlockPos) -> BlockStateId {
-        self.state(below(pos))
+}
+
+/// `Sim` reads these through its [`Signals`], so there is one implementation of each.
+impl<L: LevelAccess + ?Sized> Sim<'_, L> {
+    pub(super) fn support_state(&self, pos: BlockPos) -> BlockStateId {
+        self.signals().support_state(pos)
     }
-    pub(crate) fn rel_state(&self, pos: BlockPos, direction: Direction) -> BlockStateId {
-        self.state(rel(pos, direction))
+    fn moving_block_supports(
+        &self,
+        pos: BlockPos,
+        direction: Direction,
+        support: SupportType,
+    ) -> Option<bool> {
+        self.signals()
+            .moving_block_supports(pos, direction, support)
     }
-    pub(crate) fn is_inside_build_height(&self, y: i32) -> bool {
-        y >= self.level.min_y() && y < self.level.max_y()
+    pub fn sturdy(&self, pos: BlockPos, direction: Direction) -> bool {
+        self.signals().sturdy(pos, direction)
+    }
+    pub fn is_redstone_conductor(&self, state: BlockStateId, _pos: BlockPos) -> bool {
+        self.signals().is_redstone_conductor(state, _pos)
+    }
+    pub(crate) fn above_state(&self, pos: BlockPos) -> BlockStateId {
+        self.signals().above_state(pos)
     }
 }

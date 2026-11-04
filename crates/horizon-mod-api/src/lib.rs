@@ -122,7 +122,7 @@ pub use crate::biome::{BiomeColors, SpawnEntry};
 pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
-pub use crate::crafting::{Ingredient, RecipeFile};
+pub use crate::crafting::{Ingredient, Recipe, RecipePropertyAddition};
 pub use crate::extras::Corner;
 pub use crate::extras_hud::Corners;
 pub use crate::first_person::Hand;
@@ -277,6 +277,16 @@ pub struct NativeArmorHurt {
     pub damage: f32,
     /// The durability damage to apply instead; starts equal to `damage`.
     pub new_damage: f32,
+}
+
+/// A vanilla key mapping as the client holds it (`ClientHost::mapping`).
+#[derive(Clone, Debug)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct NativeKeyMapping {
+    /// Whether it is held (`KeyMapping.isDown`).
+    pub down: bool,
+    /// The name of the key it is bound to, as Controls shows it (`KeyMapping.getTranslatedKeyMessage`).
+    pub label: Text,
 }
 
 /// Camera values from the most recently extracted world frame.
@@ -584,6 +594,97 @@ pub struct NativePortalShape {
     pub width: i32,
     /// The portal frame's inner height in blocks.
     pub height: i32,
+}
+
+/// The mixer group a sound plays on (`SoundSource`), in vanilla's order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SoundSource {
+    /// The master volume, which scales every other source.
+    Master,
+    /// Music discs aside, the game's music.
+    Music,
+    /// Jukeboxes and music discs.
+    Records,
+    /// Rain and thunder.
+    Weather,
+    /// Sounds blocks make.
+    Blocks,
+    /// Hostile creatures.
+    Hostile,
+    /// Friendly and neutral creatures.
+    Neutral,
+    /// Players.
+    Players,
+    /// Ambient and cave sounds.
+    Ambient,
+    /// Voice sounds.
+    Voice,
+    /// Interface sounds, such as a button click.
+    Ui,
+}
+
+impl SoundSource {
+    /// Every source, in vanilla's order (`SoundSource.values()`).
+    pub const ALL: [SoundSource; 11] = [
+        Self::Master,
+        Self::Music,
+        Self::Records,
+        Self::Weather,
+        Self::Blocks,
+        Self::Hostile,
+        Self::Neutral,
+        Self::Players,
+        Self::Ambient,
+        Self::Voice,
+        Self::Ui,
+    ];
+}
+
+/// How a sound fades with distance (`SoundInstance.Attenuation`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SoundAttenuation {
+    /// Heard at full volume everywhere.
+    None,
+    /// Fades linearly to silence at the sound's range.
+    Linear,
+}
+
+/// A sound about to play, for `play_sound` (`SoundInstance`'s own settings:
+/// vanilla's `getIdentifier`, `getSource`, `getVolume`, `getPitch`, `getX/Y/Z`,
+/// `isLooping`, `getDelay`, `getAttenuation` and `isRelative`).
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct SoundPlay {
+    /// The sound event (`minecraft:entity.pig.ambient`).
+    pub identifier: String,
+    /// The mixer group it plays on.
+    pub source: SoundSource,
+    /// Its own volume, before the source's and the master's.
+    pub volume: f32,
+    /// Its pitch, 1.0 unchanged.
+    pub pitch: f32,
+    /// Where it plays, in blocks; meaningless when `relative`.
+    pub position: [f64; 3],
+    /// It restarts when it ends.
+    pub looping: bool,
+    /// Ticks to wait before it starts.
+    pub delay: i32,
+    /// How it fades with distance.
+    pub attenuation: SoundAttenuation,
+    /// It plays at the listener, wherever they move.
+    pub relative: bool,
+}
+
+/// A playing sound's channel, for `play_sound_source` and
+/// `play_streaming_source`: an id only, to tell sounds apart across the two
+/// hooks. It gives no control over the channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct ChannelRef {
+    /// The channel's id, unique among the live ones.
+    pub id: u64,
 }
 
 /// A server explosion about to happen, for `explosion_start`
@@ -948,7 +1049,6 @@ pub enum NativeAuthority {
 }
 
 /// Supported vanilla `Block.UPDATE_*` flags for a level block write.
-/// Horizon currently sends all writes to clients regardless of client flags.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct NativeBlockUpdateFlags(i32);
@@ -958,6 +1058,10 @@ impl NativeBlockUpdateFlags {
     pub const NONE: Self = Self(0);
     /// Notify neighboring blocks.
     pub const NEIGHBORS: Self = Self(1);
+    /// Send the block update to clients.
+    pub const CLIENTS: Self = Self(2);
+    /// Suppress the client-side block update notification.
+    pub const INVISIBLE: Self = Self(4);
     /// Skip neighbor shape updates.
     pub const KNOWN_SHAPE: Self = Self(16);
     /// Suppress drops caused by neighbor shape updates.
@@ -1336,17 +1440,17 @@ impl ItemEnchantments {
 
 /// A living entity's active effect (vanilla's `MobEffectInstance`), as
 /// [`LivingRef`] reads its effects and as `add_effect` gives one: the
-/// effect's id namespaced as the registry has it (`minecraft:speed`, a
-/// content mod's `mod:custom`; a bare vanilla id reads as `minecraft:`'s),
+/// effect's id, an [`Identifier`] namespaced as the registry has it
+/// (`minecraft:speed`, a content mod's `mod:custom`),
 /// the ticks left (-1 is infinite), the amplifier from 0, and the flags a
 /// beacon-style effect carries: `ambient` (an ambient one gives no
 /// particles) and `visible` (whether its particles show). Horizon keeps no
 /// separate show-icon flag: the icon always shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeActiveEffect {
     /// The effect's namespaced id.
-    pub id: &'static str,
+    pub id: Identifier,
     /// The ticks left; -1 is infinite.
     pub duration: i32,
     /// The amplifier, from 0.
@@ -1360,7 +1464,7 @@ pub struct NativeActiveEffect {
 impl NativeActiveEffect {
     /// Construct an effect with its duration, amplifier and visual flags.
     pub fn new(
-        id: &'static str,
+        id: Identifier,
         duration: i32,
         amplifier: i32,
         ambient: bool,
@@ -3469,6 +3573,14 @@ pub trait LevelHost {
     fn state_block(&self, _state: BlockStateId) -> Option<&str> {
         unimplemented!("LevelHost::state_block")
     }
+    /// Parse a block name and properties as `BlockStateParser.parseForBlock`; None for invalid input or unavailable context.
+    fn block_state_id(&self, _name: &str) -> Option<BlockStateId> {
+        unimplemented!("LevelHost::block_state_id")
+    }
+    /// The block's default state (`Block.defaultBlockState`), or None for an unknown block.
+    fn block_state_default(&self, _block: &str) -> Option<BlockStateId> {
+        unimplemented!("LevelHost::block_state_default")
+    }
     /// The full block state name and properties, as `BlockStateParser.serialize`; None for an unknown id.
     fn state_string(&self, _state: BlockStateId) -> Option<String> {
         unimplemented!("LevelHost::state_string")
@@ -3481,8 +3593,8 @@ pub trait LevelHost {
     fn height(&self) -> i32 {
         unimplemented!("LevelHost::height")
     }
-    /// Whether the block registry name is in the merged block tag. Unknown names and tags
-    /// return false; unavailable authoritative tags return None.
+    /// `BlockState.is(TagKey)`: whether the block registry name is in the merged block tag.
+    /// Unknown names and tags return false; unavailable authoritative tags return None.
     fn block_in_tag(&self, _block: &str, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::block_in_tag")
     }
@@ -3501,7 +3613,7 @@ pub trait LevelHost {
     fn state_fluid_state(&self, _state: BlockStateId) -> Option<FluidState> {
         unimplemented!("LevelHost::state_fluid_state")
     }
-    /// Whether the fluid registry name is in the merged fluid tag, as `block_in_tag` reads.
+    /// `FluidState.is(TagKey)`: whether the fluid registry name is in the merged fluid tag, as `block_in_tag` reads.
     fn fluid_in_tag(&self, _fluid: &str, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::fluid_in_tag")
     }
@@ -3583,6 +3695,10 @@ pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
     ) -> bool {
         unimplemented!("LevelWriteHost::set_block")
     }
+    /// Remove a block through `Level.removeBlock`, preserving its fluid. `moved` marks a piston move.
+    fn remove_block(&mut self, _pos: [i32; 3], _moved: bool) -> bool {
+        unimplemented!("LevelWriteHost::remove_block")
+    }
     /// Change a block property through `native_set_block_property`.
     fn set_block_property(
         &mut self,
@@ -3660,6 +3776,13 @@ mod block_entity_type;
 pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
+mod structure_type;
+/// The structure box a piece's `bounding_box` answers, in world blocks.
+pub use horizon_world::worldgen::structure::BoundingBox;
+pub use structure_type::{
+    BiomeId, ChunkPos, FoundStructure, GenerationContext, HeightmapType, NoiseBlock, NoiseColumn,
+    PieceContext, PieceRandom, StructureError, StructurePiece, StructureType, WorldgenRandom,
+};
 mod part_table;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use part_table::install_parts;
@@ -4792,7 +4915,8 @@ pub(crate) mod built {
                 visible,
             } = v;
             Self {
-                id,
+                id: crate::Identifier::parse_namespaced(id)
+                    .expect("the game's effect ids are namespaced"),
                 duration,
                 amplifier,
                 ambient,
@@ -4910,6 +5034,54 @@ pub(crate) mod built {
                 yaw,
                 pitch,
                 entity_id,
+            }
+        }
+    }
+    // exhaustive: the game builds it with a literal; mods only read it
+    pub struct ChannelRef {
+        pub id: u64,
+    }
+    impl From<ChannelRef> for super::ChannelRef {
+        fn from(v: ChannelRef) -> Self {
+            let ChannelRef { id } = v;
+            Self { id }
+        }
+    }
+    // exhaustive: the game builds it with a literal; mods read it and edit its fields
+    pub struct SoundPlay {
+        pub identifier: String,
+        pub source: super::SoundSource,
+        pub volume: f32,
+        pub pitch: f32,
+        pub position: [f64; 3],
+        pub looping: bool,
+        pub delay: i32,
+        pub attenuation: super::SoundAttenuation,
+        pub relative: bool,
+    }
+    impl From<SoundPlay> for super::SoundPlay {
+        fn from(v: SoundPlay) -> Self {
+            let SoundPlay {
+                identifier,
+                source,
+                volume,
+                pitch,
+                position,
+                looping,
+                delay,
+                attenuation,
+                relative,
+            } = v;
+            Self {
+                identifier,
+                source,
+                volume,
+                pitch,
+                position,
+                looping,
+                delay,
+                attenuation,
+                relative,
             }
         }
     }

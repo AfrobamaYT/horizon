@@ -1,7 +1,8 @@
 //! `Level.setBlock`, `LevelChunk.setBlockState` and the
 //! `CollectingNeighborUpdater` that orders neighbour and shape updates.
 use super::{
-    LevelAccess, LevelEvent, Sim, classes::Class, flags, orientation::Orientation, states::BlockId,
+    LevelAccess, LevelEvent, Signals, Sim, classes::Class, flags, orientation::Orientation,
+    states::BlockId,
 };
 use crate::{fluid::FluidState, registry::BlockStateId};
 use horizon_core::{
@@ -197,9 +198,6 @@ impl Update {
 }
 
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
-    pub fn state(&self, pos: BlockPos) -> BlockStateId {
-        self.level.block_state(pos)
-    }
     pub fn fluid_at(&self, pos: BlockPos) -> FluidState {
         self.b.fluid(self.state(pos))
     }
@@ -319,6 +317,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         };
         let new = self.state(pos);
         if new == state {
+            if update_flags & flags::UPDATE_CLIENTS != 0
+                && (!self.level.is_client_side() || update_flags & flags::UPDATE_INVISIBLE == 0)
+            {
+                self.level.send_block_updated(pos);
+            }
             if update_flags & flags::UPDATE_NEIGHBORS != 0 {
                 let old_block = self.block_of(old);
                 self.update_neighbors_at(pos, old_block);
@@ -522,6 +525,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 
     // ---- neighbour updater ----
     pub fn update_neighbors_at(&mut self, pos: BlockPos, block: BlockId) {
+        // NeoForge asks here and in the skipping variant, but not in the
+        // oriented one, which `ServerLevel` doesn't patch.
+        if self.level.neighbor_notify(pos, None) {
+            return;
+        }
         let orientation = self.initial_orientation(None, None);
         self.update_neighbors_at_oriented(pos, block, orientation);
     }
@@ -550,6 +558,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         skip: Direction,
         orientation: Option<Orientation>,
     ) {
+        if self.level.neighbor_notify(pos, Some(skip)) {
+            return;
+        }
         let index = usize::from(UPDATE_ORDER[0] == skip);
         self.add_and_run(Update::Multi {
             source: pos,
@@ -708,5 +719,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
             }
         }
+    }
+}
+
+impl<L: LevelAccess + ?Sized> Signals<'_, L> {
+    pub fn state(&self, pos: BlockPos) -> BlockStateId {
+        self.level.block_state(pos)
+    }
+}
+
+/// `Sim` reads these through its [`Signals`], so there is one implementation of each.
+impl<L: LevelAccess + ?Sized> Sim<'_, L> {
+    pub fn state(&self, pos: BlockPos) -> BlockStateId {
+        self.signals().state(pos)
     }
 }

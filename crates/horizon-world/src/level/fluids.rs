@@ -355,19 +355,26 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let b = self.b;
         let mut highest = 0;
         let mut sources = 0;
+        let converts = self.can_convert_to_source(kind);
         for direction in HORIZONTAL {
             let neighbour = self.rel_state(pos, direction);
             let fluid = b.fluid(neighbour);
             if fluid.kind().same_family(kind)
                 && self.can_pass_through_wall(direction, state, neighbour)
             {
-                if fluid.is_source() {
+                // NeoForge asks for each neighbouring source, the fluid's rule
+                // as the default (`CreateFluidSourceEvent`).
+                if fluid.is_source()
+                    && self
+                        .level
+                        .create_fluid_source(rel(pos, direction), neighbour, converts)
+                {
                     sources += 1;
                 }
                 highest = highest.max(i32::from(fluid.amount()));
             }
         }
-        if sources >= 2 && self.can_convert_to_source(kind) {
+        if sources >= 2 {
             let below_state = self.below_state(pos);
             if b.is_solid(below_state) || self.is_source_of(kind, b.fluid(below_state)) {
                 return FluidState::new(source_of(kind), 8, false);

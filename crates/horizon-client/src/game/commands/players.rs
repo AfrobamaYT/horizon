@@ -172,7 +172,11 @@ impl Game<'_> {
             ),
             ("insertion".into(), name.into()),
         ]);
-        horizon_client::lan::hub::native_player_name_format(&Text::literal(name), &mut shown);
+        horizon_client::lan::hub::native_player_name_format(
+            &self.loop_context,
+            &Text::literal(name),
+            &mut shown,
+        );
         shown
     }
 

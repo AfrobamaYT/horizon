@@ -218,6 +218,7 @@ fn teleport(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) -> bool {
             ];
             let mut cancel = false;
             super::enderman::native_ender_entity_teleport(
+                w.loop_context,
                 m.id,
                 &m.kind.id,
                 [m.position.x, m.position.y, m.position.z],
