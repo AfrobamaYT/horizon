@@ -7,7 +7,7 @@ use std::sync::Arc;
 impl Game<'_> {
     /// Dispatch on the server thread with the exact full-chunk save copies.
     pub(super) fn native_full_chunk_snapshots(&mut self, chunks: &[Arc<Chunk>]) {
-        if self.remote.is_some() || horizon_client::mod_api::mods().is_empty() {
+        if self.remote.is_some() || mod_api::mods().is_empty() {
             return;
         }
         for chunk in chunks {
@@ -16,7 +16,7 @@ impl Game<'_> {
     }
 
     pub(super) fn native_late_full_chunk_snapshot(&mut self, chunk: &Chunk) {
-        if self.remote.is_none() && !horizon_client::mod_api::mods().is_empty() {
+        if self.remote.is_none() && !mod_api::mods().is_empty() {
             self.native_full_chunk_snapshot(chunk);
         }
     }
@@ -25,7 +25,7 @@ impl Game<'_> {
 
     /// The proto stays checked out until all callbacks return and the save is submitted.
     pub(super) fn native_proto_snapshots(&mut self, protos: &[ProtoSave]) {
-        if self.remote.is_some() || horizon_client::mod_api::mods().is_empty() {
+        if self.remote.is_some() || mod_api::mods().is_empty() {
             return;
         }
         let access = self.streaming.proto_access();

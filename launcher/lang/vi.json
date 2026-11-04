@@ -1098,8 +1098,10 @@
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Mã nguồn trò chơi này không có mẫu mục trong danh mục mod mã máy. Hãy cập nhật Horizon và dựng lại các mod cho trò chơi này.",
   "no exact file on Modrinth": "không có tệp khớp chính xác trên Modrinth",
   "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
-  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml không có phần phụ thuộc horizon-client.",
+  "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod}: Cargo.toml không có phần phụ thuộc horizon-mod-api.",
+  "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod}: Cargo.toml phụ thuộc vào trò chơi ({key}). Mod chỉ phụ thuộc vào horizon-mod-api.",
   "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml không có tên gói.",
   "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client yêu cầu {fields}. Các bản dựng máy chủ không có giao diện đồ họa; trình khởi chạy quản lý các tính năng của horizon-client. Xóa features và dùng default-features = false hoặc bỏ qua thiết lập này.",
-  "{mod}: {error}": "{mod}: {error}"
+  "{mod}: {error}": "{mod}: {error}",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "Tra cứu siêu dữ liệu JAR thất bại: {reason}. Đặt các tệp gốc tại chính xác các đường dẫn bộ nhớ đệm sau, rồi thử lại:\n"
 }

@@ -1042,7 +1042,8 @@
     "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
     "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "لا يحتوي مصدر اللعبة هذا على قالب إدخال جرد المودات الأصلية. حدّث Horizon وأعد بناء المودات مقابل هذه اللعبة.",
     "{mod}: Cargo.toml has no package name.": "{mod}: لا يحتوي Cargo.toml على اسم حزمة.",
-    "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: لا يحتوي Cargo.toml على تبعية horizon-client.",
+    "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod}: لا يحتوي Cargo.toml على تبعية horizon-mod-api.",
+    "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod}: يعتمد Cargo.toml على اللعبة ({key}). يعتمد المود على horizon-mod-api وحده.",
     "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: يطلب horizon-client {fields}. بناءات الخادم بلا واجهة؛ والمشغّل هو من يتحكم في ميزات horizon-client. أزل features واستخدم default-features = false أو احذفه.",
     "{mod}: {error}": "{mod}: {error}",
     "{mode} · stopped": "{mode} · متوقف",
@@ -1101,5 +1102,6 @@
     "Save changes switches it. Nothing in its folder is deleted.": "«حفظ التغييرات» يطبّق التبديل. لا يُحذف شيء من مجلده.",
     "Its mods made for {loader} stay in its folder but won't load.": "تبقى إضافاته المصنوعة لـ {loader} في مجلده لكنها لن تعمل.",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "تبقى إضافاته المصنوعة لـ Minecraft {from} في مجلده؛ قد لا يعمل بعضها في {to}.",
-    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "حُفظت عوالمه بـ Minecraft {from}: يرقّيها {to} نهائيًا، ولا يستطيع فتحها إن كان أقدم."
+    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "حُفظت عوالمه بـ Minecraft {from}: يرقّيها {to} نهائيًا، ولا يستطيع فتحها إن كان أقدم.",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "تعذّر البحث عن البيانات الوصفية لملفات JAR: {reason}. ضع الملفات الأصلية في مسارات التخزين المؤقت هذه بالضبط، ثم أعد المحاولة:\n"
 }

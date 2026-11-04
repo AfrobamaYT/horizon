@@ -129,9 +129,9 @@ impl Game<'_> {
             player_entity_id: Some(self.own_entity_id()),
             // The server thread's and a dedicated server's menus are the server's.
             side: if self.native_authoritative() {
-                horizon_client::menu::LogicalSide::Server
+                mod_api::menu::LogicalSide::Server
             } else {
-                horizon_client::menu::LogicalSide::Client
+                mod_api::menu::LogicalSide::Client
             },
             items: self.items(),
             recipes: self.recipes(),
@@ -172,14 +172,14 @@ impl Game<'_> {
         let env = Env {
             player: Some(host.hub.guests[gi].uuid),
             player_entity_id: Some(host.hub.guests[gi].entity_id),
-            side: horizon_client::menu::LogicalSide::Server,
+            side: mod_api::menu::LogicalSide::Server,
             maps: maps.as_ref().map(|m| m as &dyn horizon_client::menu::Maps),
             limited_crafting: host.hub.limited_crafting,
             known_recipes: Some(&host.hub.guests[gi].recipe_book),
             ..self.menu_env()
         };
         load_player(menu, &host.hub.guests[gi]);
-        menu.brewed_potion_hook = !horizon_client::mod_api::mods().is_empty();
+        menu.brewed_potion_hook = !mod_api::mods().is_empty();
         menu.item_smelted_hook = menu.brewed_potion_hook;
         let result = op(menu, &env);
         if let Some(maps) = maps {
@@ -255,7 +255,7 @@ impl Game<'_> {
             .recipes()
             .find(&g.craft_grid, 2)
             .map(|(_, stack)| stack);
-        if horizon_client::mod_api::listened(horizon_client::mod_api::HookId::PrepareItemCraft) {
+        if mod_api::__private::listened(mod_api::HookId::PrepareItemCraft) {
             let name = g.name.clone();
             self.native_prepare_item_craft(uuid, &name, None, &mut result);
         }
@@ -458,9 +458,7 @@ impl Game<'_> {
         if furnace && count(menu.slot(2)) < count(items[2].as_ref()) {
             let output = items[2].as_ref();
             if let Some(output) = output
-                && horizon_client::mod_api::listened(
-                    horizon_client::mod_api::HookId::FurnaceExtract,
-                )
+                && mod_api::__private::listened(mod_api::HookId::FurnaceExtract)
                 && let Some(name) = self
                     .lan
                     .as_ref()

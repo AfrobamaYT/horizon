@@ -5,7 +5,7 @@ use super::{
     commands::Target,
     dragon::{Dragon, Fight},
 };
-use horizon_client::mod_api::{DragonRef, EntityRef, LivingRef, NativeDragonPhase};
+use mod_api::{DragonRef, EntityRef, LivingRef, NativeDragonPhase};
 
 impl Game<'_> {
     /// The dragon an entity handle names now.
@@ -131,14 +131,11 @@ mod tests {
     use super::super::Dim;
     use super::super::native_entity_refs::tests::with_game;
     use super::*;
-    use horizon_client::{
-        entities::ArmorStand,
-        mobs::Mob,
-        mod_api::{MobRef, NativeWorldEpoch},
-    };
+    use horizon_client::{entities::ArmorStand, mobs::Mob};
     use horizon_core::geometry::Vec3;
     use horizon_protocol::entity_data::{Value, serializer};
     use horizon_world::nbt::Tag;
+    use mod_api::{MobRef, NativeWorldEpoch};
 
     fn dragon_in(game: &mut Game<'_>) -> (EntityRef, DragonRef) {
         let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);

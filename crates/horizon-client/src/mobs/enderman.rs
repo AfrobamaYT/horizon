@@ -698,8 +698,9 @@ mod tests {
         let assets = crate::assets::Assets::load(&root).unwrap();
         let registry = assets.registry;
         let facts = crate::blocks::BlockFacts::load(&root, registry).unwrap();
-        let items = Items::load(&root, registry, &facts, &PackOverlay::NONE).unwrap();
-        let loot = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = Items::load(&root, registry, &facts, &PackOverlay::NONE, &defaults).unwrap();
+        let loot = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
         let death = |mob_drops| drops::Death {
             loot: &loot,
             damage: None,

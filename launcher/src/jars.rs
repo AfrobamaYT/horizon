@@ -107,7 +107,10 @@ impl fmt::Display for PrepareError {
                 write_missing_jars(f, missing)
             }
             Self::Lookup { missing, reason } => {
-                writeln!(f, "{reason}")?;
+                f.write_str(&trf(
+                    "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n",
+                    &[("reason", reason)],
+                ))?;
                 write_missing_jars(f, missing)
             }
             Self::Download { jar, path, reason } => f.write_str(&trf(

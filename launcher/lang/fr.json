@@ -1042,7 +1042,8 @@
     "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512 : {hash}",
     "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Le code source de ce jeu n'a pas de gabarit d'entrée d'inventaire natif. Mettez Horizon à jour et recompilez les mods contre ce jeu.",
     "{mod}: Cargo.toml has no package name.": "{mod} : Cargo.toml n'a pas de nom de paquet.",
-    "{mod}: Cargo.toml has no horizon-client dependency.": "{mod} : Cargo.toml n'a pas de dépendance horizon-client.",
+    "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod} : Cargo.toml n'a pas de dépendance horizon-mod-api.",
+    "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod} : Cargo.toml dépend du jeu ({key}). Un mod ne dépend que de horizon-mod-api.",
     "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod} : horizon-client demande {fields}. Les builds serveur sont headless ; le lanceur est propriétaire des fonctionnalités de horizon-client. Retirez features et utilisez default-features = false ou omettez-le.",
     "{mod}: {error}": "{mod} : {error}",
     "{mode} · stopped": "{mode} · arrêté",
@@ -1101,5 +1102,6 @@
     "Save changes switches it. Nothing in its folder is deleted.": "Enregistrer applique le changement. Rien n’est supprimé de son dossier.",
     "Its mods made for {loader} stay in its folder but won't load.": "Ses mods faits pour {loader} restent dans son dossier mais ne se chargeront pas.",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Ses mods faits pour Minecraft {from} restent dans son dossier ; certains peuvent ne pas se charger en {to}.",
-    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Ses mondes ont été enregistrés par Minecraft {from} : {to} les met à jour définitivement, et ne peut pas les ouvrir s’il est plus ancien."
+    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Ses mondes ont été enregistrés par Minecraft {from} : {to} les met à jour définitivement, et ne peut pas les ouvrir s’il est plus ancien.",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "La recherche des métadonnées JAR a échoué : {reason}. Placez les fichiers d’origine exactement à ces emplacements du cache, puis réessayez :\n"
 }

@@ -725,9 +725,9 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mod_api::{self, ServerHost};
     use horizon_client::mobs::{Anim, Brain, Mob, MobType, Part, Species};
     use horizon_core::geometry::Vec3;
+    use mod_api::{self, ServerHost};
     use std::sync::Arc;
 
     #[test]
@@ -743,9 +743,9 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn conversion_post_reads_original_and_lightning_outcome() {
-        use horizon_client::mod_api::{
-            EntityJoinLevelEvent, EquipmentSlot, Flow, Hooks, LivingConversionPostEvent,
-            LivingConversionPreEvent, install,
+        use mod_api::{
+            __private::install, EntityJoinLevelEvent, EquipmentSlot, Flow, Hooks,
+            LivingConversionPostEvent, LivingConversionPreEvent,
         };
         use std::sync::{
             Mutex,
@@ -820,15 +820,14 @@ mod tests {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let pre = Arc::new(AtomicUsize::new(0));
         let cancel_cow = Arc::new(AtomicBool::new(false));
-        let mods: horizon_client::mod_api::Mods =
-            Arc::from([horizon_client::mod_api::ModEntry::new(
-                "lightning-observer",
-                Box::new(Observer {
-                    seen: seen.clone(),
-                    pre: pre.clone(),
-                    cancel_cow: cancel_cow.clone(),
-                }),
-            )]);
+        let mods: mod_api::Mods = Arc::from([mod_api::ModEntry::new(
+            "lightning-observer",
+            Box::new(Observer {
+                seen: seen.clone(),
+                pre: pre.clone(),
+                cancel_cow: cancel_cow.clone(),
+            }),
+        )]);
         install(mods);
         super::super::native_entity_refs::tests::with_game(|game| {
             let piglin_type = game

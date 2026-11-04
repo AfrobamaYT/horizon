@@ -777,8 +777,8 @@ mod tests {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
-        use horizon_client::mod_api::Holder;
-        use horizon_client::mod_api::part_tests::{HOARD, HOARD_ASKED, game_thread};
+        use mod_api::__private::part_tests::{HOARD, HOARD_ASKED, game_thread};
+        use mod_api::Holder;
         use std::sync::Arc;
         use std::sync::atomic::Ordering;
         with_game(|game| {
@@ -810,7 +810,7 @@ mod tests {
                 )));
                 game.world.block_entities.insert(key, entity);
                 let holder = Holder::BlockEntity([pos.x, pos.y, pos.z]);
-                let host: &mut dyn horizon_client::mod_api::Host = game;
+                let host: &mut dyn mod_api::Host = game;
                 HOARD.set(host, holder, hoard).unwrap();
                 let (spawns, random) = game.with_level(|_, level, _| {
                     let mut scatter = level.world.random.clone();
@@ -855,8 +855,8 @@ mod tests {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields, ModContainer};
-        use horizon_client::mod_api::Holder;
-        use horizon_client::mod_api::part_tests::{HOARD, HOARD_ASKED, game_thread};
+        use mod_api::__private::part_tests::{HOARD, HOARD_ASKED, game_thread};
+        use mod_api::Holder;
         use std::sync::Arc;
         use std::sync::atomic::Ordering;
         with_game(|game| {
@@ -896,7 +896,7 @@ mod tests {
                 ))),
             );
             let holder = Holder::BlockEntity([pos.x, pos.y, pos.z]);
-            let host: &mut dyn horizon_client::mod_api::Host = game;
+            let host: &mut dyn mod_api::Host = game;
             HOARD.set(host, holder, 5).unwrap();
             let asked = HOARD_ASKED.load(Ordering::Relaxed);
             let dropped = game.dropped.len();

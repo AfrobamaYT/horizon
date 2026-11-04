@@ -21,29 +21,12 @@ use horizon_world::{
     server_player_damage::ServerDamageEnvironment,
     synced_floats::{FloatValue, Observer, SyncedFloats},
 };
+pub use mod_api::health::{HurtSource, ShieldBlock, Victim};
 use std::{cell::Cell, fs, io, path::Path, sync::OnceLock};
 pub(crate) type Attributes = LiveAttributes<Box<dyn horizon_world::attributes::live::Identities>>;
 pub(crate) type State = HurtState<DamageTypeId>;
 
 pub use crate::world::HealthRules;
-/// A hit's `DamageSource` for [`HURT_SERVER`]: its type (`minecraft:fall`),
-/// the entity ids of `getEntity` (`causing`) and `getDirectEntity`
-/// (`direct`), 0 for none or not known, and where it comes from
-/// (`getSourcePosition`), none when not known.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct HurtSource<'a> {
-    pub damage_type: &'a str,
-    pub causing: i32,
-    pub direct: i32,
-    pub position: Option<[f64; 3]>,
-}
-/// Where the entity a hit lands on stands and looks (`getViewVector`), for
-/// [`HURT_SERVER`].
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Victim {
-    pub position: [f64; 3],
-    pub view: [f64; 3],
-}
 /// What `LivingEntity.hurtServer` is about to hurt, for [`HURT_SERVER`], or
 /// `LivingEntity.knockback` to push, for [`KNOCKBACK`]: the entity and the
 /// hit's source.
@@ -79,6 +62,7 @@ pub static DAMAGE_POST: OnceLock<fn(DamageLevel<'_>, Hurting<'_>, &DamageContain
 /// Built from the level's world, or, in the mob tick, which reads the world while mobs
 /// draw, from a [`LentLevel`] taken out of it for the tick.
 pub struct DamageLevel<'a> {
+    shape: crate::chunk::LevelShape,
     chunks: &'a crate::chunk_map::ChunkMap,
     air: horizon_world::registry::BlockStateId,
     registry: &'a horizon_world::registry::BlockRegistry,
@@ -96,6 +80,7 @@ impl<'a> DamageLevel<'a> {
     ) -> Self {
         let crate::world::World {
             chunks,
+            shape,
             air,
             random,
             attachments,
@@ -103,6 +88,7 @@ impl<'a> DamageLevel<'a> {
             ..
         } = world;
         Self {
+            shape: *shape,
             chunks,
             air: *air,
             registry,
@@ -119,6 +105,7 @@ impl<'a> DamageLevel<'a> {
         lent: &'a mut LentLevel,
     ) -> Self {
         Self {
+            shape: world.shape,
             chunks: &world.chunks,
             air: world.air,
             registry,
@@ -138,6 +125,7 @@ impl<'a> DamageLevel<'a> {
     /// The same level, for a shorter borrow.
     pub fn reborrow(&mut self) -> DamageLevel<'_> {
         DamageLevel {
+            shape: self.shape,
             chunks: self.chunks,
             air: self.air,
             registry: self.registry,
@@ -146,6 +134,10 @@ impl<'a> DamageLevel<'a> {
             attachment_syncs: self.attachment_syncs,
             hooks: self.hooks,
         }
+    }
+    /// The build range of the level whose damage hook is running.
+    pub fn shape(&self) -> crate::chunk::LevelShape {
+        self.shape
     }
     /// The level's random (`level.getRandom()`).
     pub fn random(&mut self) -> &mut horizon_core::random::LegacyRandom {
@@ -275,18 +267,6 @@ pub static KNOCKBACK: OnceLock<fn(DamageLevel<'_>, Hurting<'_>, &mut Knock) -> b
 /// `death_protection` item in the hand (true: the off hand) is about to save the entity from
 /// a killing blow (`LivingUseTotemEvent`). True cancels it: the entity dies.
 pub static USE_TOTEM: OnceLock<fn(Hurting<'_>, bool) -> bool> = OnceLock::new();
-/// What a player's raised blocking item does to a hit, as `native_living_shield_block`
-/// may change it (`LivingShieldBlockEvent`).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ShieldBlock {
-    /// The player counts as blocking.
-    pub blocked: bool,
-    /// The damage the item stops, kept within 0 and the hit's damage.
-    pub blocked_damage: f32,
-    /// The durability the item loses (`ItemDamageFunction` of what it stops). Below 0,
-    /// vanilla's `ItemDamageFunction` of the final `blocked_damage` applies.
-    pub shield_damage: i32,
-}
 /// The game's native shield hook (`native_living_shield_block`), set once by the game:
 /// `LivingEntity.applyItemBlocking` of a hit with damage, for what it hurts, the damage
 /// and whether vanilla blocks. It may change the [`ShieldBlock`]; true cancels the block.

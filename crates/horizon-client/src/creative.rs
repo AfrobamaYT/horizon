@@ -182,6 +182,8 @@ pub fn item_group_key(id: &str) -> Option<&'static str> {
 impl Creative {
     pub const WIDTH: f32 = 195.0;
     pub const HEIGHT: f32 = 136.0;
+    /// How far a tab row reaches outside the window, above or below it.
+    pub const TAB_ROW_DEPTH: f32 = 28.0;
     pub const TRASH_POSITION: (f32, f32) = (173.0, 112.0);
 
     /// Visible player slots in the creative inventory tab (game slot ids).
@@ -799,7 +801,11 @@ impl Creative {
             // Right-aligned tabs (search, operator, inventory).
             x = Self::WIDTH - 27.0 * (7 - tab.column) as f32 + 1.0;
         }
-        let y = if tab.top { -28.0 } else { Self::HEIGHT - 4.0 };
+        let y = if tab.top {
+            -Self::TAB_ROW_DEPTH
+        } else {
+            Self::HEIGHT - 4.0
+        };
         (x, y)
     }
     /// `CreativeModeInventoryScreen.extractTabButton`'s cursor: an unselected

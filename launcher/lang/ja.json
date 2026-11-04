@@ -1042,7 +1042,8 @@
     "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
     "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "このゲームのソースにはネイティブインベントリのエントリテンプレートがありません。Horizon を更新し、このゲームに対してモッドを再ビルドしてください。",
     "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml にパッケージ名がありません。",
-    "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml に horizon-client の依存関係がありません。",
+    "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod}: Cargo.toml に horizon-mod-api の依存関係がありません。",
+    "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod}: Cargo.toml がゲームに依存しています ({key})。Mod は horizon-mod-api のみに依存します。",
     "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client が {fields} を要求しています。サーバービルドはヘッドレスで、horizon-client のフィーチャーはランチャーが管理します。features を削除し、default-features = false を指定するか省略してください。",
     "{mod}: {error}": "{mod}: {error}",
     "{online} of {max}": "{online} / {max}",
@@ -1101,5 +1102,6 @@
     "Save changes switches it. Nothing in its folder is deleted.": "「変更を保存」で切り替わります。フォルダー内のものは何も削除されません。",
     "Its mods made for {loader} stay in its folder but won't load.": "{loader} 用の Mod はフォルダーに残りますが、読み込まれません。",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Minecraft {from} 用の Mod はフォルダーに残ります。{to} では一部が読み込まれないかもしれません。",
-    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "ワールドは Minecraft {from} で保存されています：{to} はそれらを元に戻せない形で更新し、より古いバージョンなら開けません。"
+    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "ワールドは Minecraft {from} で保存されています：{to} はそれらを元に戻せない形で更新し、より古いバージョンなら開けません。",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "JARのメタデータの取得に失敗しました：{reason}。元のファイルを以下のキャッシュパスに正確に配置してから、もう一度お試しください：\n"
 }

@@ -1098,8 +1098,10 @@
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Šiame žaidimo pirminiame kode nėra vietinio kodo inventoriaus įrašo šablono. Atnaujinkite Horizon ir iš naujo sukompiliuokite modifikacijas šiam žaidimui.",
   "no exact file on Modrinth": "Modrinth sistemoje nėra tiksliai atitinkančio failo",
   "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
-  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml faile nėra horizon-client priklausomybės.",
+  "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod}: Cargo.toml faile nėra horizon-mod-api priklausomybės.",
+  "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod}: Cargo.toml priklauso nuo žaidimo ({key}). Modas priklauso tik nuo horizon-mod-api.",
   "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml faile nėra paketo pavadinimo.",
   "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client prašo {fields}. Serverio kompiliuotės neturi grafinės sąsajos; horizon-client funkcijas valdo paleidimo programa. Pašalinkite features ir naudokite default-features = false arba praleiskite šią nuostatą.",
-  "{mod}: {error}": "{mod}: {error}"
+  "{mod}: {error}": "{mod}: {error}",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "Nepavyko rasti JAR metaduomenų: {reason}. Įdėkite originalius failus tiksliai šiais podėlio keliais ir bandykite dar kartą:\n"
 }

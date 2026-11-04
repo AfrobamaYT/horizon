@@ -1098,8 +1098,10 @@
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Questo codice sorgente del gioco non ha un modello per le voci dell'inventario nativo. Aggiorna Horizon e ricompila le mod per questo gioco.",
   "no exact file on Modrinth": "nessun file con corrispondenza esatta su Modrinth",
   "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
-  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: in Cargo.toml manca una dipendenza da horizon-client.",
+  "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod}: in Cargo.toml manca una dipendenza da horizon-mod-api.",
+  "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod}: Cargo.toml dipende dal gioco ({key}). Una mod dipende solo da horizon-mod-api.",
   "{mod}: Cargo.toml has no package name.": "{mod}: in Cargo.toml manca il nome del pacchetto.",
   "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client richiede {fields}. Le build server non hanno interfaccia grafica; il launcher gestisce le funzionalità di horizon-client. Rimuovi features e usa default-features = false oppure ometti questa impostazione.",
-  "{mod}: {error}": "{mod}: {error}"
+  "{mod}: {error}": "{mod}: {error}",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "La ricerca dei metadati JAR non è riuscita: {reason}. Metti i file originali esattamente in questi percorsi della cache, poi riprova:\n"
 }

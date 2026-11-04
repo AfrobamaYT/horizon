@@ -1098,8 +1098,10 @@
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Αυτός ο πηγαίος κώδικας του παιχνιδιού δεν έχει πρότυπο εγγραφής εγγενούς καταλόγου. Ενημερώστε το Horizon και μεταγλωττίστε ξανά τα mods για αυτό το παιχνίδι.",
   "no exact file on Modrinth": "δεν υπάρχει αρχείο με ακριβή αντιστοιχία στο Modrinth",
   "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
-  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: το Cargo.toml δεν έχει εξάρτηση από το horizon-client.",
+  "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod}: το Cargo.toml δεν έχει εξάρτηση από το horizon-mod-api.",
+  "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod}: Το Cargo.toml εξαρτάται από το παιχνίδι ({key}). Ένα mod εξαρτάται μόνο από το horizon-mod-api.",
   "{mod}: Cargo.toml has no package name.": "{mod}: το Cargo.toml δεν έχει όνομα πακέτου.",
   "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: το horizon-client ζητά {fields}. Οι εκδόσεις διακομιστή δεν έχουν γραφικό περιβάλλον· ο εκκινητής διαχειρίζεται τις δυνατότητες του horizon-client. Αφαιρέστε το features και χρησιμοποιήστε default-features = false ή παραλείψτε τη ρύθμιση.",
-  "{mod}: {error}": "{mod}: {error}"
+  "{mod}: {error}": "{mod}: {error}",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "Η αναζήτηση μεταδεδομένων JAR απέτυχε: {reason}. Τοποθετήστε τα πρωτότυπα αρχεία ακριβώς σε αυτές τις διαδρομές της προσωρινής μνήμης και δοκιμάστε ξανά:\n"
 }

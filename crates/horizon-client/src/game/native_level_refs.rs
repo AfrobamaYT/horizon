@@ -4,12 +4,12 @@
 //! `None` (or `false`) on a client, for a handle of an earlier open, or for a
 //! block in a chunk that isn't loaded.
 use super::Game;
-use horizon_client::mod_api::{
-    BlockStateId, ChunkRef, ChunkStatus, LevelRef, LightLayer, NativeTicketOwner, TicketController,
-};
-use horizon_client::mod_chunk_tickets::ModTicket;
 use horizon_client::{streaming::Streaming, world::World};
 use horizon_core::position::ChunkPos;
+use mod_api::mod_chunk_tickets::ModTicket;
+use mod_api::{
+    BlockStateId, ChunkRef, ChunkStatus, LevelRef, LightLayer, NativeTicketOwner, TicketController,
+};
 
 /// Whether chunk `pos` lies inside the world (`/forceload`'s 30 million block bound).
 fn chunk_in_world(pos: [i32; 2]) -> bool {
@@ -21,7 +21,7 @@ fn chunk_in_world(pos: [i32; 2]) -> bool {
 fn calling_mod_owns(controller: TicketController) -> bool {
     controller
         .owner()
-        .is_some_and(|owner| horizon_client::crash::current_native_mod() == Some(owner))
+        .is_some_and(|owner| mod_api::crash::current_native_mod() == Some(owner))
 }
 
 /// The stored light of `layer` at `pos` in `world`, as the game's own light query reads it.
@@ -61,7 +61,7 @@ impl Game<'_> {
         self.native_level_world(level)?
             .chunks
             .contains_key(&(pos[0], pos[1]))
-            .then_some(ChunkRef { level, pos })
+            .then_some(mod_api::__private::game::chunk_ref(level, pos))
     }
     /// Whether this chunk is loaded; false on a client or for a stale handle.
     pub(super) fn native_chunk_ref_loaded(&self, chunk: ChunkRef) -> bool {
@@ -137,9 +137,7 @@ impl Game<'_> {
     /// mod listens.
     pub(super) fn validate_mod_chunk_tickets(&mut self, dim: super::Dim) {
         let mut loaded = self.streaming.take_loaded_tickets();
-        if !loaded.is_empty()
-            && horizon_client::mod_api::listened(horizon_client::mod_api::HookId::ValidateTickets)
-        {
+        if !loaded.is_empty() && mod_api::__private::listened(mod_api::HookId::ValidateTickets) {
             let mut controllers: Vec<u32> = loaded.iter().map(|t| t.controller).collect();
             controllers.sort_unstable();
             controllers.dedup();
@@ -153,7 +151,7 @@ impl Game<'_> {
                 let (own, rest): (Vec<_>, Vec<_>) =
                     loaded.into_iter().partition(|t| t.controller == slot);
                 let (mut validation, removals) =
-                    horizon_client::mod_chunk_tickets::TicketValidation::new(owner, own.clone());
+                    mod_api::mod_chunk_tickets::TicketValidation::new(owner, own.clone());
                 self.native_validate_tickets(dim.id(), controller, &mut validation);
                 let removed = removals.into_removed();
                 loaded = rest;
@@ -334,8 +332,8 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::{Dim, native_entity_refs::tests::with_game};
-    use horizon_client::mod_api::{ChunkRef, LevelRef, LightLayer, NativeWorldEpoch};
     use horizon_core::position::BlockPos;
+    use mod_api::{ChunkRef, LevelRef, LightLayer, NativeWorldEpoch};
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -423,8 +421,7 @@ mod tests {
             let stale_epoch =
                 NativeWorldEpoch::new(game.native_lifecycle.epoch().unwrap().get() + 1);
             let level = game.native_level(game.dim.id()).unwrap();
-            let stale_level =
-                horizon_client::mod_api::LevelRef::new(stale_epoch, level.dimension());
+            let stale_level = mod_api::LevelRef::new(stale_epoch, level.dimension());
             let stale = ChunkRef::new(stale_level, [0, 0]);
             assert_eq!(game.native_chunk_forced(stale), None);
             assert!(!game.native_chunk_set_forced(stale, true));
@@ -436,7 +433,7 @@ mod tests {
             } else {
                 Dim::Nether
             };
-            let parked = horizon_client::mod_api::LevelRef::new(level.epoch(), other.id());
+            let parked = mod_api::LevelRef::new(level.epoch(), other.id());
             let chunk = ChunkRef::new(parked, [1, 1]);
             assert_eq!(game.native_chunk_forced(chunk), None);
             assert!(!game.native_chunk_set_forced(chunk, true));
@@ -457,8 +454,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_level_ref_draws_from_its_levels_own_stream() {
-        use horizon_client::mod_api::{LevelRef, ServerHost};
         use horizon_core::random::RandomSource;
+        use mod_api::{LevelRef, ServerHost};
 
         with_game(|game| {
             let level = game.native_level(game.dim.id()).unwrap();
@@ -514,26 +511,26 @@ mod tests {
         });
     }
 
-    fn in_mod(id: &'static str) -> horizon_client::crash::NativeModGuard {
-        horizon_client::crash::enter_native_mod(horizon_client::crash::NativeModCall {
+    fn in_mod(id: &'static str) -> mod_api::crash::NativeModGuard {
+        mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
             id,
             hook: "test",
             part: None,
         })
     }
 
-    use horizon_client::mod_api::{
+    use horizon_client::mod_chunk_tickets::{ModTicket, TicketOwner};
+    use mod_api::{
         self, Hooks, ModEntry, Registrar, ServerHost, TicketController, ValidateTicketsEvent,
         testing,
     };
-    use horizon_client::mod_chunk_tickets::{ModTicket, TicketOwner};
 
     /// Registers three controllers: `quarry` and `drill` validate, `plain` doesn't. `quarry`'s
     /// validation prunes the block at [1, 64, 1]; each validation tells what it was shown.
     struct Machines;
     #[mod_api::__subscriptions]
     impl Hooks for Machines {
-        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
             r.register_ticket_controller("quarry", true);
             r.register_ticket_controller("machines:drill", true);
             r.register_ticket_controller("plain", false);
@@ -558,7 +555,7 @@ mod tests {
     struct Other;
     #[mod_api::__subscriptions]
     impl Hooks for Other {
-        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
             r.register_ticket_controller("vault", true);
         }
         fn validate_tickets(&self, _: &mut dyn ServerHost, e: &mut ValidateTicketsEvent<'_>) {
@@ -581,7 +578,7 @@ mod tests {
             const { std::cell::RefCell::new(Vec::new()) };
     }
 
-    fn mods() -> horizon_client::mod_api::Mods {
+    fn mods() -> mod_api::Mods {
         vec![
             ModEntry::new("machines", Box::new(Machines)),
             ModEntry::new("other", Box::new(Other)),
@@ -606,7 +603,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mod_tickets_are_scoped_by_owner_and_share_the_forceload_store() {
-        use horizon_client::mod_api::NativeTicketOwner::{Block, Entity};
+        use mod_api::NativeTicketOwner::{Block, Entity};
         with_machines(|game| {
             let level = game.native_level(game.dim.id()).unwrap();
             let chunk = game.native_level_chunk_ref(level, [5, 6]).unwrap();
@@ -680,7 +677,7 @@ mod tests {
             game.streaming.clear_forced();
             assert!(game.streaming.forced.is_empty());
             // The world's bounds, as /forceload checks them.
-            let outside = horizon_client::mod_api::ChunkRef::new(level, [1_875_000, 0]);
+            let outside = mod_api::ChunkRef::new(level, [1_875_000, 0]);
             assert!(!game.native_chunk_set_mod_forced(outside, quarry(), a, true, false));
         });
     }
@@ -688,7 +685,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mod_tickets_save_apart_from_vanillas_tickets_and_release_with_the_world() {
-        use horizon_client::mod_api::NativeTicketOwner::{Block, Entity};
+        use mod_api::NativeTicketOwner::{Block, Entity};
         with_machines(|game| {
             let level = game.native_level(game.dim.id()).unwrap();
             let chunk = game.native_level_chunk_ref(level, [-9, 4]).unwrap();
@@ -758,10 +755,10 @@ mod tests {
             let back = game.dim;
             game.enter_level(other).unwrap();
             game.enter_level(back).unwrap();
-            let parked = horizon_client::mod_api::LevelRef::new(level.epoch(), other.id());
+            let parked = mod_api::LevelRef::new(level.epoch(), other.id());
             let chunk = ChunkRef::new(parked, [2, 2]);
             let _guard = in_mod("machines");
-            let owner = horizon_client::mod_api::NativeTicketOwner::Block([32, 64, 32]);
+            let owner = mod_api::NativeTicketOwner::Block([32, 64, 32]);
             assert!(!game.levels_to_tick().contains(&other));
             assert!(game.native_chunk_set_mod_forced(chunk, quarry(), owner, true, false));
             assert!(game.levels_to_tick().contains(&other));
@@ -789,7 +786,7 @@ mod tests {
             let chunk = game.native_level_chunk_ref(level, [3, 3]).unwrap();
             game.ui.registries.permission = 4;
             let _guard = in_mod("machines");
-            let owner = horizon_client::mod_api::NativeTicketOwner::Block([48, 64, 48]);
+            let owner = mod_api::NativeTicketOwner::Block([48, 64, 48]);
             assert!(game.native_chunk_set_mod_forced(chunk, quarry(), owner, true, false));
             assert!(game.streaming.forced.contains(&(3, 3)));
             assert_eq!(query_result(game, "forceload query"), Some(0), "list form");
@@ -807,7 +804,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn natural_spawning_tickets_and_plain_ones_save_and_load_apart() {
-        use horizon_client::mod_api::NativeTicketOwner::Block;
+        use mod_api::NativeTicketOwner::Block;
         with_machines(|game| {
             let level = game.native_level(game.dim.id()).unwrap();
             let plain = game.native_level_chunk_ref(level, [11, 12]).unwrap();
@@ -858,9 +855,9 @@ mod tests {
     {
         use horizon_client::chunk::Chunk;
         use horizon_client::mobs::spawn_selection::{Category, SpawnPlayer, SpawnState};
-        use horizon_client::mod_api::NativeTicketOwner::Block;
         use horizon_client::motion::PlayerMotion;
         use horizon_core::geometry::Vec3;
+        use mod_api::NativeTicketOwner::Block;
         use std::sync::Arc;
         with_machines(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
@@ -1005,12 +1002,11 @@ mod tests {
         struct Idle;
         #[mod_api::__subscriptions]
         impl Hooks for Idle {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 r.register_ticket_controller("quarry", true);
             }
         }
-        let mods: horizon_client::mod_api::Mods =
-            vec![ModEntry::new("idle", Box::new(Idle))].into();
+        let mods: mod_api::Mods = vec![ModEntry::new("idle", Box::new(Idle))].into();
         testing::with_mods(mods, || {
             with_game(|game| {
                 let tickets = vec![saved("idle:quarry", [1, 64, 1], (7, 7))];
@@ -1032,7 +1028,7 @@ mod tests {
             let fresh = game.native_level_chunk_ref(level, [6, 6]).unwrap();
             {
                 let _guard = in_mod("machines");
-                let owner = horizon_client::mod_api::NativeTicketOwner::Block([1, 64, 1]);
+                let owner = mod_api::NativeTicketOwner::Block([1, 64, 1]);
                 assert!(game.native_chunk_set_mod_forced(fresh, quarry(), owner, true, false));
             }
             game.validate_mod_chunk_tickets(game.dim);
@@ -1045,7 +1041,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn light_and_loaded_reads_match_the_games_query_and_load_nothing() {
         use horizon_client::chunk::{Chunk, Light};
-        use horizon_client::mod_api::LevelHost;
+        use mod_api::LevelHost;
         use std::sync::Arc;
 
         with_game(|game| {

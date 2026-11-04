@@ -5,11 +5,9 @@
 //! a stack inside an item and a mod's own places go through their handlers.
 use super::transactions::After;
 use super::{Game, minecarts::CartKind};
-use horizon_client::{
-    first_person::Hand,
-    items::ItemStack,
-    mod_api::{ItemPlace, Transaction},
-};
+use horizon_client::{first_person::Hand, items::ItemStack};
+use mod_api::__private::game::*;
+use mod_api::{ItemPlace, Transaction};
 
 impl Game<'_> {
     /// The player a place belongs to, if a player's: a cursor's only while its menu is open.
@@ -18,9 +16,9 @@ impl Game<'_> {
             ItemPlace::PlayerSlot { player, .. } | ItemPlace::PlayerHand { player, .. } => {
                 Some(*player)
             }
-            ItemPlace::PlayerCursor { menu } => {
-                self.native_menu_carried(*menu).map(|_| menu.player.uuid())
-            }
+            ItemPlace::PlayerCursor { menu } => self
+                .native_menu_carried(*menu)
+                .map(|_| menu.fields().player.uuid()),
             _ => None,
         }
     }
@@ -176,7 +174,7 @@ impl Game<'_> {
             if self.native_menu_storage(*menu, *slot).is_none() {
                 return 0;
             }
-            self.journal_menus(menu.player);
+            self.journal_menus(menu.fields().player);
             if let Some(held) = self.native_menu_storage(*menu, *slot) {
                 fill(held, &mut rest);
             }
@@ -272,7 +270,7 @@ impl Game<'_> {
             if took == 0 {
                 return 0;
             }
-            self.journal_menus(menu.player);
+            self.journal_menus(menu.fields().player);
             if let Some(held) = self.native_menu_storage(*menu, *slot) {
                 *held = held.as_ref().map(|h| left(h, took)).filter(|h| h.count > 0);
             }
@@ -340,15 +338,15 @@ impl Game<'_> {
 mod tests {
     use super::super::BlockEntity;
     use super::super::native_entity_refs::tests::with_game;
-    use crate::mod_api::HostTransaction;
-    use crate::mod_api::ServerHost;
     use horizon_client::{
         items::ItemStack,
         lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
-        mod_api::{ENTITY_AUTOMATION, ENTITY_ITEMS, ItemPlace, ItemResource, MenuRef},
     };
     use horizon_core::geometry::Direction;
     use horizon_protocol::packets::configuration::ClientInformation;
+    use mod_api::HostTransaction;
+    use mod_api::ServerHost;
+    use mod_api::{ENTITY_AUTOMATION, ENTITY_ITEMS, ItemPlace, ItemResource, MenuRef};
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
 
     /// A world open to LAN on a dedicated server, as a guest's actions run.
@@ -408,9 +406,7 @@ mod tests {
     #[ignore = "needs prepared resources"]
     fn a_bucket_fills_and_empties_whole_through_its_place_and_splits_off_its_stack() {
         use horizon_client::chunk::Chunk;
-        use horizon_client::mod_api::{
-            FLUIDS, ITEM_FLUIDS, NativeBlockUpdateFlags, move_resources,
-        };
+        use mod_api::{FLUIDS, ITEM_FLUIDS, NativeBlockUpdateFlags, move_resources};
         with_game(|game| {
             open_to_lan(game);
             game.world
@@ -640,7 +636,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn an_equippable_whose_entity_tag_holds_the_player_fits_its_slot() {
-        use horizon_client::mod_api::{ComponentId, Tag};
+        use mod_api::{ComponentId, Tag};
         with_game(|game| {
             open_to_lan(game);
             game.lan.as_mut().unwrap().hub.guests.push(guest(1));
@@ -726,7 +722,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn a_chest_menus_slots_write_the_chest_and_the_inventory_and_an_abort_puts_them_back() {
-        use horizon_client::{chunk::Chunk, lan::menu::Slots, mod_api::NativeBlockUpdateFlags};
+        use horizon_client::{chunk::Chunk, lan::menu::Slots};
+        use mod_api::NativeBlockUpdateFlags;
         with_game(|game| {
             open_to_lan(game);
             game.world
@@ -800,7 +797,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn a_chests_menu_over_the_furnace_set_in_its_place_reaches_none_of_its_slots() {
-        use horizon_client::{chunk::Chunk, lan::menu::Slots, mod_api::NativeBlockUpdateFlags};
+        use horizon_client::{chunk::Chunk, lan::menu::Slots};
+        use mod_api::NativeBlockUpdateFlags;
         with_game(|game| {
             open_to_lan(game);
             game.world
@@ -961,7 +959,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn a_furnace_menus_fuel_slot_takes_one_bucket_as_its_slot_does() {
-        use horizon_client::{chunk::Chunk, lan::menu::Slots, mod_api::NativeBlockUpdateFlags};
+        use horizon_client::{chunk::Chunk, lan::menu::Slots};
+        use mod_api::NativeBlockUpdateFlags;
         with_game(|game| {
             open_to_lan(game);
             game.world
@@ -1265,7 +1264,7 @@ mod tests {
         sides: Arc<std::sync::Mutex<Vec<Option<Direction>>>>,
     }
 
-    impl horizon_client::mod_api::ResourceHandler<ItemResource> for Bin {
+    impl mod_api::ResourceHandler<ItemResource> for Bin {
         fn size(&self, _: &mut dyn ServerHost) -> usize {
             1
         }
@@ -1283,7 +1282,7 @@ mod tests {
         fn insert(
             &self,
             _: &mut dyn ServerHost,
-            _: &horizon_client::mod_api::Transaction,
+            _: &mod_api::Transaction,
             _: usize,
             resource: &ItemResource,
             amount: u32,
@@ -1307,7 +1306,7 @@ mod tests {
         fn extract(
             &self,
             _: &mut dyn ServerHost,
-            _: &horizon_client::mod_api::Transaction,
+            _: &mod_api::Transaction,
             _: usize,
             resource: &ItemResource,
             amount: u32,
@@ -1328,7 +1327,7 @@ mod tests {
 
     /// Runs `test` with a mod answering `ENTITY_AUTOMATION` for pigs with `bin`.
     fn with_bin_pigs(bin: &Bin, test: impl FnOnce(&mut super::Game<'_>)) {
-        use horizon_client::mod_api::{self, Hooks, ModEntry, Mods, Registrar};
+        use mod_api::{self, Hooks, ModEntry, Mods, Registrar};
         struct Pigs(Bin);
         #[mod_api::__subscriptions]
         impl Hooks for Pigs {
@@ -1341,8 +1340,8 @@ mod tests {
             }
         }
         let mods: Mods = vec![ModEntry::new("pigs", Box::new(Pigs(bin.clone())))].into();
-        horizon_client::mod_api::install_parts(&mods).unwrap();
-        horizon_client::mod_api::testing::with_mods(mods, || with_game(test));
+        mod_api::__private::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || with_game(test));
     }
 
     /// A hopper at (0, 64, 0) facing `facing` holding `stack`, in an otherwise empty world.
@@ -1510,8 +1509,9 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_crafter_puts_into_a_mod_entity_and_dispenses_only_what_it_refuses() {
-        use horizon_client::{chunk::Chunk, mod_api::NativeBlockUpdateFlags};
+        use horizon_client::chunk::Chunk;
         use horizon_core::{position::BlockPos, random::RandomSource as _};
+        use mod_api::NativeBlockUpdateFlags;
 
         let bin = Bin::default();
         with_bin_pigs(&bin, |game| {
@@ -1580,10 +1580,10 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mod_without_an_automation_provider_leaves_hoppers_on_the_vanilla_path() {
-        use horizon_client::mod_api::{
+        use horizon_core::random::RandomSource as _;
+        use mod_api::{
             self, ENTITY_ENERGY, Hooks, ModEntry, Mods, Registrar, has_entity_providers,
         };
-        use horizon_core::random::RandomSource as _;
         struct Energy;
         #[mod_api::__subscriptions]
         impl Hooks for Energy {
@@ -1592,7 +1592,7 @@ mod tests {
             }
         }
         let mods: Mods = vec![ModEntry::new("energy", Box::new(Energy))].into();
-        mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             assert!(!has_entity_providers(&ENTITY_AUTOMATION));
             with_game(|game| {

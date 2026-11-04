@@ -6,7 +6,6 @@ use super::{
     FileToIdConverter, Identifier,
     reload_order::{ReloadOrder, ReloadOrderError},
 };
-use crate::datapack::DataPack;
 use std::{collections::BTreeMap, sync::Arc};
 
 /// An error loading a resource, including the resource that caused it.
@@ -88,13 +87,13 @@ impl Drop for ReloadMark {
 }
 
 /// One registered listener of either side, between registration and ordering.
-pub(crate) struct RegisteredListener<L: ?Sized> {
-    pub(crate) id: Identifier,
-    pub(crate) converter: Option<FileToIdConverter>,
-    pub(crate) listener: Arc<L>,
+pub struct RegisteredListener<L: ?Sized> {
+    pub id: Identifier,
+    pub converter: Option<FileToIdConverter>,
+    pub listener: Arc<L>,
     /// The registering mod's id, for crash attribution on its later calls; the
     /// vanilla anchors have none.
-    pub(crate) owner: Option<&'static str>,
+    pub owner: Option<&'static str>,
 }
 
 /// Registration both sides share: unique names and objects, dependencies, the
@@ -234,7 +233,7 @@ impl<L: ?Sized + 'static> ReloadCore<L> {
 /// listener's `prepare` returned an error. Both sides share this form, so the
 /// reload paths report listeners alike.
 #[derive(Debug)]
-pub(crate) enum ReloadStageError {
+pub enum ReloadStageError {
     Order(ReloadOrderError),
     Listener {
         listener: Identifier,
@@ -263,7 +262,7 @@ impl std::error::Error for ReloadStageError {
 /// One mod listener's prepared step, between its `prepare` and its `apply`.
 /// The server's vanilla function library rides along as the `Vanilla` step of
 /// its own reload; the client's has none.
-pub(crate) enum PreparedStep<V = ()> {
+pub enum PreparedStep<V = ()> {
     Mod {
         apply: ReloadApply,
         owner: Option<&'static str>,
@@ -279,7 +278,7 @@ pub(crate) enum PreparedStep<V = ()> {
 /// converter-less vanilla anchor into its own step (the server's function
 /// library); the boundaries prepare nothing. Runs wherever the side stages its
 /// reload, off the thread that owns the game.
-pub(crate) fn prepare_listeners<L: ?Sized, C, V>(
+pub fn prepare_listeners<L: ?Sized, C, V>(
     ordered: Vec<RegisteredListener<L>>,
     phase: &'static str,
     vanilla: impl Fn(&RegisteredListener<L>) -> Option<V>,
@@ -316,7 +315,7 @@ pub(crate) fn prepare_listeners<L: ?Sized, C, V>(
 /// Applies the prepared steps in order on the thread that owns the game,
 /// attributing each mod listener's apply to its registering mod. `vanilla`
 /// publishes the side's own step.
-pub(crate) fn apply_listeners<V>(
+pub fn apply_listeners<V>(
     prepared: Vec<PreparedStep<V>>,
     phase: &'static str,
     mut vanilla: impl FnMut(V),
@@ -335,7 +334,7 @@ pub(crate) fn apply_listeners<V>(
 /// The files one converter selected from a reload's packs, shared by both
 /// sides' contexts; each side keeps its own context type so a wrong-side read
 /// does not compile.
-pub(crate) struct ReloadFiles(BTreeMap<Identifier, Vec<u8>>);
+pub struct ReloadFiles(BTreeMap<Identifier, Vec<u8>>);
 impl ReloadFiles {
     pub(crate) fn new(files: BTreeMap<Identifier, Vec<u8>>) -> Self {
         Self(files)
@@ -348,43 +347,4 @@ impl ReloadFiles {
     pub(crate) fn read(&self, id: &Identifier) -> Option<&[u8]> {
         self.0.get(id).map(Vec::as_slice)
     }
-}
-
-/// Reads one converter's directory from `packs`, later packs winning, and
-/// collects the converted files: the shared read-and-log loop of both sides'
-/// reloads. `top` is `"data"` or `"assets"`.
-pub(crate) fn reload_files(
-    top: &str,
-    packs: &[&DataPack],
-    listener: &Identifier,
-    converter: &FileToIdConverter,
-) -> ReloadFiles {
-    let mut selected = BTreeMap::new();
-    for pack in packs {
-        for file in pack.list_under(top, &[converter.directory()]) {
-            if let Some(id) = file
-                .strip_prefix(&format!("{top}/"))
-                .and_then(|path| converter.file_to_id(path))
-            {
-                selected.insert(id, (*pack, file));
-            }
-        }
-    }
-    let mut files = BTreeMap::new();
-    for (id, (pack, path)) in selected {
-        // A file that vanishes or fails to read between listing and reading is one bad
-        // entry, as vanilla's `scanDirectory` treats a parse failure: log it, skip it.
-        match pack.read(&path) {
-            Some(bytes) => {
-                files.insert(id, bytes);
-            }
-            None => log::error!(
-                "Couldn't read file '{id}' from '{}/{}' for listener {}",
-                pack.id,
-                path,
-                listener
-            ),
-        }
-    }
-    ReloadFiles::new(files)
 }

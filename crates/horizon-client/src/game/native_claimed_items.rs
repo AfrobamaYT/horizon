@@ -2,44 +2,9 @@
 //! first block along the view, across the distant terrain past the loaded chunks, and items whose
 //! right-click is the mod's alone, heard as use events the mod polls.
 use super::Game;
+pub use mod_api::game::{NativeHeldItem, NativeHit, NativeModEvent};
 use std::collections::BTreeMap;
 
-/// A stack as a client mod's use events carry it.
-#[derive(Clone, Debug, PartialEq)]
-pub struct NativeHeldItem {
-    pub id: String,
-    pub count: u32,
-    /// The inventory slot: 0 to 8, the hotbar (a mod use is the main hand's).
-    pub slot: u32,
-    /// `minecraft:custom_name` as SNBT, when the stack has one.
-    pub custom_name: Option<String>,
-    /// `minecraft:custom_data` as SNBT, when the stack has some.
-    pub custom_data: Option<String>,
-}
-/// The block a ray along the view meets.
-#[derive(Clone, Debug, PartialEq)]
-pub struct NativeHit {
-    pub block_x: i32,
-    pub block_y: i32,
-    pub block_z: i32,
-    /// Where the ray meets the block.
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
-    /// The block's id (`minecraft:stone`).
-    pub block: String,
-}
-/// What happened to a mod's claimed item, oldest first.
-#[derive(Clone, Debug, PartialEq)]
-#[non_exhaustive]
-pub enum NativeModEvent {
-    /// A right-click with the item began its use: the stack, and 0 ticks.
-    UseStart(NativeHeldItem, u32),
-    /// The use ended: the stack it began with, and the ticks it was held. It
-    /// ends when the button comes up, the hand's item changes or leaves the
-    /// claim, the player respawns, or the game joins a server.
-    UseStop(NativeHeldItem, u32),
-}
 /// The farthest a ray along the view reaches, in blocks.
 pub(crate) const RAYCAST_MAX: f32 = 1024.0;
 /// The ids a mod may claim.

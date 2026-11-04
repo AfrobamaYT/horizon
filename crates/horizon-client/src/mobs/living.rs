@@ -1931,11 +1931,13 @@ mod tests {
         let data = super::super::MobData::load(&root, &facts);
         let types = super::super::MobTypes::load(&root).unwrap();
         let biomes = crate::biome::Biomes::load(&root).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = crate::items::Items::load(
             &root,
             registry,
             &facts,
             &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
         )
         .unwrap();
         let collision = crate::collisions::load(&root, registry).unwrap();
@@ -2056,11 +2058,13 @@ mod tests {
         let data = super::super::MobData::load(&root, &facts);
         let types = super::super::MobTypes::load(&root).unwrap();
         let biomes = crate::biome::Biomes::load(&root).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = crate::items::Items::load(
             &root,
             registry,
             &facts,
             &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
         )
         .unwrap();
         let collision = crate::collisions::load(&root, registry).unwrap();

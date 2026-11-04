@@ -113,7 +113,7 @@ impl Game<'_> {
         let Some(win) = self.win.take() else {
             return Ok(());
         };
-        let credits = horizon_client::music::Music::credits();
+        let credits = mod_api::music::Music::credits();
         self.music
             .stop_playing_music(&credits, None, &mut self.audio);
         match win.finish {

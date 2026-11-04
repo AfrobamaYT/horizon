@@ -32,11 +32,11 @@ use horizon_client::{
     enchant::Enchantments,
     hud::{HudBatch, rgba},
     items::ItemStack,
-    mod_api::{TooltipElement, TooltipImage},
     stations::{self, AnvilResult, EnchantOffers},
     text::Text,
 };
 use horizon_core::random::{LegacyRandom, RandomSource};
+use mod_api::{TooltipElement, TooltipImage};
 
 /// The book above the enchanting table's offers: `EnchantmentScreen`'s
 /// `time`, `flip`, `oFlip`, `flipT`, `flipA`, `open`, `oOpen` and `last`.
@@ -697,7 +697,7 @@ impl Game<'_> {
     }
     /// Apply the client anvil hook once for each input and name combination.
     fn update_anvil_answer(&mut self, s: &mut Station, name: String) {
-        if !crate::mod_api::listened(crate::mod_api::HookId::AnvilUpdate) {
+        if !mod_api::__private::listened(mod_api::HookId::AnvilUpdate) {
             return;
         }
         let Some(left) = s.inputs[0].clone() else {
@@ -708,7 +708,7 @@ impl Game<'_> {
                 s.anvil = answer.clone();
             }
             _ => {
-                let mut update = horizon_client::menu::AnvilUpdate::new(
+                let mut update = mod_api::menu::AnvilUpdate::new(
                     left,
                     s.inputs[1].clone(),
                     Some(name.clone()),
@@ -1044,7 +1044,7 @@ impl Game<'_> {
         if levels == 0 {
             return;
         }
-        if crate::mod_api::listened(crate::mod_api::HookId::PlayerXpLevelChange)
+        if mod_api::__private::listened(mod_api::HookId::PlayerXpLevelChange)
             && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
         {
             let mut cancel = false;
@@ -2204,7 +2204,7 @@ impl Game<'_> {
         let e: &Enchantments = &self.stations().enchantments;
         let color = self.rarity_color(stack);
         let advanced = !nested && self.options_advanced_tooltips();
-        let display = horizon_client::item_tooltip::TooltipDisplay::for_stack(stack);
+        let display = mod_api::item_tooltip::TooltipDisplay::for_stack(stack);
         let mut lines = Vec::new();
         // `getTooltipLines`' own branch: a tooltip the stack doesn't hide.
         let shown = !nested && display.name_visible(creative);
@@ -2848,9 +2848,7 @@ impl Game<'_> {
         images: Vec<TooltipImage>,
         (width, height): (f32, f32),
     ) -> Option<(Vec<(horizon_client::text::Text, u32)>, Vec<TooltipImage>)> {
-        if !horizon_client::mod_api::listened(
-            horizon_client::mod_api::HookId::RenderTooltipGatherComponents,
-        ) {
+        if !mod_api::__private::listened(mod_api::HookId::RenderTooltipGatherComponents) {
             return Some((lines, images));
         }
         let mut elements: Vec<TooltipElement> = lines
@@ -3082,7 +3080,7 @@ impl Game<'_> {
         let consumed_fuel = was_unfueled && b.fuel > 0;
         let started = was_idle && b.brew_time > 0;
         let ingredient = started.then(|| b.ingredient.clone()).flatten();
-        let hooked = !horizon_client::mod_api::mods().is_empty();
+        let hooked = !mod_api::mods().is_empty();
         let stacks = (due && hooked).then(|| b.items.clone());
         let at = [pos.0, pos.1, pos.2];
         let mut post = false;
@@ -3177,7 +3175,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn anvil_subscriber_probe_and_answer_cache() {
-        use crate::mod_api::{self, AnvilUpdateEvent, Flow, HookId, Hooks, HostSide, ModEntry};
+        use mod_api::{self, AnvilUpdateEvent, Flow, HookId, Hooks, HostSide, ModEntry};
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
@@ -3199,7 +3197,7 @@ mod tests {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let mut station = super::Station::new(super::Kind::Anvil, [0; 3]);
                 station.inputs[0] = Some(super::ItemStack::new("minecraft:iron_sword", 1));
-                assert!(!mod_api::listened(HookId::AnvilUpdate));
+                assert!(!mod_api::__private::listened(HookId::AnvilUpdate));
                 game.update_anvil_answer(&mut station, "first".into());
                 assert!(station.anvil_answer.is_none());
                 game.update_anvil_answer(&mut station, "second".into());
@@ -3216,7 +3214,7 @@ mod tests {
                 game.update_anvil_answer(&mut station, "first".into());
                 game.update_anvil_answer(&mut station, "second".into());
                 assert_eq!(calls.load(Ordering::Relaxed), 2);
-                assert!(mod_api::listened(HookId::AnvilUpdate));
+                assert!(mod_api::__private::listened(HookId::AnvilUpdate));
             });
         });
     }
@@ -3226,11 +3224,11 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn tooltip_part_lines_come_after_the_name_and_never_for_a_hidden_tooltip() {
-        use crate::mod_api::{
+        use horizon_client::text::Text;
+        use mod_api::{
             self, ClientHost, Hooks, ItemPart, ItemTooltipEvent, ModEntry, Mods, Registrar,
             TooltipEvent,
         };
-        use horizon_client::text::Text;
 
         #[derive(Clone)]
         struct Lore;
@@ -3244,7 +3242,7 @@ mod tests {
         struct Mod;
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 r.item_part("minecraft:stick", Lore);
             }
             fn item_tooltip(&self, _: &dyn ClientHost, event: &mut ItemTooltipEvent<'_>) {
@@ -3260,7 +3258,7 @@ mod tests {
             }
         }
         let mods: Mods = vec![ModEntry::new("lore", Box::new(Mod))].into();
-        mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.settings.file.set(
@@ -3319,11 +3317,11 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn gathered_tooltip_components_wrap_only_when_a_mod_sets_the_width() {
-        use crate::mod_api::{
+        use horizon_client::text::Text;
+        use mod_api::{
             self, ClientHost, Hooks, ModEntry, Mods, RenderTooltipGatherComponentsEvent,
             TooltipElement, TooltipImage,
         };
-        use horizon_client::text::Text;
         use std::sync::atomic::{AtomicU8, Ordering};
 
         static MODE: AtomicU8 = AtomicU8::new(0);

@@ -165,3 +165,38 @@ mod tests {
         assert!(!owned("other/fd.json"));
     }
 }
+
+#[doc(hidden)]
+pub(crate) mod built {
+    #[allow(unused_imports)]
+    use super::*;
+    pub struct ConfigStat {
+        pub kind: ConfigEntryKind,
+        pub len: u64,
+        pub modified_millis: u64,
+    }
+    impl From<ConfigStat> for super::ConfigStat {
+        fn from(v: ConfigStat) -> Self {
+            let ConfigStat {
+                kind,
+                len,
+                modified_millis,
+            } = v;
+            Self {
+                kind,
+                len,
+                modified_millis,
+            }
+        }
+    }
+    pub struct ConfigEntry {
+        pub name: String,
+        pub stat: super::ConfigStat,
+    }
+    impl From<ConfigEntry> for super::ConfigEntry {
+        fn from(v: ConfigEntry) -> Self {
+            let ConfigEntry { name, stat } = v;
+            Self { name, stat }
+        }
+    }
+}

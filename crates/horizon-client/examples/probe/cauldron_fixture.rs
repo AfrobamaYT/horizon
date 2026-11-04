@@ -78,7 +78,8 @@ pub fn main() -> horizon_client::Result<()> {
             .ok_or("usage: cauldron_fixture RESOURCES INPUT OUTPUT")?,
     );
     let input = fs::read_to_string(args.get(2).ok_or("missing INPUT")?)?;
-    let items = Items::catalog(root, &PackOverlay::NONE)?;
+    let defaults = horizon_world::item_defaults::read(root)?;
+    let items = Items::catalog(root, &PackOverlay::NONE, &defaults)?;
     let recipes = Recipes::load(root, &items, &PackOverlay::NONE)?;
     let brewing = horizon_client::brewing::Brewing::load(root, &items, &PackOverlay::NONE);
     // The inventory menu never reads banner patterns.
