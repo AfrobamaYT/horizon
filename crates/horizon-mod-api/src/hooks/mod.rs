@@ -155,6 +155,7 @@ mod level_reads;
 mod level_save;
 mod level_shapes;
 mod level_signals;
+mod level_sounds;
 mod level_world;
 mod living_conversion_post;
 mod living_conversion_pre;

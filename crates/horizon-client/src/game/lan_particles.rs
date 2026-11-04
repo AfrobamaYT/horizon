@@ -1,7 +1,7 @@
 //! Particles a server sends its players and its clients draw:
 //! `ClientboundLevelParticlesPacket` (`ServerLevel.sendParticles`, which
 //! `/particle` uses) and `ClientboundExplodePacket` (`ServerLevel.explode`).
-use super::{Game, lan::LanHost};
+use super::{Game, lan::LanHost, level_sounds::LevelSound};
 use horizon_client::lan::containers::within_range;
 use horizon_client::lan::hub::Hub;
 use horizon_client::particles::{ParticleOptions, ParticleType};
@@ -15,6 +15,7 @@ use horizon_protocol::{
     packets::play::{self, Clientbound as C},
 };
 use horizon_world::registry::BlockStateId;
+use mod_api::SoundSource;
 
 /// A particle request awaiting delivery to players in its level.
 pub(super) struct QueuedParticle {
@@ -620,23 +621,40 @@ impl Game<'_> {
 
     /// Native sounds wait until the server host is available. An unknown
     /// `minecraft:` event is dropped; a mod's goes by name (`sound_packet`).
+    /// Each is asked of the mods first (`play_level_sound_at_entity` when
+    /// bound to an entity, `_at_position` otherwise).
     pub(super) fn flush_native_sounds(&mut self) {
-        let Some(host) = &self.lan else { return };
+        if self.lan.is_none() {
+            return;
+        }
         for sound in std::mem::take(&mut self.creatures.lan_sounds) {
-            if sound.sound.starts_with("minecraft:")
+            let emitter = sound.entity.and_then(|id| u32::try_from(id).ok());
+            let mut asked = LevelSound::new(&sound.sound, sound.at, sound.volume, sound.pitch)
+                .in_source(
+                    SoundSource::ALL
+                        .get(sound.source as usize)
+                        .copied()
+                        .unwrap_or(SoundSource::Master),
+                );
+            asked.emitter = emitter;
+            let Some(heard) = self.ask_level_sound(sound.dimension, asked) else {
+                continue;
+            };
+            let Some(host) = &self.lan else { return };
+            if heard.name.starts_with("minecraft:")
                 && host
                     .hub
-                    .registry_id("minecraft:sound_event", &sound.sound)
+                    .registry_id("minecraft:sound_event", &heard.name)
                     .is_none()
             {
                 continue;
             }
             let packet = host.hub.sound_packet(
-                &sound.sound,
+                &heard.name,
                 sound.at,
-                sound.volume,
-                sound.pitch,
-                sound.source,
+                heard.volume,
+                heard.pitch,
+                heard.source as i32,
                 sound.seed,
             );
             // `Level.playSound(except, entity, ...)`: the same sound and
@@ -653,7 +671,7 @@ impl Game<'_> {
                 (packet, _) => packet,
             }
             .encode();
-            let range = f64::from(sound.volume.max(1.0)) * 16.0;
+            let range = f64::from(heard.volume.max(1.0)) * 16.0;
             send_native_nearby(
                 host,
                 sound.dimension,

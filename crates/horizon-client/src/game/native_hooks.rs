@@ -7298,6 +7298,34 @@ impl Game<'_> {
     pub(super) fn native_chunk_unload(&mut self, dimension: &str, chunk: [i32; 2]) {
         mod_api::dispatch_chunk_unload(self, dimension, chunk);
     }
+    /// A sound is about to play at `position` in `level` (NeoForge's
+    /// `PlayLevelSoundEvent.AtPosition`, in `ServerLevel.playSeededSound`):
+    /// every server sound not bound to an entity, mobs' own sounds included
+    /// (`Entity.playSound` plays at the entity's position). A mod may change
+    /// `sound`, `source`, `volume` and `pitch`, or set `cancel` and no player
+    /// hears it; `original_volume` and `original_pitch` are as asked. A
+    /// sound left unplayable (a volume or pitch that isn't finite and at
+    /// least 0) is dropped. Sounds the server's level
+    /// plays during the tick are asked as they go out, at the end of the
+    /// tick, with the state then. `/playsound` sends its packet directly and
+    /// isn't asked, as in vanilla. Server-side.
+    pub(super) fn native_play_level_sound_at_position(
+        &mut self,
+        call: mod_api::__private::PlayLevelSoundAtPositionCall<'_>,
+    ) {
+        mod_api::dispatch_play_level_sound_at_position(self, call);
+    }
+    /// A sound bound to `entity` is about to play (NeoForge's
+    /// `PlayLevelSoundEvent.AtEntity`, in `ServerLevel.playSeededSound`'s
+    /// entity overload, `playSound(except, sourceEntity, ...)`): a goat horn
+    /// and a mod's sound bound to an entity. The fields and their rules are
+    /// `native_play_level_sound_at_position`'s. Server-side.
+    pub(super) fn native_play_level_sound_at_entity(
+        &mut self,
+        call: mod_api::__private::PlayLevelSoundAtEntityCall<'_>,
+    ) {
+        mod_api::dispatch_play_level_sound_at_entity(self, call);
+    }
     /// `player` started watching `chunk` (NeoForge's `ChunkWatchEvent.Watch`):
     /// the chunk came into their view and goes to their client, once until
     /// `native_chunk_unwatch`. Vanilla tells it as the chunk is queued
@@ -8749,14 +8777,19 @@ pub(super) fn mod_sound_ok(
     volume: f32,
     pitch: f32,
 ) -> bool {
+    sound_id(sound)
+        && source < horizon_client::settings::SOUND_SOURCES.len()
+        && level_sound_playable(at, volume, pitch)
+}
+
+/// Whether a sound can be sent: a position inside the world's range and a
+/// finite, non-negative volume and pitch.
+pub(super) fn level_sound_playable(at: [f64; 3], volume: f32, pitch: f32) -> bool {
     let position_ok = at
         .into_iter()
         .all(|v| v.is_finite() && v.abs() <= f64::from(i32::MAX) / 8.0);
     let gain_ok = volume.is_finite() && volume >= 0.0 && pitch.is_finite() && pitch >= 0.0;
-    sound_id(sound)
-        && source < horizon_client::settings::SOUND_SOURCES.len()
-        && position_ok
-        && gain_ok
+    position_ok && gain_ok
 }
 
 /// Whether a native mod's particles can be sent. Block particle types need

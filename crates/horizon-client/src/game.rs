@@ -188,6 +188,7 @@ mod lan_waypoints;
 mod launch_api;
 mod leads;
 mod level_particles;
+mod level_sounds;
 mod levels;
 mod lightning;
 mod living_attributes;
