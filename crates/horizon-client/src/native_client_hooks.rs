@@ -19,14 +19,15 @@ pub struct NativeClientHooks {
     pub living_jump_power: fn(u32, &str, &mut f32),
     pub living_speed: fn(u32, &str, &mut f32),
     pub living_flying_speed: fn(u32, &str, &mut f32),
+    pub player_stays_on_ground_surface: fn(u32, &mut bool),
     pub ender_entity_teleport: fn(u32, &str, [f64; 3], &mut [f64; 3], &mut bool),
 }
 
 static HOOKS: OnceLock<NativeClientHooks> = OnceLock::new();
 
-/// Install the process-wide callbacks once; a second installation keeps the first.
-pub fn install(hooks: NativeClientHooks) -> Result<(), NativeClientHooks> {
-    HOOKS.set(hooks)
+/// Install the process-wide callbacks once; a second installation keeps the first and answers false.
+pub fn install(hooks: NativeClientHooks) -> bool {
+    HOOKS.set(hooks).is_ok()
 }
 
 pub(crate) fn menu_slot_rules(
@@ -160,6 +161,12 @@ pub(crate) fn living_speed(entity: u32, kind: &str, speed: &mut f32) {
 pub(crate) fn living_flying_speed(entity: u32, kind: &str, speed: &mut f32) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.living_flying_speed)(entity, kind, speed);
+    }
+}
+
+pub(crate) fn player_stays_on_ground_surface(entity: u32, staying: &mut bool) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.player_stays_on_ground_surface)(entity, staying);
     }
 }
 
