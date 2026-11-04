@@ -9904,7 +9904,7 @@ mod tests {
         }
         #[horizon_client::mod_api::__subscriptions]
         impl Hooks for User {
-            fn register(&self, registrar: &mut Registrar) {
+            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 let kind = registrar.block_entity_type_key("be_test:shared");
                 registrar
                     .block_entity_part(&kind, Press)
@@ -9927,7 +9927,7 @@ mod tests {
         }
         #[horizon_client::mod_api::__subscriptions]
         impl Hooks for TestMod {
-            fn register(&self, registrar: &mut Registrar) {
+            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 let kind = registrar
                     .block_entity_type("shared")
                     .blocks(if self.invalid {
@@ -9983,8 +9983,7 @@ mod tests {
         horizon_client::mod_api::install(mods.clone());
         horizon_client::mod_api::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root =
-            super::super::mods::content_root(&base, &Default::default(), &Default::default());
+        let root = super::super::mods::content_root(&base, &Default::default());
         if invalid {
             let error = root.unwrap_err().to_string();
             assert!(error.contains("be_test:shared"), "{error}");

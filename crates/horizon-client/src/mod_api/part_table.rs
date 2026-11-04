@@ -1088,10 +1088,11 @@ fn namespaced(id: &str) -> bool {
 /// Every mod's [`Hooks::register`](super::Hooks::register) run against one registrar, in dispatch order.
 fn register_all(mods: &[ModEntry]) -> Registrar {
     let mut registrar = Registrar::new(mods[0].id);
+    let context = super::RegistrationContext::new();
     for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
         registrar.mod_id = mods[index].id;
         registrar.mod_index = index;
-        hooks.register(&mut registrar);
+        hooks.register(&mut registrar, &context);
     }
     registrar.expand_block_entity_parts();
     registrar
@@ -1190,7 +1191,7 @@ pub(crate) mod tests {
         struct Invalid;
         #[mod_api::__subscriptions]
         impl super::super::Hooks for Invalid {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 for path in ["", "other:press", "Uppercase", "has space"] {
                     r.block_entity_type(path).build();
                 }
@@ -1210,7 +1211,7 @@ pub(crate) mod tests {
         struct Invalid;
         #[mod_api::__subscriptions]
         impl Hooks for Invalid {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 for id in ["press", "minecraft:", "Upper:chest", "test:has space"] {
                     r.block_entity_type_key(id);
                 }
@@ -1337,7 +1338,7 @@ pub(crate) mod tests {
     struct Doubler;
     #[mod_api::__subscriptions]
     impl Hooks for Doubler {
-        fn register(&self, r: &mut Registrar) {
+        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
             r.block_part("test:gauge", Gauge);
             r.block_part("test:connector", Connector);
             r.block_part_tag("test:gauged", TagGauge);
@@ -2526,7 +2527,7 @@ pub(crate) mod tests {
     struct Chemist;
     #[mod_api::__subscriptions]
     impl Hooks for Chemist {
-        fn register(&self, r: &mut Registrar) {
+        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
             let chem_vat = r.block_entity_type_key("test:chem_vat");
             r.block_entity_capability(&CHEMICALS, &chem_vat, |_, at| Some(Box::new(ChemTank(at))));
         }
@@ -2549,7 +2550,7 @@ pub(crate) mod tests {
     struct FixtureContent;
     #[mod_api::__subscriptions]
     impl Hooks for FixtureContent {
-        fn register(&self, r: &mut Registrar) {
+        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
             for id in CAPABILITY_TYPES {
                 r.block_entity_type(id)
                     .blocks(&[&format!("test:{id}")])
@@ -2600,7 +2601,7 @@ pub(crate) mod tests {
         struct WeakPowerMod;
         #[mod_api::__subscriptions]
         impl Hooks for WeakPowerMod {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 r.block_part("minecraft:glass", WeakPower);
             }
         }
@@ -2616,7 +2617,7 @@ pub(crate) mod tests {
         struct RedstoneMod;
         #[mod_api::__subscriptions]
         impl Hooks for RedstoneMod {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 r.block_part("minecraft:glass", Connector);
             }
         }

@@ -1,0 +1,10 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "send_chat",
+      "side": "client",
+      "target": "horizon_client::game::native_net::Game<'_>::native_send_chat"
+    }
+  ]
+}

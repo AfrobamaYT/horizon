@@ -799,12 +799,11 @@ one, where vanilla gives the `by` one.
   changes otherwise, `native_update_output_neighbors(dimension, pos)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
 
 `Hooks::component_types`, `blocks`, `items` and `standalone_models` take
-`&RegistrationContext<'_>` before their event. `context.phase()` identifies the
-bootstrap declarations being collected; `context.mods()` returns a read-only
-`LoadedMods` view whose `ids()` lists loaded code mods in dispatch order. These
+`&RegistrationContext<'_>` before their event; `Hooks::register` takes it after
+its `Registrar`. `context.mods()` returns a read-only `LoadedMods` view whose
+`ids()` lists startup code and selected content packages in dispatch order. These
 contexts are supplied by the engine and have no game `Host`, handle constructors
-or transactions. Declarations still go on each event; `Hooks::register(&mut
-Registrar)` and Parts registration are unchanged.
+or transactions. Declarations still go on each event or registrar.
 
 - `native_component_types(context, types)` runs once before content loads. Append namespaced component IDs; duplicates, invalid IDs and the `minecraft` namespace stop startup. `native_component`, `native_set_component` and `native_remove_component` read, set and remove registered components, including item defaults. Values use NBT and must fit the network reader limits.
 
@@ -2643,7 +2642,20 @@ The client also owns a world epoch, separate from the server's. It begins when a
 client level, changes when a dimension change or later login replaces that level, and retires after the
 client logout hook or when reconfiguration clears the level. A same-level respawn keeps the epoch.
 Client epochs do not fire server world lifecycle or server tick hooks. This bookkeeping does not make
-the server entity and level reads available on a client.
+the server entity and level reads available on a client; the reads listed under "On a client" below are.
+
+On a client (`host.local_player()`, a client hook's `host`), these reads answer from the client's own copy, which is
+what the server sent it (vanilla's `LocalPlayer`, `ClientLevel` and `Entity` fields), and are `None` for a stale
+handle, an entity the client doesn't track and a level it doesn't show:
+
+- `host.entity(id)` and `host.level(dimension)`: the local player or an entity the server told the client of, and the
+  one level the client shows. `host.living(entity)` is the local player only.
+- `entity.position(host)`, `rotation(host)` and `velocity(host)`: the client's copy, interpolated as it draws it.
+- `level.block_state(host, pos)`, `block`, `block_property` and `is_loaded`: blocks of the chunks the client holds.
+  A chunk it doesn't hold reads as unloaded; no read loads one.
+- `living.equipment(host, slot)`, `hand_item`, `effect`, `effects`, `health` and `max_health`, for the local player.
+  Another entity's equipment, effects and health stay server reads, and so does every write.
+- `player.last_death_location(host)`, for the local player: the position the login and respawn packets carried.
 
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
@@ -3040,6 +3052,16 @@ one custom payload channel `horizon:mod_net`. A vanilla client never gets them, 
   message: check the channel. What a client sent is checked by nothing, so treat it as a player's own input.
 - A player's message reaches the server's hook in the tick after it arrives, when the helpers can reach every player;
   a message to a player leaves at the end of the tick, from any server hook.
+
+### Chat and commands a client mod sends
+
+`ClientHost::send_chat(message)` sends what the player could type in chat, to any server, a vanilla one included:
+`ClientPacketListener.sendChat` and `sendCommand`. A leading `/` sends the rest as a command, signed where its
+arguments are messages; anything else goes as signed chat. The message is trimmed first, as the chat screen trims it.
+It fires no `client_chat` (vanilla's `ClientChatEvent` comes only from the chat screen) and isn't added to the chat
+history. It is an error when the player isn't in a server's play state (not connected, not joined yet or being
+reconfigured), when the trimmed message is empty, and when the Chat option blocks it: Commands Only blocks chat,
+Hidden blocks chat and commands. The server's own spam limits apply as they do to typed chat.
 
 ### Server menus
 
@@ -3451,7 +3473,7 @@ impl BlockPart for Gauge {
 
 #[mod_api::horizon_mod]
 impl Hooks for MyMod {
-    fn register(&self, r: &mut Registrar) {
+    fn register(&self, r: &mut Registrar, _: &RegistrationContext<'_>) {
         r.block_part("minecraft:stone", Gauge);
     }
 }
