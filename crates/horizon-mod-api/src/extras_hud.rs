@@ -4,6 +4,7 @@ use crate::*;
 /// The gap between an overlay and the screen edge or the next overlay.
 const MARGIN: f32 = 2.0;
 /// Where the next overlay goes in each corner.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct Corners {
     width: f32,
     height: f32,

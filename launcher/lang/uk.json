@@ -1044,7 +1044,6 @@
     "{mod}: Cargo.toml has no package name.": "{mod}: у Cargo.toml немає назви пакета.",
     "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod}: у Cargo.toml немає залежності horizon-mod-api.",
     "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod}: Cargo.toml залежить від гри ({key}). Мод залежить лише від horizon-mod-api.",
-    "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client вимагає {fields}. Серверні збірки працюють без інтерфейсу; можливостями horizon-client керує лаунчер. Вилучіть features і використовуйте default-features = false або приберіть його.",
     "{mod}: {error}": "{mod}: {error}",
     "{mode} · stopped": "{mode} · зупинено",
     "{online} of {max}": "{online} з {max}",

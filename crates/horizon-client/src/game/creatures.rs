@@ -144,10 +144,9 @@ pub(super) struct ProjWorld<'a, 'w> {
     pub border: Option<[f64; 4]>,
 }
 impl ProjectileWorld for ProjWorld<'_, '_> {
-    fn block_contacts(&self, entity: i32, kind: &str, from: Vec3, to: Vec3, bounds: Aabb) {
-        horizon_client::block_contact::swept_inside(entity, kind, from, to, bounds, |p| {
-            let state = self.w.world.block(p.x, p.y, p.z);
-            (state, &self.w.facts.get(state).name)
+    fn block_contacts(&self, entity: i32, from: Vec3, to: Vec3, bounds: Aabb) {
+        horizon_client::block_contact::swept_inside(entity, from, to, bounds, |p| {
+            self.w.world.block(p.x, p.y, p.z)
         });
     }
     fn clip(&self, from: Vec3, to: Vec3) -> Option<(Vec3, [i32; 3], [i32; 3])> {
@@ -1349,8 +1348,10 @@ impl Game<'_> {
         }
         self.handle_mob_events(events)?;
         self.lan_guest_mob_events(guest_events);
+        self.drain_entity_inside();
         self.ordered_before(super::ordered_tick::Batch::Projectiles)?;
         self.tick_projectiles()?;
+        self.drain_entity_inside();
         self.tick_fangs();
         self.tick_allays();
         self.tick_pandas();

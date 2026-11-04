@@ -79,8 +79,9 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
     }
     if horizon_world::native_load_hooks::install(
         horizon_world::native_load_hooks::NativeLoadHooks {
-            loot_table_load: |id, table| {
-                mod_api::dispatch_loot_table_load(id, table);
+            loot_table_load: |context, id, table| {
+                let context = mod_api::DataLoadContext::new(context);
+                mod_api::dispatch_loot_table_load(&context, id, table);
             },
             modify_default_components: |context, item, components| {
                 let context = mod_api::DataLoadContext::new(context);
