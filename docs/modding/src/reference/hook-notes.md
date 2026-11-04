@@ -1875,6 +1875,12 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   its egg at `pos`. Set `cancel` to leave the block unchanged.
 - **`native_fluid_level_change(dimension, pos, fluid, from, to, cancel)`** (on `GameLevel`): flowing `water` or `lava`
   at `pos` is about to change level. Levels run from 0 through 8. Set `cancel` to keep the old level.
+- **`native_create_fluid_source(dimension, pos, state, can_convert)`** (on `GameLevel`): NeoForge's
+  `CreateFluidSourceEvent`. When the game works out a block's new fluid (`FlowingFluid.getNewLiquid`), it asks once
+  for each horizontal neighbour that is a source of the same fluid, with that neighbour's `pos` and `state`; two
+  counted sources over a solid block or a source make a new one. `can_convert` starts as the fluid's rule
+  (`water_source_conversion` or `lava_source_conversion`). Spread checks work out new fluids too, so this is asked
+  often: answer fast.
 - **`native_leaves_decay(dimension, pos, cancel)`** (on `GameLevel`): a non-persistent leaf block at distance 7 is
   about to decay. Set `cancel` to keep it.
 - **`native_inventory_block_start(player, name, pos, cancel)`**: a guest is about to open an inventory supplied by a

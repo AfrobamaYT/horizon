@@ -100,6 +100,8 @@ mod control;
 mod copper_golems;
 mod cosmetics;
 mod creaking;
+#[cfg(test)]
+mod create_fluid_source_tests;
 mod creative_hotbar;
 mod creatures;
 mod crossbow;
@@ -1313,6 +1315,13 @@ impl LevelAccess for GameLevel<'_> {
             self.native_fluid_level_change(self.dimension, pos, fluid, from, to, &mut cancel);
         }
         !cancel
+    }
+    fn create_fluid_source(&self, pos: BlockPos, state: BlockStateId, vanilla: bool) -> bool {
+        let mut can_convert = vanilla;
+        if self.native_authoritative {
+            self.native_create_fluid_source(self.dimension, pos, state, &mut can_convert);
+        }
+        can_convert
     }
     fn allow_block_ignite(&self, pos: BlockPos, cause: &'static str) -> bool {
         let mut cancel = false;

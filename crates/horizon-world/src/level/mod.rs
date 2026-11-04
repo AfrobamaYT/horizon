@@ -385,6 +385,12 @@ pub trait LevelAccess {
     ) -> bool {
         true
     }
+    /// Whether the fluid source at `pos` (`state`) counts towards making a new
+    /// source beside it (NeoForge's `CreateFluidSourceEvent`). `vanilla` is
+    /// the fluid's own rule (`water_source_conversion`, `lava_source_conversion`).
+    fn create_fluid_source(&self, _pos: BlockPos, _state: BlockStateId, vanilla: bool) -> bool {
+        vanilla
+    }
     fn allow_block_ignite(&self, _pos: BlockPos, _cause: &'static str) -> bool {
         true
     }
