@@ -429,6 +429,64 @@ pub fn load_installed(
 mod tests {
     use super::*;
 
+    /// A component importing `name` from the game's host interface, with nothing else.
+    fn importing(name: &str) -> Vec<u8> {
+        let mut resolve = wit_parser::Resolve::default();
+        let package = resolve
+            .push_str(
+                "mod.wit",
+                &format!(
+                    "package horizon:mod-api@0.1.0;\ninterface host {{ {name}: func(); }}\nworld m {{ import host; }}"
+                ),
+            )
+            .unwrap();
+        let world = resolve.select_world(&[package], Some("m")).unwrap();
+        let mut module = wasm_encoder::Module::new();
+        let mut types = wasm_encoder::TypeSection::new();
+        types.ty().function([], []);
+        module.section(&types);
+        let mut imports = wasm_encoder::ImportSection::new();
+        imports.import(
+            "horizon:mod-api/host@0.1.0",
+            name,
+            wasm_encoder::EntityType::Function(0),
+        );
+        module.section(&imports);
+        let mut module = module.finish();
+        wit_component::embed_component_metadata(
+            &mut module,
+            &resolve,
+            world,
+            wit_component::StringEncoding::UTF8,
+            false,
+        )
+        .unwrap();
+        wit_component::ComponentEncoder::default()
+            .module(&module)
+            .unwrap()
+            .encode()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_mod_importing_what_the_game_lacks_is_refused_naming_it() {
+        let engine = engine(&RuntimeConfig::default()).unwrap();
+        let component =
+            wasmtime::component::Component::new(&engine, importing("not-a-host-call")).unwrap();
+        let refused = mod_api::__private::wasm_host::instantiate(
+            &engine,
+            &component,
+            &[],
+            Budgets::default(),
+        )
+        .err()
+        .unwrap();
+        let LoadError::Import { import, .. } = &refused else {
+            panic!("refused for another reason: {refused}");
+        };
+        assert_eq!(import, "horizon:mod-api/host@0.1.0#not-a-host-call");
+    }
+
     fn package(
         id: &str,
         version: &str,

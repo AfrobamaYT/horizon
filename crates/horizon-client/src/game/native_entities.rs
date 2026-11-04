@@ -151,7 +151,7 @@ impl Game<'_> {
     /// entity it announces; nothing runs when no mod is loaded, on a client
     /// of a server (which tells nothing), or when nothing is new.
     pub(super) fn native_joins_flush(&mut self, loaded_from_disk: bool, watch: u32) -> bool {
-        if self.remote.is_some() || mod_api::mods().is_empty() || !self.joins_pending() {
+        if self.remote.is_some() || mod_api::__private::mods().is_empty() || !self.joins_pending() {
             return true;
         }
         let observed = horizon_client::join_seq::JoinSeq::latest();
@@ -298,7 +298,7 @@ impl Game<'_> {
     /// be told when it leaves.
     pub(super) fn native_joins_skip(&mut self) {
         let observed = horizon_client::join_seq::JoinSeq::latest();
-        if self.remote.is_none() && !mod_api::mods().is_empty() {
+        if self.remote.is_none() && !mod_api::__private::mods().is_empty() {
             self.assign_pending_join_ids();
             while let Some((slot, id, seq)) = self.next_unannounced() {
                 self.persist.joined_seq = seq;

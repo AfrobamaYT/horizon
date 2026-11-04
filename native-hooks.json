@@ -274,6 +274,10 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_set_block_property_with", "side": "server"
     },
     {
+      "name": "is_loaded",
+      "target": "horizon_client::game::native_config_files::Game<'_>::native_is_loaded", "side": "both"
+    },
+    {
       "name": "config_files",
       "target": "horizon_client::game::native_config_files::Game<'_>::native_config_files", "side": "both"
     },

@@ -9000,7 +9000,7 @@ impl Game<'_> {
     /// `LivingEntity`, which may be hit critically), heard by native mods on
     /// both sides. Only the server sweeps.
     fn remote_sweep_event(&mut self, target: &str, living: bool) {
-        if mod_api::mods().is_empty() {
+        if mod_api::__private::mods().is_empty() {
             return;
         }
         let speed = self

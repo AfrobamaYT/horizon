@@ -1713,13 +1713,15 @@ mod tests {
             source,
             &[super::Fill {
                 native: "native_h".into(),
-                call: "mod_api::dispatch_h(self, mod_api::mods(), player, name, cancel);".into(),
+                call:
+                    "mod_api::dispatch_h(self, mod_api::__private::mods(), player, name, cancel);"
+                        .into(),
             }],
         )
         .unwrap();
         assert_eq!(
             String::from_utf8(filled).unwrap(),
-            "impl Game<'_> {\n    fn native_other(&self, a: u32) {\n        let _ = a;\n    }\n    fn native_h(&mut self, player: u128, name: &str, cancel: &mut bool) {\n        mod_api::dispatch_h(self, mod_api::mods(), player, name, cancel);\n    }\n}\n"
+            "impl Game<'_> {\n    fn native_other(&self, a: u32) {\n        let _ = a;\n    }\n    fn native_h(&mut self, player: u128, name: &str, cancel: &mut bool) {\n        mod_api::dispatch_h(self, mod_api::__private::mods(), player, name, cancel);\n    }\n}\n"
         );
     }
 

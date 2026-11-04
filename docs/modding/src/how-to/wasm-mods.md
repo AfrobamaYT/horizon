@@ -44,3 +44,18 @@ The game loads every `mod.wasm` turned on in the Mods page (or passed with `--de
 after the native mods. Each runs sandboxed with a fuel budget per call and a memory limit; a mod
 that traps stops its group, not the game. `--wasm-interpreter` runs them interpreted, for hosts
 that can't compile code at run time; it is much slower.
+A mod refused at load is named on the Mods page with its reason. A `mod.wasm` built against
+hooks this game doesn't have, or has with another type, names the first such import
+(`horizon:mod-api/host@0.1.0#entity`), so rebuilding against this game's `mod_api` is the fix.
+
+## Calls into the game
+
+A wasm mod reaches the game through the same `mod_api` as a native one, and each call crosses
+the sandbox: a hook call into a mod costs about 1.5 µs, and a capability lookup about 2.5 µs on
+top (measured on a release build). A `Capability<T>` holds no borrow and stays valid for the
+tick, so a pipe or machine looks up its neighbours' capabilities once per tick and calls the
+handlers it got, rather than looking them up again for every move. A mod's own handlers, and
+those of mods in its group, are called directly without crossing.
+
+`host.is_loaded("other_mod")` says whether a mod is installed, native, wasm or content, as
+Fabric's `isModLoaded` does; the list is fixed at startup.

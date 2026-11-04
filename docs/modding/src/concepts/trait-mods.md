@@ -289,6 +289,11 @@ into wherever `to` takes it, each move all or nothing: what `to` won't take stay
 where one is registered, each move in a transaction of its own. A mod's own capability is a
 `CapabilityKey::new("mymod:chemicals")`, answered only by parts.
 
+A `Capability` may be held for the tick: look a neighbour's up once per tick and reuse it for
+every move that tick, as pipes and machines do. Ask again on the next tick, since the block
+entity behind it may be gone by then. For a wasm mod each lookup crosses the sandbox (about
+2.5 µs, see [Building a mod to `mod.wasm`](../how-to/wasm-mods.md)), so holding it matters more there.
+
 An item's own capability is reached where its stack lives, an `ItemPlace`: a player's slot, hand or cursor, a
 block entity's slot, an item entity, a stack inside another item (`ItemPlace::Nested`) or a mod's own place
 (`ItemPlace::Mod`, read and written by the `PlaceProvider` it registers with `r.place_provider`).

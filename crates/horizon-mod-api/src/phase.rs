@@ -100,8 +100,13 @@ fn inventory(
         .collect();
     for selected in content {
         let manifest = &selected.package.manifest;
+        // A wasm package is code, selected with the content packages.
+        let kind = match manifest.wasm {
+            Some(_) => PackageKind::Code,
+            None => PackageKind::Content,
+        };
         if !packages.iter().any(|p| p.id() == manifest.id) {
-            packages.push(PackageInfo::new(PackageKind::Content, manifest));
+            packages.push(PackageInfo::new(kind, manifest));
         }
     }
     packages

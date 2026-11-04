@@ -490,7 +490,7 @@ impl Game<'_> {
     pub(super) fn observe_screen(&mut self) {
         self.settle_title_mode();
         // Free with no native mod: the snapshot clones the title and menu.
-        if mod_api::mods().is_empty() {
+        if mod_api::__private::mods().is_empty() {
             return;
         }
         let current = self.observed_now();
@@ -7999,7 +7999,7 @@ impl Game<'_> {
     /// `living_knockback`. A nested scope for the same attacker keeps what the outer recorded.
     pub(super) fn knockback_scope(&self, attacker: i32) -> impl Drop + use<> {
         use horizon_client::health::{knockback_attacker, knockback_from_holding, knockback_held};
-        if mod_api::mods().is_empty() {
+        if mod_api::__private::mods().is_empty() {
             return knockback_from_holding(attacker, [None, None]);
         }
         let held = if attacker != 0 && attacker == knockback_attacker() {

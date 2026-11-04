@@ -930,7 +930,7 @@ impl Game<'_> {
     /// that the stand broke (`native_living_drops`). The stand item and the
     /// equipment pop outside the list, as in vanilla.
     fn armor_stand_death_drops(&mut self, id: u32, damage_type: &str, causing: u32) {
-        let source = (!mod_api::mods().is_empty())
+        let source = (!mod_api::__private::mods().is_empty())
             .then(|| super::creatures::death_hurt_source(damage_type, causing));
         let dying = super::creatures::DyingDrops {
             entity: id,

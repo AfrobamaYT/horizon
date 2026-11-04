@@ -94,7 +94,7 @@ pub fn main_with(
         crash::install(home.clone(), side);
         ram_limit::start(&home, side);
     }
-    let renderers = mod_api::mods()
+    let renderers = mod_api::__private::mods()
         .iter()
         .filter_map(|m| m.fields().hooks.render())
         .collect();
@@ -139,7 +139,7 @@ pub fn main_with(
         farmland_trample: |entity, pos, state, distance, cancel| {
             mod_api::dispatch_farmland_trample(entity, pos, state, distance, cancel);
         },
-        has_mods: || !mod_api::mods().is_empty(),
+        has_mods: || !mod_api::__private::mods().is_empty(),
         player_name_format: |username, displayname| {
             mod_api::dispatch_player_name_format(username, displayname);
         },

@@ -6898,7 +6898,7 @@ impl Game<'_> {
                     (result, UseBranch::ItemOn)
                 } else if self.hand == Hand::Main {
                     let mut empty_answer = None;
-                    if !mod_api::mods().is_empty() {
+                    if !mod_api::__private::mods().is_empty() {
                         let empty_held = self.held().cloned();
                         let click = self.block_click(hit, self.hand, empty_held.as_ref());
                         self.native_use_without_item(state, &click, &mut empty_answer);
@@ -10410,7 +10410,7 @@ impl Game<'_> {
             None => game_of.iter().position(|x| *x == Some(g)),
         };
         let mut menu = Menu::new(kind);
-        menu.brewed_potion_hook = !mod_api::mods().is_empty();
+        menu.brewed_potion_hook = !mod_api::__private::mods().is_empty();
         if matches!(kind, Kind::Mount(_)) {
             menu.mount = self.mount_menu_entity();
         }
@@ -13710,7 +13710,7 @@ impl Game<'_> {
                 t.particle.clone(),
             )
         };
-        if mod_api::mods().is_empty() {
+        if mod_api::__private::mods().is_empty() {
             let (new, t) = vanilla?;
             return Some(result(new, t));
         }
@@ -14160,7 +14160,7 @@ impl Game<'_> {
                 // With mods, the fire goes in and `BaseFireBlock.onPlace`
                 // fills the frame, as vanilla's order is, so that
                 // `portal_spawn` is asked once, where vanilla asks it.
-                if !mod_api::mods().is_empty() || !self.try_light_portal(target)? {
+                if !mod_api::__private::mods().is_empty() || !self.try_light_portal(target)? {
                     self.place_used_fire(target)?;
                 }
                 let sound = horizon_client::items::fire_starter_sound(item == "fire_charge");
@@ -16627,7 +16627,7 @@ impl Game<'_> {
         let depth_far =
             horizon_client::camera::depth_far(terrain_distance, self.settings.cloud_range);
         // Only native mods read it: no matrices or allocation per frame without one.
-        let mods_read_camera = !mod_api::mods().is_empty();
+        let mods_read_camera = !mod_api::__private::mods().is_empty();
         self.native_camera_frame = (mods_read_camera && !title).then(|| {
             let partial = camera_alpha as f32;
             mod_api::NativeCamera {
@@ -20534,7 +20534,7 @@ impl Game<'_> {
     fn load_server_loot(&mut self) {
         self.server_items = None;
         let overlay = pack_files(&self.world_tables);
-        let loot = if mod_api::mods().is_empty() {
+        let loot = if mod_api::__private::mods().is_empty() {
             horizon_client::structure_blocks::world_loot_data(
                 &self.options.resources,
                 &overlay,
@@ -20557,7 +20557,7 @@ impl Game<'_> {
                 }
             }
         };
-        if !mod_api::mods().is_empty()
+        if !mod_api::__private::mods().is_empty()
             && let Some(loot) = &loot
         {
             let mut items = self.items().clone();
@@ -22516,7 +22516,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         .mods
         .select(&std::env::current_dir()?, &early_settings.mods.enabled);
     mod_api::__private::install_packages(options.mods.native.packages(), &options.mods.selected);
-    if let Err(refused) = mod_api::__private::install_parts(mod_api::mods()) {
+    if let Err(refused) = mod_api::__private::install_parts(mod_api::__private::mods()) {
         panic!("Mod parts refused:\n{}", refused.join("\n"));
     }
     mods::register_components(&vanilla_root)?;

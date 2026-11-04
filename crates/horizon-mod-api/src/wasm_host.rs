@@ -34,8 +34,14 @@ pub enum LoadError {
     MissingExport(String),
     /// An export this game calls has another type than the game's.
     ChangedExport(String, String),
-    /// The game can't provide an import the module needs (the first one is named).
-    Import(String),
+    /// The game doesn't provide the first import the module needs, or provides it with another
+    /// type.
+    Import {
+        /// The import (`horizon:mod-api/host@0.1.0#entity`).
+        import: String,
+        /// What is wrong with it.
+        why: String,
+    },
 }
 
 impl std::fmt::Display for LoadError {
@@ -45,7 +51,12 @@ impl std::fmt::Display for LoadError {
             Self::ChangedExport(name, why) => {
                 write!(f, "mod.wasm's `{name}` has another type: {why}")
             }
-            Self::Import(why) => write!(f, "mod.wasm needs what this game doesn't have: {why}"),
+            Self::Import { import, why } => {
+                write!(
+                    f,
+                    "mod.wasm imports `{import}`, which this game doesn't have: {why}"
+                )
+            }
         }
     }
 }
@@ -564,6 +575,25 @@ fn erased_of(handler: glue::horizon::mod_api::types::Handler) -> Result<WasmHand
     Ok(proxy)
 }
 
+/// The import an instantiation refused: wasmtime names the interface in its outer context and the
+/// function in the next (`component imports instance `…``, `instance export `…``), and says why
+/// last.
+fn refused_import(error: wasmtime::Error) -> LoadError {
+    let named: Vec<String> = error
+        .chain()
+        .take(2)
+        .filter_map(|layer| {
+            let text = layer.to_string();
+            let (_, rest) = text.split_once('`')?;
+            Some(rest.split_once('`')?.0.to_owned())
+        })
+        .collect();
+    LoadError::Import {
+        import: named.join("#"),
+        why: error.root_cause().to_string(),
+    }
+}
+
 /// A member of a group: its mod id, and the prefix of its exports, `<prefix>-<interface>`.
 // exhaustive: the runtime names each member it links, and nothing else builds one
 pub struct Member {
@@ -582,7 +612,7 @@ pub fn instantiate(
 ) -> Result<Vec<crate::ModEntry>, LoadError> {
     let mut linker = Linker::<State>::new(engine);
     glue::Mod::add_to_linker::<State, wasmtime::component::HasSelf<State>>(&mut linker, |s| s)
-        .map_err(|e| LoadError::Import(e.to_string()))?;
+        .expect("the game's own imports are defined once");
     let limits = wasmtime::StoreLimitsBuilder::new()
         .memory_size(budgets.memory)
         .build();
@@ -591,7 +621,7 @@ pub fn instantiate(
     let _ = store.set_fuel(budgets.init);
     let instance: Instance = linker
         .instantiate(&mut store, component)
-        .map_err(|e| LoadError::Import(format!("{e:#}")))?;
+        .map_err(refused_import)?;
     let mut found = Vec::new();
     for member in members {
         let exports = glue::ModExports::find(&mut store, &instance, &member.exports)?;

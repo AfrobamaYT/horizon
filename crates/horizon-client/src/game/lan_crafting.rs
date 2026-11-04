@@ -179,7 +179,7 @@ impl Game<'_> {
             ..self.menu_env()
         };
         load_player(menu, &host.hub.guests[gi]);
-        menu.brewed_potion_hook = !mod_api::mods().is_empty();
+        menu.brewed_potion_hook = !mod_api::__private::mods().is_empty();
         menu.item_smelted_hook = menu.brewed_potion_hook;
         let result = op(menu, &env);
         if let Some(maps) = maps {

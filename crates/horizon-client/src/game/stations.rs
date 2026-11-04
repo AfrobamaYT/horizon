@@ -3082,7 +3082,7 @@ impl Game<'_> {
         let consumed_fuel = was_unfueled && b.fuel > 0;
         let started = was_idle && b.brew_time > 0;
         let ingredient = started.then(|| b.ingredient.clone()).flatten();
-        let hooked = !mod_api::mods().is_empty();
+        let hooked = !mod_api::__private::mods().is_empty();
         let stacks = (due && hooked).then(|| b.items.clone());
         let at = [pos.0, pos.1, pos.2];
         let mut post = false;

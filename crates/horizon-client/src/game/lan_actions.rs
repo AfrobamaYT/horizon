@@ -2109,7 +2109,7 @@ impl Game<'_> {
                 // RELEASE_USE_ITEM: ServerPlayer.releaseUsingItem, with the
                 // hand of the item in use acting.
                 6 => {
-                    let listening = !mod_api::mods().is_empty();
+                    let listening = !mod_api::__private::mods().is_empty();
                     let (uuid, name) = if listening {
                         let Some(host) = self.lan.as_ref() else {
                             return;
@@ -4366,7 +4366,8 @@ impl Game<'_> {
         };
         let dying = host.hub.guests[gi].health <= 0.0 && !host.hub.guests[gi].dead;
         // The killing blow, for the death hooks.
-        let blow = (dying && !mod_api::mods().is_empty()).then(|| self.guest_damage_source(conn));
+        let blow = (dying && !mod_api::__private::mods().is_empty())
+            .then(|| self.guest_damage_source(conn));
         if let Some((damage_type, attacker)) = &blow {
             // LivingDeathEvent: a canceled death keeps the player at 1 health.
             let entity = host.hub.guests[gi].entity_id;
@@ -4517,7 +4518,7 @@ impl Game<'_> {
             if drops.is_some() {
                 // LivingEntity.dropExperience: Player.isAlwaysExperienceDropper.
                 let now = self.world.game_time;
-                let attacker = if mod_api::mods().is_empty() {
+                let attacker = if mod_api::__private::mods().is_empty() {
                     None
                 } else {
                     self.guest_combat
@@ -4774,7 +4775,7 @@ impl Game<'_> {
         if let Some(head) = bed {
             let block = self.world.block(head[0], head[1], head[2]);
             let bed_exists = self.res.facts().get(block).name.ends_with("_bed");
-            let modded = !mod_api::mods().is_empty();
+            let modded = !mod_api::__private::mods().is_empty();
             let name = if modded && !gone {
                 self.lan
                     .as_ref()

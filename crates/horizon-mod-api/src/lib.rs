@@ -2762,13 +2762,8 @@ pub(crate) fn install(mods: Mods) -> &'static Installed {
 }
 
 /// The process-wide list in dispatch order, or an empty list before installation.
-pub fn mods() -> &'static [ModEntry] {
+pub(crate) fn mods() -> &'static [ModEntry] {
     installed().map_or(&[], |installed| &installed.mods)
-}
-
-/// Whether a mod with this `[mod] id` is installed.
-pub fn is_loaded(id: &str) -> bool {
-    mods().iter().any(|entry| entry.id == id)
 }
 
 pub(crate) fn listened(hook: generated::HookId) -> bool {

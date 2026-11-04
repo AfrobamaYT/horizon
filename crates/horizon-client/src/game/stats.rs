@@ -412,7 +412,8 @@ impl Game<'_> {
                 players.push(PhantomTarget {
                     position: Vec3::new(g.position[0], g.position[1], g.position[2]),
                     since_rest: since,
-                    identity: (!mod_api::mods().is_empty()).then(|| (g.uuid, g.name.clone())),
+                    identity: (!mod_api::__private::mods().is_empty())
+                        .then(|| (g.uuid, g.name.clone())),
                 });
             }
         }

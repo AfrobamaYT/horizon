@@ -27,6 +27,11 @@ pub mod wasm_host {
 #[cfg(any(test, feature = "testing"))]
 pub use crate::{part_table::tests as part_tests, phase::with_test_packages};
 
+/// The trait mods installed, in dispatch order: the game's own list, not part of the mod surface.
+pub fn mods() -> &'static [ModEntry] {
+    crate::mods()
+}
+
 /// The startup package inventory at an owning engine load boundary.
 pub fn loaded_mods() -> LoadedMods {
     LoadedMods::new()
