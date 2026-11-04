@@ -1026,7 +1026,13 @@ mod tests {
     fn content_recipe_unlocks_and_appears_in_book() {
         let root = content_recipe_root("unlock", CONTENT_RECIPE);
         let items = crate::items::Items::for_tests(HashMap::new());
-        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let recipes = Recipes::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let index = RecipeIndex::load(&root, &PackOverlay::NONE);
         let mut settings = Settings::default();
         assert_eq!(
@@ -1054,7 +1060,13 @@ mod tests {
         let recipe = r#"{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:flint"],"result":{"id":"minecraft:stick"},"neoforge:conditions":[{"type":"neoforge:false"}]}"#;
         let root = content_recipe_root("condition", recipe);
         let items = crate::items::Items::for_tests(HashMap::new());
-        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let recipes = Recipes::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         assert!(
             recipes
                 .find(
@@ -1074,7 +1086,13 @@ mod tests {
         let files = [("recipe/example:test".to_owned(), vec![replacement.to_vec()])];
         let overlay = PackOverlay { files: &files };
         let items = crate::items::Items::for_tests(HashMap::new());
-        let recipes = Recipes::load(&root, &items, &overlay).unwrap();
+        let recipes = Recipes::load(
+            &root,
+            &items,
+            &overlay,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let (_, result) = recipes
             .find(
                 &[Some(ItemStack::new("minecraft:flint", 1)), None, None, None],
@@ -1115,6 +1133,7 @@ mod tests {
                     serde_json::json!({"type":"mymod:mixer"}),
                 ),
             ],
+            &crate::test_resources::server_load(),
         )
         .unwrap();
         let declare = |id: &str, recipe_type: &str, icon: &str| RecipeBookCategory {
@@ -1162,7 +1181,14 @@ mod tests {
             );
         }
         assert!(mod_categories(Vec::new(), &recipes, &items).is_empty());
-        let vanilla = Recipes::from_sources(&root, &items, &PackOverlay::NONE, Vec::new()).unwrap();
+        let vanilla = Recipes::from_sources(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            Vec::new(),
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         assert!(mod_categories(vec![crusher], &vanilla, &items).is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }

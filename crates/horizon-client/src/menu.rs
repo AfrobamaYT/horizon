@@ -3602,11 +3602,21 @@ pub(crate) mod tests {
         }
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = Items::catalog(&root, &PackOverlay::NONE, &defaults).unwrap();
-        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let recipes = Recipes::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
         let banners = Banners::load(&root, &defaults);
-        let station_recipes =
-            crate::stations::StationRecipes::load(&root, &items, &PackOverlay::NONE);
+        let station_recipes = crate::stations::StationRecipes::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        );
         let enchantments = crate::enchant::Enchantments::default();
         let names = crate::creative::Names::default();
         let env = Env {
@@ -3700,7 +3710,13 @@ pub(crate) mod tests {
         let root = std::env::temp_dir().join(format!("horizon-bare-{}-{run}", std::process::id()));
         std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
         let items = Items::for_tests(Default::default());
-        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let recipes = Recipes::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
         let _ = std::fs::remove_dir_all(&root);
         let (banners, station_recipes) = (Default::default(), Default::default());
@@ -4185,7 +4201,13 @@ pub(crate) mod tests {
             std::env::temp_dir().join(format!("horizon-anvil-cancel-{}", std::process::id()));
         std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
         let items = Items::for_tests(Default::default());
-        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let recipes = Recipes::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
         let _ = std::fs::remove_dir_all(&root);
         let (banners, station_recipes) = (Banners::default(), Default::default());
@@ -4265,7 +4287,13 @@ pub(crate) mod tests {
         let root = std::env::temp_dir().join(format!("horizon-mod-menu-{}", std::process::id()));
         std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
         let items = Items::for_tests(Default::default());
-        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let recipes = Recipes::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
         let _ = std::fs::remove_dir_all(&root);
         let (banners, station_recipes) = (Banners::default(), Default::default());
@@ -4728,7 +4756,13 @@ pub(crate) mod tests {
         std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
         let items = horizon_items::items::Items::for_tests(Default::default());
         let overlay = &horizon_world::loot::PackOverlay::NONE;
-        let recipes = Recipes::load(&root, &items, overlay).unwrap();
+        let recipes = Recipes::load(
+            &root,
+            &items,
+            overlay,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let brewing = Brewing::load(&root, &items, overlay);
         let _ = std::fs::remove_dir_all(&root);
         let (banners, station_recipes) = (Default::default(), Default::default());

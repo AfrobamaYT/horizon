@@ -140,6 +140,42 @@ fn direct_connection_remembers_the_address_on_cancel_escape_and_join() {
     assert!(f.title.focused_field().unwrap().1.is_empty());
 }
 
+/// While the game gates the title (a mod listens to the screen hooks), the
+/// multiplayer list's own steps are asked for, not applied: the game fires
+/// `screen_opening` first, then applies them (`take_requested`).
+#[test]
+fn a_gated_title_asks_for_the_multiplayer_lists_steps() {
+    use crate::multiplayer::Screen;
+    let mut f = Fixture::new();
+    f.title.last_server = "localhost:25566".into();
+    f.click("Multiplayer");
+    f.click("Proceed");
+    f.title.gated = true;
+    f.click("Direct Connection");
+    assert!(matches!(
+        f.title.mode,
+        Mode::Multiplayer(Screen::List { .. })
+    ));
+    let next = f
+        .title
+        .take_requested()
+        .expect("Direct Connection is asked for");
+    assert!(matches!(
+        &next,
+        Mode::Multiplayer(Screen::Direct { address }) if address == "localhost:25566"
+    ));
+    f.title.mode = next;
+    f.title.escape();
+    assert!(matches!(
+        f.title.mode,
+        Mode::Multiplayer(Screen::Direct { .. })
+    ));
+    assert!(matches!(
+        f.title.take_requested(),
+        Some(Mode::Multiplayer(Screen::List { .. }))
+    ));
+}
+
 #[test]
 fn f5_reloads_the_server_list() {
     let mut f = Fixture::new();

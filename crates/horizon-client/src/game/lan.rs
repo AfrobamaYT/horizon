@@ -60,7 +60,13 @@ pub(super) fn sync_data(
     sync.get_or_insert_with(|| Synced {
         with_packs: packs,
         generation,
-        result: SyncData::load(item_data.root(), overlay, item_data.defaults()).map(Arc::new),
+        result: SyncData::load(
+            item_data.root(),
+            overlay,
+            item_data.defaults(),
+            &server_data_load(item_data),
+        )
+        .map(Arc::new),
     })
     .result
     .clone()
@@ -86,7 +92,13 @@ pub(super) fn reload_sync_data(
     // Kept pack dialogs count as packs: a world opened without packs after
     // a `/reload` that dropped them must read its own registries again.
     let packs = !overlay.files.is_empty() || kept.has_pack_entries();
-    let sync = SyncData::load(root, overlay, item_data.defaults()).map(|mut sync| {
+    let sync = SyncData::load(
+        root,
+        overlay,
+        item_data.defaults(),
+        &server_data_load(item_data),
+    )
+    .map(|mut sync| {
         sync.keep_registries(root, kept);
         sync.features.clone_from(&kept.features);
         Arc::new(sync)
@@ -117,6 +129,17 @@ impl Game<'_> {
     }
 }
 
+/// A server's own data load over `item_data`'s registry inputs: the owner of
+/// the data a server reads and sends, whichever window shares the `ItemData`.
+pub(super) fn server_data_load(
+    item_data: &ItemData,
+) -> horizon_world::native_load_context::LoadContext {
+    item_data.context().for_load(
+        horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
+        mod_api::__private::loaded_mods().ids(),
+    )
+}
+
 /// The registries and tags a server sends without data packs over them, read
 /// on a helper thread while a server's world prepares: most worlds have no
 /// packs, so it is what `sync_data` would load once the world is open.
@@ -136,6 +159,7 @@ pub(super) fn preload_sync_data(item_data: &Arc<ItemData>) -> Option<SyncPreload
         return None;
     }
     let item_data = Arc::clone(item_data);
+    let context = server_data_load(&item_data);
     std::thread::Builder::new()
         .name("Server data preload".into())
         .spawn(move || {
@@ -143,6 +167,7 @@ pub(super) fn preload_sync_data(item_data: &Arc<ItemData>) -> Option<SyncPreload
                 item_data.root(),
                 &horizon_world::loot::PackOverlay::NONE,
                 item_data.defaults(),
+                &context,
             )
         })
         .map(|worker| SyncPreload { generation, worker })
@@ -1306,6 +1331,7 @@ impl Game<'_> {
                 &self.pack_files(),
                 packed.as_deref(),
                 self.res.item_defaults(),
+                &server_data_load(&self.res.core.item_data),
             )?;
             world_sync.features = features;
             sync = Arc::new(world_sync);

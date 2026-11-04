@@ -7,9 +7,8 @@ mod tests;
 use super::packs::reload_files;
 use super::{Game, functions::PackStack};
 use horizon_client::datapack::DataStore;
-pub(super) use mod_api::__private::reload::ReloadStageError;
 use mod_api::{
-    __private::reload::{apply_listeners, prepare_listeners},
+    __private::reload::{ReloadStageError, apply_listeners, prepare_listeners},
     FileToIdConverter, Identifier, ServerReloadContext, ServerReloadListener,
     ServerReloadListeners, ServerReloadResources, VanillaServerListeners,
 };
@@ -51,6 +50,11 @@ impl Game<'_> {
         &self,
         stack: &PackStack,
     ) -> Result<PreparedServerReload, ReloadStageError> {
+        horizon_client::mod_content::check_jars(
+            &self.options.resources,
+            &horizon_client::logging::game_home().join("jars"),
+        )
+        .map_err(ReloadStageError::OriginalJars)?;
         // Nobody listens: no registration graph, only the vanilla function library.
         if !mod_api::__private::listened(mod_api::HookId::AddServerReloadListeners) {
             return Ok(PreparedServerReload {

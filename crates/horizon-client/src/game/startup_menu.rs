@@ -110,10 +110,14 @@ impl StartupMenu {
     }
 
     pub(super) fn handoff(&mut self, game: &mut Game<'_>) {
-        game.title = self
-            .title
-            .take()
-            .map(|title| title.with_user(|| game.options.player_name()));
+        // The startup menu's title is the game's from here: its hooks fire now.
+        match self.title.take() {
+            Some(title) => {
+                let title = title.with_user(|| game.options.player_name());
+                game.show_title(title);
+            }
+            None => game.title = None,
+        }
         game.pending_entry = self.pending.take();
         game.cursor = self.cursor;
         game.modifiers = self.modifiers;

@@ -2636,7 +2636,7 @@ impl Game<'_> {
                                 .mobs
                                 .iter()
                                 .find(|m| m.id == id)
-                                .map_or(0.0, |m| self.mob_knockback_resistance(m));
+                                .map_or(0.0, super::lan_attributes::mob_knockback_resistance);
                             (hurt, resistance)
                         }
                     };
@@ -8799,7 +8799,8 @@ mod dye_mix_tests {
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items =
             crate::items::Items::load(&root, &registry, &facts, &overlay, &defaults).unwrap();
-        let recipes = Recipes::load(&root, &items, &overlay).unwrap();
+        let recipes =
+            Recipes::load(&root, &items, &overlay, &crate::game::test_server_load()).unwrap();
         let dye = |name: &str| {
             u8::try_from(
                 horizon_client::mobs::render::DYE_NAMES

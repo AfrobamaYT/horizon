@@ -136,7 +136,14 @@ pub enum Screen {
 pub enum Outcome {
     None,
     Back,
-    Connect { address: String, lan: bool },
+    Connect {
+        address: String,
+        lan: bool,
+    },
+    /// Another multiplayer screen (`Minecraft.setScreen`): the title opens it
+    /// through `Title::set_mode`, so a mod's `screen_opening` answer is heard
+    /// first.
+    Open(Box<Screen>),
 }
 
 impl Screen {
@@ -1463,19 +1470,19 @@ impl Screen {
                 }
             }
             (Self::List { .. }, Some(41)) => {
-                *self = Self::Direct {
+                return Outcome::Open(Box::new(Self::Direct {
                     address: String::new(),
-                }
+                }));
             }
-            (Self::List { .. }, Some(47)) => *self = Self::friend(),
+            (Self::List { .. }, Some(47)) => return Outcome::Open(Box::new(Self::friend())),
             (Self::List { .. }, Some(42)) => {
-                *self = Self::Edit {
+                return Outcome::Open(Box::new(Self::Edit {
                     index: None,
                     name: crate::lang::get_or("selectServer.defaultName", "Minecraft Server"),
                     address: String::new(),
                     focus: 1,
                     packs: None,
-                }
+                }));
             }
             (
                 Self::List {
@@ -1485,13 +1492,13 @@ impl Screen {
             ) => {
                 if let Some((i, s)) = selected.and_then(|i| servers.get(i).map(|s| (i, s.clone())))
                 {
-                    *self = Self::Edit {
+                    return Outcome::Open(Box::new(Self::Edit {
                         index: Some(i),
                         name: s.name,
                         address: s.ip,
                         focus: 0,
                         packs: s.accept_textures,
-                    };
+                    }));
                 }
             }
             (
@@ -1505,43 +1512,31 @@ impl Screen {
                     .and_then(|i| servers.get(i))
                     .map(|s| s.name.clone())
                 {
-                    let list = std::mem::replace(
-                        self,
-                        Self::Direct {
-                            address: String::new(),
-                        },
-                    );
-                    *self = Self::ConfirmDelete {
-                        list: Box::new(list),
+                    // The list stays shown until the confirmation opens.
+                    return Outcome::Open(Box::new(Self::ConfirmDelete {
+                        list: Box::new(self.clone()),
                         name,
                         lines: std::cell::Cell::new(1),
-                    };
+                    }));
                 }
             }
             // deleteCallback: yes removes the server and clears the
             // selection; either answer returns to the list as it was.
-            (Self::ConfirmDelete { .. }, Some(id @ (58 | 59))) => {
-                let Self::ConfirmDelete { list, .. } = std::mem::replace(
-                    self,
-                    Self::Direct {
-                        address: String::new(),
-                    },
-                ) else {
-                    unreachable!()
-                };
-                *self = *list;
+            (Self::ConfirmDelete { list, .. }, Some(id @ (58 | 59))) => {
+                let mut list = (**list).clone();
                 if id == 58
                     && let Self::List {
                         servers, selected, ..
-                    } = self
+                    } = &mut list
                     && let Some(i) = selected.take()
                     && i < servers.len()
                 {
                     servers.remove(i);
                     save_servers(&servers_file(saves), servers);
                 }
+                return Outcome::Open(Box::new(list));
             }
-            (Self::List { .. }, Some(45)) => *self = Self::list(saves),
+            (Self::List { .. }, Some(45)) => return Outcome::Open(Box::new(Self::list(saves))),
             (Self::List { .. }, Some(46)) => return Outcome::Back,
             (
                 Self::List {
@@ -1638,7 +1633,7 @@ impl Screen {
                     None => list.push(entry),
                 }
                 let _ = servers::save(&servers_file(saves), &list);
-                *self = Self::list(saves);
+                return Outcome::Open(Box::new(Self::list(saves)));
             }
             (
                 Self::Edit { .. }
@@ -1646,7 +1641,7 @@ impl Screen {
                 | Self::Friend { .. }
                 | Self::Disconnected { .. },
                 Some(51 | 53 | 54 | 57),
-            ) => *self = Self::list(saves),
+            ) => return Outcome::Open(Box::new(Self::list(saves))),
             (Self::Disconnected { retry, .. }, Some(55)) => *retry = None,
             (Self::Direct { address }, Some(52)) => {
                 return Outcome::Connect {
@@ -1919,25 +1914,13 @@ impl Screen {
             *button = Some(buttons[next - 2]);
         }
     }
-    /// Escape: back to the list, or out of it (true).
-    pub fn escape(&mut self, saves: &Path) -> bool {
+    /// Escape: out of the list (`Back`), or back to it (`Open`).
+    pub fn escape(&self, saves: &Path) -> Outcome {
         match self {
-            Self::List { .. } => true,
+            Self::List { .. } => Outcome::Back,
             // ConfirmScreen.keyPressed: Escape answers no.
-            Self::ConfirmDelete { list, .. } => {
-                let list = std::mem::replace(
-                    &mut **list,
-                    Self::Direct {
-                        address: String::new(),
-                    },
-                );
-                *self = list;
-                false
-            }
-            _ => {
-                *self = Self::list(saves);
-                false
-            }
+            Self::ConfirmDelete { list, .. } => Outcome::Open(list.clone()),
+            _ => Outcome::Open(Box::new(Self::list(saves))),
         }
     }
 }
@@ -1982,6 +1965,24 @@ pub fn wrap(text: &str, width: f32, atlas: &HudAtlas) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// `Screen::click` as the title applies it: an `Open` replaces the screen.
+    fn click(
+        screen: &mut Screen,
+        id: Option<u8>,
+        x: f32,
+        y: f32,
+        size: (f32, f32),
+        saves: &Path,
+    ) -> Outcome {
+        match screen.click(id, x, y, size, saves) {
+            Outcome::Open(next) => {
+                *screen = *next;
+                Outcome::None
+            }
+            outcome => outcome,
+        }
+    }
+
     #[test]
     fn servers_dat_is_beside_saves_or_in_the_player_dir() {
         let saves = Path::new("/games/shared/saves");
@@ -2016,7 +2017,14 @@ mod tests {
             let Outcome::Connect {
                 address: actual,
                 lan,
-            } = screen.click(Some(40), 0.0, 0.0, (640.0, 480.0), Path::new(""))
+            } = click(
+                &mut screen,
+                Some(40),
+                0.0,
+                0.0,
+                (640.0, 480.0),
+                Path::new(""),
+            )
             else {
                 panic!("join did not connect")
             };
@@ -2474,7 +2482,7 @@ mod tests {
         let (ix, iy) = (63.0, 37.0);
         // The first server has no up arrow: its top-left quarter selects it.
         assert!(matches!(
-            screen.click(None, ix + 4.0, iy + 4.0, size, &saves),
+            click(&mut screen, None, ix + 4.0, iy + 4.0, size, &saves),
             Outcome::None
         ));
         assert_eq!(
@@ -2482,7 +2490,7 @@ mod tests {
             (vec!["a".into(), "b".into(), "c".into()], Some(0))
         );
         // Bottom-left quarter: down, saved, and still selected.
-        screen.click(None, ix + 4.0, iy + 20.0, size, &saves);
+        click(&mut screen, None, ix + 4.0, iy + 20.0, size, &saves);
         assert_eq!(
             order(&screen),
             (vec!["b".into(), "a".into(), "c".into()], Some(1))
@@ -2490,13 +2498,27 @@ mod tests {
         let saved: Vec<String> = servers::load(&file).into_iter().map(|s| s.name).collect();
         assert_eq!(saved, ["b", "a", "c"]);
         // Top-left quarter of the second row: back up.
-        screen.click(None, ix + 4.0, iy + ROW_HEIGHT + 4.0, size, &saves);
+        click(
+            &mut screen,
+            None,
+            ix + 4.0,
+            iy + ROW_HEIGHT + 4.0,
+            size,
+            &saves,
+        );
         assert_eq!(
             order(&screen),
             (vec!["a".into(), "b".into(), "c".into()], Some(0))
         );
         // The right half joins at once.
-        match screen.click(None, ix + 20.0, iy + 2.0 * ROW_HEIGHT + 10.0, size, &saves) {
+        match click(
+            &mut screen,
+            None,
+            ix + 20.0,
+            iy + 2.0 * ROW_HEIGHT + 10.0,
+            size,
+            &saves,
+        ) {
             Outcome::Connect { address, lan } => {
                 assert_eq!(address, list[2].ip);
                 assert!(!lan);
@@ -2528,7 +2550,7 @@ mod tests {
         };
         select(&mut screen);
         // Delete opens the ConfirmScreen: nothing is removed yet.
-        screen.click(Some(44), 0.0, 0.0, size, &saves);
+        click(&mut screen, Some(44), 0.0, 0.0, size, &saves);
         assert!(matches!(&screen, Screen::ConfirmDelete { name, .. } if name == "Gone"));
         let labels: Vec<(f32, f32, String, u8)> = screen
             .buttons(size.0, size.1)
@@ -2544,7 +2566,7 @@ mod tests {
         );
         assert_eq!(names(), ["Keep", "Gone"]);
         // Cancel and Escape return to the list with the selection kept.
-        screen.click(Some(59), 0.0, 0.0, size, &saves);
+        click(&mut screen, Some(59), 0.0, 0.0, size, &saves);
         assert!(matches!(
             &screen,
             Screen::List {
@@ -2552,8 +2574,11 @@ mod tests {
                 ..
             }
         ));
-        screen.click(Some(44), 0.0, 0.0, size, &saves);
-        assert!(!screen.escape(&saves));
+        click(&mut screen, Some(44), 0.0, 0.0, size, &saves);
+        let Outcome::Open(back) = screen.escape(&saves) else {
+            panic!("escape left the multiplayer screens")
+        };
+        screen = *back;
         assert!(matches!(
             &screen,
             Screen::List {
@@ -2563,8 +2588,8 @@ mod tests {
         ));
         assert_eq!(names(), ["Keep", "Gone"]);
         // Delete removes it, saves, and clears the selection.
-        screen.click(Some(44), 0.0, 0.0, size, &saves);
-        screen.click(Some(58), 0.0, 0.0, size, &saves);
+        click(&mut screen, Some(44), 0.0, 0.0, size, &saves);
+        click(&mut screen, Some(58), 0.0, 0.0, size, &saves);
         assert!(
             matches!(&screen, Screen::List { selected: None, servers, .. } if servers.len() == 1)
         );
@@ -2586,7 +2611,7 @@ mod tests {
         if let Screen::List { selected, .. } = &mut screen {
             *selected = Some(0);
         }
-        screen.click(Some(43), 0.0, 0.0, size, &saves);
+        click(&mut screen, Some(43), 0.0, 0.0, size, &saves);
         let cycle = |screen: &Screen| {
             screen
                 .buttons(size.0, size.1)
@@ -2606,22 +2631,22 @@ mod tests {
             ))
         );
         // Disabled, Prompt, Enabled: Cancel keeps what was saved.
-        screen.click(Some(60), 0.0, 0.0, size, &saves);
+        click(&mut screen, Some(60), 0.0, 0.0, size, &saves);
         assert_eq!(cycle(&screen).unwrap().3, "Server Resource Packs: Prompt");
-        screen.click(Some(51), 0.0, 0.0, size, &saves);
+        click(&mut screen, Some(51), 0.0, 0.0, size, &saves);
         assert_eq!(servers::load(&file)[0].accept_textures, Some(false));
         // Done saves it.
         if let Screen::List { selected, .. } = &mut screen {
             *selected = Some(0);
         }
-        screen.click(Some(43), 0.0, 0.0, size, &saves);
-        screen.click(Some(60), 0.0, 0.0, size, &saves);
-        screen.click(Some(60), 0.0, 0.0, size, &saves);
+        click(&mut screen, Some(43), 0.0, 0.0, size, &saves);
+        click(&mut screen, Some(60), 0.0, 0.0, size, &saves);
+        click(&mut screen, Some(60), 0.0, 0.0, size, &saves);
         assert_eq!(cycle(&screen).unwrap().3, "Server Resource Packs: Enabled");
-        screen.click(Some(50), 0.0, 0.0, size, &saves);
+        click(&mut screen, Some(50), 0.0, 0.0, size, &saves);
         assert_eq!(servers::load(&file)[0].accept_textures, Some(true));
         // A new server asks.
-        screen.click(Some(42), 0.0, 0.0, size, &saves);
+        click(&mut screen, Some(42), 0.0, 0.0, size, &saves);
         assert_eq!(cycle(&screen).unwrap().3, "Server Resource Packs: Prompt");
         let _ = std::fs::remove_dir_all(&dir);
     }
