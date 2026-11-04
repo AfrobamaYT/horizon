@@ -1155,6 +1155,10 @@ pub struct Extra {
     /// (`LivingEntity.lastEquipmentItems`, empty at first), by
     /// `EquipmentSlot` ordinal: see `Mob::equipment_stacks`.
     pub equipment_heard: Option<Box<horizon_items::equipment::Equipment>>,
+    /// The live attribute map (`AttributeMap`), built when an item with
+    /// attribute modifiers is worn or it is read. Mob logic still reads
+    /// `MobType::attributes` and `attributes` above.
+    pub live: crate::living_attributes::LivingAttributes,
 }
 impl Extra {
     /// The body item id (`getItemBySlot(BODY)`).

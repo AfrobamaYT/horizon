@@ -182,6 +182,7 @@ mod leads;
 mod level_particles;
 mod levels;
 mod lightning;
+mod living_attributes;
 mod llamas;
 mod locator_bar;
 mod loom;
@@ -2448,14 +2449,6 @@ impl PackResources {
 struct DragView {
     slots: HashMap<usize, Option<(u32, bool)>>,
     left: Option<u32>,
-}
-/// Whether an item modifier of slot `group` applies in the worn or held `slot`
-/// (`EquipmentSlotGroup.test`).
-fn equipment_modifier_applies(group: &str, slot: &str) -> bool {
-    group == slot
-        || group == "any"
-        || (group == "armor" && slot != "mainhand" && slot != "offhand")
-        || (group == "hand" && (slot == "mainhand" || slot == "offhand"))
 }
 /// Ctrl+Q reads the physical keyboard, independently of sprint key mappings.
 /// A chunk whose ticking future can complete (`ChunkMap.prepareTickingChunk`):
@@ -12497,6 +12490,7 @@ impl Game<'_> {
             self.prune_entity_attachments();
         }
         self.native_mobs_equipment();
+        self.tick_equipment_attributes();
         self.position_rider();
         self.tick_stats();
         self.tick_scoreboard();
@@ -13201,7 +13195,7 @@ impl Game<'_> {
             for (attribute, id, amount, op, group) in &info.modifiers {
                 // The attack code still reads the held item's attack damage and
                 // speed directly; the map copy is what `/attribute` reports.
-                if !equipment_modifier_applies(group, slot) {
+                if !horizon_client::living_attributes::modifier_applies(group, slot) {
                     continue;
                 }
                 if player
@@ -23205,23 +23199,6 @@ mod tests {
         );
     }
 
-    /// Held items apply their main-hand and off-hand modifiers to the player (#4118, #4777).
-    #[test]
-    fn equipment_modifiers_follow_their_slot_group() {
-        assert!(equipment_modifier_applies("mainhand", "mainhand"));
-        assert!(equipment_modifier_applies("hand", "mainhand"));
-        assert!(equipment_modifier_applies("any", "mainhand"));
-        assert!(!equipment_modifier_applies("armor", "mainhand"));
-        assert!(!equipment_modifier_applies("mainhand", "head"));
-        assert!(equipment_modifier_applies("armor", "chest"));
-        assert!(!equipment_modifier_applies("hand", "feet"));
-        assert!(equipment_modifier_applies("offhand", "offhand"));
-        assert!(equipment_modifier_applies("hand", "offhand"));
-        assert!(equipment_modifier_applies("any", "offhand"));
-        assert!(!equipment_modifier_applies("armor", "offhand"));
-        assert!(!equipment_modifier_applies("mainhand", "offhand"));
-        assert!(!equipment_modifier_applies("offhand", "mainhand"));
-    }
     use horizon_client::keymapping::{KeyAction, SNEAK, SPRINT, ToggleKeys};
 
     /// A guest's interact packet names its entity and the server keeps it:

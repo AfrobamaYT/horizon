@@ -2168,7 +2168,7 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn living_attributes_are_unavailable_for_nonplayers() {
+    fn living_attributes_answer_for_mobs_stands_and_the_dragon() {
         use horizon_client::{entities::ArmorStand, mobs::Mob};
         use horizon_core::geometry::Vec3;
         with_game(|game| {
@@ -2183,10 +2183,17 @@ pub(super) mod tests {
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 14;
             game.dragon = Some(dragon);
-            for id in [12, 13, 14] {
+            for (id, max) in [(12, 20.0), (13, 20.0), (14, 200.0)] {
                 let living = game.native_living(game.native_entity(id).unwrap()).unwrap();
-                assert_eq!(living.attribute_base(game, "minecraft:max_health"), None);
-                assert_eq!(living.attribute_value(game, "minecraft:max_health"), None);
+                assert_eq!(
+                    living.attribute_base(game, "minecraft:max_health"),
+                    Some(max)
+                );
+                assert_eq!(
+                    living.attribute_value(game, "minecraft:max_health"),
+                    Some(max)
+                );
+                assert_eq!(living.attribute_value(game, "missing:attribute"), None);
             }
         });
     }
