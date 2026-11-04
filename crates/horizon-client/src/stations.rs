@@ -33,9 +33,20 @@ impl StationData {
         defaults: &horizon_world::item_defaults::ItemDefaults,
         context: &horizon_world::native_load_context::LoadContext,
     ) -> Self {
+        let sources = crate::crafting::ResolvedSources::load_or_empty(root, overlay, context);
+        Self::from_sources(root, items, overlay, defaults, &sources)
+    }
+    /// The tables of one load whose recipes are `sources`.
+    pub fn from_sources(
+        root: &Path,
+        items: &Items,
+        overlay: &PackOverlay,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
+        sources: &crate::crafting::ResolvedSources,
+    ) -> Self {
         Self {
             enchantments: std::sync::Arc::clone(&items.enchantments),
-            recipes: StationRecipes::load(root, items, overlay, context),
+            recipes: StationRecipes::from_sources(root, items, sources),
             brewing: crate::brewing::Brewing::load(root, items, overlay),
             trades: crate::merchant::Trades::load(root, overlay),
             banners: crate::banner::Banners::load(root, defaults),
@@ -507,12 +518,8 @@ pub struct StationRecipes {
     /// `trim_material` registry: id -> (asset name, description).
     pub trim_materials: Vec<(String, String)>,
 }
-fn ingredient(
-    v: &Value,
-    items: &Items,
-    context: &horizon_world::native_load_context::LoadContext,
-) -> Ingredient {
-    Ingredient::parse(v, items, context).unwrap_or_else(|| Ingredient::of(Vec::new()))
+fn ingredient(v: &Value, items: &Items) -> Ingredient {
+    Ingredient::parse(v, items).unwrap_or_else(|| Ingredient::of(Vec::new()))
 }
 impl StationRecipes {
     pub fn load(
@@ -521,70 +528,35 @@ impl StationRecipes {
         overlay: &PackOverlay,
         context: &horizon_world::native_load_context::LoadContext,
     ) -> Self {
-        // Vanilla's recipes, then the content mods' (docs/modpacks.md).
-        let mut files = Vec::new();
-        let namespaces =
-            std::iter::once("minecraft".to_owned()).chain(crate::mod_content::namespaces(root));
-        // NeoForge's load conditions: a file whose don't hold is silently
-        // absent (`mod_loaded` asks which mods' data is in this root).
-        let mods: Vec<String> = {
-            let mut mods = horizon_items::content_namespaces::mod_ids(root);
-            if !mods.iter().any(|m| m == "minecraft") {
-                mods.push("minecraft".to_owned());
-            }
-            mods
-        };
-        let conditions_hold = |v: &Value| {
-            horizon_world::conditions::conditions_hold(v, &|id: &str| mods.iter().any(|m| m == id))
-        };
-        for namespace in namespaces {
-            let dir = root.join(format!("data/{namespace}/recipe"));
-            if let Ok(folder) = crate::json_folder::read(&dir) {
-                files.push((namespace, folder));
-            }
-        }
-        let mut sources: Vec<(String, Value)> = files
-            .iter()
-            .flat_map(|(namespace, folder)| folder.files.iter().map(move |f| (namespace, f)))
-            .filter_map(|(namespace, file)| {
-                let v = serde_json::from_slice::<Value>(file.bytes().ok()?).ok()?;
-                Some((format!("{namespace}:{}", file.name), v))
-            })
-            .collect();
-        // The world's packs' recipes over the game's own: the top pack's
-        // file for each id replaces it (`SimpleJsonResourceReloadListener`).
-        // The gate answers the merged file, as the crafting loader's does:
-        // a false-conditioned pack file leaves the lower one gone too.
-        for (id, files) in overlay.kind("recipe") {
-            let Ok(v) = serde_json::from_slice::<Value>(PackOverlay::top(files)) else {
-                continue;
-            };
-            match sources.iter_mut().find(|(n, _)| n == id) {
-                Some(slot) => slot.1 = v,
-                None => sources.push((id.to_owned(), v)),
-            }
-        }
-        // The data's recipe filters, over the final set.
-        let filters = horizon_items::recipe_filters::RecipeFilters::load(root, overlay);
-        sources.retain_mut(|(id, v)| conditions_hold(v) && filters.apply(id, v));
+        let sources = crate::crafting::ResolvedSources::load_or_empty(root, overlay, context);
+        Self::from_sources(root, items, &sources)
+    }
+    /// The station tables of `sources`, the recipes one load resolved.
+    pub fn from_sources(
+        root: &Path,
+        items: &Items,
+        sources: &crate::crafting::ResolvedSources,
+    ) -> Self {
         let mut smithing = Vec::new();
         let mut stonecutting = Vec::new();
-        for (id, v) in sources {
+        for recipe in &sources.recipes {
+            let id = crate::crafting::qualified(&recipe.name);
+            let v = &*recipe.resolved;
             match v["type"].as_str().unwrap_or("") {
                 "minecraft:smithing_transform" => smithing.push(Smithing::Transform {
                     id,
-                    template: ingredient(&v["template"], items, context),
-                    base: ingredient(&v["base"], items, context),
-                    addition: ingredient(&v["addition"], items, context),
+                    template: ingredient(&v["template"], items),
+                    base: ingredient(&v["base"], items),
+                    addition: ingredient(&v["addition"], items),
                     result: horizon_world::loot::recipe_result_id(&v["result"])
                         .unwrap_or("minecraft:air")
                         .to_owned(),
                 }),
                 "minecraft:smithing_trim" => smithing.push(Smithing::Trim {
                     id,
-                    template: ingredient(&v["template"], items, context),
-                    base: ingredient(&v["base"], items, context),
-                    addition: ingredient(&v["addition"], items, context),
+                    template: ingredient(&v["template"], items),
+                    base: ingredient(&v["base"], items),
+                    addition: ingredient(&v["addition"], items),
                     pattern: v["pattern"].as_str().unwrap_or("").to_owned(),
                 }),
                 "minecraft:stonecutting" => {
@@ -592,7 +564,7 @@ impl StationRecipes {
                     if let Some(count) = crate::crafting::template_count(&v["result"]) {
                         stonecutting.push(Stonecutting {
                             id,
-                            input: ingredient(&v["ingredient"], items, context),
+                            input: ingredient(&v["ingredient"], items),
                             result: ItemStack::new(
                                 horizon_world::loot::recipe_result_id(&v["result"])
                                     .unwrap_or("minecraft:air"),
@@ -1098,16 +1070,11 @@ mod tests {
     #[test]
     fn smithing_ingredient_parses_holders() {
         let items = sample_items();
-        let a = ingredient(
-            &serde_json::json!("minecraft:diamond_sword"),
-            &items,
-            &crate::test_resources::server_load(),
-        );
+        let a = ingredient(&serde_json::json!("minecraft:diamond_sword"), &items);
         assert_eq!(a.order, vec!["minecraft:diamond_sword"]);
         let b = ingredient(
             &serde_json::json!(["minecraft:diamond_sword", "minecraft:diamond_axe"]),
             &items,
-            &crate::test_resources::server_load(),
         );
         assert_eq!(
             b.order,

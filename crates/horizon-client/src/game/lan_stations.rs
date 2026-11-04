@@ -83,6 +83,7 @@ impl Game<'_> {
         menu.anvil_hook = kind == Kind::Anvil && hooked;
         // Likewise GrindstoneMenu's result onTake.
         menu.grind_hook = kind == Kind::Grindstone && hooked;
+        menu.item_smithed_hook = kind == Kind::Smithing && hooked;
         if kind == Kind::Enchanting {
             // Player.enchantmentSeed, made when first needed.
             let needs_seed = self
@@ -264,6 +265,17 @@ impl Game<'_> {
             }
             if let Some(xp) = ground_xp {
                 self.grindstone_award(gs.pos, xp.unsigned_abs());
+            }
+            // ItemSmithedEvent comes before the rest of SmithingMenu.onTake.
+            let smithed = std::mem::take(&mut gs.menu.item_smithed);
+            if let Some((uuid, entity_id)) = self
+                .lan
+                .as_ref()
+                .map(|host| (host.hub.guests[gi].uuid, host.hub.guests[gi].entity_id))
+            {
+                for (inputs, result) in &smithed {
+                    self.native_player_item_smithed(uuid, entity_id, inputs, result);
+                }
             }
             self.lan_station_combined(conn, &mut gs, anvil_craft.as_ref());
             if let Some(button) = gs.menu.enchant_button.take() {

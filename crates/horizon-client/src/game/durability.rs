@@ -53,7 +53,7 @@ impl DurabilityWorld for World<'_, '_> {
 
 impl Game<'_> {
     /// Compute the server durability update without firing equip effects.
-    pub(super) fn damage_equipment_stack(
+    pub(super) fn damage_stack(
         &mut self,
         stack: &ItemStack,
         amount: i32,

@@ -583,20 +583,9 @@ impl Game<'_> {
         Some(stack)
     }
     /// `ItemStack.hurtAndBreak(amount)` without an entity.
-    fn hurt_and_break(&mut self, mut stack: ItemStack, amount: u32) -> Option<ItemStack> {
-        let max = self
-            .res
-            .items()
-            .get(&stack.item)
-            .map_or(0, |i| i.max_damage);
-        if max == 0 {
-            return Some(stack);
-        }
-        stack.damage += self.durability_loss(&stack, amount);
-        if stack.damage >= max {
-            return shrink(ItemStack { damage: 0, ..stack });
-        }
-        Some(stack)
+    fn hurt_and_break(&mut self, stack: ItemStack, amount: u32) -> Option<ItemStack> {
+        self.damage_stack(&stack, amount.min(i32::MAX as u32) as i32, false)
+            .0
     }
 
     // ---- the registry ----
@@ -2248,6 +2237,19 @@ pub(super) fn tipped_effect(stack: &ItemStack) -> Option<(&'static str, i32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn dispenser_stack_damage_preserves_break_remainder() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let mut shears = ItemStack::new("minecraft:shears", 2);
+            let max = game.items().get(&shears.item).unwrap().max_damage;
+            shears.damage = max - 1;
+            let remainder = game.hurt_and_break(shears, 1).unwrap();
+            assert_eq!(remainder.count, 1);
+            assert_eq!(remainder.damage, max);
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

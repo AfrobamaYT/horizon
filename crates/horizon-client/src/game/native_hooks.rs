@@ -892,22 +892,42 @@ impl GameLevel<'_> {
 
     /// On an authoritative server, the piston at `piston` is about to push
     /// the blocks at `push` one step `direction` (`[0, 1, 0]` is up; pulling
-    /// when it retracts) and destroy those at `destroy`:
-    /// `PistonBaseBlock.moveBlocks`, once its structure resolved. Set
-    /// `canceled` and nothing moves, as when the structure can't; a sticky
-    /// piston then retracts without its block, and clients are sent the
-    /// blocks rather than the retraction to replay.
+    /// when it retracts, `extending` false) and destroy those at `destroy`:
+    /// NeoForge's `PistonEvent.Pre`, in `PistonBaseBlock.moveBlocks`, once its
+    /// structure resolved. Set `canceled` and nothing moves, as when the
+    /// structure can't; a sticky piston then retracts without its block, and
+    /// clients are sent the blocks rather than the retraction to replay.
     #[inline(always)]
-    pub(super) fn native_piston_move(
+    pub(super) fn native_piston_pre(
         &self,
         dimension: LevelDimension,
         piston: BlockPos,
         direction: [i32; 3],
+        extending: bool,
         push: &[BlockPos],
         destroy: &[BlockPos],
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_piston_move(self, dimension, piston, direction, push, destroy, canceled);
+        mod_api::dispatch_piston_pre(
+            self, dimension, piston, direction, extending, push, destroy, canceled,
+        );
+    }
+    /// On an authoritative server, the piston at `piston` pushed the blocks
+    /// at `push` one step `direction` and destroyed those at `destroy`:
+    /// NeoForge's `PistonEvent.Post`, at the end of
+    /// `PistonBaseBlock.moveBlocks`, after the neighbour updates. It only
+    /// hears; `native_piston_pre` is the veto.
+    #[inline(always)]
+    pub(super) fn native_piston_post(
+        &self,
+        dimension: LevelDimension,
+        piston: BlockPos,
+        direction: [i32; 3],
+        extending: bool,
+        push: &[BlockPos],
+        destroy: &[BlockPos],
+    ) {
+        mod_api::dispatch_piston_post(self, dimension, piston, direction, extending, push, destroy);
     }
     /// The redstone signal the block `state` at `pos` gives on its `face`, the
     /// side that touches the block reading it: `BlockState.getDirectSignal`
@@ -2067,14 +2087,14 @@ impl Game<'_> {
     /// the click: the hand swings and neither runs. Asked once per hand, as
     /// vanilla tries the main hand then the off hand. Server-side, for every
     /// player of the world (the helpers read the acting one).
-    pub(super) fn native_interact_entity(
+    pub(super) fn native_entity_interact(
         &mut self,
         entity: i32,
         kind: &str,
         stack: Option<&ItemStack>,
         claimed: &mut bool,
     ) {
-        mod_api::dispatch_interact_entity(self, entity, kind, stack, claimed);
+        mod_api::dispatch_entity_interact(self, entity, kind, stack, claimed);
     }
     /// The local player left-clicks empty space, with any main-hand stack.
     /// Client-side only; the server does not receive this event.
@@ -3898,7 +3918,7 @@ impl Game<'_> {
     }
     /// A server player who ate chorus fruit (or another item with the
     /// `teleport_randomly` consume effect) is about to try a random spot
-    /// (NeoForge's `EntityTeleportEvent.ChorusFruit`, vanilla's
+    /// (NeoForge's `EntityTeleportEvent.ItemConsumption`, vanilla's
     /// `TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),
     /// after they stopped riding. `from` is their feet, `target` the spot
     /// drawn; a mod may move it (its y kept inside the level's height, a
@@ -3906,7 +3926,7 @@ impl Game<'_> {
     /// from it for ground it may land on. Canceling ends the effect: no teleport and no
     /// more attempts. The player's state is swapped in
     /// (`native_acting_player`). Foxes are not heard.
-    pub(super) fn native_chorus_fruit_teleport(
+    pub(super) fn native_item_consumption_teleport(
         &mut self,
         player: u128,
         name: &str,
@@ -3914,7 +3934,7 @@ impl Game<'_> {
         target: &mut [f64; 3],
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_chorus_fruit_teleport(self, player, name, from, target, cancel);
+        mod_api::dispatch_item_consumption_teleport(self, player, name, from, target, cancel);
     }
     /// Armor is about to take durability damage from a hit (NeoForge's
     /// `ArmorHurtEvent`, vanilla's `LivingEntity.doHurtEquipment`): once per
@@ -4733,6 +4753,23 @@ impl Game<'_> {
         amount_removed: u32,
     ) {
         mod_api::dispatch_item_smelted(self, player, player_entity_id, stack, amount_removed);
+    }
+    /// `PlayerEvent.ItemSmithedEvent`: a server player took `result` from a
+    /// smithing table (`SmithingMenu.onTake`, or `onQuickCraft` for a
+    /// shift-click): `player` is their UUID and `player_entity_id` their
+    /// network id, `inputs` the template, base and addition as they were
+    /// before the take used them (`None` for an empty slot). NeoForge fires it
+    /// first thing in `onTake`; here it comes once the click is done, so the
+    /// menu already holds the used inputs, but before the table sounds.
+    /// Server-side.
+    pub(super) fn native_player_item_smithed(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        inputs: &[Option<ItemStack>; 3],
+        result: &ItemStack,
+    ) {
+        mod_api::dispatch_player_item_smithed(self, player, player_entity_id, inputs, result);
     }
     /// A server player enchanted `item` at an enchanting table
     /// (`EnchantmentMenu.clickMenuButton`): `enchantments` are the ones it was
@@ -5578,14 +5615,16 @@ impl Game<'_> {
     /// On the server, only when the `advance_time` rule is on;
     /// `native_time_skip` then hears the jump to the time chosen here and
     /// may still cancel it. The players wake and the weather resets as
-    /// usual either way.
+    /// usual either way. Set `canceled` and the clock is left where it is, as
+    /// NeoForge's cancel leaves it: `native_time_skip` is not asked either.
     pub(super) fn native_sleep_finished_time(
         &mut self,
         dimension: &str,
         current: i64,
         new_time: &mut i64,
+        canceled: &mut bool,
     ) {
-        mod_api::dispatch_sleep_finished_time(self, dimension, current, new_time);
+        mod_api::dispatch_sleep_finished_time(self, dimension, current, new_time, canceled);
     }
 
     /// A slime, magma cube or sulfur cube is dying and about to split into
@@ -6665,13 +6704,13 @@ impl Game<'_> {
     /// `canceled` to keep the block: nothing is destroyed or dropped, and a
     /// guest sees it back. Server-side, for every player of the world (the
     /// helpers read the acting one).
-    pub(super) fn native_destroy_block(
+    pub(super) fn native_break_block(
         &mut self,
         pos: [i32; 3],
         state: BlockStateId,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_destroy_block(self, pos, state, canceled);
+        mod_api::dispatch_break_block(self, pos, state, canceled);
     }
     /// `BlockEvent.EntityPlaceEvent` (and `EntityMultiPlaceEvent`, which
     /// extends it): `placer` is about to set the block `state` at `pos`
@@ -7438,11 +7477,19 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_item_damaged(self, player, name, item, amount, cancel);
     }
-    /// `player` threw `count` of `item` (`Player.drop`: the drop key, a
-    /// menu's throw...), not what scatters when they die. It only hears.
+    /// `player` tosses `count` of `item` (`ItemTossEvent`, from
+    /// `Player.drop`: the drop key, a menu's throw, what no longer fits),
+    /// not what scatters when they die. Set `canceled` and no item entity
+    /// is made; the items are already out of the inventory and are lost.
     /// Server-side.
-    pub(super) fn native_item_dropped(&mut self, player: u128, item: &str, count: u32) {
-        mod_api::dispatch_item_dropped(self, player, item, count);
+    pub(super) fn native_item_toss(
+        &mut self,
+        player: u128,
+        item: &str,
+        count: u32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_item_toss(self, player, item, count, canceled);
     }
     /// `player` is about to take `count` of `item` from the ground
     /// (`ItemEntity.playerTouch`). Set `canceled` to leave it there: the
@@ -7500,18 +7547,18 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_food_level_changed(self, player, name, from, to, cancel);
     }
-    /// Whether a mod hears `native_experience_orb_pickup`: set `listened`
+    /// Whether a mod hears `native_pickup_xp`: set `listened`
     /// (a HEAD injection), or the server skips swapping the player in for it,
     /// and with this empty the pickup costs nothing more without mods.
     /// Server-side.
-    pub(super) fn native_experience_orb_pickup_listened(&mut self, listened: &mut bool) {
-        mod_api::dispatch_experience_orb_pickup_listened(self, listened);
+    pub(super) fn native_pickup_xp_listened(&mut self, listened: &mut bool) {
+        mod_api::dispatch_pickup_xp_listened(self, listened);
     }
     /// Before `player` picks up orb `orb` in `dimension`. Mutations to `value`
     /// and `count` take effect only when not canceled; value is clamped to
     /// 1..=i32::MAX and count to at least one.
     /// Canceling leaves the orb and pickup delay unchanged. Server-side.
-    pub(super) fn native_experience_orb_pickup(
+    pub(super) fn native_pickup_xp(
         &mut self,
         player: u128,
         dimension: &str,
@@ -7520,9 +7567,7 @@ impl Game<'_> {
         count: &mut u32,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_experience_orb_pickup(
-            self, player, dimension, orb, value, count, canceled,
-        );
+        mod_api::dispatch_pickup_xp(self, player, dimension, orb, value, count, canceled);
     }
     /// The selected damaged Mending `stack` and the proposed durability repair
     /// for `experience` points. The amount is clamped to the stack's current damage. Zero leaves the
@@ -7644,7 +7689,7 @@ impl Game<'_> {
     /// player raises one). Change `block`: `blocked` makes the entity block or not (a block
     /// forced on a hit vanilla lets through stops all of it), `blocked_damage` what is
     /// stopped (kept within 0 and `damage`) and `shield_damage` the durability a raised
-    /// item loses (below 0: vanilla's `itemDamage` of what is stopped). Set `canceled` and nothing is blocked. No `self`, as
+    /// item loses (below 0: vanilla's `itemDamage` of what is stopped). Set `blocked` to false and nothing is blocked; the event has no cancel. No `self`, as
     /// `native_living_incoming_damage`: the game is in the middle of the hit.
     pub(super) fn native_living_shield_block(
         entity: i32,
@@ -7653,7 +7698,6 @@ impl Game<'_> {
         damage: f32,
         original_blocked: bool,
         block: &mut ShieldBlock,
-        canceled: &mut bool,
     ) {
         mod_api::dispatch_living_shield_block(
             entity,
@@ -7662,7 +7706,6 @@ impl Game<'_> {
             damage,
             original_blocked,
             block,
-            canceled,
         );
     }
     /// NeoForge's `LivingUseTotemEvent`: a killing blow on entity `entity` of type `kind`
@@ -8053,27 +8096,16 @@ pub(super) fn damage_post(
     HitLevel(level).native_living_damage_post(entity, kind, &source, container);
 }
 
-/// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`): whether it
-/// canceled the block. Its one caller. The hurt entity and the source are named as the
-/// damage hook names them.
+/// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`). Its one
+/// caller. The hurt entity and the source are named as the damage hook names them.
 pub(super) fn shield_block(
     hurting: Hurting<'_>,
     damage: f32,
     original_blocked: bool,
     block: &mut ShieldBlock,
-) -> bool {
+) {
     let (entity, kind, source) = hurt_server_args(hurting);
-    let mut canceled = false;
-    Game::native_living_shield_block(
-        entity,
-        kind,
-        &source,
-        damage,
-        original_blocked,
-        block,
-        &mut canceled,
-    );
-    canceled
+    Game::native_living_shield_block(entity, kind, &source, damage, original_blocked, block);
 }
 
 impl Game<'_> {
@@ -8589,8 +8621,17 @@ fn block_entity_for_block(
         && let Some(state) = registry.default_state(name)
         && let Some(form) = facts.get(state).sign_form()
     {
+        let text = facts.sign_text(name).map_or_else(Default::default, |d| {
+            horizon_client::signs::SignText {
+                color: d.color,
+                glowing: d.glowing,
+                ..Default::default()
+            }
+        });
         return Some(BlockEntity::Sign(horizon_client::signs::SignData {
             hanging: form.hanging,
+            front: text.clone(),
+            back: text,
             ..Default::default()
         }));
     }
@@ -9540,12 +9581,11 @@ impl Game<'_> {
             _ => return None,
         };
         let items = self.items();
-        let known: Vec<String> =
-            Ingredient::parse(&json, items, self.res.core.item_data.context())?
-                .order
-                .into_iter()
-                .filter(|item| items.get(item).is_some())
-                .collect();
+        let known: Vec<String> = Ingredient::parse(&json, items)?
+            .order
+            .into_iter()
+            .filter(|item| items.get(item).is_some())
+            .collect();
         (!known.is_empty()).then(|| Ingredient::of(known))
     }
     /// A stack as a recipe's `result` names it: `id` (a bare one as
@@ -11312,6 +11352,8 @@ mod tests {
                 id: id.into(),
                 template: template.into(),
                 item: false,
+                sign_text_color: (id == "ruby:notice_banner").then(|| "light_blue".into()),
+                sign_text_glow: (id == "ruby:notice_banner").then_some(true),
                 ..Default::default()
             })
             .collect();
@@ -11369,6 +11411,19 @@ mod tests {
                 entity => panic!("{name}: expected a sign, got {entity:?}"),
             }
         }
+        // `createDefaultSignText`: a declared colour and glow on both sides of a new sign, black
+        // and unlit on one that declares none.
+        let mut text = |name| match game.new_block_entity(name) {
+            Some(super::BlockEntity::Sign(sign)) => {
+                assert_eq!(sign.front.color, sign.back.color);
+                assert_eq!(sign.front.glowing, sign.back.glowing);
+                (sign.front.color, sign.front.glowing)
+            }
+            entity => panic!("{name}: expected a sign, got {entity:?}"),
+        };
+        assert_eq!(text("ruby:notice_banner"), (3, true));
+        assert_eq!(text("ruby:board_shelf"), (15, false));
+        assert_eq!(text("minecraft:oak_sign"), (15, false));
         assert!(game.new_block_entity("ruby:road_sign").is_none());
         assert!(matches!(
             game.new_block_entity("minecraft:white_banner"),
@@ -11856,6 +11911,8 @@ mod tests {
         let item_attribute_hooks = free_hooks(include_str!(
             "../../../horizon-mod-api/src/item_attributes.rs"
         ));
+        let enchantment_hooks =
+            free_hooks(include_str!("../../../horizon-mod-api/src/enchantments.rs"));
         let hunger_hooks = free_hooks(include_str!("../hunger.rs"));
         let landing_hooks = free_hooks(include_str!("../landing.rs"));
         let motion_hooks = free_hooks(include_str!("../motion.rs"));
@@ -11878,6 +11935,7 @@ mod tests {
             .chain(breath_hooks.iter().copied())
             .chain(crafting_hooks.iter().copied())
             .chain(item_attribute_hooks.iter().copied())
+            .chain(enchantment_hooks.iter().copied())
             .chain(hunger_hooks.iter().copied())
             .chain(landing_hooks.iter().copied())
             .chain(motion_hooks.iter().copied())
@@ -11906,6 +11964,8 @@ mod tests {
                 format!("mod_api::crafting::native_{name}")
             } else if item_attribute_hooks.contains(name) {
                 format!("mod_api::item_attributes::native_{name}")
+            } else if enchantment_hooks.contains(name) {
+                format!("mod_api::enchantments::native_{name}")
             } else if hunger_hooks.contains(name) {
                 format!("horizon_client_lib::hunger::native_{name}")
             } else if landing_hooks.contains(name) {

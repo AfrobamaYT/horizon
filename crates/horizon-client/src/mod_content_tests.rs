@@ -5063,3 +5063,13 @@ fn a_symlink_file_is_copied_through() {
     assert_eq!(fs::read(&at).unwrap(), b"real");
     let _ = fs::remove_dir_all(&scratch);
 }
+
+/// A declared sign text colour is the index into the dye table the signs draw with.
+#[test]
+fn sign_text_colors_are_the_signs_dye_ids() {
+    let names: Vec<_> = crate::signs::DYE_TEXT
+        .iter()
+        .map(|(name, _)| *name)
+        .collect();
+    assert_eq!(names, horizon_mods::content::DYE_COLORS);
+}

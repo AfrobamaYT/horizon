@@ -99,6 +99,13 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
     {
         log::warn!("Native data-load hooks already installed; keeping the first callbacks");
     }
+    if horizon_items::native_enchantment_hooks::install(
+        crate::enchantment_levels::get_enchantment_level,
+    )
+    .is_err()
+    {
+        log::warn!("The enchantment level hook is already installed; keeping the first");
+    }
     if crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
         menu_slot_rules: |menu, slot, stack, may_place, max_stack| {
             mod_api::dispatch_menu_slot_rules(menu, slot, stack, may_place, max_stack);

@@ -101,6 +101,21 @@ pub mod game {
         modifiers.changed.then_some(modifiers.entries)
     }
 
+    /// A stack's enchantments for `get_enchantment_level`, as its
+    /// component gives them.
+    pub fn item_enchantments(entries: Vec<(Identifier, u32)>) -> ItemEnchantments {
+        ItemEnchantments {
+            entries,
+            changed: false,
+        }
+    }
+    /// The enchantments the hook left, and whether a mod changed them.
+    pub fn item_enchantments_entries(
+        enchantments: ItemEnchantments,
+    ) -> (Vec<(Identifier, u32)>, bool) {
+        (enchantments.entries, enchantments.changed)
+    }
+
     pub struct BlockEntityRefFields {
         pub level: LevelRef,
         pub position: [i32; 3],

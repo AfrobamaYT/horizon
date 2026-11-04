@@ -222,9 +222,9 @@ impl SyncData {
         resources: &Path,
         overlay: &horizon_world::loot::PackOverlay,
         defaults: &horizon_world::item_defaults::ItemDefaults,
-        context: &horizon_world::native_load_context::LoadContext,
+        sources: &crate::crafting::ResolvedSources,
     ) -> Result<Self, String> {
-        Self::load_with(resources, overlay, None, defaults, context)
+        Self::load_with(resources, overlay, None, defaults, sources)
     }
 
     /// `load` with the open world's biomes: when its data packs added or
@@ -234,7 +234,7 @@ impl SyncData {
         overlay: &horizon_world::loot::PackOverlay,
         biomes: Option<&crate::biome::Biomes>,
         defaults: &horizon_world::item_defaults::ItemDefaults,
-        context: &horizon_world::native_load_context::LoadContext,
+        sources: &crate::crafting::ResolvedSources,
     ) -> Result<Self, String> {
         use crate::spans::startup;
         // The recipe book, the recipe sync and the advancements read the
@@ -329,7 +329,7 @@ impl SyncData {
             recipes: Vec::new(),
             advancements: {
                 let (recipes, groups) = startup::time("sync.network_recipes", || {
-                    super::recipes::network_recipes(resources, overlay, defaults, context)
+                    super::recipes::network_recipes(resources, overlay, defaults, sources)
                 });
                 startup::time("sync.advancements", || {
                     super::advancements::ServerAdvancements::load(
