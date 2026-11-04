@@ -1,6 +1,6 @@
-//! The Wardrobe page (top bar, between Servers and Versions), in the glass look, shown when the
-//! cosmetics service has a founder set to show (`horizon_launcher::shop`, `watch_shop`), or with
-//! `HORIZON_COSMETICS=1`: the signed-in Microsoft account's skin wearing its items, a
+//! The Wardrobe page (top bar, between Servers and Versions), shown with the cosmetics flag on
+//! (`horizon_cosmetics::enabled`) or when the cosmetics service has a founder set to show
+//! (`horizon_launcher::shop`, `watch_shop`): the signed-in Microsoft account's skin wearing its items, a
 //! row per slot, what the account owns for the chosen slot, the founder set to claim while its
 //! window is open, and three switches: Show my cosmetics (the account's, on the service), Hide
 //! other players' cosmetics and Show other players' auras and trails (the game's
@@ -10,32 +10,26 @@
 //! service fails; a change shows at once and waits on disk until the service takes it. The talking
 //! is `horizon_launcher::wardrobe`'s, on a background thread.
 use super::*;
-use crate::glass_ui as ui;
 use gpui::RenderImage;
 use horizon_cosmetics::prefs::{self, Others, Prefs};
 use horizon_cosmetics::{preview, Item, Texture};
 use horizon_launcher::wardrobe::{Catalogue, Change, ClaimState, Error, Saved, Service, Session};
-use horizon_theme::glass::{fill, ink, radius};
 use std::collections::HashMap;
 use std::sync::Arc;
-
-mod shop;
-pub(super) use shop::Shop;
 
 /// The still picture's size, in points.
 const W: f32 = 180.;
 const H: f32 = 264.;
-/// How long a line like "Equipped Founder Visor." stays.
+/// How long a line like "Equipped Sunlet." stays.
 const TOAST: Duration = Duration::from_secs(4);
 
-/// The slots a row each, with their names. Name tags have no model; launcher themes are free in
-/// Settings, not worn.
+/// The slots a row each, with their names. Themes are the launcher's own; name tags have no model.
 const SLOTS: [(&str, &str); 5] = [
     ("head", "Head"),
     ("back", "Back"),
-    ("torso", "Shirt"),
     ("shoulder", "Shoulder pet"),
     ("name_tag", "Name tag"),
+    ("theme", "Launcher theme"),
 ];
 
 /// Where the service stands, as the page tells it.
@@ -270,6 +264,23 @@ impl Launcher {
         .detach();
     }
 
+    /// The launcher theme the selected account wears (its sky and accent hue), from the outfit
+    /// kept on disk; None with cosmetics off.
+    pub(super) fn worn_theme(&self) -> Option<([u32; 6], f32)> {
+        if !horizon_cosmetics::enabled() {
+            return None;
+        }
+        let kept;
+        let saved = match &self.wardrobe {
+            Some(w) => &w.saved,
+            None => {
+                kept = Saved::load(&dir(), &self.wardrobe_account()?.uuid);
+                &kept
+            }
+        };
+        saved.theme()
+    }
+
     /// Whether the top bar has this page: the cosmetics switch is on, or the cosmetics service
     /// has a Shop to show, whatever the switch says (`shop::in_top_bar`): its public answer, or
     /// the selected account's own (a preview for it, a claim), from this visit or kept on disk.
@@ -279,7 +290,7 @@ impl Launcher {
             .map(|m| &m.claim)
             .or(self.shop_kept.as_ref());
         horizon_launcher::shop::in_top_bar(
-            horizon_cosmetics::forced(),
+            horizon_cosmetics::enabled(),
             self.shop_status.as_ref(),
             own,
         )
@@ -440,9 +451,30 @@ impl Launcher {
         self.wardrobe_wait(task, done, cx);
     }
 
-    /// Claim the founder set, as the Shop does (a free Paddle checkout when the service asks).
+    /// Claim the founder set.
     fn wardrobe_claim(&mut self, cx: &mut Context<Self>) {
-        self.shop_claim(cx);
+        let Some(w) = self.wardrobe.as_mut().filter(|w| !w.busy) else {
+            return;
+        };
+        let Some(session) = w.session.clone() else {
+            return;
+        };
+        w.busy = true;
+        let (uuid, mut saved) = (w.uuid.clone(), w.saved.clone());
+        let task = cx.background_executor().spawn(async move {
+            let result = Service::live()
+                .claim(&session)
+                .map(|me| saved.me = Some(me));
+            let _ = saved.save(&dir(), &uuid);
+            Trip {
+                saved,
+                items: HashMap::new(),
+                session: None,
+                result,
+            }
+        });
+        let done = tr("Founder set claimed. It's in your wardrobe.").into();
+        self.wardrobe_wait(task, done, cx);
     }
 
     fn wardrobe_wait(&mut self, task: gpui::Task<Trip>, done: String, cx: &mut Context<Self>) {
@@ -462,8 +494,8 @@ impl Launcher {
     /// `HORIZON_LAUNCHER_PAGE=wardrobe` in a development build: the page for a made-up account
     /// that owns the items of `HORIZON_COSMETICS_LOCAL` and wears the first of each slot, for
     /// screenshots. Nothing is asked of Mojang or the service, and nothing is saved.
-    /// `HORIZON_WARDROBE_STATE=offline|failed|closed|empty` shows that state instead.
-    /// `HORIZON_SHOP_STATE` opens the Shop tab in one of its states (`shop_preview`).
+    /// `HORIZON_WARDROBE_STATE=offline|failed|closed|empty` shows that state instead, `theme` wears
+    /// First Light.
     pub(super) fn wardrobe_preview(&mut self) {
         use horizon_launcher::wardrobe::{Claim, Entry, Me};
         let Some(dir) = std::env::var_os("HORIZON_COSMETICS_LOCAL") else {
@@ -475,18 +507,10 @@ impl Launcher {
             .flatten()
             .filter_map(|e| Item::parse(&std::fs::read(e.path()).ok()?).ok())
             .collect();
-        // The founder set's order: head, shirt, back, name tag.
-        let order = |i: &Item| {
-            use horizon_cosmetics::Slot::*;
-            [Head, Torso, Back, Shoulder, NameTag]
-                .iter()
-                .position(|s| *s == i.slot)
-        };
-        items.sort_by(|a, b| order(a).cmp(&order(b)).then(a.id.cmp(&b.id)));
+        items.sort_by(|a, b| a.id.cmp(&b.id));
         let slot = |i: &Item| match i.slot {
             horizon_cosmetics::Slot::Head => "head",
             horizon_cosmetics::Slot::Back => "back",
-            horizon_cosmetics::Slot::Torso => "torso",
             horizon_cosmetics::Slot::Shoulder => "shoulder",
             horizon_cosmetics::Slot::NameTag => "name_tag",
         };
@@ -497,7 +521,25 @@ impl Launcher {
                 .entry(slot(i).to_owned())
                 .or_insert_with(|| i.id.clone());
         }
-        let ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
+        let mut ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
+        // A launcher theme to wear: the design brief's First Light.
+        let dawn = Entry {
+            id: "first_light".into(),
+            hash: String::new(),
+            slot: "theme".into(),
+            names: [("en_us".to_owned(), "First Light".to_owned())].into(),
+            theme: Some(horizon_launcher::wardrobe::Theme {
+                sky: [
+                    "#0b1030", "#1d2a63", "#3d4c94", "#7f78c0", "#e2a0b0", "#ffd6a0",
+                ]
+                .map(String::from),
+                accent_hue: 246.,
+            }),
+        };
+        ids.push(dawn.id.clone());
+        if state == "theme" {
+            equipped.insert("theme".to_owned(), dawn.id.clone());
+        }
         let claim = Claim {
             state: if state == "closed" {
                 ClaimState::Closed
@@ -521,8 +563,8 @@ impl Launcher {
                     slot: slot(i).to_owned(),
                     names: [("en_us".to_owned(), title_case(&i.id))].into(),
                     theme: None,
-                    lines: Default::default(),
                 })
+                .chain([dawn])
                 .collect(),
             claim: claim.clone(),
         };
@@ -540,8 +582,6 @@ impl Launcher {
                 equipped: if empty { Default::default() } else { equipped },
                 visible: true,
                 claim,
-                purchases: Vec::new(),
-                checkout: None,
             }),
             catalogue: Some(catalogue),
             pending: Vec::new(),
@@ -580,9 +620,6 @@ impl Launcher {
         });
         self.wardrobe_reload = false;
         self.restyle = true;
-        if let Ok(state) = std::env::var("HORIZON_SHOP_STATE") {
-            self.shop_preview(&state);
-        }
     }
 
     /// The account's skin wearing what it wears now, baked once per change.
@@ -611,7 +648,7 @@ impl Launcher {
         draws.extend(
             worn.iter()
                 .filter_map(|id| w.items.get(id))
-                .flat_map(|item| preview::Draw::item(item, &body, 0.0)),
+                .filter_map(|item| preview::Draw::item(item, &body, 0.0)),
         );
         let (pw, ph) = ((W * scale) as u32, (H * scale) as u32);
         // Degrees: a little turned, then a quarter more per click.
@@ -632,31 +669,14 @@ impl Launcher {
 
     pub(super) fn wardrobe_page(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
-        let signed_out = self.wardrobe.is_none() && self.wardrobe_account().is_none();
-        let reload = std::mem::take(&mut self.wardrobe_reload);
-        self.shop_visit(reload, signed_out, cx);
-        if !signed_out && (reload || self.wardrobe.is_none()) {
-            self.open_wardrobe(cx);
-        }
-        // The Shop's tab, only while the service has one to show.
-        let tabs = match self.shop_tabs(cx) {
-            Some(tabs) if self.shop.open => return self.shop_page(tabs, cx),
-            tabs => tabs,
-        };
         let header = page_header(
             "Wardrobe",
             "What you wear in every Horizon world and server. Changes reach other players the next \
              time they see you.",
             &t,
-        )
-        .when(tabs.is_some(), |d| d.pt(px(4.)));
-        let page = div()
-            .flex()
-            .flex_col()
-            .gap(px(24.))
-            .children(tabs)
-            .child(header);
-        if signed_out {
+        );
+        let page = div().flex().flex_col().gap(px(24.)).child(header);
+        if self.wardrobe.is_none() && self.wardrobe_account().is_none() {
             let sign_in = button(
                 "wardrobe-sign-in",
                 "Sign in with Microsoft",
@@ -669,18 +689,22 @@ impl Launcher {
                 cx.notify();
             }));
             return page.child(
-                glass::plate(radius::PANEL)
+                plate(&t)
                     .flex()
                     .items_center()
                     .justify_between()
                     .gap(px(16.))
                     .p(px(24.))
                     .child(
-                        ui::text(15., FontWeight::MEDIUM, ink::FULL)
+                        text(theme::UI)
+                            .text_color(t.ink)
                             .child(tr("Sign in to use cosmetics.")),
                     )
                     .child(sign_in),
             );
+        }
+        if std::mem::take(&mut self.wardrobe_reload) || self.wardrobe.is_none() {
+            self.open_wardrobe(cx);
         }
         let picture = self.wardrobe_picture();
         let Some(w) = self.wardrobe.as_ref() else {
@@ -689,13 +713,7 @@ impl Launcher {
         let page = page.children(self.wardrobe_banner(w, cx));
         let Some(me) = w.saved.me.clone() else {
             // Nothing kept yet: the first answer is on its way.
-            let skeleton = |h: f32| {
-                div()
-                    .h(px(h))
-                    .w_full()
-                    .rounded(px(radius::ROW))
-                    .bg(ui::white(0.06))
-            };
+            let skeleton = |h: f32| div().h(px(h)).w_full().bg(t.well);
             return page.child(
                 div()
                     .flex()
@@ -725,12 +743,12 @@ impl Launcher {
                 .map_or(id.to_owned(), |e| e.name(lang).to_owned())
         };
         // The slots, one row each.
-        let mut slots = glass::plate(radius::PANEL)
+        let mut slots = plate(&t)
             .flex()
             .flex_col()
             .gap(px(4.))
             .p(px(8.))
-            .w(px(240.))
+            .w(px(260.))
             .flex_none();
         for (i, (slot, label)) in SLOTS.into_iter().enumerate() {
             let owns = entries
@@ -748,12 +766,10 @@ impl Launcher {
                     .flex_col()
                     .px(px(12.))
                     .py(px(8.))
-                    .rounded(px(radius::ROW))
                     .cursor_pointer()
-                    .when(chosen, |d| d.bg(ui::white(fill::ACTIVE)))
-                    .when(!chosen, |d| d.hover(|s| s.bg(ui::white(0.05))))
-                    .child(ui::text(14., FontWeight::MEDIUM, ink::FULL).child(tr(label)))
-                    .child(ui::text(12., FontWeight::NORMAL, ink::NOTE).child(under))
+                    .when(chosen, |d| d.bg(t.well))
+                    .child(text(theme::LABEL).text_color(t.ink).child(tr(label)))
+                    .child(text(theme::CAPTION).text_color(t.muted).child(under))
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         if let Some(w) = &mut this.wardrobe {
                             w.slot = slot;
@@ -781,9 +797,7 @@ impl Launcher {
             .bg(gpui::rgba(0x0000_0066))
             .children(mark.map(|m| gpui::img(m).size(px(16.))))
             .child(
-                div()
-                    .font_family(theme::MONO)
-                    .text_size(px(13.))
+                text(theme::UI)
                     .text_color(gpui::white())
                     .child(me.name.clone()),
             )
@@ -796,7 +810,7 @@ impl Launcher {
                 cx.notify();
             },
         ));
-        let player = glass::plate(radius::PANEL)
+        let player = plate(&t)
             .flex()
             .flex_col()
             .items_center()
@@ -820,30 +834,18 @@ impl Launcher {
         let wearing = me.equipped.get(slot).cloned();
         let mut cards = div().flex().flex_wrap().gap(px(8.));
         let card = |id: SharedString, title: String, under: String, on: bool| {
-            let look = ui::look();
             keyboard(div().id(id), &t)
                 .flex()
                 .flex_col()
                 .gap(px(2.))
                 .w(px(136.))
                 .p(px(12.))
-                .rounded(px(radius::LARGE))
                 .cursor_pointer()
-                .bg(ui::white(0.045))
-                .when(on, |d| {
-                    d.border_2().border_color(ui::color(if ui::light() {
-                        look.accent
-                    } else {
-                        look.accent_soft
-                    }))
-                })
-                .when(!on, |d| {
-                    d.border_1()
-                        .border_color(ui::white(0.10))
-                        .hover(|s| s.bg(ui::white(0.08)))
-                })
-                .child(ui::text(14., FontWeight::MEDIUM, ink::FULL).child(title))
-                .child(ui::text(12., FontWeight::NORMAL, ink::NOTE).child(under))
+                .bg(t.well)
+                .border_2()
+                .border_color(if on { t.accent } else { t.outline })
+                .child(text(theme::LABEL).text_color(t.ink).child(title))
+                .child(text(theme::CAPTION).text_color(t.muted).child(under))
         };
         cards = cards.child(
             card(
@@ -893,14 +895,14 @@ impl Launcher {
                 })),
             );
         }
-        let owned = glass::plate(radius::PANEL)
+        let owned = plate(&t)
             .flex()
             .flex_col()
             .gap(px(12.))
             .p(px(16.))
             .w(px(312.))
             .flex_none()
-            .child(ui::text(16., FontWeight::SEMIBOLD, ink::FULL).child(tr(label)))
+            .child(text(theme::HEADING).text_color(t.ink).child(tr(label)))
             .child(cards);
         let page = page
             .child(
@@ -918,13 +920,10 @@ impl Launcher {
             .filter(|(_, at)| at.elapsed() < TOAST)
             .map(|(s, _)| s.clone());
         page.children(toast.map(|s| {
-            div().flex().justify_center().child(
-                glass::float(radius::POPOVER).px(px(16.)).py(px(12.)).child(
-                    ui::text(13., FontWeight::NORMAL, ink::FULL)
-                        .relative()
-                        .child(s),
-                ),
-            )
+            plate(&t)
+                .px(px(16.))
+                .py(px(10.))
+                .child(text(theme::UI).text_color(t.ink).child(s))
         }))
     }
 
@@ -932,16 +931,16 @@ impl Launcher {
     fn wardrobe_banner(&self, w: &Wardrobe, cx: &mut Context<Self>) -> Option<Div> {
         let t = self.theme;
         let row = |said: String| {
-            glass::plate(radius::PANEL)
+            plate(&t)
                 .flex()
                 .items_center()
                 .gap(px(16.))
                 .p(px(16.))
                 .child(
-                    ui::text(14., FontWeight::NORMAL, ink::BODY)
-                        .relative()
+                    text(theme::UI)
                         .flex_1()
                         .min_w_0()
+                        .text_color(t.ink)
                         .child(said),
                 )
         };
@@ -1056,8 +1055,8 @@ impl Launcher {
                     div()
                         .flex()
                         .flex_col()
-                        .child(ui::text(14., FontWeight::MEDIUM, ink::FULL).child(tr(title)))
-                        .child(ui::text(12., FontWeight::NORMAL, ink::NOTE).child(tr(under))),
+                        .child(text(theme::LABEL).text_color(t.ink).child(tr(title)))
+                        .child(text(theme::CAPTION).text_color(t.muted).child(tr(under))),
                 )
         };
         let save = |prefs: Prefs| {
@@ -1068,7 +1067,7 @@ impl Launcher {
             }
         };
         let hidden = prefs.others == Others::Hidden;
-        glass::plate(radius::PANEL)
+        plate(&t)
             .flex()
             .flex_wrap()
             .gap(px(24.))

@@ -826,13 +826,6 @@ enum Cmd {
         /// You read the mods' source and trust it with full access to this computer
         #[arg(long)]
         trust_native_code: bool,
-        /// Build mods made for different Horizon versions together anyway, on the newest of them
-        #[arg(long)]
-        allow_version_mismatch: bool,
-        /// Build every mod on the commit of the version the build starts from, even the mods that
-        /// pin another Horizon commit (they may not apply or compile there)
-        #[arg(long)]
-        ignore_pins: bool,
         /// The build profile: performance (the default: incremental, quick to rebuild), dev (quickest
         /// to rebuild a mod, slow game) or release (thin LTO: slowest to build, slightly faster
         /// game). Default: the native-profile setting
@@ -1284,8 +1277,6 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             version,
             update,
             trust_native_code,
-            allow_version_mismatch,
-            ignore_pins,
             profile,
         } => {
             if !trust_native_code {
@@ -1315,8 +1306,6 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                     &base,
                     &folder,
                     &output,
-                    allow_version_mismatch,
-                    ignore_pins,
                     profile,
                     allow_jar_downloads,
                     steps,
@@ -1352,21 +1341,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 Some(folder) => folder,
                 None => native_mods::installed_mods(&target.home)?,
             };
-            let built = native_mods::build(
-                &base,
-                &folder,
-                &target,
-                allow_version_mismatch,
-                ignore_pins,
-                profile,
-                steps,
-            )
-            .map_err(|e| match e.starts_with(native_mods::MISMATCH) {
-                true => {
-                    format!("{e} They often still build: pass --allow-version-mismatch to try.")
-                }
-                false => e,
-            })?;
+            let built = native_mods::build(&base, &folder, &target, profile, steps)?;
             println!(
                 "{built} built and selected for its instance ({:.0} s).",
                 started.elapsed().as_secs_f64()
