@@ -1103,7 +1103,7 @@ impl Game<'_> {
             return;
         }
         if self.settings.chat_links_prompt {
-            self.link_prompt = Some(url);
+            self.open_screen_overlay("link_prompt", |game| game.link_prompt = Some(url));
         } else {
             super::packs::open_uri(&url);
         }
