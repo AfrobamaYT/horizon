@@ -17,7 +17,7 @@ use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
 use mod_api::{
     EntityRef, LevelRef, NativeBlockFace, NativeBlockShapeKind, NativeBlockUpdateFlags,
-    NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType,
+    NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType, NeighbourUpdate,
 };
 
 impl Game<'_> {
@@ -217,6 +217,48 @@ impl Game<'_> {
             self.with_level(|_, level, ticks| level.native_remove_block(ticks, pos, moved));
         let _ = self.process_level_events();
         changed
+    }
+    /// Tell the neighbours of `pos` that a block changed there, as vanilla's own writes do:
+    /// `Neighbours` (`Level.updateNeighborsAt`: a lever's or a button's own block, and the one
+    /// it is attached to, when the signal it gives changes), `NeighboursExcept(direction)`
+    /// (`updateNeighborsAtExceptFromFacing`: a diode's front) or `OutputSignal`
+    /// (`updateNeighbourForOutputSignal`: the comparators beside it, when its comparator output
+    /// changes without its state changing). `source` is the state whose block vanilla passes as
+    /// the one that changed. False, with nothing done, off the level in place or for a position
+    /// that isn't loaded.
+    pub(super) fn native_level_update_neighbors(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        source: BlockStateId,
+        update: NeighbourUpdate,
+    ) -> bool {
+        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+            return false;
+        }
+        let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
+        self.with_level(|b, level, ticks| {
+            b.neighbour_update(level, ticks, at, b.block(source), update)
+        });
+        let _ = self.process_level_events();
+        true
+    }
+    /// Tell the block at `pos` that `source`'s block beside it changed (`Level.neighborChanged`),
+    /// as a diode tells the block in front of it before updating that block's neighbours. False,
+    /// with nothing done, as for `update_neighbors`.
+    pub(super) fn native_level_neighbor_changed(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        source: BlockStateId,
+    ) -> bool {
+        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+            return false;
+        }
+        let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
+        self.with_level(|b, level, ticks| b.neighbor_changed_at(level, ticks, at, b.block(source)));
+        let _ = self.process_level_events();
+        true
     }
     /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
     /// dropping its resources. Parked levels and invalid positions return false.
@@ -643,6 +685,86 @@ pub(super) mod tests {
             let level = game.native_level(game.dim.id()).unwrap();
             assert_eq!(level.best_neighbor_signal(game, [4, 64, 5]), Some(0));
             assert_eq!(level.signal(game, [5, 64, 5], West), Some(0));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_level_handle_updates_neighbours_as_vanillas_writes_do() {
+        use horizon_core::geometry::Direction::East;
+        use mod_api::NeighbourUpdate::{Neighbours, NeighboursExcept, OutputSignal};
+
+        let lit = |game: &super::super::Game<'_>, [x, y, z]: [i32; 3]| {
+            let state = game.world.block(x, y, z);
+            game.native_block_state_property(state, "lit") == Some("true")
+        };
+        let set = |game: &mut super::super::Game<'_>, [x, y, z]: [i32; 3], name: &str| {
+            let state = game.pack.assets.registry.default_state(name).unwrap();
+            game.world.set(x, y, z, state).unwrap();
+        };
+        // The powered lever at (6, 64, 5) on stone; unlit lamps beside it, east and above,
+        // placed without updates, so they don't know it powers them yet.
+        let (lever, east, above) = ([6, 64, 5], [7, 64, 5], [6, 65, 5]);
+        with_game(|game| {
+            lever_on(game, "minecraft:stone");
+            let level = game.native_level(game.dim.id()).unwrap();
+            let state = game.world.block(6, 64, 5);
+            set(game, east, "minecraft:redstone_lamp");
+            set(game, above, "minecraft:redstone_lamp");
+            // `updateNeighborsAtExceptFromFacing(lever, East)`: every neighbour but the east one.
+            assert!(level.update_neighbors(game, lever, state, NeighboursExcept(East)));
+            assert!(lit(game, above) && !lit(game, east));
+            // `updateNeighborsAt(lever)`: the east lamp hears it too.
+            assert!(level.update_neighbors(game, lever, state, Neighbours));
+            assert!(lit(game, east));
+        });
+        // `Level.neighborChanged(east, lever)`: only that lamp hears.
+        with_game(|game| {
+            lever_on(game, "minecraft:stone");
+            let level = game.native_level(game.dim.id()).unwrap();
+            let state = game.world.block(6, 64, 5);
+            set(game, east, "minecraft:redstone_lamp");
+            set(game, above, "minecraft:redstone_lamp");
+            assert!(level.neighbor_changed(game, east, state));
+            assert!(lit(game, east) && !lit(game, above));
+        });
+        // `updateNeighbourForOutputSignal(cake)`: the comparator reading the cake, which
+        // outputs 14 when whole while the comparator still reads 0, schedules its tick.
+        with_game(|game| {
+            lever_on(game, "minecraft:stone");
+            game.block_ticks
+                .add_empty_chunk(horizon_core::position::ChunkPos::new(0, 0))
+                .unwrap();
+            let level = game.native_level(game.dim.id()).unwrap();
+            // Both stand on stone, as they must to survive a neighbour update.
+            set(game, [10, 63, 5], "minecraft:stone");
+            set(game, [11, 63, 5], "minecraft:stone");
+            set(game, [10, 64, 5], "minecraft:cake");
+            let comparator = game
+                .pack
+                .assets
+                .registry
+                .resolve(&horizon_world::chunk::BlockState {
+                    name: "minecraft:comparator".into(),
+                    properties: [
+                        ("facing", "west"),
+                        ("mode", "compare"),
+                        ("powered", "false"),
+                    ]
+                    .into_iter()
+                    .map(|(key, value)| (key.into(), value.into()))
+                    .collect(),
+                })
+                .unwrap();
+            game.world.set(11, 64, 5, comparator).unwrap();
+            let block = game.res.behaviours().block(comparator);
+            let at = horizon_core::position::BlockPos::new(11, 64, 5);
+            assert!(!game.block_ticks.has_block_tick(at, block));
+            let cake = game.world.block(10, 64, 5);
+            assert!(level.update_neighbors(game, [10, 64, 5], cake, OutputSignal));
+            assert!(game.block_ticks.has_block_tick(at, block));
+            // Off the level in place: refused, nothing done.
+            assert!(!level.update_neighbors(game, [10, 64, 500_000], cake, OutputSignal));
         });
     }
 

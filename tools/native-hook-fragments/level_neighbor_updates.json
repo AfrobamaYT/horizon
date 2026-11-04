@@ -1,0 +1,17 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "level_update_neighbors",
+      "side": "server",
+      "target": "horizon_client::game::native_entity_refs::Game<'_>::native_level_update_neighbors",
+      "receiver": "level"
+    },
+    {
+      "name": "level_neighbor_changed",
+      "side": "server",
+      "target": "horizon_client::game::native_entity_refs::Game<'_>::native_level_neighbor_changed",
+      "receiver": "level"
+    }
+  ]
+}

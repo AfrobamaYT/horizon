@@ -307,14 +307,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             .affect_neighbors_after_removal(pos, state, moved, &mut updates);
         let block = self.b.block(state);
         for update in updates {
-            match update {
-                NeighbourUpdate::OutputSignal => {
-                    self.update_neighbour_for_output_signal(pos, block)
-                }
-                NeighbourUpdate::Neighbours => self.update_neighbors_at(pos, block),
-                NeighbourUpdate::NeighboursExcept(skip) => {
-                    self.update_neighbors_at_except(pos, block, skip)
-                }
+            self.neighbour_update(pos, block, update);
+        }
+    }
+
+    /// One `NeighbourUpdate` from `pos`, `block` being the block vanilla passes as the one that
+    /// changed there.
+    pub fn neighbour_update(&mut self, pos: BlockPos, block: BlockId, update: NeighbourUpdate) {
+        match update {
+            NeighbourUpdate::OutputSignal => self.update_neighbour_for_output_signal(pos, block),
+            NeighbourUpdate::Neighbours => self.update_neighbors_at(pos, block),
+            NeighbourUpdate::NeighboursExcept(skip) => {
+                self.update_neighbors_at_except(pos, block, skip)
             }
         }
     }

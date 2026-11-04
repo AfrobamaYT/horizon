@@ -270,8 +270,11 @@ requires a farmer at work and `mob_griefing` enabled.
 
 - Redstone from a mod's block, on authoritative servers. `native_block_signal` may change the signal a block gives on
   a face, weak or direct, and `native_is_signal_source` lets redstone wire connect to it. Both are asked very often, so check the
-  block first and answer from the mod's own state. When the output changes, and once the block is placed (a direct signal past a conductor isn't read before), `native_update_signal_neighbors(dimension, pos)` makes the blocks around
-  it read it again; it acts on the level in place and is refused for another dimension.
+  block first and answer from the mod's own state. When the output changes, and once the block is placed (a direct signal past a conductor isn't read before),
+  `level.update_neighbors(host, pos, state, NeighbourUpdate::Neighbours)` makes the blocks around it read it again
+  (`Level.updateNeighborsAt`; a block that powers what it is attached to, as a lever does, also updates there). A
+  diode's front takes `level.neighbor_changed(host, front, state)` then `NeighbourUpdate::NeighboursExcept(facing)`
+  (`DiodeBlock.updateNeighborsInFront`). Both act on the level in place and are refused elsewhere.
 
 - Item behaviour, on the server for every player: `native_hurt_enemy` hears a player's hit land on a mob with the
   held stack, `native_inventory_tick` runs each tick for every stack a player carries (armour and off hand included), and
@@ -482,7 +485,7 @@ one, where vanilla gives the `by` one.
 
 - A mod block's comparator output, as vanilla's `BlockBehaviour.hasAnalogOutputSignal` and `getAnalogOutputSignal`: `native_has_analog_output` says a block of yours has one,
   and `native_analog_output` gives it (0 to 15) for its state and position. A state change with neighbour updates tells the comparators itself; when the output
-  changes otherwise, `native_update_output_neighbors(dimension, pos)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
+  changes otherwise, `level.update_neighbors(host, pos, state, NeighbourUpdate::OutputSignal)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
 
 `Hooks::component_types`, `blocks`, `items` and `standalone_models` take
 `&RegistrationContext` before their event; `Hooks::register` takes it after
