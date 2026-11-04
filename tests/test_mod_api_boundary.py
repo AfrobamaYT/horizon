@@ -13,8 +13,10 @@ DOC_HIDDEN_CEILING = 62
 # The game's matches on API enums that it can't complete, by enum and file. A variant added to
 # one of these enums is handled at each place listed, or the game panics there.
 UNHANDLED = [
+    ('AttributeOperation', 'crates/horizon-client/src/game/native_living_refs.rs'),
     ('EffectTickChange', 'crates/horizon-client/src/game/potions.rs'),
     ('MenuSlotBacking', 'crates/horizon-client/src/game/native_menu_refs.rs'),
+    ('ModifierLifetime', 'crates/horizon-client/src/game/native_living_refs.rs'),
     ('NativeArrowPickup', 'crates/horizon-client/src/game/native_projectile_refs.rs'),
     ('NativeBlockFace', 'crates/horizon-client/src/game/native_entity_refs.rs'),
     ('NativeBlockShapeKind', 'crates/horizon-client/src/game/native_entity_refs.rs'),
