@@ -699,6 +699,11 @@ there is no per-particle code hook.
 - Biome colours for client mods, for seasons: `native_biome_colors(biome, colors)` changes a biome's grass, foliage, dry
   foliage and water tints, asked for every biome when a mod calls `native_refresh_biome_colors()`, which rebuilds the
   loaded terrain with them.
+- Hidden blocks for client mods (ore scanners, cutaways): the `block_render_visibility` Part method (`state`, `hidden`)
+  makes a state draw nothing: the mesher sees it as air, so its neighbours' faces toward it show and it stops hiding what
+  is behind it. Its fluid layer and block entity are hidden too; light, collision and the server are untouched. It is
+  asked once per state when the client joins a world and again when a mod calls `refresh_render_visibility()`, which
+  remeshes the loaded terrain. Attach it to vanilla blocks with `block_part_tag`. With no part answering, meshing is unchanged.
 
 ### Server data reload listeners
 

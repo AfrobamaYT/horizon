@@ -238,6 +238,7 @@ fn mesher<'a>(context: &'a WorkerContext, seed: i64) -> Mesher<'a> {
         cutout_leaves: true,
         translucent_layers: &[],
         leaf_culling: LeafCullingMode::Off,
+        hidden_states: &[],
         assets: &context.assets,
         render: &context.render,
         tables: &context.tables,

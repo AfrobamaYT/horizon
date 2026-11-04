@@ -207,6 +207,7 @@ mod music;
 mod names;
 mod narrator;
 mod native_biome_colors;
+mod native_render_visibility;
 pub mod native_block_entity_draw;
 mod native_block_entity_refs;
 mod native_block_sprites;
