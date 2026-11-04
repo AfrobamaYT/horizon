@@ -3293,9 +3293,9 @@ pub enum ActionOutcome {
     EffectBlocked(FakeEffect),
 }
 
-/// An effect a fake player's action is stopped from starting.
+/// An effect a fake player's action is stopped from starting. Kinds may be added.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// exhaustive: the game stops and reports every effect, so a new one must be handled there
+#[non_exhaustive]
 pub enum FakeEffect {
     /// A menu or screen: a container, a station, a sign's editor.
     Menu,

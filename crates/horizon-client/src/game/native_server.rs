@@ -25,7 +25,10 @@ use mod_api::{
 };
 pub(crate) use mod_api::{NativeCommand, NativeServerPlayer};
 use serde_json::{Map, Value, json};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{
+    Mutex, PoisonError,
+    atomic::{AtomicBool, Ordering},
+};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 /// A sidebar a server mod shows one player (`native_sidebar`): its title and
@@ -1447,8 +1450,8 @@ impl Game<'_> {
 #[derive(Default)]
 pub(super) struct FakeAction {
     acting: AtomicBool,
-    /// The effect stopped, `FakeEffect as u8 + 1`; 0 for none.
-    blocked: AtomicU8,
+    /// The first effect stopped since the action started.
+    blocked: Mutex<Option<FakeEffect>>,
 }
 impl FakeAction {
     /// Whether a fake player's action is running.
@@ -1456,35 +1459,31 @@ impl FakeAction {
         self.acting.load(Ordering::Relaxed)
     }
     fn block(&self, effect: FakeEffect) {
-        let code = match effect {
-            FakeEffect::Menu => 1,
-            FakeEffect::Sleep => 2,
-            FakeEffect::Ride => 3,
-            FakeEffect::ChangeDimension => 4,
-        };
         // The first effect stopped is the one the action answers.
-        let _ = self
-            .blocked
-            .compare_exchange(0, code, Ordering::Relaxed, Ordering::Relaxed);
+        self.blocked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_or_insert(effect);
     }
 }
 /// Marks a fake player's action as running until it drops.
 struct Acting(Arc<FakeAction>);
 impl Acting {
     fn start(action: &Arc<FakeAction>) -> Self {
-        action.blocked.store(0, Ordering::Relaxed);
+        *action
+            .blocked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = None;
         action.acting.store(true, Ordering::Relaxed);
         Self(Arc::clone(action))
     }
     /// The effect this action stopped, if any.
     fn blocked(&self) -> Option<FakeEffect> {
-        match self.0.blocked.load(Ordering::Relaxed) {
-            1 => Some(FakeEffect::Menu),
-            2 => Some(FakeEffect::Sleep),
-            3 => Some(FakeEffect::Ride),
-            4 => Some(FakeEffect::ChangeDimension),
-            _ => None,
-        }
+        *self
+            .0
+            .blocked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 }
 impl Drop for Acting {
