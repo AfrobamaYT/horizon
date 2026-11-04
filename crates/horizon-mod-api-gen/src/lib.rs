@@ -1525,6 +1525,7 @@ mod tests {
         let hit = super::CatalogHook {
             entry: serde_json::json!({"target": "horizon_client::game::native_hooks::HitLevel<'_>::native_test", "host": "level"}),
             side: super::HelperSide::Server,
+            context: None,
         };
         assert!(super::host_param::is_level(&hit));
         assert_eq!(
@@ -1541,7 +1542,11 @@ mod tests {
                 Some(true),
             ),
         ] {
-            let hook = super::CatalogHook { entry, side };
+            let hook = super::CatalogHook {
+                entry,
+                side,
+                context: None,
+            };
             assert_eq!(
                 super::host_param::validate(&hook, "test", true, mutable, false).unwrap_err(),
                 "test: this entry takes no host marker"
