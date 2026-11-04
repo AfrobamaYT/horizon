@@ -218,7 +218,7 @@ impl<'a> DataLoadContext<'a> {
         self.source.registry(name)
     }
 
-    /// Read a mod's setting without creating or writing any files.
+    /// A loaded mod's setting captured at the owning load boundary, without file I/O.
     pub fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
         self.source.setting(mod_id, key)
     }

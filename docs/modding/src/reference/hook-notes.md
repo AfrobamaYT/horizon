@@ -2543,10 +2543,13 @@ clicks already.
 `Hooks::modify_default_components` receives `&DataLoadContext<'_>` before its
 `ModifyDefaultComponentsEvent`. The engine supplies this read-only phase context:
 `origin()` is `DataLoadOrigin::ServerDataLoad` or `ClientPreload`, `registry(name)`
-borrows names in registry ID order, `setting(mod_id, key)` reads a setting lazily,
-and `mods()` borrows the same `LoadedMods` view used during registration. There is
-no game Host, handle construction or transaction. The origin describes the actual
-owning load, not its thread name or the side of a later reader.
+borrows names in registry ID order, `setting(mod_id, key)` returns a loaded mod's
+setting captured when the owning context is built (including missing keys), and
+`mods()` borrows the same `LoadedMods` view used during registration. A later owning
+load captures fresh settings even when it reuses registry inputs; runtime Host
+settings still read live storage. There is no game Host, handle construction or
+transaction. The origin describes the actual owning load, not its thread name or
+the side of a later reader. The raw-injection `hook_version` is `2`.
 
 The lower firing target is `native_modify_default_components(context, item, components)`
 in `crates/horizon-world/src/item_defaults.rs` (NeoForge's `ModifyDefaultComponentsEvent`).
