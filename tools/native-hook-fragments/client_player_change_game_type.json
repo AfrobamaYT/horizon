@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "client_player_change_game_type",
+      "doc": "NeoForge's `ClientPlayerChangeGameTypeEvent`: observe the local player info game type change.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_client_player_change_game_type",
       "neoforge": "ClientPlayerChangeGameTypeEvent",
       "side": "client",

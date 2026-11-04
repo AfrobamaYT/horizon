@@ -814,6 +814,11 @@ fn catalog_hooks(root: &Path, catalog: &serde_json::Value) -> Result<Vec<Catalog
                 }
             }
         }
+        if hook["doc"].as_str().is_none_or(|doc| doc.trim().is_empty()) {
+            return Err(format!(
+                "hook {name}: doc missing: add a `doc` field, the rustdoc of its trait method"
+            ));
+        }
         let context = match hook.get("context") {
             None => None,
             Some(value) => Some(match value.as_str() {
@@ -1208,7 +1213,7 @@ mod tests {
             r#"{"hooks":[{"name":"same","side":"server"}]}"#,
         )
         .unwrap();
-        let catalog = serde_json::json!({"hooks":[{"name":"same","side":"server"}]});
+        let catalog = serde_json::json!({"hooks":[{"name":"same","doc":"Same.","side":"server"}]});
         assert_eq!(
             super::catalog_hooks(&dir, &catalog).unwrap_err(),
             "duplicate hook same"
@@ -1219,15 +1224,28 @@ mod tests {
     }
 
     #[test]
+    fn a_hook_without_a_doc_is_refused() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for doc in [serde_json::json!(null), serde_json::json!("  ")] {
+            let catalog =
+                serde_json::json!({"hooks": [{"name": "bare", "side": "server", "doc": doc}]});
+            assert_eq!(
+                super::catalog_hooks(&root, &catalog).unwrap_err(),
+                "hook bare: doc missing: add a `doc` field, the rustdoc of its trait method"
+            );
+        }
+    }
+
+    #[test]
     fn counterpart_metadata_accepts_strings_lists_and_absence() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target")
             .join(format!("mod-api-counterparts-{}", std::process::id()));
         std::fs::create_dir_all(root.join("tools/native-hook-fragments")).unwrap();
         let catalog = serde_json::json!({"hooks": [
-            {"name": "one", "side": "server", "fabric": "Event.ONE", "neoforge": "OneEvent"},
-            {"name": "two", "side": "both", "fabric": ["Event.TWO", "Event.THREE"], "paper": "SomeEvent"},
-            {"name": "none", "side": "client"}
+            {"name": "one", "doc": "One.", "side": "server", "fabric": "Event.ONE", "neoforge": "OneEvent"},
+            {"name": "two", "doc": "Two.", "side": "both", "fabric": ["Event.TWO", "Event.THREE"], "paper": "SomeEvent"},
+            {"name": "none", "doc": "None.", "side": "client"}
         ]});
         assert_eq!(super::catalog_hooks(&root, &catalog).unwrap().len(), 3);
         for side in [serde_json::json!(null), serde_json::json!("invalid")] {

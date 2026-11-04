@@ -371,7 +371,13 @@ pub(super) fn emit(
         } else {
             &mut dispatch
         };
-        let mut method_source = doc_comments(&method.attrs, name, false)?;
+        let mut method_source = String::new();
+        for line in hook["doc"].as_str().ok_or("doc missing")?.trim().lines() {
+            method_source.push_str(&format!(
+                "///{}{line}\n",
+                if line.is_empty() { "" } else { " " }
+            ));
+        }
         let side = match hook.side {
             HelperSide::Server => "server",
             HelperSide::Client => "client",

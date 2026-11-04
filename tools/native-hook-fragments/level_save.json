@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "level_save",
+      "doc": "`dimension`'s level was saved (NeoForge's `LevelEvent.Save`, in\n`ServerLevel.save`): its level data, chunks and entities, by the\nautosave, `/save-all`, a pause, a closing level or the server\nstopping; each level of a world save in turn. Server-side.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_level_save",
       "neoforge": "LevelEvent.Save",
       "side": "server",

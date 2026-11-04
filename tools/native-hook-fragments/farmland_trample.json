@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "farmland_trample",
+      "doc": "Called on the server before a landing converts farmland to its base block.",
       "target": "horizon_client_lib::landing::native_farmland_trample",
       "neoforge": "BlockEvent.FarmlandTrampleEvent",
       "side": "server",
