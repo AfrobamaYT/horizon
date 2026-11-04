@@ -63,6 +63,12 @@ pub trait Helpers {
     #[helper(
         side = "server",
         receiver = "living",
+        target = "horizon_client::game::native_living_refs::Game<'_>::native_living_set_hand_item"
+    )]
+    fn living_set_hand_item();
+    #[helper(
+        side = "server",
+        receiver = "living",
         target = "horizon_client::game::native_living_refs::Game<'_>::native_living_hurt_and_break"
     )]
     fn living_hurt_and_break();
