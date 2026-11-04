@@ -12,7 +12,6 @@ pub enum PackageKind {
 /// Read-only package metadata available during registration.
 #[non_exhaustive]
 pub struct PackageInfo {
-    id: String,
     kind: PackageKind,
     manifest: horizon_mods::Manifest,
 }
@@ -20,7 +19,7 @@ pub struct PackageInfo {
 impl PackageInfo {
     /// Package identifier.
     pub fn id(&self) -> &str {
-        &self.id
+        &self.manifest.id
     }
     /// The package's version.
     pub fn version(&self) -> &str {
@@ -56,9 +55,11 @@ pub(crate) fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
     let packages: Vec<_> = ids
         .iter()
         .map(|id| PackageInfo {
-            id: (*id).into(),
             kind: PackageKind::Code,
-            manifest: horizon_mods::Manifest::parse(&format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n")).unwrap(),
+            manifest: horizon_mods::Manifest::parse(&format!(
+                "id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n"
+            ))
+            .unwrap(),
         })
         .collect();
     let packages = Box::leak(packages.into_boxed_slice());
@@ -75,16 +76,14 @@ fn inventory(
     let mut packages: Vec<_> = native
         .iter()
         .map(|p| PackageInfo {
-            id: p.manifest.id.clone(),
             kind: PackageKind::Code,
             manifest: p.manifest.clone(),
         })
         .collect();
     for selected in content {
         let manifest = &selected.package.manifest;
-        if manifest.native.is_none() && !packages.iter().any(|p| p.id == manifest.id) {
+        if !packages.iter().any(|p| p.id() == manifest.id) {
             packages.push(PackageInfo {
-                id: manifest.id.clone(),
                 kind: PackageKind::Content,
                 manifest: manifest.clone(),
             });
@@ -131,7 +130,7 @@ impl LoadedMods<'_> {
 
     /// Find a package by ID. This linear lookup is intended for registration, not hot paths.
     pub fn get(&self, id: &str) -> Option<&PackageInfo> {
-        self.entries.iter().find(|entry| entry.id == id)
+        self.entries.iter().find(|entry| entry.id() == id)
     }
 }
 
@@ -175,14 +174,16 @@ impl RegistrationContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mod_api;
 
     #[test]
     fn inventory_keeps_first_content_package_after_code_mods() {
-        struct Code;
-        #[crate::mod_api::__subscriptions]
-        impl crate::mod_api::Hooks for Code {}
-        let mods = vec![super::super::ModEntry::new("runtime", Box::new(Code))];
+        let native = [horizon_mods::packages::AdjacentManifest {
+            path: Default::default(),
+            manifest: horizon_mods::Manifest::parse(
+                "id='runtime'\nname='Runtime'\nversion='3'\napi='0.2'\ncapabilities=['registries']\n",
+            )
+            .unwrap(),
+        }];
         let package = |version: &str| {
             let manifest = horizon_mods::Manifest::parse(&format!(
                 "id='plain'\nname='Plain'\nversion='{version}'\napi='0.2'\ncapabilities=['registries']\n"
@@ -195,14 +196,17 @@ mod tests {
                 },
             }
         };
-        let entries = inventory(&mods, &[package("1"), package("2")]);
+        let entries = inventory(&native, &[package("1"), package("2")]);
         let view = LoadedMods { entries: &entries };
         assert_eq!(view.ids().collect::<Vec<_>>(), ["runtime", "plain"]);
-        assert_eq!(view.get("runtime").unwrap().kind(), PackageKind::Code);
+        let runtime = view.get("runtime").unwrap();
+        assert_eq!(runtime.kind(), PackageKind::Code);
+        assert_eq!(runtime.version(), "3");
+        assert_eq!(runtime.side(), horizon_mods::Side::Client);
         let plain = view.get("plain").unwrap();
         assert_eq!(plain.kind(), PackageKind::Content);
-        assert_eq!(plain.version(), Some("1"));
-        assert_eq!(plain.side(), Some(horizon_mods::Side::Client));
+        assert_eq!(plain.version(), "1");
+        assert_eq!(plain.side(), horizon_mods::Side::Client);
         assert_eq!(plain.namespaces().collect::<Vec<_>>(), ["plain"]);
         assert!(!plain.depends_on("runtime"));
         assert!(view.get("missing").is_none());

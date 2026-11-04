@@ -15,9 +15,19 @@ pub(super) struct ModsState {
 }
 
 impl ModsState {
-    pub(super) fn select(&mut self, game_dir: &std::path::Path, enabled: &std::collections::BTreeSet<String>) {
+    pub(super) fn select(
+        &mut self,
+        game_dir: &std::path::Path,
+        enabled: &std::collections::BTreeSet<String>,
+    ) {
         self.selected = horizon_mods::selection::content_packages(game_dir, enabled, &self.dev)
-            .filter(|selected| !self.native.built().iter().any(|built| built.id == selected.package.manifest.id))
+            .filter(|selected| {
+                !self
+                    .native
+                    .built()
+                    .iter()
+                    .any(|built| built.id == selected.package.manifest.id)
+            })
             .collect();
     }
 }
@@ -27,10 +37,7 @@ impl ModsState {
 /// treats as no custom components, and `registries.json` isn't read.
 pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Result<()> {
     let mut names = Vec::new();
-    Game::native_component_types(
-        &RegistrationContext::new(),
-        &mut names,
-    );
+    Game::native_component_types(&RegistrationContext::new(), &mut names);
     if names.is_empty() {
         return Ok(());
     }
@@ -57,14 +64,8 @@ fn native_declared() -> &'static NativeDeclared {
     static DECLARED: std::sync::OnceLock<NativeDeclared> = std::sync::OnceLock::new();
     DECLARED.get_or_init(|| {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
-        Game::native_blocks(
-            &RegistrationContext::new(),
-            &mut blocks,
-        );
-        Game::native_items(
-            &RegistrationContext::new(),
-            &mut items,
-        );
+        Game::native_blocks(&RegistrationContext::new(), &mut blocks);
+        Game::native_items(&RegistrationContext::new(), &mut items);
         let types = crate::mod_api::block_entity_types().to_vec();
         NativeDeclared {
             blocks,
@@ -80,10 +81,7 @@ pub(super) fn register_standalone_models(role: ExecutionRole) {
         return;
     }
     let mut names = Vec::new();
-    Game::native_standalone_models(
-        &RegistrationContext::new(),
-        &mut names,
-    );
+    Game::native_standalone_models(&RegistrationContext::new(), &mut names);
     horizon_client::models::register_standalone(names);
 }
 
@@ -518,7 +516,7 @@ mod tests {
                 Box::new(Models(calls.clone())),
             )]
             .into(),
-            || {
+            || crate::mod_api::with_test_packages(&["registration_test"], || {
                 register_standalone_models(ExecutionRole::IntegratedServer);
                 register_standalone_models(ExecutionRole::DedicatedServer);
                 assert_eq!(calls.load(Ordering::Relaxed), 0);
@@ -529,7 +527,7 @@ mod tests {
                         .iter()
                         .any(|id| id == "registration_test:block/shaft")
                 );
-            },
+            }),
         );
     }
 
