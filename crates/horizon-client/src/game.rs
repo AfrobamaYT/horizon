@@ -13238,6 +13238,7 @@ impl Game<'_> {
         // Clear sync data (registries, dialog tags) so dialogs don't leak
         // between worlds.
         lan::forget_sync_data();
+        lan::forget_server_sources();
         let mut title = Title::new(
             std::env::current_dir()?.join("saves"),
             &self.options.resources,
@@ -20494,23 +20495,24 @@ impl Game<'_> {
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
-        let context = self.res.core.item_data.context().for_load(
+        let sources = lan::load_sources(
+            &self.res.core.item_data,
             self.options.execution_role.data_load_origin(),
-            mod_api::__private::loaded_mods().ids(),
+            &overlay,
         );
-        let recipes = match Recipes::load(root, &items, &overlay, &context) {
+        let recipes = match Recipes::from_resolved(root, &items, &overlay, &sources) {
             Ok(recipes) => recipes,
             Err(e) => {
                 log::warn!("Horizon: the world's data packs are not applied: {e}");
                 return None;
             }
         };
-        let stations = horizon_client::stations::StationData::load(
+        let stations = horizon_client::stations::StationData::from_sources(
             root,
             &items,
             &overlay,
             self.res.item_defaults(),
-            &context,
+            &sources,
         );
         let mut data_map_types = Vec::new();
         self.native_data_map_types(&mut data_map_types);
@@ -20600,6 +20602,9 @@ impl Game<'_> {
         if self.remote.is_some() {
             return;
         }
+        // One pass over the recipes for this reload: the tables built next and
+        // the players' copy below share it.
+        lan::forget_server_sources();
         self.world_tables = self.build_world_tables(stack);
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
@@ -21326,16 +21331,23 @@ fn load_world_rest(
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
+        let sources = startup::time("rest.recipe_sources", || {
+            lan::load_sources(
+                &resources.core.item_data,
+                resources.core.item_data.context().origin(),
+                overlay,
+            )
+        });
         let recipes = startup::time("rest.recipes", || {
-            Recipes::load(root, &items, overlay, resources.core.item_data.context())
+            Recipes::from_resolved(root, &items, overlay, &sources)
         })?;
         let stations = startup::time("rest.stations", || {
-            horizon_client::stations::StationData::load(
+            horizon_client::stations::StationData::from_sources(
                 root,
                 &items,
                 overlay,
                 resources.item_defaults(),
-                resources.core.item_data.context(),
+                &sources,
             )
         });
         Ok((items, recipes, stations))

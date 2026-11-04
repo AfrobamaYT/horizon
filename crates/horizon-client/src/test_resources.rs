@@ -23,6 +23,18 @@ pub(crate) fn item_data(
     dead_code,
     reason = "standalone probes that include this file may not load recipes"
 )]
+#[allow(
+    dead_code,
+    reason = "standalone probes that include this file may not load recipes"
+)]
+/// The recipes of a server load over `root`, resolved once as a load does.
+pub(crate) fn server_sources(
+    root: &std::path::Path,
+    overlay: &horizon_world::loot::PackOverlay,
+) -> horizon_client::crafting::ResolvedSources {
+    horizon_client::crafting::ResolvedSources::load_or_empty(root, overlay, &server_load())
+}
+
 pub(crate) fn server_load() -> LoadContext {
     LoadContext::new(
         DataLoadOrigin::ServerDataLoad,
