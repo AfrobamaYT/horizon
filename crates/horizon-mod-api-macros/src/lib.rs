@@ -155,3 +155,73 @@ mod tests {
         assert!(uninspectable(&item));
     }
 }
+
+/// `#[wasm(via = Form)]` on a `mod_api` type, or on the `pub use` that exports another crate's:
+/// the type crosses to wasm mods as `Form`, through `From<&Type> for Form` and
+/// `TryFrom<Form> for Type`, which live with the type. The bindings generator reads the
+/// attribute; this checks the two conversions exist.
+#[proc_macro_attribute]
+pub fn wasm(attribute: TokenStream, input: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(input as syn::Item);
+    let via = match syn::parse::<WasmVia>(attribute) {
+        Ok(via) => via.form,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let ty = match &item {
+        syn::Item::Struct(item) => item.ident.clone(),
+        syn::Item::Enum(item) => item.ident.clone(),
+        syn::Item::Use(item) => match last_use_name(&item.tree) {
+            Some(name) => name,
+            None => {
+                return syn::Error::new_spanned(item, "#[wasm] exports one type")
+                    .to_compile_error()
+                    .into();
+            }
+        },
+        item => {
+            return syn::Error::new_spanned(item, "#[wasm] goes on a type or its `pub use`")
+                .to_compile_error()
+                .into();
+        }
+    };
+    quote! {
+        #item
+        const _: () = {
+            fn crosses_as_its_form()
+            where
+                #via: for<'a> ::core::convert::From<&'a #ty>,
+                #ty: ::core::convert::TryFrom<#via>,
+            {
+            }
+        };
+    }
+    .into()
+}
+
+/// `via = Form`.
+struct WasmVia {
+    form: syn::Type,
+}
+
+impl syn::parse::Parse for WasmVia {
+    fn parse(input: syn::parse::ParseStream<'_>) -> syn::Result<Self> {
+        let key: syn::Ident = input.parse()?;
+        if key != "via" {
+            return Err(syn::Error::new(key.span(), "expected `via = Form`"));
+        }
+        input.parse::<syn::Token![=]>()?;
+        Ok(Self {
+            form: input.parse()?,
+        })
+    }
+}
+
+/// The name a `use` tree of one path brings in.
+fn last_use_name(tree: &syn::UseTree) -> Option<syn::Ident> {
+    match tree {
+        syn::UseTree::Path(path) => last_use_name(&path.tree),
+        syn::UseTree::Name(name) => Some(name.ident.clone()),
+        syn::UseTree::Rename(rename) => Some(rename.rename.clone()),
+        _ => None,
+    }
+}

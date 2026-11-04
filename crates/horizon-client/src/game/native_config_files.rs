@@ -33,7 +33,7 @@ impl Game<'_> {
 fn io(error: std::io::Error) -> ConfigFileError {
     match error.kind() {
         ErrorKind::NotFound => ConfigFileError::NotFound,
-        kind => ConfigFileError::Io(kind),
+        _ => ConfigFileError::Io(error.to_string()),
     }
 }
 

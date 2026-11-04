@@ -14,6 +14,8 @@ pub(crate) enum Ty {
     Prim(&'static str, &'static str),
     /// `u128`/`i128`, as two halves.
     Wide(&'static str),
+    /// `std::time::Duration`, as nanoseconds.
+    Duration,
     /// `String`, `&str`, `Box<str>`, `Arc<str>`: owned once lifted, except `&'static str`.
     Str(Str),
     List(Box<Ty>, List),
@@ -69,8 +71,8 @@ pub(crate) enum Kind {
     /// A unit struct.
     Unit,
     Variant(Vec<Case>),
-    /// Crosses through a hand-written codec as the WIT type `wit`.
-    Codec(&'static str),
+    /// Crosses as its form, declared on the type with `#[wasm(via = Form)]`.
+    Via(Ty),
     /// Crosses as JSON through its own serde derives.
     Json,
     /// It can't cross; why.
@@ -99,47 +101,6 @@ pub(crate) enum Payload {
     Record(String, Vec<Field>),
 }
 
-/// Whether a codec's wire form holds a string or a list, which a guest passes to an import
-/// borrowed.
-pub(super) fn codec_heap(wire: &str) -> bool {
-    CODECS.iter().any(|(_, w, heap)| *w == wire && *heap)
-}
-
-/// Types crossing through hand-written codecs: Rust name, the WIT type of their wire form, and
-/// whether that form holds a string or list. Their codecs are in `mod_api`'s `wasm_codec.rs`.
-pub(super) const CODECS: &[(&str, &str, bool)] = &[
-    ("Tag", "list<u8>", true),
-    ("Compound", "list<u8>", true),
-    ("ItemStack", "list<u8>", true),
-    ("Text", "string", true),
-    ("Identifier", "string", true),
-    ("Duration", "u64", false),
-    ("NativeWorldEpoch", "u64", false),
-    ("EntityRef", "entity-ref", false),
-    ("LivingRef", "entity-ref", false),
-    ("MobRef", "entity-ref", false),
-    ("DisplayRef", "entity-ref", false),
-    ("ItemEntityRef", "entity-ref", false),
-    ("ProjectileRef", "entity-ref", false),
-    ("MinecartRef", "entity-ref", false),
-    ("DragonRef", "entity-ref", false),
-    ("MerchantRef", "entity-ref", false),
-    ("RaidRef", "raid-ref", true),
-    ("PlayerRef", "player-ref", false),
-    ("LevelRef", "level-ref", true),
-    ("ChunkRef", "chunk-ref", true),
-    ("BlockEntityRef", "block-entity-ref", true),
-    ("BossBarRef", "boss-bar-ref", false),
-    ("NativeTickId", "u64", false),
-    ("NativeBlockUpdateFlags", "u32", false),
-    ("ConfigPath", "string", true),
-    ("ConfigFileError", "config-file-error", true),
-    ("MenuRef", "menu-ref", false),
-    ("GlobalPos", "global-pos", true),
-    ("FluidState", "string", true),
-    ("ParticleType", "string", true),
-];
-
 /// The resolved types, by definition.
 pub(crate) struct Types<'a> {
     pub(super) index: Index<'a>,
@@ -151,13 +112,39 @@ pub(crate) struct Types<'a> {
     wit_names: HashMap<String, usize>,
     /// The `mod_api` root module, where re-exported names are looked up.
     api_root: usize,
+    /// The forms of the types `mod_api` re-exports with `#[wasm(via = Form)]` on the `pub use`.
+    exported_via: HashMap<ItemId, Type>,
+    /// The same for re-exports of types the index can't read (made by a macro), by name.
+    exported_via_names: HashMap<String, Type>,
 }
 
 impl<'a> Types<'a> {
     pub(super) fn new(mut index: Index<'a>) -> Result<Self, String> {
         let api_root = index.module("mod_api", &[])?;
+        let mut exported_via = HashMap::new();
+        let mut exported_via_names = HashMap::new();
+        let uses: Vec<(String, Type)> = index.modules[api_root]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Use(item) => Some((use_name(&item.tree)?, via(&item.attrs)?)),
+                _ => None,
+            })
+            .collect();
+        for (name, form) in uses {
+            match index.resolve(api_root, &name) {
+                Ok(Found::Item(id)) => {
+                    exported_via.insert(id, form);
+                }
+                _ => {
+                    exported_via_names.insert(name, form);
+                }
+            }
+        }
         Ok(Self {
             index,
+            exported_via,
+            exported_via_names,
             defs: Vec::new(),
             refused: Vec::new(),
             by_item: HashMap::new(),
@@ -264,6 +251,20 @@ impl<'a> Types<'a> {
             Ok(Found::Item(_)) => None,
         };
         if let Some(std) = external {
+            if let Some(form) = self.exported_via_names.get(&std).cloned() {
+                let wit = std.to_kebab_case();
+                if let Some(&def) = self.wit_names.get(&wit) {
+                    return Ok(Ty::Named(def));
+                }
+                let def = self.push(Def {
+                    rust: format!("mod_api::{std}"),
+                    wit,
+                    lifetimes: 0,
+                    kind: Kind::Opaque("recursive".into()),
+                });
+                self.defs[def].kind = Kind::Via(self.ty(self.api_root, &form, &[])?);
+                return Ok(Ty::Named(def));
+            }
             return Ok(match std.as_str() {
                 "String" => Ty::Str(Str::Owned),
                 "Option" => Ty::Option(one(&args)?),
@@ -296,7 +297,7 @@ impl<'a> Types<'a> {
                     )
                 }
                 "Value" | "Map" => Ty::Named(self.json(&segments)?),
-                "Duration" => Ty::Named(self.codec_def("Duration", "std::time::Duration")?),
+                "Duration" => Ty::Duration,
                 _ => return Err(format!("unsupported type {}", segments.join("::"))),
             });
         }
@@ -327,20 +328,6 @@ impl<'a> Types<'a> {
         }))
     }
 
-    fn codec_def(&mut self, name: &str, rust: &str) -> Result<usize, String> {
-        let wit = name.to_kebab_case();
-        if let Some(&id) = self.wit_names.get(&wit) {
-            return Ok(id);
-        }
-        let codec = CODECS.iter().find(|(n, ..)| *n == name).unwrap().1;
-        Ok(self.push(Def {
-            rust: rust.into(),
-            wit,
-            lifetimes: 0,
-            kind: Kind::Codec(codec),
-        }))
-    }
-
     fn push(&mut self, def: Def) -> usize {
         let id = self.defs.len();
         self.wit_names.insert(def.wit.clone(), id);
@@ -351,6 +338,26 @@ impl<'a> Types<'a> {
     /// The named item `id`, used with type arguments `args`.
     fn item(&mut self, id: ItemId, name: &str, args: Vec<Ty>) -> Result<Ty, String> {
         let item = self.index.item(id).clone();
+        let form = match self.exported_via.get(&id) {
+            Some(form) => Some((self.api_root, form.clone())),
+            None => via(attrs(&item)).map(|form| (id.module, form)),
+        };
+        if let Some((module, form)) = form {
+            if let Some(&def) = self.by_item.get(&id) {
+                return Ok(Ty::Named(def));
+            }
+            let rust = self.public_path(id, name);
+            let wit = self.unique_wit(id, name);
+            let def = self.push(Def {
+                rust,
+                wit,
+                lifetimes: 0,
+                kind: Kind::Opaque("recursive".into()),
+            });
+            self.by_item.insert(id, def);
+            self.defs[def].kind = Kind::Via(self.ty(module, &form, &[])?);
+            return Ok(Ty::Named(def));
+        }
         if let Item::Type(alias) = &item {
             let params: Vec<String> = alias
                 .generics
@@ -383,9 +390,6 @@ impl<'a> Types<'a> {
     }
 
     fn kind(&mut self, id: ItemId, item: &Item, name: &str, wit: &str) -> Result<Kind, String> {
-        if let Some((_, codec, _)) = CODECS.iter().find(|(n, ..)| *n == name) {
-            return Ok(Kind::Codec(codec));
-        }
         let serde = derives(item, "Serialize") && derives(item, "Deserialize");
         if generics(item).type_params().next().is_some() {
             return Ok(if serde {
@@ -396,15 +400,22 @@ impl<'a> Types<'a> {
         }
         let structural = match item {
             Item::Struct(item) => match &item.fields {
-                Fields::Named(fields) if fields.named.iter().all(|f| is_pub(&f.vis)) => self
-                    .fields(id.module, fields.named.iter())
-                    .map(Kind::Record),
-                Fields::Unnamed(fields) if fields.unnamed.iter().all(|f| is_pub(&f.vis)) => fields
-                    .unnamed
-                    .iter()
-                    .map(|f| self.ty(id.module, &f.ty, &[]))
-                    .collect::<Result<_, _>>()
-                    .map(Kind::TupleRecord),
+                Fields::Named(fields)
+                    if fields.named.iter().all(|f| self.reachable(id, &f.vis)) =>
+                {
+                    self.fields(id.module, fields.named.iter())
+                        .map(Kind::Record)
+                }
+                Fields::Unnamed(fields)
+                    if fields.unnamed.iter().all(|f| self.reachable(id, &f.vis)) =>
+                {
+                    fields
+                        .unnamed
+                        .iter()
+                        .map(|f| self.ty(id.module, &f.ty, &[]))
+                        .collect::<Result<_, _>>()
+                        .map(Kind::TupleRecord)
+                }
                 Fields::Unit => Ok(Kind::Unit),
                 _ => Err(format!("{name} has private fields")),
             },
@@ -557,8 +568,56 @@ fn derives(item: &Item, name: &str) -> bool {
     })
 }
 
-fn is_pub(vis: &syn::Visibility) -> bool {
-    matches!(vis, syn::Visibility::Public(_))
+impl Types<'_> {
+    /// Whether the generated glue, inside `mod_api`, can reach a field of item `id` with
+    /// visibility `vis`: a public one, a crate-visible one of `mod_api`'s, or any of a type
+    /// defined at `mod_api`'s root, which the glue is a descendant of.
+    fn reachable(&self, id: ItemId, vis: &syn::Visibility) -> bool {
+        let in_api = self.index.modules[id.module].krate == "mod_api";
+        match vis {
+            syn::Visibility::Public(_) => true,
+            syn::Visibility::Restricted(r) => in_api && r.path.is_ident("crate"),
+            syn::Visibility::Inherited => id.module == self.api_root,
+        }
+    }
+}
+
+/// An item's attributes.
+fn attrs(item: &Item) -> &[syn::Attribute] {
+    match item {
+        Item::Struct(item) => &item.attrs,
+        Item::Enum(item) => &item.attrs,
+        Item::Type(item) => &item.attrs,
+        _ => &[],
+    }
+}
+
+/// The form `#[wasm(via = Form)]` names.
+fn via(attrs: &[syn::Attribute]) -> Option<Type> {
+    attrs.iter().find_map(|attr| {
+        if attr.path().segments.last()?.ident != "wasm" {
+            return None;
+        }
+        let mut form = None;
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("via") {
+                form = Some(meta.value()?.parse::<Type>()?);
+            }
+            Ok(())
+        })
+        .ok()?;
+        form
+    })
+}
+
+/// The name a `use` tree of one path brings in.
+fn use_name(tree: &syn::UseTree) -> Option<String> {
+    match tree {
+        syn::UseTree::Path(path) => use_name(&path.tree),
+        syn::UseTree::Name(name) => Some(name.ident.to_string()),
+        syn::UseTree::Rename(rename) => Some(rename.rename.to_string()),
+        _ => None,
+    }
 }
 
 /// The WIT identifier for a Rust field or function name.

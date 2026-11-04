@@ -129,3 +129,19 @@ mod tests {
         assert_eq!(number(item_to_nbt(&stack).get("count")), Some(1000));
     }
 }
+
+/// A stack as its saved NBT (`item_to_nbt`).
+impl From<&crate::items::ItemStack> for Tag {
+    fn from(stack: &crate::items::ItemStack) -> Self {
+        item_to_nbt(stack)
+    }
+}
+
+/// A stack read from its saved NBT (`item_from_nbt`); a tag that is no stack is refused as
+/// itself.
+impl TryFrom<Tag> for crate::items::ItemStack {
+    type Error = Tag;
+    fn try_from(tag: Tag) -> Result<Self, Tag> {
+        item_from_nbt(&tag).ok_or(tag)
+    }
+}

@@ -103,6 +103,7 @@ pub(crate) mod server_reload;
 pub use client_reload::{
     ClientReloadContext, ClientReloadListener, ClientReloadListeners, VanillaClientListeners,
 };
+#[horizon_mod_api_macros::wasm(via = String)]
 pub use horizon_world::identifier::Identifier;
 pub use reload::{ReloadApply, ReloadResourceError};
 pub use reload_order::ReloadOrderError;
@@ -145,28 +146,35 @@ pub use crate::render::{
 };
 pub use horizon_assets::item_model::{DisplayContext, StackView};
 pub use horizon_client_core::gamerules::Value as GameRuleValue;
+#[horizon_mod_api_macros::wasm(via = String)]
 pub use horizon_client_core::particle_type::ParticleType;
 pub use horizon_client_core::suggestion::Suggestion;
+#[horizon_mod_api_macros::wasm(via = serde_json::Value)]
 pub use horizon_client_core::text::Text;
 pub use horizon_core::{
     geometry::Direction,
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
+#[horizon_mod_api_macros::wasm(via = horizon_world::nbt::Tag)]
 pub use horizon_items::items::ItemStack;
 pub use horizon_items::items::TagRegistry;
 pub use horizon_world::consumable::UseAnimation;
+#[horizon_mod_api_macros::wasm(via = (horizon_world::fluid::FluidKind, u8, bool))]
+pub use horizon_world::fluid::FluidState;
+#[horizon_mod_api_macros::wasm(via = Tag)]
+pub use horizon_world::nbt::Compound;
+#[horizon_mod_api_macros::wasm(via = Vec<u8>)]
+pub use horizon_world::nbt::Tag;
 pub use horizon_world::player_inventory::EquipmentSlot;
 pub use horizon_world::{
     attachments::{
         AttachmentCodec, AttachmentError, AttachmentHost, AttachmentType, Attachments, Holder,
     },
-    fluid::FluidState,
     level::{
         BlockId, Dimension as LevelDimension, LandingWrite, NeighbourUpdate, PlacementContext,
     },
     loot::{LootStack, NativeLootContext},
-    nbt::{Compound, Tag},
     registry::BlockStateId,
 };
 pub use serde_json;
@@ -3401,8 +3409,6 @@ pub(crate) use part_table::{
     ProvidedBy, answered, ask_providers, has_part_hook, parts, place_provider, providers,
 };
 
-#[macro_use]
-mod wasm_codec;
 mod registration;
 #[cfg(target_arch = "wasm32")]
 mod wasm;

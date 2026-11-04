@@ -3138,7 +3138,7 @@ pub mod tests {
             mod_id: ["earlier", "later"][mod_index],
             mod_index,
             order: 0,
-            kind: PartKind::Native(TypeId::of::<Gauge>()),
+            kind: super::PartKind::Native(TypeId::of::<Gauge>()),
             type_name: "Gauge",
             part: Arc::new(Gauge),
         };

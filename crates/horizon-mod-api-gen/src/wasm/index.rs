@@ -18,7 +18,7 @@ const CRATES: &[(&str, &str)] = &[
 pub(super) struct Module {
     pub(super) krate: &'static str,
     pub(super) path: Vec<String>,
-    items: Vec<Item>,
+    pub(super) items: Vec<Item>,
 }
 
 /// A named item a signature refers to.

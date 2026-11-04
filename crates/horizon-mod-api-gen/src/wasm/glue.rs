@@ -14,6 +14,10 @@ use super::wit::{self, Signature, writable};
 use heck::ToSnakeCase;
 use std::fmt::Write;
 
+/// The last arm of a generated match over a game enum's cases, all read from its source when
+/// the glue is generated; it only answers `#[non_exhaustive]` on another crate's enum.
+const EVERY_CASE: &str = r#"_ => unreachable!("every case was read from the enum's source")"#;
+
 /// The wire module of the shared types, as both bindings generators lay it out.
 const W: &str = "horizon::mod_api::types";
 
@@ -47,6 +51,20 @@ fn borrows(types: &Types<'_>, ty: &Ty) -> bool {
     }
 }
 
+/// Whether a type holds a record with a lifetime, which has nothing to borrow from when the
+/// game hands it back to the mod.
+pub(super) fn borrowed_record(types: &Types<'_>, ty: &Ty) -> bool {
+    match ty {
+        Ty::List(item, _) | Ty::Array(item, _) | Ty::Option(item) | Ty::Boxed(item) => {
+            borrowed_record(types, item)
+        }
+        Ty::Result(a, b) => borrowed_record(types, a) || borrowed_record(types, b),
+        Ty::Tuple(items) => items.iter().any(|item| borrowed_record(types, item)),
+        Ty::Named(def) => types.defs[*def].lifetimes > 0,
+        _ => false,
+    }
+}
+
 /// An expression lowering `e`, of type `&R`, to its wire value.
 pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
     match ty {
@@ -59,6 +77,7 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         }
         Ty::Prim(_, wire) => format!("(*{e} as {})", wire_prim(wire)),
         Ty::Wide(_) => format!("{{ let v = *{e} as u128; ((v >> 64) as u64, v as u64) }}"),
+        Ty::Duration => format!("u64::try_from({e}.as_nanos()).unwrap_or(u64::MAX)"),
         Ty::Str(_) => format!("{e}.to_string()"),
         Ty::List(item, _) | Ty::Array(item, _) => {
             format!(
@@ -127,6 +146,7 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         Ty::Wide(rust) => {
             format!("{{ let (h, l) = {e}; ((h as u128) << 64 | l as u128) as {rust} }}")
         }
+        Ty::Duration => format!("std::time::Duration::from_nanos({e})"),
         Ty::Str(Str::Owned) => e.into(),
         Ty::Str(Str::Static) => format!("super::intern({e})"),
         Ty::Str(_) => format!("{e}.into()"),
@@ -369,7 +389,7 @@ pub(super) fn conversions(
                         )
                     })
                     .collect();
-                format!("match v {{ {} }}", arms.join(", "))
+                format!("match v {{ {}, {EVERY_CASE} }}", arms.join(", "))
             }
             Kind::Variant(cases) => {
                 let path = rust.split('<').next().unwrap();
@@ -431,13 +451,17 @@ pub(super) fn conversions(
                         },
                     )
                     .collect();
-                format!("match v {{ {} }}", arms.join(", "))
+                format!("match v {{ {}, {EVERY_CASE} }}", arms.join(", "))
             }
-            Kind::Codec(_) => format!("super::codec::lower_{}(v)", def.wit.replace('-', "_")),
+            Kind::Via(form) => format!(
+                "{{ let f: {} = ::core::convert::From::from(v); {} }}",
+                super::sides::rust_ty(types, form, false),
+                lower(types, form, "(&f)")
+            ),
             Kind::Json => "serde_json::to_string(v).unwrap_or_default()".into(),
             Kind::Opaque(_) => unreachable!(),
         };
-        writeln!(code, "#[allow(unused_variables, clippy::all)] fn lower_{id}(v: &{rust}) -> {wire} {{ {body} }}").unwrap();
+        writeln!(code, "#[allow(unused_variables, unreachable_patterns, clippy::all)] fn lower_{id}(v: &{rust}) -> {wire} {{ {body} }}").unwrap();
         // Lifting, for types that own their contents.
         if def.lifetimes == 0 {
             let path = rust.as_str();
@@ -545,7 +569,11 @@ pub(super) fn conversions(
                         .collect();
                     format!("match w {{ {} }}", arms.join(", "))
                 }
-                Kind::Codec(_) => format!("super::codec::lift_{}(w)?", def.wit.replace('-', "_")),
+                Kind::Via(form) => format!(
+                    "{{ let f: {} = {}; ::core::convert::TryFrom::try_from(f).map_err(|_| Refused)? }}",
+                    super::sides::rust_ty(types, form, false),
+                    lift(types, form, "w")
+                ),
                 Kind::Json => "serde_json::from_str(&w).map_err(|_| Refused)?".into(),
                 Kind::Opaque(_) => unreachable!(),
             };

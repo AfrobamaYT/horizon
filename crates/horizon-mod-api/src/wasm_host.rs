@@ -636,13 +636,6 @@ pub fn instantiate(
     Ok(entries)
 }
 
-// Both sides expand the same codecs; each uses only its own direction of some of them.
-#[allow(dead_code)]
-mod codec {
-    use super::Refused;
-    codecs!(super::glue::horizon::mod_api::types);
-}
-
 #[allow(
     clippy::all,
     unused_imports,

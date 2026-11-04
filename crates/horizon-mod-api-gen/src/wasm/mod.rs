@@ -141,6 +141,17 @@ pub(super) fn surface<'a>(
     let (bound, refused): (Vec<_>, Vec<_>) = methods
         .into_iter()
         .map(|method| match wit::signature(&types, &method) {
+            // A borrowed view handed back has nothing on the mod's side to point into.
+            Ok(_)
+                if IMPORTS.contains(&method.owner)
+                    && glue::borrowed_record(&types, &method.ret) =>
+            {
+                Err(Unbound {
+                    owner: method.owner,
+                    name: method.name,
+                    why: "returns a borrowed view, which crosses only as a resource".into(),
+                })
+            }
             Ok(_) => Ok(method),
             Err(why) => Err(Unbound {
                 owner: method.owner,

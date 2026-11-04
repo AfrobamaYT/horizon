@@ -8,10 +8,11 @@ use heck::{ToSnakeCase, ToUpperCamelCase};
 use std::fmt::Write;
 
 /// `ty` as Rust names it in a trait method's signature.
-fn rust_ty(types: &Types<'_>, ty: &Ty, ret: bool) -> String {
+pub(super) fn rust_ty(types: &Types<'_>, ty: &Ty, ret: bool) -> String {
     match ty {
         Ty::Unit => "()".into(),
         Ty::Prim(rust, _) | Ty::Wide(rust) => (*rust).into(),
+        Ty::Duration => "std::time::Duration".into(),
         Ty::Str(Str::Owned) => "String".into(),
         Ty::Str(Str::Borrowed) => "&str".into(),
         Ty::Str(Str::Static) => "&'static str".into(),
@@ -369,6 +370,7 @@ fn wire_type(types: &Types<'_>, ty: &Ty) -> String {
         }
         .into(),
         Ty::Wide(_) => "(u64, u64)".into(),
+        Ty::Duration => "u64".into(),
         Ty::Str(_) => "String".into(),
         Ty::List(item, _) | Ty::Array(item, _) => format!("Vec<{}>", wire_type(types, item)),
         Ty::Option(item) => format!("Option<{}>", wire_type(types, item)),
@@ -727,7 +729,7 @@ fn wire_is_list(types: &Types<'_>, ty: &Ty) -> bool {
     match ty {
         Ty::Str(_) | Ty::List(..) | Ty::Array(..) => true,
         Ty::Named(def) => {
-            matches!(&types.defs[*def].kind, Kind::Codec(wire) if wire.starts_with("list<") || *wire == "string")
+            matches!(&types.defs[*def].kind, Kind::Via(form) if wire_is_list(types, form))
         }
         _ => false,
     }
@@ -775,7 +777,6 @@ fn heap(types: &Types<'_>, ty: &Ty) -> bool {
         Ty::Named(def) => {
             let def = &types.defs[*def];
             match &def.kind {
-                super::ty::Kind::Codec(wire) => super::ty::codec_heap(wire),
                 super::ty::Kind::Json => true,
                 _ => wit::def_fields(def).into_iter().any(|t| heap(types, t)),
             }

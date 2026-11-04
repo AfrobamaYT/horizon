@@ -32,7 +32,22 @@ pub trait ConfigFiles {
 /// that it is the calling mod's.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
+#[horizon_mod_api_macros::wasm(via = String)]
 pub struct ConfigPath(String);
+
+impl From<&ConfigPath> for String {
+    fn from(path: &ConfigPath) -> Self {
+        path.0.clone()
+    }
+}
+
+/// A path checked as [`ConfigPath::new`] checks it.
+impl TryFrom<String> for ConfigPath {
+    type Error = ConfigFileError;
+    fn try_from(path: String) -> Result<Self, ConfigFileError> {
+        Self::new(&path)
+    }
+}
 
 impl ConfigPath {
     /// Checks `path` and makes a `ConfigPath` of it, or refuses with `ConfigFileError::InvalidPath`.
@@ -97,7 +112,7 @@ pub struct ConfigEntry {
 }
 
 /// Why a config file call was refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ConfigFileError {
     /// Called outside any mod's hook or part, so no mod owns the call.
@@ -117,8 +132,8 @@ pub enum ConfigFileError {
     NotAFolder,
     /// A symbolic link on the path, which could lead outside `config/`.
     Symlink,
-    /// Any other failure of the file system.
-    Io(std::io::ErrorKind),
+    /// Any other failure of the file system, as it describes itself.
+    Io(String),
 }
 
 impl std::fmt::Display for ConfigFileError {
@@ -132,7 +147,7 @@ impl std::fmt::Display for ConfigFileError {
             Self::NotAFile => f.write_str("not a file"),
             Self::NotAFolder => f.write_str("not a folder"),
             Self::Symlink => f.write_str("a symbolic link is on the path"),
-            Self::Io(kind) => write!(f, "{kind}"),
+            Self::Io(error) => f.write_str(error),
         }
     }
 }
