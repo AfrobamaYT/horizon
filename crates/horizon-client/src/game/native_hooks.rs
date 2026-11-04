@@ -892,22 +892,42 @@ impl GameLevel<'_> {
 
     /// On an authoritative server, the piston at `piston` is about to push
     /// the blocks at `push` one step `direction` (`[0, 1, 0]` is up; pulling
-    /// when it retracts) and destroy those at `destroy`:
-    /// `PistonBaseBlock.moveBlocks`, once its structure resolved. Set
-    /// `canceled` and nothing moves, as when the structure can't; a sticky
-    /// piston then retracts without its block, and clients are sent the
-    /// blocks rather than the retraction to replay.
+    /// when it retracts, `extending` false) and destroy those at `destroy`:
+    /// NeoForge's `PistonEvent.Pre`, in `PistonBaseBlock.moveBlocks`, once its
+    /// structure resolved. Set `canceled` and nothing moves, as when the
+    /// structure can't; a sticky piston then retracts without its block, and
+    /// clients are sent the blocks rather than the retraction to replay.
     #[inline(always)]
-    pub(super) fn native_piston_move(
+    pub(super) fn native_piston_pre(
         &self,
         dimension: LevelDimension,
         piston: BlockPos,
         direction: [i32; 3],
+        extending: bool,
         push: &[BlockPos],
         destroy: &[BlockPos],
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_piston_move(self, dimension, piston, direction, push, destroy, canceled);
+        mod_api::dispatch_piston_pre(
+            self, dimension, piston, direction, extending, push, destroy, canceled,
+        );
+    }
+    /// On an authoritative server, the piston at `piston` pushed the blocks
+    /// at `push` one step `direction` and destroyed those at `destroy`:
+    /// NeoForge's `PistonEvent.Post`, at the end of
+    /// `PistonBaseBlock.moveBlocks`, after the neighbour updates. It only
+    /// hears; `native_piston_pre` is the veto.
+    #[inline(always)]
+    pub(super) fn native_piston_post(
+        &self,
+        dimension: LevelDimension,
+        piston: BlockPos,
+        direction: [i32; 3],
+        extending: bool,
+        push: &[BlockPos],
+        destroy: &[BlockPos],
+    ) {
+        mod_api::dispatch_piston_post(self, dimension, piston, direction, extending, push, destroy);
     }
     /// The redstone signal the block `state` at `pos` gives on its `face`, the
     /// side that touches the block reading it: `BlockState.getDirectSignal`

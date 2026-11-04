@@ -461,16 +461,31 @@ pub trait LevelAccess {
     }
     /// Whether the piston at `piston` may push the blocks `push` one step
     /// `direction` and destroy `destroy` (`PistonBaseBlock.moveBlocks`, once
-    /// the structure resolved). Refused, it moves nothing, as a structure
-    /// that can't move. The default allows.
+    /// the structure resolved; `extending` is the piston's move type).
+    /// Refused, it moves nothing, as a structure that can't move. The default
+    /// allows.
     fn allow_piston_move(
         &self,
         _piston: BlockPos,
         _direction: Direction,
+        _extending: bool,
         _push: &[BlockPos],
         _destroy: &[BlockPos],
     ) -> bool {
         true
+    }
+    /// Observe the piston at `piston` having pushed the blocks `push` one step
+    /// `direction` and destroyed `destroy`, at the end of
+    /// `PistonBaseBlock.moveBlocks`, after the neighbour updates. The default
+    /// does nothing.
+    fn observe_piston_moved(
+        &self,
+        _piston: BlockPos,
+        _direction: Direction,
+        _extending: bool,
+        _push: &[BlockPos],
+        _destroy: &[BlockPos],
+    ) {
     }
     /// Observe a committed `Level.setBlock` state change, before its side effects.
     fn observe_block_changed(&self, _pos: BlockPos, _old: BlockStateId, _new: BlockStateId) {}

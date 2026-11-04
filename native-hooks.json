@@ -778,12 +778,24 @@
       }
     },
     {
-      "name": "piston_move", "doc": "On an authoritative server, the piston at `piston` is about to push\nthe blocks at `push` one step `direction` (`[0, 1, 0]` is up; pulling\nwhen it retracts) and destroy those at `destroy`:\n`PistonBaseBlock.moveBlocks`, once its structure resolved. Set\n`canceled` and nothing moves, as when the structure can't; a sticky\npiston then retracts without its block, and clients are sent the\nblocks rather than the retraction to replay.", "side": "server",
+      "name": "piston_pre", "doc": "On an authoritative server, the piston at `piston` is about to push\nthe blocks at `push` one step `direction` (`[0, 1, 0]` is up; pulling\nwhen it retracts, `extending` false) and destroy those at `destroy`\n(NeoForge's `PistonEvent.Pre`, in `PistonBaseBlock.moveBlocks`, once its\nstructure resolved). Set\n`canceled` and nothing moves, as when the structure can't; a sticky\npiston then retracts without its block, and clients are sent the\nblocks rather than the retraction to replay. Diverges from upstream: `piston_move` is renamed to\n`piston_pre`, and `piston_post` is new.", "neoforge": "PistonEvent.Pre",
+      "side": "server",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_piston_move",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_piston_pre",
       "mod_api": {
         "contract": "cancel",
         "out": "canceled"
+      }
+    },
+    {
+      "name": "piston_post",
+      "doc": "On an authoritative server, the piston at `piston` pushed the blocks at\n`push` one step `direction` (`[0, 1, 0]` is up; pulling when it\nretracts, `extending` false) and destroyed those at `destroy`\n(NeoForge's `PistonEvent.Post`, at the end of `PistonBaseBlock.moveBlocks`,\nafter the neighbour updates). It only hears; `piston_pre` is the veto.\nServer-side. Diverges from upstream: `piston_move` is split into\n`piston_pre` and `piston_post`.",
+      "neoforge": "PistonEvent.Post",
+      "side": "server",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_piston_post",
+      "mod_api": {
+        "contract": "listen"
       }
     },
     {
