@@ -1835,6 +1835,7 @@ impl Game<'_> {
     /// Only the entities whose id is above `after` (0: all of them).
     fn lan_entities(&mut self, out: &mut States, drain_minecart_steps: bool, after: u32) {
         out.clear();
+        let mut speeds = super::lan_attributes::SpeedByType::default();
         for m in self.mobs.iter().filter(|m| !m.removed && m.id > after) {
             let Some(host) = self.lan.as_ref() else {
                 return;
@@ -1876,7 +1877,7 @@ impl Game<'_> {
             e.precise = m.species() == horizon_client::mobs::Species::HappyGhast
                 && horizon_client::mobs::happy_ghast::on_still_timeout(m);
             mob_freeze_meta(m, &mut e.meta, &mut e.defaults);
-            self.mob_attributes(m, &mut e.attributes);
+            self.mob_attributes(m, &mut speeds, &mut e.attributes);
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
