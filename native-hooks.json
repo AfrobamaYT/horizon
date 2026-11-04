@@ -126,10 +126,6 @@
       "target": "horizon_client::game::native_biome_colors::Game<'_>::native_refresh_biome_colors", "side": "client"
     },
     {
-      "name": "neighbor_signal",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_neighbor_signal", "side": "server"
-    },
-    {
       "name": "weather",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_weather", "side": "both"
     },
