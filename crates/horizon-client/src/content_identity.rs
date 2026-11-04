@@ -228,7 +228,9 @@ mod tests {
                 r#"{{"minecraft:menu":{{"entries":{{"minecraft:generic_9x1":{{"protocol_id":0}}{extra}}}}}}}"#
             );
             std::fs::write(root.join("registries.json"), report).unwrap();
-            let hash = identity(&root).unwrap();
+            std::fs::write(root.join("items.json"), "{}").unwrap();
+            let defaults = horizon_world::item_defaults::read(&root).unwrap();
+            let hash = identity(&root, &defaults).unwrap();
             std::fs::remove_dir_all(&root).unwrap();
             hash
         };
@@ -264,13 +266,15 @@ mod tests {
                 membership,
             )
             .unwrap();
-            identity(&root).unwrap()
+            std::fs::write(root.join("items.json"), "{}").unwrap();
+            let defaults = horizon_world::item_defaults::read(&root).unwrap();
+            (identity(&root, &defaults).unwrap(), defaults)
         };
         let mapping = r#"{"test:press":"test:machine","test:mill":"test:machine"}"#;
-        let machine = build("first", "test:machine", 44, mapping);
-        assert_eq!(identity(&root.join("first")).unwrap(), machine);
-        assert_ne!(machine, build("wire", "test:machine", 45, mapping));
-        assert_ne!(machine, build("name", "test:other", 44, mapping));
+        let (machine, defaults) = build("first", "test:machine", 44, mapping);
+        assert_eq!(identity(&root.join("first"), &defaults).unwrap(), machine);
+        assert_ne!(machine, build("wire", "test:machine", 45, mapping).0);
+        assert_ne!(machine, build("name", "test:other", 44, mapping).0);
         assert_ne!(
             machine,
             build(
@@ -279,6 +283,7 @@ mod tests {
                 44,
                 r#"{"test:press":"test:machine"}"#
             )
+            .0
         );
         assert_eq!(
             machine,
@@ -288,6 +293,7 @@ mod tests {
                 44,
                 r#"{"test:mill":"test:machine","test:press":"test:machine"}"#
             )
+            .0
         );
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -307,7 +313,9 @@ mod tests {
             "minecraft:mob_effect":{"entries":{"minecraft:speed":{"protocol_id":0}}}}"#,
         )
         .unwrap();
-        assert_eq!(identity(&root).unwrap(), hash_facts(facts).unwrap());
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        assert_eq!(identity(&root, &defaults).unwrap(), hash_facts(facts).unwrap());
         std::fs::remove_dir_all(&root).unwrap();
     }
 

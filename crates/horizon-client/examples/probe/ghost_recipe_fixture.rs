@@ -19,7 +19,8 @@ pub fn main() -> horizon_client::Result<()> {
     let usage = "usage: ghost_recipe_fixture RESOURCES CASES OUTPUT";
     let root = Path::new(args.get(1).ok_or(usage)?);
     let cases = fs::read_to_string(args.get(2).ok_or(usage)?)?;
-    let items = Items::catalog(root, &PackOverlay::NONE)?;
+    let defaults = horizon_world::item_defaults::read(root)?;
+    let items = Items::catalog(root, &PackOverlay::NONE, &defaults)?;
     let recipes = Recipes::load(root, &items, &PackOverlay::NONE)?;
     let index = RecipeIndex::load(root, &PackOverlay::NONE);
     let mut book = Book::build(&recipes, &items);

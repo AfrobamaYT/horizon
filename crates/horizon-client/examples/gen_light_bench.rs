@@ -24,6 +24,9 @@
 //! neighbour waits). Sleeping workers don't compete for cores, so this shows
 //! how the pipeline scales to many workers even on a busy machine.
 extern crate horizon_client_lib as horizon_client;
+#[path = "../src/test_resources.rs"]
+mod test_resources;
+use horizon_world::native_load_context::DataLoadOrigin;
 use horizon_client::{
     assets::Assets,
     biome::Biomes,
@@ -286,7 +289,14 @@ fn main() -> Result<(), Error> {
         assets: assets.clone(),
         render,
     });
-    let terrain = || VanillaTerrain::new(&root.join("worldgen"), assets.registry, &biomes, seed);
+    let item_data = test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
+    let terrain_resources = horizon_client::vanillagen::TerrainResources {
+        dir: &root.join("worldgen"),
+        registry: assets.registry,
+        biomes: &biomes,
+        item_data: &item_data,
+    };
+    let terrain = || VanillaTerrain::new(terrain_resources, seed);
     let go = |center, radius, n| -> Result<Run, Error> {
         match &simulate {
             Some(ms) => {

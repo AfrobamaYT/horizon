@@ -69,12 +69,13 @@ pub fn main() -> horizon_client::Result<()> {
     );
     let input = fs::read_to_string(args.get(2).ok_or("missing INPUT")?)?;
     let types = MobTypes::load(root)?;
-    let loot = LootData::load(root, &PackOverlay::NONE)?;
+    let defaults = horizon_world::item_defaults::read(root)?;
+    let loot = LootData::load(root, &PackOverlay::NONE, &defaults)?;
     // Block loot for an enderman's carried block (BlockState.getDrops).
     let assets = Assets::load(root)?;
     let registry = assets.registry;
     let facts = BlockFacts::load(root, registry)?;
-    let block_items = Items::load(root, registry, &facts, &PackOverlay::NONE)?;
+    let block_items = Items::load(root, registry, &facts, &PackOverlay::NONE, &defaults)?;
     // The stand-in level's random (RandomSource.create(0)), never reset.
     let mut level_random = LegacyRandom::new(0);
     let mut out = String::new();

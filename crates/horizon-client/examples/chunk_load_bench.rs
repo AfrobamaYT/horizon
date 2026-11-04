@@ -16,6 +16,9 @@
 //! meshes (vertices and visibility) shows that an A/B pair of builds made the
 //! same ones.
 extern crate horizon_client_lib as horizon_client;
+#[path = "../src/test_resources.rs"]
+mod test_resources;
+use horizon_world::native_load_context::DataLoadOrigin;
 use horizon_client::{
     assets::Assets,
     biome::Biomes,
@@ -87,7 +90,16 @@ fn main() -> Result<(), Error> {
         assets: assets.clone(),
         render,
     });
-    let terrain = VanillaTerrain::new(&root.join("worldgen"), assets.registry, &biomes, seed)?;
+    let item_data = test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
+    let terrain = VanillaTerrain::new(
+        horizon_client::vanillagen::TerrainResources {
+            dir: &root.join("worldgen"),
+            registry: assets.registry,
+            biomes: &biomes,
+            item_data: &item_data,
+        },
+        seed,
+    )?;
 
     // Generation and light, on the game's worker pool (`threads` workers).
     // Meshing is left out here and measured on its own below.

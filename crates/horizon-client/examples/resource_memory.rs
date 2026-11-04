@@ -10,6 +10,9 @@
 //! with `footprint`'s physical footprint, the number the OS charges: RSS also
 //! counts freed pages the allocator marked reusable.
 extern crate horizon_client_lib as horizon_client;
+#[path = "../src/test_resources.rs"]
+mod test_resources;
+use horizon_world::native_load_context::DataLoadOrigin;
 use horizon_client::{
     assets::Assets, biome::Biomes, blocks::BlockFacts, collisions, crafting::Recipes, items::Items,
     light::LightTables, mesher::MeshTables, models, motion::MotionResources,
@@ -107,7 +110,14 @@ fn main() -> Result<()> {
     // The game decodes gameplay facts once for both tables (BlockFacts::load_pair).
     let (facts, behaviours) = BlockFacts::load_pair(&root, assets.registry)?;
     step("block facts+behaviours");
-    let items = Items::load(&root, assets.registry, &facts, &PackOverlay::NONE)?;
+    let item_data = test_resources::item_data(&root, DataLoadOrigin::ClientPreload)?;
+    let items = Items::load(
+        &root,
+        assets.registry,
+        &facts,
+        &PackOverlay::NONE,
+        item_data.defaults(),
+    )?;
     step("items");
     let recipes = Recipes::load(&root, &items, &PackOverlay::NONE)?;
     step("recipes");
@@ -126,7 +136,15 @@ fn main() -> Result<()> {
     step("collision");
     let motion = MotionResources::load_with_facts(&root, &assets, &facts)?;
     step("motion");
-    let terrain = VanillaTerrain::new(&root.join("worldgen"), assets.registry, &biomes, 1234)?;
+    let terrain = VanillaTerrain::new(
+        horizon_client::vanillagen::TerrainResources {
+            dir: &root.join("worldgen"),
+            registry: assets.registry,
+            biomes: &biomes,
+            item_data: &item_data,
+        },
+        1234,
+    )?;
     step("worldgen");
     println!(
         "{} block states; live {:.0} MB, RSS {:.0} MB",
@@ -149,7 +167,7 @@ fn main() -> Result<()> {
     // Keep everything alive until the end.
     drop((
         terrain, behaviours, motion, collision, tables, light, biomes, recipes, items, facts,
-        assets,
+        assets, item_data,
     ));
     Ok(())
 }
