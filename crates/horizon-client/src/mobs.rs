@@ -2884,6 +2884,9 @@ pub trait MobHooks {
     /// `EntityMobGriefingEvent`: whether mob `mob` may grief, `rule` (the
     /// `mob_griefing` game rule) unless a mod says otherwise.
     fn can_grief(&self, mob: u32, rule: bool) -> bool;
+    /// `LivingVisibilityEvent`: `visibility`, the player's visibility
+    /// percent as mob `looking` targets it, as mods scale it.
+    fn living_visibility(&self, player: &PlayerView, looking: u32, visibility: f64) -> f64;
 }
 impl MobWorld<'_> {
     /// `EventHooks.canEntityGrief(level, mob)`: the `mob_griefing` rule, or
@@ -2894,6 +2897,16 @@ impl MobWorld<'_> {
             Some(hooks) => hooks.can_grief(mob, self.mob_griefing),
             None => self.mob_griefing,
         }
+    }
+    /// `LivingEntity.getVisibilityPercent(level, looking)` of the player `p`:
+    /// `visibility` holds vanilla's factors; NeoForge's `LivingVisibilityEvent`
+    /// scales it last, before the clamp to 0..=10.
+    pub fn player_visibility(&self, p: &PlayerView, looking: u32, visibility: f64) -> f64 {
+        let visibility = match self.mob_hooks {
+            Some(hooks) => hooks.living_visibility(p, looking, visibility),
+            None => visibility,
+        };
+        visibility.clamp(0.0, 10.0)
     }
 }
 /// `Entity.getTeam` of the player and of the mobs on a team.

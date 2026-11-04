@@ -7876,6 +7876,17 @@ impl Game<'_> {
     pub(super) fn native_entity_mob_griefing(&self, entity: EntityRef, can_grief: &mut bool) {
         mod_api::dispatch_entity_mob_griefing(self, entity, can_grief);
     }
+    /// `LivingVisibilityEvent` (`LivingEntity.getVisibilityPercent`): how
+    /// visible `entity` is to `looking`, which scales the range a targeting
+    /// check sees it from. `visibility` comes in as vanilla's percent.
+    pub(super) fn native_living_visibility(
+        &self,
+        entity: LivingRef,
+        looking: Option<EntityRef>,
+        visibility: &mut f64,
+    ) {
+        mod_api::dispatch_living_visibility(self, entity, looking, visibility);
+    }
     /// `MobEffect.shouldApplyEffectTickThisTick` for a content mod's effect
     /// `effect` (`ruby:bleeding`), each tick a player or a mob has it, in
     /// `MobEffectInstance.tickServer` before it counts down: `tick_count` is
