@@ -1,0 +1,26 @@
+# Modding Horizon
+
+> Horizon is Minecraft: Java Edition 26.3 in Rust. A mod is one `.hmod`: content (assets/ and data/), plus an optional Rust crate built native or to mod.wasm against the `mod_api` crate (`horizon-mod-api`).
+
+Prefer a hook or Part method; otherwise a `trait_method` injection with a `Host` binding; a `helper` bound to `Game` is a last resort. Every injection is a hook request. NeoForge 26.3 names, no `on_` prefix, `&mut` events, writes take `host`.
+
+## Rules
+
+- [Rules for agents](agents.md): the rules in order and the manifest fields.
+- [Injections](injections.md): the decision ladder, convertible injections, the hook-request template, ordering.
+
+## Guide
+
+- [Your first native mod](start/first-mod.md)
+- [Installing and using mods](start/installing.md)
+- [Making a content mod](how-to/content-mods.md)
+- [Native mods](how-to/native-mods.md)
+- [Trait mods, Parts and attachments](concepts/trait-mods.md)
+- [Publishing your mod](how-to/publish.md)
+
+## Reference
+
+- [The manifest and the package](reference/manifest.md)
+- [The registry index](reference/registry-index.md)
+- [Hook notes](reference/hook-notes.md)
+- [The mod API (rustdoc)](reference/api.md)

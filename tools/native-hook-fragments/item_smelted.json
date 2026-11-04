@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "item_smelted",
+      "doc": "`FurnaceResultSlot.checkTakeAchievements` ran for a server player at a\nfurnace, blast furnace or smoker's result slot: `player` is their UUID\nand `player_entity_id` their network id; `stack` and `amount_removed`\nare what vanilla passes there (`getSmelting`, `getAmountRemoved`). A\nclick or a throw passes the taken stack and its count; a shift-click\npasses the slot's stack as it was with the count moved, then what\nstayed in the slot (`None` once it is empty) with 0; a hotbar swap\npasses the taken stack with 0. Fires before `furnace_extract`.\nServer-side.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_item_smelted",
       "neoforge": "PlayerEvent.ItemSmeltedEvent",
       "side": "server",

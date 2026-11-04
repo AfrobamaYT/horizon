@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "block_tool_modification",
+      "doc": "A tool is about to transform a block. Cancel or replace the final state;\n`None` suppresses the transformation.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_tool_modification",
       "neoforge": "BlockEvent.BlockToolModificationEvent",
       "side": "both",

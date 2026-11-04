@@ -39,7 +39,7 @@ fn run_refuses_code_mods_without_building() {
         error.contains("horizon-launcher native-build . --trust-native-code"),
         "{error}"
     );
-    assert!(error.contains("docs/native-mods.md"), "{error}");
+    assert!(error.contains("docs/modding/src/how-to/native-mods.md"), "{error}");
     assert!(
         !project.join("target").exists(),
         "run must refuse before building"

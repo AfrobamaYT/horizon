@@ -1,5 +1,5 @@
 //! Writes to a living entity for native server mods, through a `LivingRef`
-//! (docs/native-mods.md, "Entity and level handles"): `LivingEntity.swing`,
+//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles"): `LivingEntity.swing`,
 //! the arrows and bee stingers stuck in a player (`setArrowCount`,
 //! `setStingerCount`, `removeArrowTime`, `removeStingerTime`),
 //! `Mob.setLeftHanded`, `Mob.setCanPickUpLoot` and `useItemRemaining`. Reads

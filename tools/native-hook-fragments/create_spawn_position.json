@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "create_spawn_position",
+      "doc": "Before a new server level selects its initial world spawn\n(NeoForge's `LevelEvent.CreateSpawnPosition`).",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_create_spawn_position",
       "neoforge": "LevelEvent.CreateSpawnPosition",
       "side": "server",

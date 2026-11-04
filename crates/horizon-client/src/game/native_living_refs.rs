@@ -1,5 +1,5 @@
 //! Living entities for native server mods, through a `LivingRef`
-//! (docs/native-mods.md, "Entity and level handles", #7387): the equipment
+//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): the equipment
 //! of mobs, players and armor stands, throwing a stack, and whether a mob
 //! is tamed. Reads return `None`, writes false, for a stale handle or on a
 //! client; the exception is the reads marked side `both` (`living`, `equipment`,

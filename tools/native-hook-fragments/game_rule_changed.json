@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "game_rule_changed",
+      "doc": "A server game rule `rule` (`minecraft:keep_inventory`) was set to\n`value` (`GameRuleChangedEvent`, from `GameRules.set` with a server:\n`/gamerule`, the game rules screen, the management protocol, a test\nenvironment, `server.properties`). `actor` is present when a player\ncaused the change. The server and complete game rules are not exposed\nby this event (tracked on #29). Server-side.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_game_rule_changed",
       "neoforge": "GameRuleChangedEvent",
       "side": "server",

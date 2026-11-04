@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "screen_closing",
+      "doc": "The `screen` that was open is being replaced (`ScreenEvent.Closing`), after `native_screen_opening` let it.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_closing",
       "neoforge": "ScreenEvent.Closing",
       "side": "client",

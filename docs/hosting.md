@@ -230,7 +230,7 @@ keep vanilla's names and formats, so going back to vanilla works too.
 
 A native-mods build exports a standalone engine
 (`horizon-launcher native-build FOLDER --server-output DIR --version TAG --trust-native-code`;
-see [Native mods](native-mods.md#standalone-server-export)). Point the server at it:
+see [Native mods](modding/src/how-to/native-mods.md#standalone-server-export)). Point the server at it:
 
     horizon-server --dir SERVER config set engine.path=/absolute/export/horizon-engine
     horizon-server --dir SERVER restart

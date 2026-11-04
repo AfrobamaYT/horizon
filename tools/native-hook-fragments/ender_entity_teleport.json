@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "ender_entity_teleport",
+      "doc": "An enderman or a shulker is about to teleport on its own\n(`EntityTeleportEvent.EnderEntity`). A mod may move `target` or cancel.",
       "target": "horizon_client_lib::mobs::enderman::native_ender_entity_teleport",
       "neoforge": "EntityTeleportEvent.EnderEntity",
       "side": "server",

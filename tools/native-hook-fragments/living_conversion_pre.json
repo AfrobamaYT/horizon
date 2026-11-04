@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "living_conversion_pre",
+      "doc": "A mob is about to convert into another type (NeoForge's\n`LivingConversionEvent.Pre`, vanilla's `Mob.convertTo`): a zombie\ndrowning, a piglin or hoglin in the Overworld, a tadpole growing, a\nmooshroom sheared by a dispenser, a pig or villager struck by\nlightning. `outcome` is the new type. Set `cancel` to keep the mob as\nit is; a drowning zombie starts its timers again. Not told: a\nmooshroom a player shears, a zombie villager's cure, a villager turned\nby a zombie.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_living_conversion_pre",
       "neoforge": "LivingConversionEvent.Pre",
       "side": "server",
