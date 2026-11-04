@@ -51,9 +51,15 @@ mod tests {
         pub(super) struct NativeExplosionStart<'a>(pub &'a ());
         pub(super) struct NativeItemFished<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
+        #[derive(Debug, PartialEq)]
         pub(super) enum ScreenOpening {
             Cancel,
-            ModScreen(String),
+            ModScreen,
+        }
+        #[derive(Debug, PartialEq)]
+        pub(super) struct Answered<T> {
+            pub(super) answer: T,
+            pub(super) mod_id: &'static str,
         }
         pub(super) struct StackedOnOther<'a> {
             pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
@@ -341,24 +347,30 @@ mod tests {
             .is_some_and(|installed| installed.subscribers.contains_any(hook as usize))
     }
     fn entered(hook_id: HookId, hook: &'static str) -> impl Iterator<Item = &'static dyn Hooks> {
+        entered_with_id(hook_id, hook).map(|(_, hooks)| hooks)
+    }
+    fn entered_with_id(
+        hook_id: HookId,
+        hook: &'static str,
+    ) -> impl Iterator<Item = (&'static str, &'static dyn Hooks)> {
         MODS.get().into_iter().flat_map(move |installed| {
             installed
                 .subscribers
                 .indices(hook_id as usize)
                 .map(move |index| {
-                    let hooks = &*installed.mods[index].hooks;
+                    let entry = &installed.mods[index];
                     ENTERED.with(|entered| entered.borrow_mut().push((index, hook)));
-                    hooks
+                    (entry.id, &*entry.hooks)
                 })
         })
     }
     struct ModEntry {
-        _id: &'static str,
+        id: &'static str,
         hooks: Box<dyn Hooks>,
     }
     impl ModEntry {
         fn new(id: &'static str, hooks: Box<dyn Hooks>) -> Self {
-            Self { _id: id, hooks }
+            Self { id, hooks }
         }
     }
     struct Registrar;
@@ -1022,6 +1034,48 @@ mod tests {
             );
             assert_eq!((container.0, canceled), (expected, false));
         }
+    }
+
+    #[test]
+    fn an_answer_names_the_mod_that_gave_it() {
+        struct Passer;
+        #[mod_api::__subscriptions]
+        impl Hooks for Passer {
+            fn screen_opening(
+                &self,
+                _: &dyn ClientHost,
+                _: &mut ScreenOpeningEvent<'_>,
+            ) -> Option<ScreenOpening> {
+                None
+            }
+        }
+        struct Opener;
+        #[mod_api::__subscriptions]
+        impl Hooks for Opener {
+            fn screen_opening(
+                &self,
+                _: &dyn ClientHost,
+                _: &mut ScreenOpeningEvent<'_>,
+            ) -> Option<ScreenOpening> {
+                Some(ScreenOpening::ModScreen)
+            }
+        }
+        let mods: Vec<ModEntry> = vec![
+            ModEntry::new("passer", Box::new(Passer)),
+            ModEntry::new("opener", Box::new(Opener)),
+            ModEntry::new("late", Box::new(Opener)),
+        ];
+        install(mods.into());
+        let view = NativeScreenView(&());
+        let mut outcome = None;
+        dispatch_screen_opening(&TestHost, &view, &view, &mut outcome);
+        assert_eq!(
+            outcome,
+            Some(Answered {
+                answer: ScreenOpening::ModScreen,
+                mod_id: "opener"
+            })
+        );
     }
 
     #[test]

@@ -119,6 +119,11 @@ pub(super) fn emit(
         let replacement = fresh_name("replacement", &mut used);
         let contract = api["contract"].as_str().ok_or("contract missing")?;
         let out = api.get("out").and_then(|v| v.as_str());
+        // A replace hook that names which mod answered: its output holds `Answered<T>`.
+        let answered = api.get("answered_by").is_some_and(|v| v == "mod");
+        if answered && (contract != "replace" || api.get("scope").is_some()) {
+            return Err(format!("{name}: answered_by needs a global replace hook"));
+        }
         if !matches!(
             (contract, out),
             ("cancel" | "replace" | "collect", Some(_)) | ("listen", None)
@@ -144,6 +149,11 @@ pub(super) fn emit(
             match contract {
                 "cancel" if reference.elem.to_token_stream().to_string() == "bool" => {
                     " -> Flow".to_owned()
+                }
+                "replace" if answered => {
+                    let answer = answered_type(&reference.elem)
+                        .ok_or_else(|| format!("{name}: output must be Option<Answered<T>>"))?;
+                    format!(" -> Option<{}>", answer.to_token_stream())
                 }
                 "replace" => format!(" -> {}", reference.elem.to_token_stream()),
                 "collect" => String::new(),
@@ -371,6 +381,8 @@ pub(super) fn emit(
         // A trait mod's call is marked with the mod for a panic to name; render hooks are called bare.
         let each = if is_render {
             format!("super::entered_render(RenderHookId::{hook_id})")
+        } else if answered {
+            format!("super::entered_with_id(HookId::{hook_id}, \"{name}\")")
         } else {
             format!("super::entered(HookId::{hook_id}, \"{name}\")")
         };
@@ -380,19 +392,25 @@ pub(super) fn emit(
                 "if matches!({callee}.{name}({invoke}), Flow::Cancel) {{ *{o} = true; {exit}; }}",
                 o = out.unwrap()
             ),
+            "replace" if answered => format!(
+                "if let Some({replacement}) = {callee}.{name}({invoke}) {{ *{o} = Some(Answered {{ answer: {replacement}, mod_id }}); {exit}; }}",
+                o = out.unwrap()
+            ),
             "replace" => format!(
                 "if let Some({replacement}) = {callee}.{name}({invoke}) {{ *{o} = Some({replacement}); {exit}; }}",
                 o = out.unwrap()
             ),
             _ => format!("{callee}.{name}({invoke});"),
         };
+        let binding = if answered {
+            format!("(mod_id, {mod_item})")
+        } else {
+            mod_item.clone()
+        };
         let (lookup, calls) = match &scoped {
             None => (
                 String::new(),
-                format!(
-                    "for {mod_item} in {each} {{ {} }}",
-                    call(&mod_item, "break")
-                ),
+                format!("for {binding} in {each} {{ {} }}", call(&mod_item, "break")),
             ),
             Some((_, lookup)) => (
                 // The parts are looked up first: the key may be moved into the event.
@@ -441,4 +459,22 @@ pub(super) fn emit(
         render_hook_constants,
         render_hook_count,
     })
+}
+
+/// `T` of an `Option<Answered<T>>` output, if that is its type.
+fn answered_type(ty: &Type) -> Option<&Type> {
+    generic_of(generic_of(ty, "Option")?, "Answered")
+}
+
+/// `T` of a `name<T>` type.
+fn generic_of<'a>(ty: &'a Type, name: &str) -> Option<&'a Type> {
+    let Type::Path(path) = ty else { return None };
+    let segment = path.path.segments.last().filter(|s| s.ident == name)?;
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    match args.args.first()? {
+        syn::GenericArgument::Type(ty) => Some(ty),
+        _ => None,
+    }
 }
