@@ -343,10 +343,7 @@ pub fn knockback_held() -> [Option<crate::items::ItemStack>; 2] {
 /// `f` of the main-hand stack of `direct`, a hit's direct entity, when it is the attacker
 /// the enclosing attack scope recorded (`DamageSource.getWeaponItem`: the direct entity's
 /// weapon), else of none. Borrowed, not cloned.
-pub fn with_weapon_of<R>(
-    direct: i32,
-    f: impl FnOnce(Option<&crate::items::ItemStack>) -> R,
-) -> R {
+pub fn with_weapon_of<R>(direct: i32, f: impl FnOnce(Option<&crate::items::ItemStack>) -> R) -> R {
     let known = direct != 0 && direct == KNOCKBACK_ATTACKER.get();
     KNOCKBACK_HELD.with_borrow(|held| f(held[0].as_ref().filter(|_| known)))
 }
@@ -1163,9 +1160,11 @@ impl HurtWorld for Environment<'_> {
             direct: 0,
             position: None,
         };
-        let canceled =
-            self.level
-                .incoming_canceled(Hurting::Player(self.entity, source), self.victim, container);
+        let canceled = self.level.incoming_canceled(
+            Hurting::Player(self.entity, source),
+            self.victim,
+            container,
+        );
         self.canceled |= canceled;
         Ok(canceled)
     }
