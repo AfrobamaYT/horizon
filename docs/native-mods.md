@@ -37,7 +37,7 @@ fn item_model_property(
 }
 ```
 
-`ClientHost`, `ItemModelPropertyEvent`, and `StackView` are exported by `horizon_client::mod_api`. The stack is borrowed,
+`ClientHost`, `ItemModelPropertyEvent`, and `StackView` are exported by `mod_api`. The stack is borrowed,
 including for nested bundle items: `item`, `count`, explicit component `patch` (not merged
 defaults), and the runtime bundle selection. Listeners run in mod order; later answers win.
 Use `"property": "example:charged"` with both `on_true` and `on_false` in the item's
@@ -505,10 +505,11 @@ The hook may be called many times a craft; the answer must be the same for the s
 
 ### The mod's crate
 
-The root `Cargo.toml` and `src/` form the mod's one crate. It depends on `horizon-client` for
-`mod_api`; the launcher links it into the generated game executable, rather than making the game
-library depend on the mod. The launcher stages the crate as `native-api/<mod>/`, rewrites its game
-dependency to the staged game and resolves [mod dependencies](#dependencies-between-trait-mods).
+The root `Cargo.toml` and `src/` form the mod's one crate. It depends on `horizon-mod-api` (lib
+`mod_api`) and never on the game, so the same crate builds native or to `mod.wasm`; the launcher
+links it into the generated game executable, rather than making the game library depend on the
+mod. The launcher stages the crate as `native-api/<mod>/`, rewrites its mod API dependency to the
+staged one and resolves [mod dependencies](#dependencies-between-trait-mods).
 A project has no separate workspace or lock file. Arbitrary path and git dependencies are refused;
 the launcher supplies the checked paths needed for the game and declared mod dependencies.
 
@@ -602,7 +603,7 @@ mob's death loot; on other rolls `place` is `None`.
 ### Recipe book category declarations (first slice of #5501)
 
 The `recipe_book_categories` hook declares recipe book categories. Trait mods import
-`RecipeBookCategory` from `horizon_client::mod_api` and append declarations in
+`RecipeBookCategory` from `mod_api` and append declarations in
 `Hooks::recipe_book_categories`:
 
 ```rust,ignore
@@ -820,6 +821,7 @@ one, where vanilla gives the `by` one.
 
 - Tag and fluid reads from any hook that has a `Host`: `host.block_state_in_tag(state, "minecraft:logs")` (`BlockState.is(TagKey)`), `host.item_stack_in_tag(&stack, tag)` (`ItemStack.is(TagKey)`), `host.state_fluid_state(state)` (`BlockState.getFluidState`: water for a waterlogged state, `None` for an id no state has) and `host.fluid_in_tag(fluid, "minecraft:water")` (`FluidState.is(TagKey)`). The tag may be written with or without `minecraft:`, with no `#`. They read the world's merged tags, data packs and content mods included; an unknown tag is false and an empty stack tests `minecraft:air`. The tag reads are `None` on a client and before the world loads its tags. `host.state_outline(state)` (`BlockState.getShape` with an empty getter at the origin) gives a state's outline boxes in the block's own space, with no random offset and no world context; empty for air, `None` for an id no state has. `host.tag_members(TagRegistry::Block, tag)` (also `Item` and `Fluid`; `HolderSet.Named` iteration) lists a tag's members in vanilla's order, the file's order with nested tags in place and the first occurrence kept: an unknown tag lists nothing, and it is `None` where the tag reads are. `level.fluid_state(host, pos)` (`BlockGetter.getFluidState`) reads the fluid at a position, `None` where the block read is (an unloaded chunk or a `y` outside the world).
 
+- A block part's `is_pathfindable` changes whether a path of a `PathComputationType` (`Land`, `Water`, `Air`) may go through the block's states (`BlockBehaviour.isPathfindable`); `event.pathfindable` starts with the block's own answer. The answer depends on the state and the type alone: the game asks once per state and type when parts resolve (at world load and on every `/reload`) and path finding, spawning and the goals read the stored answer, so a part cannot answer from a position, a level or the time. Server-side.
 - A block part's `should_check_weak_power` adjusts whether a signal query reads indirect power through that block, for its position and input direction.
 
 - A block part's `should_redstone_wire_connect_to` adjusts whether redstone wire connects to that block for the given position and optional direction.
@@ -914,9 +916,9 @@ or transactions. Declarations still go on each event or registrar.
 
 - `native_screen_render_post`, the point of `ScreenEvent.Render.Post`: a native mod draws over the open screen after it and its tooltips, given its id, the server-opened menu's vanilla type (`menu`) and title, its container panel, its slot count, the mouse in GUI pixels and the partial tick (`NativeScreenView`). Every container, station and mod window draws on the inventory screen and so reports `inventory`: tell them apart by `menu` and `title` (None on a window the client opened) and by `slots`. It does not fire on the title screen, nor for the prompts, books and sign editors drawn over gameplay after it.
 
-- `native_screen_exclusion()` answers the rectangles (`[x, y, width, height]`, GUI pixels) the open screen keeps clear for the things drawn beside its window: the recipe book's panel, the creative tab rows above and below the window, and the active effects right of the inventory, then every rectangle a mod added in `native_screen_exclusion_areas(screen, areas)` (a side panel, a button column; a mod that draws over a screen reports where). A mod that lays out panels of its own, as a recipe viewer does, shrinks its rows and columns around them. Empty and non-finite rectangles are dropped. Empty with no screen up. Vanilla has no counterpart; NeoForge recipe viewers take the same from their own API (EMI's `EmiExclusionArea`, JEI's `IGuiContainerHandler.getGuiExtraAreas`). Client-side.
+- `native_screen_exclusion()` answers the rectangles (`[x, y, width, height]`, GUI pixels) the open screen keeps clear for the things drawn beside its window: the recipe book's panel, the creative tab rows above and below the window, and the active effects right of the inventory, then every rectangle a mod added in `native_screen_exclusion_areas(screen, areas)` (a side panel, a button column; a mod that draws over a screen reports where). Compute it once per screen layout and cache it, not per frame: the rectangles move only when the window, the recipe book or the effects change. A mod that lays out panels of its own, as a recipe viewer does, shrinks its rows and columns around them. Empty and non-finite rectangles are dropped. Empty with no screen up. Vanilla has no counterpart; NeoForge recipe viewers take the same from their own API (EMI's `EmiExclusionArea`, JEI's `IGuiContainerHandler.getGuiExtraAreas`). Client-side.
 
-- `native_modify_default_components(item, components)`, in `horizon-world`'s `item_defaults.rs`: an item's default
+- `native_modify_default_components(context, item, components)`, in `horizon-world`'s `item_defaults.rs`: an item's default
   components in `items.json`'s form, for any item, vanilla's included (NeoForge's `ModifyDefaultComponentsEvent`). Insert
   or replace a component to set it (`"minecraft:max_stack_size": 16`), remove it to take it away. The item table,
   loot, enchanting and item models all read the changed defaults, and stacks are saved and sent against them as
@@ -947,7 +949,7 @@ or transactions. Declarations still go on each event or registrar.
 
 - `native_render_hand(render, canceled)` before each visible first-person hand, including maps and the empty main-hand arm. `render` carries the player UUID and entity id, hand, displayed stack, partial tick, interpolated pitch, light, swing and inverse equip height including swap animation scale. Adjust its translation (blocks), rotation (pitch, yaw, roll in degrees) and scale; the pose is applied in that order before the ordinary hand and item poses. Non-finite or out-of-range components are ignored individually: offsets must be within -16..=16 blocks, angles within -3600..=3600 degrees and scale within 0.01..=100. Set `canceled` to skip default geometry. Unlike NeoForge's `RenderHandEvent`, this hook does not expose the full pose stack, player render state or submission collector and cannot draw a replacement.
 
-`native_screen_opening(current, new, outcome)` (`ScreenEvent.Opening`), `native_screen_closing(screen)` (`ScreenEvent.Closing`) and `native_screen_init_post(screen)` (`ScreenEvent.Init.Post`) take a `NativeScreenView`. Every change of the game's screen (all of the game's screen assignments) goes through `Game::set_screen`, which mirrors `Gui.setScreen`: when a different screen would open, `screen_opening` fires first with the screen that is open (`current`) and the one about to open (`new`; the id `playing` is vanilla's null, no screen), and answers `ScreenOpening::Cancel` (the current screen stays) or `ScreenOpening::ModScreen(mod_id)` (that mod's own screen opens instead, if it can open there; the replacement fires nothing again); the first mod to answer wins. Then `screen_closing` fires for the screen being left (never for `playing`), and the new screen opens. The same screen again fires nothing, and a game with no native mod assigns the screen with no event. `screen_init_post` is still observed once per frame (an open or a resize). The screens of the game's `Screen` list (inventory, containers, pause, options, chat, creative, stats, advancements, mod screens, dead, win…) announce themselves in `set_screen`, before they change, and honour `Cancel` and `ModScreen`. The title's own screens and the overlays drawn over gameplay (sign editors, book edit/sign/view and lectern screens, dialogs and prompts) have no single place they open or close, so the per-frame observer announces them through the same function, in the same order, after the change: a mod hears `screen_opening` and `screen_closing` for them, but its answer cannot keep them shut. Overlay views use the full window as their rectangle and have no menu or title; anvil rename remains part of its inventory screen. Dialog states share the `dialog` id. A menu swapped inside the open inventory screen is not a change of screen.
+`native_screen_opening(current, new, outcome)` (`ScreenEvent.Opening`), `native_screen_closing(screen)` (`ScreenEvent.Closing`) and `native_screen_init_post(screen)` (`ScreenEvent.Init.Post`) take a `NativeScreenView`. Every change of the game's screen (all of the game's screen assignments) goes through `Game::set_screen`, which mirrors `Gui.setScreen`: when a different screen would open, `screen_opening` fires first with the screen that is open (`current`) and the one about to open (`new`; the id `playing` is vanilla's null, no screen), and answers `ScreenOpening::Cancel` (the current screen stays) or `ScreenOpening::ModScreen` (the answering mod's own screen opens instead, if it can open there; the replacement fires nothing again); the first mod to answer wins, and the dispatch records its id, so a mod can open only its own screen. Then `screen_closing` fires for the screen being left (never for `playing`), and the new screen opens. The same screen again fires nothing, and a game where no mod listens to `screen_opening` or `screen_closing` assigns the screen with no event. `screen_init_post` is still observed once per frame (an open or a resize). The screens of the game's `Screen` list (inventory, containers, pause, options, chat, creative, stats, advancements, mod screens, dead, win…) announce themselves in `set_screen`, before they change, and honour `Cancel` and `ModScreen`. The title's own screens and the overlays drawn over gameplay (sign editors, book edit/sign/view and lectern screens, dialogs and prompts) have no single place they open or close, so the per-frame observer announces them through the same function, in the same order, after the change: a mod hears `screen_opening` and `screen_closing` for them, but its answer cannot keep them shut. Overlay views use the full window as their rectangle and have no menu or title; anvil rename remains part of its inventory screen. Dialog states share the `dialog` id. A menu swapped inside the open inventory screen is not a change of screen.
 
 - `native_client_resources_reloaded()` fires on the render thread after successful client resource-pack application: the atlas, models, renderer and client caches already use the new resources. It covers selection/F3+T and server-pack reloads. Failed staging or application and initial startup do not fire it. This is a completion notification, not a reload-listener registration or staging API.
 
@@ -1109,7 +1111,7 @@ for a key whose id or type does not match a registration, `listener` gives `None
 
 ```rust,ignore
 use std::sync::{Arc, RwLock};
-use horizon_client::mod_api::{
+use mod_api::{
     self, AddServerReloadListenersEvent, FileToIdConverter, Host, Hooks, Identifier,
     ReloadApply, ServerReloadContext, ReloadResourceError, ServerReloadListener,
 };
@@ -1187,7 +1189,7 @@ own live state.
 
 ```rust,ignore
 use std::sync::{Arc, RwLock};
-use horizon_client::mod_api::{
+use mod_api::{
     self, AddClientReloadListenersEvent, ClientHost, ClientReloadContext, ClientReloadListener,
     FileToIdConverter, Hooks, Identifier, ReloadApply, ReloadResourceError,
 };
@@ -1256,7 +1258,7 @@ registration path.
 
 - A server's recipes reach its Horizon clients, as NeoForge's `OnDatapackSyncEvent.sendRecipes` and `RecipesReceivedEvent`: on the server, `native_datapack_sync(recipe_types)` takes the recipe types (`minecraft:smelting`, `mymod:crusher`) a mod's client half needs, asked once per load, the same types for every player (NeoForge asks per joining player); Horizon sends their final recipes (data packs merged, load conditions held) to every Horizon client when it joins and after each `/reload`, in payloads within the clientbound cap, and nothing to a vanilla client. On the client the recipe helpers (`native_recipes`, `native_recipes_of_type`) then give the server's recipes of those types in place of the window's own, single player included, and `native_recipes_received(recipe_types)` says they came. No type asked: nothing is sent and nothing changes; none asked after a load that asked some: the clients go back to their own recipes and `native_recipes_received` comes with no types.
 
-- `native_input_key(event, modifiers)` runs after a real window keyboard event finishes handling, including shortcuts, screen consumption and repeats. event is the original winit::event::KeyEvent with physical/logical key, location, text, state and repeat; modifiers use the screen hooks' GLFW bits, captured before handling. Not cancellable. Foreign-window and OS synthetic focus events skip it. Window callback only: pad, focus and control-socket input are not window key events.
+- `native_input_key(key, action, modifiers)` runs after a real window keyboard event finishes handling, including shortcuts, screen consumption and repeats (`InputEvent.Key`). key is vanilla's name for the physical key (`key.keyboard.a`; `key.keyboard.unknown` for one it doesn't name), action is `KeyAction::Press`, `Repeat` or `Release`, and modifiers use the screen hooks' GLFW bits, captured before handling. Not cancellable. Foreign-window and OS synthetic focus events skip it. Window callback only: pad, focus and control-socket input are not window key events.
 
 - `native_mouse_scrolling(scroll, accumulated, buttons, cursor, modifiers, canceled)` fires with a player in gameplay and no open screen/prompt/sleeping UI, after accumulation and before hotbar/spectator handling, including when no whole step has accumulated. scroll is x/y after discrete/sensitivity scaling (touchpad pixels normalized by 30), accumulated is the whole x/y pair, buttons are physical left/middle/right, cursor is the GUI position, and modifiers use GLFW bits. Cancel skips gameplay scrolling; accumulated whole steps remain consumed. Synthetic input follows the same gameplay scroll path; screen-scroll hooks are unchanged.
 
@@ -2029,11 +2031,9 @@ the canonical `horizon-native-mods/<id>/` projects and the provenance `native-mo
 host only (no cross compilation), needs a prepared installed launcher base release, and survives cache pruning
 because it is copied outside the managed folders. On Windows use the printed `horizon-engine.exe` path.
 
-Server projects must not request `horizon-client`'s `default-features = true` or any dependency
-`features` field, even an empty array. This covers aliases, target-specific declarations and SDK
-feature requests through Cargo feature tables. Omit `default-features` or set it to `false`; the
-launcher stages the server SDK dependencies with defaults disabled. Refusals name the mod and the
-requested fields, before toolchain work. Client build behavior is unchanged.
+A mod's crate depends on `horizon-mod-api` and never on the game: a `horizon-client` dependency,
+under any name or target, is refused naming the mod and the key, before toolchain work. The mod API
+has no sound or controller features, so server and client builds stage the same crate.
 
 Declared jars use the same exact-hash preparation as ordinary launches. A server export refuses
 missing jars by default and never asks interactively; `--allow-jar-downloads` permits the shared
@@ -2828,6 +2828,14 @@ handle, an entity the client doesn't track and a level it doesn't show:
   (Paper's `Entity#isDead` is its inverse; a dying mob, mid death animation, is not alive). During a nested
   player swap an outer player's displaced record is unavailable, and during a player's turn the other
   players' handles read `None` until the hub is back.
+- `living.attribute_value(host, id)` is `AttributeMap.getValue` and `attribute_base` is `getBaseValue`, for a
+  player, a guest, a mob, an armor stand and the dragon (`None` for an attribute the entity type lacks, a stale
+  handle, or on a client). A mob, a stand and the dragon answer from a live attribute map built from the type's
+  defaults, the saved `attributes` list (bases and permanent modifiers, with their ids), and the attribute modifiers
+  of the items they hold and wear, put on and taken off slot by slot in `EquipmentSlot` order as
+  `LivingEntity.collectEquipmentChanges` does (transient: never saved). The map is built when first needed. Mob
+  behavior still reads the type's defaults, so a modifier does not yet change how a mob moves or hits, and an item's
+  own `attribute_modifiers` component is not read yet, only the item type's.
 - `living.set_health(host, health)` is `LivingEntity.setHealth` (Paper's `Damageable#setHealth`), cut to the
   range from zero to the maximum, with no hook; a non-finite value is refused. This raw write can set zero
   or change a dead entity's health without running the death pipeline.
@@ -3112,8 +3120,8 @@ stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is insta
 
 ### Render hook points
 
-`crates/horizon-client-render/src/gfx/native_render.rs`: the renderer's own hook points, free functions rather than
-`Game` methods, which a bundle targets as `horizon_client_render::gfx::native_render::native_<name>`. They run on the
+`crates/horizon-mod-api/src/render.rs`: the renderer's own hook points, free functions rather than
+`Game` methods, which a bundle targets as `mod_api::render::native_<name>`. They run on the
 render thread with the frame's wgpu objects; what a mod draws there shows in that frame.
 
 - `native_world_drawn(world)`: the world is drawn (sky, terrain, entities, particles, weather and the world post pass),
@@ -3206,9 +3214,17 @@ clicks already.
 
 ### Items' default components
 
-`crates/horizon-world/src/item_defaults.rs`: `native_modify_default_components(item, components)`, a free function a
-bundle targets as `horizon_world::item_defaults::native_modify_default_components` (NeoForge's
-`ModifyDefaultComponentsEvent`). `components` is the item's entry in `items.json`, vanilla's default-component report:
+`Hooks::modify_default_components` receives `&DataLoadContext<'_>` before its
+`ModifyDefaultComponentsEvent`. The engine supplies this read-only phase context:
+`origin()` is `DataLoadOrigin::ServerDataLoad` or `ClientPreload`, `registry(name)`
+borrows names in registry ID order, `setting(mod_id, key)` reads a setting lazily,
+and `mods()` borrows the same `LoadedMods` view used during registration. There is
+no game Host, handle construction or transaction. The origin describes the actual
+owning load, not its thread name or the side of a later reader.
+
+The lower firing target is `native_modify_default_components(context, item, components)`
+in `crates/horizon-world/src/item_defaults.rs` (NeoForge's `ModifyDefaultComponentsEvent`).
+`components` is the item's entry in `items.json`, vanilla's default-component report:
 insert or replace a key to set a component (`"minecraft:max_stack_size": 16`), remove it to take the component away.
 Any item can be changed, vanilla's included. Write values as vanilla's codec writes them: nothing decodes them with it.
 Each table reads the fields it understands and takes a default for a field it can't read, but keeps the component, so a
@@ -3217,10 +3233,13 @@ data pack's own is held to `ExtraCodecs.intRange(1, 99)`, a mod's to 1 to `i32::
 carry), and a value that is not a number leaves the data pack's own. Keep a stack above 99 to a server whose clients run
 the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot show it.
 
-- Every table that reads items' defaults reads them through it: the item table, loot, enchanting, item models,
-  banners, pot sherds, item rarity in chat. Stacks are saved and sent as their difference from the changed defaults, as from vanilla's.
-- It's asked for every item each time the defaults are read, from any thread, several times as resources load
-  and again when a world's data packs load. Answer the same each time, from the item alone.
+- One owning load decodes the defaults, asks once per item, then publishes one immutable snapshot. The item
+  table, loot, enchanting, item models, banners, pot sherds and rarity readers borrow that snapshot; workers
+  retain shared ownership. The renderers also share its canonical component prototypes. Stacks are saved and
+  sent as their difference from the changed defaults, as from vanilla's.
+- Reusing client-preloaded item data on the integrated server is not another load. Opening a world or running
+  the data-pack `/reload` does not replay this hook. A dedicated resource load supplies `ServerDataLoad`;
+  the client preload supplies `ClientPreload`. The hook may run on a load worker, before a game Host exists.
 - Client and server each apply their own mods, so both need the mod. A client without it (a vanilla Java client, or
   Horizon without the mod) fills in vanilla's defaults for the same stacks: a stone stack the server caps at 16 still
   looks like it stacks to 64 there.
@@ -3234,11 +3253,11 @@ and `data/` directories. The template greets each player who joins. Build it wit
 `horizon-launcher native-build <path> --trust-native-code`; `cargo horizon-mod build` packages the same
 project into a `.hmod` without compiling it ([api/mod-files.md](api/mod-files.md)).
 
-The root Rust package depends on `horizon-client` for `mod_api`. Its root `src/lib.rs` marks one
+The root Rust package depends on `horizon-mod-api` (lib `mod_api`), never on the game. Its root `src/lib.rs` marks one
 `impl Hooks` with the attribute:
 
 ```rust,ignore
-use horizon_client::mod_api::{self, Hooks};
+use mod_api::{self, Hooks};
 
 #[derive(Default)]
 struct Mod;
@@ -3312,7 +3331,7 @@ The generated trait method is `inject_<mod_id>_<trait_method>`. Its event, as a 
 is that name in CamelCase plus `Event`
 (`InjectExampleBeforeTickEvent`), with the bindings as fields under the same rules. Implement it on the object
 returned by that mod's generated factory; it is called only for that mod's object. Types must be
-public and available from both the target and `horizon_client::mod_api`. The kinds are HEAD listen,
+public and available from both the target and `mod_api`. The kinds are HEAD listen,
 or HEAD with `cancellable = true` for a unit-returning target (that method returns `Flow`, and
 `Flow::Cancel` returns early from the target), and RETURN, MODIFY_ARG and MODIFY_EXPRESSION_VALUE.
 For those three, the binding whose `value` is `$value` (its type is the returned, argument or
@@ -3351,7 +3370,7 @@ The launcher stages declarations in `.horizon-mod-api-injections.json`; Cargo co
 `HORIZON_MOD_API_INJECTIONS`. The declarations stay with cached mixin output, and generated Rust lives
 only in Cargo's `OUT_DIR`. A player build does not edit generated Rust in the source tree or run rustfmt.
 
-A linked trait mod implements `horizon_client::mod_api::Hooks`. Mixin injections run first.
+A linked trait mod implements `mod_api::Hooks`. Mixin injections run first.
 An injection that returns early skips trait mods. A claimed cancellation also skips trait mods.
 Otherwise, trait mods run in their supplied order. The first `Cancel` stops dispatch.
 For replacement hooks, the first `Some` wins. Collection hooks call every mod. Receiverless hooks have no `Host`.
@@ -3372,7 +3391,7 @@ fn living_incoming_damage(
 }
 ```
 
-The event is a generated `#[non_exhaustive]` struct named after the catalog hook, in CamelCase plus `Event`, with
+The event is a generated struct named after the catalog hook, in CamelCase plus `Event`, with
 the hook point's arguments as public fields: values as values and borrowed ones as references (`event.kind`). A
 number or `bool` a mod may change is a plain field, written back once every mod has run, even after a `Cancel`;
 anything else a mod may change, a game struct or a list, is a `&mut` field. A cancellation or replacement is still
@@ -3390,7 +3409,8 @@ hooks can run on any loading thread; item default changes must be identical on e
 The trait has every hook in `native-hooks.json` and the pending fragments ([Adding a hook](#adding-a-hook)).
 Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `block_state` through `LevelAccess::block_state`, client-side detection and
-`state_with_property`. It also reads light and loaded state, through the game's own queries:
+`state_with_property`. `state_string(state)` serializes the full name and properties, or returns `None`
+for an unknown state; `min_y()` and `height()` read the level's build range. It also reads light and loaded state, through the game's own queries:
 `brightness(LightLayer::Block | Sky, pos)` (`getBrightness`, the stored 0 to 15),
 `raw_brightness(pos, sky_darken)` (`getRawBrightness`, which `CropBlock.randomTick` asks with 0)
 and `is_loaded(pos)` (`Level.isLoaded`: inside the build height and in a loaded chunk),
@@ -3438,8 +3458,8 @@ With the `COUNTER` declaration from [Server attachments](#server-attachments) in
 
 ```rust
 fn count(game: &mut crate::game::Game<'_>) {
-    let host: &mut dyn horizon_client::mod_api::Host = game;
-    let holder = horizon_client::mod_api::Holder::Level;
+    let host: &mut dyn mod_api::Host = game;
+    let holder = mod_api::Holder::Level;
     if let Ok(old) = COUNTER.get(&mut *host, holder) {
         let _ = COUNTER.set(host, holder, old + 1);
     }
@@ -3450,12 +3470,12 @@ fn count(game: &mut crate::game::Game<'_>) {
 the same host exposes typed helpers.
 
 On a `GameLevel` method that takes `&mut self` (`native_random_tick`, `native_tick_block`, `native_perform_bonemeal`,
-`native_is_bonemeal_success`), bind `{ name = "level", ty = "&mut dyn crate::mod_api::LevelRandomHost", value = "&mut *self" }`
+`native_is_bonemeal_success`), bind `{ name = "level", ty = "&mut dyn mod_api::LevelRandomHost", value = "&mut *self" }`
 for attachments and `random()`. Scheduling and `set_block_property` stay on the `LevelTicksHost` and `LevelWriteHost` the
 hook points pass; `is_bonemeal_success` gets only a `LevelRandomHost`.
 
 A trait injection gives the mod's root crate the same `Host` at that method. It depends on
-horizon-client's library, not on the game executable. For example, with `COUNTER` declared as the
+`horizon-mod-api`, not on the game. For example, with `COUNTER` declared as the
 `AttachmentType<i32>` in [Server attachments](#server-attachments):
 
 ```toml
@@ -3464,7 +3484,7 @@ id = "count"
 target = "horizon_client::game::Game<'_>::tick_mobs"
 kind = "HEAD"
 trait_method = "count"
-bindings = [{ name = "host", ty = "&mut dyn crate::mod_api::Host", value = "&mut *self" }]
+bindings = [{ name = "host", ty = "&mut dyn mod_api::Host", value = "&mut *self" }]
 ```
 
 ```rust
@@ -3827,13 +3847,13 @@ namespace. Both checks run once, when the mods register.
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it, so a test double implements only what its hook calls, and an
-unexpected call fails loudly. Enable the `testing` feature on the mod's `horizon-client` test dependency. Then
+unexpected call fails loudly. Enable the `testing` feature on the mod's `horizon-mod-api` test dependency. Then
 `testing::with_mods` takes an owned `Mods` list and runs a closure with it installed on the current thread.
 It restores the previous list even if the closure panics. The test allocation is retained because dispatch exposes
 a static slice. Call `dispatch_<hook>(&mut host, args…)` inside the closure to build the event as the game does:
 
 ```rust
-use horizon_client::mod_api::{self, Hooks, Host, HostSide, ServerHost, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
+use mod_api::{self, Hooks, Host, HostSide, ServerHost, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 struct HostDouble;
@@ -3898,7 +3918,7 @@ keeps a copy for any holder it is asked about (see the sync paragraph below).
 without a codec) and `InvalidSyncPolicy` (sync without a codec).
 
 ```rust
-use horizon_client::mod_api::{AttachmentCodec, AttachmentError, AttachmentType, Compound, Holder, Tag};
+use mod_api::{AttachmentCodec, AttachmentError, AttachmentType, Compound, Holder, Tag};
 
 static COUNTER: AttachmentType<i32> = AttachmentType {
     namespace: "example", name: "counter", default: || 0,

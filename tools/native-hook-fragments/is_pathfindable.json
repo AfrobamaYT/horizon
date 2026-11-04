@@ -1,0 +1,13 @@
+{
+  "hooks": [
+    {
+      "name": "is_pathfindable",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_is_pathfindable",
+      "side": "server",
+      "host": "read",
+      "neoforge": "IBlockExtension.isPathfindable",
+      "doc": "Changes whether a path of a `PathComputationType` (`Land`, `Water` or `Air`) may go through a block state. `event.pathfindable` starts with the block's own answer. The answer depends on the state and the type alone: the game asks once per state and type when parts resolve, at world load and on every `/reload`, so path finding and spawning read the stored answer and a part cannot answer from a position, level or time.",
+      "mod_api": {"contract": "collect", "out": "pathfindable", "scope": "block", "key": "state"}
+    }
+  ]
+}

@@ -1427,6 +1427,9 @@ pub struct ArmorStand {
     pub enchantment_fall_distance: f64,
     /// Last equipment seen by `collectEquipmentChanges`; not saved to NBT.
     pub enchantment_equipment: horizon_items::equipment::Equipment,
+    /// The live attribute map (`AttributeMap`), built when an item with
+    /// attribute modifiers is worn or it is read.
+    pub live: crate::living_attributes::LivingAttributes,
     /// `Entity.firstTick`: true until its first tick has run.
     pub first_tick: bool,
     /// `Entity.mainSupportingBlockPos` after the last move.
@@ -1601,6 +1604,7 @@ impl ArmorStand {
             enchantment_block: None,
             enchantment_fall_distance: 0.0,
             enchantment_equipment: Default::default(),
+            live: Default::default(),
             first_tick: true,
             support: Default::default(),
         }
@@ -1942,8 +1946,15 @@ mod fire_environment_tests {
         let assets = crate::assets::Assets::load(&root).unwrap();
         let render = assets.reload(&root).unwrap();
         let facts = BlockFacts::load(&root, assets.registry).unwrap();
-        let items =
-            crate::items::Items::load(&root, assets.registry, &facts, &PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = crate::items::Items::load(
+            &root,
+            assets.registry,
+            &facts,
+            &PackOverlay::NONE,
+            &defaults,
+        )
+        .unwrap();
         let mut world = World::test_scene(&assets, &render, 3).unwrap();
         let at = Vec3::new(20.5, 4.0, 20.5);
         world
@@ -2089,8 +2100,15 @@ mod destroyed_bundle_environment_tests {
         let assets = crate::assets::Assets::load(&root).unwrap();
         let render = assets.reload(&root).unwrap();
         let facts = BlockFacts::load(&root, assets.registry).unwrap();
-        let items =
-            crate::items::Items::load(&root, assets.registry, &facts, &PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = crate::items::Items::load(
+            &root,
+            assets.registry,
+            &facts,
+            &PackOverlay::NONE,
+            &defaults,
+        )
+        .unwrap();
         let mut world = World::test_scene(&assets, &render, 3).unwrap();
         let at = Vec3::new(20.5, 4.0, 20.5);
         world

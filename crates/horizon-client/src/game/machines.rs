@@ -3,6 +3,7 @@
 //! the vanilla dispense behaviours Horizon has entities for, and container
 //! comparator signals (`AbstractContainerMenu.getRedstoneSignalFromContainer`).
 use super::{Game, storage::is_shulker_box};
+use mod_api::__private::game::*;
 
 mod crafter;
 pub(in crate::game) mod native_energy;
@@ -12,15 +13,15 @@ use horizon_client::{
     Result,
     containers::{BlockEntity, HOPPER_SLOTS, ModContainer},
     items::{ItemStack, Items},
-    mod_api::{
-        self, BlockSide, Capability, ENTITY_AUTOMATION, EntityRef, ItemResource, ResourceHandler,
-    },
     world::World,
 };
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
 use horizon_world::{
     level::{Behaviours, LevelAccess},
     registry::BlockStateId,
+};
+use mod_api::{
+    self, BlockSide, Capability, ENTITY_AUTOMATION, EntityRef, ItemResource, ResourceHandler,
 };
 use std::{ops::ControlFlow, sync::Arc};
 
@@ -950,7 +951,7 @@ impl Game<'_> {
     ) -> u32 {
         let resource = ItemResource::of(stack);
         mod_api::run_transaction(self, |game, tx| {
-            let host: &mut dyn horizon_client::mod_api::ServerHost = game;
+            let host: &mut dyn mod_api::ServerHost = game;
             let went = part.insert_any(host, tx, &resource, stack.count);
             match part.checked(went, stack.count, &at) {
                 Some(0) | None => Err(()),
@@ -1021,7 +1022,7 @@ impl Game<'_> {
                 continue;
             }
             let moved = mod_api::run_transaction(self, |game, tx| {
-                let host: &mut dyn horizon_client::mod_api::ServerHost = game;
+                let host: &mut dyn mod_api::ServerHost = game;
                 let came = part.extract(host, tx, slot, &resource, 1);
                 if part.checked(came, 1, &at) != Some(1) {
                     return Err(());
@@ -1111,7 +1112,7 @@ impl Game<'_> {
         source: &View,
         destination: &View,
     ) -> bool {
-        if !crate::mod_api::listened(crate::mod_api::HookId::InventoryMoveItem) {
+        if !mod_api::__private::listened(mod_api::HookId::InventoryMoveItem) {
             return false;
         }
         let containers = self.containers();
@@ -1239,7 +1240,7 @@ impl Game<'_> {
             // room, the setItem putting the bone meal back into the detached
             // container (whose bone meal is lost with it).
             let bone_meal = c.bone_meal.clone();
-            if crate::mod_api::listened(crate::mod_api::HookId::InventoryMoveItem) {
+            if mod_api::__private::listened(mod_api::HookId::InventoryMoveItem) {
                 let mut cancel = false;
                 self.native_inventory_move_item(
                     [above.0, above.1, above.2],
@@ -1998,7 +1999,9 @@ mod capacity_tests {
         let registry = assets.registry;
         let facts = horizon_client::blocks::BlockFacts::load(&root, registry).unwrap();
         let overlay = &horizon_world::loot::PackOverlay::NONE;
-        let items = horizon_client::items::Items::load(&root, registry, &facts, overlay).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = horizon_client::items::Items::load(&root, registry, &facts, overlay, &defaults)
+            .unwrap();
         let behaviours = horizon_world::level::Behaviours::load(registry, &root).unwrap();
         let brewing = Brewing {
             recipes: Vec::new(),
@@ -2067,8 +2070,8 @@ mod part_front_tests {
     use horizon_client::chunk::Chunk;
     use horizon_client::containers::BlockEntity;
     use horizon_client::items::ItemStack;
-    use horizon_client::mod_api::NativeBlockUpdateFlags;
     use horizon_core::position::BlockPos;
+    use mod_api::NativeBlockUpdateFlags;
     use std::sync::Arc;
 
     fn stack(item: &str, count: u32) -> ItemStack {

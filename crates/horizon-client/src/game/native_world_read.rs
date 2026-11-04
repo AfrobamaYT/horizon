@@ -1,6 +1,5 @@
 //! Read-only block, tag and fluid queries for native mods.
 use super::{Dim, Game};
-use horizon_client::mod_api::{LevelRef, NativeLifecycleContext, TagRegistry};
 use horizon_client::{
     items::{ItemStack, Items},
     world::World,
@@ -11,6 +10,7 @@ use horizon_world::{
     level::Behaviours,
     registry::{BlockRegistry, BlockStateId},
 };
+use mod_api::{LevelRef, NativeLifecycleContext, TagRegistry};
 
 /// Why a server block cannot be read.
 #[allow(dead_code)]
@@ -186,7 +186,7 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use super::*;
     use horizon_client::chunk::Chunk;
-    use horizon_client::mod_api::LevelHost;
+    use mod_api::LevelHost;
     use std::sync::Arc;
 
     #[test]
@@ -386,7 +386,16 @@ mod tests {
                 assert_eq!(host.fluid_state([1, 64, 1]), Some(FluidState::WATER));
             });
             game.options.dedicated = Some(Vec::new());
+            let bounds = game.native_level_height(level).unwrap();
             game.with_level(|_, host, _| {
+                assert_eq!(host.state_string(stone).as_deref(), Some("minecraft:stone"));
+                assert!(
+                    host.state_string(slab)
+                        .unwrap()
+                        .contains("waterlogged=true")
+                );
+                assert_eq!(host.state_string(BlockStateId(u32::MAX)), None);
+                assert_eq!((host.min_y(), host.height()), bounds);
                 assert_eq!(
                     host.block_state_in_tag(stone, "minecraft:base_stone_overworld"),
                     Some(true)
@@ -407,6 +416,18 @@ mod tests {
                     Some(false)
                 );
             });
+            {
+                use mod_api::LevelHost;
+                let hit =
+                    super::super::native_hooks::HitLevel(horizon_client::health::DamageLevel::of(
+                        &mut game.world,
+                        game.pack.assets.registry,
+                    ));
+                assert_eq!(hit.state_string(stone).as_deref(), Some("minecraft:stone"));
+                assert!(hit.state_string(slab).unwrap().contains("waterlogged=true"));
+                assert_eq!(hit.state_string(BlockStateId(u32::MAX)), None);
+                assert_eq!((hit.min_y(), hit.height()), bounds);
+            }
             assert_eq!(game.world.chunks.len(), chunks, "nothing was loaded");
             game.session_lock = None;
             let _ = std::fs::remove_dir_all(dir);

@@ -1,6 +1,7 @@
 //! Startup shared by the gameplay library and its executable.
 use crate::{crash, game, logging, ram_limit};
 use horizon_mods::selection::{Argument, LaunchArguments};
+use mod_api::__private::game::*;
 
 /// Start the game. The executable supplies the allocator and retains the mod API marker.
 pub fn main() {
@@ -8,7 +9,7 @@ pub fn main() {
 }
 
 /// Start the game with named trait mods in dispatch order.
-pub fn main_with(mods: crate::mod_api::Mods, built: &'static [horizon_mods::runtime::BuiltMod]) {
+pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::BuiltMod]) {
     let native: crate::Result<_> = std::env::current_exe()
         .map_err(Into::into)
         .and_then(|exe| horizon_mods::runtime::Runtime::load(&exe, built).map_err(Into::into));
@@ -21,7 +22,7 @@ pub fn main_with(mods: crate::mod_api::Mods, built: &'static [horizon_mods::runt
     };
     crate::gfx::native_render::set_mods_built_in(!native.built().is_empty());
     // First: a trait injection into anything below (logging, the crash handler) calls its mod.
-    crate::mod_api::install(mods);
+    mod_api::__private::install(mods);
     horizon_threads::configure_allocator();
     horizon_client::telemetry::mark_start();
     horizon_client::spans::startup::init(std::time::Instant::now());
@@ -69,9 +70,9 @@ pub fn main_with(mods: crate::mod_api::Mods, built: &'static [horizon_mods::runt
         crash::install(home.clone(), side);
         ram_limit::start(&home, side);
     }
-    let renderers = crate::mod_api::mods()
+    let renderers = mod_api::mods()
         .iter()
-        .filter_map(|m| m.hooks.render())
+        .filter_map(|m| m.fields().hooks.render())
         .collect();
     if crate::gfx::native_render::install(renderers).is_err() {
         log::warn!("Trait renderers already installed; keeping the first list");
@@ -79,16 +80,17 @@ pub fn main_with(mods: crate::mod_api::Mods, built: &'static [horizon_mods::runt
     if horizon_world::native_load_hooks::install(
         horizon_world::native_load_hooks::NativeLoadHooks {
             loot_table_load: |id, table| {
-                crate::mod_api::dispatch_loot_table_load(id, table);
+                mod_api::dispatch_loot_table_load(id, table);
             },
-            modify_default_components: |item, components| {
-                crate::mod_api::dispatch_modify_default_components(item, components);
+            modify_default_components: |context, item, components| {
+                let context = mod_api::DataLoadContext::new(context);
+                mod_api::dispatch_modify_default_components(&context, item, components);
             },
             loot_function: |kind, data, ctx, stack| {
-                crate::mod_api::dispatch_loot_function(kind, data, ctx, stack);
+                mod_api::dispatch_loot_function(kind, data, ctx, stack);
             },
             loot_condition: |kind, data, ctx, holds| {
-                crate::mod_api::dispatch_loot_condition(kind, data, ctx, holds);
+                mod_api::dispatch_loot_condition(kind, data, ctx, holds);
             },
         },
     )
@@ -98,29 +100,29 @@ pub fn main_with(mods: crate::mod_api::Mods, built: &'static [horizon_mods::runt
     }
     if crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
         menu_slot_rules: |menu, slot, stack, may_place, max_stack| {
-            crate::mod_api::dispatch_menu_slot_rules(menu, slot, stack, may_place, max_stack);
+            mod_api::dispatch_menu_slot_rules(menu, slot, stack, may_place, max_stack);
         },
         item_stacked_on_other: |event, canceled| {
-            crate::mod_api::dispatch_item_stacked_on_other(event, canceled);
+            mod_api::dispatch_item_stacked_on_other(event, canceled);
         },
         living_heal: |entity, amount, cancel| {
-            crate::mod_api::dispatch_living_heal(entity, amount, cancel);
+            mod_api::dispatch_living_heal(entity, amount, cancel);
         },
         living_breathe: |entity, kind, can_breathe, consume, refill| {
-            crate::mod_api::dispatch_living_breathe(entity, kind, can_breathe, consume, refill);
+            mod_api::dispatch_living_breathe(entity, kind, can_breathe, consume, refill);
         },
         farmland_trample: |entity, pos, state, distance, cancel| {
-            crate::mod_api::dispatch_farmland_trample(entity, pos, state, distance, cancel);
+            mod_api::dispatch_farmland_trample(entity, pos, state, distance, cancel);
         },
-        has_mods: || !crate::mod_api::mods().is_empty(),
+        has_mods: || !mod_api::mods().is_empty(),
         player_name_format: |username, displayname| {
-            crate::mod_api::dispatch_player_name_format(username, displayname);
+            mod_api::dispatch_player_name_format(username, displayname);
         },
         player_tab_list_name_format: |player, name, display_name| {
-            crate::mod_api::dispatch_player_tab_list_name_format(player, name, display_name);
+            mod_api::dispatch_player_tab_list_name_format(player, name, display_name);
         },
         living_drown: |entity, kind, is_drowning, damage_amount, bubble_count, cancel| {
-            crate::mod_api::dispatch_living_drown(
+            mod_api::dispatch_living_drown(
                 entity,
                 kind,
                 is_drowning,
@@ -130,19 +132,13 @@ pub fn main_with(mods: crate::mod_api::Mods, built: &'static [horizon_mods::runt
             );
         },
         living_fall: |entity, kind, distance, multiplier, cancel| {
-            crate::mod_api::dispatch_living_fall(entity, kind, distance, multiplier, cancel);
+            mod_api::dispatch_living_fall(entity, kind, distance, multiplier, cancel);
         },
         living_jump: |entity, kind| {
-            crate::mod_api::dispatch_living_jump(entity, kind);
+            mod_api::dispatch_living_jump(entity, kind);
         },
         ender_entity_teleport: |entity, kind, from, target, cancel| {
-            crate::mod_api::dispatch_ender_entity_teleport(entity, kind, from, target, cancel);
-        },
-        ingredient: |kind, data, items| {
-            crate::mod_api::dispatch_ingredient(kind, data, items);
-        },
-        ingredient_test: |kind, data, stack, accept| {
-            crate::mod_api::dispatch_ingredient_test(kind, data, stack, accept);
+            mod_api::dispatch_ender_entity_teleport(entity, kind, from, target, cancel);
         },
     })
     .is_err()

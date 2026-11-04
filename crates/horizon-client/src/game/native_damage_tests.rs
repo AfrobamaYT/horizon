@@ -4,15 +4,15 @@
 use super::dragon::{Dragon, SPECIAL};
 use super::entity::damage_level_of;
 use super::native_entity_refs::tests::with_game;
-use crate::mod_api::{
-    self, Hooks, LevelRandomHost, LivingDamagePostEvent, LivingDamagePreEvent,
-    LivingIncomingDamageEvent, Reduction,
-};
 use horizon_client::{
     health,
     mobs::{Damage, DamageKind, Mob},
 };
 use horizon_core::{geometry::Vec3, random::RandomSource};
+use mod_api::{
+    self, Hooks, LevelRandomHost, LivingDamagePostEvent, LivingDamagePreEvent,
+    LivingIncomingDamageEvent, Reduction,
+};
 use std::sync::{Arc, Mutex};
 
 /// What the probe heard: Pre's entity, original damage, new damage and armor's reduction, and

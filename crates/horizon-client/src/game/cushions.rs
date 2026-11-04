@@ -425,7 +425,7 @@ impl Game<'_> {
         let Some((sprite, tint)) = self.particle_sprite(state, at) else {
             return;
         };
-        let options = horizon_client::particles::ParticleOptions::block(
+        let options = mod_api::particles::ParticleOptions::block(
             horizon_client::particles::ParticleType::Block,
             sprite,
             tint,
@@ -555,7 +555,7 @@ impl Game<'_> {
     pub(super) fn cushion_geometry(
         &self,
         camera: glam::DVec3,
-        out: &mut Vec<horizon_client::mesher::Vertex>,
+        out: &mut Vec<mod_api::render::Vertex>,
     ) {
         let Some(model) = self.cushion_model.as_ref() else {
             return;

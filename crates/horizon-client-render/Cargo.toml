@@ -6,10 +6,8 @@ license.workspace = true
 rust-version = "1.90"
 description = "The client's world data, rendering and screens: chunks, meshing, light, streaming, the renderer, the HUD, menus and settings; no gameplay"
 
-[build-dependencies]
-horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
-
 [dependencies]
+horizon-mod-api = { path = "../horizon-mod-api" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
 horizon-cosmetics = { path = "../horizon-cosmetics" }
 # The GUI atlas's pixels, kept compressed once uploaded (hud.rs `pack_pixels`).
@@ -84,5 +82,6 @@ test-support = []
 workspace = true
 
 [dev-dependencies]
+horizon-mod-api = { path = "../horizon-mod-api", features = ["testing"] }
 horizon-items = { path = "../horizon-items", features = ["test-support"] }
 naga = { version = "30.0.1", features = ["wgsl-in", "hlsl-out", "glsl-out", "msl-out", "spv-out"] }

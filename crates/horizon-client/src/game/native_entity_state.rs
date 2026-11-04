@@ -6,9 +6,9 @@
 //! and `None` for the rest, as for a stale handle or on a client.
 use super::{Game, commands::Target};
 use horizon_client::mobs::{Mob, Species, sync};
-use horizon_client::mod_api::EntityRef;
 use horizon_client::motion::PlayerMotion;
 use horizon_client::pose::Pose;
+use mod_api::EntityRef;
 
 /// `Pose`'s serialized names by id (`Pose.STANDING` is 0).
 const POSES: [&str; 18] = [

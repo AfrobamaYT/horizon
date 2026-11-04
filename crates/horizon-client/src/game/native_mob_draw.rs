@@ -7,6 +7,7 @@
 //! has `native_player_submit` (`RenderPlayerEvent.Pre`), and every mob and
 //! player in view gets `native_mob_layer` after its vanilla model
 //! (`EntityRenderersEvent.AddLayers`), in the same frame.
+pub use mod_api::game::{NativeMobRender, NativePlayerRender};
 
 use super::{Dim, Game, native_block_entity_draw::BlockEntityDraw};
 use glam::{DVec3, Mat4};
@@ -16,78 +17,29 @@ use horizon_client::{
     mobs::{Mob, anim, living::wrap},
 };
 
-/// One mob's frame, as `EntityRenderer.extractRenderState` fills a
-/// `LivingEntityRenderState`: what a model reads to pose and animate itself.
-/// Angles are in degrees, interpolated to the frame's partial tick.
-// Native mods read it; nothing in Horizon does.
-#[derive(Clone, Debug)]
-pub struct NativeMobRender<'a> {
-    /// The mob's network id, as the mob helpers and mod messages name it.
-    pub id: u32,
-    /// Its entity type (`minecraft:villager`).
-    pub kind: &'a str,
-    /// Its `CustomName` as plain text, when it has one.
-    pub custom_name: Option<&'a str>,
-    /// `isBaby`.
-    pub baby: bool,
-    /// The frame's partial tick, 0 to 1.
-    pub partial: f32,
-    /// `ageInTicks`: ticks lived plus the partial tick, for idle motion.
-    pub age: f32,
-    /// `bodyRot`: the way the body faces (0 is south, 90 west).
-    pub body_yaw: f32,
-    /// `yRot`: the head's turn from the body, -180 to 180.
-    pub head_yaw: f32,
-    /// `xRot`: the head's pitch, positive looking down.
-    pub pitch: f32,
-    /// `walkAnimationPos`: how far the legs have swung, for a walk cycle
-    /// (a vanilla quadruped's legs swing `cos(pos * 0.6662) * 1.4 * speed` radians).
-    pub walk_position: f32,
-    /// `walkAnimationSpeed`: how fast it walks, 0 standing to about 1.
-    pub walk_speed: f32,
-    /// Ticks left of the red hurt flash (10 when hit).
-    pub hurt_time: i32,
-    /// Ticks since it died, 0 while alive (vanilla tips the body over 20).
-    pub death_time: i32,
-    pub on_ground: bool,
-}
-
-impl<'a> NativeMobRender<'a> {
-    /// The render state of `m` at `partial` (`LivingEntityRenderer.extractRenderState`).
-    pub(super) fn of(m: &'a Mob, partial: f32) -> Self {
-        let body = m.previous_body_yaw + wrap(m.body_yaw - m.previous_body_yaw) * partial;
-        // The walk cycle, head turn and age as the vanilla models read them:
-        // no walking while riding or dead, a baby's legs three times as far
-        // (`WalkAnimationState.position(partial)`, `positionScale`).
-        let pose = anim::state(m, partial);
-        Self {
-            id: m.id,
-            kind: &m.kind.id,
-            custom_name: m.custom_name.as_deref(),
-            baby: m.is_baby(),
-            partial,
-            age: pose.age,
-            body_yaw: body,
-            head_yaw: pose.y_rot,
-            pitch: pose.x_rot,
-            walk_position: pose.pos,
-            walk_speed: pose.speed,
-            hurt_time: m.hurt_time,
-            death_time: m.death_time,
-            on_ground: m.on_ground,
-        }
+/// The render state of `m` at `partial` (`LivingEntityRenderer.extractRenderState`).
+pub(super) fn mob_render<'a>(m: &'a Mob, partial: f32) -> NativeMobRender<'a> {
+    let body = m.previous_body_yaw + wrap(m.body_yaw - m.previous_body_yaw) * partial;
+    // The walk cycle, head turn and age as the vanilla models read them:
+    // no walking while riding or dead, a baby's legs three times as far
+    // (`WalkAnimationState.position(partial)`, `positionScale`).
+    let pose = anim::state(m, partial);
+    NativeMobRender {
+        id: m.id,
+        kind: &m.kind.id,
+        custom_name: m.custom_name.as_deref(),
+        baby: m.is_baby(),
+        partial,
+        age: pose.age,
+        body_yaw: body,
+        head_yaw: pose.y_rot,
+        pitch: pose.x_rot,
+        walk_position: pose.pos,
+        walk_speed: pose.speed,
+        hurt_time: m.hurt_time,
+        death_time: m.death_time,
+        on_ground: m.on_ground,
     }
-}
-
-/// Which player a [`NativeMobRender`] is, for `native_player_submit` and
-/// `native_mob_layer`.
-// Native mods read it; nothing in Horizon does.
-#[derive(Clone, Copy, Debug)]
-pub struct NativePlayerRender<'a> {
-    /// The player's profile name.
-    pub name: &'a str,
-    /// Whether it is the player of this window, drawn in third person.
-    pub local: bool,
 }
 
 /// The pose a mod's mob model starts from: at the feet, `at` (relative to the
@@ -173,7 +125,7 @@ impl Game<'_> {
         out: &mut Vec<Vertex>,
         hook: impl FnOnce(&NativeMobRender<'_>, &mut BlockEntityDraw) -> bool,
     ) -> bool {
-        let render = NativeMobRender::of(mob, partial);
+        let render = mob_render(mob, partial);
         let a = f64::from(partial);
         let feet = mob.previous.lerp(mob.position, a);
         let feet = DVec3::new(feet.x, feet.y, feet.z);

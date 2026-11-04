@@ -4,6 +4,7 @@
 //! usage text and the vanilla error messages. Argument types live in
 //! [`args`]; the vanilla command tree in [`vanilla`].
 #![forbid(unsafe_code)]
+pub use horizon_client_core::suggestion::{Range, Suggestion};
 pub mod args;
 pub mod block;
 pub mod codec;
@@ -269,7 +270,6 @@ impl<'a> Reader<'a> {
     }
 }
 
-pub type Range = (usize, usize);
 #[derive(Clone, Debug)]
 pub enum NodeKind {
     Root,
@@ -492,22 +492,6 @@ impl ParseResults {
                 },
             )),
         }
-    }
-}
-/// A completion: replace `range` of the input with `text`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Suggestion {
-    pub range: Range,
-    pub text: String,
-    pub tooltip: Option<String>,
-    /// IntegerSuggestion: sorted numerically against other integers.
-    pub int_value: Option<i32>,
-}
-impl Suggestion {
-    /// Suggestion.apply.
-    pub fn apply(&self, input: &str) -> String {
-        let (s, e) = (self.range.0.min(input.len()), self.range.1.min(input.len()));
-        format!("{}{}{}", &input[..s], self.text, &input[e..])
     }
 }
 /// SuggestionsBuilder: suggestions for the text from `start` to the cursor.

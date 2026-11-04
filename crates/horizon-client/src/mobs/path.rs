@@ -2,7 +2,10 @@
 //! the walking, swimming, flying and amphibious node evaluators
 //! (`WalkNodeEvaluator`, `SwimNodeEvaluator`, `FlyNodeEvaluator`,
 //! `AmphibiousNodeEvaluator`), ported rule for rule.
-use super::{MobWorld, data};
+use super::{
+    MobWorld,
+    data::{self, PathComputationType},
+};
 use crate::blocks::Fluid;
 use crate::fast_hash::FxHashMap;
 use horizon_core::geometry::{Aabb, Vec3};
@@ -369,6 +372,9 @@ impl<'a, 'w> Finder<'a, 'w> {
     fn state(&self, x: i32, y: i32, z: i32) -> data::StateData {
         self.w.data.state(self.w.world.block(x, y, z))
     }
+    fn pathfindable(&self, x: i32, y: i32, z: i32, kind: PathComputationType) -> bool {
+        self.w.data.pathfindable(self.w.world.block(x, y, z), kind)
+    }
     fn type_from_state(&self, x: i32, y: i32, z: i32) -> PathType {
         self.w.path_type_from_state(x, y, z)
     }
@@ -554,9 +560,8 @@ impl<'a, 'w> Finder<'a, 'w> {
             for yy in y..y + self.entity_height {
                 for zz in z..z + self.entity_depth {
                     let fluid = self.fluid(xx, yy, zz);
-                    let below = self.state(xx, yy - 1, zz);
                     if fluid == Fluid::None
-                        && below.flags & data::WATER != 0
+                        && self.pathfindable(xx, yy - 1, zz, PathComputationType::Water)
                         && self.is_air(xx, yy, zz)
                     {
                         return PathType::Breach;
@@ -568,7 +573,7 @@ impl<'a, 'w> Finder<'a, 'w> {
                 }
             }
         }
-        if self.state(last.0, last.1, last.2).flags & data::WATER != 0 {
+        if self.pathfindable(last.0, last.1, last.2, PathComputationType::Water) {
             PathType::Water
         } else {
             PathType::Blocked
@@ -672,7 +677,9 @@ impl<'a, 'w> Finder<'a, 'w> {
                     start_y = y;
                     y -= 1;
                     let s = self.w.world.block(bx, y, bz);
-                    if !self.w.facts.is_air(s) && self.w.data.state(s).flags & data::LAND == 0 {
+                    if !self.w.facts.is_air(s)
+                        && !self.w.data.pathfindable(s, PathComputationType::Land)
+                    {
                         break;
                     }
                 }
@@ -1025,28 +1032,29 @@ impl<'a, 'w> Finder<'a, 'w> {
         let malus =
             |s: &Self, n: Option<u32>| n.is_some_and(|n| s.nodes[n as usize].cost_malus >= 0.0);
         // Direction.values(): down, up, north, south, west, east.
-        let mut by_dir: FxHashMap<(i32, i32, i32), Option<u32>> = FxHashMap::default();
-        for (dx, dy, dz) in [
+        let dirs = [
             (0, -1, 0),
             (0, 1, 0),
             (0, 0, -1),
             (0, 0, 1),
             (-1, 0, 0),
             (1, 0, 0),
-        ] {
+        ];
+        let mut by_dir: [Option<u32>; 6] = [None; 6];
+        for (slot, (dx, dy, dz)) in by_dir.iter_mut().zip(dirs) {
             let n = self.swim_accepted(px + dx, py + dy, pz + dz);
-            by_dir.insert((dx, dy, dz), n);
+            *slot = n;
             if open(self, n) {
                 out.push(n.unwrap_or_default());
             }
         }
-        for ((dx, dz), (cx, cz)) in [
-            ((0, -1), (1, 0)),
-            ((1, 0), (0, 1)),
-            ((0, 1), (-1, 0)),
-            ((-1, 0), (0, -1)),
+        for (a, b, dx, dz, cx, cz) in [
+            (2usize, 5usize, 0i32, -1i32, 1i32, 0i32),
+            (5usize, 3usize, 1i32, 0i32, 0i32, 1i32),
+            (3usize, 4usize, 0i32, 1i32, -1i32, 0i32),
+            (4usize, 2usize, -1i32, 0i32, 0i32, -1i32),
         ] {
-            if malus(self, by_dir[&(dx, 0, dz)]) && malus(self, by_dir[&(cx, 0, cz)]) {
+            if malus(self, by_dir[a]) && malus(self, by_dir[b]) {
                 let d = self.swim_accepted(px + dx + cx, py, pz + dz + cz);
                 if open(self, d) {
                     out.push(d.unwrap_or_default());

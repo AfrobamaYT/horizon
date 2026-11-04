@@ -2,19 +2,15 @@
 //! and `BlockEntity.setChanged` make. A write inside `host.transaction` is journaled
 //! (`transactions.rs`) and tells the world at the root commit.
 use super::{Game, transactions::After};
-use horizon_client::{
-    block_entity_nbt,
-    containers::BlockEntity,
-    mod_api::{BlockEntityRef, BlockEntityTypeKey, LevelRef, PlayerRef},
-    save,
-    world::World,
-};
+use horizon_client::{block_entity_nbt, containers::BlockEntity, save, world::World};
 use horizon_world::nbt::{Compound, Tag};
+use mod_api::__private::game::*;
+use mod_api::{BlockEntityRef, BlockEntityTypeKey, LevelRef, PlayerRef};
 
 impl Game<'_> {
     fn native_block_entity_target(&self, entity: BlockEntityRef) -> Option<(&World, &BlockEntity)> {
-        let world = self.native_level_world(entity.level)?;
-        Some((world, loaded_block_entity(world, entity.position)?))
+        let world = self.native_level_world(entity.fields().level)?;
+        Some((world, loaded_block_entity(world, entity.fields().position)?))
     }
 
     /// Find a block entity in a loaded chunk of an open server level. A block
@@ -24,10 +20,7 @@ impl Game<'_> {
         level: LevelRef,
         pos: [i32; 3],
     ) -> Option<BlockEntityRef> {
-        let entity = BlockEntityRef {
-            level,
-            position: pos,
-        };
+        let entity = mod_api::__private::game::block_entity_ref(level, pos);
         self.native_block_entity_target(entity).map(|_| entity)
     }
 
@@ -40,7 +33,7 @@ impl Game<'_> {
         entity: BlockEntityRef,
     ) -> bool {
         if self.player_handle_read(player).is_none()
-            || !self.native_level_in_place(entity.level)
+            || !self.native_level_in_place(entity.fields().level)
             || self.native_block_entity_target(entity).is_none()
         {
             return false;
@@ -50,15 +43,15 @@ impl Game<'_> {
                 .guests
                 .iter()
                 .find(|guest| {
-                    guest.uuid == player.uuid
+                    guest.uuid == player.fields().uuid
                         && guest.placed
-                        && guest.dimension == entity.level.dimension()
+                        && guest.dimension == entity.fields().level.dimension()
                 })
                 .map(|guest| guest.conn)
         }) else {
             return false;
         };
-        let [x, y, z] = entity.position;
+        let [x, y, z] = entity.fields().position;
         matches!(
             self.open_block_menu(conn, (x, y, z)),
             super::lan_actions::MenuOpen::Opened
@@ -71,7 +64,7 @@ impl Game<'_> {
         entity: BlockEntityRef,
     ) -> Option<BlockEntityTypeKey> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
-        let [x, y, z] = entity.position;
+        let [x, y, z] = entity.fields().position;
         let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
         BlockEntityTypeKey::registered(save::block_entity_id(block_entity, block))
     }
@@ -79,20 +72,20 @@ impl Game<'_> {
     /// The block entity's position.
     pub(super) fn native_block_entity_position(&self, entity: BlockEntityRef) -> Option<[i32; 3]> {
         self.native_block_entity_target(entity)?;
-        Some(entity.position)
+        Some(entity.fields().position)
     }
 
     /// The block entity's level.
     pub(super) fn native_block_entity_level(&self, entity: BlockEntityRef) -> Option<LevelRef> {
         self.native_block_entity_target(entity)?;
-        Some(entity.level)
+        Some(entity.fields().level)
     }
 
     /// The data saved without identity or position metadata
     /// (`BlockEntity.saveWithoutMetadata`).
     pub(super) fn native_block_entity_data(&self, entity: BlockEntityRef) -> Option<Compound> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
-        let [x, y, z] = entity.position;
+        let [x, y, z] = entity.fields().position;
         let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
         save_without_metadata(world, (x, y, z), block_entity, block)
     }
@@ -103,11 +96,11 @@ impl Game<'_> {
         &self,
         entity: BlockEntityRef,
     ) -> Option<((i32, i32, i32), String)> {
-        if !self.native_level_in_place(entity.level) {
+        if !self.native_level_in_place(entity.fields().level) {
             return None;
         }
         let (world, _) = self.native_block_entity_target(entity)?;
-        let [x, y, z] = entity.position;
+        let [x, y, z] = entity.fields().position;
         let block = self
             .pack
             .assets
@@ -223,7 +216,7 @@ impl Game<'_> {
     /// client.
     pub(super) fn native_block_entity_name(&self, entity: BlockEntityRef) -> Option<String> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
-        let [x, y, z] = entity.position;
+        let [x, y, z] = entity.fields().position;
         match block_entity {
             BlockEntity::Banner(banner) => banner.name.clone(),
             _ => world.block_names.get(&(x, y, z)).cloned(),
@@ -319,10 +312,10 @@ fn loaded_block_entity(world: &World, [x, y, z]: [i32; 3]) -> Option<&BlockEntit
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mod_api::HostTransaction;
-    use crate::mod_api::ServerHost;
     use horizon_client::chunk::Chunk;
     use horizon_world::registry::BlockStateId;
+    use mod_api::HostTransaction;
+    use mod_api::ServerHost;
     use std::sync::Arc;
 
     #[test]
@@ -373,7 +366,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn player_opens_provider_and_refuses_non_provider() {
-        use horizon_client::mod_api::NativeBlockUpdateFlags;
+        use mod_api::NativeBlockUpdateFlags;
         super::super::native_guest_turn_tests::with_guests(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -399,10 +392,7 @@ mod tests {
             let sign = game.native_block_entity_ref(level, [4, 64, 0]).unwrap();
             use super::super::lan_actions::MenuOpen;
             assert!(!player.open_menu(game, sign));
-            assert_eq!(
-                game.open_block_menu(999, (0, 64, 0)),
-                MenuOpen::NotAProvider
-            );
+            assert_eq!(game.open_block_menu(999, (0, 64, 0)), MenuOpen::Refused);
             game.world
                 .block_entities
                 .insert((0, 64, 0), BlockEntity::Chest(vec![None; 2]));
@@ -417,7 +407,7 @@ mod tests {
             game.lan.as_mut().unwrap().hub.guests[0].dimension = dimension;
             let host = game.lan.take();
             assert!(!player.open_menu(game, chest));
-            assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::NotAProvider);
+            assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::Refused);
             game.lan = host;
             game.lan.as_mut().unwrap().hub.guests[0].kind =
                 horizon_client::lan::guest::GuestKind::Fake;
@@ -436,7 +426,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn writes_merge_data_name_and_roll_back_with_a_transaction() {
         use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
-        use horizon_client::mod_api::NativeBlockUpdateFlags;
+        use mod_api::NativeBlockUpdateFlags;
         if run_fresh_cases(
             "game::native_block_entity_refs::tests::writes_merge_data_name_and_roll_back_with_a_transaction",
             "HORIZON_VANILLA_BE_REGISTRY_CHILD",
@@ -551,7 +541,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_abort_puts_back_the_lock_and_the_loot_table_roll() {
         use super::super::native_entity_refs::tests::with_game;
-        use horizon_client::mod_api::NativeBlockUpdateFlags;
+        use mod_api::NativeBlockUpdateFlags;
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -596,8 +586,8 @@ mod tests {
     fn a_level_hook_set_block_replaces_whole_states_and_their_block_entities() {
         use super::super::mod_api_host::LevelTicks;
         use super::super::native_entity_refs::tests::with_game;
-        use crate::mod_api::{LevelWriteHost, NativeBlockUpdateFlags};
         use horizon_world::chunk::BlockState;
+        use mod_api::{LevelWriteHost, NativeBlockUpdateFlags};
 
         fn write(
             game: &mut Game<'_>,

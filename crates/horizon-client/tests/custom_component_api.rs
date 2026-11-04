@@ -56,9 +56,11 @@ fn registration_limits_and_defaults_are_bound_to_the_connection() {
         )
         .unwrap();
     }
-    let a = content_identity::identity(&dir.join("a")).unwrap();
-    let b = content_identity::identity(&dir.join("b")).unwrap();
-    let c = content_identity::identity(&dir.join("c")).unwrap();
+    let [a, b, c] = ["a", "b", "c"].map(|name| {
+        let root = dir.join(name);
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        content_identity::identity(&root, &defaults).unwrap()
+    });
     assert_ne!(a, b);
     assert_eq!(a, c);
     let scratch = std::env::temp_dir().join(format!(
@@ -141,9 +143,13 @@ fn registration_limits_and_defaults_are_bound_to_the_connection() {
     );
     assert!(items["good:thing"].get("minecraft:repairable").is_none());
     assert!(items.get("bad:thing").is_none());
-    let catalog =
-        horizon_client::items::Items::catalog(&out, &horizon_world::loot::PackOverlay::NONE)
-            .unwrap();
+    let defaults = horizon_world::item_defaults::read(&out).unwrap();
+    let catalog = horizon_client::items::Items::catalog(
+        &out,
+        &horizon_world::loot::PackOverlay::NONE,
+        &defaults,
+    )
+    .unwrap();
     assert_eq!(
         catalog.get("good:thing").unwrap().custom_components["sample:a"],
         Tag::compound([("value", Tag::Int(5))])

@@ -99,8 +99,8 @@ class PrReadyTests(unittest.TestCase):
         for path in ["crates/horizon-mod-api-gen/src/lib.rs",
                      "crates/horizon-mod-api-gen/dispatch-tests/src/lib.rs",
                      "crates/horizon-mod-api-macros/src/lib.rs",
-                     "crates/horizon-client/src/mod_api.rs",
-                     "crates/horizon-client/src/mod_api/part_table.rs",
+                     "crates/horizon-mod-api/src/lib.rs",
+                     "crates/horizon-mod-api/src/part_table.rs",
                      "native-hooks.json",
                      "tools/native-hook-fragments/tick.json"]:
             with self.subTest(path=path):

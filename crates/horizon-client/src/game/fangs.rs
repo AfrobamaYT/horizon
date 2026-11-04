@@ -178,7 +178,7 @@ impl Game<'_> {
         &self,
         camera: glam::DVec3,
         alpha: f64,
-        out: &mut Vec<horizon_client::mesher::Vertex>,
+        out: &mut Vec<mod_api::render::Vertex>,
     ) {
         let Some(model) = self.fangs.model.as_ref() else {
             return;

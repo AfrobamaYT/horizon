@@ -117,10 +117,14 @@ pub fn main() -> Result<()> {
     };
     let assets = Assets::load(root)?;
     let registry = assets.registry;
-    let renderer = BlockEntityRenderer::load(root, registry)?;
+    let item_data = crate::test_resources::item_data(
+        root,
+        horizon_world::native_load_context::DataLoadOrigin::ClientPreload,
+    )?;
+    let renderer = BlockEntityRenderer::load(root, registry, item_data.defaults())?;
     let atlas = HudAtlas::build(root)?;
-    let banners = Banners::load(root);
-    let items = ItemRenderer::load(root)?;
+    let banners = Banners::load(root, item_data.defaults());
+    let items = ItemRenderer::load(root, &item_data)?;
     let (sprites, names, grid) = fake_sprites(textures)?;
     let air = registry.default_state("minecraft:air").ok_or("no air")?;
     let mut out = BufWriter::new(fs::File::create(output)?);

@@ -1,0 +1,29 @@
+name: modding-book
+on:
+  push:
+    branches: [main]
+    paths: ["docs/modding/**", "crates/horizon-mod-api/**", "native-hooks.json", "tools/native-hook-fragments/**"]
+  pull_request:
+    paths: ["docs/modding/**", "crates/horizon-mod-api/**", "native-hooks.json", "tools/native-hook-fragments/**"]
+jobs:
+  book:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Inert until the modding book exists on the branch.
+      - id: book
+        run: test -f docs/modding/book.toml && echo present=true >> "$GITHUB_OUTPUT" || true
+      - if: steps.book.outputs.present == 'true'
+        run: cargo install mdbook --locked --version 0.4.52
+      - if: steps.book.outputs.present == 'true'
+        run: mdbook build docs/modding
+      - if: steps.book.outputs.present == 'true'
+        run: RUSTDOCFLAGS="-D warnings" cargo doc -p horizon-mod-api --no-deps
+      - if: steps.book.outputs.present == 'true'
+        run: cargo test -p horizon-modding-examples
+      # book.toml sets build-dir = "../../target/modding-book", relative to docs/modding.
+      - if: steps.book.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: modding-book
+          path: target/modding-book

@@ -11,7 +11,7 @@ use horizon_client::text::Text;
 use horizon_shaders::{BlockIds, Macros, Pack, Properties, dimension_folder_named, load_post};
 
 use super::{Dim, Game};
-use horizon_client::gfx::pack_draw::EntitySpan;
+use mod_api::render::EntitySpan;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 
