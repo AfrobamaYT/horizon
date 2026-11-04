@@ -2284,7 +2284,8 @@ pub(crate) fn prepared_items() -> Option<Items> {
         BlockRegistry::from_facts_json_with_flags(fs::File::open(root.join("facts.json")).ok()?)
             .ok()?;
     let facts = BlockFacts::load(&root, &registry).ok()?;
-    Items::load(&root, &registry, &facts, &PackOverlay::NONE).ok()
+    let defaults = horizon_world::item_defaults::read(&root).ok()?;
+    Items::load(&root, &registry, &facts, &PackOverlay::NONE, &defaults).ok()
 }
 
 #[cfg(test)]
@@ -2810,7 +2811,8 @@ mod tests {
         fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
         let items = r#"{"minecraft:bowl": {}, "minecraft:milk_bucket": {}, "ruby:stew": {}}"#;
         fs::write(root.join("items.json"), items).unwrap();
-        let catalog = |root: &Path| Items::catalog(root, &PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let catalog = |root: &Path| Items::catalog(root, &PackOverlay::NONE, &defaults).unwrap();
         let remainder = |items: &Items, id: &str| items.items[id].crafting_remainder.clone();
         let vanilla = catalog(&root);
         assert_eq!(remainder(&vanilla, "ruby:stew"), None);

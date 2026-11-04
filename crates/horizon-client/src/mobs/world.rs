@@ -443,11 +443,13 @@ pub(crate) fn with_resource_test_world(
     let data = super::MobData::load(root, &facts);
     let types = super::MobTypes::load(root).unwrap();
     let biomes = crate::biome::Biomes::load(root).unwrap();
+    let defaults = horizon_world::item_defaults::read(root).unwrap();
     let items = crate::items::Items::load(
         root,
         registry,
         &facts,
         &horizon_world::loot::PackOverlay::NONE,
+        &defaults,
     )
     .unwrap();
     let collision = crate::collisions::load(root, registry).unwrap();

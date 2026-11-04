@@ -47,12 +47,15 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
     // callback per table, even when the raw map is already cached.
     let dir = root.join("data/minecraft/loot_table");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(root.join("items.json"), "{}").unwrap();
+    std::fs::write(root.join("items.json"), r#"{"probe:token":{}}"#).unwrap();
     std::fs::write(dir.join("test.json"), "[]").unwrap();
+    let item_data = item_defaults::ItemData::load(&root, context).unwrap();
+    assert_eq!(item_data.defaults().entries()["probe:token"]["item"], "probe:token");
     let raw = loot::shared_tables(&root, &loot::PackOverlay::NONE).unwrap();
     assert_eq!(raw["minecraft:test"], json!([]));
     for _ in 0..2 {
-        let mut server = loot::LootData::load(&root, &loot::PackOverlay::NONE).unwrap();
+        let mut server =
+            loot::LootData::load(&root, &loot::PackOverlay::NONE, item_data.defaults()).unwrap();
         server.apply_native_table_loads();
         assert_eq!(server.tables()["minecraft:test"], json!(["minecraft:test"]));
         assert_eq!(raw["minecraft:test"], json!([]));
