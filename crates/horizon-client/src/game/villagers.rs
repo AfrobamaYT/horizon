@@ -411,9 +411,7 @@ impl Game<'_> {
         }
     }
 
-    /// The UUID of the player who last hurt a mob (`last_hurt_by_player`:
-    /// None for the host, else the guest's connection): the reputation a
-    /// villager keeps is that player's, the one trading looks up.
+    /// The UUID of a player by connection (None for the host).
     pub(super) fn player_uuid_of(&self, who: Option<u32>) -> Option<[i32; 4]> {
         let uuid = match who {
             None => return self.level.player_uuid,
@@ -440,8 +438,10 @@ impl Game<'_> {
             if villager::ext(m).is_some_and(|e| e.hurt_seen == time) {
                 continue;
             }
-            let hurt_by = self.last_hurt_by_player.get(&at).copied().flatten();
-            let Some(uuid) = self.player_uuid_of(hurt_by) else {
+            let Some(uuid) = self.last_hurt_by_player.get(&at).and_then(|credit| {
+                self.resolve_player_credit(*credit)
+                    .and_then(|who| self.player_uuid_of(who))
+            }) else {
                 continue;
             };
             let e = villager::ext_mut(&mut self.mobs[i]);

@@ -16,12 +16,12 @@
       "receiver": "living"
     },
     {
-      "name": "living_equipment", "side": "server",
+      "name": "living_equipment", "side": "both",
       "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_equipment",
       "receiver": "living"
     },
     {
-      "name": "living_hand_item", "side": "server",
+      "name": "living_hand_item", "side": "both",
       "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_hand_item",
       "receiver": "living"
     },

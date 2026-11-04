@@ -576,6 +576,12 @@ impl Game<'_> {
         &self,
         player: PlayerRef,
     ) -> Option<(String, [i32; 3])> {
+        if !self.is_logical_server() {
+            // A client's copy: what the login and respawn packets carried.
+            return (self.native_local_player()? == player)
+                .then(|| self.level.last_death.clone())
+                .flatten();
+        }
         self.player_handle_read(player)?.last_death().cloned()
     }
 

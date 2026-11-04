@@ -10,7 +10,7 @@
       "target": "horizon_client::game::native_entity_refs::Game<'_>::native_level"
     },
     {
-      "name": "entity_position", "side": "server",
+      "name": "entity_position", "side": "both",
       "target": "horizon_client::game::native_entity_refs::Game<'_>::native_entity_position",
       "receiver": "entity"
     },
@@ -20,7 +20,7 @@
       "receiver": "entity"
     },
     {
-      "name": "entity_rotation", "side": "server",
+      "name": "entity_rotation", "side": "both",
       "target": "horizon_client::game::native_entity_refs::Game<'_>::native_entity_rotation",
       "receiver": "entity"
     },

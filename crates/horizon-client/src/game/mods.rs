@@ -2,7 +2,7 @@
 //! assets (`content_root`), and the Mods page's rows. Code mods are native
 //! (`native_hooks.rs`); executable components in content packages are refused.
 use super::{Game, execution_role::ExecutionRole};
-use crate::mod_api::{RegistrationContext, RegistrationPhase};
+use crate::mod_api::RegistrationContext;
 use horizon_client::mod_list::{self, Installed};
 use std::path::PathBuf;
 
@@ -11,6 +11,25 @@ pub(super) struct ModsState {
     /// `--dev-mod PATH`: content mods always on.
     pub(super) dev: Vec<PathBuf>,
     pub(super) native: std::sync::Arc<horizon_mods::runtime::Runtime>,
+    pub(super) selected: std::sync::Arc<[horizon_mods::selection::SelectedPackage]>,
+}
+
+impl ModsState {
+    pub(super) fn select(
+        &mut self,
+        game_dir: &std::path::Path,
+        enabled: &std::collections::BTreeSet<String>,
+    ) {
+        self.selected = horizon_mods::selection::content_packages(game_dir, enabled, &self.dev)
+            .filter(|selected| {
+                !self
+                    .native
+                    .built()
+                    .iter()
+                    .any(|built| built.id == selected.package.manifest.id)
+            })
+            .collect();
+    }
 }
 
 /// Freeze native component IDs before reading content or opening a connection.
@@ -18,10 +37,7 @@ pub(super) struct ModsState {
 /// treats as no custom components, and `registries.json` isn't read.
 pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Result<()> {
     let mut names = Vec::new();
-    Game::native_component_types(
-        &RegistrationContext::new(RegistrationPhase::Components),
-        &mut names,
-    );
+    Game::native_component_types(&RegistrationContext::new(), &mut names);
     if names.is_empty() {
         return Ok(());
     }
@@ -48,14 +64,8 @@ fn native_declared() -> &'static NativeDeclared {
     static DECLARED: std::sync::OnceLock<NativeDeclared> = std::sync::OnceLock::new();
     DECLARED.get_or_init(|| {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
-        Game::native_blocks(
-            &RegistrationContext::new(RegistrationPhase::Blocks),
-            &mut blocks,
-        );
-        Game::native_items(
-            &RegistrationContext::new(RegistrationPhase::Items),
-            &mut items,
-        );
+        Game::native_blocks(&RegistrationContext::new(), &mut blocks);
+        Game::native_items(&RegistrationContext::new(), &mut items);
         let types = crate::mod_api::block_entity_types().to_vec();
         NativeDeclared {
             blocks,
@@ -71,10 +81,7 @@ pub(super) fn register_standalone_models(role: ExecutionRole) {
         return;
     }
     let mut names = Vec::new();
-    Game::native_standalone_models(
-        &RegistrationContext::new(RegistrationPhase::StandaloneModels),
-        &mut names,
-    );
+    Game::native_standalone_models(&RegistrationContext::new(), &mut names);
     horizon_client::models::register_standalone(names);
 }
 
@@ -102,21 +109,12 @@ pub(super) struct ContentOverlay {
 /// [`content_root`]'s step.
 pub(super) fn content_overlay(
     root: &std::path::Path,
-    enabled: &std::collections::BTreeSet<String>,
     sources: &ModsState,
 ) -> horizon_client::Result<ContentOverlay> {
     use horizon_client::mod_content::{self, ContentMod};
     use horizon_mods::Content;
     let here = std::env::current_dir().unwrap_or_default();
-    let content: Vec<_> = horizon_mods::selection::content_packages(&here, enabled, &sources.dev)
-        .filter(|selected| {
-            !sources
-                .native
-                .built()
-                .iter()
-                .any(|built| built.id == selected.package.manifest.id)
-        })
-        .collect();
+
     let mut known = None;
     let mut mods: Vec<ContentMod> = Vec::new();
     let announce = !horizon_protocol::mod_list::is_set();
@@ -140,7 +138,7 @@ pub(super) fn content_overlay(
         manifest: &p.manifest,
         content_only: false,
     });
-    let content = content.iter().map(|p| PackageSource {
+    let content = sources.selected.iter().map(|p| PackageSource {
         path: &p.path,
         manifest: &p.package.manifest,
         content_only: true,
@@ -220,10 +218,9 @@ pub(super) fn content_overlay(
 /// and the protocol's local mod list, each set once.
 pub(super) fn content_root(
     root: &std::path::Path,
-    enabled: &std::collections::BTreeSet<String>,
     sources: &ModsState,
 ) -> horizon_client::Result<std::path::PathBuf> {
-    let overlay = content_overlay(root, enabled, sources)?;
+    let overlay = content_overlay(root, sources)?;
     register_block_entity_types(&overlay.root, &overlay.mods)?;
     if overlay.announce {
         horizon_protocol::mod_list::set_local(overlay.announced);
@@ -504,7 +501,6 @@ mod tests {
                 context: &RegistrationContext<'_>,
                 event: &mut StandaloneModelsEvent<'_>,
             ) {
-                assert_eq!(context.phase(), RegistrationPhase::StandaloneModels);
                 assert_eq!(
                     context.mods().ids().collect::<Vec<_>>(),
                     ["registration_test"]
@@ -521,16 +517,18 @@ mod tests {
             )]
             .into(),
             || {
-                register_standalone_models(ExecutionRole::IntegratedServer);
-                register_standalone_models(ExecutionRole::DedicatedServer);
-                assert_eq!(calls.load(Ordering::Relaxed), 0);
-                register_standalone_models(ExecutionRole::Client);
-                assert_eq!(calls.load(Ordering::Relaxed), 1);
-                assert!(
-                    horizon_client::models::standalone()
-                        .iter()
-                        .any(|id| id == "registration_test:block/shaft")
-                );
+                crate::mod_api::with_test_packages(&["registration_test"], || {
+                    register_standalone_models(ExecutionRole::IntegratedServer);
+                    register_standalone_models(ExecutionRole::DedicatedServer);
+                    assert_eq!(calls.load(Ordering::Relaxed), 0);
+                    register_standalone_models(ExecutionRole::Client);
+                    assert_eq!(calls.load(Ordering::Relaxed), 1);
+                    assert!(
+                        horizon_client::models::standalone()
+                            .iter()
+                            .any(|id| id == "registration_test:block/shaft")
+                    );
+                })
             },
         );
     }
@@ -589,12 +587,13 @@ mod tests {
         )
         .unwrap();
         std::env::set_current_dir(&here).unwrap();
-        let sources = ModsState {
+        let mut sources = ModsState {
             native: std::sync::Arc::new(native),
             ..Default::default()
         };
         let enabled = std::collections::BTreeSet::from(["plain".to_owned()]);
-        assert_eq!(content_root(&base, &enabled, &sources).unwrap(), base);
+        sources.select(&here, &enabled);
+        assert_eq!(content_root(&base, &sources).unwrap(), base);
         let local = horizon_protocol::mod_list::local();
         let ids: Vec<_> = local.iter().map(|m| m.id.as_str()).collect();
         if mode.as_deref() == Some("compiled") {
