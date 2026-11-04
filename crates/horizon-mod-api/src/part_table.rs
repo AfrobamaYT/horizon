@@ -988,7 +988,7 @@ impl dyn Registrar + '_ {
             BlockProviderOf::of(Arc::new(provider)),
         );
     }
-    /// [`block_entity_capability`](Self::block_entity_capability), asked ahead of the game's own
+    /// `block_entity_capability`, asked ahead of the game's own
     /// provider (NeoForge's priority), as a mod that replaces how a block entity's slots are
     /// reached.
     pub fn block_entity_capability_before_game<T: ?Sized + 'static>(
@@ -1007,7 +1007,7 @@ impl dyn Registrar + '_ {
     /// Answer item capability `key` for item `item` (`mymod:backpack`) with `provider`, which
     /// gives a handler for the stack at one place, or none: `r.item_capability(&ITEM_ITEMS,
     /// "mymod:backpack", |_, _| Some(Box::new(Backpack)))`. Asked as
-    /// [`block_entity_capability`](Self::block_entity_capability)'s are.
+    /// `block_entity_capability`'s are.
     pub fn item_capability<T: ?Sized + 'static>(
         &mut self,
         key: &ItemCapabilityKey<T>,
@@ -1021,7 +1021,7 @@ impl dyn Registrar + '_ {
             ItemProviderOf::of(Arc::new(provider)),
         );
     }
-    /// [`item_capability`](Self::item_capability), asked ahead of the game's own provider.
+    /// `item_capability`, asked ahead of the game's own provider.
     pub fn item_capability_before_game<T: ?Sized + 'static>(
         &mut self,
         key: &ItemCapabilityKey<T>,
@@ -1033,7 +1033,7 @@ impl dyn Registrar + '_ {
     /// Answer entity capability `key` for entity type `kind` (`mymod:robot`,
     /// `minecraft:player`) with `provider`, which gives a handler for one entity, or none:
     /// `r.entity_capability(&ENTITY_ITEMS, "mymod:robot", |_, robot, ()| Some(Box::new(Cargo(robot))))`.
-    /// Asked as [`block_entity_capability`](Self::block_entity_capability)'s are.
+    /// Asked as `block_entity_capability`'s are.
     pub fn entity_capability<T: ?Sized + 'static, C: 'static>(
         &mut self,
         key: &EntityCapabilityKey<T, C>,
@@ -1047,7 +1047,7 @@ impl dyn Registrar + '_ {
             EntityProviderOf::of(Arc::new(provider)),
         );
     }
-    /// [`entity_capability`](Self::entity_capability), asked ahead of the game's own provider,
+    /// `entity_capability`, asked ahead of the game's own provider,
     /// as a mod that replaces how a player's inventory is reached.
     pub fn entity_capability_before_game<T: ?Sized + 'static, C: 'static>(
         &mut self,
