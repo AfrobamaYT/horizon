@@ -744,8 +744,10 @@ already be registered; unknown names fail immediately, and cycles fail after reg
 `last()` are ordering boundaries. These anchors and dependency ends use `Identifier`. Mod
 listeners run after vanilla by default, in registration order; an explicit dependency before
 `functions()` works without a false cycle. Use these anchors rather than their string values. The read-only `get_registry`,
-`get_graph`, `get_name_lookup(listener)` and `get_last_vanilla_listener` expose the registered
-objects, dependencies and vanilla anchor. Horizon does not expose NeoForge's condition
+`get_graph` and `get_last_vanilla_listener` give the registered names, the dependency edges and
+the vanilla anchor's name, by value (NeoForge's give the objects; a mod keeps its own listener's
+`Arc`, and its name is the one it registered it under). `prepare` returns
+`Box<dyn ReloadApply>`; `<dyn ReloadApply>::new(move || ...)` makes one from a closure. Horizon does not expose NeoForge's condition
 context here.
 
 `event.listeners.add_retained_listener(&key, converter, listener)` also keeps the listener
