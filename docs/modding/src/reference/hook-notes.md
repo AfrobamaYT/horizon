@@ -1321,7 +1321,7 @@ registration path.
 
 - A server player's trade with a villager or a wandering trader, as NeoForge's `TradeWithVillagerEvent`: `native_trade_with_villager(merchant, kind, offer)` is heard once per trade made, after its statistic and `villager_trade` trigger, with the trader's entity id and type and the `MerchantOffer` as it is after the trade. Listen only; the player's state is swapped in.
 
-- A server player's `teleport_randomly` consume effect (chorus fruit) is about to try a spot: `native_chorus_fruit_teleport(player, name, from, target, cancel)`, once per attempt (up to 16). A mod may move `target`; the game still looks down from it for ground to land on. `cancel` ends the effect with no teleport and no more attempts. Foxes are not heard.
+- A server player's `teleport_randomly` consume effect (chorus fruit) is about to try a spot: `native_item_consumption_teleport(player, name, from, target, cancel)`, once per attempt (up to 16). A mod may move `target`; the game still looks down from it for ground to land on. `cancel` ends the effect with no teleport and no more attempts. Foxes are not heard.
 
 - A server player's ender pearl landed: `native_ender_pearl_teleport(player, name, pearl, from, target, damage, cancel)` runs before the endermite roll and the teleport. A mod may move `target` or change the fall `damage` (5; 0 or less is none); `cancel` keeps the player where they are, without the endermite roll, damage or sound, and the pearl is used up either way.
 
@@ -1582,8 +1582,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   fall damage they then take (5). A mod may move `target` or change `damage` (0 or less: none). Canceling keeps the
   player where they are: no endermite roll, no teleport, no damage, no sound; the pearl is used up either way. Mobs'
   pearls are not heard.
-- **`native_chorus_fruit_teleport(player, name, from, target, cancel)`**: a server player whose `teleport_randomly`
-  consume effect (chorus fruit) is about to try a spot (NeoForge's `EntityTeleportEvent.ChorusFruit`,
+- **`native_item_consumption_teleport(player, name, from, target, cancel)`**: a server player whose `teleport_randomly`
+  consume effect (chorus fruit) is about to try a spot (NeoForge's `EntityTeleportEvent.ItemConsumption`,
   `TeleportRandomlyConsumeEffect.apply`): once per attempt, up to 16, after they stopped riding. A mod may move
   `target` (its y is kept inside the level's height); the game still looks down from it for ground to land on, inside
   the border. Canceling ends the effect: no
@@ -2218,6 +2218,21 @@ handle, an entity the client doesn't track and a level it doesn't show:
   A worn stack is asked again only when it changes (`ItemStack.matches`), so the answer must be the same for the
   same stack. With no mod listening, or none changing a stack's list, nothing is copied. A player's attack speed
   still reads its held item type's `attack_speed`, not the stack's (see #549).
+- `get_enchantment_level` (`GetEnchantmentLevelEvent`) edits the enchantments gameplay sees on a stack:
+  `ItemEnchantments` is NeoForge's `ItemEnchantments.Mutable` (`level`, `set`, `upgrade`, `retain` for `removeIf`,
+  levels at most 255), and `target` is the one enchantment a read asks for, `None` when every one is read. The
+  game's reads follow NeoForge's split:
+  - through the hook: `ItemStack::enchantment_level` (`getEnchantmentLevel`, every gameplay level read: Looting,
+    Fortune and the other loot functions, Respiration, Silk Touch, Mending, Thorns, the trident's and crossbow's
+    enchantments, fishing), and `ItemStack::all_enchantments` (`getAllEnchantments`: every enchantment effect
+    component, the enchantments' attribute modifiers, the decorated pot's `hasTag` check, the killer's gear for
+    entity loot);
+  - the stack's own component: `ItemStack::enchantments` and `tag_enchantment_level` (`getTagEnchantmentLevel`)
+    for tooltips, the anvil, grindstone and enchanting table, item predicates, saves, the network, and
+    `EnchantmentHelper.has` (Curse of Binding), which NeoForge doesn't hook either.
+
+  It is asked on every such read, many times a tick, so keep a listener cheap. With no mod listening nothing runs;
+  with one, ids are parsed once and a read the mods leave alone allocates nothing.
 - `living.set_health(host, health)` is `LivingEntity.setHealth` (Paper's `Damageable#setHealth`), cut to the
   range from zero to the maximum, with no hook; a non-finite value is refused. This raw write can set zero
   or change a dead entity's health without running the death pipeline.
