@@ -528,7 +528,7 @@ pub fn main() -> horizon_client::Result<()> {
     // Trial spawner rewards: the loot tables and the configs.
     let loot = if input.contains("mode=trial") || input.contains("mode=vault") {
         horizon_client::mobs::trial_spawner::load_registry(root);
-        horizon_client::structure_blocks::loot_data(root, &PackOverlay::NONE)
+        horizon_client::structure_blocks::loot_data(root, &PackOverlay::NONE, &defaults)
     } else {
         None
     };
