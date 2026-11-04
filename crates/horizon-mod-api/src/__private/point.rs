@@ -16,6 +16,7 @@ pub enum Place {
 }
 
 /// One compiled-in slot. `F` is its listener's function type, fixed by the function's signature.
+// exhaustive: built only by `Point::new`, its fields private.
 pub struct Point<F: 'static> {
     target: &'static str,
     place: Place,

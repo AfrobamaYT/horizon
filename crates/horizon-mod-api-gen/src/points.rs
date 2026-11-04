@@ -118,6 +118,7 @@ pub fn slots(points: &[GamePoint]) -> String {
     let all = slots.iter().map(|(slot, ..)| slot);
     quote! {
         use mod_api::__private::point::{Attach, Place, Point};
+        pub(crate) use mod_api::points::*;
         #(#statics)*
         /// Every slot, for the launcher's generated `main` to fill by target and place.
         pub static POINTS: &[&(dyn Attach + Sync)] = &[#(&#all),*];

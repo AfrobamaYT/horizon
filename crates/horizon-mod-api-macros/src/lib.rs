@@ -195,7 +195,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     }
     // What the listeners get for `self`: the shape's host.
     let host = match (shape.mutable, shape.side) {
-        (false, _) => quote!(&*self),
+        (false, _) => quote!(self),
         (true, point_shape::Side::Both) => quote!(crate::game::points::host_side(&mut *self)),
         (true, _) => quote!(&mut *self),
     };
@@ -227,7 +227,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         point_shape::Returns::Opaque => (quote!(), quote!(#fire;)),
     };
     outer.block = syn::parse_quote!({
-        let mut __args = ::mod_api::points::#record::__new(#(#passed),*);
+        let mut __args = crate::game::points::#record::__new(#(#passed),*);
         if let Some(__listeners) = crate::game::points::#slot.get() {
             #fire;
             #stop

@@ -12476,7 +12476,6 @@ impl Game<'_> {
         self.sky_darken_memo.set(Some((key, darken)));
         darken
     }
-    #[horizon_mod_api_macros::point(side = "both")]
     fn mob_hit(&self) -> Option<(usize, f64)> {
         if let Some(hit) = self.tick_mob {
             return hit;
