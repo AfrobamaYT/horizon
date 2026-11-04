@@ -388,7 +388,48 @@ impl Game<'_> {
         })
     }
 
+    /// Opens the title screen `Title::set_mode` asked for, as
+    /// `Minecraft.setScreen` opens the title's screens: `screen_opening` fires
+    /// from the title screen shown to the new one, then `screen_closing` for
+    /// the one it leaves, and the change applies unless a mod answered
+    /// `Cancel`. A mod's own screen can't open over the title, so `ModScreen`
+    /// opens the screen asked for. Then `screen_init_post` follows and the
+    /// frame's observer is told, so it does not announce it again. Each call
+    /// also sets the title's gate: when no mod listens to the screen hooks
+    /// (`screen_hooks_heard`), `set_mode` applies at once. Run after each window
+    /// event and control command, and each frame.
+    pub(super) fn settle_title_mode(&mut self) {
+        let gated = self.screen_hooks_heard();
+        let Some(title) = self.title.as_mut() else {
+            return;
+        };
+        title.gated = gated;
+        let Some(mode) = title.take_requested() else {
+            return;
+        };
+        let (current, id) = (title.mode.id(), mode.id());
+        // What changed before is told first.
+        let now = self.observed_now();
+        self.observe_change(now);
+        let decision = {
+            let none = self.screen_change_view(Screen::Playing);
+            let from = screen_view_with_id(&none, current);
+            let to = screen_view_with_id(&none, id);
+            self.decide_screen(&from, &to, true)
+        };
+        if let ScreenDecision::Keep = decision {
+            return;
+        }
+        if let Some(title) = self.title.as_mut() {
+            title.mode = mode;
+        }
+        self.observed_screen = self.observed_now();
+        let none = self.screen_change_view(Screen::Playing);
+        self.native_screen_init_post(&screen_view_with_id(&none, id));
+    }
+
     pub(super) fn observe_screen(&mut self) {
+        self.settle_title_mode();
         // Free with no native mod: the snapshot clones the title and menu.
         if mod_api::mods().is_empty() {
             return;
@@ -11641,6 +11682,38 @@ mod screen_open_tests {
             assert!(game.sign_edit.is_some());
             assert_eq!(take(log), ["opening playing->sign_editor"]);
             game.observe_screen();
+            assert!(take(log).is_empty());
+        });
+    }
+
+    /// A title screen asked for through `Title::set_mode` opens once the game
+    /// fired `screen_opening` (then `screen_closing` for the one it leaves),
+    /// and `Cancel` keeps the title screen shown.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_title_screen_opens_through_screen_opening() {
+        use horizon_client::title::{Mode, Title};
+        run(|game, log, answer| {
+            // No saves: Singleplayer opens Create New World.
+            let saves = std::env::temp_dir().join("horizon-title-gate-test-no-saves");
+            game.title = Some(Title::new(saves, &game.options.resources));
+            game.settle_title_mode();
+            assert!(game.title.as_ref().unwrap().gated);
+            *answer.lock().unwrap() = Some(ScreenOpening::Cancel);
+            game.title.as_mut().unwrap().enter_singleplayer();
+            assert!(matches!(game.title.as_ref().unwrap().mode, Mode::Main));
+            game.settle_title_mode();
+            assert!(matches!(game.title.as_ref().unwrap().mode, Mode::Main));
+            assert_eq!(take(log), ["opening title->world_create"]);
+            *answer.lock().unwrap() = None;
+            game.title.as_mut().unwrap().enter_singleplayer();
+            game.settle_title_mode();
+            assert!(matches!(
+                game.title.as_ref().unwrap().mode,
+                Mode::Create { .. }
+            ));
+            assert_eq!(take(log), ["opening title->world_create", "closing title"]);
+            game.settle_title_mode();
             assert!(take(log).is_empty());
         });
     }

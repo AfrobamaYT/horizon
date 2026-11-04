@@ -17865,6 +17865,8 @@ impl Game<'_> {
             }
         }
         self.handle_window_event_inner(event_loop, event);
+        // A title screen the event asked for opens before the next event.
+        self.settle_title_mode();
         if let Some((button, pressed, modifiers)) = mouse {
             self.native_mouse_button_post(button, pressed, modifiers);
         }
