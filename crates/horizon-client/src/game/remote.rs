@@ -6287,12 +6287,12 @@ impl Game<'_> {
         Ok(())
     }
 
-    /// ClientPacketListener.handlePlayerAbilities: the player flies, may fly
-    /// and is invulnerable as the server says (bits 2, 4 and 1).
     /// The last `ClientboundPlayerAbilities` the server sent, on a client.
     pub(super) fn remote_abilities(&self) -> Option<&play::PlayerAbilities> {
         self.remote.as_ref()?.abilities.as_ref()
     }
+    /// ClientPacketListener.handlePlayerAbilities: the player flies, may fly
+    /// and is invulnerable as the server says (bits 2, 4 and 1).
     fn apply_remote_abilities(&mut self) {
         let (Some(player), Some(a)) = (
             self.player.as_mut(),
