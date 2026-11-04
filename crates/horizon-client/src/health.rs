@@ -66,6 +66,7 @@ pub struct DamageLevel<'a> {
     chunks: &'a crate::chunk_map::ChunkMap,
     air: horizon_world::registry::BlockStateId,
     registry: &'a horizon_world::registry::BlockRegistry,
+    tags: Option<&'a crate::items::Items>,
     random: &'a mut horizon_core::random::LegacyRandom,
     attachments: &'a mut horizon_world::attachments::Attachments,
     attachment_syncs: &'a mut crate::fast_hash::FxHashSet<horizon_world::attachments::Holder>,
@@ -77,6 +78,7 @@ impl<'a> DamageLevel<'a> {
     pub fn of(
         world: &'a mut crate::world::World,
         registry: &'a horizon_world::registry::BlockRegistry,
+        tags: Option<&'a crate::items::Items>,
     ) -> Self {
         let crate::world::World {
             chunks,
@@ -92,6 +94,7 @@ impl<'a> DamageLevel<'a> {
             chunks,
             air: *air,
             registry,
+            tags,
             random,
             attachments,
             attachment_syncs,
@@ -103,12 +106,14 @@ impl<'a> DamageLevel<'a> {
         world: &'a crate::world::World,
         registry: &'a horizon_world::registry::BlockRegistry,
         lent: &'a mut LentLevel,
+        tags: Option<&'a crate::items::Items>,
     ) -> Self {
         Self {
             shape: world.shape,
             chunks: &world.chunks,
             air: world.air,
             registry,
+            tags,
             random: &mut lent.random,
             attachments: &mut lent.attachments,
             attachment_syncs: &mut lent.attachment_syncs,
@@ -129,11 +134,16 @@ impl<'a> DamageLevel<'a> {
             chunks: self.chunks,
             air: self.air,
             registry: self.registry,
+            tags: self.tags,
             random: self.random,
             attachments: self.attachments,
             attachment_syncs: self.attachment_syncs,
             hooks: self.hooks,
         }
+    }
+    /// The authoritative world's merged tag tables, if available.
+    pub fn tags(&self) -> Option<&crate::items::Items> {
+        self.tags
     }
     /// The build range of the level whose damage hook is running.
     pub fn shape(&self) -> crate::chunk::LevelShape {
@@ -241,7 +251,7 @@ impl TestLevel {
         }
     }
     pub fn level(&mut self) -> DamageLevel<'_> {
-        DamageLevel::of(&mut self.world, &self.registry)
+        DamageLevel::of(&mut self.world, &self.registry, None)
     }
     /// The level's random, for a probe that draws from it outside a hit.
     pub fn random(&mut self) -> &mut horizon_core::random::LegacyRandom {
