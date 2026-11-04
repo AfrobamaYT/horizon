@@ -673,6 +673,33 @@ fn warn_conflicts(mods: &[Bundle]) -> Vec<String> {
     out
 }
 
+/// A raw `target` that is a catalog hook point's function: the same place by name, which a
+/// game update can move without breaking the mod, and a `mod_api` contract that needs no
+/// injection at all. Said once the game's source, which holds the catalog, is at hand.
+fn hook_hints(mods: &[Bundle], points: &[horizon_mod_api_gen::HookPoint]) -> Vec<String> {
+    let mut out = Vec::new();
+    for b in mods {
+        for i in &b.injections {
+            let InjectionSite::Target(target) = &i.site else {
+                continue;
+            };
+            let Some(point) = points.iter().find(|p| &p.target == target) else {
+                continue;
+            };
+            let instead = if point.scoped {
+                format!("the `{}` Part method", point.name)
+            } else {
+                format!("`Hooks::{}`", point.name)
+            };
+            out.push(format!(
+                "{}'s `{}` targets hook point `{}`: use `hook = \"{}\"`, `hook_version = {}`, or implement {instead} with no injection.",
+                b.manifest.id, i.id, point.name, point.name, point.version
+            ));
+        }
+    }
+    out
+}
+
 /// Appends `text` to the build log, the way a compiler warning reads.
 fn log_warning(text: &str) {
     if let Ok(mut log) = fs::OpenOptions::new()
@@ -1534,6 +1561,9 @@ fn pipeline(
         let needs_mixins = mods.iter().any(Bundle::needs_mixins);
         progress(Step::Source(revision.clone()));
         let source = source(&revision)?;
+        for hint in hook_hints(&mods, &horizon_mod_api_gen::hook_points(&source)?) {
+            log_warning(&hint);
+        }
         // `root()` is already the form horizon-mixins and MinGW take: resolved (no link, which
         // it refuses) and, on Windows, ASCII (which they can't read past), both by build_dir.
         let real = root();
@@ -2247,6 +2277,32 @@ mod tests {
             ),
         ];
         assert!(warn_conflicts(&mods).is_empty());
+    }
+
+    #[test]
+    fn a_target_that_is_a_hook_points_function_gets_the_hook_hint() {
+        let points =
+            horizon_mod_api_gen::hook_points(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".."))
+                .unwrap();
+        let frame = "horizon_client::game::native_hooks::Game<'_>::native_frame";
+        let scoped =
+            "horizon_client::game::native_hooks::GameLevel<'_>::native_pre_remove_side_effects";
+        let mods = [bundle_of(
+            "alpha",
+            &format!(
+                "[[injection]]\nid = \"raw\"\ntarget = \"{frame}\"\nkind = \"HEAD\"\n\
+                 [[injection]]\nid = \"part\"\ntarget = \"{scoped}\"\nkind = \"HEAD\"\n\
+                 [[injection]]\nid = \"named\"\nhook = \"frame\"\nkind = \"HEAD\"\n\
+                 [[injection]]\nid = \"other\"\ntarget = \"game::calls::compute\"\nkind = \"HEAD\"\n"
+            ),
+        )];
+        assert_eq!(
+            hook_hints(&mods, &points),
+            [
+                "alpha's `raw` targets hook point `frame`: use `hook = \"frame\"`, `hook_version = 1`, or implement `Hooks::frame` with no injection.",
+                "alpha's `part` targets hook point `pre_remove_side_effects`: use `hook = \"pre_remove_side_effects\"`, `hook_version = 1`, or implement the `pre_remove_side_effects` Part method with no injection."
+            ]
+        );
     }
 
     #[test]
