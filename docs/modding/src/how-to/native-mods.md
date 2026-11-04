@@ -122,7 +122,7 @@ forms are in the modding book: [Injections](../injections.md).
 ### Named hook points
 
 `native-hooks.json` at the root of the source names each hook point and the version of its contract (signature,
-when it is called, what it does): `{"name": "hud", "version": 1, "target": "horizon_client::game::native_hooks::Game<'_>::native_hud"}`.
+when it is called, what it does): `{"name": "render_gui_post", "version": 1, "target": "horizon_client::game::native_hooks::Game<'_>::native_render_gui_post"}`.
 An injection names `hook` and `hook_version` instead of `target`, and horizon-mixins resolves it from the catalog
 of the source it applies to, so a hook point can move in the source without breaking the mods that use it. A name
 the catalog lacks is `E_HOOK_UNKNOWN` (the error lists the names it has), a version it lacks `E_HOOK_VERSION`. A
