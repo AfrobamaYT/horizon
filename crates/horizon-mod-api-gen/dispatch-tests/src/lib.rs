@@ -82,6 +82,7 @@ mod tests {
         pub(super) struct NativeShake;
         pub(super) struct ShieldBlock;
         pub(super) struct HurtSource<'a>(pub &'a ());
+        pub(super) struct DamageContainer;
         #[derive(Clone, Copy)]
         pub(super) struct PhantomSpawnResult;
         #[derive(Clone, Copy)]

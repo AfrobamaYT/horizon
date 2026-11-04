@@ -16,6 +16,7 @@ use super::{
     path::Path,
     villager_brain::{NEVER, Slot, Tracker, Visible, WalkTarget, compute_path, reached},
 };
+use crate::health::DamageLevel;
 use crate::projectiles::{Projectile, ProjectileKind};
 use horizon_core::{
     geometry::{Vec3, trig},
@@ -175,16 +176,16 @@ pub fn init(m: &mut Mob, shuffle_seed: i64) {
 }
 
 /// What behaviours read and emit during a brain tick.
-struct Bx<'a, 'w> {
+struct Bx<'a, 'w, 'l> {
     w: &'a MobWorld<'w>,
-    lr: &'a mut LegacyRandom,
+    level: &'a mut DamageLevel<'l>,
     events: &'a mut Vec<MobEvent>,
     now: i64,
 }
 
 /// `Brain.tick`, then the species' `updateActivity`
 /// (`Breeze.customServerAiStep`, `Creaking.customServerAiStep`).
-pub fn tick(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom, events: &mut Vec<MobEvent>) {
+pub fn tick(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut Vec<MobEvent>) {
     if brain(m).is_none() {
         let seed = i64::from(m.id);
         init(m, seed);
@@ -194,7 +195,7 @@ pub fn tick(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom, events: &mut Vec<M
     let mut list = std::mem::take(&mut brain_mut(m).list);
     let mut cx = Bx {
         w,
-        lr,
+        level,
         events,
         now: w.game_time,
     };
@@ -575,14 +576,14 @@ impl B {
                 if *creaking && !super::creaking::can_move(m) || !swim_condition(m) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::LookAtTargetSink(t) => {
                 if !mem(m).look_target.present() {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::MoveToTargetSink {
@@ -606,7 +607,7 @@ impl B {
                 let reached = reached(m, cx.w, &walk);
                 if !reached && compute_path(m, cx.w, cx.now, &walk, path, speed, cant_reach) {
                     *last_target = walk.target.block(cx.w);
-                    t.begin(cx.lr, cx.now);
+                    t.begin(cx.level.random(), cx.now);
                     // start
                     mem(m).path.set_opt(path.clone());
                     m.nav_move_to_path(cx.w, path.clone(), f64::from(*speed));
@@ -687,7 +688,7 @@ impl B {
                 true
             }
             B::DoNothing(t) => {
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::RandomStroll(running, speed) => {
@@ -717,7 +718,7 @@ impl B {
                 let Some(t) = found else { return false };
                 // Ticker.tickDownAndCheck with UniformInt.of(30, 60).
                 if *until_next == 0 {
-                    *until_next = 30 + cx.lr.next_int_bound(31).unwrap_or(0) - 1;
+                    *until_next = 30 + cx.level.random().next_int_bound(31).unwrap_or(0) - 1;
                     return false;
                 }
                 *until_next -= 1;
@@ -783,7 +784,7 @@ impl B {
                 m.swing();
                 let mut gcx = Cx {
                     w,
-                    lr: cx.lr,
+                    level: cx.level,
                     events: cx.events,
                 };
                 super::ai::do_hurt_target(m, target, &mut gcx);
@@ -817,7 +818,7 @@ impl B {
                     mem(m).breeze_shoot.clear();
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 // start
                 super::breeze::set_pose(m, super::breeze::SHOOTING);
                 mem(m).breeze_shoot_charging.set_ttl((), 15);
@@ -836,7 +837,7 @@ impl B {
                 if !long_jump_can_run(m, cx) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 // start
                 if !mem(m).breeze_jump_inhaling.present() {
                     mem(m).breeze_jump_inhaling.set_ttl((), 10);
@@ -874,7 +875,7 @@ impl B {
                 if !stuck {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 mem(m).breeze_shoot.set_ttl((), 60);
                 true
             }
@@ -893,7 +894,7 @@ impl B {
                 {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 slide_start(m, cx);
                 true
             }
@@ -1021,7 +1022,7 @@ impl B {
                     && !reached(m, cx.w, &walk)
                     && m.ai.nav.stuck
                 {
-                    *cooldown = cx.lr.next_int_bound(40).unwrap_or(0);
+                    *cooldown = cx.level.random().next_int_bound(40).unwrap_or(0);
                 }
                 m.nav_stop();
                 let mm = mem(m);

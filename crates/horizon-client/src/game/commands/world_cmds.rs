@@ -260,11 +260,10 @@ impl Game<'_> {
 
     /// Retain the mob hit's causing-player connection after the hit is accepted.
     fn command_damage_mob(&mut self, id: u32, amount: f32, damage: Damage) -> bool {
-        let hurt = self
-            .mobs
-            .iter_mut()
-            .find(|m| m.id == id)
-            .is_some_and(|m| m.damage(amount, damage));
+        let hurt =
+            self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+                m.damage(crate::game::entity::damage_level_of!(self), amount, damage)
+            });
         if hurt {
             self.resolve_player_responsible(id, damage);
             if damage.attacker == Some(Who::Player) {
