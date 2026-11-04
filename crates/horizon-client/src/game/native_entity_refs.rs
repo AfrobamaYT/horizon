@@ -224,8 +224,8 @@ impl Game<'_> {
     /// (`updateNeighborsAtExceptFromFacing`: a diode's front) or `OutputSignal`
     /// (`updateNeighbourForOutputSignal`: the comparators beside it, when its comparator output
     /// changes without its state changing). `source` is the state whose block vanilla passes as
-    /// the one that changed. False, with nothing done, off the level in place or for a position
-    /// that isn't loaded.
+    /// the one that changed. False, with nothing done, off the level in place, for a position
+    /// that isn't loaded, or for a `source` that is no block state.
     pub(super) fn native_level_update_neighbors(
         &mut self,
         level: LevelRef,
@@ -233,7 +233,10 @@ impl Game<'_> {
         source: BlockStateId,
         update: NeighbourUpdate,
     ) -> bool {
-        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+        if !self.native_level_write_allowed(level, pos)
+            || self.dim.id() != level.dimension()
+            || self.pack.assets.registry.state(source).is_none()
+        {
             return false;
         }
         let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
@@ -245,14 +248,18 @@ impl Game<'_> {
     }
     /// Tell the block at `pos` that `source`'s block beside it changed (`Level.neighborChanged`),
     /// as a diode tells the block in front of it before updating that block's neighbours. False,
-    /// with nothing done, as for `update_neighbors`.
+    /// with nothing done, as for `update_neighbors`: off the level in place, for a position that
+    /// isn't loaded, or for a `source` that is no block state.
     pub(super) fn native_level_neighbor_changed(
         &mut self,
         level: LevelRef,
         pos: [i32; 3],
         source: BlockStateId,
     ) -> bool {
-        if !self.native_level_write_allowed(level, pos) || self.dim.id() != level.dimension() {
+        if !self.native_level_write_allowed(level, pos)
+            || self.dim.id() != level.dimension()
+            || self.pack.assets.registry.state(source).is_none()
+        {
             return false;
         }
         let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
@@ -809,6 +816,10 @@ pub(super) mod tests {
             assert!(game.block_ticks.has_block_tick(at, block));
             // Off the level in place: refused, nothing done.
             assert!(!level.update_neighbors(game, [10, 64, 500_000], cake, OutputSignal));
+            // A source that is no block state: refused, not a panic.
+            let unknown = horizon_world::registry::BlockStateId(u32::MAX);
+            assert!(!level.update_neighbors(game, [10, 64, 5], unknown, Neighbours));
+            assert!(!level.neighbor_changed(game, [11, 64, 5], unknown));
         });
     }
 
