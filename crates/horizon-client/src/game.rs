@@ -1249,6 +1249,17 @@ impl LevelAccess for GameLevel<'_> {
             self.native_neighbor_changed(self.dimension, pos, state, changed, moved);
         }
     }
+    fn affect_neighbors_after_removal(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        moved: bool,
+        updates: &mut Vec<horizon_world::level::NeighbourUpdate>,
+    ) {
+        if self.native_authoritative {
+            self.native_affect_neighbors_after_removal(self.dimension, pos, state, moved, updates);
+        }
+    }
     fn allow_spread(
         &self,
         kind: horizon_world::level::Spread,
