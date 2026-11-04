@@ -452,6 +452,13 @@ one, where vanilla gives the `by` one.
 
 - Chunks and players coming and going, on the server: `native_chunk_load` (with whether the chunk is new), `native_chunk_unload`, and
   `native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Changes made to the departing chunk in `native_chunk_unload` aren't saved: as in vanilla, the chunk is saved before it unloads.
+- Chunks a player watches, on the server: `native_chunk_watch(player, chunk)`, `native_chunk_sent(player, chunk)` and
+  `native_chunk_unwatch(player, chunk)` (NeoForge's `ChunkWatchEvent.Watch`, `Sent` and `UnWatch`). Each chunk that comes into a
+  player's view is watched, then sent; it's unwatched when it leaves the view, when the player leaves the level (a portal, a
+  teleport, a respawn) and when they disconnect, in the level it was watched in. Vanilla watches a chunk when it queues it; Horizon
+  picks a chunk only as it sends it, so the watch comes just before the send. The hub records them only while a mod listens and
+  the game tells them after the hub's network step for that level, so a handler sees the state after that step; the order per
+  player and chunk is vanilla's. The far ring's columns past the view distance aren't told, and the server stopping doesn't unwatch.
 
 - [the renderer's hook points](#render-hook-points): `native_world_drawn`, called once the world is drawn with its colour, depth, matrices and entity geometry, and
   `native_render_needs`, where a mod asks for the entity runs and the world's depth without a shader pack.
