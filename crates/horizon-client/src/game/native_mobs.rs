@@ -188,7 +188,12 @@ impl Game<'_> {
         if monster && self.ui.difficulty == 0 {
             return None;
         }
-        let id = self.spawn_mob(kind, pos, true)?;
+        let id = self.spawn_mob(
+            kind,
+            pos,
+            true,
+            horizon_client::mobs::spawn_rules::Reason::Command,
+        )?;
         // A jockey's other mob comes after it: this one is found by its id.
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
             m.no_ai = options.no_ai;

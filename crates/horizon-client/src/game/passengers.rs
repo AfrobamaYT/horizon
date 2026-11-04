@@ -367,7 +367,12 @@ impl Game<'_> {
                         self.mount_mob(id, chicken);
                     }
                 } else if self.world.random.next_float() < CHICKEN_JOCKEY_ODDS
-                    && let Some(chicken) = self.spawn_mob("minecraft:chicken", at, false)
+                    && let Some(chicken) = self.spawn_mob(
+                        "minecraft:chicken",
+                        at,
+                        false,
+                        horizon_client::mobs::spawn_rules::Reason::Jockey,
+                    )
                 {
                     self.make_chicken_jockey(chicken);
                     self.mount_mob(id, chicken);
@@ -375,7 +380,12 @@ impl Game<'_> {
             }
             // Spider.finalizeSpawn: one in a hundred carries a skeleton.
             Species::Spider if self.world.random.next_int_bound(100).unwrap_or(1) == 0 => {
-                if let Some(skeleton) = self.spawn_mob("minecraft:skeleton", at, false) {
+                if let Some(skeleton) = self.spawn_mob(
+                    "minecraft:skeleton",
+                    at,
+                    false,
+                    horizon_client::mobs::spawn_rules::Reason::Jockey,
+                ) {
                     self.mount_mob(skeleton, id);
                 }
             }
@@ -390,7 +400,12 @@ impl Game<'_> {
                             Species::Zombie,
                         )) =>
             {
-                if let Some(zombie) = self.spawn_mob("minecraft:zombie", at, false) {
+                if let Some(zombie) = self.spawn_mob(
+                    "minecraft:zombie",
+                    at,
+                    false,
+                    horizon_client::mobs::spawn_rules::Reason::Jockey,
+                ) {
                     if let Some(z) = self.mobs.iter_mut().find(|m| m.id == zombie) {
                         z.extra.set_main_hand(Some("minecraft:iron_spear".into()));
                     }
@@ -424,11 +439,21 @@ impl Game<'_> {
         if let Some(h) = self.mobs.iter_mut().find(|m| m.id == id) {
             h.extra.set_main_hand(Some("minecraft:iron_spear".into()));
         }
-        let Some(camel) = self.spawn_mob("minecraft:camel_husk", at, false) else {
+        let Some(camel) = self.spawn_mob(
+            "minecraft:camel_husk",
+            at,
+            false,
+            horizon_client::mobs::spawn_rules::Reason::Jockey,
+        ) else {
             return;
         };
         self.mount_mob(id, camel);
-        let _ = self.spawn_mob("minecraft:parched", at, false);
+        let _ = self.spawn_mob(
+            "minecraft:parched",
+            at,
+            false,
+            horizon_client::mobs::spawn_rules::Reason::Jockey,
+        );
     }
     /// `Drowned.finalizeSpawn`: half the natural drowned holding a trident,
     /// outside the rivers and oceans that breed more drowned, ride a zombie
@@ -456,7 +481,12 @@ impl Game<'_> {
         if frequent {
             return;
         }
-        if let Some(n) = self.spawn_mob("minecraft:zombie_nautilus", at, false) {
+        if let Some(n) = self.spawn_mob(
+            "minecraft:zombie_nautilus",
+            at,
+            false,
+            horizon_client::mobs::spawn_rules::Reason::Jockey,
+        ) {
             self.mount_mob(id, n);
         }
     }
@@ -487,7 +517,12 @@ impl Game<'_> {
             if !self.ui.rules.bool("spawn_mobs") {
                 return;
             }
-            if let Some(piglin) = self.spawn_mob("minecraft:zombified_piglin", at, false) {
+            if let Some(piglin) = self.spawn_mob(
+                "minecraft:zombified_piglin",
+                at,
+                false,
+                horizon_client::mobs::spawn_rules::Reason::Jockey,
+            ) {
                 let baby = self.world.random.next_float() < CHICKEN_JOCKEY_ODDS;
                 if let Some(p) = self.mobs.iter_mut().find(|m| m.id == piglin) {
                     p.extra
@@ -500,7 +535,12 @@ impl Game<'_> {
                 self.mount_mob(piglin, id);
             }
         } else if self.world.random.next_int_bound(10).unwrap_or(1) == 0
-            && let Some(baby) = self.spawn_mob("minecraft:strider", at, false)
+            && let Some(baby) = self.spawn_mob(
+                "minecraft:strider",
+                at,
+                false,
+                horizon_client::mobs::spawn_rules::Reason::Jockey,
+            )
         {
             if let Some(b) = self.mobs.iter_mut().find(|m| m.id == baby) {
                 b.extra.age = -24000;
@@ -557,7 +597,12 @@ impl Game<'_> {
         };
         self.mount_mob(skeleton, id);
         for _ in 0..3 {
-            let Some(other) = self.spawn_mob("minecraft:skeleton_horse", at, true) else {
+            let Some(other) = self.spawn_mob(
+                "minecraft:skeleton_horse",
+                at,
+                true,
+                horizon_client::mobs::spawn_rules::Reason::Triggered,
+            ) else {
                 continue;
             };
             let (dx, dz) = (
@@ -578,7 +623,12 @@ impl Game<'_> {
     /// `SkeletonTrapGoal.createSkeleton`: an iron helmet unless it already
     /// has a helm.
     fn trap_skeleton(&mut self, at: [f64; 3]) -> Option<u32> {
-        let id = self.spawn_mob("minecraft:skeleton", at, true)?;
+        let id = self.spawn_mob(
+            "minecraft:skeleton",
+            at,
+            true,
+            horizon_client::mobs::spawn_rules::Reason::Triggered,
+        )?;
         let m = self.mobs.iter_mut().find(|m| m.id == id)?;
         m.invulnerable = TRAP_INVULNERABLE;
         if m.extra.head_id().is_none() {

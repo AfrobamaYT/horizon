@@ -153,8 +153,12 @@ impl Game<'_> {
             Some("west") => 90.0,
             _ => 0.0,
         };
-        if let Some(id) = self.spawn_mob("minecraft:happy_ghast", at, true)
-            && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
+        if let Some(id) = self.spawn_mob(
+            "minecraft:happy_ghast",
+            at,
+            true,
+            horizon_client::mobs::spawn_rules::Reason::Triggered,
+        ) && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
         {
             // DriedGhastBlock.spawnGhastling sets the baby age before
             // addFreshEntity, so ageBoundaryReached runs the ghastling setup

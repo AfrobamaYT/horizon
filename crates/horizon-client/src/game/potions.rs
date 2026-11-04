@@ -248,6 +248,7 @@ impl Game<'_> {
                     [feet.x, feet.y + 0.5, feet.z],
                     false,
                     true,
+                    horizon_client::mobs::spawn_rules::Reason::Triggered,
                 ) && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
                     horizon_client::mobs::cube::set_size(m, 2);
@@ -356,8 +357,13 @@ impl Game<'_> {
                 look[1] * 0.3 * 1.5,
                 f64::from(-x as f32 * sin + z as f32 * cos),
             );
-            if let Some(id) = self.spawn_mob_for("minecraft:silverfish", at, false, true)
-                && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
+            if let Some(id) = self.spawn_mob_for(
+                "minecraft:silverfish",
+                at,
+                false,
+                true,
+                horizon_client::mobs::spawn_rules::Reason::Triggered,
+            ) && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
             {
                 m.velocity = velocity;
             }

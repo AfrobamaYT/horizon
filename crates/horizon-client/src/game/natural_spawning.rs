@@ -1,7 +1,7 @@
 //! The game's side of `NaturalSpawner` (`mobs::spawn_selection`): the level
 //! it reads, the spawning chunks and caps of `ServerChunkCache.tickChunks`,
 //! and the mobs it adds (finalized with the game's `finalizeSpawn`).
-use super::{Dim, Game};
+use super::{Dim, Game, creatures::Finalized};
 use horizon_client::vanillagen::VanillaTerrain;
 use horizon_client::{
     biome::{BiomeInfo, SpawnEntry},
@@ -697,13 +697,14 @@ impl<'a> Game<'a> {
         let kind = self.res.mob_types().get(r.entity)?.clone();
         let [x, y, z] = r.position;
         let mut mob = Mob::new(0, kind, Vec3::new(x, y, z), r.yaw);
-        let facts = self.biome_facts(x.floor() as i32, y.floor() as i32, z.floor() as i32);
-        let difficulty = self.local_difficulty(r.position);
-        horizon_client::mobs::spawning::finalize(&mut mob, &facts, &difficulty);
-        horizon_client::mobs::raider::finalize(
-            &mut mob,
-            horizon_client::mobs::raider::Reason::Natural,
-        );
+        match self.finalize_with(&mut mob, r.reason, None) {
+            Finalized::Cancelled => return None,
+            Finalized::Skipped => {}
+            Finalized::Done => horizon_client::mobs::raider::finalize(
+                &mut mob,
+                horizon_client::mobs::raider::Reason::Natural,
+            ),
+        }
         let bounds = mob.bounds();
         pending.push(mob);
         Some(Spawned {
@@ -1252,6 +1253,79 @@ mod tests {
             let fail = run(Some(NativeSpawnCheck::Fail));
             assert_eq!(fail.0, (false, none.0.1));
             assert_eq!(fail.1, (false, first));
+        });
+    }
+
+    /// Answers `finalize_spawn` the way a test asks.
+    #[derive(Clone, Copy)]
+    enum FinalizeAnswer {
+        Pass,
+        SkipFinalize,
+        StopSpawn,
+    }
+    struct FinalizeMod(FinalizeAnswer);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for FinalizeMod {
+        fn finalize_spawn(
+            &self,
+            _: &dyn mod_api::Host,
+            event: &mut mod_api::FinalizeSpawnEvent<'_>,
+        ) -> mod_api::Flow {
+            match self.0 {
+                FinalizeAnswer::Pass => {}
+                FinalizeAnswer::SkipFinalize => return mod_api::Flow::Cancel,
+                FinalizeAnswer::StopSpawn => event.spawn_cancelled = true,
+            }
+            mod_api::Flow::Continue
+        }
+    }
+
+    /// No listener and a listener that changes nothing finalize and draw as vanilla; a cancel
+    /// skips finalization and its draws, the mob still spawning; `spawn_cancelled` adds no mob.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    fn finalize_spawn_cancels_pin_the_draws_and_the_outcome() {
+        use super::super::native_entity_refs::tests::with_game;
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .cloned()
+                .unwrap();
+            let run = |game: &mut Game<'_>, answer: Option<FinalizeAnswer>| {
+                game.world.random = LegacyRandom::new(5);
+                let mut mob = Mob::new(1, kind.clone(), Vec3::new(8.5, 64.0, 8.5), 0.0);
+                let go =
+                    |game: &Game<'_>, mob: &mut Mob| game.finalize_with(mob, Reason::Natural, None);
+                let outcome = match answer {
+                    None => go(game, &mut mob),
+                    Some(a) => mod_api::testing::with_mods(
+                        vec![mod_api::ModEntry::new("finalize", Box::new(FinalizeMod(a)))].into(),
+                        || go(game, &mut mob),
+                    ),
+                };
+                let tag = match outcome {
+                    Finalized::Done => "done",
+                    Finalized::Skipped => "skipped",
+                    Finalized::Cancelled => "cancelled",
+                };
+                (
+                    tag,
+                    game.world.random.next_int(),
+                    mob.random.clone().next_int(),
+                )
+            };
+            let none = run(game, None);
+            assert_eq!(none.0, "done");
+            assert_eq!(run(game, Some(FinalizeAnswer::Pass)), none, "pass-through");
+            let fresh = LegacyRandom::new(5).next_int();
+            let skipped = run(game, Some(FinalizeAnswer::SkipFinalize));
+            assert_eq!(skipped.0, "skipped");
+            assert_eq!(skipped.1, fresh, "a skipped finalization draws nothing");
+            let stopped = run(game, Some(FinalizeAnswer::StopSpawn));
+            assert_eq!(stopped.0, "cancelled");
+            assert_eq!(stopped.1, fresh, "a stopped spawn draws nothing");
         });
     }
 }

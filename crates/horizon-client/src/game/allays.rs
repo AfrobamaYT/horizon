@@ -263,8 +263,12 @@ impl Game<'_> {
         if m.extra.flag && shard && m.extra.egg_time == 0 {
             let pos = at;
             self.mobs[index].extra.egg_time = 6000;
-            if let Some(id) = self.spawn_mob("minecraft:allay", pos, true)
-                && let Some(c) = self.mobs.iter_mut().find(|m| m.id == id)
+            if let Some(id) = self.spawn_mob(
+                "minecraft:allay",
+                pos,
+                true,
+                horizon_client::mobs::spawn_rules::Reason::Triggered,
+            ) && let Some(c) = self.mobs.iter_mut().find(|m| m.id == id)
             {
                 c.extra.egg_time = 6000;
             }

@@ -2,7 +2,7 @@
 //! their waves, boss bar, victory and the raiders' bookkeeping. The rules are
 //! `horizon_client::patrol` and `horizon_client::raid`; this is the game's
 //! side of them.
-use super::{Dim, Game};
+use super::{Dim, Game, creatures::Finalized};
 use horizon_client::mobs::villager as mobs_villager;
 use horizon_client::{
     effects::{EffectInstance, OmenTick},
@@ -10,7 +10,6 @@ use horizon_client::{
         Mob, Species, raider,
         spawn_rules::{self, SpawnLevel},
         spawn_selection::{Heightmap, NaturalLevel},
-        spawning,
     },
     patrol::{GameplayAttributes, Member, PatrolLevel, PatrolSpawner},
     raid::{self, Action, BarName, RaidLevel, RaidPlayer, RaiderInfo, RaiderType, Raids, Spawn},
@@ -780,14 +779,16 @@ impl Game<'_> {
                 raider::find_patrol_target_from(&mut mob, [0, 0, 0]);
             }
         }
-        let facts = self.biome_facts(
-            at[0].floor() as i32,
-            at[1].floor() as i32,
-            at[2].floor() as i32,
-        );
-        let difficulty = self.local_difficulty(at);
-        spawning::finalize(&mut mob, &facts, &difficulty);
-        raider::finalize(&mut mob, reason);
+        let spawn_reason = if reason == raider::Reason::Patrol {
+            horizon_client::mobs::spawn_rules::Reason::Patrol
+        } else {
+            horizon_client::mobs::spawn_rules::Reason::Event
+        };
+        match self.finalize_with(&mut mob, spawn_reason, None) {
+            Finalized::Cancelled => return None,
+            Finalized::Skipped => {}
+            Finalized::Done => raider::finalize(&mut mob, reason),
+        }
         let id = mob.id;
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);

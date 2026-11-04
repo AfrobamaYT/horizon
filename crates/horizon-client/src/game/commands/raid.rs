@@ -53,7 +53,13 @@ impl Game<'_> {
             },
             "raid.spawnleader" => {
                 let kind = "minecraft:pillager";
-                match self.spawn_mob_for(kind, [player.x, player.y, player.z], true, true) {
+                match self.spawn_mob_for(
+                    kind,
+                    [player.x, player.y, player.z],
+                    true,
+                    true,
+                    horizon_client::mobs::spawn_rules::Reason::Command,
+                ) {
                     Some(id) => {
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                             raider::set_patrol_leader(m, true);

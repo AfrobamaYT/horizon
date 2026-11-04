@@ -6058,7 +6058,12 @@ impl Game<'_> {
                             f64::from(pos.y) - 0.5,
                             f64::from(pos.z) + dz,
                         ];
-                        let _ = self.spawn_mob("minecraft:tadpole", spawn, true);
+                        let _ = self.spawn_mob(
+                            "minecraft:tadpole",
+                            spawn,
+                            true,
+                            horizon_client::mobs::spawn_rules::Reason::Breeding,
+                        );
                     }
                 }
                 LevelEvent::BlockEvent {
@@ -6718,7 +6723,12 @@ impl Game<'_> {
                         f64::from(pos[1]),
                         f64::from(pos[2]) + 0.5,
                     ];
-                    if let Some(id) = self.spawn_mob("minecraft:silverfish", at, false) {
+                    if let Some(id) = self.spawn_mob(
+                        "minecraft:silverfish",
+                        at,
+                        false,
+                        horizon_client::mobs::spawn_rules::Reason::Triggered,
+                    ) {
                         self.mob_poof(id);
                     }
                 }

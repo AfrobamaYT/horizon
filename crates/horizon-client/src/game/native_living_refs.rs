@@ -1919,7 +1919,12 @@ mod tests {
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
         let id = game
-            .spawn_mob("minecraft:wolf", [2.5, 64.0, 2.5], true)
+            .spawn_mob(
+                "minecraft:wolf",
+                [2.5, 64.0, 2.5],
+                true,
+                horizon_client::mobs::spawn_rules::Reason::Command,
+            )
             .unwrap();
         let wolf = game.native_living(game.native_entity(id).unwrap()).unwrap();
         assert_eq!(game.native_living_is_tamed(wolf), Some(false));
