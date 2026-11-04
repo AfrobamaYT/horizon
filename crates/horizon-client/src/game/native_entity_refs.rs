@@ -603,8 +603,11 @@ pub(super) mod tests {
                 game.world.set(6, 64, 5, lamp_state("false")).unwrap();
                 game.world.set(7, 64, 5, power).unwrap();
                 let lit = game.with_level(|b, level, ticks| {
-                    let flags = horizon_world::level::flags::UPDATE_MOVE_BY_PISTON
-                        | horizon_world::level::flags::UPDATE_CLIENTS;
+                    // Flags 82: how a piston pushes a block out (`PistonBaseBlock.moveBlocks`).
+                    use horizon_world::level::flags;
+                    let flags = flags::UPDATE_MOVE_BY_PISTON
+                        | flags::UPDATE_KNOWN_SHAPE
+                        | flags::UPDATE_CLIENTS;
                     b.set_block(
                         level,
                         ticks,
