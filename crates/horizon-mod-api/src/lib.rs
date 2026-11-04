@@ -160,6 +160,28 @@ pub use horizon_core::{
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
+/// The registry facts a recipe viewer needs for an enchantment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct EnchantmentInfo {
+    /// Registry name, including namespace.
+    pub id: String,
+    /// Largest supported level.
+    pub max_level: u32,
+    /// Whether the enchantment is in the curse tag.
+    pub curse: bool,
+}
+impl EnchantmentInfo {
+    /// Construct registry facts for an enchantment.
+    pub fn new(id: String, max_level: u32, curse: bool) -> Self {
+        Self {
+            id,
+            max_level,
+            curse,
+        }
+    }
+}
+
 pub use horizon_items::items::ItemStack;
 pub use horizon_items::items::TagRegistry;
 pub use horizon_world::consumable::UseAnimation;
@@ -3459,14 +3481,12 @@ pub trait LevelHost {
     fn height(&self) -> i32 {
         unimplemented!("LevelHost::height")
     }
-    /// `BlockState.is(TagKey)`: the block of `state` is in the block tag `tag` (`minecraft:logs`
-    /// or `logs`, no `#`), over the world's merged tags, its data packs and content mods
-    /// included. False for an unknown tag or state. None on a client level, whose tags are not
-    /// the server's, as `Host::block_state_in_tag` is.
-    fn block_state_in_tag(&self, _state: BlockStateId, _tag: &str) -> Option<bool> {
-        unimplemented!("LevelHost::block_state_in_tag")
+    /// Whether the block registry name is in the merged block tag. Unknown names and tags
+    /// return false; unavailable authoritative tags return None.
+    fn block_in_tag(&self, _block: &str, _tag: &str) -> Option<bool> {
+        unimplemented!("LevelHost::block_in_tag")
     }
-    /// `ItemStack.is(TagKey)`: `stack` is in the item tag `tag`, as `block_state_in_tag` reads
+    /// `ItemStack.is(TagKey)`: `stack` is in the item tag `tag`, as `block_in_tag` reads
     /// a tag. An empty stack tests `minecraft:air`.
     fn item_stack_in_tag(&self, _stack: &ItemStack, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::item_stack_in_tag")
@@ -3481,9 +3501,8 @@ pub trait LevelHost {
     fn state_fluid_state(&self, _state: BlockStateId) -> Option<FluidState> {
         unimplemented!("LevelHost::state_fluid_state")
     }
-    /// `FluidState.is(TagKey)`: the fluid is in the fluid tag `tag` (`minecraft:water`), as
-    /// `block_state_in_tag` reads a tag. The empty fluid is in none.
-    fn fluid_in_tag(&self, _fluid: FluidState, _tag: &str) -> Option<bool> {
+    /// Whether the fluid registry name is in the merged fluid tag, as `block_in_tag` reads.
+    fn fluid_in_tag(&self, _fluid: &str, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::fluid_in_tag")
     }
     /// `BlockState.setValue`, through `native_state_with_property`; None if invalid.

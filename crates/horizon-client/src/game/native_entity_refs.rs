@@ -1054,6 +1054,10 @@ pub(super) mod tests {
             .unwrap();
             game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = Some(Box::new(motion));
             let player = game.native_player_ref(12).unwrap();
+            assert_eq!(
+                player.inventory(game),
+                Some(vec![ItemStack::new("minecraft:stone", 1)])
+            );
             let guest_living = game.native_living(player.fields().entity).unwrap();
             let host: &dyn mod_api::Host = game;
             assert_eq!(

@@ -82,6 +82,7 @@ impl Game<'_> {
                 assets: &self.pack.assets,
                 collision_binding: self.collision,
                 resources: self.motion,
+                tag_items: Some(world_items!(self)),
             }
             .replayed_tick(keys, sprinting)
         };
