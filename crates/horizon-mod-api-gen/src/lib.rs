@@ -698,6 +698,7 @@ fn free_function_source(target: &str) -> Option<(&'static str, String)> {
         ("horizon_world::", "horizon-world"),
         ("mod_api::", "horizon-mod-api"),
         ("horizon_client_lib::", "horizon-client"),
+        ("horizon_client_render::", "horizon-client-render"),
     ];
     prefixes
         .into_iter()
@@ -1643,6 +1644,15 @@ mod tests {
             Some((
                 "horizon-client",
                 "breathing::native_living_breathe".to_owned()
+            ))
+        );
+        assert_eq!(
+            super::free_function_source(
+                "horizon_client_render::sound_engine::hooks::native_play_sound"
+            ),
+            Some((
+                "horizon-client-render",
+                "sound_engine::hooks::native_play_sound".to_owned()
             ))
         );
         for target in [

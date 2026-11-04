@@ -39,10 +39,10 @@ pub mod reload {
 /// The structs the game fills for its hooks, each turned into the API's own with `From`.
 pub mod built {
     pub use crate::built::{
-        NativeActiveEffect, NativeBlockClick, NativeExplosionStart, NativeItemClick,
+        ChannelRef, NativeActiveEffect, NativeBlockClick, NativeExplosionStart, NativeItemClick,
         NativeItemFished, NativeLifecycleContext, NativeLootDrops, NativePlayerAbilities,
         NativePlayerExperience, NativePlayerFood, NativePortalShape, NativeScreenView,
-        NativeServerPlayer, ToolUse,
+        NativeServerPlayer, SoundPlay, ToolUse,
     };
     pub use crate::config_files::built::{ConfigEntry, ConfigStat};
     pub use crate::game::built::NativeConfigFile;
