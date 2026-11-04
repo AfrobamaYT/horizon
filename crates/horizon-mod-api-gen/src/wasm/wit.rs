@@ -224,6 +224,10 @@ fn def_wit(types: &Types<'_>, def: &Def, out: &mut String, used_out: bool) -> Re
                 }
             }
         }
+        // A token whose fields hold nothing, as a transaction: it crosses as its one value.
+        Kind::TupleRecord(items) if items.iter().all(|i| *i == Ty::Unit) => {
+            writeln!(out, "  enum {name} {{ value }}").unwrap()
+        }
         Kind::TupleRecord(items) => {
             let ty = wit(types, &Ty::Tuple(items.clone()))?.ok_or("empty tuple struct")?;
             let ty = match items.as_slice() {

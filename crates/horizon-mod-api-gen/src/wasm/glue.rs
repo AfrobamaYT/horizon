@@ -402,6 +402,9 @@ pub(super) fn conversions(
                     format!("{wire} {{ {} }}", parts.join(", "))
                 }
             }
+            Kind::TupleRecord(items) if items.iter().all(|i| *i == Ty::Unit) => {
+                format!("{wire}::Value")
+            }
             Kind::TupleRecord(items) => match items.as_slice() {
                 [one] => lower(types, one, "(&v.0)"),
                 _ => {
@@ -515,6 +518,10 @@ pub(super) fn conversions(
                         })
                         .collect();
                     format!("{path} {{ {} }}", parts.join(", "))
+                }
+                Kind::TupleRecord(items) if items.iter().all(|i| *i == Ty::Unit) => {
+                    let units = vec!["()"; items.len()].join(", ");
+                    format!("{{ let _ = w; {path}({units}) }}")
                 }
                 Kind::TupleRecord(items) => match items.as_slice() {
                     [one] => format!("{path}({})", lift(types, one, "w")),
