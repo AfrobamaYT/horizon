@@ -2626,6 +2626,44 @@ pub(crate) mod tests {
         mark_game_thread();
     }
 
+    /// Install parts that change what a path may cross: glass becomes land and air, air
+    /// stops being land and becomes water.
+    pub(crate) fn pathfindable_game_thread() {
+        struct Answers(&'static [(PathComputationType, bool)]);
+        #[mod_api::horizon_part]
+        impl BlockPart for Answers {
+            fn is_pathfindable(&self, _: &dyn Host, event: &mut IsPathfindableEvent) {
+                if let Some((_, answer)) = self.0.iter().find(|(kind, _)| *kind == event.kind) {
+                    event.pathfindable = *answer;
+                }
+            }
+        }
+        struct PathMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for PathMod {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+                r.block_part(
+                    "minecraft:glass",
+                    Answers(&[
+                        (PathComputationType::Land, true),
+                        (PathComputationType::Air, true),
+                    ]),
+                );
+                r.block_part(
+                    "minecraft:air",
+                    Answers(&[
+                        (PathComputationType::Land, false),
+                        (PathComputationType::Water, true),
+                    ]),
+                );
+            }
+        }
+        let mods: super::super::Mods = vec![ModEntry::new("path_test", Box::new(PathMod))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        mark_game_thread();
+    }
+
     /// Install a part on glass that asks, when a glass block is removed, for every neighbour to
     /// be told, as an override of `affectNeighborsAfterRemoval` calling `updateNeighborsAt`.
     pub(crate) fn removal_game_thread() {

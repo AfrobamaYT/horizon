@@ -571,6 +571,48 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn block_part_answers_is_pathfindable_once_per_state_and_type() {
+        use horizon_client::mobs::data::PathComputationType::{self, Air, Land, Water};
+
+        // Before any part: every state answers as the vanilla export says.
+        with_game(|game| {
+            let data = &game.res.rest().mob_data;
+            for (i, vanilla) in data.states.iter().enumerate() {
+                for (kind, bit) in [(Land, 1), (Water, 2), (Air, 4)] {
+                    let state = horizon_world::registry::BlockStateId(i as u32);
+                    assert_eq!(data.pathfindable(state, kind), vanilla.flags & bit != 0);
+                }
+            }
+        });
+        horizon_client::mod_api::part_tests::pathfindable_game_thread();
+        with_game(|game| {
+            let registry = game.pack.assets.registry;
+            let asks = |name: &str, kind: PathComputationType| {
+                let state = registry.default_state(name).unwrap();
+                game.res.rest().mob_data.pathfindable(state, kind)
+            };
+            // Glass: land and air answered, water left to the block (vanilla: none of them).
+            assert!(asks("minecraft:glass", Land));
+            assert!(asks("minecraft:glass", Air));
+            assert!(!asks("minecraft:glass", Water));
+            // Air: land refused, water allowed, air left to the block.
+            assert!(!asks("minecraft:air", Land));
+            assert!(asks("minecraft:air", Water));
+            assert!(asks("minecraft:air", Air));
+            // A block with no part answers as before.
+            assert!(!asks("minecraft:stone", Land));
+            // A reload without the mod's answers takes them back.
+            game.res
+                .rest()
+                .mob_data
+                .set_pathfindable(false, |_, _, vanilla| vanilla);
+            assert!(!asks("minecraft:glass", Land));
+            assert!(asks("minecraft:air", Land));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn block_part_asks_neighbours_to_update_when_its_block_is_removed() {
         use horizon_client::chunk::Chunk;
         use horizon_core::position::BlockPos;

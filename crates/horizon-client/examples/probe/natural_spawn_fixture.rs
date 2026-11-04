@@ -349,7 +349,10 @@ impl NaturalLevel for World<'_> {
             .map_or(self.min_y(), |y| y + 1)
     }
     fn pathfindable_land(&self, x: i32, y: i32, z: i32) -> bool {
-        self.s.data.state(self.state(x, y, z)).flags & horizon_client::mobs::data::LAND != 0
+        self.s.data.pathfindable(
+            self.state(x, y, z),
+            horizon_client::mobs::data::PathComputationType::Land,
+        )
     }
 }
 

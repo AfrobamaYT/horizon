@@ -14854,6 +14854,7 @@ impl Game<'_> {
             None,
             self.settings.horizon.api,
             self.settings.horizon.translucent_batching,
+            self.settings.horizon.wide_frame(),
             shader_packs::picked_pack_draws_flat(&self.settings),
         )?;
         renderer.screenshot = screenshot;
@@ -14890,6 +14891,7 @@ impl Game<'_> {
             None,
             self.settings.horizon.api,
             self.settings.horizon.translucent_batching,
+            self.settings.horizon.wide_frame(),
             shader_packs::picked_pack_draws_flat(&self.settings),
         )
     }
@@ -20394,7 +20396,21 @@ impl Game<'_> {
                 state_block: &|state| &registry.state(BlockStateId(state as u32)).unwrap().name,
             },
         )
-        .map_err(|refused| format!("Mod parts refused:\n{}", refused.join("\n")).into())
+        .map_err(|refused| format!("Mod parts refused:\n{}", refused.join("\n")))?;
+        self.resolve_pathfindable();
+        Ok(())
+    }
+    /// Ask the parts of each block `isPathfindable` once per state and type: the answer depends
+    /// on nothing else, so path finding and spawning read it with no dispatch.
+    fn resolve_pathfindable(&self) {
+        let asked = horizon_client::mod_api::has_scoped_hook(
+            horizon_client::mod_api::HookId::IsPathfindable,
+        );
+        let data = &self.res.rest().mob_data;
+        data.set_pathfindable(asked, |state, kind, mut pathfindable| {
+            self.native_is_pathfindable(state, kind, &mut pathfindable);
+            pathfindable
+        });
     }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).
@@ -21262,6 +21278,9 @@ fn build_renderer(
     prepared: Option<horizon_client::gfx::PreparedTextures>,
     api: horizon_client::graphics::GraphicsApi,
     translucent_batching: bool,
+    // HDR with Smooth Gradients (`Graphics::wide_frame`): a 16-bit frame where HDR output is
+    // offered (`Renderer::new`).
+    wide_frame: bool,
     shader_pack: bool,
 ) -> Result<Renderer> {
     let assets = &pack.render;
@@ -21299,6 +21318,7 @@ fn build_renderer(
         previous,
         api,
         translucent_batching,
+        wide_frame,
         shader_pack,
     ))?;
     renderer.hud.sprite_animations = atlas
@@ -21365,6 +21385,8 @@ fn loading_renderer(
         previous,
         api,
         // It draws no terrain.
+        false,
+        // An 8-bit frame, which HDR output takes as well.
         false,
         false,
     ))?;
@@ -21950,6 +21972,7 @@ impl Loading {
                 loaded.renderer_cpu,
                 self.settings.horizon.api,
                 self.settings.horizon.translucent_batching,
+                self.settings.horizon.wide_frame(),
                 shader_packs::picked_pack_draws_flat(&self.settings),
             )
         })?;
