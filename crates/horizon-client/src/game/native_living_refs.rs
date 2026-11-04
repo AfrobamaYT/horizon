@@ -7,17 +7,16 @@
 //! client answer for the local player from the client's own copy.
 use super::Game;
 use super::commands::{Target, items::Owner};
+use super::living_attributes::AttributeWrite;
 use crate::mobs::Who;
 use horizon_client::items::ItemStack;
 use horizon_client::mobs::Mob;
-use horizon_client::mobs::finalize::{self, Attr, Op};
-use horizon_world::attributes::{AttributeError, Instance, Modifier, Operation, live::Dirty};
+use horizon_world::attributes::Operation;
 use mod_api::first_person::Hand;
 use mod_api::{
     AttributeModifier, AttributeOperation, EntityRef, EquipmentSlot, Identifier, LivingRef,
     ModifierLifetime,
 };
-use std::convert::Infallible;
 
 /// A player's armour slots (`armor`, head first) by equipment slot.
 fn armor_index(slot: EquipmentSlot) -> Option<usize> {
@@ -65,141 +64,6 @@ fn slot_name(slot: EquipmentSlot) -> &'static str {
 /// a save is not alive either.
 fn alive_at(health: f32) -> bool {
     health > 0.0
-}
-
-/// One write a mod asks of an attribute instance.
-#[derive(Clone)]
-enum AttributeWrite {
-    /// `addTransientModifier` or `addPermanentModifier`, refused when the id
-    /// is taken; with `replace`, the modifier with that id goes first
-    /// (`addOrUpdateTransientModifier`, `addOrReplacePermanentModifier`).
-    Add {
-        modifier: Modifier,
-        permanent: bool,
-        replace: bool,
-    },
-    /// `removeModifier`.
-    Remove(String),
-    /// `setBaseValue`.
-    Base(f64),
-}
-
-impl AttributeWrite {
-    fn add(modifier: AttributeModifier, lifetime: ModifierLifetime, replace: bool) -> Option<Self> {
-        let operation = match modifier.operation {
-            AttributeOperation::AddValue => Operation::AddValue,
-            AttributeOperation::AddMultipliedBase => Operation::AddMultipliedBase,
-            AttributeOperation::AddMultipliedTotal => Operation::AddMultipliedTotal,
-            _ => return None,
-        };
-        let permanent = match lifetime {
-            ModifierLifetime::Transient => false,
-            ModifierLifetime::Permanent => true,
-            _ => return None,
-        };
-        if !modifier.amount.is_finite() {
-            return None;
-        }
-        let modifier = Modifier::new(&modifier.id.to_string(), modifier.amount, operation).ok()?;
-        Some(Self::Add {
-            modifier,
-            permanent,
-            replace,
-        })
-    }
-
-    /// The write on an instance: false when an add finds the id taken, or a
-    /// remove finds nothing.
-    fn apply(
-        self,
-        value: &mut Instance,
-        observer: &mut Dirty<'_>,
-    ) -> Result<bool, AttributeError<Infallible>> {
-        match self {
-            Self::Add {
-                modifier,
-                permanent,
-                replace,
-            } => {
-                if value.modifier(modifier.id()).is_some() {
-                    if !replace {
-                        return Ok(false);
-                    }
-                    value.remove(modifier.id(), observer)?;
-                }
-                if permanent {
-                    value.add_permanent(modifier, observer)?;
-                } else {
-                    value.add_transient(modifier, observer)?;
-                }
-                Ok(true)
-            }
-            Self::Remove(id) => value.remove(&id, observer),
-            Self::Base(base) => {
-                value.set_base_value(base, observer)?;
-                Ok(true)
-            }
-        }
-    }
-
-    /// The write on a mob's attribute that its gameplay reads from
-    /// `finalize`, which saves its permanent modifiers.
-    fn apply_to_mob(self, m: &mut Mob, a: Attr) -> bool {
-        let taken = |m: &Mob, id: &str| {
-            finalize::has_modifier(m, a, id) || finalize::has_transient_modifier(m, a, id)
-        };
-        match self {
-            Self::Add {
-                modifier,
-                permanent,
-                replace,
-            } => {
-                let id = modifier.id();
-                if taken(m, id) {
-                    if !replace {
-                        return false;
-                    }
-                    finalize::remove_modifier(m, a, id);
-                }
-                let op = match modifier.operation() {
-                    Operation::AddValue => Op::AddValue,
-                    Operation::AddMultipliedBase => Op::AddMultipliedBase,
-                    Operation::AddMultipliedTotal => Op::AddMultipliedTotal,
-                };
-                if permanent {
-                    finalize::add_modifier(m, a, id.to_owned(), modifier.amount(), op);
-                } else {
-                    finalize::add_transient_modifier(m, a, id, modifier.amount(), op);
-                }
-                true
-            }
-            Self::Remove(id) => {
-                let had = taken(m, &id);
-                if had {
-                    finalize::remove_modifier(m, a, &id);
-                }
-                had
-            }
-            Self::Base(base) => {
-                finalize::set_base(m, a, base);
-                true
-            }
-        }
-    }
-
-    /// What the live map keeps of a mod's transient modifiers after this
-    /// write: the added one, or None to forget the id.
-    fn transient_record(&self) -> Option<(&str, Option<Modifier>)> {
-        match self {
-            Self::Add {
-                modifier,
-                permanent,
-                ..
-            } => Some((modifier.id(), (!permanent).then(|| modifier.clone()))),
-            Self::Remove(id) => Some((id, None)),
-            Self::Base(_) => None,
-        }
-    }
 }
 
 fn equipment_stack(stack: Option<ItemStack>) -> Option<ItemStack> {
@@ -261,11 +125,12 @@ impl Game<'_> {
 
     /// Adds an attribute modifier (`AttributeInstance.addTransientModifier`
     /// or `addPermanentModifier`). A permanent one is saved with the entity;
-    /// a transient one lasts until it unloads. Gameplay sees it at once, and
-    /// the entity's clients with the next attribute sync. False when the
-    /// entity already has a modifier with that id on the attribute (vanilla
-    /// throws), for an attribute the entity type does not have, a non-finite
-    /// amount, a stale handle, or on a client.
+    /// a transient one lasts until it unloads. It goes where `/attribute`
+    /// writes (`Game::write_attribute`), so gameplay and the entity's clients
+    /// see it. False when the entity already has a modifier with that id on
+    /// the attribute (vanilla throws), for an attribute the entity type does
+    /// not have, a non-finite amount, the dragon (whose attributes nothing
+    /// reads yet), a stale handle, or on a client.
     pub(super) fn native_living_add_attribute_modifier(
         &mut self,
         living: LivingRef,
@@ -273,8 +138,7 @@ impl Game<'_> {
         modifier: AttributeModifier,
         lifetime: ModifierLifetime,
     ) -> bool {
-        AttributeWrite::add(modifier, lifetime, false)
-            .is_some_and(|write| self.native_living_attribute_write(living, attribute, write))
+        self.native_living_add_modifier(living, attribute, modifier, lifetime, false)
     }
 
     /// Adds an attribute modifier in place of the one with the same id, if
@@ -288,13 +152,11 @@ impl Game<'_> {
         modifier: AttributeModifier,
         lifetime: ModifierLifetime,
     ) -> bool {
-        AttributeWrite::add(modifier, lifetime, true)
-            .is_some_and(|write| self.native_living_attribute_write(living, attribute, write))
+        self.native_living_add_modifier(living, attribute, modifier, lifetime, true)
     }
 
     /// Removes the modifier with id `id` from the attribute
-    /// (`AttributeInstance.removeModifier`), whatever its lifetime, including
-    /// one a worn item put there until the item next changes. False when
+    /// (`AttributeInstance.removeModifier`), whatever its lifetime. False when
     /// there was none, and in the cases `add_attribute_modifier` is.
     pub(super) fn native_living_remove_attribute_modifier(
         &mut self,
@@ -302,116 +164,62 @@ impl Game<'_> {
         attribute: &str,
         id: &Identifier,
     ) -> bool {
-        self.native_living_attribute_write(
-            living,
-            attribute,
-            AttributeWrite::Remove(id.to_string()),
-        )
+        self.native_living_write(living, attribute, AttributeWrite::Remove(id.to_string()))
     }
 
-    /// Sets the attribute's base value (`AttributeInstance.setBaseValue`),
-    /// which is saved; the value stays within the attribute's range. False
-    /// for a non-finite base, and in the cases `add_attribute_modifier` is.
+    /// Sets the attribute's base value (`AttributeInstance.setBaseValue`);
+    /// the value stays within the attribute's range. False for a non-finite
+    /// base, and in the cases `add_attribute_modifier` is.
     pub(super) fn native_living_set_attribute_base(
         &mut self,
         living: LivingRef,
         attribute: &str,
         base: f64,
     ) -> bool {
-        base.is_finite()
-            && self.native_living_attribute_write(living, attribute, AttributeWrite::Base(base))
+        base.is_finite() && self.native_living_write(living, attribute, AttributeWrite::Base(base))
     }
 
-    /// One attribute write, on the record the entity's gameplay reads: a
-    /// player's own map; for a mob, `finalize`'s store for the attributes it
-    /// keeps there, else the live map, as for an armor stand and the dragon.
-    fn native_living_attribute_write(
+    fn native_living_add_modifier(
+        &mut self,
+        living: LivingRef,
+        attribute: &str,
+        modifier: AttributeModifier,
+        lifetime: ModifierLifetime,
+        replace: bool,
+    ) -> bool {
+        let operation = match modifier.operation {
+            AttributeOperation::AddValue => Operation::AddValue,
+            AttributeOperation::AddMultipliedBase => Operation::AddMultipliedBase,
+            AttributeOperation::AddMultipliedTotal => Operation::AddMultipliedTotal,
+            _ => unreachable!("AttributeOperation: unhandled variant"),
+        };
+        let permanent = match lifetime {
+            ModifierLifetime::Transient => false,
+            ModifierLifetime::Permanent => true,
+            _ => unreachable!("ModifierLifetime: unhandled variant"),
+        };
+        if !modifier.amount.is_finite() {
+            return false;
+        }
+        AttributeWrite::add(
+            &modifier.id.to_string(),
+            modifier.amount,
+            operation,
+            permanent,
+            replace,
+        )
+        .is_some_and(|write| self.native_living_write(living, attribute, write))
+    }
+
+    fn native_living_write(
         &mut self,
         living: LivingRef,
         name: &str,
         write: AttributeWrite,
     ) -> bool {
-        let catalog = self.motion.attributes.clone();
-        match self.native_living_target(living) {
-            Some(t @ (Target::Player | Target::Guest(_))) => self
-                .for_player(t, |g| {
-                    let live = &mut g.player.as_mut()?.attributes;
-                    let handle = live.get_instance(Some(live.key(name)?)).ok()??;
-                    live.edit(&handle, |value, observer| write.apply(value, observer))
-                        .ok()
-                })
-                .flatten()
-                .unwrap_or(false),
-            Some(Target::Mob(id)) => {
-                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
-                    return false;
-                };
-                if let Some(a) = Attr::ALL.into_iter().find(|a| a.id() == name) {
-                    return finalize::default_value(m, a).is_some() && write.apply_to_mob(m, a);
-                }
-                let kind = m.kind.id.clone();
-                let seed = horizon_client::entity_nbt::attribute_entries(m)
-                    .into_iter()
-                    .map(|(_, entry)| entry)
-                    .collect();
-                Self::live_write(&mut m.extra.live, &catalog, &kind, name, write, seed)
-            }
-            Some(Target::Stand(id)) => {
-                let Some(a) = self.armor_stands.iter_mut().find(|a| a.id == id) else {
-                    return false;
-                };
-                Self::live_write(
-                    &mut a.live,
-                    &catalog,
-                    "minecraft:armor_stand",
-                    name,
-                    write,
-                    Vec::new(),
-                )
-            }
-            Some(Target::Dragon(id)) => {
-                let Some(d) = self.dragon.as_mut().filter(|d| d.id == id) else {
-                    return false;
-                };
-                Self::live_write(
-                    &mut d.live,
-                    &catalog,
-                    "minecraft:ender_dragon",
-                    name,
-                    write,
-                    Vec::new(),
-                )
-            }
-            _ => false,
-        }
-    }
-
-    /// A write on a live map that its entity rebuilds from records: the base
-    /// and permanent modifiers go to its saved entries, a transient modifier
-    /// to its own list.
-    fn live_write(
-        live: &mut horizon_client::living_attributes::LivingAttributes,
-        catalog: &std::sync::Arc<horizon_world::attributes::entity::Catalog>,
-        entity: &str,
-        name: &str,
-        write: AttributeWrite,
-        seed: Vec<horizon_world::nbt::Tag>,
-    ) -> bool {
-        let record = write.transient_record().map(|(id, m)| (id.to_owned(), m));
-        let done = live
-            .edit(
-                catalog,
-                entity,
-                name,
-                true,
-                || seed,
-                |value, observer| write.apply(value, observer),
-            )
-            .unwrap_or(false);
-        if done && let Some((id, modifier)) = record {
-            live.keep_transient(name, &id, modifier);
-        }
-        done
+        self.native_living_target(living)
+            .and_then(|t| self.write_attribute(t, name, write))
+            .unwrap_or(false)
     }
 
     fn native_living_attribute(

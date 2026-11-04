@@ -2,6 +2,15 @@
 //! dragon (`LivingEntity.collectEquipmentChanges`). The map and the NBT are in
 //! `horizon_client::living_attributes`.
 use super::Game;
+use super::commands::Target;
+use horizon_client::mobs::{
+    Mob,
+    finalize::{self, Attr, Op},
+};
+use horizon_world::attributes::{
+    AttributeError, Instance, Modifier, Observer, Operation, entity::AttributeId,
+};
+use std::convert::Infallible;
 
 impl Game<'_> {
     /// `LivingEntity.tick`'s `collectEquipmentChanges` for what the server
@@ -69,6 +78,282 @@ impl Game<'_> {
 fn warn_failed(id: u32, kind: &str, result: horizon_client::Result<()>) {
     if let Err(error) = result {
         log::warn!("equipment attributes of {kind} {id}: {error}");
+    }
+}
+
+/// One attribute write: the one path of `/attribute` (`AttributeCommand`'s
+/// `base set`, `base reset`, `modifier add` and `modifier remove`) and the mod
+/// API's `LivingRef` writes, through `Game::write_attribute`.
+#[derive(Clone)]
+pub(in crate::game) enum AttributeWrite {
+    /// `addTransientModifier` or `addPermanentModifier`, refused when the id
+    /// is taken; with `replace`, the modifier with that id goes first
+    /// (`addOrUpdateTransientModifier`, `addOrReplacePermanentModifier`).
+    Add {
+        modifier: Modifier,
+        permanent: bool,
+        replace: bool,
+    },
+    /// `removeModifier`.
+    Remove(String),
+    /// `setBaseValue`.
+    Base(f64),
+    /// `setBaseValue` of the entity type's default.
+    ResetBase,
+}
+
+impl AttributeWrite {
+    /// An add of the modifier `id`, or None for an id `Modifier` refuses.
+    pub(in crate::game) fn add(
+        id: &str,
+        amount: f64,
+        operation: Operation,
+        permanent: bool,
+        replace: bool,
+    ) -> Option<Self> {
+        Some(Self::Add {
+            modifier: Modifier::new(id, amount, operation).ok()?,
+            permanent,
+            replace,
+        })
+    }
+
+    /// The write on an instance, whose type's default base is `default`:
+    /// false when an add finds the id taken or a remove finds nothing.
+    fn apply<O: Observer<Error = Infallible>>(
+        self,
+        value: &mut Instance,
+        observer: &mut O,
+        default: f64,
+    ) -> Result<bool, AttributeError<Infallible>> {
+        match self {
+            Self::Add {
+                modifier,
+                permanent,
+                replace,
+            } => {
+                if value.modifier(modifier.id()).is_some() {
+                    if !replace {
+                        return Ok(false);
+                    }
+                    value.remove(modifier.id(), observer)?;
+                }
+                if permanent {
+                    value.add_permanent(modifier, observer)?;
+                } else {
+                    value.add_transient(modifier, observer)?;
+                }
+                Ok(true)
+            }
+            Self::Remove(id) => value.remove(&id, observer),
+            Self::Base(base) => {
+                value.set_base_value(base, observer)?;
+                Ok(true)
+            }
+            Self::ResetBase => {
+                value.set_base_value(default, observer)?;
+                Ok(true)
+            }
+        }
+    }
+
+    /// The write on one of the attributes a mob's gameplay reads from
+    /// `finalize`, which saves its bases and permanent modifiers.
+    fn apply_to_mob(self, m: &mut Mob, a: Attr) -> bool {
+        let taken = |m: &Mob, id: &str| {
+            finalize::has_modifier(m, a, id) || finalize::has_transient_modifier(m, a, id)
+        };
+        match self {
+            Self::Add {
+                modifier,
+                permanent,
+                replace,
+            } => {
+                let id = modifier.id();
+                if taken(m, id) {
+                    if !replace {
+                        return false;
+                    }
+                    finalize::remove_modifier(m, a, id);
+                }
+                let op = match modifier.operation() {
+                    Operation::AddValue => Op::AddValue,
+                    Operation::AddMultipliedBase => Op::AddMultipliedBase,
+                    Operation::AddMultipliedTotal => Op::AddMultipliedTotal,
+                };
+                if permanent {
+                    finalize::add_modifier(m, a, id.to_owned(), modifier.amount(), op);
+                } else {
+                    finalize::add_transient_modifier(m, a, id, modifier.amount(), op);
+                }
+                true
+            }
+            Self::Remove(id) => {
+                let had = taken(m, &id);
+                if had {
+                    finalize::remove_modifier(m, a, &id);
+                }
+                had
+            }
+            Self::Base(base) => {
+                finalize::set_base(m, a, base);
+                true
+            }
+            Self::ResetBase => {
+                let default = finalize::default_value(m, a).unwrap_or_default();
+                finalize::set_base(m, a, default);
+                true
+            }
+        }
+    }
+
+    /// What a live map keeps of the transient modifiers written to it after
+    /// this write: the added one, or None to forget the id.
+    fn transient_record(&self) -> Option<(&str, Option<Modifier>)> {
+        match self {
+            Self::Add {
+                modifier,
+                permanent,
+                ..
+            } => Some((modifier.id(), (!permanent).then(|| modifier.clone()))),
+            Self::Remove(id) => Some((id, None)),
+            Self::Base(_) | Self::ResetBase => None,
+        }
+    }
+}
+
+impl Game<'_> {
+    /// Applies `write` to the attribute `name` of `t` on the record that the
+    /// entity's gameplay and its clients' attribute sync read:
+    /// - a player's (or a guest's, in its turn) own attribute map;
+    /// - for a mob, `finalize`'s store for the nine attributes its behavior
+    ///   reads there (so it moves and hits by them at once); for its armor and
+    ///   toughness its armor map (`mobs/armor.rs`); for the rest, as for an
+    ///   armor stand, its generic map (`cmds.attributes`), which the sync sends.
+    ///
+    /// A mob's and a stand's live map (`living_attributes`, which the mod
+    /// API's reads and the save use) takes the same write and keeps it
+    /// through a rebuild. A lower max health cuts a mob's health
+    /// (`LivingEntity.onAttributeUpdated`).
+    ///
+    /// None when the entity has no such attribute or takes no attribute writes
+    /// (the dragon, as `/attribute` refuses it); `Some(false)` when an add
+    /// finds the id taken or a remove finds none.
+    pub(in crate::game) fn write_attribute(
+        &mut self,
+        t: Target,
+        name: &str,
+        write: AttributeWrite,
+    ) -> Option<bool> {
+        let catalog = self.motion.attributes.clone();
+        let id = catalog.id(name)?;
+        let default = match write {
+            AttributeWrite::ResetBase => catalog.default_base(&self.target_type(t), id)?,
+            _ => 0.0,
+        };
+        match t {
+            Target::Player | Target::Guest(_) => self
+                .for_player(t, |g| {
+                    let live = &mut g.player.as_mut()?.attributes;
+                    let handle = live.get_instance(Some(live.key(name)?)).ok()??;
+                    live.edit(&handle, |value, observer| {
+                        write.apply(value, observer, default)
+                    })
+                    .ok()
+                })
+                .flatten(),
+            Target::Mob(mob) => {
+                let m = self.mobs.iter_mut().find(|m| m.id == mob && !m.removed)?;
+                let short = name.strip_prefix("minecraft:").unwrap_or(name);
+                if let Some(a) = finalize::command_attr(short)
+                    .filter(|a| finalize::default_value(m, *a).is_some())
+                {
+                    let done = write.apply_to_mob(m, a);
+                    if a == Attr::MaxHealth && m.health > m.attrs.max_health {
+                        m.health = m.attrs.max_health;
+                        m.needs_sync = true;
+                    }
+                    return Some(done);
+                }
+                self.write_generic_attribute(t, name, id, write, default)
+            }
+            Target::Stand(_) => self.write_generic_attribute(t, name, id, write, default),
+            _ => None,
+        }
+    }
+
+    fn write_generic_attribute(
+        &mut self,
+        t: Target,
+        name: &str,
+        id: AttributeId,
+        write: AttributeWrite,
+        default: f64,
+    ) -> Option<bool> {
+        let map = self.generic_attributes(t, name)?;
+        if !map.has(id) {
+            return None;
+        }
+        let done = map
+            .edit(id, |value, observer| {
+                write.clone().apply(value, observer, default)
+            })?
+            .ok()?;
+        if done {
+            self.write_live_attributes(t, name, write, default);
+        }
+        Some(done)
+    }
+
+    /// The same write on a mob's or a stand's live map: its base and
+    /// permanent modifiers go to the map's saved entries, a transient modifier
+    /// to its own list, so a rebuilt map has them again.
+    fn write_live_attributes(
+        &mut self,
+        t: Target,
+        name: &str,
+        write: AttributeWrite,
+        default: f64,
+    ) {
+        let catalog = self.motion.attributes.clone();
+        let (live, entity, seed) = match t {
+            Target::Mob(id) => {
+                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
+                    return;
+                };
+                // The seed is only read when the map is not built yet.
+                let seed = if m.extra.live.built().is_none() {
+                    horizon_client::entity_nbt::attribute_entries(m)
+                        .into_iter()
+                        .map(|(_, entry)| entry)
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                (&mut m.extra.live, m.kind.id.clone(), seed)
+            }
+            Target::Stand(id) => {
+                let Some(a) = self.armor_stands.iter_mut().find(|a| a.id == id) else {
+                    return;
+                };
+                (&mut a.live, "minecraft:armor_stand".to_owned(), Vec::new())
+            }
+            _ => return,
+        };
+        let record = write.transient_record().map(|(id, m)| (id.to_owned(), m));
+        let done = live
+            .edit(
+                &catalog,
+                &entity,
+                name,
+                true,
+                || seed,
+                |value, observer| write.apply(value, observer, default),
+            )
+            .unwrap_or(false);
+        if done && let Some((id, modifier)) = record {
+            live.keep_transient(name, &id, modifier);
+        }
     }
 }
 
@@ -367,6 +652,27 @@ mod tests {
                 30.0,
             );
             assert_eq!(read(game, 12, gravity), (Some(0.2), Some(0.1)));
+            // The write is where `/attribute` reads it and the sync sends it.
+            let key = game.motion.attributes.id(gravity).unwrap();
+            let map = game.generic_attributes(Target::Mob(12), gravity).unwrap();
+            assert_eq!(map.value(key).unwrap(), 0.2);
+            let mut synced = Vec::new();
+            let zombie_mob = game.mobs[0].clone();
+            game.mob_attributes(&zombie_mob, &mut synced);
+            let registry = key.registry_id();
+            let sent = synced.iter().find(|s| s.attribute == registry).unwrap();
+            assert_eq!(sent.base, 0.1);
+            assert_eq!(
+                sent.modifiers
+                    .iter()
+                    .map(|m| m.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["test:heavy"]
+            );
+            // A mob's armor goes to its armor map, which its damage reads.
+            assert!(zombie.set_attribute_base(game, "minecraft:armor", 10.0));
+            assert_eq!(horizon_client::mobs::armor::values(&game.mobs[0]).0, 10.0);
+            assert_eq!(read(game, 12, "minecraft:armor").1, Some(10.0));
         });
     }
 
@@ -396,14 +702,15 @@ mod tests {
                 modifier("test:x", f64::NAN, AddValue),
                 Permanent
             ));
+            // `/attribute` refuses the dragon, and nothing reads its map yet.
             let dragon = living(game, 14);
-            assert!(dragon.add_attribute_modifier(
+            assert!(!dragon.add_attribute_modifier(
                 game,
                 health,
                 modifier("test:tough", 100.0, AddValue),
                 Transient
             ));
-            assert_eq!(read(game, 14, health), (Some(300.0), Some(200.0)));
+            assert_eq!(read(game, 14, health), (Some(200.0), Some(200.0)));
 
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.lan_acting_uuid = Some(123);
