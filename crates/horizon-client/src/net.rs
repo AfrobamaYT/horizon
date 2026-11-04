@@ -1238,6 +1238,7 @@ fn continues_after_failed_join(lan: bool, signed_in: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horizon_world::native_load_context::DataLoadOrigin;
 
     /// Launchers find the last server joined in `latest.log` by vanilla's line.
     #[test]
@@ -1416,6 +1417,10 @@ mod tests {
         let (c, _, _) = connect_tcp("127.0.0.1", port, true, Duration::from_millis(300)).unwrap();
         let _server = held.join().unwrap().unwrap();
         let (mut reader, writer) = c.split();
+        let root = std::env::temp_dir().join(format!("horizon-net-timeout-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload).unwrap();
         let (done, result) = channel();
         std::thread::spawn(move || {
             let (send, _events) = channel();
@@ -1427,7 +1432,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 &crate::lod_net::Inbox::default(),
-                Path::new("."),
+                &data,
             ));
         });
         let ended = result
@@ -1437,6 +1442,7 @@ mod tests {
             ended.map(|r| r.text).map_err(|r| r.text),
             Err("Timed out".to_owned())
         );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1464,7 +1470,9 @@ mod tests {
             br#"{"states":[["minecraft:stone",false,false,"Block{minecraft:stone}",{"id":"minecraft:stone"}]]}"#,
         )
         .unwrap();
-        let expected = crate::content_identity::identity(&root).unwrap();
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload).unwrap();
+        let expected = crate::content_identity::identity(&root, data.defaults()).unwrap();
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let (mut reader, writer) = Connection::local(client).split();
         let writer = Mutex::new(Some(writer));
@@ -1477,7 +1485,7 @@ mod tests {
                 &Language::new(),
                 &send,
                 &Cookies::default(),
-                &root,
+                &data,
             )
         });
         let mut server = Connection::local(server);

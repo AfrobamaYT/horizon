@@ -686,7 +686,8 @@ fn content_root_loads_with_every_table() {
     assert_eq!(facts.get(iron).hardness, a.hardness);
     assert_eq!(&*facts.get(iron).name, "minecraft:iron_block");
 
-    let items = Items::load(&root, new, &facts, &PackOverlay::NONE).unwrap();
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
+    let items = Items::load(&root, new, &facts, &PackOverlay::NONE, &defaults).unwrap();
     let ruby_block = &items.items["ruby:ruby_block"];
     assert_eq!(ruby_block.block, Some(ruby));
     let iron_block = &items.items["minecraft:iron_block"];
@@ -1632,9 +1633,11 @@ fn content_root_with_only_an_item_checks_its_identity() {
     let ids = horizon_protocol::registry::Builtin::load(&root.join("registries.json")).unwrap();
     assert!(ids.get("minecraft:item").unwrap().id("gem:opal").is_some());
     assert!(root.join(crate::content_identity::MARKER).exists());
+    let base_defaults = horizon_world::item_defaults::read(&base).unwrap();
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
     assert_ne!(
-        crate::content_identity::identity(&root).unwrap(),
-        crate::content_identity::identity(&base).unwrap()
+        crate::content_identity::identity(&root, &defaults).unwrap(),
+        crate::content_identity::identity(&base, &base_defaults).unwrap()
     );
     fs::remove_dir_all(&scratch).unwrap();
 }
@@ -2651,7 +2654,8 @@ fn mod_recipe_results_are_an_item_stack_or_a_bare_item_id() {
     let assets = Assets::load(&root).unwrap();
     let new = assets.registry;
     let facts = BlockFacts::load(&root, new).unwrap();
-    let items = Items::load(&root, new, &facts, &PackOverlay::NONE).unwrap();
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
+    let items = Items::load(&root, new, &facts, &PackOverlay::NONE, &defaults).unwrap();
     let recipes = crate::crafting::Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
     for (name, input, _, item, count) in cases {
         let grid = [
@@ -4244,7 +4248,8 @@ fn blocks_and_items_declared_in_code_get_ids() {
         );
     }
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
-    let items = Items::load(&root, assets.registry, &facts, &PackOverlay::NONE).unwrap();
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
+    let items = Items::load(&root, assets.registry, &facts, &PackOverlay::NONE, &defaults).unwrap();
     assert_eq!(items.items["gears:wrench"].max_stack, 1);
     assert!(items.items["gears:shaft"].block.is_some());
     // The same declarations reuse the root; others build a new one.
@@ -4258,7 +4263,8 @@ fn blocks_and_items_declared_in_code_get_ids() {
     assert_ne!(changed, root);
     assert_eq!(fs::read(root.join(STAMP)).unwrap(), stamp);
     assert_ne!(fs::read(changed.join(STAMP)).unwrap(), stamp);
-    let changed_items = Items::load(&changed, assets.registry, &facts, &PackOverlay::NONE).unwrap();
+    let changed_defaults = horizon_world::item_defaults::read(&changed).unwrap();
+    let changed_items = Items::load(&changed, assets.registry, &facts, &PackOverlay::NONE, &changed_defaults).unwrap();
     assert_eq!(changed_items.items["gears:wrench"].max_stack, 2);
     assert_eq!(items.items["gears:wrench"].max_stack, 1);
     let _ = fs::remove_dir_all(&scratch);
@@ -4391,8 +4397,9 @@ fn signs_take_their_form_wood_and_wall_block_from_their_declaration() {
     );
     assert_eq!(&*block("signs:board").item, "signs:notice");
     assert_eq!(&*block("signs:bracket").item, "signs:lantern");
+    let defaults = horizon_world::item_defaults::read(&root).unwrap();
     let mut renderer =
-        crate::block_entity_render::BlockEntityRenderer::load(&root, registry).unwrap();
+        crate::block_entity_render::BlockEntityRenderer::load(&root, registry, &defaults).unwrap();
     renderer.add_mod_signs(&facts, registry);
     for name in [
         "signs:notice",

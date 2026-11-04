@@ -3839,7 +3839,8 @@ mod tests {
         }
         let assets = Assets::load(&root).unwrap();
         let registry = assets.registry;
-        let renderer = BlockEntityRenderer::load(&root, registry).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let renderer = BlockEntityRenderer::load(&root, registry, &defaults).unwrap();
         let state = registry.default_state("minecraft:decorated_pot").unwrap();
         let sprites: HashMap<String, Rect> = [
             "entity/decorated_pot/decorated_pot_base",

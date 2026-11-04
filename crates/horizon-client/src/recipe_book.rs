@@ -1109,7 +1109,8 @@ mod tests {
             r#"{"minecraft:stone":{},"mymod:crusher":{},"minecraft:air":{}}"#,
         )
         .unwrap();
-        let items = Items::catalog(&root, &PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = Items::catalog(&root, &PackOverlay::NONE, &defaults).unwrap();
         let recipes = Recipes::from_sources(
             &root,
             &items,

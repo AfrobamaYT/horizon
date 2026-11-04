@@ -1097,8 +1097,9 @@ mod tests {
         }
         let registry = horizon_world::level::data::load_registry(&root).unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, &registry).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
         Some(ItemRules(
-            Items::load(&root, &registry, &facts, &PackOverlay::NONE).unwrap(),
+            Items::load(&root, &registry, &facts, &PackOverlay::NONE, &defaults).unwrap(),
         ))
     }
 

@@ -11543,10 +11543,11 @@ mod tests {
             return;
         }
         let none = &horizon_world::loot::PackOverlay::NONE;
-        let items = Items::catalog(&root, none).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = Items::catalog(&root, none, &defaults).unwrap();
         let recipes = Recipes::load(&root, &items, none).unwrap();
         let brewing = Brewing::load(&root, &items, none);
-        let banners = Banners::load(&root);
+        let banners = Banners::load(&root, &defaults);
         let station_recipes = StationRecipes::load(&root, &items, none);
         let enchantments = Enchantments::default();
         let names = Names::default();
@@ -11793,11 +11794,13 @@ mod tests {
         }
         let registry = horizon_world::level::data::load_registry(&root).unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, &registry).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = horizon_client::items::Items::load(
             &root,
             &registry,
             &facts,
             &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
         )
         .unwrap();
         let rocket = items.get("minecraft:firework_rocket").unwrap();

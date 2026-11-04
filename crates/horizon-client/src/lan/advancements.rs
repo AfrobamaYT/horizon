@@ -676,7 +676,8 @@ mod tests {
     /// The server's sync over `root`, and the one entry of `id` read back as
     /// the client's `RecipeBookEntry::read` reads it.
     fn entry(root: &std::path::Path, id: &str) -> (SyncData, RecipeBookEntry) {
-        let sync = SyncData::load(root, &horizon_world::loot::PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(root).unwrap();
+        let sync = SyncData::load(root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
         let entries = sync
             .advancements
             .book_entries(id, &sync, NOTIFY_AND_HIGHLIGHT);
@@ -766,10 +767,11 @@ mod tests {
             Some(p) => horizon_world::loot::PackOverlay { files: p },
             None => horizon_world::loot::PackOverlay::NONE,
         };
-        let sync = SyncData::load(&root, &overlay).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let sync = SyncData::load(&root, &overlay, &defaults).unwrap();
         // What the craft hands the book: find_with over the crafting
         // copy, the way award_crafted calls it.
-        let items = crate::items::Items::catalog(&root, &overlay).unwrap();
+        let items = crate::items::Items::catalog(&root, &overlay, &defaults).unwrap();
         let recipes = crate::crafting::Recipes::load(&root, &items, &overlay).unwrap();
         let grid = vec![Some(horizon_items::items::ItemStack {
             item: "minecraft:raw_copper".into(),
@@ -828,7 +830,8 @@ mod tests {
                 "result":{"id":"minecraft:copper_ingot"}}"#,
             )],
         );
-        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
         assert!(
             !sync
                 .advancements
@@ -865,7 +868,8 @@ mod tests {
                 ),
             ],
         );
-        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
         let item = |n: &str| sync.id("minecraft:item", n).unwrap();
         let raw = item("minecraft:raw_copper");
         let redstone = item("minecraft:redstone");
@@ -919,7 +923,8 @@ mod tests {
                 ),
             ],
         );
-        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
         assert_eq!(
             sync.advancements.recipe_of_display(0),
             Some("minecraft:aaa_shaped")
@@ -1012,7 +1017,8 @@ mod tests {
             ],
         )];
         let overlay = horizon_world::loot::PackOverlay { files: &packs };
-        let sync = SyncData::load(&root, &overlay).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let sync = SyncData::load(&root, &overlay, &defaults).unwrap();
         let entries = sync.advancements.book_entries(
             "minecraft:copper_ingot_from_smelting_raw_copper",
             &sync,

@@ -3,6 +3,8 @@
 // launcher's horizon-mixins then rejects every native mod targeting this crate (#8169).
 #![forbid(unsafe_code)]
 extern crate self as horizon_client;
+#[cfg(test)]
+mod test_resources;
 pub use horizon_client_lib::*;
 pub mod entry;
 pub mod game;

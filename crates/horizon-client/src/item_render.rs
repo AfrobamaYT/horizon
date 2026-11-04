@@ -1110,6 +1110,7 @@ pub fn cluster_poses(state: &ItemRenderState, pose: Mat4, amount: u32, seed: i64
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horizon_world::native_load_context::DataLoadOrigin;
 
     /// One frame's glint is read once and shared: every item drawn from the
     /// same `GlintFrame` scrolls by the same phase, and without the atlas
@@ -1157,7 +1158,8 @@ mod tests {
         assert!(library.is_err());
         fs::write(root.join("items.json"), "{")?;
         let load = || {
-            ItemRenderer::load_with_library(&root, library.clone())
+            crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload)
+                .and_then(|data| ItemRenderer::load_with_library(&root, library.clone(), &data))
                 .err()
                 .unwrap()
                 .to_string()
@@ -1207,8 +1209,9 @@ mod tests {
             r#"{"horizon:top":{"minecraft:max_stack_size":16}}"#,
         )?;
         let library = crate::model_library::ParsedModels::load(&root).into_item_library();
-        let client = ItemRenderer::load_with_library(&root, library.clone())?;
-        let server = ItemRenderer::load_for_server(&root, library)?;
+        let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload)?;
+        let client = ItemRenderer::load_with_library(&root, library.clone(), &data)?;
+        let server = ItemRenderer::load_for_server(&root, library, &data)?;
         let _ = fs::remove_dir_all(&root);
         assert!(client.models.definitions.contains_key("horizon:top"));
         assert!(server.models.definitions.is_empty());
@@ -1283,7 +1286,8 @@ mod tests {
             eprintln!("no prepared resources: skipped");
             return;
         }
-        let r = ItemRenderer::load(&root).unwrap();
+        let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload).unwrap();
+        let r = ItemRenderer::load(&root, &data).unwrap();
         let resolve = |id: &str| {
             let view = StackView::new(id, 1);
             r.resolve(&view, DisplayContext::Ground, None, None, 7, &NoEnv)

@@ -1907,8 +1907,9 @@ mod fire_environment_tests {
         let assets = crate::assets::Assets::load(&root).unwrap();
         let render = assets.reload(&root).unwrap();
         let facts = BlockFacts::load(&root, assets.registry).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items =
-            crate::items::Items::load(&root, assets.registry, &facts, &PackOverlay::NONE).unwrap();
+            crate::items::Items::load(&root, assets.registry, &facts, &PackOverlay::NONE, &defaults).unwrap();
         let mut world = World::test_scene(&assets, &render, 3).unwrap();
         let at = Vec3::new(20.5, 4.0, 20.5);
         world
@@ -2054,8 +2055,9 @@ mod destroyed_bundle_environment_tests {
         let assets = crate::assets::Assets::load(&root).unwrap();
         let render = assets.reload(&root).unwrap();
         let facts = BlockFacts::load(&root, assets.registry).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items =
-            crate::items::Items::load(&root, assets.registry, &facts, &PackOverlay::NONE).unwrap();
+            crate::items::Items::load(&root, assets.registry, &facts, &PackOverlay::NONE, &defaults).unwrap();
         let mut world = World::test_scene(&assets, &render, 3).unwrap();
         let at = Vec3::new(20.5, 4.0, 20.5);
         world

@@ -834,7 +834,7 @@ Registrar)` and Parts registration are unchanged.
 
 - `native_screen_render_post`, the point of `ScreenEvent.Render.Post`: a native mod draws over the open screen after it and its tooltips, given its id, the server-opened menu's vanilla type (`menu`) and title, its container panel, its slot count, the mouse in GUI pixels and the partial tick (`NativeScreenView`). Every container, station and mod window draws on the inventory screen and so reports `inventory`: tell them apart by `menu` and `title` (None on a window the client opened) and by `slots`. It does not fire on the title screen, nor for the prompts, books and sign editors drawn over gameplay after it.
 
-- `native_modify_default_components(item, components)`, in `horizon-world`'s `item_defaults.rs`: an item's default
+- `native_modify_default_components(context, item, components)`, in `horizon-world`'s `item_defaults.rs`: an item's default
   components in `items.json`'s form, for any item, vanilla's included (NeoForge's `ModifyDefaultComponentsEvent`). Insert
   or replace a component to set it (`"minecraft:max_stack_size": 16`), remove it to take it away. The item table,
   loot, enchanting and item models all read the changed defaults, and stacks are saved and sent against them as
@@ -2997,9 +2997,17 @@ clicks already.
 
 ### Items' default components
 
-`crates/horizon-world/src/item_defaults.rs`: `native_modify_default_components(item, components)`, a free function a
-bundle targets as `horizon_world::item_defaults::native_modify_default_components` (NeoForge's
-`ModifyDefaultComponentsEvent`). `components` is the item's entry in `items.json`, vanilla's default-component report:
+`Hooks::modify_default_components` receives `&DataLoadContext<'_>` before its
+`ModifyDefaultComponentsEvent`. The engine supplies this read-only phase context:
+`origin()` is `DataLoadOrigin::ServerDataLoad` or `ClientPreload`, `registry(name)`
+borrows names in registry ID order, `setting(mod_id, key)` reads a setting lazily,
+and `mods()` borrows the same `LoadedMods` view used during registration. There is
+no game Host, handle construction or transaction. The origin describes the actual
+owning load, not its thread name or the side of a later reader.
+
+The lower firing target is `native_modify_default_components(context, item, components)`
+in `crates/horizon-world/src/item_defaults.rs` (NeoForge's `ModifyDefaultComponentsEvent`).
+`components` is the item's entry in `items.json`, vanilla's default-component report:
 insert or replace a key to set a component (`"minecraft:max_stack_size": 16`), remove it to take the component away.
 Any item can be changed, vanilla's included. Write values as vanilla's codec writes them: nothing decodes them with it.
 Each table reads the fields it understands and takes a default for a field it can't read, but keeps the component, so a
@@ -3008,10 +3016,13 @@ data pack's own is held to `ExtraCodecs.intRange(1, 99)`, a mod's to 1 to `i32::
 carry), and a value that is not a number leaves the data pack's own. Keep a stack above 99 to a server whose clients run
 the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot show it.
 
-- Every table that reads items' defaults reads them through it: the item table, loot, enchanting, item models,
-  banners, pot sherds, item rarity in chat. Stacks are saved and sent as their difference from the changed defaults, as from vanilla's.
-- It's asked for every item each time the defaults are read, from any thread, several times as resources load
-  and again when a world's data packs load. Answer the same each time, from the item alone.
+- One owning load decodes the defaults, asks once per item, then publishes one immutable snapshot. The item
+  table, loot, enchanting, item models, banners, pot sherds and rarity readers borrow that snapshot; workers
+  retain shared ownership. The renderers also share its canonical component prototypes. Stacks are saved and
+  sent as their difference from the changed defaults, as from vanilla's.
+- Reusing client-preloaded item data on the integrated server is not another load. Opening a world or running
+  the data-pack `/reload` does not replay this hook. A dedicated resource load supplies `ServerDataLoad`;
+  the client preload supplies `ClientPreload`. The hook may run on a load worker, before a game Host exists.
 - Client and server each apply their own mods, so both need the mod. A client without it (a vanilla Java client, or
   Horizon without the mod) fills in vanilla's defaults for the same stacks: a stone stack the server caps at 16 still
   looks like it stacks to 64 there.

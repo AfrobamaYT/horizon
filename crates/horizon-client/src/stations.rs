@@ -1004,8 +1004,9 @@ mod tests {
         if !root.join("items.json").exists() {
             return;
         }
-        let items = Items::tags_only(&root, &PackOverlay::NONE).unwrap();
-        let data = StationData::load(&root, &items, &PackOverlay::NONE);
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = Items::tags_only(&root, &PackOverlay::NONE, &defaults).unwrap();
+        let data = StationData::load(&root, &items, &PackOverlay::NONE, &defaults);
         let e = &data.enchantments;
         assert_eq!(e.list.len(), 43);
         assert_eq!(

@@ -8313,11 +8313,13 @@ mod pearl_tests {
         let motion = horizon_client::motion::MotionResources::load(&root, &assets).unwrap();
         let data = horizon_client::mobs::MobData::load(&root, &facts);
         let biomes = horizon_client::biome::Biomes::load(&root).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = horizon_client::items::Items::load(
             &root,
             registry,
             &facts,
             &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
         )
         .unwrap();
         let collision = horizon_client::collisions::load(&root, registry).unwrap();
@@ -8536,7 +8538,8 @@ mod dye_mix_tests {
         let registry = horizon_world::level::data::load_registry(&root).unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, &registry).unwrap();
         let overlay = horizon_world::loot::PackOverlay::NONE;
-        let items = crate::items::Items::load(&root, &registry, &facts, &overlay).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = crate::items::Items::load(&root, &registry, &facts, &overlay, &defaults).unwrap();
         let recipes = Recipes::load(&root, &items, &overlay).unwrap();
         let dye = |name: &str| {
             u8::try_from(
