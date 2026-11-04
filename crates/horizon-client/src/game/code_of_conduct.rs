@@ -128,12 +128,14 @@ impl Game<'_> {
             r.session.accept_code_of_conduct();
             return;
         }
-        self.capture(false);
-        self.code_of_conduct = Some(Prompt {
-            text,
-            hash,
-            stop_showing: false,
-            scroll: ui::Scroll::default(),
+        self.open_screen_overlay("code_of_conduct", |game| {
+            game.capture(false);
+            game.code_of_conduct = Some(Prompt {
+                text,
+                hash,
+                stop_showing: false,
+                scroll: ui::Scroll::default(),
+            });
         });
     }
 

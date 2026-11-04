@@ -14,7 +14,6 @@ use horizon_client::{
     projectiles::{Projectile, ProjectileKind},
 };
 // Its old home, for mixin code that names it here.
-pub(super) use horizon_client::mod_api::NativeDispensed;
 use horizon_core::{
     geometry::{Aabb, Direction, Vec3},
     position::BlockPos,
@@ -25,6 +24,7 @@ use horizon_world::{
     level::{BucketContent, PlaceContext, PlaceOutcome},
     registry::BlockStateId,
 };
+pub(super) use mod_api::NativeDispensed;
 use std::sync::Arc;
 
 type Pos = (i32, i32, i32);

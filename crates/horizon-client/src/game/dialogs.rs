@@ -211,21 +211,23 @@ impl Game<'_> {
                 _ => None,
             })
             .collect();
-        self.dialogs.open = Some(Open {
-            dialog,
-            values,
-            fields,
-            focus: None,
-            scroll: ui::Scroll::default(),
-            dragging: None,
-            selecting: None,
+        self.open_screen_overlay("dialog", |game| {
+            game.dialogs.open = Some(Open {
+                dialog,
+                values,
+                fields,
+                focus: None,
+                scroll: ui::Scroll::default(),
+                dragging: None,
+                selecting: None,
+            });
+            game.dialogs.waiting = None;
+            game.keys.clear();
+            game.physical_keys.clear();
+            game.left = false;
+            game.right = false;
+            game.capture(false);
         });
-        self.dialogs.waiting = None;
-        self.keys.clear();
-        self.physical_keys.clear();
-        self.left = false;
-        self.right = false;
-        self.capture(false);
     }
 
     /// `clearDialog`: the dialog closes (under the warning screen, Back then
@@ -258,8 +260,10 @@ impl Game<'_> {
 
     /// The confirmation's no: the dialog again, with what was typed in it.
     pub(super) fn reopen_dialog(&mut self, dialog: ClosedDialog) {
-        self.dialogs.open = Some(*dialog.0);
-        self.dialogs.waiting = None;
+        self.open_screen_overlay("dialog", |game| {
+            game.dialogs.open = Some(*dialog.0);
+            game.dialogs.waiting = None;
+        });
     }
 
     /// `DialogScreen.runAction`: the click event, then the screen the dialog's

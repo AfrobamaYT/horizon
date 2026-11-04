@@ -4,7 +4,7 @@
 //! mounts; mobs ride mobs, boats and minecarts. Reads return `None` for a
 //! stale handle or on a client.
 use super::{Game, commands::Target};
-use horizon_client::mod_api::EntityRef;
+use mod_api::EntityRef;
 
 impl Game<'_> {
     /// The id of the entity `t` rides, if it rides one.
@@ -306,11 +306,9 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::commands::Target;
-    use horizon_client::{
-        mobs::Mob,
-        mod_api::{self, EntityMountEvent, Flow, Hooks, ServerHost},
-    };
+    use horizon_client::mobs::Mob;
     use horizon_core::geometry::Vec3;
+    use mod_api::{self, EntityMountEvent, Flow, Hooks, ServerHost};
     use std::sync::{Arc, Mutex};
 
     struct MountObserver(Arc<Mutex<Vec<bool>>>);

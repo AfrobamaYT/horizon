@@ -16,6 +16,8 @@ mod tests {
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub(super) struct BlockStateId;
         #[derive(Clone, Copy)]
+        pub(super) struct LevelRef;
+        #[derive(Clone, Copy)]
         pub(super) struct FluidState;
         pub(super) struct PlacementContext;
         #[derive(Clone, Copy)]
@@ -211,6 +213,16 @@ mod tests {
     trait Host {}
     trait ServerHost: Host {}
     trait ClientHost: Host {}
+    trait DrawContext {}
+    /// Records which part drew, in order.
+    trait BlockEntityDrawContext {
+        fn mark(&mut self, part: u32);
+    }
+    impl BlockEntityDrawContext for BlockEntityDraw {
+        fn mark(&mut self, part: u32) {
+            self.0.push(part);
+        }
+    }
     enum HostSide<'a> {
         Server(&'a mut dyn ServerHost),
         Client(&'a mut dyn ClientHost),
@@ -249,11 +261,6 @@ mod tests {
     impl Host for TestHost {}
     impl ServerHost for TestHost {}
     impl ClientHost for TestHost {}
-    mod winit {
-        pub mod event {
-            pub struct KeyEvent;
-        }
-    }
     #[allow(dead_code)]
     mod generated {
         mod horizon_mods {
@@ -262,15 +269,15 @@ mod tests {
                 pub struct Item;
             }
         }
-        pub(super) mod horizon_client {
+        pub(super) mod mod_api {
             pub mod camera {
                 pub struct CameraEntity;
                 pub struct FovPlayer;
             }
-            pub mod mod_api {
-                pub struct NativeClientInfo;
-                pub struct NativeArmorHurt;
-            }
+            pub struct NativeClientInfo;
+            #[derive(Clone, Copy)]
+            pub enum KeyAction {}
+            pub struct NativeArmorHurt;
             pub mod menu {
                 pub struct MenuButtonContext {
                     pub player: u128,
@@ -661,7 +668,7 @@ mod tests {
         fn block_entity_submit(&self, _: &dyn ClientHost, event: &mut BlockEntitySubmitEvent<'_>) {
             assert_eq!(event.pos, [1, 2, 3]);
             assert_eq!(event.block, "example:machine");
-            event.draw.0.push(self.id);
+            event.draw.mark(self.id);
         }
     }
     impl MenuPart for Mod {
@@ -774,7 +781,7 @@ mod tests {
             block_entities: vec![part(1, &calls)],
             ..Parts::default()
         });
-        let context = generated::horizon_client::menu::MenuButtonContext {
+        let context = generated::mod_api::menu::MenuButtonContext {
             player: 123,
             player_entity_id: 42,
             pos: [1, 2, 3],

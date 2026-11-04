@@ -4,7 +4,6 @@
 //! (`ServerPlayer.findRespawnAndUseSpawnBlock`, `PlayerList.respawn`),
 //! using a charge.
 use super::{Dim, Game};
-use horizon_client::first_person::Hand;
 use horizon_client::{
     Result,
     blocks::Fluid,
@@ -18,6 +17,7 @@ use horizon_core::{
     position::BlockPos,
 };
 use horizon_world::{collision_context::CollisionContext, registry::BlockStateId};
+use mod_api::first_person::Hand;
 
 /// `ServerPlayer.RespawnConfig`: a respawn point other than the world spawn
 /// that the game resolves through its block (a respawn anchor).

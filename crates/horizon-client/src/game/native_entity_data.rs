@@ -3,8 +3,8 @@
 //! `/data` and `/tag` read and change. They return `None` (or `false`) for a
 //! stale handle or on a client.
 use super::Game;
-use horizon_client::mod_api::EntityRef;
 use horizon_world::nbt::{Compound, Tag};
+use mod_api::EntityRef;
 
 /// The most tags an entity holds (`Entity.addTag`).
 const MAX_TAGS: usize = 1024;

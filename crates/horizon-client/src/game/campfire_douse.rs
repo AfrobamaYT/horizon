@@ -62,18 +62,18 @@ impl Game<'_> {
         stack: &ItemStack,
         unlit: horizon_world::registry::BlockStateId,
     ) -> Option<horizon_world::registry::BlockStateId> {
-        if !crate::mod_api::listened(crate::mod_api::HookId::BlockToolModification) {
+        if !mod_api::__private::listened(mod_api::HookId::BlockToolModification) {
             return Some(unlit);
         }
-        let tool = crate::mod_api::ToolUse {
+        let tool = mod_api::ToolUse::from(mod_api::__private::built::ToolUse {
             player: self.player.is_some().then(|| self.own_entity_id() as u32),
             hand: self.hand,
             pos: hit.pos,
             face: hit.face,
             click: hit.point,
-            ability: crate::mod_api::ToolAbility::ShovelDouse,
+            ability: mod_api::ToolAbility::ShovelDouse,
             simulated: false,
-        };
+        });
         let mut state = Some(unlit);
         let mut cancel = false;
         self.native_block_tool_modification(stack, &tool, &mut state, &mut cancel);
