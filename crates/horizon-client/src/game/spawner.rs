@@ -2,14 +2,16 @@
 //! `clientTick` for every spawner (`mobs::spawner`), the mobs they add, a
 //! spawn egg used on one (`SpawnEggItem.useOn`), their events and the mob
 //! spinning inside (`SpawnerRenderer`).
-use super::Game;
+use super::{
+    Game,
+    creatures::{Finalized, SpawnReason},
+};
 use horizon_client::{
     Result,
     containers::BlockEntity,
     mobs::{
         Mob, Who,
         spawner::{SpawnDataExt, Spawner, SpawnerAdded, SpawnerEvent, SpawnerExt, SpawnerSpawn},
-        spawning,
         trial_spawner::{TrialSpawnerExt, TrialState},
     },
     particles::{ParticleOptions, ParticleType},
@@ -122,10 +124,14 @@ impl Game<'_> {
         );
         let mut events = Vec::new();
         let mut planned: Vec<Planned> = Vec::new();
+        // A minecart spawner has no block.
+        let source = cart
+            .is_none()
+            .then(|| mod_api::NativeSpawner::Block(mod_api::BlockPos::new(key.0, key.1, key.2)));
         {
             let level = self.natural_level();
             let mut spawn = |l: &super::natural_spawning::GameLevel, r: &SpawnerSpawn| {
-                l.game.plan_spawner_mob(l, r, &mut planned)
+                l.game.plan_spawner_mob(l, r, source, &mut planned)
             };
             spawner.server_tick(&level, &mut random, pos, &mut spawn, &mut events);
         }
@@ -148,7 +154,12 @@ impl Game<'_> {
                     self.native_mobs_joined(self.mobs.len() - 1, false);
                     self.enchant_spawn_equipment(id);
                     self.halloween_spawn_head(id);
-                    self.spawn_jockeys(id, false);
+                    self.spawn_jockeys(
+                        id,
+                        super::creatures::SpawnSite::Finalizing(
+                            horizon_client::mobs::spawn_rules::Reason::Spawner,
+                        ),
+                    );
                     Some((id, equipment))
                 }
                 Planned::Loaded(tag, equipment) => {
@@ -171,6 +182,7 @@ impl Game<'_> {
         &self,
         l: &super::natural_spawning::GameLevel,
         r: &SpawnerSpawn,
+        source: Option<mod_api::NativeSpawner>,
         planned: &mut Vec<Planned>,
     ) -> Option<SpawnerAdded> {
         let kind = self.res.mob_types().get(r.id)?.clone();
@@ -178,15 +190,21 @@ impl Game<'_> {
         let at = Vec3::new(x, y, z);
         let bounds = if r.finalize {
             let mut mob = Mob::new(0, kind, at, r.yaw);
-            let facts = self.biome_facts(x.floor() as i32, y.floor() as i32, z.floor() as i32);
-            let difficulty = self.local_difficulty(r.position);
-            spawning::finalize(&mut mob, &facts, &difficulty);
+            let reason = if r.trial {
+                SpawnReason::TrialSpawner
+            } else {
+                SpawnReason::Spawner
+            };
             // TrialSpawner.spawnMob: setPersistenceRequired.
             mob.persistent = r.trial;
-            horizon_client::mobs::raider::finalize(
-                &mut mob,
-                horizon_client::mobs::raider::Reason::Other,
-            );
+            match self.finalize_with(&mut mob, reason, source) {
+                Finalized::Cancelled => return None,
+                Finalized::Skipped => {}
+                Finalized::Done => horizon_client::mobs::raider::finalize(
+                    &mut mob,
+                    horizon_client::mobs::raider::Reason::Other,
+                ),
+            }
             // Shulker.finalizeSpawn faces it south.
             if mob.species() == horizon_client::mobs::Species::Shulker {
                 mob.yaw = 0.0;

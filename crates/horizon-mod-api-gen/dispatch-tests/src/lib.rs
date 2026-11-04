@@ -59,6 +59,8 @@ mod tests {
         pub(super) struct Compound;
         pub(super) struct NativeSpawnReason;
         pub(super) struct NativeSpawnCheck;
+        pub(super) struct NativeDifficulty;
+        pub(super) struct NativeSpawner;
         pub(super) enum Placement {
             Single,
         }

@@ -250,7 +250,12 @@ impl Game<'_> {
             f64::from(pos[1]),
             f64::from(pos[2]) + 0.5,
         ];
-        let Some(id) = self.spawn_mob("minecraft:copper_golem", at, true) else {
+        let Some(id) = self.spawn_mob(
+            "minecraft:copper_golem",
+            at,
+            true,
+            super::creatures::SpawnSite::Plain,
+        ) else {
             return false;
         };
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {

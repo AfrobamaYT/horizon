@@ -482,6 +482,9 @@ impl Game<'_> {
                     f64::from(at[2]) + 0.5,
                 ],
                 false,
+                super::creatures::SpawnSite::Finalizing(
+                    horizon_client::mobs::spawn_rules::Reason::Natural,
+                ),
             );
         }
     }

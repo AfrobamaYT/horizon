@@ -2547,6 +2547,33 @@ pub enum NativeSpawnReason {
     DimensionTravel,
 }
 
+/// The local difficulty at a spawn (`DifficultyInstance`): what `finalize_spawn` reads and
+/// may change before the mob is finalized.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct NativeDifficulty {
+    /// `Difficulty.getId`: 0 peaceful, 1 easy, 2 normal, 3 hard. A larger value is taken as 3.
+    pub base: u8,
+    /// `DifficultyInstance.getEffectiveDifficulty`: the base scaled by world age, the chunk's
+    /// inhabited time and the moon.
+    pub effective: f32,
+}
+
+impl NativeDifficulty {
+    /// A difficulty of `base` and `effective`.
+    pub fn new(base: u8, effective: f32) -> Self {
+        Self { base, effective }
+    }
+}
+
+/// What spawned a mob, where `EntitySpawnReason` alone does not say (`FinalizeSpawnEvent.getSpawner`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeSpawner {
+    /// A spawner or trial spawner block at this position.
+    Block(BlockPos),
+}
+
 /// What a mod answers a spawn check (`MobSpawnEvent.PositionCheck.Result` and
 /// `MobSpawnEvent.SpawnPlacementCheck.Result`, one type for both).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
