@@ -80,11 +80,17 @@ def build(out: Path, server: bool) -> None:
             shutil.copy2(file, deps / file.name)
     native = out / NATIVE
     native.mkdir()
+    # Only libraries that come with a crate (its source in Cargo's home, or its build script's output): a
+    # system folder a script names (pkg-config's /usr/lib) is the player's own system's to provide.
+    crates = (target_dir, Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo")))
     for script in scripts:
         # A static library a script names is already inside its crate's rlib, so inside the game.
         bundled = {lib.split("=")[-1] for lib in script["linked_libs"] if lib.startswith("static")}
         for search in script["linked_paths"]:
-            for file in sorted(Path(search.split("=", 1)[-1]).iterdir()):
+            folder = Path(search.split("=", 1)[-1]).resolve()
+            if not any(folder.is_relative_to(root.resolve()) for root in crates):
+                continue
+            for file in sorted(folder.iterdir()):
                 stem = file.name.removeprefix("lib").split(".")[0]
                 if file.is_file() and file.name.endswith(NATIVE_SUFFIXES) and stem not in bundled:
                     shutil.copy2(file, native / file.name)
