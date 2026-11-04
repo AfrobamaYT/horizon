@@ -27,6 +27,12 @@ defaults), and the runtime bundle selection. Listeners run in mod order; later a
 Use `"property": "example:charged"` with both `on_true` and `on_false` in the item's
 `minecraft:condition` node. Custom special model renderers are not supplied by this hook.
 
+A `minecraft:special` item model whose `model.type` is another namespace's has no renderer in Horizon: the
+item draws as its `base` model, and the log says so once per type. A mod gets the same result from model
+JSON: a `minecraft:model` leaf naming a model file with `elements` and `display` draws cuboids with a
+transformation per display context, `tints` colours them, and `minecraft:select`, `condition` and
+`range_dispatch` on a property the mod answers through `item_model_property` pick between variants.
+
 ## Item frame rendering
 
 `native_render_item_in_frame(entity_id, pos, stack, canceled)` runs before a visible item frame draws its item or map, including glow and invisible frames. Set `canceled` to hide the item without hiding the frame.
