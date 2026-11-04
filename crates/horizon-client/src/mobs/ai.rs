@@ -733,15 +733,15 @@ fn effects_from_blocks(
         // 0.2 below the feet, or the supporting block when the centre is over
         // its edge.
         let [x, y, z] = m.block_on_legacy(w);
-        crate::block_contact::emit(crate::block_contact::Event::StepOn(
+        crate::block_contact::step_on(
+            w.block_name(x, y, z),
             crate::block_contact::Contact {
                 entity: m.id as i32,
                 kind: &m.kind.id,
-                block: w.block_name(x, y, z),
                 state: w.world.block(x, y, z),
                 position: horizon_core::position::BlockPos::new(x, y, z),
             },
-        ));
+        );
         if w.block_name(x, y, z) == "minecraft:magma_block" {
             m.damage(level, 1.0, Damage::of(DamageKind::HotFloor));
         }

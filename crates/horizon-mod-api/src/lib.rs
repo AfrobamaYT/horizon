@@ -162,7 +162,9 @@ pub use horizon_world::{
         AttachmentCodec, AttachmentError, AttachmentHost, AttachmentType, Attachments, Holder,
     },
     fluid::FluidState,
-    level::{BlockId, Dimension as LevelDimension, NeighbourUpdate, PlacementContext},
+    level::{
+        BlockId, Dimension as LevelDimension, LandingWrite, NeighbourUpdate, PlacementContext,
+    },
     loot::{LootStack, NativeLootContext},
     nbt::{Compound, Tag},
     registry::BlockStateId,
@@ -3391,6 +3393,13 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
 }
 pub use generated::Hooks;
+impl FallOnEvent<'_> {
+    /// Ask for a write at the block the entity landed on. It is applied once the entity's
+    /// batch has ticked, in the order asked, if the block is still the state it landed on.
+    pub fn request(&mut self, write: LandingWrite) {
+        self.writes.push(write);
+    }
+}
 // hidden: a game-side re-export, not part of the mod surface
 #[doc(hidden)]
 pub use generated::*;

@@ -22393,10 +22393,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         return Ok(());
     }
     let _ = horizon_client::health::HURT_SERVER.set(native_hooks::incoming_damage);
-    let _ = horizon_client::block_contact::HOOK.set(native_hooks::block_contact);
-    let _ = horizon_client::block_contact::ANY_INSIDE.set(mod_api::__private::any_entity_inside);
-    let _ = horizon_client::block_contact::INSIDE_LISTENS
-        .set(mod_api::__private::entity_inside_listens);
+    let _ = horizon_client::block_contact::HOOKS.set(native_hooks::BLOCK_CONTACT_HOOKS);
     let _ = horizon_client::health::KNOCKBACK.set(native_hooks::knockback);
     let _ = horizon_client::health::SHIELD_BLOCK.set(native_hooks::shield_block);
     let _ = horizon_client::health::DAMAGE_PRE.set(native_hooks::damage_pre);

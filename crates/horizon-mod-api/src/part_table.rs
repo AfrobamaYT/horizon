@@ -227,17 +227,12 @@ pub fn has_part_hook(hook: HookId) -> bool {
     installed().is_some_and(|installed| installed.hook_bits[hook as usize])
 }
 
-/// Whether any part listens to `entity_inside`.
-pub fn any_entity_inside() -> bool {
-    has_scoped_hook(HookId::EntityInside)
-}
-
-/// Whether a part listens to `entity_inside` for `state`: one table lookup, and
-/// only once some part listens at all.
-pub fn entity_inside_listens(state: BlockStateId) -> bool {
-    any_entity_inside()
-        && parts("entity_inside")
-            .for_hook(HookId::EntityInside)
+/// Whether a part listens to the block hook `hook` (named `name`) for `state`: one table
+/// lookup, and only once some part listens at all.
+pub fn block_listens(hook: HookId, name: &'static str, state: BlockStateId) -> bool {
+    has_scoped_hook(hook)
+        && parts(name)
+            .for_hook(hook)
             .is_some_and(|table| !table.block_state(state).is_empty())
 }
 

@@ -20,6 +20,7 @@ use super::{
     native_panel_recipes::RecipePage,
 };
 use horizon_assets::item_model::StackView;
+use horizon_client::block_contact::Pending;
 use horizon_client::creative::Creative;
 use horizon_client::{
     atlas_sources::qualified,
@@ -71,8 +72,9 @@ use mod_api::{
 };
 use mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
-    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult,
-    NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion, TooltipElement, UsePhase,
+    LandingWrite, LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeBlockUpdateFlags,
+    NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
+    TooltipElement, UsePhase,
 };
 pub(crate) use mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -7528,39 +7530,58 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_entity_inside(self, state, pos, entity, precise);
     }
-    /// Deliver the contacts the batch just ticked recorded, in order. A contact is skipped
-    /// when its entity is gone (an item merged away later in the batch) or the block at
-    /// `pos` is no longer the state it touched, as vanilla never sees a stale one.
+    /// Deliver the contacts the batch just ticked recorded, in order: `entity_inside` to the
+    /// parts, and the writes a landing asked for to the level. A contact is skipped when its
+    /// entity is gone (an item merged away later in the batch) or the block at its position
+    /// is no longer the state it touched, as vanilla never sees a stale one.
     pub(super) fn drain_entity_inside(&mut self) {
-        for contact in horizon_client::block_contact::take_inside() {
-            let Some(entity) = u32::try_from(contact.entity)
-                .ok()
-                .and_then(|id| self.native_entity(id))
-            else {
+        for contact in horizon_client::block_contact::take_pending() {
+            let (state, pos) = match &contact {
+                Pending::Inside(inside) => (inside.state, inside.position),
+                Pending::Landed(landed) => (landed.state, landed.position),
+            };
+            let Some(level) = self.native_level(self.dim.id()) else {
                 continue;
             };
-            let pos = contact.position;
-            let here = self
-                .native_level(self.dim.id())
-                .and_then(|level| self.native_level_state(level, [pos.x, pos.y, pos.z]));
-            if here == Some(contact.state) {
-                self.native_entity_inside(contact.state, pos, entity, contact.precise);
+            if self.native_level_state(level, [pos.x, pos.y, pos.z]) != Some(state) {
+                continue;
+            }
+            match contact {
+                Pending::Inside(inside) => {
+                    if let Some(entity) = u32::try_from(inside.entity)
+                        .ok()
+                        .and_then(|id| self.native_entity(id))
+                    {
+                        self.native_entity_inside(state, pos, entity, inside.precise);
+                    }
+                }
+                Pending::Landed(landed) => {
+                    for write in landed.writes {
+                        self.apply_landing_write(level, pos, write);
+                    }
+                }
             }
         }
     }
-    /// `Block.fallOn` for a mod block. Change calculated damage before generic fall sounds
-    /// and hurt handling; zero prevents both. Creative and fall-immune entities
-    /// notify with zero damage and retain their immunity. Server-side only.
-    pub(super) fn native_block_fall_on(
-        dimension: &str,
-        entity: i32,
-        kind: &str,
-        state: BlockStateId,
-        position: [i32; 3],
-        distance: f64,
-        damage: &mut f32,
+
+    /// Apply one write a landing asked for, at the block the entity landed on.
+    fn apply_landing_write(
+        &mut self,
+        level: mod_api::LevelRef,
+        pos: BlockPos,
+        write: LandingWrite,
     ) {
-        mod_api::dispatch_block_fall_on(dimension, entity, kind, state, position, distance, damage);
+        let at = [pos.x, pos.y, pos.z];
+        match write {
+            LandingWrite::SetBlock(state) => {
+                self.native_level_set_block(level, at, state, NativeBlockUpdateFlags::NEIGHBORS);
+            }
+            LandingWrite::DestroyBlock { drop } => {
+                self.native_level_destroy_block(level, at, drop);
+            }
+            // A write a later API adds that this game does not know is not applied.
+            _ => {}
+        }
     }
 }
 
@@ -7584,13 +7605,58 @@ pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
     cancel
 }
 
-/// The level a hit lands in, as its damage hooks' level host: its blocks, its random and its
+/// The level a hit or a landing happens in, as its hooks' level host: its blocks, its random and its
 /// own attachments. Not `GameLevel`, which a hit can't build: a mob's hit lands in the mob
 /// tick, where the world is read by every mob and its random is lent out, and building one
 /// per hit would allocate its entity boxes.
 pub(super) struct HitLevel<'a>(pub(super) DamageLevel<'a>);
 
 impl HitLevel<'_> {
+    /// `Block.fallOn`: entity `entity` of type `kind` landed on `state` at `pos` after falling
+    /// `distance` blocks. `damage` is the fall damage `causeFallDamage` calculated, before hurt
+    /// handling and the fall sounds: change it, and zero prevents both. A creative or
+    /// fall-immune entity is told with zero damage and keeps its immunity. Players and mobs
+    /// land here; dropped items, projectiles and the other entities do not yet.
+    pub(super) fn native_fall_on(
+        &mut self,
+        dimension: &str,
+        entity: i32,
+        kind: &str,
+        state: BlockStateId,
+        pos: BlockPos,
+        distance: f64,
+        damage: &mut f32,
+        writes: &mut Vec<LandingWrite>,
+    ) {
+        mod_api::dispatch_fall_on(
+            self, dimension, entity, kind, state, pos, distance, writes, damage,
+        );
+    }
+    /// `Block.bounceOn`: entity `entity` of type `kind` bounced off `state` at `pos` and fell
+    /// `fall_distance` blocks. `movement` is the movement the bounce leaves it, before
+    /// vanilla sets it: change it to change what the entity keeps. Players and mobs bounce
+    /// here; dropped items and the other entities do not yet.
+    pub(super) fn native_bounce_on(
+        &mut self,
+        dimension: &str,
+        entity: i32,
+        kind: &str,
+        state: BlockStateId,
+        pos: BlockPos,
+        fall_distance: f64,
+        movement: &mut [f64; 3],
+    ) {
+        mod_api::dispatch_bounce_on(
+            self,
+            dimension,
+            entity,
+            kind,
+            state,
+            pos,
+            fall_distance,
+            movement,
+        );
+    }
     /// NeoForge's `LivingIncomingDamageEvent`: `LivingEntity.hurtServer`, past its guards (an
     /// invulnerable or dead entity, fire on a fire-resistant one), is about to hurt entity
     /// `entity` of type `kind` (`minecraft:zombie`, `minecraft:player`) by `source`: its damage
@@ -7854,31 +7920,48 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
     canceled
 }
 
-pub(super) fn block_contact(
-    dimension: &str,
-    event: horizon_client::block_contact::Event<'_>,
-    damage: &mut f32,
-) {
-    use horizon_client::block_contact::Event;
-    match event {
-        Event::StepOn(c) => Game::native_block_step_on(
-            dimension,
-            c.entity,
-            c.kind,
-            c.state,
-            [c.position.x, c.position.y, c.position.z],
-        ),
-        Event::FallOn(c, distance) => Game::native_block_fall_on(
-            dimension,
-            c.entity,
-            c.kind,
-            c.state,
-            [c.position.x, c.position.y, c.position.z],
-            distance,
-            damage,
-        ),
-    }
-}
+/// The contacts of a simulating entity with a block, as the simulation's own code (client-lib)
+/// reports them.
+pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
+    horizon_client::block_contact::Hooks {
+        step_on: |dimension, c| {
+            Game::native_block_step_on(
+                dimension,
+                c.entity,
+                c.kind,
+                c.state,
+                [c.position.x, c.position.y, c.position.z],
+            );
+        },
+        any_inside: || mod_api::__private::has_scoped_hook(mod_api::HookId::EntityInside),
+        inside_listens: |state| {
+            mod_api::__private::block_listens(mod_api::HookId::EntityInside, "entity_inside", state)
+        },
+        fall_listens: |state| {
+            mod_api::__private::block_listens(mod_api::HookId::FallOn, "fall_on", state)
+        },
+        bounce_listens: |state| {
+            mod_api::__private::block_listens(mod_api::HookId::BounceOn, "bounce_on", state)
+        },
+        fall_on: |dimension, level, c, distance, damage, writes| {
+            HitLevel(level.reborrow()).native_fall_on(
+                dimension, c.entity, c.kind, c.state, c.position, distance, damage, writes,
+            );
+        },
+        bounce_on: |dimension, level, c, fall_distance, movement| {
+            let mut answer = [movement.x, movement.y, movement.z];
+            HitLevel(level.reborrow()).native_bounce_on(
+                dimension,
+                c.entity,
+                c.kind,
+                c.state,
+                c.position,
+                fall_distance,
+                &mut answer,
+            );
+            *movement = horizon_core::geometry::Vec3::new(answer[0], answer[1], answer[2]);
+        },
+    };
 
 /// `native_living_incoming_damage`'s entity, entity type and source for a hit.
 fn hurt_server_args(hurting: Hurting<'_>) -> (i32, &str, HurtSource<'_>) {
@@ -11998,6 +12081,52 @@ mod entity_inside_tests {
     };
     use std::sync::{Arc, Mutex};
 
+    /// Landing writes reach the level at the batch end, in the order asked, and only
+    /// where the block is still the state landed on.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn landing_writes_apply_at_the_batch_end() {
+        use horizon_client::block_contact::{landed, take_pending};
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let state = |name| game.pack.assets.registry.default_state(name).unwrap();
+            let (farmland, dirt, stone, air) = (
+                state("minecraft:farmland"),
+                state("minecraft:dirt"),
+                state("minecraft:stone"),
+                state("minecraft:air"),
+            );
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            game.world.set(1, 64, 1, farmland).unwrap();
+            game.world.set(2, 64, 1, farmland).unwrap();
+            game.world.set(3, 64, 1, stone).unwrap();
+            let at = |x| BlockPos::new(x, 64, 1);
+            landed(farmland, at(1), vec![LandingWrite::SetBlock(dirt)]);
+            // The block changed after the landing: dropped.
+            landed(stone, at(2), vec![LandingWrite::SetBlock(dirt)]);
+            landed(
+                stone,
+                at(3),
+                vec![LandingWrite::DestroyBlock { drop: false }],
+            );
+            // Nothing asked: nothing kept.
+            landed(farmland, at(1), Vec::new());
+            assert_eq!(
+                game.world.block(1, 64, 1),
+                farmland,
+                "nothing writes mid-batch"
+            );
+            game.drain_entity_inside();
+            assert_eq!(game.world.block(1, 64, 1), dirt);
+            assert_eq!(game.world.block(2, 64, 1), farmland);
+            assert_eq!(game.world.block(3, 64, 1), air, "the stone is destroyed");
+            assert!(take_pending().is_empty());
+        });
+    }
+
     /// What the part on stone heard: the entity's id, the position and `precise`.
     #[derive(Clone, Default)]
     struct Stone(Arc<Mutex<Vec<(u32, BlockPos, bool)>>>);
@@ -12028,10 +12157,7 @@ mod entity_inside_tests {
         let mods: mod_api::Mods =
             vec![ModEntry::new("inside", Box::new(Mod(heard.clone())))].into();
         mod_api::__private::install_parts(&mods).unwrap();
-        let _ =
-            horizon_client::block_contact::ANY_INSIDE.set(mod_api::__private::any_entity_inside);
-        let _ = horizon_client::block_contact::INSIDE_LISTENS
-            .set(mod_api::__private::entity_inside_listens);
+        let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
         with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let state = |name| game.pack.assets.registry.default_state(name).unwrap();
