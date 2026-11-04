@@ -398,7 +398,13 @@ pub enum Action {
     },
 }
 pub struct Title {
+    /// The screen shown. Code here changes it through `set_mode`.
     pub mode: Mode,
+    /// Set by the game while a native mod is loaded: `set_mode` then leaves
+    /// a new screen in `requested` for the game to announce
+    /// (`screen_opening`) and apply, so a mod's answer can keep it shut.
+    pub gated: bool,
+    requested: Option<Mode>,
     /// Direct Connection's address, synchronized with `options.txt`'s `lastServer`.
     pub last_server: String,
     /// `skipMultiplayerWarning`, synchronized with `options.txt` the same way.
@@ -732,6 +738,21 @@ impl Mode {
 }
 
 impl Title {
+    /// Opens `mode` (`Minecraft.setScreen`). While `gated`, a screen with a
+    /// different id waits in `requested` for the game; the same screen again
+    /// (its id unchanged) is applied at once.
+    pub fn set_mode(&mut self, mode: Mode) {
+        if self.gated && mode.id() != self.mode.id() {
+            self.requested = Some(mode);
+        } else {
+            self.requested = None;
+            self.mode = mode;
+        }
+    }
+    /// The screen `set_mode` left for the game to announce and apply.
+    pub fn take_requested(&mut self) -> Option<Mode> {
+        self.requested.take()
+    }
     /// Names the player for the `<NAME> IS YOU` splash; `name` is only asked for when that splash was rolled.
     pub fn with_user(mut self, name: impl FnOnce() -> String) -> Self {
         if self.splash_you {
@@ -758,6 +779,8 @@ impl Title {
         let now = std::time::Instant::now();
         Self {
             mode,
+            gated: false,
+            requested: None,
             last_server: String::new(),
             skip_multiplayer_warning: false,
             saves,
@@ -803,14 +826,14 @@ impl Title {
         self.scroll.set(crate::ui::Scroll::default());
         let worlds = list_worlds(&self.saves);
         self.create_return_to_main = worlds.is_empty();
-        self.mode = if worlds.is_empty() {
+        self.set_mode(if worlds.is_empty() {
             Self::new_world()
         } else {
             Mode::Select {
                 worlds,
                 selected: None,
             }
-        };
+        });
     }
     pub(crate) fn new_world() -> Mode {
         Mode::Create {
@@ -829,7 +852,7 @@ impl Title {
         *self.recent.borrow_mut() = None;
         if worlds.is_empty() {
             self.create_return_to_main = true;
-            self.mode = Self::new_world();
+            self.set_mode(Self::new_world());
             return;
         }
         let selected = folder.and_then(|folder| {
@@ -837,7 +860,7 @@ impl Title {
                 .iter()
                 .position(|w| w.folder == folder && self.matches_search(w))
         });
-        self.mode = Mode::Select { worlds, selected };
+        self.set_mode(Mode::Select { worlds, selected });
     }
     /// Deletes the world `Mode::Delete` asks about and goes back to the
     /// refreshed list; a failure (the world is open elsewhere, say) shows the
@@ -867,7 +890,7 @@ impl Title {
             let _ = std::fs::remove_dir_all(dir);
         }
         if self.create_return_to_main {
-            self.mode = Mode::Main;
+            self.set_mode(Mode::Main);
         } else {
             self.return_to_list(None);
         }
@@ -921,7 +944,8 @@ impl Title {
     /// Return to Create New World, keeping (`apply`) the chosen biome
     /// (`CreateBuffetWorldScreen`'s Done and Cancel).
     fn close_buffet(&mut self, apply: bool) {
-        let mode = std::mem::replace(&mut self.mode, Mode::Main);
+        // A clone: while the game gates the change, this screen shows until it applies.
+        let mode = self.mode.clone();
         if let Mode::CreateBuffet {
             name,
             seed,
@@ -935,18 +959,19 @@ impl Title {
                 options.world_type = crate::save::WorldPreset::SingleBiomeSurface;
                 options.single_biome = buffet.biome.clone();
             }
-            self.mode = Mode::Create {
+            self.set_mode(Mode::Create {
                 name,
                 seed,
                 creative,
                 focus,
                 options,
-            };
+            });
         }
     }
     /// Return to Create New World, keeping (`apply`) or dropping the layers.
     fn close_flat(&mut self, apply: bool) {
-        let mode = std::mem::replace(&mut self.mode, Mode::Main);
+        // A clone: while the game gates the change, this screen shows until it applies.
+        let mode = self.mode.clone();
         if let Mode::CreateFlat {
             name,
             seed,
@@ -960,13 +985,13 @@ impl Title {
                 options.world_type = crate::save::WorldPreset::Flat;
                 options.flat_settings = Some(flat.settings);
             }
-            self.mode = Mode::Create {
+            self.set_mode(Mode::Create {
                 name,
                 seed,
                 creative,
                 focus,
                 options,
-            };
+            });
         }
     }
     /// `createWorld.preparing` is up: the world creation data is being read.
@@ -989,7 +1014,7 @@ impl Title {
     pub fn finish_preparing(&mut self) {
         self.preparing = false;
         if !matches!(self.mode, Mode::Create { .. }) {
-            self.mode = Self::new_world();
+            self.set_mode(Self::new_world());
         }
     }
     /// `PackSelectionScreen.onFilesDrop`: a pack dropped on the window joins
@@ -1195,11 +1220,11 @@ impl Title {
     }
     pub fn failed(&mut self, error: impl std::fmt::Display) {
         let return_to = Box::new(self.mode.clone());
-        self.mode = Mode::Error {
+        self.set_mode(Mode::Error {
             message: error.to_string(),
             return_to,
             alert: None,
-        };
+        });
     }
     /// Polling is done once per rendered frame so filesystem work never blocks drawing.
     pub fn poll_backup(&mut self) {
@@ -1296,7 +1321,7 @@ impl Title {
                 WorldEntry::corrupted(folder.to_owned(), std::time::SystemTime::now())
             });
         let issues = [Some(issue), crate::save::level_dat_issue(&dir, true)];
-        self.mode = Mode::Recover { world, issues };
+        self.set_mode(Mode::Recover { world, issues });
         true
     }
     /// `WorldOpenFlows.openWorld`: a world that can't be locked, as one another
@@ -1316,14 +1341,14 @@ impl Title {
         if world_management::symlinks(&self.saves, &world.folder)
             .is_ok_and(|links| !links.is_empty())
         {
-            self.mode = Mode::Error {
+            self.set_mode(Mode::Error {
                 message: lang::get_or(
                     "symlink_warning.message.world",
                     "You are trying to open a world whose folder holds links to other files. That can be a risk to the rest of your files, so the world stays closed.",
                 ),
                 return_to: Box::new(self.mode.clone()),
                 alert: Some(Alert::Symlink),
-            };
+            });
             return Action::None;
         }
         if crate::save::SessionLock::acquire(&self.saves.join(&world.folder)).is_err() {
@@ -1337,7 +1362,7 @@ impl Title {
         // RecoverWorldDataScreen instead of the world.
         let issues = recover_issues(&self.saves.join(&world.folder));
         if issues[0].is_some() {
-            self.mode = Mode::Recover { world, issues };
+            self.set_mode(Mode::Recover { world, issues });
             return Action::None;
         }
         // openWorldCheckVersionCompatibility: a world from another series is an AlertScreen.
@@ -1347,7 +1372,7 @@ impl Title {
             } else {
                 version
             };
-            self.mode = Mode::Error {
+            self.set_mode(Mode::Error {
                 message: translate(
                     "selectWorld.incompatible.description",
                     "This world cannot be opened in this version.\nIt was last played in version %s.",
@@ -1355,15 +1380,15 @@ impl Title {
                 ),
                 return_to: Box::new(self.mode.clone()),
                 alert: Some(Alert::Incompatible),
-            };
+            });
             return Action::None;
         }
         if crate::save::needs_file_fixes(&self.saves.join(&world.folder)) {
-            self.mode = Mode::BackupBeforeUpgrade {
+            self.set_mode(Mode::BackupBeforeUpgrade {
                 world,
                 downgrade: None,
                 stem: None,
-            };
+            });
             return Action::None;
         }
         // BackupStatus.DOWNGRADE: a world from a newer version asks for a backup too.
@@ -1373,11 +1398,11 @@ impl Title {
             } else {
                 version
             };
-            self.mode = Mode::BackupBeforeUpgrade {
+            self.set_mode(Mode::BackupBeforeUpgrade {
                 world,
                 downgrade: Some(version),
                 stem: None,
-            };
+            });
             return Action::None;
         }
         self.after_prompt(world, false)
@@ -1398,16 +1423,16 @@ impl Title {
                 None
             };
             if let Some(stem) = issue {
-                self.mode = Mode::BackupBeforeUpgrade {
+                self.set_mode(Mode::BackupBeforeUpgrade {
                     world,
                     downgrade: None,
                     stem: Some(stem),
-                };
+                });
                 return Action::None;
             }
         }
         if crate::save::low_disk_space(&dir) {
-            self.mode = Mode::LowDiskSpace { world };
+            self.set_mode(Mode::LowDiskSpace { world });
             return Action::None;
         }
         Action::Play {
@@ -1431,7 +1456,7 @@ impl Title {
             );
         }
         *self.recent.borrow_mut() = None;
-        self.mode = Mode::Recovered { world, success };
+        self.set_mode(Mode::Recovered { world, success });
     }
     /// `OptimizeWorldScreen.create`: a world that still needs its file fixes or whose level data
     /// does not read can't be optimized (vanilla logs and `setScreen(null)`, the main menu here).
@@ -1445,12 +1470,12 @@ impl Title {
             || crate::save::level_data_needs_recovery(&dir).is_some()
         {
             eprintln!("Failed to load datapacks, can't optimize world");
-            self.mode = Mode::Main;
+            self.set_mode(Mode::Main);
             return;
         }
         let levels = world_upgrader::world_dimensions(&dir);
         self.optimize = Some(WorldUpgrader::new(&dir, levels, erase_cache, false));
-        self.mode = Mode::Optimize { world };
+        self.set_mode(Mode::Optimize { world });
     }
     /// `OptimizeWorldScreen.tick`: a finished upgrader ends the screen with `true`.
     fn poll_optimize(&mut self) {
@@ -1583,7 +1608,7 @@ impl Title {
         });
         self.backup_shown.set(false);
         self.backup = Some(receive);
-        self.mode = Mode::Backup { world };
+        self.set_mode(Mode::Backup { world });
     }
     fn icon(
         &self,
@@ -3422,11 +3447,11 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             }
             (Mode::Main, Some(4)) => {
                 // TitleScreen.init: SafetyScreen first, unless it was turned off.
-                self.mode = if self.skip_multiplayer_warning {
+                self.set_mode(if self.skip_multiplayer_warning {
                     Mode::Multiplayer(crate::multiplayer::Screen::list(&self.saves))
                 } else {
                     Mode::MultiplayerWarning { check: false }
-                };
+                });
                 Action::None
             }
             (Mode::MultiplayerWarning { check }, Some(70)) => {
@@ -3434,16 +3459,18 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 if *check {
                     self.skip_multiplayer_warning = true;
                 }
-                self.mode = Mode::Multiplayer(crate::multiplayer::Screen::list(&self.saves));
+                self.set_mode(Mode::Multiplayer(crate::multiplayer::Screen::list(
+                    &self.saves,
+                )));
                 Action::None
             }
             (Mode::MultiplayerWarning { .. }, Some(71)) => {
-                self.mode = Mode::Main;
+                self.set_mode(Mode::Main);
                 Action::None
             }
             (Mode::Multiplayer(_), hit) => match self.multiplayer_click(hit, x, y, (w, h)) {
                 crate::multiplayer::Outcome::Back => {
-                    self.mode = Mode::Main;
+                    self.set_mode(Mode::Main);
                     Action::None
                 }
                 crate::multiplayer::Outcome::Connect { address, lan } => {
@@ -3452,7 +3479,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 crate::multiplayer::Outcome::None => Action::None,
             },
             (Mode::Main, Some(5)) => {
-                self.mode = Mode::Multiplayer(crate::multiplayer::Screen::friend());
+                self.set_mode(Mode::Multiplayer(crate::multiplayer::Screen::friend()));
                 Action::None
             }
             (Mode::Onboarding(_), Some(onboarding::SOUNDS)) => Action::Sounds,
@@ -3540,27 +3567,25 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                     return Action::None;
                 };
                 match id {
-                    13 => {
-                        self.mode = Mode::Edit {
-                            name: world.name.clone(),
-                            world,
-                            focused: true,
-                        }
-                    }
-                    14 => self.mode = Mode::Delete { world },
+                    13 => self.set_mode(Mode::Edit {
+                        name: world.name.clone(),
+                        world,
+                        focused: true,
+                    }),
+                    14 => self.set_mode(Mode::Delete { world }),
                     _ => {
                         let level = Level::read(&self.saves.join(&world.folder));
                         // WorldListEntry.recreateWorld: a world that will not read is an
                         // AlertScreen over the list.
                         let Some(level) = level else {
-                            self.mode = Mode::Error {
+                            self.set_mode(Mode::Error {
                                 message: lang::get_or(
                                     "selectWorld.recreate.error.text",
                                     "Something went wrong while trying to recreate a world.",
                                 ),
                                 return_to: Box::new(self.mode.clone()),
                                 alert: Some(Alert::Recreate),
-                            };
+                            });
                             return Action::None;
                         };
                         self.create_return_to_main = false;
@@ -3570,19 +3595,19 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                             &self.saves.join(&world.folder),
                         );
                         options.restore_feature_packs(&self.resources, &level);
-                        self.mode = Mode::Create {
+                        self.set_mode(Mode::Create {
                             name: level.name,
                             seed: level.seed.to_string(),
                             creative: level.creative,
                             focus: 0,
                             options,
-                        };
+                        });
                     }
                 }
                 Action::None
             }
             (Mode::Select { .. }, Some(12)) => {
-                self.mode = Mode::Main;
+                self.set_mode(Mode::Main);
                 Action::None
             }
             (Mode::Select { .. }, None) => {
@@ -3635,11 +3660,11 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                         world_management::open_folder(&world_management::backups_path(&self.saves))
                     }
                     34 => {
-                        self.mode = Mode::OptimizeConfirm {
+                        self.set_mode(Mode::OptimizeConfirm {
                             world,
                             name,
                             erase_cache: false,
-                        };
+                        });
                         return Action::None;
                     }
                     35 => world_management::rename(&self.saves, &world.folder, &name),
@@ -3689,7 +3714,8 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 Action::None
             }
             (Mode::Error { return_to, .. }, Some(39)) => {
-                self.mode = *return_to.clone();
+                let back = *return_to.clone();
+                self.set_mode(back);
                 Action::None
             }
             // CreateWorldScreen.openGameRulesScreen over a copy of the rules.
@@ -3712,7 +3738,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 Some(26),
             ) if options.world_type == crate::save::WorldPreset::SingleBiomeSurface => {
                 let buffet = buffet::State::new(&self.resources, &options.single_biome);
-                self.mode = Mode::CreateBuffet {
+                let mode = Mode::CreateBuffet {
                     name: name.clone(),
                     seed: seed.clone(),
                     creative: *creative,
@@ -3720,6 +3746,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                     options: options.clone(),
                     buffet,
                 };
+                self.set_mode(mode);
                 Action::None
             }
             // CreateFlatWorldScreen for the flat preset.
@@ -3734,7 +3761,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 Some(26),
             ) => {
                 let flat = flat::State::new(&self.resources, options.flat_settings.clone());
-                self.mode = Mode::CreateFlat {
+                let mode = Mode::CreateFlat {
                     name: name.clone(),
                     seed: seed.clone(),
                     creative: *creative,
@@ -3742,6 +3769,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                     options: options.clone(),
                     flat,
                 };
+                self.set_mode(mode);
                 Action::None
             }
             (
@@ -4435,10 +4463,11 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
     }
     /// `Gui.buildInitialScreens`' chain: the next queued ban notice, else the title.
     fn next_ban_notice(&mut self) {
-        self.mode = match self.ban_queue.pop_front() {
+        let mode = match self.ban_queue.pop_front() {
             Some(notice) => Mode::BanNotice(notice),
             None => Mode::Main,
         };
+        self.set_mode(mode);
     }
     /// The account fetches vanilla starts in `Minecraft`'s constructor
     /// (`userPropertiesFuture`, `profileFuture`), run once per launch on a thread, only
@@ -4510,11 +4539,11 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             Mode::Backup { .. } | Mode::Optimize { .. } => {}
             // BackupConfirmScreen.keyPressed: Escape runs `onCancel`, the Edit World screen again.
             Mode::OptimizeConfirm { world, name, .. } => {
-                self.mode = Mode::Edit {
+                self.set_mode(Mode::Edit {
                     world: world.clone(),
                     name: name.clone(),
                     focused: true,
-                };
+                });
             }
             Mode::Edit { world, .. }
             | Mode::Delete { world }
@@ -4525,7 +4554,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 let folder = world.folder.clone();
                 self.return_to_list(Some(&folder));
             }
-            Mode::Error { return_to, .. } => self.mode = *return_to.clone(),
+            Mode::Error { return_to, .. } => self.set_mode(*return_to.clone()),
             Mode::CreateFlat { .. } => {
                 if matches!(&self.mode, Mode::CreateFlat { flat, .. } if flat.page == flat::Page::Presets)
                 {
@@ -4542,7 +4571,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             Mode::Onboarding(_) => self.onboarding_close(),
             // ConfirmScreen.keyPressed: Escape answers no, which runs `next`.
             Mode::BanNotice(_) => self.next_ban_notice(),
-            _ => self.mode = Mode::Main,
+            _ => self.set_mode(Mode::Main),
         }
     }
     /// `JoinMultiplayerScreen.keyPressed`: F5 refreshes the server list as
