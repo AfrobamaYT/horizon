@@ -992,11 +992,14 @@ mod tests {
     fn hook_points_come_from_the_catalog_and_its_fragments() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let points = super::hook_points(&root).unwrap();
-        let frame = points.iter().find(|p| p.name == "frame").unwrap();
+        let frame = points
+            .iter()
+            .find(|p| p.name == "render_frame_pre")
+            .unwrap();
         assert_eq!(frame.version, 1);
         assert_eq!(
             frame.target,
-            "horizon_client::game::native_hooks::Game<'_>::native_frame"
+            "horizon_client::game::native_hooks::Game<'_>::native_render_frame_pre"
         );
         assert!(!frame.scoped);
         let scoped = points
