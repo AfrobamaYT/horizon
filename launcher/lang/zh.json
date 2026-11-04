@@ -953,7 +953,6 @@
   "Others look like plain players to you. Also in the game's Horizon settings.": "其他玩家在你看来就是普通玩家。游戏的 Horizon 设置里也有此选项。",
   "Show other players' auras and trails": "显示其他玩家的光环和拖尾",
   "Off by default. Also in the game's Horizon settings.": "默认关闭。游戏的 Horizon 设置里也有此选项。",
-  "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "此游戏源码没有可读取的原生入口模板。请更新 Horizon 并针对该游戏重新构建模组。",
   "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.": "原生构建 {version} 的 native-mods.json 记录缺失或无效。请基于已安装的 Horizon 版本重新构建。",
   "Friend": "好友",
   "Friends on the same Wi-Fi: Multiplayer, Add server, paste.": "同一 Wi-Fi 下的好友：多人游戏，添加服务器，粘贴。",
@@ -1040,5 +1039,10 @@
   "SHA-512 mismatch at {path}: expected {expected}, got {actual}. Replace this cache entry with the exact original file, or remove it and retry with --allow-jar-downloads.": "{path} 的 SHA-512 不匹配：预期 {expected}，实际 {actual}。请用准确的原始文件替换此缓存项，或将其删除后使用 --allow-jar-downloads 重试。",
   "SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.": "SHA-512 {hash} 同时对应 {first_id} {first_version} 和 {second_id} {second_version}。",
   "no exact file on Modrinth": "Modrinth 上没有完全匹配的文件",
-  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512：{hash}"
+  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512：{hash}",
+  "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "此游戏源码缺少原生清单条目模板。请更新 Horizon 并针对此游戏重新构建模组。",
+  "{mod}: Cargo.toml has no package name.": "{mod}：Cargo.toml 没有包名称。",
+  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}：Cargo.toml 没有 horizon-client 依赖。",
+  "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}：horizon-client 请求 {fields}。服务器构建是无界面的；horizon-client 的特性由启动器管理。请移除 features 并使用 default-features = false，或将其省略。",
+  "{mod}: {error}": "{mod}：{error}"
 }

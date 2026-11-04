@@ -953,7 +953,6 @@
   "Others look like plain players to you. Also in the game's Horizon settings.": "他のプレイヤーは通常の姿で表示されます。ゲームの Horizon 設定にもあります。",
   "Show other players' auras and trails": "他のプレイヤーのオーラと軌跡を表示",
   "Off by default. Also in the game's Horizon settings.": "既定ではオフ。ゲームの Horizon 設定にもあります。",
-  "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "このゲームのソースには、読み取り可能なネイティブエントリテンプレートがありません。Horizonを更新し、このゲーム向けにModを再ビルドしてください。",
   "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.": "ネイティブビルド {version} の native-mods.json レコードが見つからないか無効です。インストール済みのHorizonから再ビルドしてください。",
   "Friend": "フレンド",
   "Friends on the same Wi-Fi: Multiplayer, Add server, paste.": "同じ Wi-Fi のフレンド: マルチプレイ、サーバーを追加、貼り付け。",
@@ -1040,5 +1039,10 @@
   "SHA-512 mismatch at {path}: expected {expected}, got {actual}. Replace this cache entry with the exact original file, or remove it and retry with --allow-jar-downloads.": "{path} の SHA-512 が一致しません：期待値 {expected}、実際の値 {actual}。このキャッシュ項目を正確なオリジナルのファイルに置き換えるか、削除して --allow-jar-downloads を指定して再試行してください。",
   "SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.": "SHA-512 {hash} が {first_id} {first_version} と {second_id} {second_version} の両方を示しています。",
   "no exact file on Modrinth": "Modrinth に完全に一致するファイルがありません",
-  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}"
+  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}",
+  "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "このゲームのソースにはネイティブインベントリのエントリテンプレートがありません。Horizon を更新し、このゲームに対してモッドを再ビルドしてください。",
+  "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml にパッケージ名がありません。",
+  "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml に horizon-client の依存関係がありません。",
+  "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client が {fields} を要求しています。サーバービルドはヘッドレスで、horizon-client のフィーチャーはランチャーが管理します。features を削除し、default-features = false を指定するか省略してください。",
+  "{mod}: {error}": "{mod}: {error}"
 }

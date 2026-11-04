@@ -193,22 +193,15 @@ fn initial_load_stages_and_applies_client_reload_listeners() {
     .into();
     with_mods(mods, || {
         with_game(|game| {
-            let selected: Vec<_> = horizon_mods::selection::packages(
-                &std::env::current_dir().unwrap(),
-                &game.settings.mods.enabled,
-                &Default::default(),
-                &game.options.dev_mods,
-            )
-            .collect();
             let root = crate::game::packs::startup_root(
                 &game.options.resources,
                 &game.settings.resource_packs,
                 &[],
-                &selected,
+                &game.options.mods,
             )
             .or_else(|error| {
                 log::warn!("Horizon: resource packs not applied: {error}");
-                crate::game::mods::content_root(&game.options.resources, &selected)
+                crate::game::mods::content_root(&game.options.resources, &game.options.mods)
             })
             .unwrap();
             let mut loaded = load_resources(
@@ -252,6 +245,7 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
     use crate::mod_api::{self, ModEntry};
     use horizon_client::mod_api::{AddClientReloadListenersEvent, ClientHost, Hooks};
     use std::{
+        collections::BTreeSet,
         sync::Mutex,
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     };
@@ -366,19 +360,17 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
     with_mods(mods, || {
         with_game(|game| {
             let resources = game.options.resources.clone();
-            let dev = [mod_dir.clone()];
-            let selected: Vec<_> = horizon_mods::selection::packages(
-                &std::env::current_dir().unwrap(),
-                &Default::default(),
-                &Default::default(),
-                &dev,
-            )
-            .collect();
+            let enabled = BTreeSet::new();
+            let mut sources = crate::game::mods::ModsState {
+                dev: vec![mod_dir.clone()],
+                ..Default::default()
+            };
+            sources.select(&std::env::current_dir().unwrap(), &enabled);
             // The merged root without `startup_root`'s process-wide mod
             // registrations, which a test must not freeze for the others
             // (`brewing`'s mod effects among them).
             let merged = |packs: &[horizon_client::packs::Pack]| {
-                let base = crate::game::mods::content_overlay(&resources, &selected)
+                let base = crate::game::mods::content_overlay(&resources, &sources)
                     .unwrap()
                     .root;
                 horizon_client::packs::resource_root(&base, packs, &crate::game::packs::cache_dir())

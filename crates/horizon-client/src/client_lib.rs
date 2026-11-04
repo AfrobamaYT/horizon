@@ -139,6 +139,7 @@ pub mod win_screen;
 pub mod world_spawn;
 pub use horizon_client_core::Result;
 pub use horizon_client_core::block_entity_nbt;
+pub use horizon_client_core::block_entity_types;
 pub use horizon_client_core::bossbar;
 pub use horizon_client_core::component;
 pub use horizon_client_core::fastutil_order;

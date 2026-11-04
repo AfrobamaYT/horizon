@@ -14,7 +14,7 @@ pub enum PackageKind {
 pub struct PackageInfo {
     id: String,
     kind: PackageKind,
-    manifest: Option<horizon_mods::Manifest>,
+    manifest: horizon_mods::Manifest,
 }
 
 impl PackageInfo {
@@ -22,31 +22,25 @@ impl PackageInfo {
     pub fn id(&self) -> &str {
         &self.id
     }
-    /// The package's version, when its manifest is available.
-    pub fn version(&self) -> Option<&str> {
-        self.manifest.as_ref().map(|m| m.version.as_str())
+    /// The package's version.
+    pub fn version(&self) -> &str {
+        &self.manifest.version
     }
     /// Whether this package contains code.
     pub fn kind(&self) -> PackageKind {
         self.kind
     }
-    /// Manifest side, if the manifest is available.
-    pub fn side(&self) -> Option<horizon_mods::Side> {
-        self.manifest.as_ref().map(|m| m.side)
+    /// The package's declared side.
+    pub fn side(&self) -> horizon_mods::Side {
+        self.manifest.side
     }
     /// The package's own namespace followed by any additional namespaces.
     pub fn namespaces(&self) -> impl Iterator<Item = &str> {
-        std::iter::once(self.id()).chain(
-            self.manifest
-                .iter()
-                .flat_map(|m| m.namespaces.iter().map(String::as_str)),
-        )
+        std::iter::once(self.id()).chain(self.manifest.namespaces.iter().map(String::as_str))
     }
     /// Whether this package declares a dependency on `id`.
     pub fn depends_on(&self, id: &str) -> bool {
-        self.manifest
-            .as_ref()
-            .is_some_and(|m| m.dependencies.contains_key(id))
+        self.manifest.dependencies.contains_key(id)
     }
 }
 
@@ -64,7 +58,7 @@ pub(crate) fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
         .map(|id| PackageInfo {
             id: (*id).into(),
             kind: PackageKind::Code,
-            manifest: None,
+            manifest: horizon_mods::Manifest::parse(&format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n")).unwrap(),
         })
         .collect();
     let packages = Box::leak(packages.into_boxed_slice());
@@ -75,15 +69,15 @@ pub(crate) fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
 }
 
 fn inventory(
-    mods: &[super::ModEntry],
+    native: &[horizon_mods::packages::AdjacentManifest],
     content: &[horizon_mods::selection::SelectedPackage],
 ) -> Vec<PackageInfo> {
-    let mut packages: Vec<_> = mods
+    let mut packages: Vec<_> = native
         .iter()
-        .map(|m| PackageInfo {
-            id: m.id.into(),
+        .map(|p| PackageInfo {
+            id: p.manifest.id.clone(),
             kind: PackageKind::Code,
-            manifest: None,
+            manifest: p.manifest.clone(),
         })
         .collect();
     for selected in content {
@@ -92,7 +86,7 @@ fn inventory(
             packages.push(PackageInfo {
                 id: manifest.id.clone(),
                 kind: PackageKind::Content,
-                manifest: Some(manifest.clone()),
+                manifest: manifest.clone(),
             });
         }
     }
@@ -100,11 +94,11 @@ fn inventory(
 }
 
 pub(crate) fn install_packages(
-    mods: &[super::ModEntry],
+    native: &[horizon_mods::packages::AdjacentManifest],
     content: &[horizon_mods::selection::SelectedPackage],
 ) {
     assert!(
-        PACKAGES.set(inventory(mods, content)).is_ok(),
+        PACKAGES.set(inventory(native, content)).is_ok(),
         "package inventory already installed"
     );
 }

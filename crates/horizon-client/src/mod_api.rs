@@ -54,6 +54,7 @@ pub use crate::gfx::native_render::{
 pub use crate::health::{HurtSource, ShieldBlock};
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
+pub use crate::item_tooltip::TooltipDisplay;
 pub use crate::items::ItemStack;
 pub use crate::menu::{LogicalSide, StackedOnOther};
 pub use crate::merchant::MerchantOffer;
@@ -546,14 +547,12 @@ pub struct NativeScreen {
     pub own_background: bool,
 }
 
-/// A native mod as Options > Mods lists it (`native_mods`).
+/// Key definitions for a compiled mod's Options > Mods page (`native_mods`).
+/// Its display metadata comes from its validated runtime package.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NativeMod {
     /// Its id: its settings folder and its keys' lines.
     pub id: String,
-    /// `Name 1.0`.
-    pub title: String,
-    pub description: String,
     /// Its keys: name, label and default key (`key.keyboard.z`). The page
     /// lists them first; `native_mod_key` reads the player's choice.
     pub keys: Vec<[String; 3]>,

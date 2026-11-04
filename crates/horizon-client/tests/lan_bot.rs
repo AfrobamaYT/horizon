@@ -1443,10 +1443,8 @@ fn the_prediction_records_each_client_tick_and_the_server_ticks_it_had_seen() {
 /// with no `BlockEntityData` for one whose mod gives no tag.
 #[test]
 fn a_synced_mod_block_entity_reaches_the_chunks_players_once_a_tick() {
-    use horizon_client::containers::{
-        BlockEntity, ModBlockEntity,
-        block_entity_types::{self, BlockEntityTypes},
-    };
+    use horizon_client::block_entity_types::{self, BlockEntityTypes};
+    use horizon_client::containers::{BlockEntity, ModBlockEntity};
     use horizon_world::nbt::{Compound, JavaString, Tag};
     let Some(resources) = resources() else {
         return;

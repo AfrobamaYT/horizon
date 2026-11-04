@@ -352,6 +352,7 @@ pub(super) fn spawn_loader(
     let (sender, receiver) = std::sync::mpsc::channel();
     let settings = settings.clone();
     let vanilla_root = vanilla_root.to_path_buf();
+    let mod_sources = options.mods.clone();
     let world = launch_world(options).map(str::to_owned);
     let progress = progress.clone();
     let handle = std::thread::Builder::new()
@@ -362,11 +363,11 @@ pub(super) fn spawn_loader(
                 &vanilla_root,
                 &settings.resource_packs,
                 &[],
-                mods::startup_packages(),
+                &mod_sources,
             )
             .or_else(|error| {
                 pack_error = Some(error.to_string());
-                mods::content_root(&vanilla_root, mods::startup_packages())
+                mods::content_root(&vanilla_root, &mod_sources)
             });
             let result = root
                 .and_then(|root| {

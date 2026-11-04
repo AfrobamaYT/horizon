@@ -316,7 +316,9 @@ mod tests {
             return;
         }
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root = super::super::mods::content_root(&base, &[]).unwrap();
+        let root =
+            super::super::mods::content_root(&base, &Default::default())
+                .unwrap();
         with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
