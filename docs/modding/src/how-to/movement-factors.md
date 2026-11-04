@@ -1,16 +1,16 @@
 # Slowing or boosting entities on a block
 
-A Block Part changes how fast, or how high, entities move on the blocks it is attached to, as a block that overrides NeoForge's `Block.getSpeedFactor()` and `Block.getJumpFactor()` does. Both Part methods get the loop `context` of the side that ticks the entity (no `Host`), the block `state` and the `factor` to edit, which starts at the block's own value (honey is 0.4 speed and 0.5 jump, soul sand 0.4 speed, every other block 1.0).
+A Block Part changes how fast, or how high, entities move on the blocks it is attached to, as a block that overrides NeoForge's `Block.getSpeedFactor()` and `Block.getJumpFactor()` does. Both Part methods get the loop `context` of the side that ticks the entity (no `Host`) and an event with the block `state` and the `factor` to edit, which starts at the block's own value (honey is 0.4 speed and 0.5 jump, soul sand 0.4 speed, every other block 1.0).
 
 ```rust,ignore
 struct Mud;
 
 impl mod_api::BlockPart for Mud {
-    fn block_speed_factor(&self, _: &mod_api::LoopContext, _: mod_api::BlockStateId, factor: &mut f32) {
-        *factor = 0.25;
+    fn block_speed_factor(&self, _: &dyn mod_api::LoopContext, event: &mut mod_api::BlockSpeedFactorEvent) {
+        event.factor = 0.25;
     }
-    fn block_jump_factor(&self, _: &mod_api::LoopContext, _: mod_api::BlockStateId, factor: &mut f32) {
-        *factor = 0.5;
+    fn block_jump_factor(&self, _: &dyn mod_api::LoopContext, event: &mut mod_api::BlockJumpFactorEvent) {
+        event.factor = 0.5;
     }
 }
 
