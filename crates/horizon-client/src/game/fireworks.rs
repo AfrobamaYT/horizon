@@ -543,7 +543,7 @@ impl Game<'_> {
         self.native_firework_explode(r.id, at, r.explosions.len());
     }
     fn rocket_hurt_mobs(&mut self, hits: &[(u32, f32)], attacker: Option<Who>, at: [f64; 3]) {
-        let _attacker = self.knockback_scope(if attacker == Some(Who::Player) {
+        let attack = self.attack_of(if attacker == Some(Who::Player) {
             self.player.as_ref().map_or(0, |p| p.entity_id)
         } else {
             0
@@ -551,7 +551,7 @@ impl Game<'_> {
         for &(id, amount) in hits {
             if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                 let hurt = m.damage(
-                    crate::game::entity::damage_level_of!(self),
+                    crate::game::entity::damage_level_of!(self, &attack),
                     amount,
                     Damage::fireworks(attacker, at),
                 );

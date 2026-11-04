@@ -2,7 +2,7 @@
 //! where the player fell from, turned into the vanilla death message.
 use super::{Game, commands::Target};
 use horizon_client::{
-    health::HealthEvent,
+    health::{Attack, HealthEvent},
     mobs::{Mob, Species},
     motion::MotionEvent,
     particles::{ParticleOptions, ParticleType},
@@ -115,6 +115,9 @@ pub(super) struct CombatTracker {
     last_hurt_by_player: Option<(PlayerCredit, i64)>,
     /// The mob the player last hurt (`getLastHurtMob`) and when.
     pub(super) last_hurt_mob: Option<(u32, i64)>,
+    /// The attack the hits on the player land in now: who attacks and what they hold. Set only
+    /// by [`Game::with_attack`], which restores the previous one on return.
+    attack: Attack,
     /// The mob whose projectile is hitting the player now.
     pub(super) projectile_owner: Option<u32>,
     /// The display name of the projectile hitting the player now: the
@@ -186,6 +189,10 @@ pub(super) struct CombatTracker {
     fall_before: f64,
 }
 impl CombatTracker {
+    /// The attack lent by the enclosing [`Game::with_attack`] (`damage_level_of!(game, scoped)`).
+    pub(super) fn attack(&self) -> &Attack {
+        &self.attack
+    }
     /// The last blow taken: its damage type and the causing entity's id (0
     /// for none), for `LivingDeathEvent`.
     pub(super) fn last_blow(&self) -> Option<(&str, u32)> {
@@ -225,6 +232,22 @@ impl CombatTracker {
     }
 }
 impl Game<'_> {
+    /// Runs `f` with `attack` as the attack the hits on the player land in, and puts the previous
+    /// one back when it returns: the one writer of `combat.attack`, so the restore cannot be
+    /// skipped. Mob victims take their attack explicitly (`DamageLevel::attacked_by`); this is
+    /// the one implicit scope left, because the player-victim path (`hurt_player_from`,
+    /// `mob_hits_player`) has ~30 callers that would all pass it through.
+    pub(super) fn with_attack<R>(&mut self, attack: Attack, f: impl FnOnce(&mut Self) -> R) -> R {
+        let outer = std::mem::replace(&mut self.combat.attack, attack);
+        let result = f(self);
+        self.combat.attack = outer;
+        result
+    }
+    /// The attack the hits on the player land in now (a reader of `combat.attack`).
+    pub(super) fn current_attack(&self) -> Attack {
+        self.combat.attack.clone()
+    }
+
     /// `LivingEntity.makeDrownParticles`: eight bubbles around the entity,
     /// moving with it.
     pub(super) fn drown_particles(&mut self, at: [f64; 3], velocity: [f64; 3]) {
