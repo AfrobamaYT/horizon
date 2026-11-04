@@ -561,6 +561,7 @@ macro_rules! damage_level_of {
             &mut $game.world,
             $game.pack.assets.registry,
             Some(world_items!($game)),
+            Some(&$game.pack.block_registries),
         )
     };
 }

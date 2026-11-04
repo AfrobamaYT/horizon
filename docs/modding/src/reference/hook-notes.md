@@ -176,8 +176,7 @@ requires a farmer at work and `mob_griefing` enabled.
 
 - `native_set_block`, a server-side `Game` helper that replaces a state in the current dimension through
   `Level.setBlock`. It accepts vanilla's neighbour and shape flags and returns whether a block changed; a block with a
-  block entity gets one. Horizon sends every write to players whatever the flags: `UPDATE_CLIENTS`, `UPDATE_INVISIBLE`
-  and `UPDATE_IMMEDIATE` change nothing yet. Hooks holding only `GameLevel` cannot call it yet.
+  block entity gets one. `UPDATE_CLIENTS` sends the update; `UPDATE_INVISIBLE` suppresses notification only on the client, as in `Level.setBlock`. Hooks holding only `GameLevel` cannot call it yet.
 
 - `GameLevel::native_play_sound` for registered vanilla sound events on an authoritative server.
   It queues the sound for nearby players in the level's dimension, including during a guest's turn.
@@ -238,8 +237,7 @@ requires a farmer at work and `mob_griefing` enabled.
   ticks randomly), and lava's fluid random tick runs either way. It needs the level mutably, which only `native_random_tick` and `native_tick_block` give. It is `Game::native_set_block_property` with `Level.setBlock`'s flags (`native_hooks::flags`): a
   vanilla crop grows with `flags::UPDATE_CLIENTS` (neighbours' shapes update, so an observer fires, but no neighbour
   gets `neighborChanged` and comparators aren't told), a furnace sets its `lit` with `flags::UPDATE_ALL` (both). Horizon
-  sends every write to players whatever the flags: `UPDATE_CLIENTS` (2), `UPDATE_INVISIBLE` (4) and `UPDATE_IMMEDIATE`
-  (8) change nothing yet. It writes at any loaded position, returns false off an authoritative server (the `Game` one too: a window that isn't a server), for a property or
+  sends updates when `UPDATE_CLIENTS` (2) is set; `UPDATE_INVISIBLE` (4) suppresses notification only on the client, as in `Level.setBlock`. `UPDATE_IMMEDIATE` (8) has no effect yet. It writes at any loaded position, returns false off an authoritative server (the `Game` one too: a window that isn't a server), for a property or
   value the block doesn't have, a position that isn't loaded, or a property that already has the value (nothing is written:
   vanilla's `Level.setBlock` returns false for an unchanged state, as `native_set_block` does), and true when the block changed. Elsewhere, `Game::native_set_block_property_with(pos, key, value, flags)` does the same, as a brewing
   stand's tick sets its bottles with `flags::UPDATE_CLIENTS`.
@@ -899,6 +897,7 @@ registration path.
 - `native_mouse_button_pre(button, pressed, modifiers, canceled)` sees real button events on any screen, before normal dispatch. Button and modifiers use the screen hooks' GLFW encoding. Physical button bookkeeping already ran. Cancellation skips normal dispatch and Post. Accepted events call `native_mouse_button_post(button, pressed, modifiers)` after dispatch, including screen handlers' early returns. Synthetic pad/focus clicks skip both hooks. Existing screen-specific hooks remain.
 
 - A player respawning: `native_player_respawned(player, name)` is heard once at the end of `PlayerList.respawn`, with the player placed and their health, food and experience reset (NeoForge's `PlayerRespawnEvent`), on a server, with their state swapped in so the helpers reach them.
+- Where a player respawns (`PlayerRespawnPositionEvent`): `native_player_respawn_position(player, original_level, original_position, missing_respawn_block, level, position, yaw, pitch, copy_original_spawn_position)`, on a server, once the respawn point is found. `player` is the player's handle. The mods may change the level, the position, the facing and whether the fresh player keeps its respawn point (default: yes, unless the bed or anchor was missing). Vanilla finds the point inside `PlayerList.respawn`. Horizon places the player first and finds a bed or anchor's spot, or the world spawn's free column, once its chunks have loaded, so for those the hook fires then, after `player_respawned`. There a new point in the same level is a teleport, and another level is a level change: one extra Respawn packet, heard as `player_teleported`. An Overworld forced point needs no block: the hook fires at once, before the Respawn packet, and a changed level, point or facing is simply where the player respawns. The point the mods choose is not block-checked and the hook doesn't fire again. Not for the End exit, which isn't a respawn here.
 
 - A client mod's view and items: `native_raycast(distance)` and `native_view_hit()` (the first block along the view, up to 1024 blocks, across the distant terrain past the loaded chunks), and `native_claim_items(mod_id, ids)`: a right-click with one of those items is the mod's alone, the server never hears of it, and `native_poll(mod_id)` gives `UseStart` and `UseStop` with the stack (its custom name and data as SNBT) and the ticks it was held.
 
@@ -1018,6 +1017,8 @@ registration path.
 
 - A mod that hears `native_pickup_xp` sets `listened` in `native_pickup_xp_listened` (a HEAD injection); `native_pickup_xp(player, dimension, orb, value, count, canceled)` then runs before a server player takes an orb. Canceling leaves the orb and the pickup delay unchanged; otherwise the value is clamped to 1..=2,147,483,647 and the count to at least one, then one count is taken. `native_mending_repair(player, stack, experience, repair)` sees the damaged Mending item picked at random and can change the durability repair proposed for it, which is capped at its current damage. Turning a positive proposal into zero leaves the experience unspent (a zero vanilla proposal keeps vanilla's behaviour); if the picked stack is removed, changed except for its damage, or no longer eligible, the repair is skipped and the experience remains. The repair also decides how much experience is left for further repairs. It runs for `PlayerRef::give_experience_points` too. Both run on the integrated and the dedicated server, guests included.
 
+- Whom an experience orb follows (`XpOrbTargetingEvent`): `native_xp_orb_targeting(orb, scan_distance, following)`, on a server, for each orb as it ticks. `following` starts as the nearest living player within `scan_distance` (8) blocks who isn't a spectator, or `None`; set another player, or `None` to follow no one. The orb goes only for a living player who isn't a spectator and is in its level, and moves only once they are within 8 blocks. An orb that follows no one gets vanilla's push out of a block it is stuck in. Horizon looks for the nearest player on every orb tick, where vanilla keeps the player it follows while they stay within 8 blocks, so the hook is asked every tick for each orb (NeoForge asks only when the orb has no player in range). Clients still predict the orb's flight towards the nearest player; the server's position wins.
+
 - Where a loot roll happens, for a mod's own loot kinds: `ctx.place` in `native_loot_function` and
   `native_loot_condition` brings `LootContextParams.ORIGIN` (a broken block's centre, a dead mob's position), `BLOCK_ENTITY` (the broken
   block's entity as it was, saved with its id, position and `Items`) and the level (its dimension, game time, time of day, rain and
@@ -1051,6 +1052,8 @@ registration path.
 - The helper `native_physical_window_size()`, which returns the window's width and height in physical pixels, independent of GUI scale. It returns no size on a server or when no window exists.
 
 - A recipe ingredient of a mod's own kind. The ingredient entry that names a type in a namespace outside minecraft: reaches native_ingredient(context, kind, data, items) at load time. Fill items with the item ids the ingredient matches (item ids only: components are not checked; a match-time hook follows separately). Duplicates are removed keeping first-seen order. The hook gets the `DataLoadContext` of the load that parses the recipes and hears each occurrence of the kind once per load, nested ones and ones under any slot a recipe reads an ingredient from included, before the load's tables parse the recipes: the client's own recipe load has `origin()` `ClientPreload`, the server's `ServerDataLoad`. A server loads its recipes once however many tables and copies read them (its recipe tables, the stations and the copy synchronised to guests, on a dedicated server too), and a `/reload` asks again once; a client that only joins a remote server is never told `ServerDataLoad`. The answer must be the same every time. An unclaimed kind leaves the list empty and the recipe fails.
+
+- Items a mod's own recipe type takes in a station slot. `native_recipe_property_sets(context, additions)` is asked once per load, after the recipes are resolved, with the `DataLoadContext` of the load that owns them (`origin()` `ServerDataLoad` on a server, `ClientPreload` on a client's own load), and again after `/reload`. Push one `RecipePropertyAddition::new(set, items)` per set to add to (`minecraft:furnace_input`, `blast_furnace_input`, `smoker_input`, `campfire_input`, `smithing_template`, `smithing_base`, `smithing_addition`, `brewing_input`, `brewing_reagent`); the vanilla recipes' items stay in. The furnace shift-click, the smithing and brewing slots and the set a client is sent read the one answer, so the client predicts what the server accepts. An unknown set key or an item that is air is logged and skipped; an item the registry does not know is ignored. The answer must be the same every time.
 
 - Lowering the frame rate limit: `native_framerate_limit(focused, minimized, in_world, limit)` is asked each frame with the limit Horizon is about to use (Max Framerate after the inactivity throttle and Battery Mode, 260 for unlimited), whether the window has focus, whether it is minimised and whether a world is open. A mod may lower `limit`, for example to throttle a window in the background as Dynamic FPS does; Horizon keeps the lower of its own limit and the mod's and ignores values below 1.
 
@@ -1871,10 +1874,25 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   to leave the position unchanged. Direct player flint-and-steel/fire-charge placement is not covered.
 - **`native_block_burn(dimension, pos, cancel)`** (on `GameLevel`): fire's burnout check is about to remove the block at
   `pos`. Set `cancel` to keep it.
+- **`native_crop_grow_pre(dimension, pos, state, result)`** and **`native_crop_grow_post(dimension, pos,
+  original_state, state)`** (on `GameLevel`): NeoForge's `CropGrowEvent.Pre` and `.Post`, at the random-tick growth of
+  crops (beetroot and torchflowers after their own 1 in 3 skip), stems, nether wart, cocoa, sweet berries, bamboo,
+  cactus, chorus flowers, sugar cane, kelp and the vines. `result` is a `NativeTriState`: `Default` keeps vanilla's
+  chance, `True` grows, `False` doesn't. Pre fires at NeoForge's positions (the block above for cactus and chorus,
+  the block grown into for kelp and vines). Vanilla's random roll is drawn first, in vanilla's order, and passed as
+  the default. Diverges from NeoForge, which draws bamboo's and sweet berries' roll later (only after the
+  other checks), so a NeoForge server's crops drift from vanilla's random sequence. Pitcher crops, bamboo
+  saplings and mangrove propagules don't fire, as in NeoForge.
 - **`native_dragon_egg_form(dimension, pos, cancel)`** (on `GameLevel`): the first Ender Dragon fight is about to place
   its egg at `pos`. Set `cancel` to leave the block unchanged.
 - **`native_fluid_level_change(dimension, pos, fluid, from, to, cancel)`** (on `GameLevel`): flowing `water` or `lava`
   at `pos` is about to change level. Levels run from 0 through 8. Set `cancel` to keep the old level.
+- **`native_create_fluid_source(dimension, pos, state, can_convert)`** (on `GameLevel`): NeoForge's
+  `CreateFluidSourceEvent`. When the game works out a block's new fluid (`FlowingFluid.getNewLiquid`), it asks once
+  for each horizontal neighbour that is a source of the same fluid, with that neighbour's `pos` and `state`; two
+  counted sources over a solid block or a source make a new one. `can_convert` starts as the fluid's rule
+  (`water_source_conversion` or `lava_source_conversion`). Spread checks work out new fluids too, so this is asked
+  often: answer fast.
 - **`native_leaves_decay(dimension, pos, cancel)`** (on `GameLevel`): a non-persistent leaf block at distance 7 is
   about to decay. Set `cancel` to keep it.
 - **`native_inventory_block_start(player, name, pos, cancel)`**: a guest is about to open an inventory supplied by a
@@ -2128,7 +2146,7 @@ handle, an entity the client doesn't track and a level it doesn't show:
   vanilla. It moves the deadline the use-item Tick hook moves, so shield, bow, trident, spear, instrument and bundle uses,
   which don't count it, ignore it, and a call inside that Tick hook is overwritten by the hook's result. Nothing in use reads 0 and refuses a write. A mob's item use is a counter of its goal, so mobs read None.
 - `living.effects(host)` lists a living entity's active effects (vanilla's `activeEffects`) as `NativeActiveEffect`s — the
-  namespaced id, the ticks left (-1 infinite), the amplifier, and the `ambient` and `visible` flags; Horizon keeps no separate
+  namespaced id as an owned `Identifier`, the ticks left (-1 infinite), the amplifier, and the `ambient` and `visible` flags; Horizon keeps no separate
   show-icon flag, the icon always shows. `living.effect(host, id)` reads one (`getEffect`) and `living.potion_affected(host,
   id)` answers `hasEffect`; a bare vanilla id reads as `minecraft:`'s. `living.add_effect(host, &effect)` is
   `LivingEntity.addEffect` by the game's own path: a player's or a guest's goes through the potion machinery (its attribute
@@ -2273,7 +2291,7 @@ handle, an entity the client doesn't track and a level it doesn't show:
   `award_experience(host, x, y, z,
   amount)` splits experience into orbs (`ExperienceOrb.award`), all in the level in place.
 
-`level.set_block(host, pos, state, flags)` and `level.destroy_block(host, pos, drop)` change the level in place. Both return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill. Horizon sends all block changes to clients regardless of client-update flags.
+`level.set_block(host, pos, state, flags)`, `level.remove_block(host, pos, moved)` and `level.destroy_block(host, pos, drop)` change the level in place. They return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. Removal preserves the fluid's legacy block; `moved` marks a piston move. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. `CLIENTS` sends the update, while `INVISIBLE` suppresses notification only on the client, as in `Level.setBlock`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill.
 
 A helper whose catalog entry names a `receiver` (`entity`, `level`, `block_entity`) is called on that handle (for example `entity.position(host)`), rather than as an ID-based `Host` method.
 
@@ -2584,13 +2602,17 @@ Look blocks up once and keep what you need (a few words a block for your own sha
 
 ### Menu slot rules
 
-`crates/horizon-client/src/menu.rs`: `native_menu_slot_rules(menu, slot, stack, may_place, max_stack)`, a free function
+`crates/horizon-client/src/menu.rs`: `native_menu_slot_rules(context, menu, slot, stack, may_place, max_stack)`, a free function
 a bundle targets as `horizon_client::menu::native_menu_slot_rules`. A content mod menu type's container slot `slot`
 (from 0) is asked whether it takes `stack` (`Slot.mayPlace`) and how many it holds (`Slot.getMaxStackSize`), as a
 NeoForge mod's own `Slot` overrides them. `may_place` and `max_stack` come in with the type's own answer (false on one
 of its `results` ([making a content mod](../how-to/content-mods.md#menu-types)), true elsewhere, and 99): change them for your own menu types.
 `max_stack` is kept to 1 to 99, and the item's own stack size still caps it. It runs inside a click, a drag or a
-shift-click (several times for one), with no level or player at hand: answer from the stack, and fast. It is asked
+shift-click (several times for one), with no level or player at hand: answer from the stack and the `LoopContext` it
+is given, and fast. The context's `side()` is `LoopSide::Server`, and a mod's setting read through it is the one captured
+when the server last loaded its data: a `/reload` builds the next context, which the next call sees. The hook's contract
+version is `2`: a mod written for `1` takes the context as a new first argument of `Hooks::menu_slot_rules` and
+`MenuPart::menu_slot_rules`. It is asked
 only for a server's players (single player's server thread, LAN guests, a dedicated server), and vanilla's menus
 never ask it. As in vanilla (`AbstractContainerMenu.moveItemStackTo`), a
 shift-click tops up a slot (not a `results` one) that already holds the same item without asking `may_place`, only `max_stack`: to keep a
@@ -2623,14 +2645,22 @@ clicks already.
 
 `LoopContext<'_>` is the read-only view for a hook fired inside a menu, recipe or
 player-list loop, where no game is at hand (a catalog entry names it with
-`"context": "loop"`; no hook uses it yet). `side()` is `LoopSide::Server` or
+`"context": "loop"`; `menu_slot_rules`, `item_stacked_on_other`, `player_name_format` and
+`player_tab_list_name_format` take it). `side()` is `LoopSide::Server` or
 `LoopSide::Client`, `registry(name)` borrows names in registry ID order,
 `setting(mod_id, key)` returns a loaded mod's setting captured when the context was
 built, and `mods()` is the `LoadedMods` view of registration. It has no game Host,
 handle construction or transaction, and its answers never change while it is held.
 The side that owns the loop builds it, never a hook: the client builds one at window
-start and again after each resource reload, so a reload captures fresh settings; a
-server side comes with the first server hook that takes it.
+start and again after each resource reload, and a server builds one when it starts its
+mods and again on each `/reload`, so a reload captures fresh settings. A LAN or dedicated server's hub holds the server's
+current one, so its Tab list and chat names, and the clicks of its players, see it too.
+
+`item_stacked_on_other(context, event, canceled)` is NeoForge's `ItemStackedOnOtherEvent`, fired inside a pickup click on
+either side. The event no longer carries a side: `context.side()` says it. `player_name_format(context, username,
+displayname)` and `player_tab_list_name_format(context, player, name, display_name)` format a player's name for chat and
+commands (both sides) and for the Tab list (server). All three are contract version `2`: a mod written for `1` takes the
+context as a new first argument of the `Hooks` method, and reads the side from it instead of `event.side`.
 
 ### Items' default components
 

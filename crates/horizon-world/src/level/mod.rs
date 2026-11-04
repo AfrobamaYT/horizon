@@ -385,6 +385,12 @@ pub trait LevelAccess {
     ) -> bool {
         true
     }
+    /// Whether the fluid source at `pos` (`state`) counts towards making a new
+    /// source beside it (NeoForge's `CreateFluidSourceEvent`). `vanilla` is
+    /// the fluid's own rule (`water_source_conversion`, `lava_source_conversion`).
+    fn create_fluid_source(&self, _pos: BlockPos, _state: BlockStateId, vanilla: bool) -> bool {
+        vanilla
+    }
     fn allow_block_ignite(&self, _pos: BlockPos, _cause: &'static str) -> bool {
         true
     }
@@ -400,6 +406,14 @@ pub trait LevelAccess {
     ) -> Option<std::borrow::Cow<'a, str>> {
         feature.map(std::borrow::Cow::Borrowed)
     }
+    /// Whether a crop-like block grows on this random tick (NeoForge's
+    /// `CommonHooks.canCropGrow`). `vanilla` is the game's own answer, its
+    /// random roll already drawn.
+    fn crop_grow_pre(&mut self, _pos: BlockPos, _state: BlockStateId, vanilla: bool) -> bool {
+        vanilla
+    }
+    /// A crop-like block grew (NeoForge's `CommonHooks.fireCropGrowPost`).
+    fn crop_grow_post(&mut self, _pos: BlockPos, _original: BlockStateId) {}
     fn allow_leaves_decay(&self, _pos: BlockPos) -> bool {
         true
     }
@@ -647,6 +661,8 @@ pub trait LevelAccess {
     /// Storage write (`LevelChunkSection.setBlockState`). Returns the previous
     /// state, or None when nothing could be stored (unloaded chunk).
     fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId>;
+    /// Notify clients of a completed block write, when `UPDATE_CLIENTS` is set.
+    fn send_block_updated(&mut self, _pos: BlockPos) {}
     fn is_loaded(&self, pos: BlockPos) -> bool;
     /// Inclusive minimum and exclusive maximum build height.
     fn min_y(&self) -> i32 {

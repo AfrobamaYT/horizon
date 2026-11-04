@@ -6161,6 +6161,7 @@ impl Game<'_> {
                 collision_binding: self.collision,
                 resources: self.motion,
                 tag_items: None,
+                block_registries: None,
             }
             .controlled_simulation_tick_with_sprint_window(keys, sprint_window)?;
         } else {
@@ -6177,6 +6178,7 @@ impl Game<'_> {
                     collision_binding: self.collision,
                     resources: self.motion,
                     tag_items: None,
+                    block_registries: None,
                 }
                 .passenger_pose_tick()?;
             }
@@ -12368,7 +12370,8 @@ mod tests {
         let env = Env {
             player: None,
             player_entity_id: None,
-            side: mod_api::menu::LogicalSide::Client,
+            loop_context: &crate::game::test_server_load()
+                .loop_context(horizon_world::native_load_context::LoopSide::Client, []),
             items: &items,
             recipes: &recipes,
             brewing: &brewing,

@@ -315,14 +315,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     }
                 }
                 Class::BambooStalk => {
-                    if b.table.int(state, p.stage) == 0
-                        && self.rand_int(3) == 0
-                        && self.is_empty_block(above(pos))
-                        && self.raw_brightness(above(pos), 0) >= 9
-                    {
-                        let height = self.bamboo_height_below(pos) + 1;
-                        if height < 16 {
-                            self.bamboo_grow(state, pos, height);
+                    if b.table.int(state, p.stage) == 0 {
+                        // Vanilla's roll comes first; NeoForge asks the crop
+                        // hook only after the other checks.
+                        let roll = self.rand_int(3) == 0;
+                        if self.is_empty_block(above(pos))
+                            && self.raw_brightness(above(pos), 0) >= 9
+                        {
+                            let height = self.bamboo_height_below(pos) + 1;
+                            if height < 16 && self.level.crop_grow_pre(pos, state, roll) {
+                                self.bamboo_grow(state, pos, height);
+                                self.level.crop_grow_post(pos, state);
+                            }
                         }
                     }
                 }
@@ -336,11 +340,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 Class::Cactus => self.cactus_random_tick(state, pos),
                 Class::ChorusFlower => self.chorus_flower_random_tick(state, pos),
                 Class::Cocoa => {
-                    if self.rand_int(5) == 0 {
-                        let age = b.table.int(state, p.age);
-                        if age < 2 {
-                            self.set_block(pos, b.table.set_int(state, p.age, age + 1), 2);
-                        }
+                    let roll = self.rand_int(5) == 0;
+                    let age = b.table.int(state, p.age);
+                    if age < 2 && self.level.crop_grow_pre(pos, state, roll) {
+                        self.set_block(pos, b.table.set_int(state, p.age, age + 1), 2);
+                        self.level.crop_grow_post(pos, state);
                     }
                 }
                 Class::Farmland => self.farmland_random_tick(state, pos),
@@ -363,13 +367,17 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     }
                 }
                 Class::GrowingPlantHead => {
-                    if b.table.int(state, p.age) < 25
-                        && self.random().next_double() < data.grow_probability
-                    {
+                    if b.table.int(state, p.age) < 25 {
+                        let roll = self.random().next_double() < data.grow_probability;
                         let growth = rel(pos, data.growth_direction);
-                        if self.growing_plant_can_grow_into(state, self.state(growth)) {
+                        if self.level.crop_grow_pre(growth, state, roll)
+                            && self.growing_plant_can_grow_into(state, self.state(growth))
+                        {
                             let next = self.growing_plant_grow_into_state(state);
                             self.set_block_and_update(growth, next);
+                            // NeoForge passes the new head as the original state.
+                            let grown = self.state(growth);
+                            self.level.crop_grow_post(growth, grown);
                         }
                     }
                 }
@@ -412,8 +420,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 Class::Mushroom => self.mushroom_random_tick(state, pos),
                 Class::NetherWart => {
                     let age = b.table.int(state, p.age);
-                    if age < 3 && self.rand_int(10) == 0 {
-                        self.set_block(pos, b.table.set_int(state, p.age, age + 1), 2);
+                    if age < 3 {
+                        let roll = self.rand_int(10) == 0;
+                        if self.level.crop_grow_pre(pos, state, roll) {
+                            self.set_block(pos, b.table.set_int(state, p.age, age + 1), 2);
+                            self.level.crop_grow_post(pos, state);
+                        }
                     }
                 }
                 Class::Nylium => {
@@ -451,10 +463,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         while b.is_block(self.state(pos.offset(0, -height, 0)), block) {
                             height += 1;
                         }
-                        if height < 3 {
+                        if height < 3 && self.level.crop_grow_pre(pos, state, true) {
                             let age = b.table.int(state, p.age);
                             if age == 15 {
                                 self.set_block_and_update(above(pos), b.default_of(block));
+                                self.level.crop_grow_post(above(pos), b.default_of(block));
                                 self.set_block(pos, b.table.set_int(state, p.age, 0), 260);
                             } else {
                                 self.set_block(pos, b.table.set_int(state, p.age, age + 1), 260);
@@ -464,10 +477,17 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 Class::SweetBerryBush => {
                     let age = b.table.int(state, p.age);
-                    if age < 3 && self.rand_int(5) == 0 && self.raw_brightness(above(pos), 0) >= 9 {
-                        let next = b.table.set_int(state, p.age, age + 1);
-                        self.set_block(pos, next, 2);
-                        self.game_event(pos, "minecraft:block_change");
+                    if age < 3 {
+                        // Vanilla rolls before the light check; NeoForge after.
+                        let roll = self.rand_int(5) == 0;
+                        if self.raw_brightness(above(pos), 0) >= 9
+                            && self.level.crop_grow_pre(pos, state, roll)
+                        {
+                            let next = b.table.set_int(state, p.age, age + 1);
+                            self.set_block(pos, next, 2);
+                            self.game_event(pos, "minecraft:block_change");
+                            self.level.crop_grow_post(pos, state);
+                        }
                     }
                 }
                 Class::Vine => self.vine_random_tick(state, pos),
@@ -857,9 +877,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let max = self.crop_max_age(state);
         if age < max {
             let speed = self.crop_growth_speed(b.block(state), pos);
-            if self.rand_int((25.0 / speed) as i32 + 1) == 0 {
+            let roll = self.rand_int((25.0 / speed) as i32 + 1) == 0;
+            if self.level.crop_grow_pre(pos, state, roll) {
                 let next = self.crop_state_for_age(state, age + 1);
                 self.set_block(pos, next, 2);
+                self.level.crop_grow_post(pos, state);
             }
         }
     }
@@ -869,9 +891,15 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             return;
         }
         let speed = self.crop_growth_speed(b.block(state), pos);
-        if self.rand_int((25.0 / speed) as i32 + 1) != 0 {
+        let roll = self.rand_int((25.0 / speed) as i32 + 1) == 0;
+        if !self.level.crop_grow_pre(pos, state, roll) {
             return;
         }
+        self.stem_grow(state, pos);
+        self.level.crop_grow_post(pos, state);
+    }
+    fn stem_grow(&mut self, state: BlockStateId, pos: BlockPos) {
+        let b = self.b;
         let age = b.table.int(state, b.props.age);
         if age < 7 {
             self.set_block(pos, b.table.set_int(state, b.props.age, age + 1), 2);
@@ -964,7 +992,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let b = self.b;
         let block = b.block(state);
         let above_pos = above(pos);
-        if !self.is_empty_block(above_pos) {
+        if !self.is_empty_block(above_pos) || !self.level.crop_grow_pre(above_pos, state, true) {
             return;
         }
         let mut height = 1;
@@ -989,6 +1017,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if age < 15 {
             self.set_block(pos, b.table.set_int(state, b.props.age, age + 1), 260);
         }
+        self.level.crop_grow_post(pos, state);
     }
     fn farmland_random_tick(&mut self, state: BlockStateId, pos: BlockPos) {
         let b = self.b;
@@ -1398,16 +1427,23 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     fn chorus_flower_random_tick(&mut self, state: BlockStateId, pos: BlockPos) {
         let b = self.b;
         let p = b.props;
-        let block = b.block(state);
-        let plant = b.named.chorus_plant;
         let above_pos = above(pos);
         if !self.is_empty_block(above_pos) || above_pos.y > self.level.max_y() - 1 {
             return;
         }
         let age = b.table.int(state, p.age);
-        if age >= 5 {
+        if age >= 5 || !self.level.crop_grow_pre(above_pos, state, true) {
             return;
         }
+        self.chorus_flower_grow(state, pos, age);
+        self.level.crop_grow_post(pos, state);
+    }
+    fn chorus_flower_grow(&mut self, state: BlockStateId, pos: BlockPos, age: i32) {
+        let b = self.b;
+        let p = b.props;
+        let block = b.block(state);
+        let plant = b.named.chorus_plant;
+        let above_pos = above(pos);
         let mut grow_up = false;
         let mut pillar_on_support = false;
         let below_state = self.below_state(pos);
@@ -1972,6 +2008,7 @@ impl RandomTickMask {
         }
         Self(bits)
     }
+    #[inline]
     pub fn may_tick(&self, pos: BlockPos) -> bool {
         let i = ((pos.y & 15) << 8 | (pos.z & 15) << 4 | (pos.x & 15)) as usize;
         self.0[i >> 6] >> (i & 63) & 1 != 0

@@ -540,6 +540,7 @@ impl BlockFacts {
             extra,
         ))
     }
+    #[inline]
     pub fn get(&self, id: BlockStateId) -> &StateFacts {
         &self.states[id.0 as usize]
     }

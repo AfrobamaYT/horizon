@@ -1,17 +1,18 @@
 //! Callbacks into the executable for native trait mods' client-library hooks.
 use crate::items::ItemStack;
+use horizon_world::native_load_context::LoopContext;
 use std::sync::OnceLock;
 
 /// Client-library hooks, installed before any menu, entity or recipe is used.
 pub struct NativeClientHooks {
-    pub menu_slot_rules: fn(&str, usize, &ItemStack, &mut bool, &mut u32),
-    pub item_stacked_on_other: fn(&mut crate::menu::StackedOnOther<'_>, &mut bool),
+    pub menu_slot_rules: fn(&LoopContext, &str, usize, &ItemStack, &mut bool, &mut u32),
+    pub item_stacked_on_other: fn(&LoopContext, &mut crate::menu::StackedOnOther<'_>, &mut bool),
     pub living_heal: fn(u32, &mut f32, &mut bool),
     pub living_breathe: fn(u32, &str, &mut bool, &mut i32, &mut i32),
     pub farmland_trample: fn(u32, [i32; 3], u32, f64, &mut bool),
     pub has_mods: fn() -> bool,
-    pub player_name_format: fn(&crate::text::Text, &mut crate::text::Text),
-    pub player_tab_list_name_format: fn(u128, &str, &mut Option<crate::text::Text>),
+    pub player_name_format: fn(&LoopContext, &crate::text::Text, &mut crate::text::Text),
+    pub player_tab_list_name_format: fn(&LoopContext, u128, &str, &mut Option<crate::text::Text>),
     pub living_drown: fn(u32, &str, &mut bool, &mut f32, i32, &mut bool),
     pub living_fall: fn(u32, &str, &mut f64, &mut f32, &mut bool),
     pub living_jump: fn(u32, &str),
@@ -30,6 +31,7 @@ pub fn install(hooks: NativeClientHooks) -> bool {
 }
 
 pub(crate) fn menu_slot_rules(
+    context: &LoopContext,
     menu: &str,
     slot: usize,
     stack: &ItemStack,
@@ -37,16 +39,17 @@ pub(crate) fn menu_slot_rules(
     max_stack: &mut u32,
 ) {
     if let Some(hooks) = HOOKS.get() {
-        (hooks.menu_slot_rules)(menu, slot, stack, may_place, max_stack);
+        (hooks.menu_slot_rules)(context, menu, slot, stack, may_place, max_stack);
     }
 }
 
 pub(crate) fn item_stacked_on_other(
+    context: &LoopContext,
     event: &mut crate::menu::StackedOnOther<'_>,
     canceled: &mut bool,
 ) {
     if let Some(hooks) = HOOKS.get() {
-        (hooks.item_stacked_on_other)(event, canceled);
+        (hooks.item_stacked_on_other)(context, event, canceled);
     }
 }
 
@@ -85,21 +88,23 @@ pub(crate) fn has_mods() -> bool {
 }
 
 pub(crate) fn player_name_format(
+    context: &LoopContext,
     username: &crate::text::Text,
     displayname: &mut crate::text::Text,
 ) {
     if let Some(hooks) = HOOKS.get() {
-        (hooks.player_name_format)(username, displayname);
+        (hooks.player_name_format)(context, username, displayname);
     }
 }
 
 pub(crate) fn player_tab_list_name_format(
+    context: &LoopContext,
     player: u128,
     name: &str,
     display_name: &mut Option<crate::text::Text>,
 ) {
     if let Some(hooks) = HOOKS.get() {
-        (hooks.player_tab_list_name_format)(player, name, display_name);
+        (hooks.player_tab_list_name_format)(context, player, name, display_name);
     }
 }
 

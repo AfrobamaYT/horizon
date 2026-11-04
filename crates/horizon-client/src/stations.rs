@@ -12,7 +12,7 @@ use horizon_core::random::{LegacyRandom, RandomSource};
 use horizon_world::loot::PackOverlay;
 pub use mod_api::stations::{AnvilResult, EnchantmentRow};
 use serde_json::Value;
-use std::{fs, path::Path, sync::Arc};
+use std::{collections::HashSet, fs, path::Path, sync::Arc};
 
 /// Everything the workstation menus read, loaded once with the resources.
 pub struct StationData {
@@ -47,7 +47,13 @@ impl StationData {
         Self {
             enchantments: std::sync::Arc::clone(&items.enchantments),
             recipes: StationRecipes::from_sources(root, items, sources),
-            brewing: crate::brewing::Brewing::load(root, items, overlay),
+            brewing: {
+                let mut brewing = crate::brewing::Brewing::load(root, items, overlay);
+                let added = |key| sources.property_additions.get(key).into_iter().flatten();
+                brewing.reagents.extend(added("brewing_reagent").cloned());
+                brewing.inputs.extend(added("brewing_input").cloned());
+                brewing
+            },
             trades: crate::merchant::Trades::load(root, overlay),
             banners: crate::banner::Banners::load(root, defaults),
             recipe_index: crate::recipe_book::RecipeIndex::load(root, overlay),
@@ -517,6 +523,9 @@ pub struct StationRecipes {
     pub stonecutting: Vec<Stonecutting>,
     /// `trim_material` registry: id -> (asset name, description).
     pub trim_materials: Vec<(String, String)>,
+    /// What mods added to the smithing slots' property sets (template, base,
+    /// addition).
+    smithing_additions: [HashSet<String>; 3],
 }
 fn ingredient(v: &Value, items: &Items) -> Ingredient {
     Ingredient::parse(v, items).unwrap_or_else(|| Ingredient::of(Vec::new()))
@@ -601,10 +610,22 @@ impl StationRecipes {
                 ));
             }
         }
+        let added = |key| {
+            sources
+                .property_additions
+                .get(key)
+                .cloned()
+                .unwrap_or_default()
+        };
         Self {
             smithing,
             stonecutting,
             trim_materials,
+            smithing_additions: [
+                added("smithing_template"),
+                added("smithing_base"),
+                added("smithing_addition"),
+            ],
         }
     }
     /// Recipes whose input accepts `stack`, in display order.
@@ -615,23 +636,24 @@ impl StationRecipes {
             .collect()
     }
     fn slot_ok(&self, slot: usize, stack: &ItemStack) -> bool {
-        self.smithing.iter().any(|r| {
-            let (t, b, a) = match r {
-                Smithing::Transform {
-                    template,
-                    base,
-                    addition,
-                    ..
-                }
-                | Smithing::Trim {
-                    template,
-                    base,
-                    addition,
-                    ..
-                } => (template, base, addition),
-            };
-            [t, b, a][slot].test(stack)
-        })
+        self.smithing_additions[slot].contains(&*stack.item)
+            || self.smithing.iter().any(|r| {
+                let (t, b, a) = match r {
+                    Smithing::Transform {
+                        template,
+                        base,
+                        addition,
+                        ..
+                    }
+                    | Smithing::Trim {
+                        template,
+                        base,
+                        addition,
+                        ..
+                    } => (template, base, addition),
+                };
+                [t, b, a][slot].test(stack)
+            })
     }
     /// `RecipePropertySet` SMITHING_TEMPLATE / BASE / ADDITION.
     pub fn smithing_accepts(&self, slot: usize, stack: &ItemStack) -> bool {

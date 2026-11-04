@@ -1453,7 +1453,7 @@ impl Game<'_> {
         let far = (net.lod_distance > 0)
             .then(|| horizon_client::lod_net::Service::new(net.lod_distance, biome_names.clone()));
         let lan = Lan::start_with(sync.clone(), net)?;
-        let mut hub = Hub::new(lan, sync, encoder, config);
+        let mut hub = Hub::new(lan, sync, encoder, config, self.loop_context.clone());
         hub.sync_attachments = !mod_api::mods().is_empty();
         hub.flat_world = self.world_flat;
         hub.debug_world = self.world_debug;
@@ -1855,6 +1855,27 @@ impl Game<'_> {
             host.settings.force_game_mode = force;
             host.hub.config.force_game_mode = force;
             enforce_guest_game_mode(host, &self.world, self.collision);
+        }
+    }
+
+    /// Update the live view distance used for player chunk tracking.
+    pub(super) fn set_view_distance(&mut self, distance: i32) {
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.set_view_distance(distance);
+        }
+    }
+
+    /// Update the live spawn-protection radius.
+    pub(super) fn set_spawn_protection(&mut self, radius: i32) {
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.spawn_protection = radius;
+        }
+    }
+
+    /// Update the live simulation distance sent to player clients.
+    pub(super) fn set_simulation_distance(&mut self, distance: i32) {
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.set_simulation_distance(distance);
         }
     }
 

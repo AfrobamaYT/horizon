@@ -387,7 +387,27 @@ mod tests {
             });
             game.options.dedicated = Some(Vec::new());
             let bounds = game.native_level_height(level).unwrap();
-            game.with_level(|_, host, _| {
+            let parsed = game.native_block_state_id("minecraft:oak_slab[waterlogged=true]");
+            let default = game.native_block_state_default("minecraft:oak_slab");
+            game.with_level(|_, host, ticks| {
+                assert_eq!(
+                    host.block_state_id("minecraft:oak_slab[waterlogged=true]"),
+                    parsed
+                );
+                assert_eq!(host.block_state_default("minecraft:oak_slab"), default);
+                assert_eq!(host.block_state_id("minecraft:oak_slab[bad=true]"), None);
+                assert_eq!(host.block_state_default("missing:unknown"), None);
+                let wrapped = super::super::mod_api_host::LevelTicks {
+                    level: &*host,
+                    ticks,
+                };
+                assert_eq!(
+                    wrapped.block_state_id("minecraft:oak_slab[waterlogged=true]"),
+                    parsed
+                );
+                assert_eq!(wrapped.block_state_default("minecraft:oak_slab"), default);
+                assert_eq!(wrapped.block_state_id("minecraft:oak_slab[bad=true]"), None);
+                assert_eq!(wrapped.block_state_default("missing:unknown"), None);
                 assert_eq!(host.state_string(stone).as_deref(), Some("minecraft:stone"));
                 assert!(
                     host.state_string(slab)
@@ -423,7 +443,15 @@ mod tests {
                         &mut game.world,
                         game.pack.assets.registry,
                         Some(world_items!(game)),
+                        Some(&game.pack.block_registries),
                     ));
+                assert_eq!(
+                    hit.block_state_id("minecraft:oak_slab[waterlogged=true]"),
+                    parsed
+                );
+                assert_eq!(hit.block_state_default("minecraft:oak_slab"), default);
+                assert_eq!(hit.block_state_id("minecraft:oak_slab[bad=true]"), None);
+                assert_eq!(hit.block_state_default("missing:unknown"), None);
                 assert_eq!(hit.state_string(stone).as_deref(), Some("minecraft:stone"));
                 assert!(hit.state_string(slab).unwrap().contains("waterlogged=true"));
                 assert_eq!(hit.state_string(BlockStateId(u32::MAX)), None);
@@ -448,7 +476,10 @@ mod tests {
                         &mut game.world,
                         game.pack.assets.registry,
                         None,
+                        None,
                     ));
+                assert_eq!(hit.block_state_id("minecraft:stone"), None);
+                assert_eq!(hit.block_state_default("minecraft:stone"), None);
                 assert_eq!(hit.block_in_tag("minecraft:stone", "minecraft:logs"), None);
                 assert_eq!(hit.fluid_in_tag("minecraft:water", "minecraft:water"), None);
             }

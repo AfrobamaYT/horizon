@@ -55,6 +55,12 @@ struct Level {
     block_entities: Vec<(BlockPos, crate::nbt::Compound)>,
     /// What a mod's `BlockGrowFeatureEvent` grows when vanilla has no feature.
     supplied: Option<&'static str>,
+    /// A mod's `CropGrowEvent.Pre` answer (`None`: `DEFAULT`).
+    crop: Option<bool>,
+    /// What the crop hooks heard: Pre's position and vanilla answer, Post's
+    /// position and original state.
+    crop_asked: Vec<(BlockPos, bool)>,
+    crop_grown: Vec<(BlockPos, BlockStateId)>,
 }
 impl LevelAccess for Level {
     fn day_time(&self) -> i64 {
@@ -91,6 +97,13 @@ impl LevelAccess for Level {
     ) -> Option<std::borrow::Cow<'a, str>> {
         feature.or(self.supplied).map(std::borrow::Cow::Borrowed)
     }
+    fn crop_grow_pre(&mut self, pos: BlockPos, _state: BlockStateId, vanilla: bool) -> bool {
+        self.crop_asked.push((pos, vanilla));
+        self.crop.unwrap_or(vanilla)
+    }
+    fn crop_grow_post(&mut self, pos: BlockPos, original: BlockStateId) {
+        self.crop_grown.push((pos, original));
+    }
 }
 
 struct World {
@@ -116,6 +129,9 @@ impl World {
                 day: 6000,
                 block_entities: Vec::new(),
                 supplied: None,
+                crop: None,
+                crop_asked: Vec::new(),
+                crop_grown: Vec::new(),
             },
             f,
             ticks,
@@ -865,4 +881,51 @@ fn a_non_strict_template_updates_its_shapes_and_neighbours() {
             "strict {strict}: the lamp next to the template lights"
         );
     }
+}
+
+/// One random tick of `state` at the origin with the crop hook answering
+/// `answer`: the block after it, what the hooks heard, and the random's state.
+fn crop_tick(
+    f: &'static Fixture,
+    state: (&str, &[(&str, &str)]),
+    soil: &str,
+    answer: Option<bool>,
+) -> (World, u64) {
+    let mut w = World::new(f, 11);
+    w.floor(soil, 2);
+    let origin = BlockPos::new(0, 64, 0);
+    let id = w.id(state.0, state.1);
+    w.put(origin, id);
+    w.level.crop = answer;
+    f.behaviours.random_tick(&mut w.level, &mut w.ticks, origin);
+    let rolled = w.level.random.state();
+    (w, rolled)
+}
+
+#[test]
+fn the_crop_hook_decides_growth_and_keeps_vanillas_rolls() {
+    let Some(f) = fixture() else { return };
+    let origin = BlockPos::new(0, 64, 0);
+    let wheat = ("wheat", &[("age", "0")][..]);
+    let (vanilla, rolled) = crop_tick(f, wheat, "farmland", None);
+    let [(at, roll)] = vanilla.level.crop_asked[..] else {
+        panic!("one Pre: {:?}", vanilla.level.crop_asked);
+    };
+    assert_eq!(at, origin);
+    let young = vanilla.id("wheat", &[("age", "0")]);
+    let grown = vanilla.id("wheat", &[("age", "1")]);
+    assert_eq!(vanilla.level.block_state(origin) == grown, roll);
+    for answer in [false, true] {
+        let (w, after) = crop_tick(f, wheat, "farmland", Some(answer));
+        assert_eq!(after, rolled, "the roll is drawn whatever the mod says");
+        assert_eq!(w.level.block_state(origin) == grown, answer);
+        let posts: &[_] = if answer { &[(origin, young)] } else { &[] };
+        assert_eq!(w.level.crop_grown, posts);
+    }
+
+    // Cactus asks for the block above, and a denied one doesn't age.
+    let cactus = ("cactus", &[("age", "0")][..]);
+    let (w, _) = crop_tick(f, cactus, "sand", Some(false));
+    assert_eq!(w.level.crop_asked, [(origin.offset(0, 1, 0), true)]);
+    assert_eq!(w.level.block_state(origin), w.id("cactus", &[("age", "0")]));
 }
