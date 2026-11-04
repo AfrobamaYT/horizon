@@ -22,16 +22,14 @@ pub use item::{
 };
 pub use pose::{Pose, pose_matrix};
 
-/// Cosmetics run by default (Ludovic, 2026-11-04: on when the shop opens): the game asks what
-/// players in view wear and draws it, and its settings show and hide them (both shown by
-/// default). `HORIZON_COSMETICS=0` turns them off.
-pub const ON_BY_DEFAULT: bool = true;
+/// Cosmetics stay off until this is true: no request, no drawing, no settings.
+pub const ON_BY_DEFAULT: bool = false;
 
 /// The cosmetics service (`HORIZON_COSMETICS_API` overrides it).
 pub const API: &str = "https://cosmetics.playhorizon.dev";
 
-/// Whether cosmetics run: `ON_BY_DEFAULT`, or `HORIZON_COSMETICS=1` / `0` for one run
-/// (development, the bench).
+/// Whether cosmetics run: `ON_BY_DEFAULT`, or `HORIZON_COSMETICS=1` for one run (development,
+/// the bench). `HORIZON_COSMETICS=0` keeps them off.
 pub fn enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| match std::env::var("HORIZON_COSMETICS").as_deref() {
@@ -39,10 +37,4 @@ pub fn enabled() -> bool {
         Ok("0") => false,
         _ => ON_BY_DEFAULT,
     })
-}
-
-/// `HORIZON_COSMETICS=1` asked for this run: the launcher shows its Wardrobe even while the
-/// cosmetics service has no Shop to show (development, screenshots).
-pub fn forced() -> bool {
-    std::env::var("HORIZON_COSMETICS").as_deref() == Ok("1")
 }

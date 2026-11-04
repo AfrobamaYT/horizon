@@ -8,10 +8,7 @@ use crate::{containers::BlockEntity, items::ItemStack, world::World};
 use horizon_core::random::RandomSource;
 use horizon_protocol::{
     item::Hashed,
-    packets::{
-        configuration::CustomPayload,
-        play::{self, Clientbound as C},
-    },
+    packets::play::{self, Clientbound as C},
 };
 use horizon_world::nbt::Tag;
 use std::collections::HashMap;
@@ -225,10 +222,7 @@ impl Hub {
         );
     }
 
-    /// Open a block container for a guest (ServerPlayer.openMenu). `extra`,
-    /// for a mod menu type, goes first in a `horizon:menu_extra` payload with
-    /// the window and `pos` (`openMenu` with an extra-data writer).
-    #[allow(clippy::too_many_arguments)]
+    /// Open a block container for a guest (ServerPlayer.openMenu).
     pub fn open_container(
         &mut self,
         conn: u32,
@@ -237,7 +231,6 @@ impl Hub {
         pos: (i32, i32, i32),
         slots: Slots,
         items: Vec<Option<ItemStack>>,
-        extra: Option<Vec<u8>>,
     ) {
         let Some(kind) = self
             .sync
@@ -253,21 +246,6 @@ impl Hub {
         self.close_container_at(i);
         let g = &mut self.guests[i];
         let window = g.next_menu_window();
-        let window = g.next_window;
-        if let Some(data) = extra {
-            let message = horizon_protocol::menu_extra::Message {
-                window,
-                pos: [pos.0, pos.1, pos.2],
-                data,
-            };
-            match horizon_protocol::menu_extra::encode(&message) {
-                Ok(data) => g.send(&C::CustomPayload(CustomPayload {
-                    channel: horizon_protocol::menu_extra::CHANNEL.into(),
-                    data,
-                })),
-                Err(e) => log::warn!("Horizon: {menu_kind}'s extra data not sent: {e}"),
-            }
-        }
         g.send(&C::OpenScreen(play::OpenScreen {
             container: window,
             menu: kind,

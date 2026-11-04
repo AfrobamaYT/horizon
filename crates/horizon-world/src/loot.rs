@@ -657,8 +657,8 @@ impl LootData {
         let mut predicates = HashMap::new();
         load_kind(&all, "predicate", &mut predicates)?;
         overlay_map(overlay, "predicate", &mut predicates);
-        let raw = crate::item_defaults::shared(root)?;
-        let items = raw
+        let items = defaults
+            .entries()
             .iter()
             .map(|(name, c)| {
                 (

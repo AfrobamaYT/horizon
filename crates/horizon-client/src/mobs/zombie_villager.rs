@@ -190,9 +190,7 @@ mod tests {
             &defaults,
         )
         .unwrap();
-        let collision = std::sync::Arc::new(crate::collisions::load(&root, registry).unwrap());
-        let suffocation =
-            crate::mobs::suffocation::bind(collision.clone(), &motion.causes_suffocation).unwrap();
+        let collision = crate::collisions::load(&root, registry).unwrap();
         let air = registry.default_state("minecraft:air").unwrap();
         let world = crate::world::World::new(air, 0);
         let lid_openers = std::collections::HashMap::new();
@@ -205,7 +203,6 @@ mod tests {
             fluid_tables: &motion.fluids,
             movement: &motion.blocks,
             collision: &collision,
-            suffocation: &suffocation,
             data: &data,
             player: None,
             controlling_player_movement: None,

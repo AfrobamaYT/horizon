@@ -68,9 +68,8 @@ impl FeatureWorld for ChunkWorld<'_> {
 impl FlatTerrain {
     /// The overworld generator of `world_gen_settings` (`data.dimensions`), if it
     /// is flat. Its layers, as FlatLevelSource places them, and of the features
-    /// its settings decorate the world with, `void_start_platform`. A world that
-    /// places other features or lakes runs on the pipeline instead
-    /// ([`Self::pipeline_settings`]).
+    /// its settings decorate the world with, `void_start_platform`; the other
+    /// features and the lakes are not placed yet.
     pub fn from_settings(
         settings: &Tag,
         registry: &BlockRegistry,
@@ -151,13 +150,12 @@ impl FlatTerrain {
             void_platform,
         })
     }
-    /// The settings of a superflat overworld that runs on the structure and feature
-    /// pipeline (`FlatLevelSource`): one that lets structure sets generate
-    /// (`createState`: no `structure_overrides` key means every set, `[]` none) or
-    /// that decorates (`features` or `lakes`, `adjustGenerationSettings`). `None` for a
-    /// world with neither, the Void preset's biome (its platform is a feature this
-    /// generator places) or one that is not superflat.
-    pub fn pipeline_settings(
+    /// The settings of a superflat overworld that lets structure sets generate
+    /// (`FlatLevelSource.createState`): its layers, biome and `structure_overrides`
+    /// (no key means every set; `[]` none). `None` for anything else, a world with no
+    /// structure set to generate, the Void preset's biome (its platform is a feature
+    /// this generator places) or one that is not superflat.
+    pub fn structure_settings(
         settings: &Tag,
     ) -> Option<horizon_world::worldgen::generator::FlatSettings> {
         let generator = settings
@@ -189,17 +187,13 @@ impl FlatTerrain {
             Some(Tag::String(set)) => Some(vec![set.to_string_lossy()]),
             _ => None,
         };
-        let flag = |key| crate::save::number(s.get(key)).is_some_and(|v| v != 0);
-        let decorates = flag("features") || flag("lakes");
-        if structure_overrides.as_ref().is_some_and(Vec::is_empty) && !decorates {
+        if structure_overrides.as_ref().is_some_and(Vec::is_empty) {
             return None;
         }
         Some(horizon_world::worldgen::generator::FlatSettings {
             layers,
             biome,
             structure_overrides,
-            features: flag("features"),
-            lakes: flag("lakes"),
         })
     }
     /// FlatLevelSource.getSpawnHeight: the top of the layers.
@@ -562,10 +556,10 @@ mod tests {
             ]))
         };
         // No key: every set. A list: those. An empty list: none. The void and a noise world: none.
-        let all = FlatTerrain::pipeline_settings(&flat(vec![], "minecraft:plains")).unwrap();
+        let all = FlatTerrain::structure_settings(&flat(vec![], "minecraft:plains")).unwrap();
         assert_eq!(all.structure_overrides, None);
         assert_eq!(all.layers, [("minecraft:stone".to_owned(), 3)]);
-        let some = FlatTerrain::pipeline_settings(&flat(
+        let some = FlatTerrain::structure_settings(&flat(
             vec![(
                 "structure_overrides",
                 Tag::List(vec![Tag::String("minecraft:villages".into())]),
@@ -579,31 +573,15 @@ mod tests {
         );
         assert_eq!(some.biome, "minecraft:desert");
         assert!(
-            FlatTerrain::pipeline_settings(&flat(
+            FlatTerrain::structure_settings(&flat(
                 vec![("structure_overrides", Tag::List(vec![]))],
                 "minecraft:plains"
             ))
             .is_none()
         );
-        // No structure set, but features or lakes to place: the pipeline, with no set.
-        for key in ["features", "lakes"] {
-            let decorated = FlatTerrain::pipeline_settings(&flat(
-                vec![
-                    ("structure_overrides", Tag::List(vec![])),
-                    (key, Tag::Byte(1)),
-                ],
-                "minecraft:plains",
-            ))
-            .unwrap();
-            assert_eq!(decorated.structure_overrides, Some(vec![]), "{key}");
-            assert_eq!(
-                (decorated.features, decorated.lakes),
-                (key == "features", key == "lakes")
-            );
-        }
-        assert!(FlatTerrain::pipeline_settings(&flat(vec![], "minecraft:the_void")).is_none());
+        assert!(FlatTerrain::structure_settings(&flat(vec![], "minecraft:the_void")).is_none());
         assert!(
-            FlatTerrain::pipeline_settings(&world(Tag::compound([(
+            FlatTerrain::structure_settings(&world(Tag::compound([(
                 "type",
                 Tag::String("minecraft:noise".into())
             )])))

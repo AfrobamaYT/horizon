@@ -136,7 +136,6 @@ fn draw(
                 ]
             }),
             foil_uv: poly.map(|v| [v[3], v[4]]),
-            gui_glint_uv: None,
             normal,
             color,
             foil,
