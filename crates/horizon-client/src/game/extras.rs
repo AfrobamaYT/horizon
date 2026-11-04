@@ -68,12 +68,15 @@ impl Game<'_> {
         let r = self.extras.fps.reading();
         (r.fps, r.min, r.low)
     }
-    /// Attack and use clicks in the last second, and whether each is held.
-    pub(super) fn mouse_reading(&mut self) -> ((u32, u32), [bool; 2]) {
+    /// Attack and use clicks in the last second.
+    pub(super) fn click_reading(&mut self) -> (u32, u32) {
         let now = self.extras_now();
         let [l, r] = &mut self.extras.cps;
-        let cps = (l.per_second(now) as u32, r.per_second(now) as u32);
-        (cps, self.extras.mouse)
+        (l.per_second(now) as u32, r.per_second(now) as u32)
+    }
+    /// Whether the attack and use buttons are held.
+    pub(super) fn mouse_held(&self) -> [bool; 2] {
+        self.extras.mouse
     }
     /// Auto-reconnect: a connection to `address` as `name` starts.
     pub(super) fn extras_connecting(&mut self, address: &str, name: &str, lan: bool) {
