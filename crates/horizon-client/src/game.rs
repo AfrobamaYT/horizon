@@ -2737,6 +2737,8 @@ struct Game<'a> {
     gpu_passes: bool,
     screen: Screen,
     observed_screen: Option<native_hooks::ObservedScreen>,
+    /// The layout the last frame drew the inventory's effect panels with.
+    effects_layout: std::cell::Cell<Option<horizon_client::inventory_effects::EffectsLayout>>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     /// Avoid an endless rebuild loop if the new device is lost as well.
@@ -19634,6 +19636,7 @@ impl<'a> Game<'a> {
             gpu_passes: false,
             screen: Screen::Playing,
             observed_screen: None,
+            effects_layout: std::cell::Cell::new(None),
             window: None,
             renderer: None,
             last_device_recovery: None,
