@@ -3234,6 +3234,9 @@ mod eat_block_tests {
         fn can_grief(&self, mob: u32, rule: bool) -> bool {
             rule || mob == 1
         }
+        fn grief_hooked(&self) -> bool {
+            true
+        }
         fn living_visibility(&self, _: &crate::mobs::PlayerView, _: u32, visibility: f64) -> f64 {
             visibility
         }
@@ -3616,6 +3619,9 @@ mod visibility_hook_tests {
         }
         fn can_grief(&self, _: u32, rule: bool) -> bool {
             rule
+        }
+        fn grief_hooked(&self) -> bool {
+            false
         }
         fn living_visibility(&self, _: &PlayerView, looking: u32, visibility: f64) -> f64 {
             if looking == 1 {

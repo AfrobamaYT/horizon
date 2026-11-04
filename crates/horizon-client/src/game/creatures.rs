@@ -7988,6 +7988,9 @@ impl horizon_client::mobs::MobHooks for Game<'_> {
     fn can_grief(&self, mob: u32, rule: bool) -> bool {
         self.entity_grief(mob, rule)
     }
+    fn grief_hooked(&self) -> bool {
+        Game::grief_hooked(self)
+    }
     fn living_visibility(&self, player: &PlayerView, looking: u32, visibility: f64) -> f64 {
         if !mod_api::__private::listened(mod_api::HookId::LivingVisibility) {
             return visibility;

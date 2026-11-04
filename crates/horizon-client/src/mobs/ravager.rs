@@ -146,7 +146,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     // crop (PitcherCropBlock.entityInside) goes the same way, both halves.
     // NeoForge asks `canEntityGrief` for each crop, and reads the rule alone
     // for a pitcher crop.
-    if w.mob_griefing || w.mob_hooks.is_some() {
+    if w.griefing_possible() {
         let b = m
             .bounds()
             .deflate(horizon_core::geometry::Vec3::new(1.0e-5, 1.0e-5, 1.0e-5));
