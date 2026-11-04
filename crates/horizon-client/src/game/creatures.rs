@@ -1991,8 +1991,8 @@ impl Game<'_> {
         }
     }
 
-    /// Resolve `EntityReference.getEntity` in the victim's level. None inside
-    /// means the player in place; Some is a guest connection.
+    /// Resolve `EntityReference.getEntity` across levels. None inside means
+    /// the player in place; Some is a guest connection.
     pub(super) fn resolve_player_credit(
         &self,
         credit: super::combat::PlayerCredit,
@@ -2007,7 +2007,7 @@ impl Game<'_> {
         self.lan
             .iter()
             .flat_map(|h| h.hub.guests.iter())
-            .find(|g| g.placed && g.dimension == self.dim.id() && g.uuid == uuid)
+            .find(|g| g.placed && g.uuid == uuid)
             .map(|g| Some(g.conn))
     }
     /// `InfestedMobEffect.onMobHurt` for a mob: silverfish from half its height up.
@@ -7893,6 +7893,16 @@ mod tests {
                 let host = game.lan.as_ref().unwrap();
                 assert_eq!(host.play[&12].stats.get("custom", "minecraft:mob_kills"), 2);
                 assert!(host.hub.guests[0].advancements.has("test:catalyst", "kill"));
+                game.lan.as_mut().unwrap().hub.guests[0].dimension =
+                    "minecraft:the_nether".into();
+                let mut third = victim.clone();
+                third.id = 103;
+                game.resolve_player_responsible(101, Damage::mob(100, [0.0; 3]));
+                let credit = game.last_hurt_by_player.remove(&101).unwrap();
+                game.last_hurt_by_player.insert(103, credit);
+                game.mob_died(&third);
+                let host = game.lan.as_ref().unwrap();
+                assert_eq!(host.play[&12].stats.get("custom", "minecraft:mob_kills"), 3);
                 game.mobs[0].extra.owner = None;
                 game.resolve_player_responsible(101, Damage::mob(100, [0.0; 3]));
                 assert!(!game.last_hurt_by_player.contains_key(&101));
