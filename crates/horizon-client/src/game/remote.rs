@@ -2370,9 +2370,8 @@ impl Game<'_> {
         let block = self.world.block(pos[0], pos[1], pos[2]);
         if let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&key) {
             if m.id() == name
-                && horizon_client::containers::block_entity_types::type_for(
-                    &self.res.facts().get(block).name,
-                ) == Some(name)
+                && horizon_client::block_entity_types::type_for(&self.res.facts().get(block).name)
+                    == Some(name)
             {
                 m.merge_update_tag(fields);
             }

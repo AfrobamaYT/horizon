@@ -950,7 +950,7 @@ pub fn decode_block_entity_for_block(
         crate::containers::BlockEntity::Mod(m) => Some(m.id()),
         _ => None,
     };
-    (actual == crate::containers::block_entity_types::type_for(block)).then_some(decoded)
+    (actual == crate::block_entity_types::type_for(block)).then_some(decoded)
 }
 
 pub fn decode_block_entity(tag: &Tag) -> Option<((i32, i32, i32), crate::containers::BlockEntity)> {
@@ -6448,7 +6448,7 @@ mod tests {
             );
             return;
         }
-        use crate::containers::block_entity_types::{self, BlockEntityTypes};
+        use crate::block_entity_types::{self, BlockEntityTypes};
         block_entity_types::install(BlockEntityTypes::new(
             [
                 ("test:press".into(), "test:machine".into()),

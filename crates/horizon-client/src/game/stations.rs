@@ -2205,7 +2205,9 @@ impl Game<'_> {
         let advanced = !nested && self.options_advanced_tooltips();
         let display = horizon_client::item_tooltip::TooltipDisplay::for_stack(stack);
         let mut lines = Vec::new();
-        if !nested && display.name_visible(self.screen == Screen::Creative) {
+        // `getTooltipLines`' own branch: a tooltip the stack doesn't hide.
+        let shown = !nested && display.name_visible(creative);
+        if shown {
             let name =
                 horizon_client::item_tooltip::styled_name(stack, || self.stack_hover_name(stack));
             lines.push((name, color));
@@ -2494,12 +2496,9 @@ impl Game<'_> {
         }
         // SuspiciousStewEffects.addToTooltip: the creative flag, which vanilla
         // sets for the creative screen's own slots, as `name_visible` above.
-        for (text, c) in horizon_client::item_tooltip::stew_lines(
-            stack,
-            !nested && self.screen == Screen::Creative,
-            &display,
-            &translate,
-        ) {
+        for (text, c) in
+            horizon_client::item_tooltip::stew_lines(stack, creative, &display, &translate)
+        {
             push(&mut lines, text, c);
         }
         // BlockItemStateProperties.addToTooltip.
@@ -2607,6 +2606,18 @@ impl Game<'_> {
                     rgba(255, 85, 85, 255),
                 ));
             }
+        }
+        // ItemTooltipEvent, once the tooltip vanilla shows is complete.
+        if shown {
+            self.native_item_tooltip(
+                self.own_uuid(),
+                self.own_entity_id(),
+                stack,
+                &display,
+                advanced,
+                creative,
+                &mut lines,
+            );
         }
         lines
     }
@@ -3140,12 +3151,14 @@ mod tests {
         });
     }
     /// A stick's part adds its line where `Item.appendHoverText` does, after the name and before
-    /// the advanced id line; a stick whose tooltip is hidden doesn't ask it.
+    /// the advanced id line; `item_tooltip` (`ItemTooltipEvent`) then gets the whole tooltip, with
+    /// its flags, and its changes are what shows. A stick whose tooltip is hidden asks neither.
     #[test]
     #[ignore = "needs prepared resources"]
     fn tooltip_part_lines_come_after_the_name_and_never_for_a_hidden_tooltip() {
         use crate::mod_api::{
-            self, ClientHost, Hooks, ItemPart, ModEntry, Mods, Registrar, TooltipEvent,
+            self, ClientHost, Hooks, ItemPart, ItemTooltipEvent, ModEntry, Mods, Registrar,
+            TooltipEvent,
         };
         use horizon_client::text::Text;
 
@@ -3164,6 +3177,17 @@ mod tests {
             fn register(&self, r: &mut Registrar) {
                 r.item_part("minecraft:stick", Lore);
             }
+            fn item_tooltip(&self, _: &dyn ClientHost, event: &mut ItemTooltipEvent<'_>) {
+                let plain: Vec<String> = event.lines.iter().map(|(t, _)| t.plain()).collect();
+                assert_eq!(plain[..3], ["Stick", "part", "minecraft:stick"]);
+                assert!(event.advanced);
+                // Only the hidden stack is asked from a creative slot, where its
+                // display hides every component's lines.
+                assert_eq!(event.display.shows("minecraft:lore"), !event.creative);
+                // Every line is the mod's to change: drop the count, add one at the end.
+                event.lines.pop();
+                event.lines.push((Text::literal("event"), u32::MAX));
+            }
         }
         let mods: Mods = vec![ModEntry::new("lore", Box::new(Mod))].into();
         mod_api::install_parts(&mods).unwrap();
@@ -3179,9 +3203,7 @@ mod tests {
                     .iter()
                     .map(|(text, _)| text.plain())
                     .collect();
-                let id_and_components = ["minecraft:stick", "14 component(s)"];
-                assert_eq!(lines[..2], ["Stick", "part"]);
-                assert_eq!(lines[2..], id_and_components);
+                assert_eq!(lines, ["Stick", "part", "minecraft:stick", "event"]);
                 // `hide_tooltip`: no name, and the part isn't asked; the advanced lines stay.
                 let mut hidden = stick.clone();
                 hidden.data_mut().set_other(
@@ -3197,9 +3219,27 @@ mod tests {
                     .map(|(text, _)| text.plain())
                     .collect();
                 assert!(
-                    !lines.iter().any(|l| l == "Stick" || l == "part"),
+                    !lines
+                        .iter()
+                        .any(|l| l == "Stick" || l == "part" || l == "event"),
                     "{lines:?}"
                 );
+                // The creative screen's inventory and hotbar slots aren't creative
+                // tab slots: still hidden there.
+                game.screen = super::Screen::Creative;
+                let inventory: Vec<String> = game
+                    .stack_tooltip_lines(&hidden, false, false)
+                    .iter()
+                    .map(|(text, _)| text.plain())
+                    .collect();
+                assert!(!inventory.iter().any(|l| l == "Stick"), "{inventory:?}");
+                // A creative tab's own slot (`TooltipFlag.isCreative`) shows it anyway.
+                let creative: Vec<String> = game
+                    .stack_tooltip_lines(&hidden, false, true)
+                    .iter()
+                    .map(|(text, _)| text.plain())
+                    .collect();
+                assert_eq!(creative[..2], ["Stick", "part"]);
             });
         });
     }

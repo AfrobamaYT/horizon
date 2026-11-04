@@ -5,7 +5,7 @@ use super::{Game, transactions::After};
 use horizon_client::{
     block_entity_nbt,
     containers::BlockEntity,
-    mod_api::{BlockEntityRef, LevelRef},
+    mod_api::{BlockEntityRef, BlockEntityTypeKey, LevelRef},
     save,
     world::World,
 };
@@ -32,11 +32,14 @@ impl Game<'_> {
     }
 
     /// The block entity's type (`BlockEntity.getType`).
-    pub(super) fn native_block_entity_kind(&self, entity: BlockEntityRef) -> Option<&str> {
+    pub(super) fn native_block_entity_kind(
+        &self,
+        entity: BlockEntityRef,
+    ) -> Option<BlockEntityTypeKey> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
         let [x, y, z] = entity.position;
         let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
-        Some(save::block_entity_id(block_entity, block))
+        BlockEntityTypeKey::registered(save::block_entity_id(block_entity, block))
     }
 
     /// The block entity's position.
@@ -303,9 +306,20 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn writes_merge_data_name_and_roll_back_with_a_transaction() {
-        use super::super::native_entity_refs::tests::with_game;
+        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
         use horizon_client::mod_api::NativeBlockUpdateFlags;
-        with_game(|game| {
+        if run_fresh_cases(
+            "game::native_block_entity_refs::tests::writes_merge_data_name_and_roll_back_with_a_transaction",
+            "HORIZON_VANILLA_BE_REGISTRY_CHILD",
+            &["vanilla"],
+        ) {
+            return;
+        }
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let root =
+            super::super::mods::content_root(&base, &Default::default(), &Default::default())
+                .unwrap();
+        with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
@@ -331,7 +345,10 @@ mod tests {
                 compound(&format!("{{id:\"minecraft:furnace\",x:9,{}", &stick[1..]))
             ));
             assert_eq!(slot3(game), Some(3));
-            assert_eq!(chest.kind(game), Some("minecraft:chest"));
+            assert_eq!(
+                chest.kind(game).as_ref().map(|kind| kind.id()),
+                Some("minecraft:chest")
+            );
             assert_eq!(chest.position(game), Some([0, 64, 0]));
             assert!(!chest.merge_data(game, compound(stick)), "no change");
             assert!(chest.merge_data(game, compound("{Items:[]}")));

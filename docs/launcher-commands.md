@@ -107,6 +107,7 @@ Native mods (docs/native-mods.md): compile flat Rust mod projects against the in
 
 - `FOLDER`: A mod folder (horizon-mod.toml with [native], Cargo.toml and src/), or a folder of them (default: the native mods installed and turned on in the instance)
 - `--server-output`: Export mode: build a standalone dedicated-server engine into this folder instead of an instance's build. Needs a mod FOLDER; no instance is read or changed, and no launcher config is written
+- `--allow-jar-downloads`: Allow exact-hash jar downloads into the local cache for the server export; jar bytes are never included in the exported folder
 - `--instance`: The instance whose installed native mods to build, and which then plays the build (default: the selected one)
 - `--update`: Move to the newest installed release or Nightly instead of the Horizon the instance plays (a full rebuild)
 - `--trust-native-code`: You read the mods' source and trust it with full access to this computer

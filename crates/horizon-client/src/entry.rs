@@ -4,11 +4,22 @@ use horizon_mods::selection::{Argument, LaunchArguments};
 
 /// Start the game. The executable supplies the allocator and retains the mod API marker.
 pub fn main() {
-    main_with(Default::default());
+    main_with(Default::default(), &[]);
 }
 
 /// Start the game with named trait mods in dispatch order.
-pub fn main_with(mods: crate::mod_api::Mods) {
+pub fn main_with(mods: crate::mod_api::Mods, built: &'static [horizon_mods::runtime::BuiltMod]) {
+    let native: crate::Result<_> = std::env::current_exe()
+        .map_err(Into::into)
+        .and_then(|exe| horizon_mods::runtime::Runtime::load(&exe, built).map_err(Into::into));
+    let native = match native {
+        Ok(native) => native,
+        Err(error) => {
+            eprintln!("Horizon: {error}");
+            std::process::exit(game::exit_code::ERROR);
+        }
+    };
+    crate::gfx::native_render::set_mods_built_in(!native.built().is_empty());
     // First: a trait injection into anything below (logging, the crash handler) calls its mod.
     crate::mod_api::install(mods);
     horizon_threads::configure_allocator();
@@ -145,7 +156,7 @@ pub fn main_with(mods: crate::mod_api::Mods) {
         log::warn!("Native client hooks already installed; keeping the first callbacks");
     }
     raise_open_file_limit();
-    if let Err(error) = game::run_with(launch) {
+    if let Err(error) = game::run_with(launch, native) {
         // A bad command line is the caller's mistake, not a crash: no report.
         let usage = error.is::<game::UsageError>();
         log::error!("Horizon: {error}");

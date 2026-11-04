@@ -85,6 +85,7 @@ mod chat;
 mod chat_filter;
 mod chiseled_bookshelf;
 mod client_ambient;
+mod client_reload;
 mod clipboard;
 mod code_of_conduct;
 mod combat;
@@ -552,8 +553,8 @@ struct Options {
     dedicated: Option<Vec<String>>,
     /// `--benchmark SCENARIO`: run the benchmark, write its report and quit.
     benchmark: Option<String>,
-    /// `--dev-mod PATH` (repeatable): content mods always on.
-    dev_mods: Vec<PathBuf>,
+    /// Content selection and the compiled native runtime shared with resource loaders.
+    mods: mods::ModsState,
     /// What this Game executes; independent of its current server connection.
     execution_role: execution_role::ExecutionRole,
     /// `--fullscreen` (vanilla's): the window opens fullscreen whatever options.txt says,
@@ -693,7 +694,10 @@ impl Options {
                 .filter(|n| !n.is_empty()),
             dedicated: None,
             benchmark: None,
-            dev_mods: context.dev_mods,
+            mods: mods::ModsState {
+                dev: context.dev_mods,
+                native: Default::default(),
+            },
             execution_role: execution_role::ExecutionRole::Client,
             fullscreen: false,
             game_dir: context.game_dir,
@@ -791,6 +795,7 @@ impl Options {
                             }
                             // main has set this player's own folder (logging::set_player_dir).
                             "--player-dir" => {}
+
                             "--benchmark" => {
                                 if horizon_client::benchmark::scenes(&value).is_none() {
                                     return Err(format!(
@@ -2297,7 +2302,7 @@ impl UiResources {
                     horizon_client::gfx::panorama::Faces::load(root, defaults)
                 })
             });
-            let mod_image = crate::game::mods::built_with_native_mods();
+            let mod_image = horizon_client::gfx::native_render::world_drawn_hooked();
             let atlas = startup::time("ui.atlas", || {
                 HudAtlas::build_over_with_image(root, defaults, mod_image)
             });
@@ -19396,6 +19401,7 @@ impl<'a> Game<'a> {
         // A scoped hook on this thread asks this game's parts.
         horizon_client::mod_api::mark_game_thread();
         let root = options.resources.clone();
+        let mod_sources = options.mods.clone();
         let registry = pack.assets.registry;
         // Until a world is opened the streamer is idle.
         let mut streaming = Streaming::new(
@@ -19807,7 +19813,7 @@ impl<'a> Game<'a> {
             pending_uploads: Vec::new(),
             frame_graph: Default::default(),
             extras: Default::default(),
-            mods: Default::default(),
+            mods: mod_sources,
             recipe_tables: Default::default(),
             panel: Default::default(),
             native_shaders: Default::default(),
@@ -20025,6 +20031,9 @@ struct Loaded {
     pack_error: Option<String>,
     resources: Arc<Resources>,
     rest_loader: Option<WorldRestLoader>,
+    /// The client reload listeners' prepared applies, staged by the loader
+    /// thread; `start_game` runs them once the game exists.
+    client_applies: Vec<client_reload::PreparedClientReload>,
     pack: PackResources,
     /// The menu bundle, for the synchronous launch; the loading screen receives
     /// it earlier through its own channel.
@@ -20979,6 +20988,26 @@ fn load_resources(
     } else {
         (None, None)
     };
+    // The client reload listeners register once before any prepare runs (no
+    // game exists yet, as NeoForge's construction-time event fires before
+    // resources load) and prepare here beside the rest of the load, against
+    // the same merged root; the game applies them at handoff. A dedicated
+    // server never fires the client event. A failed prepare keeps the game
+    // running without mod reload listeners, like the reload path's rollback.
+    let client_applies = if headless {
+        Vec::new()
+    } else {
+        match client_reload::stage_client_reload(
+            &root,
+            client_reload::register_startup_client_reload_listeners(),
+        ) {
+            Ok(steps) => steps,
+            Err(error) => {
+                log::warn!("Horizon: resource reload failed: {error}");
+                Vec::new()
+            }
+        }
+    };
     Ok(Loaded {
         game_cpu,
         renderer_cpu,
@@ -20986,6 +21015,7 @@ fn load_resources(
         pack_error,
         resources,
         rest_loader,
+        client_applies,
         pack,
         gui: loaded_gui,
     })
@@ -21435,6 +21465,7 @@ fn start_game<'a>(
     rest_loader: Option<WorldRestLoader>,
     settings: Option<Settings>,
     prepared: Option<GameCpuResources>,
+    client_applies: Vec<client_reload::PreparedClientReload>,
 ) -> Result<Option<Game<'a>>> {
     let handoff = prepared.is_some();
     let mut settings = match settings {
@@ -21466,9 +21497,11 @@ fn start_game<'a>(
     game.apply_settings();
     // Benchmarks measure the game alone.
     if game.options.benchmark.is_none() {
-        game.mods.dev = game.options.dev_mods.clone();
         game.start_mods();
     }
+    // The initial load's client reload listeners, registered and staged by
+    // the loader thread, publish now that the game owns the assets.
+    client_reload::apply_client_reload(client_applies);
     // After the mods: their templates are among the ids it lists.
     game.preload_registries();
     game.start_agent_control()?;
@@ -21869,7 +21902,7 @@ impl Loading {
             );
         }
     }
-    fn finish(&mut self, loaded: Loaded) -> Result<Option<split::Split<'static>>> {
+    fn finish(&mut self, mut loaded: Loaded) -> Result<Option<split::Split<'static>>> {
         let handoff_at = Instant::now();
         let mut options = self.options.take().ok_or("loading already finished")?;
         options.resources = loaded.root.clone();
@@ -21925,6 +21958,7 @@ impl Loading {
             loaded.rest_loader,
             Some(self.settings.clone()),
             loaded.game_cpu,
+            std::mem::take(&mut loaded.client_applies),
         )?
         else {
             return Ok(None);
@@ -22133,10 +22167,11 @@ fn run_loading(
 
 pub use launch_api::{UsageError, exit_code};
 
-pub fn run_with(launch: LaunchArguments) -> Result<()> {
+pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime) -> Result<()> {
     let Some(mut options) = Options::read(launch)? else {
         return Ok(());
     };
+    options.mods.native = Arc::new(native);
     if options.execution_role == execution_role::ExecutionRole::DedicatedServer
         && !dedicated::preflight(&mut options)?
     {
@@ -22244,18 +22279,14 @@ pub fn run_with(launch: LaunchArguments) -> Result<()> {
         &early_settings.resource_packs,
         &[],
         &early_settings.mods.enabled,
-        &options.dev_mods,
+        &options.mods,
     )
     .or_else(|e| {
         log::warn!("Horizon: resource packs not applied: {e}");
         pack_error = Some(e.to_string());
-        mods::content_root(
-            &vanilla_root,
-            &early_settings.mods.enabled,
-            &options.dev_mods,
-        )
+        mods::content_root(&vanilla_root, &early_settings.mods.enabled, &options.mods)
     })?;
-    let loaded = load_resources(
+    let mut loaded = load_resources(
         options.resources.clone(),
         launch_world(&options),
         &vanilla_root,
@@ -22286,6 +22317,7 @@ pub fn run_with(launch: LaunchArguments) -> Result<()> {
         loaded.rest_loader,
         None,
         None,
+        std::mem::take(&mut loaded.client_applies),
     )?;
     if let Some(mut game) = game {
         // Minecraft.onGameLoadFinished: a start that made it this far is clean.

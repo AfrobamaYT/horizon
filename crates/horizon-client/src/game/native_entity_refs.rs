@@ -433,6 +433,19 @@ pub(super) mod tests {
         true
     }
 
+    /// The parent runs and checks an isolated child; the child loads the Part fixtures' types.
+    pub(in crate::game) fn declared_part_root(name: &str) -> Option<std::path::PathBuf> {
+        if run_fresh_cases(name, "HORIZON_DECLARED_PART_GAME_CHILD", &["valid"]) {
+            return None;
+        }
+        let _mods = horizon_client::mod_api::part_tests::game_thread();
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        Some(
+            super::super::mods::content_root(&base, &Default::default(), &Default::default())
+                .unwrap(),
+        )
+    }
+
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         with_game_at(root, test);
