@@ -8604,8 +8604,17 @@ fn block_entity_for_block(
         && let Some(state) = registry.default_state(name)
         && let Some(form) = facts.get(state).sign_form()
     {
+        let text = facts.sign_text(name).map_or_else(Default::default, |d| {
+            horizon_client::signs::SignText {
+                color: d.color,
+                glowing: d.glowing,
+                ..Default::default()
+            }
+        });
         return Some(BlockEntity::Sign(horizon_client::signs::SignData {
             hanging: form.hanging,
+            front: text.clone(),
+            back: text,
             ..Default::default()
         }));
     }
@@ -11327,6 +11336,8 @@ mod tests {
                 id: id.into(),
                 template: template.into(),
                 item: false,
+                sign_text_color: (id == "ruby:notice_banner").then(|| "light_blue".into()),
+                sign_text_glow: (id == "ruby:notice_banner").then_some(true),
                 ..Default::default()
             })
             .collect();
@@ -11384,6 +11395,19 @@ mod tests {
                 entity => panic!("{name}: expected a sign, got {entity:?}"),
             }
         }
+        // `createDefaultSignText`: a declared colour and glow on both sides of a new sign, black
+        // and unlit on one that declares none.
+        let mut text = |name| match game.new_block_entity(name) {
+            Some(super::BlockEntity::Sign(sign)) => {
+                assert_eq!(sign.front.color, sign.back.color);
+                assert_eq!(sign.front.glowing, sign.back.glowing);
+                (sign.front.color, sign.front.glowing)
+            }
+            entity => panic!("{name}: expected a sign, got {entity:?}"),
+        };
+        assert_eq!(text("ruby:notice_banner"), (3, true));
+        assert_eq!(text("ruby:board_shelf"), (15, false));
+        assert_eq!(text("minecraft:oak_sign"), (15, false));
         assert!(game.new_block_entity("ruby:road_sign").is_none());
         assert!(matches!(
             game.new_block_entity("minecraft:white_banner"),
