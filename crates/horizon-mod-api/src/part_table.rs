@@ -722,6 +722,7 @@ pub trait Registrar {
     fn attach_item_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn ItemPart>);
     /// The game's registrar, for what doesn't cross to a wasm mod yet: capability and place
     /// providers.
+    // hidden: the game's own registrar, not part of the mod surface
     #[doc(hidden)]
     fn game(&mut self) -> Option<&mut PartRegistrar> {
         None
