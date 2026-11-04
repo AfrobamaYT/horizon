@@ -480,7 +480,7 @@ pub struct Injection {
     pub cancellable: bool,
 }
 
-/// An injection's site: `hook = "frame"` names a native hook point from the
+/// An injection's site: `hook = "render_frame_pre"` names a native hook point from the
 /// catalog, `target = "game::tick"` a raw function path.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum InjectionSite {
@@ -2115,17 +2115,17 @@ mod tests {
         let mods = [
             bundle_of(
                 "alpha",
-                "[[injection]]\nid = \"a\"\nhook = \"frame\"\nkind = \"HEAD\"\n",
+                "[[injection]]\nid = \"a\"\nhook = \"render_frame_pre\"\nkind = \"HEAD\"\n",
             ),
             bundle_of(
                 "beta",
-                "[[injection]]\nid = \"b\"\nhook = \"frame\"\nkind = \"HEAD\"\npriority = 200\n",
+                "[[injection]]\nid = \"b\"\nhook = \"render_frame_pre\"\nkind = \"HEAD\"\npriority = 200\n",
             ),
         ];
         assert_eq!(
             warn_conflicts(&mods),
             [
-                "mods beta, alpha both inject at hook `frame` HEAD; beta runs first (priority descending, mod id ascending)."
+                "mods beta, alpha both inject at hook `render_frame_pre` HEAD; beta runs first (priority descending, mod id ascending)."
             ]
         );
     }
@@ -2137,17 +2137,17 @@ mod tests {
         let mods = [
             bundle_of(
                 "alpha",
-                "[[injection]]\nid = \"a\"\nhook = \"frame\"\nkind = \"HEAD\"\n",
+                "[[injection]]\nid = \"a\"\nhook = \"render_frame_pre\"\nkind = \"HEAD\"\n",
             ),
             bundle_of(
                 "beta",
-                "[[injection]]\nid = \"b\"\nhook = \"frame\"\nkind = \"HEAD\"\npriority = 50\n",
+                "[[injection]]\nid = \"b\"\nhook = \"render_frame_pre\"\nkind = \"HEAD\"\npriority = 50\n",
             ),
         ];
         assert_eq!(
             warn_conflicts(&mods),
             [
-                "mods beta, alpha both inject at hook `frame` HEAD; beta runs first (priority descending, mod id ascending)."
+                "mods beta, alpha both inject at hook `render_frame_pre` HEAD; beta runs first (priority descending, mod id ascending)."
             ]
         );
     }
@@ -2282,7 +2282,7 @@ mod tests {
         let mods = [
             bundle_of(
                 "alpha",
-                "[[injection]]\nid = \"a\"\nhook = \"frame\"\nkind = \"HEAD\"\n",
+                "[[injection]]\nid = \"a\"\nhook = \"render_frame_pre\"\nkind = \"HEAD\"\n",
             ),
             bundle_of(
                 "beta",
@@ -2297,7 +2297,7 @@ mod tests {
         let points =
             horizon_mod_api_gen::hook_points(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".."))
                 .unwrap();
-        let frame = "horizon_client::game::native_hooks::Game<'_>::native_frame";
+        let frame = "horizon_client::game::native_hooks::Game<'_>::native_render_frame_pre";
         let scoped =
             "horizon_client::game::native_hooks::GameLevel<'_>::native_pre_remove_side_effects";
         let mods = [bundle_of(
@@ -2305,14 +2305,14 @@ mod tests {
             &format!(
                 "[[injection]]\nid = \"raw\"\ntarget = \"{frame}\"\nkind = \"HEAD\"\n\
                  [[injection]]\nid = \"part\"\ntarget = \"{scoped}\"\nkind = \"HEAD\"\n\
-                 [[injection]]\nid = \"named\"\nhook = \"frame\"\nkind = \"HEAD\"\n\
+                 [[injection]]\nid = \"named\"\nhook = \"render_frame_pre\"\nkind = \"HEAD\"\n\
                  [[injection]]\nid = \"other\"\ntarget = \"game::calls::compute\"\nkind = \"HEAD\"\n"
             ),
         )];
         assert_eq!(
             hook_hints(&mods, &points),
             [
-                "alpha's `raw` targets hook point `frame`: use `hook = \"frame\"`, `hook_version = 1`, or implement `Hooks::frame` with no injection.",
+                "alpha's `raw` targets hook point `render_frame_pre`: use `hook = \"render_frame_pre\"`, `hook_version = 1`, or implement `Hooks::render_frame_pre` with no injection.",
                 "alpha's `part` targets hook point `pre_remove_side_effects`: use `hook = \"pre_remove_side_effects\"`, `hook_version = 1`, or implement the `pre_remove_side_effects` Part method with no injection."
             ]
         );
@@ -2323,7 +2323,7 @@ mod tests {
         let points =
             horizon_mod_api_gen::hook_points(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".."))
                 .unwrap();
-        let frame = "horizon_client::game::native_hooks::Game<'_>::native_frame";
+        let frame = "horizon_client::game::native_hooks::Game<'_>::native_render_frame_pre";
         let mods = [bundle_of(
             "alpha",
             &format!(
@@ -2333,7 +2333,7 @@ mod tests {
         let hints = hook_hints(&mods, &points);
         assert_eq!(
             hints[0],
-            "alpha's `stop` can cancel at hook `frame` HEAD: a Break skips the later injections and the function's body."
+            "alpha's `stop` can cancel at hook `render_frame_pre` HEAD: a Break skips the later injections and the function's body."
         );
         assert_eq!(hints.len(), 2);
     }
@@ -2342,12 +2342,12 @@ mod tests {
     fn a_cancelling_head_on_a_hook_point_warns() {
         let mods = [bundle_of(
             "alpha",
-            "[[injection]]\nid = \"stop\"\nhook = \"frame\"\nkind = \"HEAD\"\ncancellable = true\n",
+            "[[injection]]\nid = \"stop\"\nhook = \"render_frame_pre\"\nkind = \"HEAD\"\ncancellable = true\n",
         )];
         assert_eq!(
             warn_conflicts(&mods),
             [
-                "alpha's `stop` can cancel at hook `frame` HEAD: a Break skips the later injections and the function's body."
+                "alpha's `stop` can cancel at hook `render_frame_pre` HEAD: a Break skips the later injections and the function's body."
             ]
         );
     }
@@ -2380,8 +2380,8 @@ mod tests {
     fn one_mod_with_two_injections_on_one_site_stays_quiet() {
         let mods = [bundle_of(
             "alpha",
-            "[[injection]]\nid = \"first\"\nhook = \"frame\"\nkind = \"HEAD\"\n\
-             [[injection]]\nid = \"second\"\nhook = \"frame\"\nkind = \"HEAD\"\n",
+            "[[injection]]\nid = \"first\"\nhook = \"render_frame_pre\"\nkind = \"HEAD\"\n\
+             [[injection]]\nid = \"second\"\nhook = \"render_frame_pre\"\nkind = \"HEAD\"\n",
         )];
         assert!(warn_conflicts(&mods).is_empty());
     }
