@@ -277,6 +277,7 @@ mod native_projectiles;
 mod native_quick_move;
 mod native_raid_refs;
 mod native_recipes;
+mod native_render_visibility;
 mod native_server;
 mod native_shaders;
 mod native_sound_refs;
@@ -2403,6 +2404,7 @@ impl PackResources {
             tables: old.tables.clone(),
             biomes,
             light: old.light.clone(),
+            hidden_states: old.hidden_states.clone(),
         })
     }
     /// The pack tables over their parts, which `load_resources` builds on
@@ -2430,6 +2432,7 @@ impl PackResources {
                 tables,
                 biomes,
                 light,
+                hidden_states: Arc::from([]),
             }),
             assets,
             render,
@@ -4459,6 +4462,7 @@ impl Game<'_> {
             }
         }
         self.tick_dropped_items(&mut round);
+        self.drain_entity_inside();
         self.native_tick_post_batch(round);
     }
     fn tick_dropped_items(&mut self, round: &mut native_ticks::TickRound) {
@@ -5336,7 +5340,7 @@ impl Game<'_> {
                     // The last answer, asked from Y `from` at a world revision:
                     // the next ticking section and its mask. It stands for a
                     // later Y up to that section's until a block changes.
-                    let mut last: Option<(u64, i32, Option<(i32, Arc<_>)>)> = None;
+                    let mut last: Option<(u64, i32, Option<(i32, std::rc::Rc<_>)>)> = None;
                     let pos = horizon_core::position::ChunkPos::new(x, z);
                     b.tick_chunk_random_masked(level, ticks, pos, |level, from| {
                         let revision = level.world.revision;
@@ -18192,6 +18196,10 @@ impl Game<'_> {
             self.screen_chars_typed(typed.as_deref());
             return;
         }
+        // The Post a mouse input owes once the screen's arms below have handled
+        // it (`ScreenEvent.MouseButtonPressed.Post` and its siblings): set where
+        // the Pre lets the input through, fired after the arms ran.
+        let mut mouse_post: Option<native_hooks::ScreenMousePost> = None;
         let result: Result<()> = (|| {
             if let WindowEvent::MouseInput { state, button, .. } = &event
                 && !self.pad_synthetic_input()
@@ -18239,6 +18247,10 @@ impl Game<'_> {
                 if canceled {
                     return Ok(());
                 }
+                mouse_post = Some(native_hooks::ScreenMousePost::Button {
+                    button,
+                    pressed: *state == ElementState::Pressed,
+                });
             }
             self.key_focus_mouse_press(&event);
             match event {
@@ -18311,8 +18323,10 @@ impl Game<'_> {
                         let b = HudBatch::new([r.config.width, r.config.height]);
                         let previous = self.cursor;
                         self.cursor = (position.x as f32 / b.scale, position.y as f32 / b.scale);
-                        if self.screen_mouse_dragged(previous) {
-                            return Ok(());
+                        match self.screen_mouse_dragged(previous) {
+                            native_hooks::ScreenMousePre::Canceled => return Ok(()),
+                            native_hooks::ScreenMousePre::Passed(post) => mouse_post = Some(post),
+                            native_hooks::ScreenMousePre::NotFired => {}
                         }
                         if self.dialog_open() {
                             self.dialog_drag();
@@ -18389,6 +18403,10 @@ impl Game<'_> {
                         if canceled {
                             return Ok(());
                         }
+                        mouse_post = Some(native_hooks::ScreenMousePost::Scroll([
+                            scaled(raw_x),
+                            scaled(raw_y),
+                        ]));
                     }
                     if self.dialog_open() {
                         self.dialog_scroll(d);
@@ -19066,6 +19084,14 @@ impl Game<'_> {
                     {
                         self.smooth_camera = !self.smooth_camera;
                     }
+                    // ScreenEvent.KeyPressed.Post / KeyReleased.Post: no screen arm
+                    // took the key, so the open screen's `keyPressed` returned
+                    // false; a cancel marks it handled and the game's own key
+                    // handling never sees it.
+                    if self.screen_key_post(key, event.state == ElementState::Pressed, event.repeat)
+                    {
+                        return Ok(());
+                    }
                     self.mapped_key_event(key, event.state == ElementState::Pressed, event.repeat)?;
                 }
                 WindowEvent::RedrawRequested => {
@@ -19321,6 +19347,11 @@ impl Game<'_> {
 
             Ok(())
         })();
+        if let Some(post) = mouse_post
+            && result.is_ok()
+        {
+            self.screen_mouse_post(post);
+        }
         // ScreenEvent.CharacterTyped.Pre: GLFW's char callback comes after its
         // key callback, so a key's characters reach the screen the key left
         // open, after the key's own effects (`KeyboardHandler.charTyped`).
@@ -20833,12 +20864,6 @@ fn gameplay_tables(
     let (facts, gameplay_projection) =
         BlockFacts::load_with_projection(root, assets.registry, &behaviour_json, parallel)
             .map_err(|e| e.to_string())?;
-    horizon_client::block_contact::set_mod_blocks(
-        facts
-            .states
-            .iter()
-            .any(|s| !s.name.starts_with("minecraft:")),
-    );
     drop(facts_step);
     progress.set(2);
     let (light, motion) = std::thread::scope(|scope| {
@@ -22326,6 +22351,9 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     }
     let _ = horizon_client::health::HURT_SERVER.set(native_hooks::incoming_damage);
     let _ = horizon_client::block_contact::HOOK.set(native_hooks::block_contact);
+    let _ = horizon_client::block_contact::ANY_INSIDE.set(mod_api::__private::any_entity_inside);
+    let _ = horizon_client::block_contact::INSIDE_LISTENS
+        .set(mod_api::__private::entity_inside_listens);
     let _ = horizon_client::health::KNOCKBACK.set(native_hooks::knockback);
     let _ = horizon_client::health::SHIELD_BLOCK.set(native_hooks::shield_block);
     let _ = horizon_client::health::DAMAGE_PRE.set(native_hooks::damage_pre);

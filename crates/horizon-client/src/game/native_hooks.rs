@@ -63,10 +63,10 @@ use horizon_world::{
 use mod_api::NativePermissionLevel;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor,
-    LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
-    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
-    NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening,
+    self, Answered, ClientReloadListeners, EffectTickChange, EntityRef, EquipmentSlot,
+    GameRuleActor, LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender,
+    NativeItemDrop, NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood,
+    NativeProgressType, NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening,
     ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
@@ -1490,6 +1490,22 @@ const MAPPINGS: [(&str, Option<KeyCode>); 9] = [
     ("key.attack", None),
     ("key.use", None),
 ];
+
+/// The Post a mouse input owes once the screen has handled it, built when
+/// its Pre let the input through (`Game::screen_mouse_post`).
+pub(super) enum ScreenMousePost {
+    Button { button: i32, pressed: bool },
+    Scroll([f64; 2]),
+    Drag { button: i32, delta: [f32; 2] },
+}
+
+/// What a drag's Pre decided (`Game::screen_mouse_dragged`).
+pub(super) enum ScreenMousePre {
+    /// No screen hook ran: no drag, a synthetic move or no screen open.
+    NotFired,
+    Canceled,
+    Passed(ScreenMousePost),
+}
 
 /// What a `ScreenEvent.CharacterTyped.Pre` leaves of `text`, given `canceled`
 /// (whether a hook cancelled character `c`): the cancelled printable
@@ -2962,6 +2978,74 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_screen_char_typed_pre(self, screen, c, modifiers, canceled);
     }
+    /// A mouse press after the open screen's arms ran (`ScreenEvent.MouseButtonPressed.Post`).
+    pub(super) fn native_screen_mouse_button_pressed_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        button: i32,
+        modifiers: u32,
+    ) {
+        mod_api::dispatch_screen_mouse_button_pressed_post(self, screen, button, modifiers);
+    }
+    /// A mouse release after the open screen's arms ran (`ScreenEvent.MouseButtonReleased.Post`).
+    pub(super) fn native_screen_mouse_button_released_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        button: i32,
+        modifiers: u32,
+    ) {
+        mod_api::dispatch_screen_mouse_button_released_post(self, screen, button, modifiers);
+    }
+    /// A drag the open screen's handlers have seen (`ScreenEvent.MouseDragged.Post`).
+    pub(super) fn native_screen_mouse_dragged_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        button: i32,
+        delta: [f32; 2],
+        modifiers: u32,
+    ) {
+        mod_api::dispatch_screen_mouse_dragged_post(self, screen, button, delta, modifiers);
+    }
+    /// A wheel turn the open screen has scrolled by (`ScreenEvent.MouseScrolled.Post`).
+    pub(super) fn native_screen_mouse_scrolled_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        scroll: [f64; 2],
+        modifiers: u32,
+    ) {
+        mod_api::dispatch_screen_mouse_scrolled_post(self, screen, scroll, modifiers);
+    }
+    /// A key press no screen took (`ScreenEvent.KeyPressed.Post`).
+    pub(super) fn native_screen_key_pressed_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        key: &str,
+        repeat: bool,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_screen_key_pressed_post(self, screen, key, repeat, modifiers, canceled);
+    }
+    /// A key release no screen took (`ScreenEvent.KeyReleased.Post`).
+    pub(super) fn native_screen_key_released_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        key: &str,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_screen_key_released_post(self, screen, key, modifiers, canceled);
+    }
+    /// A character no text box took (`ScreenEvent.CharacterTyped.Post`).
+    pub(super) fn native_screen_char_typed_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        c: char,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_screen_char_typed_post(self, screen, c, modifiers, canceled);
+    }
     /// The open screen as a native mod sees it (`NativeScreenView`): its id,
     /// the open menu's type and title, its slot count, and its panel's
     /// rectangle, with the mouse and the partial tick. `screen` is the screen
@@ -3032,28 +3116,109 @@ impl Game<'_> {
         // left down, right down, left up sends no drag while right is still held.
         self.drag_button = pressed.then_some(button);
     }
-    pub(super) fn screen_mouse_dragged(&self, previous: (f32, f32)) -> bool {
+    pub(super) fn screen_mouse_dragged(&self, previous: (f32, f32)) -> ScreenMousePre {
         if self.pad_synthetic_input() || self.cursor == previous {
-            return false;
+            return ScreenMousePre::NotFired;
         }
         let Some(button) = self
             .drag_button
             .filter(|b| self.physical_buttons.contains(b))
         else {
-            return false;
+            return ScreenMousePre::NotFired;
         };
         let Some(screen) = self.screen_view_now() else {
-            return false;
+            return ScreenMousePre::NotFired;
         };
+        let button = super::glfw_button(button);
+        let delta = [self.cursor.0 - previous.0, self.cursor.1 - previous.1];
         let mut canceled = false;
         self.native_screen_mouse_dragged_pre(
             &screen,
-            super::glfw_button(button),
-            [self.cursor.0 - previous.0, self.cursor.1 - previous.1],
+            button,
+            delta,
             super::glfw_modifiers(self.modifiers),
             &mut canceled,
         );
+        if canceled {
+            ScreenMousePre::Canceled
+        } else {
+            ScreenMousePre::Passed(ScreenMousePost::Drag { button, delta })
+        }
+    }
+    /// The Post of a mouse input whose Pre let it through, once the screen's
+    /// own handling has run. The screen is the one open then (none, and no
+    /// Post, when the input closed it). Nothing is built with no subscriber.
+    pub(super) fn screen_mouse_post(&self, post: ScreenMousePost) {
+        use mod_api::HookId;
+        let hook = match post {
+            ScreenMousePost::Button { pressed: true, .. } => HookId::ScreenMouseButtonPressedPost,
+            ScreenMousePost::Button { pressed: false, .. } => HookId::ScreenMouseButtonReleasedPost,
+            ScreenMousePost::Scroll(_) => HookId::ScreenMouseScrolledPost,
+            ScreenMousePost::Drag { .. } => HookId::ScreenMouseDraggedPost,
+        };
+        if !mod_api::__private::listened(hook) {
+            return;
+        }
+        let Some(screen) = self.screen_view_now() else {
+            return;
+        };
+        let modifiers = super::glfw_modifiers(self.modifiers);
+        match post {
+            ScreenMousePost::Button {
+                button,
+                pressed: true,
+            } => self.native_screen_mouse_button_pressed_post(&screen, button, modifiers),
+            ScreenMousePost::Button {
+                button,
+                pressed: false,
+            } => self.native_screen_mouse_button_released_post(&screen, button, modifiers),
+            ScreenMousePost::Scroll(scroll) => {
+                self.native_screen_mouse_scrolled_post(&screen, scroll, modifiers)
+            }
+            ScreenMousePost::Drag { button, delta } => {
+                self.native_screen_mouse_dragged_post(&screen, button, delta, modifiers)
+            }
+        }
+    }
+    /// Whether a Post of the key `key` over the open screen cancelled it
+    /// (`ScreenEvent.KeyPressed.Post` / `KeyReleased.Post`): asked where the
+    /// key no screen arm took reaches the game's own key handling, which a
+    /// cancel then skips. False with no subscriber, no screen of the hooks'
+    /// open, or a key with no vanilla name.
+    pub(super) fn screen_key_post(&self, key: KeyCode, pressed: bool, repeat: bool) -> bool {
+        let hook = if pressed {
+            mod_api::HookId::ScreenKeyPressedPost
+        } else {
+            mod_api::HookId::ScreenKeyReleasedPost
+        };
+        if !mod_api::__private::listened(hook) {
+            return false;
+        }
+        let (Some(name), Some(screen)) = (keybinds::key_name(key), self.screen_view_now()) else {
+            return false;
+        };
+        let modifiers = super::glfw_modifiers(self.modifiers);
+        let mut canceled = false;
+        if pressed {
+            self.native_screen_key_pressed_post(&screen, name, repeat, modifiers, &mut canceled);
+        } else {
+            self.native_screen_key_released_post(&screen, name, modifiers, &mut canceled);
+        }
         canceled
+    }
+    /// `ScreenEvent.CharacterTyped.Post` for each character of `text` that no
+    /// text box took.
+    fn screen_chars_post(&self, text: &str) {
+        if !mod_api::__private::listened(mod_api::HookId::ScreenCharTypedPost) {
+            return;
+        }
+        let Some(screen) = self.screen_view_now() else {
+            return;
+        };
+        let modifiers = super::glfw_modifiers(self.modifiers);
+        for c in text.chars() {
+            self.native_screen_char_typed_post(&screen, c, modifiers, &mut false);
+        }
     }
     /// A screen the native mods' input hooks are for is open: the window has a
     /// renderer, either the title's own (`title`, `world_select`,
@@ -3162,11 +3327,10 @@ impl Game<'_> {
             return;
         };
         // A held edit modifier makes a shortcut of the key, not text.
-        if !self.types_text() {
-            return;
-        }
         // `Err` only says no text box of the screen takes the characters.
-        let _ = self.type_chars_into_screen(&text);
+        if !self.types_text() || self.type_chars_into_screen(&text).is_err() {
+            self.screen_chars_post(&text);
+        }
     }
     /// A left or right (`right`) press at `at` (GUI pixels from the screen's
     /// top left, so outside it too) on block `block`'s screen, a mod's, over
@@ -6253,6 +6417,11 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_is_pathfindable(self, state, kind, pathfindable);
     }
+    /// Whether a mod hides `state` from the mesher (`hidden` starts false); asked once for every
+    /// state at join and on `native_refresh_render_visibility`. Client-side.
+    pub(super) fn native_block_render_visibility(&self, state: BlockStateId, hidden: &mut bool) {
+        mod_api::dispatch_block_render_visibility(self, state, hidden);
+    }
     /// `BlockBehaviour.getCloneItemStack`, asked by
     /// `ServerGamePacketListenerImpl.handlePickItemFromBlock`. `include_data`
     /// is true for a creative player picking with Ctrl. Leave `stack` unset to
@@ -7347,16 +7516,37 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_block_step_on(dimension, entity, kind, state, position);
     }
-    /// `Block.entityInside` for each mod block touched along the entity's movement.
-    /// Repeated sweep hits in one contact pass are suppressed; idle overlap still fires.
-    pub(super) fn native_block_entity_inside(
-        dimension: &str,
-        entity: i32,
-        kind: &str,
+    /// `Block.entityInside`: an entity's sweep crossed a block with a part for it (`precise`
+    /// is `Entity.checkInsideBlocks`' flag). The part gets `&mut dyn ServerHost` once the
+    /// entity's batch (mobs, projectiles, items) has ticked, not mid-sweep.
+    pub(super) fn native_entity_inside(
+        &mut self,
         state: BlockStateId,
-        position: [i32; 3],
+        pos: BlockPos,
+        entity: EntityRef,
+        precise: bool,
     ) {
-        mod_api::dispatch_block_entity_inside(dimension, entity, kind, state, position);
+        mod_api::dispatch_entity_inside(self, state, pos, entity, precise);
+    }
+    /// Deliver the contacts the batch just ticked recorded, in order. A contact is skipped
+    /// when its entity is gone (an item merged away later in the batch) or the block at
+    /// `pos` is no longer the state it touched, as vanilla never sees a stale one.
+    pub(super) fn drain_entity_inside(&mut self) {
+        for contact in horizon_client::block_contact::take_inside() {
+            let Some(entity) = u32::try_from(contact.entity)
+                .ok()
+                .and_then(|id| self.native_entity(id))
+            else {
+                continue;
+            };
+            let pos = contact.position;
+            let here = self
+                .native_level(self.dim.id())
+                .and_then(|level| self.native_level_state(level, [pos.x, pos.y, pos.z]));
+            if here == Some(contact.state) {
+                self.native_entity_inside(contact.state, pos, entity, contact.precise);
+            }
+        }
     }
     /// `Block.fallOn` for a mod block. Change calculated damage before generic fall sounds
     /// and hurt handling; zero prevents both. Creative and fall-immune entities
@@ -7672,13 +7862,6 @@ pub(super) fn block_contact(
     use horizon_client::block_contact::Event;
     match event {
         Event::StepOn(c) => Game::native_block_step_on(
-            dimension,
-            c.entity,
-            c.kind,
-            c.state,
-            [c.position.x, c.position.y, c.position.z],
-        ),
-        Event::Inside(c) => Game::native_block_entity_inside(
             dimension,
             c.entity,
             c.kind,
@@ -11802,6 +11985,92 @@ mod screen_open_tests {
                 game.options.execution_role = ExecutionRole::Client;
                 game.set_screen(Screen::Inventory);
                 assert_eq!(game.screen, Screen::Inventory);
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod entity_inside_tests {
+    use super::*;
+    use horizon_client::block_contact::{in_level, inside};
+    use mod_api::{
+        BlockPart, EntityInsideEvent, Hooks, ModEntry, Registrar, ServerHost, testing::with_mods,
+    };
+    use std::sync::{Arc, Mutex};
+
+    /// What the part on stone heard: the entity's id, the position and `precise`.
+    #[derive(Clone, Default)]
+    struct Stone(Arc<Mutex<Vec<(u32, BlockPos, bool)>>>);
+    #[mod_api::horizon_part]
+    impl BlockPart for Stone {
+        fn entity_inside(&self, _: &mut dyn ServerHost, event: &mut EntityInsideEvent) {
+            self.0
+                .lock()
+                .unwrap()
+                .push((event.entity.id(), event.pos, event.precise));
+        }
+    }
+    struct Mod(Stone);
+    #[mod_api::__subscriptions]
+    impl Hooks for Mod {
+        fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+            r.block_part("minecraft:stone", self.0.clone());
+        }
+    }
+
+    /// A contact is delivered once, in order, with its flag; one whose entity is gone
+    /// (an item merged later in the batch) or whose block changed is dropped, and a
+    /// block with no part is never recorded.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn contacts_reach_the_part_unless_stale() {
+        let heard = Stone::default();
+        let mods: mod_api::Mods =
+            vec![ModEntry::new("inside", Box::new(Mod(heard.clone())))].into();
+        mod_api::__private::install_parts(&mods).unwrap();
+        let _ =
+            horizon_client::block_contact::ANY_INSIDE.set(mod_api::__private::any_entity_inside);
+        let _ = horizon_client::block_contact::INSIDE_LISTENS
+            .set(mod_api::__private::entity_inside_listens);
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let state = |name| game.pack.assets.registry.default_state(name).unwrap();
+                let (stone, dirt) = (state("minecraft:stone"), state("minecraft:dirt"));
+                game.world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+                );
+                game.world.set(1, 64, 1, stone).unwrap();
+                game.world.set(2, 64, 1, stone).unwrap();
+                game.world.set(3, 64, 1, dirt).unwrap();
+                let level = game.native_level(game.dim.id()).unwrap();
+                let stack = || ItemStack::new("minecraft:stone", 1);
+                let kept = game
+                    .native_level_spawn_item(level, 1.5, 70.0, 1.5, stack())
+                    .unwrap();
+                let at = |x| BlockPos::new(x, 64, 1);
+                in_level(Some(game.dim.id()), || {
+                    inside(kept.id() as i32, stone, at(1), true);
+                    inside(kept.id() as i32, stone, at(2), false);
+                    // The block under a contact changed after it was noted.
+                    inside(kept.id() as i32, dirt, at(2), true);
+                    // No part on dirt: never recorded.
+                    inside(kept.id() as i32, dirt, at(3), true);
+                    // No such entity: it merged away.
+                    inside(9999, stone, at(1), true);
+                });
+                game.drain_entity_inside();
+                assert_eq!(
+                    *heard.0.lock().unwrap(),
+                    vec![(kept.id(), at(1), true), (kept.id(), at(2), false)]
+                );
+                game.drain_entity_inside();
+                assert_eq!(
+                    heard.0.lock().unwrap().len(),
+                    2,
+                    "a drain empties the queue"
+                );
             });
         });
     }

@@ -3,6 +3,7 @@
 use crate::*;
 /// `PathComputationType`: what a path is computed for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: a closed set the game matches without a wildcard
 pub enum PathComputationType {
     Land,
     Water,

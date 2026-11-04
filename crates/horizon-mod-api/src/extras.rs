@@ -3,6 +3,7 @@
 use crate::*;
 /// A screen corner for an overlay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: a closed set the game matches without a wildcard
 pub enum Corner {
     TopLeft,
     TopRight,
@@ -32,6 +33,7 @@ impl Corner {
             Corner::BottomRight => "Bottom right",
         }
     }
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn parse(s: &str, default: Corner) -> Corner {
         Self::ALL
