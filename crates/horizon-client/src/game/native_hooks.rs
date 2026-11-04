@@ -85,7 +85,7 @@ pub(crate) use mod_api::{
     NativeMinimap, NativeMod, NativeNoteInstrument, NativePanelEvent, NativePortalShape,
     NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
-use mod_api::{NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason, Recipe};
+use mod_api::{NativeDespawn, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason, Recipe};
 use std::{
     collections::HashMap,
     fs,
@@ -5934,6 +5934,19 @@ impl Game<'_> {
         result: &mut NativeSpawnCheck,
     ) {
         mod_api::dispatch_mob_spawn_position_check(self, dimension, kind, reason, pos, result);
+    }
+
+    /// `Mob.checkDespawn` is about to run for mob `entity` (NeoForge's
+    /// `MobDespawnEvent`): set `result` to force or forbid the despawn.
+    pub(super) fn native_mob_despawn(
+        &self,
+        dimension: &str,
+        kind: &str,
+        entity: u32,
+        pos: [f64; 3],
+        result: &mut NativeDespawn,
+    ) {
+        mod_api::dispatch_mob_despawn(self, dimension, kind, entity, pos, result);
     }
 
     /// The world's spawn point changed to `pos` and `angle`.

@@ -1254,4 +1254,63 @@ mod tests {
             assert_eq!(fail.1, (false, first));
         });
     }
+
+    /// Answers every `mob_despawn` event with the value in its cell.
+    struct Despawns(std::sync::Arc<std::sync::Mutex<mod_api::NativeDespawn>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Despawns {
+        fn mob_despawn(&self, _: &dyn mod_api::Host, event: &mut mod_api::MobDespawnEvent<'_>) {
+            *event.result = *self.0.lock().unwrap();
+        }
+    }
+
+    /// A zombie in peaceful is discarded by `Mob.checkDespawn`: `Default` leaves
+    /// that to vanilla, `Deny` keeps it, `Allow` discards it in normal too. The
+    /// listener's answer reaches the mob through the hook.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    fn mob_despawn_answers_override_vanilla_and_default_passes_through() {
+        use super::super::native_entity_refs::tests::with_game;
+        use mod_api::NativeDespawn::{Allow, Default as Vanilla, Deny};
+        let answer = std::sync::Arc::new(std::sync::Mutex::new(Vanilla));
+        let mods = vec![mod_api::ModEntry::new(
+            "despawns",
+            Box::new(Despawns(answer.clone())),
+        )];
+        mod_api::testing::with_mods(mods.into(), || {
+            with_game(|game| {
+                let id = game
+                    .spawn_mob("minecraft:zombie", [8.5, 64.0, 8.5], false)
+                    .unwrap();
+                let at = [8.5, 64.0, 8.5];
+                let kept_with = |game: &mut super::Game<'_>, said, peaceful: bool| {
+                    *answer.lock().unwrap() = said;
+                    let mut mob = game.mobs.iter().find(|m| m.id == id).unwrap().clone();
+                    game.native_mob_despawn(
+                        "minecraft:overworld",
+                        &mob.kind.id,
+                        id,
+                        at,
+                        &mut mob.despawn,
+                    );
+                    let mut world = game.mob_world_base(&[]);
+                    world.difficulty.effective = if peaceful { 0.0 } else { 2.0 };
+                    horizon_client::mobs::ai::despawn_check(&mut mob, &world)
+                };
+                assert!(
+                    !kept_with(game, Vanilla, true),
+                    "Default: vanilla discards it in peaceful"
+                );
+                assert!(kept_with(game, Deny, true), "Deny keeps it in peaceful");
+                assert!(
+                    !kept_with(game, Allow, false),
+                    "Allow discards it in normal"
+                );
+                assert!(
+                    kept_with(game, Vanilla, false),
+                    "Default: vanilla keeps it in normal"
+                );
+            });
+        });
+    }
 }
