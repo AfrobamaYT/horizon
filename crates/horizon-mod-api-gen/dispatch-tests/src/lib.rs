@@ -183,6 +183,8 @@ mod tests {
         #[derive(Clone, Copy)]
         pub(super) struct LivingRef;
         #[derive(Clone, Copy)]
+        pub(super) struct EntityRef;
+        #[derive(Clone, Copy)]
         pub(super) struct TicketController;
         #[derive(Clone, Copy)]
         pub(super) struct MinecartRef;

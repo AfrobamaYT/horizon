@@ -63,10 +63,10 @@ use horizon_world::{
 use mod_api::NativePermissionLevel;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor,
-    LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
-    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
-    NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening,
+    self, Answered, ClientReloadListeners, EffectTickChange, EntityRef, EquipmentSlot,
+    GameRuleActor, LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender,
+    NativeItemDrop, NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood,
+    NativeProgressType, NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening,
     ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
@@ -7352,16 +7352,37 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_block_step_on(dimension, entity, kind, state, position);
     }
-    /// `Block.entityInside` for each mod block touched along the entity's movement.
-    /// Repeated sweep hits in one contact pass are suppressed; idle overlap still fires.
-    pub(super) fn native_block_entity_inside(
-        dimension: &str,
-        entity: i32,
-        kind: &str,
+    /// `Block.entityInside`: an entity's sweep crossed a block with a part for it (`precise`
+    /// is `Entity.checkInsideBlocks`' flag). The part gets `&mut dyn ServerHost` once the
+    /// entity's batch (mobs, projectiles, items) has ticked, not mid-sweep.
+    pub(super) fn native_entity_inside(
+        &mut self,
         state: BlockStateId,
-        position: [i32; 3],
+        pos: BlockPos,
+        entity: EntityRef,
+        precise: bool,
     ) {
-        mod_api::dispatch_block_entity_inside(dimension, entity, kind, state, position);
+        mod_api::dispatch_entity_inside(self, state, pos, entity, precise);
+    }
+    /// Deliver the contacts the batch just ticked recorded, in order. A contact is skipped
+    /// when its entity is gone (an item merged away later in the batch) or the block at
+    /// `pos` is no longer the state it touched, as vanilla never sees a stale one.
+    pub(super) fn drain_entity_inside(&mut self) {
+        for contact in horizon_client::block_contact::take_inside() {
+            let Some(entity) = u32::try_from(contact.entity)
+                .ok()
+                .and_then(|id| self.native_entity(id))
+            else {
+                continue;
+            };
+            let pos = contact.position;
+            let here = self
+                .native_level(self.dim.id())
+                .and_then(|level| self.native_level_state(level, [pos.x, pos.y, pos.z]));
+            if here == Some(contact.state) {
+                self.native_entity_inside(contact.state, pos, entity, contact.precise);
+            }
+        }
     }
     /// `Block.fallOn` for a mod block. Change calculated damage before generic fall sounds
     /// and hurt handling; zero prevents both. Creative and fall-immune entities
@@ -7677,13 +7698,6 @@ pub(super) fn block_contact(
     use horizon_client::block_contact::Event;
     match event {
         Event::StepOn(c) => Game::native_block_step_on(
-            dimension,
-            c.entity,
-            c.kind,
-            c.state,
-            [c.position.x, c.position.y, c.position.z],
-        ),
-        Event::Inside(c) => Game::native_block_entity_inside(
             dimension,
             c.entity,
             c.kind,
@@ -11806,6 +11820,92 @@ mod screen_open_tests {
                 game.options.execution_role = ExecutionRole::Client;
                 game.set_screen(Screen::Inventory);
                 assert_eq!(game.screen, Screen::Inventory);
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod entity_inside_tests {
+    use super::*;
+    use horizon_client::block_contact::{in_level, inside};
+    use mod_api::{
+        BlockPart, EntityInsideEvent, Hooks, ModEntry, Registrar, ServerHost, testing::with_mods,
+    };
+    use std::sync::{Arc, Mutex};
+
+    /// What the part on stone heard: the entity's id, the position and `precise`.
+    #[derive(Clone, Default)]
+    struct Stone(Arc<Mutex<Vec<(u32, BlockPos, bool)>>>);
+    #[mod_api::horizon_part]
+    impl BlockPart for Stone {
+        fn entity_inside(&self, _: &mut dyn ServerHost, event: &mut EntityInsideEvent) {
+            self.0
+                .lock()
+                .unwrap()
+                .push((event.entity.id(), event.pos, event.precise));
+        }
+    }
+    struct Mod(Stone);
+    #[mod_api::__subscriptions]
+    impl Hooks for Mod {
+        fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+            r.block_part("minecraft:stone", self.0.clone());
+        }
+    }
+
+    /// A contact is delivered once, in order, with its flag; one whose entity is gone
+    /// (an item merged later in the batch) or whose block changed is dropped, and a
+    /// block with no part is never recorded.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn contacts_reach_the_part_unless_stale() {
+        let heard = Stone::default();
+        let mods: mod_api::Mods =
+            vec![ModEntry::new("inside", Box::new(Mod(heard.clone())))].into();
+        mod_api::__private::install_parts(&mods).unwrap();
+        let _ =
+            horizon_client::block_contact::ANY_INSIDE.set(mod_api::__private::any_entity_inside);
+        let _ = horizon_client::block_contact::INSIDE_LISTENS
+            .set(mod_api::__private::entity_inside_listens);
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let state = |name| game.pack.assets.registry.default_state(name).unwrap();
+                let (stone, dirt) = (state("minecraft:stone"), state("minecraft:dirt"));
+                game.world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+                );
+                game.world.set(1, 64, 1, stone).unwrap();
+                game.world.set(2, 64, 1, stone).unwrap();
+                game.world.set(3, 64, 1, dirt).unwrap();
+                let level = game.native_level(game.dim.id()).unwrap();
+                let stack = || ItemStack::new("minecraft:stone", 1);
+                let kept = game
+                    .native_level_spawn_item(level, 1.5, 70.0, 1.5, stack())
+                    .unwrap();
+                let at = |x| BlockPos::new(x, 64, 1);
+                in_level(Some(game.dim.id()), || {
+                    inside(kept.id() as i32, stone, at(1), true);
+                    inside(kept.id() as i32, stone, at(2), false);
+                    // The block under a contact changed after it was noted.
+                    inside(kept.id() as i32, dirt, at(2), true);
+                    // No part on dirt: never recorded.
+                    inside(kept.id() as i32, dirt, at(3), true);
+                    // No such entity: it merged away.
+                    inside(9999, stone, at(1), true);
+                });
+                game.drain_entity_inside();
+                assert_eq!(
+                    *heard.0.lock().unwrap(),
+                    vec![(kept.id(), at(1), true), (kept.id(), at(2), false)]
+                );
+                game.drain_entity_inside();
+                assert_eq!(
+                    heard.0.lock().unwrap().len(),
+                    2,
+                    "a drain empties the queue"
+                );
             });
         });
     }
