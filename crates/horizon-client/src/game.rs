@@ -2898,7 +2898,7 @@ struct Game<'a> {
     audio: Audio,
     /// The side, registries and mod settings of this game's resource generation, which
     /// its menus lend to the hooks they fire inside a loop; rebuilt by `refresh_loop_context`.
-    loop_context: horizon_world::native_load_context::LoopContext,
+    loop_context: Arc<horizon_world::native_load_context::LoopContext>,
     music: horizon_client::music::MusicManager,
     /// The tracks native mods play over the music (`native_music_layers`).
     music_layers: horizon_client::music::MusicLayers,
@@ -19942,7 +19942,7 @@ impl<'a> Game<'a> {
             player_autosaves: Default::default(),
             session_lock: None,
             audio,
-            loop_context: res.core.item_data.context().loop_context(loop_side, []),
+            loop_context: Arc::new(res.core.item_data.context().loop_context(loop_side, [])),
             music: {
                 // The manager starts with the saved option (MusicManager's constructor).
                 let mut music = horizon_client::music::MusicManager::default();
