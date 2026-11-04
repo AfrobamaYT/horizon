@@ -1,5 +1,20 @@
 # Hook notes
 
+## Decoded client packets
+
+`Hooks::client_packet` receives `&mut dyn ClientHost` and a read-only
+`ClientPacketEvent` before the window handles a decoded server play packet.
+The read-only `event.packet` is a `mod_api::ClientPacket`: `id` identifies the
+packet type (for example, `minecraft:custom_payload`); `custom_payload` contains
+the channel and raw bytes for a custom payload, or `None` otherwise. An id
+outside the protocol's packet table is reported as `horizon:unknown`.
+Other decoded fields are not exposed. This one plain-data contract works
+for native and wasm mods, with a generated codec.
+
+The hook cannot cancel or replace a packet. It also observes chunk packets
+handled by the batching path, once each. Configuration packets and the network
+thread's own handling (including keep-alives and resource pack messages) do not fire it.
+
 ## Conditional item model properties
 
 A client mod supplies its own namespaced `minecraft:condition` property by implementing
@@ -2213,7 +2228,8 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
   `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
-  slot as `LivingEntity.setItemSlot` does (None or air empties it). Mobs store all eight slots (`Mob::equipment_stacks` reads them as a `horizon_items::equipment::Equipment`); players (the host and guests) hold an `Equipment` for body and saddle beside their own hand and armor fields, and save through its `read` / `write`. A player's
+  slot as `LivingEntity.setItemSlot` does (None or air empties it), and `set_hand_item(host, hand, stack)` puts one in
+  a hand as `LivingEntity.setItemInHand` does (the main hand's or the off hand's slot, written as `set_equipment` writes it). Mobs store all eight slots (`Mob::equipment_stacks` reads them as a `horizon_items::equipment::Equipment`); players (the host and guests) hold an `Equipment` for body and saddle beside their own hand and armor fields, and save through its `read` / `write`. A player's
   `body` and `saddle` are kept and saved in the `equipment` compound as vanilla does, and dropped on death, but nothing
   renders or sends them. Armor stands and the dragon hold all eight slots in the same `Equipment`, saved in `equipment`
   (omitted when empty). A stand keeps a body or saddle a mod writes (`setItemSlot` stores it; `ArmorStand.canUseSlot`

@@ -491,6 +491,12 @@ fn has_call(block: &syn::Block, expected: &str) -> bool {
         found: bool,
     }
     impl<'ast> Visit<'ast> for Calls<'_> {
+        fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+            if call.method == self.expected {
+                self.found = true;
+            }
+            syn::visit::visit_expr_method_call(self, call);
+        }
         fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
             if let syn::Expr::Path(path) = &*call.func
                 && path
@@ -724,7 +730,11 @@ fn free_function_source(target: &str) -> Option<(&'static str, String)> {
 /// only the placeholder a new hook starts with, `let _ = (every, parameter);`
 /// (`let _ = parameter;` for one). Any other body is an error, left alone.
 fn needs_fill(method: &syn::ItemFn, call: &str, in_game: bool) -> Result<bool, String> {
-    if has_call(&method.block, call) {
+    if has_call(&method.block, call)
+        || call
+            .strip_prefix("dispatch_")
+            .is_some_and(|name| has_call(&method.block, &format!("fire_{name}")))
+    {
         return Ok(false);
     }
     let params: Vec<String> = method
@@ -846,6 +856,7 @@ struct Sources {
     host: String,
     implementation: String,
     render: String,
+    fire: String,
 }
 
 /// Parse and validate the catalog and hook/helper signatures.
@@ -867,6 +878,7 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
         render_dispatch,
         part_traits,
         fills,
+        fire,
         hook_ids,
         hook_constants,
         hook_count,
@@ -928,6 +940,7 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
         host,
         implementation,
         render: render_code,
+        fire,
     })
 }
 
@@ -1628,7 +1641,11 @@ mod tests {
         super::fill_hooks(&root).unwrap();
         // The generator writes LF; a Windows checkout (core.autocrlf) has CRLF.
         let lf = |s: &str| s.replace("\r\n", "\n");
-        assert_eq!(lf(&std::fs::read_to_string(&hooks).unwrap()), lf(&shipped));
+        let filled = shipped.replace(
+            call,
+            "self.fire_item_damaged(player, name, item, amount, cancel);",
+        );
+        assert_eq!(lf(&std::fs::read_to_string(&hooks).unwrap()), lf(&filled));
         assert_eq!(
             super::sources(&root, super::FillMode::Require)
                 .unwrap()
@@ -1730,5 +1747,12 @@ mod tests {
             syn::parse_quote! { fn native_zoom(&self) { mod_api::dispatch_zoom(); } };
         assert!(!super::has_call(&missing.block, "dispatch_zoom"));
         assert!(super::has_call(&present.block, "dispatch_zoom"));
+        let generated: syn::ItemFn = syn::parse_quote! {
+            fn native_zoom(&self) { self.fire_zoom(); }
+        };
+        assert_eq!(
+            super::needs_fill(&generated, "dispatch_zoom", true),
+            Ok(false)
+        );
     }
 }

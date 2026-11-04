@@ -7,6 +7,7 @@ pub(super) struct HookSources {
     pub render_dispatch: String,
     pub part_traits: BTreeMap<&'static str, String>,
     pub fills: Vec<Fill>,
+    pub fire: String,
     pub hook_ids: String,
     pub hook_constants: String,
     pub hook_count: usize,
@@ -68,6 +69,7 @@ pub(super) fn emit(
     let mut render_dispatch = String::new();
     let mut part_traits: BTreeMap<&str, String> = BTreeMap::new();
     let mut fills = Vec::new();
+    let mut fire = String::new();
     let mut calls = String::new();
     for hook in hooks {
         let name = hook.name.as_str();
@@ -404,24 +406,58 @@ pub(super) fn emit(
             Contract::Replace => "None",
             _ => "",
         };
-        if fill {
-            // The dispatch's parameters in order: the host, the arguments,
-            // and the output last.
-            let host = host.as_ref().map(|(_, param)| param.call.to_owned());
+        // Reuse the exact host and drawing conversions for generated game-side calls.
+        if in_game {
             let passed = host
+                .as_ref()
+                .map(|(_, param)| {
+                    if param.call == "&*self" && receiver_mut == Some(false) {
+                        "self".to_owned()
+                    } else {
+                        param.call.to_owned()
+                    }
+                })
                 .into_iter()
-                .chain(args.iter().chain(output.as_ref()).map(|(n, _)| {
-                    surface_calls
-                        .get(n.as_str())
-                        .cloned()
-                        .unwrap_or_else(|| n.clone())
-                }))
+                .chain(if declared.is_empty() {
+                    args.iter()
+                        .chain(output.as_ref())
+                        .map(|(n, _)| {
+                            surface_calls
+                                .get(n.as_str())
+                                .cloned()
+                                .unwrap_or_else(|| n.clone())
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    vec!["call".to_owned()]
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
-            fills.push(Fill {
-                native: native.clone(),
-                call: format!("mod_api::{call}({passed});"),
-            });
+            let mut signature = sig.clone();
+            signature.ident = syn::Ident::new(&format!("fire_{name}"), signature.ident.span());
+            let receiver = if target.contains("::GameLevel<") {
+                "GameLevel"
+            } else if target.contains("::HitLevel<") {
+                "HitLevel"
+            } else {
+                "Game"
+            };
+            fire.push_str(&format!("impl {receiver}<'_> {{ #[allow(dead_code)] #[inline] pub(super) {signature} {{ mod_api::{call}({passed}); }} }}\n", signature = signature.to_token_stream()));
+            if fill {
+                let passed = sig
+                    .inputs
+                    .iter()
+                    .filter_map(|arg| match arg {
+                        FnArg::Typed(arg) => Some(arg.pat.to_token_stream().to_string()),
+                        FnArg::Receiver(_) => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                fills.push(Fill {
+                    native: native.clone(),
+                    call: format!("self.fire_{name}({passed});"),
+                });
+            }
         }
         let invoke = call_args.join(", ");
         let trait_params = trait_params.join(", ");
@@ -566,6 +602,7 @@ pub(super) fn emit(
         render_dispatch,
         part_traits,
         fills,
+        fire,
         hook_ids,
         hook_constants,
         hook_count,
