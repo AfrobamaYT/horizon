@@ -167,6 +167,9 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
         ender_entity_teleport: |entity, kind, from, target, cancel| {
             mod_api::dispatch_ender_entity_teleport(entity, kind, from, target, cancel);
         },
+        fluid_flow: |fluid, pos, flow| {
+            mod_api::dispatch_fluid_flow(fluid, pos, flow);
+        },
     }) {
         log::warn!("Native client hooks already installed; keeping the first callbacks");
     }

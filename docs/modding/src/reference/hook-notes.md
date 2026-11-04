@@ -2730,3 +2730,7 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 ## Player edge backoff
 
 - **`native_player_stays_on_ground_surface(entity, staying)`**: edit whether the player counts as staying on the ground surface (`Player.isStayingOnGroundSurface`, vanilla: the shift key is down) where `maybeBackOffFromEdge` asks, so a mod can make the player hold to an edge without crouching, or walk off one while crouching. It fires on both sides and on the client's replayed ticks, so a mod registers on both and keeps the listener a pure function of its inputs. With no listener the cost is one `listened` branch per movement. Beyond NeoForge (no counterpart); Diverges from upstream: new hook. Mobs never back off an edge, so there is no mob call site.
+
+## Fluid flow
+
+- **`native_fluid_flow(fluid, pos, flow)`**: edit the current (`FlowingFluid.getFlow`) of the fluid block at `pos` as it pushes an entity: the player, mobs, dropped items, experience orbs, armor stands and arrows all read it through the one shared helper. It runs for each fluid block the entity touches in a tick, before the vanilla scale for shallow fluid, so keep the listener short. The renderer's own flow vector (a fluid texture's rotation) is not changed. It fires on both sides and on the client's replayed ticks, so a mod registers on both and keeps the listener a pure function of its inputs. With no listener the cost is one `listened` branch per fluid block. Beyond NeoForge (no counterpart); Diverges from upstream: new hook.

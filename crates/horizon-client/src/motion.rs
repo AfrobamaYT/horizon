@@ -84,6 +84,26 @@ pub fn native_player_stays_on_ground_surface(entity: u32, staying: &mut bool) {
     crate::native_client_hooks::player_stays_on_ground_surface(entity, staying);
 }
 
+/// The current a fluid block pushes with (`FlowingFluid.getFlow`) is about to push an entity
+/// (beyond NeoForge: there is no counterpart). Mods may change it. Fires on replayed ticks too, so a
+/// listener must be a pure function of its inputs.
+#[inline(never)]
+pub fn native_fluid_flow(fluid: &str, pos: BlockPos, flow: &mut [f64; 3]) {
+    crate::native_client_hooks::fluid_flow(fluid, pos, flow);
+}
+
+/// `FlowingFluid.getFlow` as it pushes an entity: the vanilla vector, then `fluid_flow`.
+pub(crate) fn pushing_flow<W: horizon_world::fluid_flow::FluidFlowWorld>(
+    world: &mut W,
+    state: horizon_world::fluid::FluidState,
+    pos: BlockPos,
+) -> std::result::Result<Vec3, W::Error> {
+    let flow = horizon_world::fluid_flow::flow_at(world, state, pos)?;
+    let mut edited = [flow.x, flow.y, flow.z];
+    native_fluid_flow(state.kind().name(), pos, &mut edited);
+    Ok(Vec3::new(edited[0], edited[1], edited[2]))
+}
+
 pub(crate) mod environment;
 mod fluids;
 pub use fluids::{

@@ -4336,6 +4336,7 @@ pub(crate) mod tests {
                 },
                 player_stays_on_ground_surface: |_, _| {},
                 ender_entity_teleport: |_, _, _, _, _| {},
+                fluid_flow: |_, _, _| {},
             });
         assert!(installed);
         let kind = Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {

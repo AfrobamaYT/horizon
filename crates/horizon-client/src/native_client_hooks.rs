@@ -1,5 +1,6 @@
 //! Callbacks into the executable for native trait mods' client-library hooks.
 use crate::items::ItemStack;
+use horizon_core::position::BlockPos;
 use horizon_world::native_load_context::LoopContext;
 use std::sync::OnceLock;
 
@@ -21,6 +22,7 @@ pub struct NativeClientHooks {
     pub living_flying_speed: fn(&LoopContext, u32, &str, &mut f32),
     pub player_stays_on_ground_surface: fn(u32, &mut bool),
     pub ender_entity_teleport: fn(u32, &str, [f64; 3], &mut [f64; 3], &mut bool),
+    pub fluid_flow: fn(&str, BlockPos, &mut [f64; 3]),
 }
 
 static HOOKS: OnceLock<NativeClientHooks> = OnceLock::new();
@@ -179,5 +181,11 @@ pub(crate) fn ender_entity_teleport(
 ) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.ender_entity_teleport)(entity, kind, from, target, cancel);
+    }
+}
+
+pub(crate) fn fluid_flow(fluid: &str, pos: BlockPos, flow: &mut [f64; 3]) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.fluid_flow)(fluid, pos, flow);
     }
 }
