@@ -534,11 +534,12 @@ mod tests {
             m.on_ground = true;
             let mut started = false;
             with_test_world(&seen, |w, _| {
-                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
+                let level = &mut test_level.level();
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w,
-                    lr: &mut lr,
+                    level,
                     events: &mut events,
                 };
                 started = (0..64).any(|_| RandomSitting.can_use(&mut m, &mut cx));

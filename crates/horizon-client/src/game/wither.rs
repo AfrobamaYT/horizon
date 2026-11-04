@@ -210,7 +210,8 @@ impl Game<'_> {
                         false
                     }
                     Some(m) => {
-                        let hit = m.damage(amount, source);
+                        let hit =
+                            m.damage(crate::game::entity::damage_level_of!(self), amount, source);
                         if hit && m.alive() && m.species() != Species::Wither && wither_ticks > 0 {
                             m.add_effect("minecraft:wither", wither_ticks, 1);
                         }

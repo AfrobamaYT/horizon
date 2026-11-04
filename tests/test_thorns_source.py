@@ -27,6 +27,10 @@ mod horizon_client { pub mod health {
     CONTEXT
 } }
 mod mod_api { pub fn mods() -> &'static [()] { &[()] } }
+mod crate_game { pub mod entity {
+    macro_rules! damage_level_of { ($game:expr) => { &mut () } }
+    pub(crate) use damage_level_of;
+} }
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Who { Player, Mob(u32) }
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,12 +47,12 @@ thread_local! {
 }
 impl Mob {
     fn alive(&self) -> bool { true }
-    fn damage(&mut self, amount: f32, source: Damage) {
+    fn damage(&mut self, _: &mut (), amount: f32, source: Damage) {
         use horizon_client::health::{knockback_attacker, knockback_held};
         HITS.with_borrow_mut(|hits| hits.push((amount, source, knockback_attacker(), knockback_held())));
     }
     fn hurt(&mut self, amount: f32, _: Option<[f64; 3]>, _: &mut ()) {
-        self.damage(amount, Damage { kind: DamageKind::Generic, attacker: None, from: None });
+        self.damage(&mut (), amount, Damage { kind: DamageKind::Generic, attacker: None, from: None });
     }
 }
 struct Audio;
@@ -90,7 +94,7 @@ fn a_nested_thorns_hit_uses_the_enchanted_armors_owner() {
             ("THORNS", effects, "thorns"),
         ]:
             fixture = fixture.replace(placeholder, method(source.replace("pub(super) fn", "fn"), name))
-        fixture = fixture.replace("CONTEXT", context)
+        fixture = fixture.replace("CONTEXT", context).replace("crate::game::entity::", "crate::crate_game::entity::")
         target = ROOT / "target"
         target.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=target) as folder:

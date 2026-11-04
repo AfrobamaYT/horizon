@@ -8,6 +8,7 @@ use super::{
     goals::{Cx, Goal, LookAtPlayer, MOVE, Panic, RandomLookAround, Stroll, goal_clone},
     nav::NavKind,
 };
+use crate::health::DamageLevel;
 use crate::items::ItemStack;
 use crate::sculk::{self, Context, Info};
 use horizon_core::geometry::trig::Mth;
@@ -357,9 +358,15 @@ pub fn tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
 /// `Allay.travel`: `travelFlying(input, getSpeed())` — the airborne speed is
 /// the one the move control set this tick, and no gravity applies, so an
 /// allay never falls under its own travel.
-pub fn travel(m: &mut Mob, w: &MobWorld, input: Vec3, events: &mut Vec<MobEvent>) -> bool {
+pub fn travel(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    input: Vec3,
+    events: &mut Vec<MobEvent>,
+) -> bool {
     let speed = m.ai.speed;
-    m.travel_flying_speeds(w, input, events, 0.02, 0.02, speed);
+    m.travel_flying_speeds(w, level, input, events, 0.02, 0.02, speed);
     true
 }
 /// `Allay.aiStep` / `tick`: healing, cooldowns, the hold and spin clocks.

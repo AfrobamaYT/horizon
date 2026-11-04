@@ -733,7 +733,11 @@ impl Game<'_> {
                         .map(|p| [p.position.x, p.position.y, p.position.z])
                         .unwrap_or_default();
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                        m.damage(amount, horizon_client::mobs::Damage::player(at));
+                        m.damage(
+                            crate::game::entity::damage_level_of!(self),
+                            amount,
+                            horizon_client::mobs::Damage::player(at),
+                        );
                     }
                     self.remember_mob_player_credit(id);
                 }

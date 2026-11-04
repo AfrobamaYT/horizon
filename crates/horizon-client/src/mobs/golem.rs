@@ -113,10 +113,10 @@ fn back_to_village_position(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]> {
 /// a village section (7 in 10 the villager first), and anywhere if neither
 /// is found. The picks draw from the level's random.
 fn village_stroll_position(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]> {
-    if cx.lr.next_float() < 0.3 {
+    if cx.level.random().next_float() < 0.3 {
         return m.land_random_pos(cx.w, 10, 7);
     }
-    let target = if cx.lr.next_float() < 0.7 {
+    let target = if cx.level.random().next_float() < 0.7 {
         towards_villager_who_wants_golem(m, cx).or_else(|| towards_poi(m, cx))
     } else {
         towards_poi(m, cx).or_else(|| towards_villager_who_wants_golem(m, cx))
@@ -141,7 +141,11 @@ fn towards_villager_who_wants_golem(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]
     if villagers.is_empty() {
         return None;
     }
-    let at = villagers[cx.lr.next_int_bound(villagers.len() as i32).unwrap_or(0) as usize];
+    let at = villagers[cx
+        .level
+        .random()
+        .next_int_bound(villagers.len() as i32)
+        .unwrap_or(0) as usize];
     m.land_random_pos_towards(cx.w, 10, 7, [at.x, at.y, at.z])
 }
 /// `GolemRandomStrollInVillageGoal.getPositionTowardsPoi`: a taken point of
@@ -164,7 +168,11 @@ fn towards_poi(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]> {
     if sections.is_empty() {
         return None;
     }
-    let s = sections[cx.lr.next_int_bound(sections.len() as i32).unwrap_or(0) as usize];
+    let s = sections[cx
+        .level
+        .random()
+        .next_int_bound(sections.len() as i32)
+        .unwrap_or(0) as usize];
     let taken = others_tickets(m, cx.w);
     let pois = occupied_pois_in_range(
         cx.w,
@@ -175,7 +183,11 @@ fn towards_poi(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]> {
     if pois.is_empty() {
         return None;
     }
-    let p = pois[cx.lr.next_int_bound(pois.len() as i32).unwrap_or(0) as usize];
+    let p = pois[cx
+        .level
+        .random()
+        .next_int_bound(pois.len() as i32)
+        .unwrap_or(0) as usize];
     m.land_random_pos_towards(
         cx.w,
         10,
@@ -603,10 +615,11 @@ mod tests {
                     wanted: [0.0; 3],
                 };
                 let mut events = Vec::new();
-                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
+                let level = &mut test_level.level();
                 let mut cx = Cx {
                     w: &w,
-                    lr: &mut lr,
+                    level,
                     events: &mut events,
                 };
                 if goal.can_use(&mut m, &mut cx) {
@@ -645,10 +658,11 @@ mod tests {
             let mut golem = mob(1, Species::IronGolem, Vec3::new(0.5, 64.0, 0.5));
             let mut goal = HurtByTarget::new();
             let mut events = Vec::new();
-            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            let mut test_level = crate::health::TestLevel::new(0);
+            let level = &mut test_level.level();
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level,
                 events: &mut events,
             };
 
@@ -675,10 +689,11 @@ mod tests {
             let mut golem = mob(1, Species::IronGolem, Vec3::new(0.5, 64.0, 0.5));
             golem.extra.anger = 100;
             let mut events = Vec::new();
-            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            let mut test_level = crate::health::TestLevel::new(0);
+            let level = &mut test_level.level();
             let mut cx = Cx {
                 w: &w,
-                lr: &mut lr,
+                level,
                 events: &mut events,
             };
             let mut goal = NearestTarget::player(true)
@@ -700,12 +715,13 @@ mod created_golem_tests {
     /// The target `m`'s target goals pick over `ticks` ticks in `w`.
     fn target(m: &mut Mob, w: &MobWorld<'_>, ticks: u32) -> Option<Who> {
         let mut events = Vec::new();
-        let mut lr = horizon_core::random::LegacyRandom::new(0);
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut goals = std::mem::take(&mut m.ai.targets);
         {
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level,
                 events: &mut events,
             };
             for _ in 0..ticks {
@@ -790,10 +806,10 @@ mod crack_sound_tests {
     }
     /// One hit of `amount` past the golem's hurt frames: how often it played
     /// `entity.iron_golem.damage`.
-    fn cracks(m: &mut Mob, amount: f32) -> usize {
+    fn cracks(level: &mut crate::health::DamageLevel<'_>, m: &mut Mob, amount: f32) -> usize {
         m.outbox.clear();
         m.invulnerable = 0;
-        assert!(m.damage(amount, Damage::player([0.0, 0.0, 1.0])));
+        assert!(m.damage(level, amount, Damage::player([0.0, 0.0, 1.0])));
         m.outbox
             .iter()
             .filter(|e| matches!(e, MobEvent::Sound("entity.iron_golem.damage", ..)))
@@ -805,11 +821,21 @@ mod crack_sound_tests {
     /// `entity.iron_golem.damage` once, and hits inside one level play none.
     #[test]
     fn a_crack_is_heard_once_at_the_threshold() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = golem();
-        assert_eq!(cracks(&mut m, 30.0), 1, "100 to 70 crosses 0.75");
-        assert_eq!(cracks(&mut m, 10.0), 0, "70 to 60 stays at the same crack");
-        assert_eq!(cracks(&mut m, 20.0), 1, "60 to 40 crosses 0.5");
-        assert_eq!(cracks(&mut m, 10.0), 0, "40 to 30 stays at the same crack");
-        assert_eq!(cracks(&mut m, 10.0), 1, "30 to 20 crosses 0.25");
+        assert_eq!(cracks(level, &mut m, 30.0), 1, "100 to 70 crosses 0.75");
+        assert_eq!(
+            cracks(level, &mut m, 10.0),
+            0,
+            "70 to 60 stays at the same crack"
+        );
+        assert_eq!(cracks(level, &mut m, 20.0), 1, "60 to 40 crosses 0.5");
+        assert_eq!(
+            cracks(level, &mut m, 10.0),
+            0,
+            "40 to 30 stays at the same crack"
+        );
+        assert_eq!(cracks(level, &mut m, 10.0), 1, "30 to 20 crosses 0.25");
     }
 }

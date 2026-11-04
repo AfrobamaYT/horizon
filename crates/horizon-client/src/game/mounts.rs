@@ -706,7 +706,12 @@ impl Game<'_> {
             && let Some(r) = self.mobs.iter_mut().find(|m| m.id == rider)
         {
             let mut events = Vec::new();
-            r.cause_fall_damage_from(distance, modifier, &mut events);
+            r.cause_fall_damage_from(
+                crate::game::entity::damage_level_of!(self),
+                distance,
+                modifier,
+                &mut events,
+            );
             let _ = self.handle_mob_events(events);
         }
     }
