@@ -4235,9 +4235,10 @@ pub(crate) mod tests {
                 living_jump_power: |_, _, _| {},
                 living_speed: |_, _, _| {},
                 living_flying_speed: |_, _, _| {},
+                player_stays_on_ground_surface: |_, _| {},
                 ender_entity_teleport: |_, _, _, _, _| {},
             });
-        assert!(installed.is_ok());
+        assert!(installed);
         let kind = Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {
             id: "test:rules",
             slots: 1,
