@@ -13,13 +13,21 @@ pub enum MenuSlotBacking {
     Player(usize),
     /// Slot `slot` of the block entity at `pos`, through its [`ITEMS`](super::ITEMS) handler.
     BlockEntity {
+        /// The level.
         level: LevelRef,
+        /// The pos.
         pos: [i32; 3],
+        /// The slot.
         slot: usize,
     },
     /// Slot `slot` of `entity`'s [`ENTITY_ITEMS`](super::ENTITY_ITEMS): a chest minecart's, a
     /// chest boat's or a chested mount's.
-    Entity { entity: EntityRef, slot: usize },
+    Entity {
+        /// The entity.
+        entity: EntityRef,
+        /// The slot.
+        slot: usize,
+    },
     /// Slot `.0` of the player's ender chest.
     Ender(usize),
     /// Slot `.0` of the player's inventory crafting grid, 0..4.

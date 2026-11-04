@@ -6,7 +6,9 @@ use std::sync::OnceLock;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PackageKind {
+    /// Code.
     Code,
+    /// Content.
     Content,
 }
 

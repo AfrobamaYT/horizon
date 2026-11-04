@@ -28,10 +28,15 @@ impl AsRef<str> for BlockEntityTypeKey {
 #[non_exhaustive]
 pub enum BlockEntityPartError {
     /// Vanilla entities do not expose a native Part's payload.
-    VanillaType { kind: BlockEntityTypeKey },
+    VanillaType {
+        /// The kind.
+        kind: BlockEntityTypeKey,
+    },
     /// This Part type is already attached to the entity type.
     Duplicate {
+        /// The kind.
         kind: BlockEntityTypeKey,
+        /// The part.
         part: &'static str,
     },
 }

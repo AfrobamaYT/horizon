@@ -3,6 +3,7 @@
 //! Trait mods are process-wide, like mixin module statics.
 //! Hooks use `&self + Send + Sync` for shared and reentrant calls; see `docs/modding/src/how-to/native-mods.md`.
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
+#![deny(missing_docs)]
 extern crate self as mod_api;
 #[doc(hidden)]
 pub mod biome;
@@ -173,6 +174,7 @@ impl<'a> ModBlockEntityView<'a> {
     pub(crate) fn new(entity: &'a mut ModBlockEntity) -> Self {
         Self { entity }
     }
+    /// Id.
     pub fn id(&self) -> &str {
         self.entity.id()
     }
@@ -194,8 +196,11 @@ use std::time::Duration;
 /// What a key did in an `input_key` event (GLFW's `action`: release 0, press 1, repeat 2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyAction {
+    /// Release.
     Release,
+    /// Press.
     Press,
+    /// Repeat.
     Repeat,
 }
 
@@ -205,27 +210,40 @@ pub enum KeyAction {
 /// game casts it to a whole number as vanilla does).
 #[derive(Clone, Debug)]
 pub struct NativeArmorHurt {
+    /// The slot.
     pub slot: EquipmentSlot,
+    /// The stack.
     pub stack: ItemStack,
+    /// The damage.
     pub damage: f32,
+    /// The new damage.
     pub new_damage: f32,
 }
 
 /// Camera values from the most recently extracted world frame.
 #[derive(Clone, Debug)]
 pub struct NativeCamera {
+    /// The position.
     pub position: [f64; 3],
+    /// The eye height.
     pub eye_height: f32,
+    /// The partial tick.
     pub partial_tick: f32,
+    /// The yaw.
     pub yaw: f32,
+    /// The pitch.
     pub pitch: f32,
+    /// The fov degrees.
     pub fov_degrees: f32,
+    /// The near.
     pub near: f32,
+    /// The far.
     pub far: f32,
     /// Camera-relative view matrix in column-major order.
     pub view: [f32; 16],
     /// Reversed-Z projection matrix in column-major order.
     pub projection: [f32; 16],
+    /// The dimension.
     pub dimension: String,
 }
 
@@ -234,18 +252,29 @@ pub struct NativeCamera {
 /// Translation is in blocks and rotation is in degrees (pitch, yaw, roll).
 /// The renderer applies the transform before the ordinary hand and item poses.
 pub struct NativeHandRender<'a> {
+    /// The player.
     pub player: u128,
+    /// The player entity id.
     pub player_entity_id: i32,
+    /// The hand.
     pub hand: Hand,
+    /// The stack.
     pub stack: Option<&'a ItemStack>,
+    /// The partial.
     pub partial: f32,
+    /// The interpolated pitch.
     pub interpolated_pitch: f32,
+    /// The swing.
     pub swing: f32,
+    /// The equip.
     pub equip: f32,
     /// Vanilla packed light at the eyes (`LightCoordsUtil.pack`: block << 4 | sky << 20).
     pub packed_light: u32,
+    /// The translation.
     pub translation: [f32; 3],
+    /// The rotation.
     pub rotation: [f32; 3],
+    /// The scale.
     pub scale: f32,
 }
 
@@ -256,7 +285,9 @@ pub type NativeDispensed = (Option<ItemStack>, i32);
 /// Context for a player tuning a note block.
 #[derive(Clone, Copy, Debug)]
 pub struct NativeNoteBlockChange {
+    /// The dimension.
     pub dimension: LevelDimension,
+    /// The pos.
     pub pos: BlockPos,
     /// The block's instrument before tuning.
     pub instrument: NativeNoteInstrument,
@@ -307,6 +338,7 @@ pub struct NativeLootDrops<'a> {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct NativeItemDrop {
+    /// The stack.
     pub stack: ItemStack,
     /// Where the item entity appears.
     pub position: [f64; 3],
@@ -381,32 +413,59 @@ impl NativeStatType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeNoteInstrument {
+    /// Harp.
     Harp,
+    /// Basedrum.
     Basedrum,
+    /// Snare.
     Snare,
+    /// Hat.
     Hat,
+    /// Bass.
     Bass,
+    /// Flute.
     Flute,
+    /// Bell.
     Bell,
+    /// Guitar.
     Guitar,
+    /// Chime.
     Chime,
+    /// Xylophone.
     Xylophone,
+    /// Iron xylophone.
     IronXylophone,
+    /// Cow bell.
     CowBell,
+    /// Didgeridoo.
     Didgeridoo,
+    /// Bit.
     Bit,
+    /// Banjo.
     Banjo,
+    /// Pling.
     Pling,
+    /// Trumpet.
     Trumpet,
+    /// Trumpet exposed.
     TrumpetExposed,
+    /// Trumpet oxidized.
     TrumpetOxidized,
+    /// Trumpet weathered.
     TrumpetWeathered,
+    /// Zombie.
     Zombie,
+    /// Skeleton.
     Skeleton,
+    /// Creeper.
     Creeper,
+    /// Dragon.
     Dragon,
+    /// Wither skeleton.
     WitherSkeleton,
+    /// Piglin.
     Piglin,
+    /// Custom head.
     CustomHead,
 }
 
@@ -459,7 +518,9 @@ pub struct NativePortalShape {
     pub x_axis: bool,
     /// Its bottom-left inside block.
     pub bottom_left: [i32; 3],
+    /// The width.
     pub width: i32,
+    /// The height.
     pub height: i32,
 }
 
@@ -470,10 +531,13 @@ pub struct NativePortalShape {
 pub struct NativeExplosionStart<'a> {
     /// The level it happens in (`minecraft:overworld`).
     pub dimension: &'a str,
+    /// The center.
     pub center: [f64; 3],
+    /// The radius.
     pub radius: f32,
     /// It sets fires (`createFire`).
     pub fire: bool,
+    /// The interaction.
     pub interaction: NativeBlockInteraction,
     /// The damage type of its damage source (`minecraft:explosion`,
     /// `minecraft:player_explosion`, `minecraft:bad_respawn_point`).
@@ -491,8 +555,11 @@ pub struct NativeExplosionStart<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeBlockInteraction {
+    /// Keep.
     Keep,
+    /// Destroy.
     Destroy,
+    /// Destroy with decay.
     DestroyWithDecay,
     /// A wind burst: it pushes, and triggers doors, buttons, bells and the like.
     TriggerBlock,
@@ -504,6 +571,7 @@ pub enum NativeBlockInteraction {
 pub struct NativeItemFished<'a> {
     /// The bobber's entity id and position.
     pub hook: u32,
+    /// The position.
     pub position: [f64; 3],
     /// The items the fishing loot table rolled, which the player receives
     /// (`getDrops`: they can't be changed here; loot tables change them).
@@ -584,17 +652,24 @@ pub struct NativeScreenView<'a> {
 /// A depth-tested outline of the client's block selection shape.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeBlockRim {
+    /// The pos.
     pub pos: [i32; 3],
+    /// The argb.
     pub argb: u32,
+    /// The width.
     pub width: f32,
 }
 
 /// A camera-local visual light, with no gameplay light or shadow writes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeColoredLight {
+    /// The at.
     pub at: [f64; 3],
+    /// The rgb.
     pub rgb: u32,
+    /// The radius.
     pub radius: f32,
+    /// The intensity.
     pub intensity: f32,
 }
 
@@ -603,10 +678,15 @@ pub struct NativeColoredLight {
 /// turning with the player or north up, round or square.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeMinimap {
+    /// The corner.
     pub corner: Corner,
+    /// The size.
     pub size: f32,
+    /// The blocks per pixel.
     pub blocks_per_pixel: f32,
+    /// The rotate.
     pub rotate: bool,
+    /// The round.
     pub round: bool,
 }
 
@@ -620,8 +700,11 @@ pub struct NativeMinimap {
 pub struct NativeScreen {
     /// Vanilla's container screens are 176 wide.
     pub width: f32,
+    /// The height.
     pub height: f32,
+    /// The slots.
     pub slots: Vec<Option<[f32; 2]>>,
+    /// The inventory y.
     pub inventory_y: f32,
     /// The inventory's left column (vanilla's is 8).
     pub inventory_x: f32,
@@ -649,8 +732,11 @@ pub struct NativeMod {
 /// the item's own, in vanilla's item syntax, or "".
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NativeStack {
+    /// The item.
     pub item: String,
+    /// The count.
     pub count: u32,
+    /// The components.
     pub components: String,
 }
 
@@ -660,20 +746,34 @@ pub struct NativeStack {
 pub enum NativePanelEvent {
     /// A click on an item of the panel, by its index in
     /// `native_panel_items`' list.
-    Clicked { index: u32, right: bool },
+    Clicked {
+        /// The index.
+        index: u32,
+        /// The right.
+        right: bool,
+    },
     /// The search box's text, each time the player changes it.
     Search(String),
     /// A key (`key.keyboard.r`; compare it with `native_mod_key`) went down
     /// while the pointer was on an item: a slot of the screen's, or the
     /// panel's.
-    Key { key: String, stack: NativeStack },
+    Key {
+        /// The key.
+        key: String,
+        /// The stack.
+        stack: NativeStack,
+    },
     /// A click on a slot of a recipe the panel shows: the recipe's index in
     /// `native_panel_recipes`' list and the slot's in it (the results come
     /// after the slots), and the stack it showed then.
     SlotClicked {
+        /// The recipe.
         recipe: u32,
+        /// The slot.
         slot: u32,
+        /// The stack.
         stack: NativeStack,
+        /// The right.
         right: bool,
     },
     /// The action button of the recipe at this index.
@@ -691,8 +791,11 @@ pub enum NativePanelEvent {
 /// field of view like the spyglass when `smooth`, and the scale of mouse turning.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeZoom {
+    /// The factor.
     pub factor: f32,
+    /// The smooth.
     pub smooth: bool,
+    /// The turn.
     pub turn: f32,
 }
 
@@ -700,13 +803,16 @@ pub struct NativeZoom {
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct NativeServerPlayer {
+    /// The uuid.
     pub uuid: u128,
+    /// The name.
     pub name: String,
     /// The operator level, 0 to 4 (`ops.json`; single player's owner with
     /// cheats on is 4).
     pub permission: u8,
     /// `minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`.
     pub dimension: String,
+    /// The position.
     pub position: [f64; 3],
     /// 0 survival, 1 creative, 2 adventure, 3 spectator.
     pub game_mode: i32,
@@ -715,6 +821,7 @@ pub struct NativeServerPlayer {
     /// Where they look, in degrees (`yRot`, `xRot`), as their last move told
     /// the server.
     pub yaw: f32,
+    /// The pitch.
     pub pitch: f32,
     /// The network entity id the player has this session, the one hooks that only know entity ids
     /// (`living_incoming_damage`, `living_knockback`) give for the player; 0 when not known.
@@ -732,6 +839,7 @@ pub struct NativeServerPlayer {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeCommand {
+    /// The usage.
     pub usage: String,
     /// The operator level a player needs to see and run it (0: everyone).
     pub level: u8,
@@ -758,9 +866,13 @@ impl NativeCommand {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeAuthority {
+    /// Local authoritative.
     LocalAuthoritative,
+    /// Integrated server.
     IntegratedServer,
+    /// Dedicated server.
     DedicatedServer,
+    /// Remote client.
     RemoteClient,
 }
 
@@ -966,60 +1078,103 @@ pub enum NativeGoal {
     /// `PanicGoal(speed)`, or `TurtlePanicGoal(speed)` with `water_range`
     /// set: always head for water this far away, not only when on fire.
     Panic {
+        /// The speed.
         speed: f64,
+        /// The water range.
         water_range: Option<i32>,
     },
     /// `RandomStrollGoal(speed, interval)`; `water_avoiding` set to its
     /// probability makes `WaterAvoidingRandomStrollGoal`, `swim`
     /// `RandomSwimmingGoal`, `flying` `WaterAvoidingRandomFlyingGoal`.
     Stroll {
+        /// The speed.
         speed: f64,
+        /// The interval.
         interval: i32,
+        /// The water avoiding.
         water_avoiding: Option<f32>,
+        /// The swim.
         swim: bool,
+        /// The flying.
         flying: bool,
     },
     /// `LookAtPlayerGoal(range, probability, onlyHorizontal)`: the nearest
     /// player, the nearest mob with `mobs`, or only mobs of `only`'s
     /// species.
     LookAtPlayer {
+        /// The range.
         range: f32,
+        /// The probability.
         probability: f32,
+        /// The only horizontal.
         only_horizontal: bool,
+        /// The mobs.
         mobs: bool,
+        /// The only.
         only: Option<String>,
     },
     /// `RandomLookAroundGoal`. Vanilla parameters: none.
     RandomLookAround,
     /// `MeleeAttackGoal(speed, followUnseen)`.
-    MeleeAttack { speed: f64, follow_unseen: bool },
+    MeleeAttack {
+        /// The speed.
+        speed: f64,
+        /// The follow unseen.
+        follow_unseen: bool,
+    },
     /// `LeapAtTargetGoal(leapMotion)`.
-    LeapAtTarget { yd: f32 },
+    LeapAtTarget {
+        /// The yd.
+        yd: f32,
+    },
     /// `AvoidEntityGoal(what, maxDist, walk, sprint)`: sprint away from
     /// `what` once it is closer than `max_dist`.
     AvoidEntity {
+        /// The what.
         what: NativeMobFilter,
+        /// The max dist.
         max_dist: f32,
+        /// The walk.
         walk: f64,
+        /// The sprint.
         sprint: f64,
     },
     /// `TemptGoal(speed, items, canScare)`: `items` are item ids
     /// (`minecraft:wheat`; a bare id reads as `minecraft:`'s).
     Tempt {
+        /// The speed.
         speed: f64,
+        /// The items.
         items: Vec<String>,
+        /// The can scare.
         can_scare: bool,
     },
     /// `BreedGoal(speed)`. An animal keeps it; other mobs refuse it.
-    Breed { speed: f64 },
+    Breed {
+        /// The speed.
+        speed: f64,
+    },
     /// `FollowParentGoal(speed)`. An animal keeps it; other mobs refuse it.
-    FollowParent { speed: f64 },
+    FollowParent {
+        /// The speed.
+        speed: f64,
+    },
     /// `FollowMobGoal(speed, stopDistance, areaSize)`.
-    FollowMob { speed: f64, stop: f32, area: f32 },
+    FollowMob {
+        /// The speed.
+        speed: f64,
+        /// The stop.
+        stop: f32,
+        /// The area.
+        area: f32,
+    },
     /// `RestrictSunGoal`. Vanilla parameters: none.
     RestrictSun,
     /// `FleeSunGoal(speed)`.
-    FleeSun { speed: f64 },
+    FleeSun {
+        /// The speed.
+        speed: f64,
+    },
     /// `EatBlockGoal`. Vanilla parameters: none.
     EatBlock,
     /// `BreathAirGoal`. Vanilla parameters: none.
@@ -1030,13 +1185,20 @@ pub enum NativeGoal {
     /// checking every `interval` ticks, `must_see` (`mustSee`) and
     /// `must_reach` (`mustReach`).
     NearestTarget {
+        /// The prey.
         prey: NativeMobFilter,
+        /// The must see.
         must_see: bool,
+        /// The must reach.
         must_reach: bool,
+        /// The interval.
         interval: i32,
     },
     /// `HurtByTargetGoal`, `alert` as its `setAlert()`.
-    HurtByTarget { alert: bool },
+    HurtByTarget {
+        /// The alert.
+        alert: bool,
+    },
 }
 
 impl NativeGoal {
@@ -1106,16 +1268,27 @@ impl DragonRef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeDragonPhase {
+    /// Holding pattern.
     HoldingPattern,
+    /// Strafe player.
     StrafePlayer,
+    /// Landing approach.
     LandingApproach,
+    /// Landing.
     Landing,
+    /// Takeoff.
     Takeoff,
+    /// Sitting flaming.
     SittingFlaming,
+    /// Sitting scanning.
     SittingScanning,
+    /// Sitting attacking.
     SittingAttacking,
+    /// Charging player.
     ChargingPlayer,
+    /// Dying.
     Dying,
+    /// Hover.
     Hover,
 }
 
@@ -1220,8 +1393,11 @@ impl MerchantRef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeDisplayKind {
+    /// Block.
     Block,
+    /// Item.
     Item,
+    /// Text.
     Text,
 }
 
@@ -1246,9 +1422,13 @@ impl NativeDisplayKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeBillboard {
+    /// Fixed.
     Fixed,
+    /// Vertical.
     Vertical,
+    /// Horizontal.
     Horizontal,
+    /// Center.
     Center,
 }
 
@@ -1274,15 +1454,25 @@ impl NativeBillboard {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeItemDisplayContext {
+    /// None.
     None,
+    /// Third person left hand.
     ThirdPersonLeftHand,
+    /// Third person right hand.
     ThirdPersonRightHand,
+    /// First person left hand.
     FirstPersonLeftHand,
+    /// First person right hand.
     FirstPersonRightHand,
+    /// Head.
     Head,
+    /// Gui.
     Gui,
+    /// Ground.
     Ground,
+    /// Fixed.
     Fixed,
+    /// On shelf.
     OnShelf,
 }
 
@@ -1325,8 +1515,11 @@ impl NativeItemDisplayContext {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeTextAlignment {
+    /// Center.
     Center,
+    /// Left.
     Left,
+    /// Right.
     Right,
 }
 
@@ -1345,9 +1538,13 @@ impl NativeTextAlignment {
 /// right rotation. Quaternions are `[x, y, z, w]`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeTransformation {
+    /// The translation.
     pub translation: [f32; 3],
+    /// The left rotation.
     pub left_rotation: [f32; 4],
+    /// The scale.
     pub scale: [f32; 3],
+    /// The right rotation.
     pub right_rotation: [f32; 4],
 }
 
@@ -1378,8 +1575,11 @@ pub enum NativeDeflection {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeArrowPickup {
+    /// Disallowed.
     Disallowed,
+    /// Allowed.
     Allowed,
+    /// Creative only.
     CreativeOnly,
 }
 
@@ -1607,19 +1807,27 @@ pub enum NativeExplosionInteraction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeSoundSource {
+    /// Master.
     Master,
+    /// Music.
     Music,
     /// Jukeboxes and note blocks (`RECORDS`).
     Records,
+    /// Weather.
     Weather,
     /// Blocks (`BLOCKS`).
     Blocks,
+    /// Hostile.
     Hostile,
+    /// Neutral.
     Neutral,
     /// Players (`PLAYERS`).
     Players,
+    /// Ambient.
     Ambient,
+    /// Voice.
     Voice,
+    /// Ui.
     Ui,
 }
 
@@ -1644,8 +1852,11 @@ pub enum NativeBlockShapeKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeChatVisibility {
+    /// Full.
     Full,
+    /// System.
     System,
+    /// Hidden.
     Hidden,
 }
 
@@ -1687,7 +1898,9 @@ impl NativePermissionLevel {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeMainHand {
+    /// Left.
     Left,
+    /// Right.
     Right,
 }
 
@@ -1695,8 +1908,11 @@ pub enum NativeMainHand {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeParticleStatus {
+    /// All.
     All,
+    /// Decreased.
     Decreased,
+    /// Minimal.
     Minimal,
 }
 
@@ -1706,15 +1922,23 @@ pub enum NativeParticleStatus {
 /// unknown id as left.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeClientInfo {
+    /// The language.
     pub language: String,
+    /// The view distance.
     pub view_distance: i8,
+    /// The chat visibility.
     pub chat_visibility: NativeChatVisibility,
+    /// The chat colors.
     pub chat_colors: bool,
     /// Skin layer bits (`PlayerModelPart`).
     pub model_customisation: u8,
+    /// The main hand.
     pub main_hand: NativeMainHand,
+    /// The text filtering.
     pub text_filtering: bool,
+    /// The allows listing.
     pub allows_listing: bool,
+    /// The particle status.
     pub particle_status: NativeParticleStatus,
 }
 
@@ -1722,11 +1946,17 @@ pub struct NativeClientInfo {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeBlockFace {
+    /// Down.
     Down,
+    /// Up.
     Up,
+    /// North.
     North,
+    /// South.
     South,
+    /// West.
     West,
+    /// East.
     East,
 }
 
@@ -1734,8 +1964,11 @@ pub enum NativeBlockFace {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeSupportType {
+    /// Full.
     Full,
+    /// Center.
     Center,
+    /// Rigid.
     Rigid,
 }
 
@@ -1755,7 +1988,9 @@ pub enum NativeRemovalReason {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeClipBlock {
+    /// Collider.
     Collider,
+    /// Outline.
     Outline,
 }
 
@@ -1763,17 +1998,24 @@ pub enum NativeClipBlock {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeClipFluid {
+    /// None.
     None,
 }
 
 /// Result of a block ray, including the vanilla miss result.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeClipHit {
+    /// The miss.
     pub miss: bool,
+    /// The block.
     pub block: [i32; 3],
+    /// The face.
     pub face: NativeBlockFace,
+    /// The location.
     pub location: [f64; 3],
+    /// The inside.
     pub inside: bool,
+    /// The world border.
     pub world_border: bool,
 }
 
@@ -1783,13 +2025,20 @@ pub struct NativeClipHit {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum NativeCrosshairTarget {
+    /// Block.
     Block {
+        /// The pos.
         pos: BlockPos,
+        /// The state.
         state: BlockStateId,
+        /// The hit.
         hit: BlockHit,
     },
+    /// Entity.
     Entity {
+        /// The entity.
         entity: EntityRef,
+        /// The point.
         point: [f64; 3],
     },
 }
@@ -1834,9 +2083,13 @@ impl From<PlayerRef> for EntityRef {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GameMode {
+    /// Survival.
     Survival,
+    /// Creative.
     Creative,
+    /// Adventure.
     Adventure,
+    /// Spectator.
     Spectator,
 }
 
@@ -1888,12 +2141,19 @@ pub struct BossBarRef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum BossBarColor {
+    /// Pink.
     Pink,
+    /// Blue.
     Blue,
+    /// Red.
     Red,
+    /// Green.
     Green,
+    /// Yellow.
     Yellow,
+    /// Purple.
     Purple,
+    /// White.
     White,
 }
 
@@ -1931,10 +2191,15 @@ impl BossBarColor {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum BossBarOverlay {
+    /// Progress.
     Progress,
+    /// Notched6.
     Notched6,
+    /// Notched10.
     Notched10,
+    /// Notched12.
     Notched12,
+    /// Notched20.
     Notched20,
 }
 
@@ -2094,9 +2359,11 @@ impl NativeTickId {
 #[allow(clippy::enum_variant_names)]
 #[non_exhaustive]
 pub enum WorldPhase {
+    /// World open ready.
     WorldOpenReady,
     /// The open failed; `error_text` is the engine's own error text.
     WorldOpenFailed,
+    /// World close final.
     WorldCloseFinal,
     /// The server loop or final save failed; `error_text` carries the error.
     WorldCloseFailed,
@@ -2106,8 +2373,16 @@ pub enum WorldPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ServerTickPhase {
-    ServerTickStart { world_running: bool },
-    ServerTickEnd { world_running: bool },
+    /// Server tick start.
+    ServerTickStart {
+        /// The world running.
+        world_running: bool,
+    },
+    /// Server tick end.
+    ServerTickEnd {
+        /// The world running.
+        world_running: bool,
+    },
 }
 
 /// Context for every world lifecycle phase.
@@ -2118,8 +2393,11 @@ pub enum ServerTickPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeLifecycleContext {
+    /// The authority.
     pub authority: NativeAuthority,
+    /// The epoch.
     pub epoch: NativeWorldEpoch,
+    /// The tick.
     pub tick: NativeTickId,
 }
 
@@ -2127,11 +2405,17 @@ pub struct NativeLifecycleContext {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ToolAbility {
+    /// Axe strip.
     AxeStrip,
+    /// Axe scrape.
     AxeScrape,
+    /// Axe wax off.
     AxeWaxOff,
+    /// Shovel flatten.
     ShovelFlatten,
+    /// Shovel douse.
     ShovelDouse,
+    /// Hoe till.
     HoeTill,
 }
 
@@ -2150,7 +2434,9 @@ pub struct GameRuleActor<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeProgressType {
+    /// Grant.
     Grant,
+    /// Revoke.
     Revoke,
 }
 
@@ -2422,6 +2708,7 @@ pub struct BlockHit {
     pub inside: bool,
 }
 impl BlockHit {
+    /// New.
     pub const fn new(point: [f64; 3], face: [i32; 3], inside: bool) -> Self {
         Self {
             point,
@@ -2604,9 +2891,11 @@ pub struct NativeBlockClick<'a> {
     pub hit: BlockHit,
     /// The hand clicking (`getHand`) and what it holds (`getItemStack`).
     pub hand: Hand,
+    /// The stack.
     pub stack: Option<&'a ItemStack>,
     /// The clicking player's UUID and entity id (`getEntity`).
     pub player: u128,
+    /// The player entity id.
     pub player_entity_id: i32,
 }
 
@@ -2626,13 +2915,19 @@ pub enum UsePhase {
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct NativeItemClick<'a> {
+    /// The side.
     pub side: LogicalSide,
+    /// The dimension.
     pub dimension: LevelDimension,
     /// The block containing the clicking player's feet (`getPos`).
     pub pos: [i32; 3],
+    /// The hand.
     pub hand: Hand,
+    /// The stack.
     pub stack: &'a ItemStack,
+    /// The player.
     pub player: u128,
+    /// The player entity id.
     pub player_entity_id: i32,
 }
 
@@ -2668,9 +2963,12 @@ impl NativeInteractionResult {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeTriState {
+    /// False.
     False,
     #[default]
+    /// Default.
     Default,
+    /// True.
     True,
 }
 impl NativeTriState {

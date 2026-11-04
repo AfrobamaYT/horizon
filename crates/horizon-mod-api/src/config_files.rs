@@ -34,6 +34,7 @@ pub trait ConfigFiles {
 pub struct ConfigPath(String);
 
 impl ConfigPath {
+    /// New.
     pub fn new(path: &str) -> Result<Self, ConfigFileError> {
         let valid = path
             .split('/')
@@ -43,6 +44,7 @@ impl ConfigPath {
             .ok_or(ConfigFileError::InvalidPath)
     }
 
+    /// As str.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -65,7 +67,9 @@ impl ConfigPath {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ConfigEntryKind {
+    /// File.
     File,
+    /// Folder.
     Folder,
 }
 
@@ -73,6 +77,7 @@ pub enum ConfigEntryKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ConfigStat {
+    /// The kind.
     pub kind: ConfigEntryKind,
     /// Bytes, for a file; 0 for a folder.
     pub len: u64,
@@ -84,7 +89,9 @@ pub struct ConfigStat {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ConfigEntry {
+    /// The name.
     pub name: String,
+    /// The stat.
     pub stat: ConfigStat,
 }
 
@@ -101,6 +108,7 @@ pub enum ConfigFileError {
     /// More than `CONFIG_FILE_MAX` bytes, or a folder of more than
     /// `CONFIG_LIST_MAX` entries.
     TooLarge,
+    /// Not found.
     NotFound,
     /// A folder where a file was asked for.
     NotAFile,
