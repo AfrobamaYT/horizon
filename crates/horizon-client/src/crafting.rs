@@ -12,6 +12,7 @@ use crate::{
 use horizon_world::loot::PackOverlay;
 use horizon_world::native_load_context::LoopContext;
 use horizon_world::nbt::Tag;
+use mod_api::__private::game::IngredientTest;
 pub use mod_api::crafting::{Ingredient, Shape, native_ingredient, native_ingredient_test};
 use serde_json::Value;
 use std::{
@@ -484,7 +485,7 @@ impl Special {
                 let (mut target, mut source) = (false, false);
                 for s in &stacks {
                     let Some(this) =
-                        banner::banner_color(&s.item).filter(|_| ing.test(ctx.context, s))
+                        banner::banner_color(&s.item).filter(|_| ing.test_in(ctx.context, s))
                     else {
                         return false;
                     };
@@ -515,13 +516,13 @@ impl Special {
                 }
                 let (mut patterned, mut clear) = (false, false);
                 for s in &stacks {
-                    if ing.test(ctx.context, s) && banner::banner_color(&s.item).is_some() {
+                    if ing.test_in(ctx.context, s) && banner::banner_color(&s.item).is_some() {
                         if patterned {
                             return false;
                         }
                         patterned = true;
                     } else {
-                        if !tgt.test(ctx.context, s) || clear || !banner::layers(s).is_empty() {
+                        if !tgt.test_in(ctx.context, s) || clear || !banner::layers(s).is_empty() {
                             return false;
                         }
                         clear = true;
@@ -544,13 +545,13 @@ impl Special {
                 let mut found: Option<&ItemStack> = None;
                 let mut materials = 0;
                 for s in &stacks {
-                    if base.test(ctx.context, s) {
+                    if base.test_in(ctx.context, s) {
                         if found.is_some() {
                             return false;
                         }
                         found = Some(s);
                     } else {
-                        if !material.test(ctx.context, s) {
+                        if !material.test_in(ctx.context, s) {
                             return false;
                         }
                         materials += 1;
@@ -582,13 +583,13 @@ impl Special {
                 }
                 let (mut has_target, mut has_dyes) = (false, false);
                 for s in &stacks {
-                    if target.test(ctx.context, s) {
+                    if target.test_in(ctx.context, s) {
                         if has_target {
                             return false;
                         }
                         has_target = true;
                     } else {
-                        if !dye.test(ctx.context, s) || ctx.dye(s).is_none() {
+                        if !dye.test_in(ctx.context, s) || ctx.dye(s).is_none() {
                             return false;
                         }
                         has_dyes = true;
@@ -605,7 +606,7 @@ impl Special {
                 (0..3).all(|y| {
                     (0..3).all(|x| {
                         let ing = if x == 1 && y == 1 { source } else { material };
-                        input.get(x, y).is_some_and(|s| ing.test(ctx.context, s))
+                        input.get(x, y).is_some_and(|s| ing.test_in(ctx.context, s))
                     })
                 })
             }
@@ -621,7 +622,7 @@ impl Special {
                 }
                 let (mut has_material, mut has_source) = (false, false);
                 for s in &stacks {
-                    if source.test(ctx.context, s) {
+                    if source.test_in(ctx.context, s) {
                         let Some(book) = s.data().and_then(|d| d.written.as_ref()) else {
                             return false;
                         };
@@ -631,7 +632,7 @@ impl Special {
                         }
                         has_source = true;
                     } else {
-                        if !material.test(ctx.context, s) {
+                        if !material.test_in(ctx.context, s) {
                             return false;
                         }
                         has_material = true;
@@ -648,17 +649,17 @@ impl Special {
                 let mut has_shell = false;
                 let mut fuels = 0;
                 for s in &stacks {
-                    if shell.test(ctx.context, s) {
+                    if shell.test_in(ctx.context, s) {
                         if has_shell {
                             return false;
                         }
                         has_shell = true;
-                    } else if fuel.test(ctx.context, s) {
+                    } else if fuel.test_in(ctx.context, s) {
                         fuels += 1;
                         if fuels > 3 {
                             return false;
                         }
-                    } else if !star.test(ctx.context, s) {
+                    } else if !star.test_in(ctx.context, s) {
                         return false;
                     }
                 }
@@ -678,25 +679,25 @@ impl Special {
                 let (mut has_fuel, mut has_dye, mut has_shape) = (false, false, false);
                 let (mut has_trail, mut has_twinkle) = (false, false);
                 for s in &stacks {
-                    if twinkle.test(ctx.context, s) {
+                    if twinkle.test_in(ctx.context, s) {
                         if has_twinkle {
                             return false;
                         }
                         has_twinkle = true;
-                    } else if trail.test(ctx.context, s) {
+                    } else if trail.test_in(ctx.context, s) {
                         if has_trail {
                             return false;
                         }
                         has_trail = true;
-                    } else if fuel.test(ctx.context, s) {
+                    } else if fuel.test_in(ctx.context, s) {
                         if has_fuel {
                             return false;
                         }
                         has_fuel = true;
-                    } else if dye.test(ctx.context, s) && ctx.dye(s).is_some() {
+                    } else if dye.test_in(ctx.context, s) && ctx.dye(s).is_some() {
                         has_dye = true;
                     } else {
-                        if !shapes.iter().any(|(_, ing)| ing.test(ctx.context, s)) || has_shape {
+                        if !shapes.iter().any(|(_, ing)| ing.test_in(ctx.context, s)) || has_shape {
                             return false;
                         }
                         has_shape = true;
@@ -710,10 +711,10 @@ impl Special {
                 }
                 let (mut has_dye, mut has_target) = (false, false);
                 for s in &stacks {
-                    if dye.test(ctx.context, s) && ctx.dye(s).is_some() {
+                    if dye.test_in(ctx.context, s) && ctx.dye(s).is_some() {
                         has_dye = true;
                     } else {
-                        if !target.test(ctx.context, s) || has_target {
+                        if !target.test_in(ctx.context, s) || has_target {
                             return false;
                         }
                         has_target = true;
@@ -728,7 +729,7 @@ impl Special {
                 let ring = (0..3).all(|y| {
                     (0..3).all(|x| {
                         let ing = if x == 1 && y == 1 { map } else { material };
-                        input.get(x, y).is_some_and(|s| ing.test(ctx.context, s))
+                        input.get(x, y).is_some_and(|s| ing.test_in(ctx.context, s))
                     })
                 });
                 if !ring {
@@ -750,10 +751,18 @@ impl Special {
                 input.width == 3
                     && input.height == 3
                     && stacks.len() == 4
-                    && input.get(1, 0).is_some_and(|s| back.test(ctx.context, s))
-                    && input.get(0, 1).is_some_and(|s| left.test(ctx.context, s))
-                    && input.get(2, 1).is_some_and(|s| right.test(ctx.context, s))
-                    && input.get(1, 2).is_some_and(|s| front.test(ctx.context, s))
+                    && input
+                        .get(1, 0)
+                        .is_some_and(|s| back.test_in(ctx.context, s))
+                    && input
+                        .get(0, 1)
+                        .is_some_and(|s| left.test_in(ctx.context, s))
+                    && input
+                        .get(2, 1)
+                        .is_some_and(|s| right.test_in(ctx.context, s))
+                    && input
+                        .get(1, 2)
+                        .is_some_and(|s| front.test_in(ctx.context, s))
             }
             Self::RepairItem => Self::repair_pair(ctx, &stacks).is_some(),
         }
@@ -797,9 +806,9 @@ impl Special {
             } => {
                 let (mut banner_stack, mut shield) = (None, None);
                 for s in &stacks {
-                    if ing.test(ctx.context, s) && banner::banner_color(&s.item).is_some() {
+                    if ing.test_in(ctx.context, s) && banner::banner_color(&s.item).is_some() {
                         banner_stack = Some(*s);
-                    } else if target.test(ctx.context, s) {
+                    } else if target.test_in(ctx.context, s) {
                         shield = Some(*s);
                     }
                 }
@@ -825,15 +834,15 @@ impl Special {
                     let mut materials = 0;
                     let mut found = None;
                     for s in &stacks {
-                        if base.test(ctx.context, s) {
+                        if base.test_in(ctx.context, s) {
                             found = Some(*s);
-                        } else if material.test(ctx.context, s) {
+                        } else if material.test_in(ctx.context, s) {
                             materials += 1;
                         }
                     }
                     result.over(found?, materials)
                 } else {
-                    let s = stacks.iter().find(|s| base.test(ctx.context, s))?;
+                    let s = stacks.iter().find(|s| base.test_in(ctx.context, s))?;
                     result.over(s, 0)
                 }
             }
@@ -845,13 +854,13 @@ impl Special {
                 let mut dyes = Vec::new();
                 let mut target_stack: Option<&ItemStack> = None;
                 for s in &stacks {
-                    if target.test(ctx.context, s) {
+                    if target.test_in(ctx.context, s) {
                         if target_stack.is_some() {
                             return None;
                         }
                         target_stack = Some(s);
                     } else {
-                        if !dye.test(ctx.context, s) {
+                        if !dye.test_in(ctx.context, s) {
                             return None;
                         }
                         // getOrDefault(DYE, WHITE)
@@ -882,14 +891,15 @@ impl Special {
                 let mut copies = 0u32;
                 let mut book: Option<&ItemStack> = None;
                 for s in &stacks {
-                    if source.test(ctx.context, s) && s.data().is_some_and(|d| d.written.is_some())
+                    if source.test_in(ctx.context, s)
+                        && s.data().is_some_and(|d| d.written.is_some())
                     {
                         if book.is_some() {
                             return None;
                         }
                         book = Some(s);
                     } else {
-                        if !material.test(ctx.context, s) {
+                        if !material.test_in(ctx.context, s) {
                             return None;
                         }
                         copies += 1;
@@ -909,9 +919,9 @@ impl Special {
                 let mut explosions = Vec::new();
                 let mut fuels = 0u8;
                 for s in &stacks {
-                    if fuel.test(ctx.context, s) {
+                    if fuel.test_in(ctx.context, s) {
                         fuels += 1;
-                    } else if star.test(ctx.context, s)
+                    } else if star.test_in(ctx.context, s)
                         && let Some(e) = s.data().and_then(|d| d.firework_explosion.clone())
                     {
                         explosions.push(e);
@@ -937,14 +947,14 @@ impl Special {
                 let mut colors = Vec::new();
                 for s in &stacks {
                     if let Some((found, _)) =
-                        shapes.iter().find(|(_, ing)| ing.test(ctx.context, s))
+                        shapes.iter().find(|(_, ing)| ing.test_in(ctx.context, s))
                     {
                         shape = *found;
-                    } else if twinkle.test(ctx.context, s) {
+                    } else if twinkle.test_in(ctx.context, s) {
                         has_twinkle = true;
-                    } else if trail.test(ctx.context, s) {
+                    } else if trail.test_in(ctx.context, s) {
                         has_trail = true;
-                    } else if dye.test(ctx.context, s) {
+                    } else if dye.test_in(ctx.context, s) {
                         colors.push(DYE_FIREWORK_COLORS[ctx.dye(s).unwrap_or(0)].1);
                     }
                 }
@@ -966,9 +976,9 @@ impl Special {
                 let mut colors = Vec::new();
                 let mut target_stack = None;
                 for s in &stacks {
-                    if dye.test(ctx.context, s) {
+                    if dye.test_in(ctx.context, s) {
                         colors.push(DYE_FIREWORK_COLORS[ctx.dye(s).unwrap_or(0)].1);
-                    } else if target.test(ctx.context, s) {
+                    } else if target.test_in(ctx.context, s) {
                         target_stack = Some(*s);
                     }
                 }
@@ -1186,7 +1196,7 @@ fn matches_all(context: &LoopContext, ingredients: &[Ingredient], stacks: &[&Ite
         seen: &mut [bool],
     ) -> bool {
         for s in 0..stacks.len() {
-            if seen[s] || !ingredients[i].test(context, stacks[s]) {
+            if seen[s] || !ingredients[i].test_in(context, stacks[s]) {
                 continue;
             }
             seen[s] = true;
@@ -1787,7 +1797,7 @@ impl Recipes {
                             let rx = if mirror { width - 1 - x } else { x };
                             match (&cells[y * width + rx], input.get(x, y)) {
                                 (None, None) => true,
-                                (Some(i), Some(s)) => i.test(ctx.context, s),
+                                (Some(i), Some(s)) => i.test_in(ctx.context, s),
                                 _ => false,
                             }
                         })
@@ -1946,7 +1956,7 @@ impl Recipes {
         index.get(kind)?.get(&*input.item)?.iter().find_map(|i| {
             self.cooking
                 .get(*i)
-                .filter(|c| c.ingredient.test(context, input))
+                .filter(|c| c.ingredient.test_in(context, input))
         })
     }
     /// What mods added to the property set `key` (`furnace_input`).
@@ -1969,7 +1979,7 @@ impl Recipes {
     fn cook_scan(&self, context: &LoopContext, kind: &str, input: &ItemStack) -> Option<&Cooking> {
         self.cooking
             .iter()
-            .find(|c| c.kind == kind && c.ingredient.test(context, input))
+            .find(|c| c.kind == kind && c.ingredient.test_in(context, input))
     }
 }
 
@@ -2127,19 +2137,19 @@ mod tests {
             r#"{"type":"neoforge:compound","children":["minecraft:oak_planks","minecraft:birch_planks"]}"#,
         );
         assert!(compound.children.is_some(), "the children stay with it");
-        assert!(compound.test(lc(), &stack("minecraft:oak_planks")));
-        assert!(compound.test(lc(), &stack("minecraft:birch_planks")));
-        assert!(!compound.test(lc(), &stack("minecraft:stone")));
+        assert!(compound.test_in(lc(), &stack("minecraft:oak_planks")));
+        assert!(compound.test_in(lc(), &stack("minecraft:birch_planks")));
+        assert!(!compound.test_in(lc(), &stack("minecraft:stone")));
         let inter = parse(
             r#"{"type":"neoforge:intersection","ingredients":["minecraft:oak_planks",["minecraft:oak_planks","minecraft:birch_planks"]]}"#,
         );
-        assert!(inter.test(lc(), &stack("minecraft:oak_planks")));
-        assert!(!inter.test(lc(), &stack("minecraft:birch_planks")));
+        assert!(inter.test_in(lc(), &stack("minecraft:oak_planks")));
+        assert!(!inter.test_in(lc(), &stack("minecraft:birch_planks")));
         let diff = parse(
             r#"{"type":"neoforge:difference","base":["minecraft:oak_planks","minecraft:birch_planks"],"subtracted":"minecraft:birch_planks"}"#,
         );
-        assert!(diff.test(lc(), &stack("minecraft:oak_planks")));
-        assert!(!diff.test(lc(), &stack("minecraft:birch_planks")));
+        assert!(diff.test_in(lc(), &stack("minecraft:oak_planks")));
+        assert!(!diff.test_in(lc(), &stack("minecraft:birch_planks")));
     }
 
     #[test]

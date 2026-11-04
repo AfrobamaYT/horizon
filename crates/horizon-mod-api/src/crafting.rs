@@ -325,9 +325,16 @@ impl Ingredient {
             children: nested,
         })
     }
-    /// `Ingredient.test`: a stack the list names — and for a mod's own
-    /// kind, one the match-time hook accepts (`ICustomIngredient.test`).
-    pub fn test(
+    /// `Ingredient.test`: whether `stack` fits: a stack the list names, and
+    /// for a mod's own kind one the match-time hook accepts
+    /// (`ICustomIngredient.test`). The game answers with the loop context of
+    /// the side `host` runs on; a host without a game refuses every stack.
+    pub fn test(&self, host: &dyn Host, stack: &ItemStack) -> bool {
+        backend_of(host).is_some_and(|backend| backend.recipe_ingredient_test(self, stack))
+    }
+    /// `test` with the loop context the game already holds, for the game's
+    /// own matching.
+    pub(crate) fn test_in(
         &self,
         context: &horizon_world::native_load_context::LoopContext,
         stack: &ItemStack,
@@ -335,11 +342,11 @@ impl Ingredient {
         match &self.children {
             // Each child its own `test`, as on NeoForge — a mod's kind
             // among them answers through its hook.
-            Some((Shape::Compound, kids)) => kids.iter().any(|k| k.test(context, stack)),
-            Some((Shape::Intersection, kids)) => kids.iter().all(|k| k.test(context, stack)),
+            Some((Shape::Compound, kids)) => kids.iter().any(|k| k.test_in(context, stack)),
+            Some((Shape::Intersection, kids)) => kids.iter().all(|k| k.test_in(context, stack)),
             Some((Shape::Difference, kids)) => {
-                kids.first().is_some_and(|k| k.test(context, stack))
-                    && kids.get(1).is_none_or(|k| !k.test(context, stack))
+                kids.first().is_some_and(|k| k.test_in(context, stack))
+                    && kids.get(1).is_none_or(|k| !k.test_in(context, stack))
             }
             None => {
                 if !self.items.contains(&*stack.item) {

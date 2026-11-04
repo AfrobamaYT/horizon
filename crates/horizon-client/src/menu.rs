@@ -17,6 +17,7 @@ use crate::{
 #[cfg(test)]
 use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
 use horizon_world::native_load_context::{LoopContext, LoopSide};
+use mod_api::__private::game::IngredientTest;
 pub use mod_api::menu::{
     AnvilCraft, AnvilUpdate, AnvilVanilla, CarriedAccess, GrindstonePlace, GrindstoneTake,
     LogicalSide, MenuButtonContext, SlotView, StackedOnOther,
@@ -1119,7 +1120,7 @@ impl Menu {
                 .stonecutting
                 .iter()
                 .enumerate()
-                .filter(|(_, r)| r.input.test(env.loop_context, stack))
+                .filter(|(_, r)| r.input.test_in(env.loop_context, stack))
                 .map(|(i, _)| i)
                 .collect(),
             None => Vec::new(),
@@ -2581,7 +2582,7 @@ impl Menu {
                     .station_recipes
                     .stonecutting
                     .iter()
-                    .any(|r| r.input.test(env.loop_context, &stack))
+                    .any(|r| r.input.test_in(env.loop_context, &stack))
                 {
                     if !self.move_to(env, &mut stack, 0, 1, false) {
                         return None;

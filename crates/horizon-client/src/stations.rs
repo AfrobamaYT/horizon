@@ -11,6 +11,7 @@ use crate::{
 use horizon_core::random::{LegacyRandom, RandomSource};
 use horizon_world::loot::PackOverlay;
 use horizon_world::native_load_context::LoopContext;
+use mod_api::__private::game::IngredientTest;
 pub use mod_api::stations::{AnvilResult, EnchantmentRow};
 use serde_json::Value;
 use std::{collections::HashSet, fs, path::Path, sync::Arc};
@@ -633,7 +634,7 @@ impl StationRecipes {
     pub fn stonecutter(&self, context: &LoopContext, stack: &ItemStack) -> Vec<&Stonecutting> {
         self.stonecutting
             .iter()
-            .filter(|r| r.input.test(context, stack))
+            .filter(|r| r.input.test_in(context, stack))
             .collect()
     }
     fn slot_ok(&self, context: &LoopContext, slot: usize, stack: &ItemStack) -> bool {
@@ -653,7 +654,7 @@ impl StationRecipes {
                         ..
                     } => (template, base, addition),
                 };
-                [t, b, a][slot].test(context, stack)
+                [t, b, a][slot].test_in(context, stack)
             })
     }
     /// `RecipePropertySet` SMITHING_TEMPLATE / BASE / ADDITION.
@@ -691,9 +692,9 @@ impl StationRecipes {
                     addition: a,
                     result,
                 } => {
-                    if t.test(context, template)
-                        && b.test(context, base)
-                        && a.test(context, addition)
+                    if t.test_in(context, template)
+                        && b.test_in(context, base)
+                        && a.test_in(context, addition)
                     {
                         // SmithingTransformRecipe: transmute the base keeping its components.
                         return Some((id.as_str(), base.transmute(result, 1)));
@@ -707,9 +708,9 @@ impl StationRecipes {
                     pattern,
                     ..
                 } => {
-                    if t.test(context, template)
-                        && b.test(context, base)
-                        && a.test(context, addition)
+                    if t.test_in(context, template)
+                        && b.test_in(context, base)
+                        && a.test_in(context, addition)
                     {
                         return apply_trim(e, base, addition, pattern).map(|r| (id.as_str(), r));
                     }

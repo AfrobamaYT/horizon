@@ -62,6 +62,7 @@ use horizon_world::{
     nbt::{Compound, Tag},
     registry::{BlockRegistry, BlockStateId},
 };
+use mod_api::__private::game::IngredientTest;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EnchantmentInfo,
@@ -9882,6 +9883,15 @@ impl Game<'_> {
             .filter(|item| items.get(item).is_some())
             .collect();
         (!known.is_empty()).then(|| Ingredient::of(known))
+    }
+    /// Whether `stack` fits `ingredient` (`Ingredient.test`), matched with this
+    /// game's loop context.
+    pub(super) fn native_recipe_ingredient_test(
+        &self,
+        ingredient: &Ingredient,
+        stack: &ItemStack,
+    ) -> bool {
+        ingredient.test_in(&self.loop_context, stack)
     }
     /// A stack as a recipe's `result` names it: `id` (a bare one as
     /// `minecraft:`), `count` (1 by default, up to 99) and `components`. None
