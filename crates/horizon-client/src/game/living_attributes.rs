@@ -244,4 +244,185 @@ mod tests {
             assert_eq!(Tag::List(list), saved);
         });
     }
+
+    fn modifier(id: &str, amount: f64, operation: AttributeOperation) -> AttributeModifier {
+        AttributeModifier::new(Identifier::parse(id).unwrap(), amount, operation)
+    }
+
+    fn living(game: &Game<'_>, id: u32) -> mod_api::LivingRef {
+        game.native_living(game.native_entity(id).unwrap()).unwrap()
+    }
+
+    /// The ids of the modifiers a saved `attributes` list holds.
+    fn saved_ids<'a>(list: impl IntoIterator<Item = &'a horizon_world::nbt::Tag>) -> Vec<String> {
+        use horizon_client_core::nbt_value::text;
+        use horizon_world::nbt::Tag;
+        list.into_iter()
+            .flat_map(|entry| match entry.get("modifiers") {
+                Some(Tag::List(l)) => l.iter().filter_map(|m| text(m.get("id"))).collect(),
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+
+    use mod_api::{AttributeModifier, AttributeOperation, Identifier, ModifierLifetime};
+
+    /// A mob's movement speed is kept where its gameplay reads it: a mod's
+    /// permanent modifier is saved, a transient one is not, both count at once.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mods_modifiers_on_a_mobs_speed_reach_its_gameplay() {
+        use AttributeOperation::*;
+        use ModifierLifetime::*;
+        with_game(|game| {
+            spawn(game);
+            let speed = "minecraft:movement_speed";
+            let zombie = living(game, 12);
+            let (_, Some(base)) = read(game, 12, speed) else {
+                panic!("a zombie has a movement speed");
+            };
+            assert!(zombie.add_attribute_modifier(
+                game,
+                speed,
+                modifier("test:fast", 1.0, AddMultipliedBase),
+                Permanent
+            ));
+            // The id is taken (vanilla throws).
+            assert!(!zombie.add_attribute_modifier(
+                game,
+                speed,
+                modifier("test:fast", 2.0, AddValue),
+                Transient
+            ));
+            assert!(zombie.add_attribute_modifier(
+                game,
+                speed,
+                modifier("test:boost", 0.5, AddMultipliedTotal),
+                Transient
+            ));
+            let value = base * 2.0 * 1.5;
+            assert_eq!(read(game, 12, speed), (Some(value), Some(base)));
+            assert_eq!(game.mobs[0].attrs.speed, value);
+            let saved = horizon_client::entity_nbt::attribute_entries(&game.mobs[0]);
+            assert_eq!(saved_ids(saved.iter().map(|(_, e)| e)), ["test:fast"]);
+            // Replacing takes the new lifetime: no longer saved.
+            assert!(zombie.replace_attribute_modifier(
+                game,
+                speed,
+                modifier("test:fast", 1.0, AddMultipliedBase),
+                Transient
+            ));
+            let saved = horizon_client::entity_nbt::attribute_entries(&game.mobs[0]);
+            assert!(saved_ids(saved.iter().map(|(_, e)| e)).is_empty());
+            assert_eq!(read(game, 12, speed), (Some(value), Some(base)));
+            let boost = Identifier::parse("test:boost").unwrap();
+            assert!(zombie.remove_attribute_modifier(game, speed, &boost));
+            assert!(!zombie.remove_attribute_modifier(game, speed, &boost));
+            assert_eq!(read(game, 12, speed), (Some(base * 2.0), Some(base)));
+            assert!(zombie.set_attribute_base(game, speed, 0.5));
+            assert_eq!(read(game, 12, speed), (Some(1.0), Some(0.5)));
+            assert_eq!(game.mobs[0].attrs.speed, 1.0);
+        });
+    }
+
+    /// An attribute only the live map keeps keeps a mod's writes when the map
+    /// is built again, and saves the permanent ones.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mods_writes_outlive_a_rebuilt_map() {
+        use AttributeOperation::*;
+        use ModifierLifetime::*;
+        with_game(|game| {
+            spawn(game);
+            let gravity = "minecraft:gravity";
+            let zombie = living(game, 12);
+            assert!(zombie.set_attribute_base(game, gravity, 0.1));
+            assert!(zombie.add_attribute_modifier(
+                game,
+                gravity,
+                modifier("test:heavy", 1.0, AddMultipliedBase),
+                Permanent
+            ));
+            assert!(zombie.add_attribute_modifier(
+                game,
+                gravity,
+                modifier("test:float", -0.05, AddValue),
+                Transient
+            ));
+            let both = Some((0.1 - 0.05) * 2.0);
+            assert_eq!(read(game, 12, gravity), (both, Some(0.1)));
+            game.mobs[0].extra.live.invalidate();
+            assert_eq!(read(game, 12, gravity), (both, Some(0.1)));
+            let mut list = Vec::new();
+            game.mobs[0].extra.live.save_into(&mut list);
+            assert_eq!(saved_ids(&list), ["test:heavy"]);
+            let float = Identifier::parse("test:float").unwrap();
+            assert!(zombie.remove_attribute_modifier(game, gravity, &float));
+            game.mobs[0].extra.live.invalidate();
+            assert_eq!(read(game, 12, gravity), (Some(0.2), Some(0.1)));
+            // A change to `finalize`'s store rebuilds the map without losing them.
+            horizon_client::mobs::finalize::set_base(
+                &mut game.mobs[0],
+                horizon_client::mobs::finalize::Attr::MaxHealth,
+                30.0,
+            );
+            assert_eq!(read(game, 12, gravity), (Some(0.2), Some(0.1)));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_stand_the_dragon_and_a_player_take_writes() {
+        use AttributeOperation::*;
+        use ModifierLifetime::*;
+        use horizon_client::motion::PlayerMotion;
+        with_game(|game| {
+            spawn(game);
+            let health = "minecraft:max_health";
+            let stand = living(game, 13);
+            assert!(stand.set_attribute_base(game, health, 4.0));
+            assert_eq!(read(game, 13, health), (Some(4.0), Some(4.0)));
+            // Not an attribute of an armor stand; a non-finite amount.
+            let damage = modifier("test:x", 1.0, AddValue);
+            assert!(!stand.add_attribute_modifier(
+                game,
+                "minecraft:attack_damage",
+                damage,
+                Permanent
+            ));
+            assert!(!stand.add_attribute_modifier(
+                game,
+                health,
+                modifier("test:x", f64::NAN, AddValue),
+                Permanent
+            ));
+            let dragon = living(game, 14);
+            assert!(dragon.add_attribute_modifier(
+                game,
+                health,
+                modifier("test:tough", 100.0, AddValue),
+                Transient
+            ));
+            assert_eq!(read(game, 14, health), (Some(300.0), Some(200.0)));
+
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let player = living(game, 20);
+            assert!(player.add_attribute_modifier(
+                game,
+                health,
+                modifier("test:hearty", 0.5, AddMultipliedBase),
+                Permanent
+            ));
+            assert_eq!(read(game, 20, health), (Some(30.0), Some(20.0)));
+            let hearty = Identifier::parse("test:hearty").unwrap();
+            assert!(player.remove_attribute_modifier(game, health, &hearty));
+            assert_eq!(read(game, 20, health), (Some(20.0), Some(20.0)));
+            // A stale handle writes nothing.
+            let zombie = living(game, 12);
+            game.mobs.clear();
+            assert!(!zombie.set_attribute_base(game, "minecraft:gravity", 1.0));
+        });
+    }
 }

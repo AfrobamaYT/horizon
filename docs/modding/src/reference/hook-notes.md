@@ -2162,6 +2162,20 @@ handle, an entity the client doesn't track and a level it doesn't show:
   `LivingEntity.collectEquipmentChanges` does (transient: never saved). The map is built when first needed. Mob
   behavior still reads the type's defaults, so a modifier does not yet change how a mob moves or hits, and an item's
   own `attribute_modifiers` component is not read yet, only the item type's.
+- The writes take the same entities (a guest in its own turn) and answer false for an attribute the type lacks, a
+  stale handle, or on a client. `living.add_attribute_modifier(host, id, modifier, lifetime)` is
+  `AttributeInstance.addTransientModifier` or `addPermanentModifier` (`ModifierLifetime`), refused when the
+  attribute already has a modifier with that id (vanilla throws) or the amount is not finite.
+  `replace_attribute_modifier` puts the new one in place of the old (`addOrUpdateTransientModifier`,
+  `addOrReplacePermanentModifier`), and the new lifetime wins. `remove_attribute_modifier(host, id, modifier_id)` is
+  `removeModifier` (false when there was none), and `set_attribute_base(host, id, base)` is `setBaseValue`.
+  `AttributeModifier` holds the modifier's id, amount and `AttributeOperation`. A permanent modifier and a base are
+  saved with the entity, and a transient modifier lasts until it unloads. Each write goes where the entity's
+  gameplay reads it: a player's own attribute map, and for a mob the store of the ten attributes its behavior uses
+  (max health, movement and flying speed, follow range, attack damage, knockback resistance, armor, jump strength,
+  burning time, reinforcements), so the mob moves and hits by them at once, and its clients see them with its next
+  attribute sync. Its other attributes, and a stand's and the dragon's, change the live map, which keeps the writes
+  when it is built again.
 - `living.set_health(host, health)` is `LivingEntity.setHealth` (Paper's `Damageable#setHealth`), cut to the
   range from zero to the maximum, with no hook; a non-finite value is refused. This raw write can set zero
   or change a dead entity's health without running the death pipeline.
