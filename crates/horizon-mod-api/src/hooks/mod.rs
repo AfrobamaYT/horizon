@@ -176,6 +176,7 @@ mod menu_slots;
 mod merchant_refs;
 mod minecart_pass;
 mod minecart_refs;
+mod mob_despawn;
 mod mob_effect_events;
 mod mob_goals;
 mod mob_navigation;
