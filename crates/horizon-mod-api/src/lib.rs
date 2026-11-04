@@ -846,6 +846,12 @@ pub struct NativeBlockRim {
     /// The line width in pixels.
     pub width: f32,
 }
+impl NativeBlockRim {
+    /// An outline of the block at `pos` in `argb`, `width` pixels wide.
+    pub const fn new(pos: [i32; 3], argb: u32, width: f32) -> Self {
+        Self { pos, argb, width }
+    }
+}
 
 /// A camera-local visual light, with no gameplay light or shadow writes.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -859,6 +865,17 @@ pub struct NativeColoredLight {
     pub radius: f32,
     /// The light's strength.
     pub intensity: f32,
+}
+impl NativeColoredLight {
+    /// A light at `at` in `rgb`, reaching `radius` blocks at strength `intensity`.
+    pub const fn new(at: [f64; 3], rgb: u32, radius: f32, intensity: f32) -> Self {
+        Self {
+            at,
+            rgb,
+            radius,
+            intensity,
+        }
+    }
 }
 
 /// The minimap a native mod shows (`native_minimap`), drawn by Horizon's
