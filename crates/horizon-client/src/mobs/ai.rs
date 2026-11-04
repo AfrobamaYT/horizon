@@ -4628,7 +4628,7 @@ mod ravager_noai_tests {
                     mob.extra.counter = initial.0;
                     mob.extra.counter2 = initial.1;
                     mob.extra.anim_ticks = initial.2;
-                    let mut random = LegacyRandom::new(0);
+                    let mut random = horizon_core::random::LegacyRandom::new(0);
                     let mut events = Vec::new();
                     for elapsed in 1..=22 {
                         tick(&mut mob, w, &mut random, &mut events);
