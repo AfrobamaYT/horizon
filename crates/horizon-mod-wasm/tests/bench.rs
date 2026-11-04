@@ -145,6 +145,88 @@ fn a_call_past_its_fuel_stops_its_group() {
     assert_eq!(chat(wasm, "text"), "");
 }
 
+/// A flat world's start context, all the bench's structure type needs.
+struct Flat;
+
+impl horizon_world::worldgen::structure::jigsaw::JigsawContext for Flat {
+    fn min_y(&self) -> i32 {
+        -64
+    }
+    fn max_y(&self) -> i32 {
+        320
+    }
+    fn base_height(&mut self, _: i32, _: i32, _: mod_api::HeightmapType) -> i32 {
+        65
+    }
+    fn column_has_valid_biome(&mut self, _: i32, _: i32, _: i32, _: i32) -> bool {
+        true
+    }
+}
+
+impl horizon_world::worldgen::structure::start::StartContext for Flat {
+    fn seed(&self) -> i64 {
+        1
+    }
+    fn sea_level(&self) -> i32 {
+        63
+    }
+    fn base_column(&mut self, _: i32, _: i32, _: mod_api::HeightmapType) -> Vec<bool> {
+        Vec::new()
+    }
+    fn base_columns(&mut self, _: i32, _: i32, _: &[mod_api::HeightmapType]) -> Vec<Vec<bool>> {
+        Vec::new()
+    }
+    fn noise_column(&mut self, _: i32, _: i32) -> mod_api::NoiseColumn {
+        mod_api::NoiseColumn::default()
+    }
+    fn cold_enough_to_snow(&mut self, _: mod_api::BiomeId, _: [i32; 3]) -> bool {
+        false
+    }
+    fn generation(&self) -> horizon_world::worldgen::anchor::WorldGenerationContext {
+        horizon_world::worldgen::anchor::WorldGenerationContext::new(-64, 384, 63)
+    }
+    fn noise_biome(&mut self, _: [i32; 3]) -> mod_api::BiomeId {
+        mod_api::BiomeId(0)
+    }
+    fn noise_biomes(&mut self, quarts: &[[i32; 3]]) -> Vec<mod_api::BiomeId> {
+        vec![mod_api::BiomeId(0); quarts.len()]
+    }
+    fn set_valid_biomes(&mut self, _: Option<&std::collections::BTreeSet<mod_api::BiomeId>>) {}
+}
+
+#[test]
+#[ignore = "needs tests/bench built to mod.wasm (CI's wasm-bench job)"]
+fn worldgen_workers_sharing_a_wasm_structure_each_get_their_structure() {
+    use horizon_core::random::{LegacyRandom, WorldgenRandom};
+    // A hook call would be refused after 1 ms of waiting for the group; worldgen calls queue.
+    let mut budgets = Budgets::default();
+    budgets.wait = Duration::from_millis(1);
+    let loaded = load(budgets);
+    mod_api::__private::install_parts(&loaded.mods).unwrap();
+    let types = mod_api::__private::installed_structure_types();
+    let spin = types
+        .get("bench_mod:spin")
+        .cloned()
+        .expect("the bench mod registers bench_mod:spin");
+    let config = std::sync::Arc::new(serde_json::json!({"type": "bench_mod:spin"}));
+    let workers: Vec<_> = (0..8)
+        .map(|i| {
+            let (spin, config) = (spin.clone(), config.clone());
+            std::thread::spawn(move || {
+                let mut random = WorldgenRandom::new(LegacyRandom::new(0));
+                random.set_large_feature_seed(1, i, 0);
+                let chunk = mod_api::ChunkPos::new(i, 0);
+                spin.find_generation_point(&mut Flat, chunk, &config, &mut random)
+                    .map(|(position, pieces)| (position, pieces.len()))
+            })
+        })
+        .collect();
+    for (i, worker) in workers.into_iter().enumerate() {
+        let (position, pieces) = worker.join().unwrap().expect("every chunk gets its start");
+        assert_eq!((position[0], position[2], pieces), (i as i32 * 16, 0, 1));
+    }
+}
+
 #[test]
 #[ignore = "needs tests/bench built to mod.wasm and a release build (CI's wasm-bench job)"]
 fn a_wasm_mod_against_the_same_mod_native() {
