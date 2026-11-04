@@ -67,6 +67,40 @@ pub fn decode_items(tag: Option<&Tag>, size: usize) -> Vec<Option<crate::items::
     slots
 }
 
+/// A stack as its saved NBT (`item_to_nbt`).
+impl From<&crate::items::ItemStack> for Tag {
+    fn from(stack: &crate::items::ItemStack) -> Self {
+        item_to_nbt(stack)
+    }
+}
+
+/// A stack read from its saved NBT (`item_from_nbt`); a tag that is no stack is refused as
+/// itself.
+impl TryFrom<Tag> for crate::items::ItemStack {
+    type Error = Tag;
+    fn try_from(tag: Tag) -> Result<Self, Tag> {
+        item_from_nbt(&tag).ok_or(tag)
+    }
+}
+
+/// Components as a stack's `components` compound (`components_tag`), undamaged.
+impl From<&crate::item_data::StackData> for Tag {
+    fn from(data: &crate::item_data::StackData) -> Self {
+        crate::item_data::components_tag(0, Some(data))
+            .unwrap_or_else(|| Tag::Compound(Default::default()))
+    }
+}
+
+/// Components read from a stack's `components` compound (`decode_components`); a damage in it
+/// is not a component of these.
+impl TryFrom<Tag> for crate::item_data::StackData {
+    type Error = Tag;
+    fn try_from(tag: Tag) -> Result<Self, Tag> {
+        let (_, extra) = crate::item_data::decode_components(Some(&tag));
+        Ok(extra.map(|data| *data).unwrap_or_default())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,39 +161,5 @@ mod tests {
         let stack = crate::items::ItemStack::new("minecraft:diamond_sword", 1000);
         assert_eq!(stack.count, 1000);
         assert_eq!(number(item_to_nbt(&stack).get("count")), Some(1000));
-    }
-}
-
-/// A stack as its saved NBT (`item_to_nbt`).
-impl From<&crate::items::ItemStack> for Tag {
-    fn from(stack: &crate::items::ItemStack) -> Self {
-        item_to_nbt(stack)
-    }
-}
-
-/// A stack read from its saved NBT (`item_from_nbt`); a tag that is no stack is refused as
-/// itself.
-impl TryFrom<Tag> for crate::items::ItemStack {
-    type Error = Tag;
-    fn try_from(tag: Tag) -> Result<Self, Tag> {
-        item_from_nbt(&tag).ok_or(tag)
-    }
-}
-
-/// Components as a stack's `components` compound (`components_tag`), undamaged.
-impl From<&crate::item_data::StackData> for Tag {
-    fn from(data: &crate::item_data::StackData) -> Self {
-        crate::item_data::components_tag(0, Some(data))
-            .unwrap_or_else(|| Tag::Compound(Default::default()))
-    }
-}
-
-/// Components read from a stack's `components` compound (`decode_components`); a damage in it
-/// is not a component of these.
-impl TryFrom<Tag> for crate::item_data::StackData {
-    type Error = Tag;
-    fn try_from(tag: Tag) -> Result<Self, Tag> {
-        let (_, extra) = crate::item_data::decode_components(Some(&tag));
-        Ok(extra.map(|data| *data).unwrap_or_default())
     }
 }

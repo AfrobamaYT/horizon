@@ -870,6 +870,38 @@ impl Snbt<'_> {
     }
 }
 
+/// A tag as its network NBT bytes (`write_network`); a tag past the default limits writes none.
+impl From<&Tag> for Vec<u8> {
+    fn from(tag: &Tag) -> Self {
+        write_network(tag, Limits::default()).unwrap_or_default()
+    }
+}
+
+/// A tag read from its network NBT bytes (`read_network`).
+impl TryFrom<Vec<u8>> for Tag {
+    type Error = Error;
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Error> {
+        read_network(&bytes, Limits::default()).map(|(tag, _)| tag)
+    }
+}
+
+impl From<&Compound> for Tag {
+    fn from(compound: &Compound) -> Self {
+        Tag::Compound(compound.clone())
+    }
+}
+
+/// The compound a compound tag holds; any other tag is refused as itself.
+impl TryFrom<Tag> for Compound {
+    type Error = Tag;
+    fn try_from(tag: Tag) -> Result<Self, Tag> {
+        match tag {
+            Tag::Compound(compound) => Ok(compound),
+            tag => Err(tag),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1160,37 +1192,5 @@ mod tests {
         assert_eq!(parse_snbt("1.5f").unwrap().0, Tag::Float(1.5f32.to_bits()));
         assert_eq!(parse_snbt("3b").unwrap().0, Tag::Byte(3));
         assert_eq!(parse_snbt("-2L").unwrap().0, Tag::Long(-2));
-    }
-}
-
-/// A tag as its network NBT bytes (`write_network`); a tag past the default limits writes none.
-impl From<&Tag> for Vec<u8> {
-    fn from(tag: &Tag) -> Self {
-        write_network(tag, Limits::default()).unwrap_or_default()
-    }
-}
-
-/// A tag read from its network NBT bytes (`read_network`).
-impl TryFrom<Vec<u8>> for Tag {
-    type Error = Error;
-    fn try_from(bytes: Vec<u8>) -> Result<Self, Error> {
-        read_network(&bytes, Limits::default()).map(|(tag, _)| tag)
-    }
-}
-
-impl From<&Compound> for Tag {
-    fn from(compound: &Compound) -> Self {
-        Tag::Compound(compound.clone())
-    }
-}
-
-/// The compound a compound tag holds; any other tag is refused as itself.
-impl TryFrom<Tag> for Compound {
-    type Error = Tag;
-    fn try_from(tag: Tag) -> Result<Self, Tag> {
-        match tag {
-            Tag::Compound(compound) => Ok(compound),
-            tag => Err(tag),
-        }
     }
 }
