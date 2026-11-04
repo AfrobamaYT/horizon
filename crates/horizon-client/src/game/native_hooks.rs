@@ -11267,6 +11267,26 @@ mod tests {
     }
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn translate_gives_the_text_of_a_defined_key_and_none_otherwise() {
+        use horizon_client::lang::{Language, ResourceSource, scoped};
+        struct Empty;
+        impl ResourceSource for Empty {
+            fn read(&self, _: &str) -> Option<Vec<u8>> {
+                None
+            }
+        }
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (got, _) = scoped(Language::load(&[&Empty], "en_us"), || {
+                (
+                    game.native_translate("horizon.options.controller"),
+                    game.native_translate("missing.key"),
+                )
+            });
+            assert_eq!(got, (Some("Controller".to_owned()), None));
+        });
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_trait_mod_measures_text_and_sprites_through_its_draw_context() {
         use super::super::mod_api_host::generated::GameDrawContext;
         use super::super::native_entity_refs::tests::with_game;
