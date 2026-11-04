@@ -48,7 +48,8 @@ pub fn register(m: &mut Mob) {
     m.set_malus(super::path::PathType::Water, -1.0);
 }
 /// Enderman.isBeingStaredBy: the player's look within a cone of 0.025 / distance
-/// of the eyes, with line of sight, and no carved pumpkin.
+/// of the eyes, with line of sight, and no carved pumpkin. Last, as in NeoForge,
+/// a mod may keep the enderman calm (`EnderManAngerEvent`).
 pub fn stared_at(m: &Mob, w: &MobWorld) -> bool {
     let Some(p) = &w.player else { return false };
     if !p.alive || p.head.as_deref() == Some("minecraft:carved_pumpkin") {
@@ -70,6 +71,9 @@ pub fn stared_at(m: &Mob, w: &MobWorld) -> bool {
             Vec3::new(p.eye[0], p.eye[1], p.eye[2]),
             Vec3::new(m.position.x, m.eye_y(), m.position.z),
         )
+        && !w
+            .mob_hooks
+            .is_some_and(|hooks| hooks.enderman_anger_suppressed(m.id, p))
 }
 /// An enderman or a shulker is about to teleport on its own
 /// (`EntityTeleportEvent.EnderEntity`). A mod may move `target` or cancel.
