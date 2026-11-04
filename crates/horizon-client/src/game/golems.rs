@@ -176,6 +176,7 @@ impl Game<'_> {
                     id: 2001,
                     pos,
                     data: state.0 as i32,
+                    source: None,
                 });
         }
         self.process_level_events()
