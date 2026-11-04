@@ -58,8 +58,6 @@ concurrency:
   group: launcher-${{ github.ref == 'refs/heads/main' && 'release' || github.ref }}
   cancel-in-progress: false
 
-env:
-
 jobs:
   decide:
     runs-on: ubuntu-latest

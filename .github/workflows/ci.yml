@@ -19,8 +19,6 @@ concurrency:
   # A new push to a pull request replaces its running checks; main's runs all finish (releases follow them).
   group: checks-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-env:
-
 jobs:
   # One job, not one per check: each job takes a runner from the organisation's shared pool, and with every pull request
   # and every merge to main starting this workflow, three jobs a run left the pool's queue tens of minutes deep.

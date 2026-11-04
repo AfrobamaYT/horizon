@@ -22,8 +22,6 @@ on:
         default: false
 permissions:
   contents: read
-env:
-
 jobs:
   parity:
     runs-on: ${{ inputs.full && fromJSON('["self-hosted", "horizon-game", "playhorizon"]') || fromJSON('["self-hosted", "horizon-game"]') }}

@@ -17,8 +17,6 @@ permissions:
 concurrency:
   group: parity-main
   cancel-in-progress: false
-env:
-
 jobs:
   parity-main:
     # A Mac mini runner of its own (ludovics-mac-mini-2 holds only this label since 2026-10-26): behind PR parity jobs

@@ -23,8 +23,6 @@ permissions:
 concurrency:
   group: nightly-audit
   cancel-in-progress: false
-env:
-
 jobs:
   audit:
     # The Mac mini's runners only: the audit compares with the previous one, so it stays on one platform.
