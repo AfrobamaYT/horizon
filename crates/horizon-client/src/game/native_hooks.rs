@@ -983,9 +983,8 @@ impl GameLevel<'_> {
     /// vanilla's answer (a solid face, a fence of the same kind or a gate across the
     /// arm): change it, to false as well as to true, when the fence is your own.
     /// Asked whenever the fence settles its shape or is placed, inside the level's
-    /// update: answer from the arguments without touching the world. A mod fence's
-    /// `connects_to` tag still adds connections as data; this hook is for the rule
-    /// a tag can't say. Authoritative servers only.
+    /// update: answer from the arguments without touching the world. Only the fence block's own part is asked, so vanilla fences cost
+    /// nothing. Authoritative servers only.
     #[inline(always)]
     pub(super) fn native_fence_connects_to(
         &self,

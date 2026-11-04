@@ -467,6 +467,8 @@ one, where vanilla gives the `by` one.
 
 - A block part's `should_redstone_wire_connect_to` adjusts whether redstone wire connects to that block for the given position and optional direction.
 
+- A block part's `fence_connects_to` (`FenceBlock.connectsTo`) says whether a fence of that block connects an arm toward a neighbour state, `event.connected` starting with vanilla's answer; set it to false to deny a connection (a solid face, a fence of the same kind, a gate) as well as to true to make one. Only the fence block's own part is asked, so vanilla fences cost nothing.
+
 - A mod block's comparator output, as vanilla's `BlockBehaviour.hasAnalogOutputSignal` and `getAnalogOutputSignal`: `native_has_analog_output` says a block of yours has one,
   and `native_analog_output` gives it (0 to 15) for its state and position. A state change with neighbour updates tells the comparators itself; when the output
   changes otherwise, `native_update_output_neighbors(dimension, pos)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
