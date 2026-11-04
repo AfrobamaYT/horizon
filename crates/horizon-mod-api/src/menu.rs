@@ -1,6 +1,56 @@
 //! Moved here from the game so mods can name it.
 #[allow(unused_imports)]
 use crate::*;
+/// One click on the local player's open menu, submitted with `MenuRef::click`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MenuClick {
+    /// Pick up, place or drop the carried stack; `None` means outside.
+    Pickup {
+        slot: Option<usize>,
+        button: MouseButton,
+    },
+    /// Shift-click a menu-order slot into the opposite inventory.
+    QuickMove { slot: usize },
+    /// Exchange a menu-order slot with a hotbar slot or the offhand.
+    Swap { slot: usize, with: SwapWith },
+    /// Clone a menu-order slot in creative mode.
+    Clone { slot: usize },
+    /// Drop one item or the whole stack from a menu-order slot.
+    Throw { slot: usize, whole_stack: bool },
+    /// Distribute the carried stack across menu-order slots as one complete gesture.
+    Drag { kind: DragKind, slots: Vec<usize> },
+    /// Collect matching stacks into the carried stack.
+    PickupAll { slot: usize },
+}
+
+/// The mouse button used to pick up or place a stack.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: the two vanilla pickup buttons
+pub enum MouseButton {
+    Left,
+    Right,
+}
+
+/// The inventory location exchanged with a menu slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: vanilla swaps target the hotbar or the offhand
+pub enum SwapWith {
+    /// A hotbar index in 0..=8; other indices refuse the entire batch.
+    Hotbar(u8),
+    Offhand,
+}
+
+/// How a complete drag distributes the carried stack.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: vanilla has split, one-per-slot and creative-fill drags
+pub enum DragKind {
+    Split,
+    One,
+    /// Fill each slot in creative mode only.
+    Clone,
+}
+
 /// Identity and location of a player pressing a mod container button.
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct MenuButtonContext {

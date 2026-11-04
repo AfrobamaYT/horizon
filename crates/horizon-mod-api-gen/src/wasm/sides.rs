@@ -180,6 +180,7 @@ pub(super) fn guest(
         match *owner {
             "Host" => code.push_str("fn backend(&self) -> Option<crate::BackendRef<'_>> { Some(crate::BackendRef::of(self)) }\nfn capability_providers(&self) -> &'static dyn crate::CapabilityProviders { &Guest }\n"),
             "ServerHost" => code.push_str("fn backend_mut(&mut self) -> Option<crate::BackendMutRef<'_>> { Some(crate::BackendMutRef::of(self)) }\n"),
+            "ClientHost" => code.push_str("fn client_backend_mut(&mut self) -> Option<crate::ClientBackendMutRef<'_>> { Some(crate::ClientBackendMutRef::of(self)) }\n"),
             _ => {}
         }
         for method in methods.iter().filter(|m| m.owner == *owner) {

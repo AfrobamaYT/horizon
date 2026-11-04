@@ -164,9 +164,11 @@ pub trait Hooks {
         neighbour: BlockStateId,
         new: &mut Option<BlockStateId>,
     );
-    /// A command typed or clicked in chat, without its slash, before the
-    /// server and Horizon's commands see it: set `ran` when the mod ran it.
-    #[hook(side = "both", contract = "cancel", out = "ran")]
+    /// A command the local player typed or clicked in chat, without its
+    /// slash, before the server and Horizon's commands see it: set `ran`
+    /// when the mod ran it. Client-side: a server never asks, not for
+    /// command blocks, guests or the console.
+    #[hook(side = "client", contract = "cancel", out = "ran", version = 2)]
     fn command();
     /// The client's own commands (NeoForge's `RegisterClientCommandsEvent`), which
     /// `command` runs: push a `NativeCommand` per usage (`x <mode:word>`).

@@ -37,7 +37,6 @@ const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[
     "fall_on",
     "bounce_on",
     "bonemeal",
-    "fence_connects_to",
     "finalize_spawn",
     "item_tooltip",
     "living_drops",

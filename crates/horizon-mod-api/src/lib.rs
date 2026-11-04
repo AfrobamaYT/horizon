@@ -149,7 +149,7 @@ pub use crate::health::DamageContainer;
 pub use crate::health::{HurtSource, Reduction, ShieldBlock, Victim};
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::item_tooltip::TooltipDisplay;
-pub use crate::menu::{LogicalSide, StackedOnOther};
+pub use crate::menu::{DragKind, LogicalSide, MenuClick, MouseButton, StackedOnOther, SwapWith};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
 pub use crate::mobs::PathComputationType;
@@ -213,7 +213,8 @@ pub use horizon_world::{
         AttachmentType, AttachmentValue, AttachmentWrite, Holder,
     },
     level::{
-        BlockId, Dimension as LevelDimension, LandingWrite, NeighbourUpdate, PlacementContext,
+        BlockId, ConnectionKind, Dimension as LevelDimension, LandingWrite, NeighbourUpdate,
+        PlacementContext,
     },
     loot::{LootStack, NativeLootContext},
     registry::BlockStateId,
@@ -2872,6 +2873,20 @@ impl BossBarOverlay {
 
 /// One player's open menu, invalidated on close, replacement or reconnect.
 /// Client menu handles are also invalidated on respawn.
+///
+/// Clicks require a mutable client host, not a server or a read-only hook:
+/// ```compile_fail
+/// use mod_api::{MenuRef, ServerHost};
+/// fn wrong(menu: MenuRef, host: &mut dyn ServerHost) {
+///     menu.click(host, &[]);
+/// }
+/// ```
+/// ```compile_fail
+/// use mod_api::{MenuRef, ClientHost};
+/// fn wrong(menu: MenuRef, host: &dyn ClientHost) {
+///     menu.click(host, &[]);
+/// }
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MenuRef {
@@ -3597,6 +3612,26 @@ pub struct BackendMutRef<'a> {
     inner: &'a mut dyn BackendMut,
 }
 
+/// The opaque client-write backend, with no access to server writes.
+///
+/// Only the API can construct or open this value.
+// hidden: a game-side type, not part of the mod surface
+#[doc(hidden)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct ClientBackendMutRef<'a> {
+    inner: &'a mut dyn ClientBackendMut,
+}
+
+impl<'a> ClientBackendMutRef<'a> {
+    pub(crate) fn of(inner: &'a mut dyn ClientBackendMut) -> Self {
+        Self { inner }
+    }
+
+    fn open(self) -> &'a mut dyn ClientBackendMut {
+        self.inner
+    }
+}
+
 impl<'a> BackendRef<'a> {
     /// Wraps a read backend; only the generated game impl and this module's
     /// test doubles build a wrapper, always around themselves.
@@ -3701,6 +3736,12 @@ impl LevelSide<'_> {
 /// caller answers its typed refusal instead of running on.
 pub(crate) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&mut dyn BackendMut> {
     host.backend_mut().map(|wrapper| wrapper.open())
+}
+
+pub(crate) fn client_backend_mut_of(
+    host: &mut dyn ClientHost,
+) -> Option<&mut dyn ClientBackendMut> {
+    host.client_backend_mut().map(|wrapper| wrapper.open())
 }
 
 /// What used bone meal on a block (`BonemealSource`), for `bonemeal`.
@@ -3870,7 +3911,7 @@ mod generated_host {
 }
 // hidden: a game-side re-export, not part of the mod surface
 #[doc(hidden)]
-pub use generated_host::{Backend, BackendMut};
+pub use generated_host::{Backend, BackendMut, ClientBackendMut};
 pub use generated_host::{
     BlockEntityDrawContext, ClientHost, DrawContext, Host, HostSide, LevelSide, ServerHost,
 };
@@ -4275,6 +4316,22 @@ mod hooks_tests;
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn client_menu_click_refuses_a_host_without_its_backend() {
+        struct Empty;
+        impl Host for Empty {}
+        impl ClientHost for Empty {}
+        let player = __private::game::player_ref(EntityRef::new(NativeWorldEpoch::new(1), 7), 42);
+        let menu = __private::game::menu_ref(player, 0, 1);
+        assert!(!menu.click(
+            &mut Empty,
+            &[MenuClick::Pickup {
+                slot: Some(0),
+                button: MouseButton::Left,
+            }]
+        ));
+    }
 
     #[test]
     fn level_family_accepts_empty_doubles() {

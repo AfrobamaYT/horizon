@@ -155,7 +155,10 @@ pub struct Context {
     pub source: Option<Who>,
     /// The projectile's owner, when the source is a projectile.
     pub owner: Option<Who>,
-    /// `affectedState` is in `dampens_vibrations`.
+    /// `GameEvent.Context.affectedState`, the block state the event touched.
+    pub affected_state: Option<horizon_world::registry::BlockStateId>,
+    /// `affected_state` is in `dampens_vibrations`: the tag test, made once where the
+    /// context is built (the registry-free listeners read this, not the tag tables).
     pub dampening_state: bool,
     /// The source is a spectator.
     pub spectator: bool,

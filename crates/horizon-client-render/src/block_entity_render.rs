@@ -696,11 +696,21 @@ const TEXT_OVER_OUTLINE: f32 = 0.05;
 /// reader instead (a twentieth of a font pixel, invisible) rather than
 /// z-fighting with the outline under it.
 fn draw_text(scene: &Scene, call: &TextCall, out: &mut Vec<Vertex>) {
+    push_text(scene.glyph, &call.run(), out);
+}
+
+/// [`draw_text`] with any font's glyphs (`glyph`: a character's cell in the atlas, its box and
+/// advance): a sign's text, or a mod block entity's (`BlockEntityDrawContext::draw_text`).
+pub fn push_text(
+    glyph: &dyn Fn(char) -> crate::font::Glyph,
+    call: &TextRun<'_>,
+    out: &mut Vec<Vertex>,
+) {
     let mut emit = |dx: f32, dy: f32, z: f32, argb: u32| {
         let mut x = call.x + dx;
         let y0 = call.y + dy;
         for ch in call.text.chars() {
-            let g = (scene.glyph)(ch);
+            let g = glyph(ch);
             if let Some(cell) = g.rect {
                 // BakedSheetGlyph: the glyph's own box from the pen, not a
                 // fixed 8x8 cell (a Unifont glyph is 0.5 units per texel).
@@ -786,6 +796,36 @@ pub struct TextCall {
     pub x: f32,
     pub y: f32,
     pub text: String,
+    /// ARGB.
+    pub color: u32,
+    /// ARGB outline colour, 0 for none.
+    pub outline: u32,
+    /// Horizon packed light (sky*16 | block*16 << 8).
+    pub light: u32,
+}
+impl TextCall {
+    /// The call as [`push_text`] reads it.
+    pub fn run(&self) -> TextRun<'_> {
+        TextRun {
+            matrix: self.matrix,
+            x: self.x,
+            y: self.y,
+            text: &self.text,
+            color: self.color,
+            outline: self.outline,
+            light: self.light,
+        }
+    }
+}
+
+/// A line of text [`push_text`] lays out, borrowing its text: a [`TextCall`]'s, or one a mod
+/// draws each frame, which then allocates nothing.
+#[derive(Clone, Copy, Debug)]
+pub struct TextRun<'a> {
+    pub matrix: Mat4,
+    pub x: f32,
+    pub y: f32,
+    pub text: &'a str,
     /// ARGB.
     pub color: u32,
     /// ARGB outline colour, 0 for none.
