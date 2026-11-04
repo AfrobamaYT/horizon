@@ -61,7 +61,8 @@ struct Observed(Changes);
 #[mod_api::__subscriptions]
 impl Hooks for Observed {
     fn register(&self, r: &mut Registrar, _: &RegistrationContext<'_>) {
-        for block in ["minecraft:chest", "minecraft:crafter"] {
+        // An unbacked vehicle coordinate would select air if it were dispatched as a block.
+        for block in ["minecraft:air", "minecraft:chest", "minecraft:crafter"] {
             r.block_part(block, self.0.clone());
         }
         let kind = r.block_entity_type("depot").blocks(&[DEPOT]).build();
