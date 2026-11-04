@@ -2,7 +2,9 @@
 //! (docs/native-mods.md, "Entity and level handles", #7387): the equipment
 //! of mobs, players and armor stands, throwing a stack, and whether a mob
 //! is tamed. Reads return `None`, writes false, for a stale handle or on a
-//! client.
+//! client; the exception is the reads marked side `both` (`living`, `equipment`,
+//! `hand_item`, `health`, `max_health`, and `effect`/`effects`), which on a
+//! client answer for the local player from the client's own copy.
 use super::Game;
 use super::commands::{Target, items::Owner};
 use crate::mobs::Who;
@@ -78,9 +80,24 @@ impl Game<'_> {
     /// The entity as a living entity (vanilla's `LivingEntity`: a mob, a
     /// player, an armor stand or the dragon), or None for another kind or a
     /// stale handle.
+    ///
+    /// On a client, only the local player is one: the client keeps the others'
+    /// equipment, effects and health only as far as it draws them.
     pub(super) fn native_living(&self, entity: EntityRef) -> Option<LivingRef> {
         let living = LivingRef::new(entity);
-        self.native_living_target(living).map(|_| living)
+        self.native_living_read_target(living).map(|_| living)
+    }
+    /// What a living handle names for a read that works on both sides: the
+    /// server's entity, or on a client the local player (`Minecraft.player`),
+    /// whose state is the client's copy of what the server sent.
+    pub(super) fn native_living_read_target(&self, living: LivingRef) -> Option<Target> {
+        if self.is_logical_server() {
+            return self.native_living_target(living);
+        }
+        match self.native_client_entity_target(living.entity())? {
+            Target::Player => Some(Target::Player),
+            _ => None,
+        }
     }
     /// The effective value of an attribute on a living entity. None for an
     /// unknown or absent attribute, an unavailable entity, or on a client.
@@ -106,7 +123,16 @@ impl Game<'_> {
         name: &str,
         kind: horizon_world::attribute_map::ValueKind,
     ) -> Option<f64> {
-        let player = match self.native_living_target(living)? {
+        self.native_target_attribute(self.native_living_target(living)?, name, kind)
+    }
+
+    fn native_target_attribute(
+        &self,
+        target: Target,
+        name: &str,
+        kind: horizon_world::attribute_map::ValueKind,
+    ) -> Option<f64> {
+        let player = match target {
             Target::Player => self.player.as_ref()?,
             Target::Guest(conn) => self.command_guest(conn)?.motion.as_deref()?,
             _ => return None,
@@ -120,7 +146,7 @@ impl Game<'_> {
     /// resolves: the hub is out for their action, and other players'
     /// handles read `None` until it is back.
     pub(super) fn native_living_health(&self, living: LivingRef) -> Option<f32> {
-        match self.native_living_target(living)? {
+        match self.native_living_read_target(living)? {
             Target::Player => Some(self.player.as_ref()?.health.health()),
             Target::Guest(conn) => Some(self.command_guest(conn)?.health),
             Target::Mob(id) => self
@@ -149,10 +175,11 @@ impl Game<'_> {
     /// armor stand the fixed 20 the game seeds it with, the dragon its
     /// 200) until live attribute maps cover them.
     pub(super) fn native_living_max_health(&self, living: LivingRef) -> Option<f32> {
-        match self.native_living_target(living)? {
+        let target = self.native_living_read_target(living)?;
+        match target {
             Target::Player | Target::Guest(_) => self
-                .native_living_attribute(
-                    living,
+                .native_target_attribute(
+                    target,
                     "minecraft:max_health",
                     horizon_world::attribute_map::ValueKind::Computed,
                 )
@@ -297,7 +324,7 @@ impl Game<'_> {
         living: LivingRef,
         slot: EquipmentSlot,
     ) -> Option<ItemStack> {
-        match self.native_living_target(living)? {
+        match self.native_living_read_target(living)? {
             Target::Player => player_slot(
                 &self.inventory,
                 self.selected,

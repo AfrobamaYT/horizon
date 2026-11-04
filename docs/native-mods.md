@@ -2643,7 +2643,20 @@ The client also owns a world epoch, separate from the server's. It begins when a
 client level, changes when a dimension change or later login replaces that level, and retires after the
 client logout hook or when reconfiguration clears the level. A same-level respawn keeps the epoch.
 Client epochs do not fire server world lifecycle or server tick hooks. This bookkeeping does not make
-the server entity and level reads available on a client.
+the server entity and level reads available on a client; the reads listed under "On a client" below are.
+
+On a client (`host.local_player()`, a client hook's `host`), these reads answer from the client's own copy, which is
+what the server sent it (vanilla's `LocalPlayer`, `ClientLevel` and `Entity` fields), and are `None` for a stale
+handle, an entity the client doesn't track and a level it doesn't show:
+
+- `host.entity(id)` and `host.level(dimension)`: the local player or an entity the server told the client of, and the
+  one level the client shows. `host.living(entity)` is the local player only.
+- `entity.position(host)`, `rotation(host)` and `velocity(host)`: the client's copy, interpolated as it draws it.
+- `level.block_state(host, pos)`, `block`, `block_property` and `is_loaded`: blocks of the chunks the client holds.
+  A chunk it doesn't hold reads as unloaded; no read loads one.
+- `living.equipment(host, slot)`, `hand_item`, `effect`, `effects`, `health` and `max_health`, for the local player.
+  Another entity's equipment, effects and health stay server reads, and so does every write.
+- `player.last_death_location(host)`, for the local player: the position the login and respawn packets carried.
 
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
