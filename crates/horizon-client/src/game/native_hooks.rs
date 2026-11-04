@@ -12724,7 +12724,7 @@ mod entity_inside_tests {
                 let level = game.native_level(game.dim.id()).unwrap();
                 let stack = || ItemStack::new("minecraft:stone", 1);
                 let kept = game
-                    .native_level_spawn_item(level, 1.5, 70.0, 1.5, stack())
+                    .native_level_spawn_item(level, 1.5, 70.0, 1.5, stack(), 10)
                     .unwrap();
                 let at = |x| BlockPos::new(x, 64, 1);
                 in_level(Some(game.dim.id()), || {
