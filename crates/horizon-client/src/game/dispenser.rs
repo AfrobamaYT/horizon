@@ -4,6 +4,7 @@
 //! event it plays (`DefaultDispenseItemBehavior.dispense` then plays that
 //! event and the smoke animation, event 2000).
 use super::Game;
+use super::level_sounds::LevelSound;
 use horizon_client::{
     Result,
     collisions::SceneCollisions,
@@ -13,6 +14,7 @@ use horizon_client::{
     particles::{ParticleOptions, ParticleType},
     projectiles::{Projectile, ProjectileKind},
 };
+use mod_api::SoundSource;
 // Its old home, for mixin code that names it here.
 use horizon_core::{
     geometry::{Aabb, Direction, Vec3},
@@ -1823,12 +1825,21 @@ impl Game<'_> {
         } else {
             "minecraft:shearing/mooshroom/red"
         };
-        self.audio.play(
+        // shear: level.playSound(null, this, MOOSHROOM_SHEAR, source, 1, 1),
+        // PLAYERS for a player's shears and BLOCKS for a dispenser's.
+        let source = if player.is_some() {
+            SoundSource::Players
+        } else {
+            SoundSource::Blocks
+        };
+        let shear = LevelSound::new(
             "minecraft:entity.mooshroom.shear",
-            Some([at.x, at.y, at.z]),
+            [at.x, at.y, at.z],
             1.0,
             1.0,
-        );
+        )
+        .in_source(source);
+        self.play_bound_sound(shear, old.id, None);
         self.convert_to(
             &old,
             "minecraft:cow",
@@ -1883,6 +1894,10 @@ impl Game<'_> {
             let entity_id = m.id;
             let kind = m.kind.id.clone();
             let sound_at = Some([at.x, at.y, at.z]);
+            // shear(level, BLOCKS, tool): level.playSound(null, this, sound, BLOCKS, 1, 1).
+            let shear_sound = |name: &'static str| {
+                LevelSound::new(name, [at.x, at.y, at.z], 1.0, 1.0).in_source(SoundSource::Blocks)
+            };
             match m.species() {
                 Species::SulfurCube if sulfur_cube::has_body(m) => {
                     // SulfurCube.shear: the swallowed block comes out at the
@@ -1902,8 +1917,11 @@ impl Game<'_> {
                 Species::Sheep if !m.extra.sheared && !m.is_baby() => {
                     let color =
                         horizon_client::mobs::render::DYE_NAMES[m.extra.color as usize & 15];
-                    self.audio
-                        .play("minecraft:entity.sheep.shear", sound_at, 1.0, 1.0);
+                    self.play_bound_sound(
+                        shear_sound("minecraft:entity.sheep.shear"),
+                        entity_id,
+                        None,
+                    );
                     let drops = self.sequence_loot(
                         "minecraft:shearing/sheep",
                         &format!("minecraft:shearing/sheep/{color}"),
@@ -1936,8 +1954,11 @@ impl Game<'_> {
                 }
                 Species::Bogged if !m.extra.sheared => {
                     let height = f64::from(m.height());
-                    self.audio
-                        .play("minecraft:entity.bogged.shear", sound_at, 1.0, 1.0);
+                    self.play_bound_sound(
+                        shear_sound("minecraft:entity.bogged.shear"),
+                        entity_id,
+                        None,
+                    );
                     let drops = self.sequence_loot(
                         "minecraft:shearing/bogged",
                         "minecraft:shearing/bogged",
@@ -1950,8 +1971,11 @@ impl Game<'_> {
                 }
                 Species::SnowGolem if !m.extra.sheared => {
                     let eye = m.eye_height();
-                    self.audio
-                        .play("minecraft:entity.snow_golem.shear", sound_at, 1.0, 1.0);
+                    self.play_bound_sound(
+                        shear_sound("minecraft:entity.snow_golem.shear"),
+                        entity_id,
+                        None,
+                    );
                     self.mobs[i].extra.sheared = true;
                     let drops = self.sequence_loot(
                         "minecraft:shearing/snow_golem",
@@ -1964,8 +1988,11 @@ impl Game<'_> {
                 }
                 // CopperGolem.shear: the antenna's flower drops 1.5 up.
                 Species::CopperGolem if self.golem_shearable(i) => {
-                    self.audio
-                        .play("minecraft:entity.copper_golem.shear", sound_at, 1.0, 1.0);
+                    self.play_bound_sound(
+                        shear_sound("minecraft:entity.copper_golem.shear"),
+                        entity_id,
+                        None,
+                    );
                     let antenna = self.mobs[i].saddle_item();
                     let id = self.mobs[i].id;
                     // setItemSlot(EQUIPMENT_SLOT_ANTENNA, EMPTY): an unequip.
