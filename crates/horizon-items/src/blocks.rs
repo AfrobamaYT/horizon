@@ -52,6 +52,9 @@ pub struct StateFacts {
     pub random_ticks: bool,
     pub block_entity: bool,
     pub render_shape: RenderShape,
+    /// Whether the breaking crack is drawn on the block (`false`: a content
+    /// block declared `destroy_overlay: false`).
+    pub destroy_overlay: bool,
     pub full_collision: bool,
     pub friction: f32,
     pub explosion_resistance: f32,
@@ -473,6 +476,7 @@ impl BlockFacts {
                     Some("ENTITYBLOCK_ANIMATED") => RenderShape::Animated,
                     _ => RenderShape::Model,
                 },
+                destroy_overlay: !entry.no_destroy_overlay,
                 full_collision: entry.full_collision,
                 friction: entry.friction as f32,
                 explosion_resistance: entry.explosion_resistance as f32,

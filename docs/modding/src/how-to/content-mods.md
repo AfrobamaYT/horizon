@@ -139,6 +139,12 @@ doesn't leave a hole in the floor under it. It is no longer a solid render eithe
 leaves: dampened by 1, or not at all if its template lets skylight down. Unset or `true`, it occludes as its template
 does.
 
+`destroy_overlay: false` hides the breaking crack (`destroy_stage_0` to `9`) on the block, for one broken by use
+(a feast or a cake taken apart bite by bite). It is read once at load into the block's facts, and only the overlay
+is skipped: the mining progress, the server's progress and the destroy-progress packets other players see stay
+vanilla's. Unset or `true`, the crack is drawn. It stands where a mod once had a mixin on
+`LevelRenderer.renderBlockDestroyAnimation`, which has no NeoForge event.
+
 A block copies its template's states. It can also declare state properties of
 its own, which its template does not have — how a pipe says which sides it
 connects to, or a machine whether it is running. Its states then become its

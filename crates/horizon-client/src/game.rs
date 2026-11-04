@@ -12088,6 +12088,10 @@ impl Game<'_> {
                     - camera;
                 d.length_squared() <= 1024.0
             })
+            .filter(|(pos, _)| {
+                let state = self.world.block(pos[0], pos[1], pos[2]);
+                self.res.facts().get(state).destroy_overlay
+            })
             .filter_map(|(pos, stage)| {
                 let name = DESTROY_STAGES.get(stage as usize)?;
                 let r = self.gui.atlas.sprites.get(*name)?;
