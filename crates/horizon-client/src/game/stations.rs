@@ -3174,7 +3174,7 @@ mod tests {
         struct Mod;
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 r.item_part("minecraft:stick", Lore);
             }
             fn item_tooltip(&self, _: &dyn ClientHost, event: &mut ItemTooltipEvent<'_>) {

@@ -799,12 +799,11 @@ one, where vanilla gives the `by` one.
   changes otherwise, `native_update_output_neighbors(dimension, pos)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
 
 `Hooks::component_types`, `blocks`, `items` and `standalone_models` take
-`&RegistrationContext<'_>` before their event. `context.phase()` identifies the
-bootstrap declarations being collected; `context.mods()` returns a read-only
-`LoadedMods` view whose `ids()` lists loaded code mods in dispatch order. These
+`&RegistrationContext<'_>` before their event; `Hooks::register` takes it after
+its `Registrar`. `context.mods()` returns a read-only `LoadedMods` view whose
+`ids()` lists startup code and selected content packages in dispatch order. These
 contexts are supplied by the engine and have no game `Host`, handle constructors
-or transactions. Declarations still go on each event; `Hooks::register(&mut
-Registrar)` and Parts registration are unchanged.
+or transactions. Declarations still go on each event or registrar.
 
 - `native_component_types(context, types)` runs once before content loads. Append namespaced component IDs; duplicates, invalid IDs and the `minecraft` namespace stop startup. `native_component`, `native_set_component` and `native_remove_component` read, set and remove registered components, including item defaults. Values use NBT and must fit the network reader limits.
 
@@ -3474,7 +3473,7 @@ impl BlockPart for Gauge {
 
 #[mod_api::horizon_mod]
 impl Hooks for MyMod {
-    fn register(&self, r: &mut Registrar) {
+    fn register(&self, r: &mut Registrar, _: &RegistrationContext<'_>) {
         r.block_part("minecraft:stone", Gauge);
     }
 }

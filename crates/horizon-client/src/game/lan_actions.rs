@@ -6300,7 +6300,7 @@ mod tests {
         }
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 r.block_part("minecraft:stone", Picker(self.picks.clone()));
                 r.block_part("minecraft:beehive", Picker(self.picks.clone()));
                 r.block_part("minecraft:chest", Picker(self.picks.clone()));
@@ -6867,7 +6867,7 @@ mod tests {
         }
         #[mod_api::__subscriptions]
         impl Hooks for BlockUse {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 r.block_part("minecraft:lever", self.clone());
             }
         }
@@ -6935,7 +6935,7 @@ mod tests {
         }
         #[mod_api::__subscriptions]
         impl Hooks for Replacement {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 r.block_part("minecraft:note_block", self.clone());
             }
         }

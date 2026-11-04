@@ -470,7 +470,7 @@ mod tests {
         struct TestMod;
         #[horizon_client::mod_api::__subscriptions]
         impl Hooks for TestMod {
-            fn register(&self, registrar: &mut Registrar) {
+            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 let kind = registrar
                     .block_entity_type("crate")
                     .blocks(&[CRATE])
@@ -496,9 +496,7 @@ mod tests {
         horizon_client::mod_api::install(mods.clone());
         horizon_client::mod_api::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root =
-            super::super::mods::content_root(&base, &Default::default(), &Default::default())
-                .unwrap();
+        let root = super::super::mods::content_root(&base, &Default::default()).unwrap();
         with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world

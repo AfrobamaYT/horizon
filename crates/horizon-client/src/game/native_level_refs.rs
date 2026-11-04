@@ -533,7 +533,7 @@ mod tests {
     struct Machines;
     #[mod_api::__subscriptions]
     impl Hooks for Machines {
-        fn register(&self, r: &mut Registrar) {
+        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
             r.register_ticket_controller("quarry", true);
             r.register_ticket_controller("machines:drill", true);
             r.register_ticket_controller("plain", false);
@@ -558,7 +558,7 @@ mod tests {
     struct Other;
     #[mod_api::__subscriptions]
     impl Hooks for Other {
-        fn register(&self, r: &mut Registrar) {
+        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
             r.register_ticket_controller("vault", true);
         }
         fn validate_tickets(&self, _: &mut dyn ServerHost, e: &mut ValidateTicketsEvent<'_>) {
@@ -1005,7 +1005,7 @@ mod tests {
         struct Idle;
         #[mod_api::__subscriptions]
         impl Hooks for Idle {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 r.register_ticket_controller("quarry", true);
             }
         }
