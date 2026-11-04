@@ -1944,21 +1944,18 @@ impl Game<'_> {
     }
     /// `EffectsInInventory`: panels to the right of survival/creative inventory.
     /// The caller draws the returned tooltip after every other tooltip.
+    /// `ScreenEvent.RenderInventoryMobEffects` fires here once a frame, with
+    /// room and effects to show; its layout is kept for
+    /// `inventory_effects_rect`.
     pub(super) fn draw_inventory_effects(
         &self,
         batch: &mut HudBatch,
         origin: (f32, f32),
         image_width: i32,
     ) -> Option<[(String, u32); 2]> {
-        let panels = inventory_effects::panels(
-            batch.width as i32,
-            [origin.0 as i32, origin.1 as i32],
-            image_width,
-            &self.potions.effects.list,
-            self.clock.rate(),
-            &|key| self.pack.names.display_get(key),
-            &|text| self.gui.atlas.font.width(text).ceil() as i32,
-        );
+        let space = Self::effects_space(batch, [origin.0, origin.1], image_width as f32);
+        let layout = self.inventory_effects_layout(batch, &space);
+        let panels = self.effect_panels(&space, &layout);
         inventory_effects::paint(
             batch,
             &self.gui.atlas,
@@ -1967,26 +1964,76 @@ impl Game<'_> {
         )
     }
     /// The rectangle `draw_inventory_effects` covers, none with no effects
-    /// or too little room right of the window.
+    /// or too little room right of the window. It follows the layout the last
+    /// frame drew, so it lags a frame behind a change of the mod's choice.
     pub(super) fn inventory_effects_rect(
         &self,
         batch: &HudBatch,
         origin: [f32; 2],
         image_width: f32,
     ) -> Option<[f32; 4]> {
-        let panels = inventory_effects::panels(
-            batch.width as i32,
-            [origin[0] as i32, origin[1] as i32],
-            image_width as i32,
-            &self.potions.effects.list,
-            self.clock.rate(),
-            &|key| self.pack.names.display_get(key),
-            &|text| self.gui.atlas.font.width(text).ceil() as i32,
-        );
+        let space = Self::effects_space(batch, origin, image_width);
+        let layout = self
+            .effects_layout
+            .get()
+            .unwrap_or_else(|| inventory_effects::EffectsLayout::vanilla(space.available()));
+        let panels = self.effect_panels(&space, &layout);
         let first = panels.first()?;
         let width = panels.iter().map(|p| p.width).max()?;
         let height = (panels.len() as i32 - 1) * first.spacing + 32;
         Some([first.x as f32, first.y as f32, width as f32, height as f32])
+    }
+    fn effects_space(
+        batch: &HudBatch,
+        origin: [f32; 2],
+        image_width: f32,
+    ) -> inventory_effects::EffectsSpace {
+        inventory_effects::EffectsSpace {
+            screen_width: batch.width as i32,
+            origin: [origin[0] as i32, origin[1] as i32],
+            image_width: image_width as i32,
+        }
+    }
+    fn effect_panels(
+        &self,
+        space: &inventory_effects::EffectsSpace,
+        layout: &inventory_effects::EffectsLayout,
+    ) -> Vec<inventory_effects::EffectPanel> {
+        inventory_effects::panels(
+            space,
+            layout,
+            &self.potions.effects.list,
+            self.clock.rate(),
+            &|key| self.pack.names.display_get(key),
+            &|text| self.gui.atlas.font.width(text).ceil() as i32,
+        )
+    }
+    /// Vanilla's layout, as `native_screen_render_inventory_mob_effects`
+    /// leaves it, kept for the rect. No fire with no effect to show or no
+    /// room (vanilla returns first), nor with no mod listening.
+    fn inventory_effects_layout(
+        &self,
+        batch: &HudBatch,
+        space: &inventory_effects::EffectsSpace,
+    ) -> inventory_effects::EffectsLayout {
+        let mut layout = inventory_effects::EffectsLayout::vanilla(space.available());
+        if !self.potions.effects.list.is_empty()
+            && space.available() >= 32
+            && mod_api::__private::listened(mod_api::HookId::ScreenRenderInventoryMobEffects)
+        {
+            let view = self.screen_view(batch, self.screen);
+            let mut canceled = false;
+            self.native_screen_render_inventory_mob_effects(
+                &view,
+                space.available(),
+                &mut layout.compact,
+                &mut layout.offset,
+                &mut canceled,
+            );
+            layout.hidden = canceled;
+        }
+        self.effects_layout.set(Some(layout));
+        layout
     }
     /// Effects saved in level.dat (`Player.active_effects`).
     pub(super) fn restore_effects(&mut self) {
