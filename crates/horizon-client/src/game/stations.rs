@@ -2664,11 +2664,43 @@ impl Game<'_> {
             return;
         }
         let lines = Self::resolved(lines);
+        let screen = (batch.width, batch.height);
+        let Some(at) = self.tooltip_pre(None, &lines, &[], (x, y), screen) else {
+            return;
+        };
         let atlas = &self.gui.atlas;
-        let (x, y, w, h) =
-            Self::tooltip_geometry(atlas, &lines, (x, y), (batch.width, batch.height), [0.0; 2]);
+        let (x, y, w, h) = Self::tooltip_geometry(atlas, &lines, at, screen, [0.0; 2]);
         self.tooltip_box(batch, None, x, y, w, h);
         Self::tooltip_text(batch, atlas, &lines, x, y);
+    }
+    /// `RenderTooltipEvent.Pre` for a tooltip of `lines` then `images`, hanging from `at`: the
+    /// point a mod moved it to, `None` when one cancelled it. Only built when a mod listens.
+    pub(super) fn tooltip_pre(
+        &self,
+        stack: Option<&ItemStack>,
+        lines: &[(horizon_client::text::Text, u32)],
+        images: &[TooltipImage],
+        at: (f32, f32),
+        screen: (f32, f32),
+    ) -> Option<(f32, f32)> {
+        if !mod_api::__private::listened(mod_api::HookId::RenderTooltipPre) {
+            return Some(at);
+        }
+        let elements: Vec<TooltipElement> = lines
+            .iter()
+            .cloned()
+            .map(|(text, color)| TooltipElement::Text(text, color))
+            .chain(images.iter().cloned().map(TooltipElement::Image))
+            .collect();
+        let mut place = mod_api::TooltipPlace {
+            x: at.0 as i32,
+            y: at.1 as i32,
+            screen_width: screen.0 as i32,
+            screen_height: screen.1 as i32,
+        };
+        let mut cancel = false;
+        self.native_render_tooltip_pre(stack, &elements, &mut place, &mut cancel);
+        (!cancel).then_some((place.x as f32, place.y as f32))
     }
     /// A tooltip's lines with their legacy codes resolved and their colours.
     fn resolved<T: Clone + Into<horizon_client::text::Text>>(
@@ -2817,14 +2849,12 @@ impl Game<'_> {
             .fold(if probe.is_some() { 96.0_f32 } else { 0.0 }, |w, image| {
                 w.max(image.size[0])
             });
+        let screen = (batch.width, batch.height);
+        let Some(at) = self.tooltip_pre(Some(stack), &lines, &images, (x, y), screen) else {
+            return;
+        };
         let atlas = &self.gui.atlas;
-        let (x, y, w, h) = Self::tooltip_geometry(
-            atlas,
-            &lines,
-            (x, y),
-            (batch.width, batch.height),
-            [min_width, extra],
-        );
+        let (x, y, w, h) = Self::tooltip_geometry(atlas, &lines, at, screen, [min_width, extra]);
         self.tooltip_box(batch, Some(stack), x, y, w, h);
         let text_h = h - extra;
         Self::tooltip_text(batch, atlas, &lines, x, y);
@@ -3539,5 +3569,62 @@ mod cycling_tests {
         assert_eq!(additions[..m].len(), 7);
         assert_eq!(smithing_slot_icons(Some("minecraft:stick")).1, 0);
         assert_eq!(smithing_slot_icons(None).3, 0);
+    }
+
+    /// `render_tooltip_pre` sees a tooltip's lines, stack and screen, can move the point it hangs
+    /// from, and cancels it; with no mod the point is the cursor's.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_tooltip_pre_answer_moves_or_cancels_the_tooltip() {
+        use horizon_client::text::Text;
+        use mod_api::{
+            self, ClientHost, Hooks, ModEntry, Mods, RenderTooltipPreEvent, TooltipElement,
+        };
+        use std::sync::atomic::{AtomicU8, Ordering};
+
+        static MODE: AtomicU8 = AtomicU8::new(0);
+        struct Mod;
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn render_tooltip_pre(
+                &self,
+                _: &dyn ClientHost,
+                event: &mut RenderTooltipPreEvent<'_>,
+            ) -> mod_api::Flow {
+                assert_eq!(event.elements.len(), 1);
+                assert!(
+                    matches!(&event.elements[0], TooltipElement::Text(t, _) if t.plain() == "Tip")
+                );
+                assert_eq!((event.place.x, event.place.y), (10, 20));
+                assert_eq!(
+                    (event.place.screen_width, event.place.screen_height),
+                    (320, 240)
+                );
+                match MODE.load(Ordering::Relaxed) {
+                    1 => {
+                        event.place.x = 50;
+                        event.place.y = 60;
+                    }
+                    2 => return mod_api::Flow::Cancel,
+                    _ => {}
+                }
+                mod_api::Flow::Continue
+            }
+        }
+        let lines = vec![(Text::literal("Tip"), u32::MAX)];
+        let mods: Mods = vec![ModEntry::new("pre", Box::new(Mod))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let pre = |game: &super::Game<'_>| {
+                    game.tooltip_pre(None, &lines, &[], (10.0, 20.0), (320.0, 240.0))
+                };
+                MODE.store(0, Ordering::Relaxed);
+                assert_eq!(pre(game), Some((10.0, 20.0)));
+                MODE.store(1, Ordering::Relaxed);
+                assert_eq!(pre(game), Some((50.0, 60.0)));
+                MODE.store(2, Ordering::Relaxed);
+                assert_eq!(pre(game), None);
+            });
+        });
     }
 }

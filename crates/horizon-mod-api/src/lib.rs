@@ -109,7 +109,7 @@ pub use config_files::{
     ConfigPath, ConfigStat,
 };
 mod tooltip_element;
-pub use tooltip_element::{TooltipElement, TooltipImage};
+pub use tooltip_element::{TooltipElement, TooltipImage, TooltipPlace};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod client_reload;

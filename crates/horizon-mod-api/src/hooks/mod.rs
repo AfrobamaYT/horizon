@@ -244,6 +244,7 @@ mod render_gui_pre;
 mod render_item_in_frame;
 mod render_name_tag;
 mod render_tooltip_gather_components;
+mod render_tooltip_pre;
 mod right_click_empty;
 mod right_click_item;
 mod screen_closing;
