@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "use_item_on_block",
+      "doc": "`UseItemOnBlockEvent`: after a phase was chosen, before its Part or\nvanilla behaviour. Cancel skips that behaviour and returns\n`cancellation_result` (initially `TryWithEmptyHand`).",
       "side": "both",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_use_item_on_block",

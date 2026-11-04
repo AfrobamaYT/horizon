@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "player_enchant_item",
+      "doc": "A server player enchanted `item` at an enchanting table\n(`EnchantmentMenu.clickMenuButton`): `enchantments` are the ones it was\ngiven, in order, as (id, level). `item` is the enchanted stack (an\nenchanted book for a book). Fires after the levels are paid, before\n`enchant_item`. Server-side.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_enchant_item",
       "neoforge": "PlayerEnchantItemEvent",
       "side": "server",

@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "should_check_weak_power",
+      "doc": "`IBlockExtension.shouldCheckWeakPower`: set `check` to decide whether\nindirect power is read through this block. `check` starts with vanilla's\nconductor answer. `direction` is the input side of the block being powered,\nopposite the queried block's output side. Authoritative servers only.",
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_should_check_weak_power",
       "side": "server",
       "neoforge": "IBlockExtension.shouldCheckWeakPower",

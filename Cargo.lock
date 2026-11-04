@@ -1651,6 +1651,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-modding-examples"
+version = "0.0.0"
+dependencies = [
+ "horizon-mod-api",
+]
+
+[[package]]
 name = "horizon-mods"
 version = "0.1.0"
 dependencies = [

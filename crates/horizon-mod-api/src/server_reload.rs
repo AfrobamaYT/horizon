@@ -166,7 +166,9 @@ impl ServerReloadListeners {
 
 /// The ordered listeners and retained entries of one completed registration.
 pub struct OrderedServerReload {
+    /// The listeners in dependency order.
     pub listeners: Vec<super::reload::RegisteredListener<dyn ServerReloadListener>>,
+    /// The entries the reload keeps.
     pub retained: Vec<RetainedEntry>,
 }
 
@@ -186,6 +188,7 @@ pub struct ListenerKey<T: ?Sized> {
     marker: PhantomData<fn() -> T>,
 }
 impl<T: ?Sized> ListenerKey<T> {
+    /// Names a listener key.
     pub fn new(id: Identifier) -> Self {
         Self {
             id,

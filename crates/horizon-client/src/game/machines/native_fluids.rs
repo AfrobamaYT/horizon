@@ -1,4 +1,4 @@
-//! The game's own answer to the fluid capability (`FLUIDS`, docs/native-mods.md): the tanks a
+//! The game's own answer to the fluid capability (`FLUIDS`, docs/modding/src/how-to/native-mods.md): the tanks a
 //! mod block declared through `native_block_entity_fluids`, and a cauldron, read through a
 //! side, filled and drained in millibuckets. They act where the world is simulated, never on a
 //! client's copy, and only on the level in place.

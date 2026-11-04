@@ -1,5 +1,5 @@
 //! An entity's state flags for native server mods, through an `EntityRef`
-//! (docs/native-mods.md, "Entity and level handles", #7387): sneaking and
+//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): sneaking and
 //! sprinting, water and lava, fire and air, silence, invisibility and pose.
 //! Players and mobs have them all; the other kinds have the ones Horizon
 //! keeps for them (an armor stand's fire and invisibility, an item's fire),

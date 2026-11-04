@@ -1,0 +1,12 @@
+[book]
+title = "Modding Horizon"
+description = "Guide and reference for making Horizon mods: content, native and WebAssembly"
+language = "en"
+src = "src"
+
+[build]
+build-dir = "../../target/modding-book"
+
+[output.html]
+git-repository-url = "https://github.com/arismoko/horizon"
+edit-url-template = "https://github.com/arismoko/horizon/edit/main/docs/modding/{path}"

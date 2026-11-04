@@ -2,7 +2,7 @@
 #[allow(unused_imports)]
 use crate::*;
 pub use horizon_world::living_damage::{DamageContainer, Reduction};
-/// A hit's `DamageSource` for [`HURT_SERVER`]: its type (`minecraft:fall`),
+/// A hit's `DamageSource` for `HURT_SERVER`: its type (`minecraft:fall`),
 /// the entity ids of `getEntity` (`causing`) and `getDirectEntity`
 /// (`direct`), 0 for none or not known, and where it comes from
 /// (`getSourcePosition`), none when not known.
@@ -14,7 +14,7 @@ pub struct HurtSource<'a> {
     pub position: Option<[f64; 3]>,
 }
 /// Where the entity a hit lands on stands and looks (`getViewVector`), for
-/// [`HURT_SERVER`].
+/// `HURT_SERVER`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Victim {
     pub position: [f64; 3],

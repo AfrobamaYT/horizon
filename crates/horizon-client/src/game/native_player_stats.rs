@@ -1,5 +1,5 @@
 //! A player's statistics and recipe book for native server mods, through a
-//! `PlayerRef` (docs/native-mods.md): `ServerStatsCounter` and
+//! `PlayerRef` (docs/modding/src/how-to/native-mods.md): `ServerStatsCounter` and
 //! `ServerRecipeBook`. Reads return None for a stale handle or a player who
 //! isn't online here. Writes return false (or None) for those, for a dead
 //! player, and, inside another player's turn, for anyone but that player.
