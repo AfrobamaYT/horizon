@@ -4841,7 +4841,7 @@ mod magic_absorb_tests {
         assert_eq!(m.absorption, 8.0);
         m.absorption = 2.0;
         for _ in 0..90 {
-            ai::tick_effects(&mut m, None);
+            ai::tick_effects(&mut m, &mut crate::health::TestLevel::new(0).level(), None);
         }
         assert_eq!(m.extra.effects, vec![("minecraft:absorption", 110, 0)]);
         assert_eq!(m.absorption, 2.0);
@@ -4853,7 +4853,7 @@ mod magic_absorb_tests {
         m.add_effect_with("speed", 200, 0, false, true);
         m.add_effect_with("speed", 90, 1, false, true);
         for _ in 0..90 {
-            ai::tick_effects(&mut m, None);
+            ai::tick_effects(&mut m, &mut crate::health::TestLevel::new(0).level(), None);
         }
         assert_eq!(m.extra.effects, vec![("minecraft:speed", 110, 0)]);
     }
@@ -4864,7 +4864,7 @@ mod magic_absorb_tests {
         assert!(m.add_effect_with("speed", 2, 1, false, false));
         assert!(!m.add_effect_with("speed", 5, 0, true, false));
         for _ in 0..2 {
-            ai::tick_effects(&mut m, None);
+            ai::tick_effects(&mut m, &mut crate::health::TestLevel::new(0).level(), None);
         }
         assert_eq!(m.extra.effects, vec![("minecraft:speed", 3, 0)]);
         assert!(m.extra.ambient_effects.contains(&"minecraft:speed"));

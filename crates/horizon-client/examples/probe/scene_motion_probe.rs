@@ -392,7 +392,11 @@ pub fn main() -> Result<()> {
                 ),
                 "food_tick" => world
                     .player
-                    .food_tick(&resources.health, world.scene.health_rules)?,
+                    .food_tick(
+                        &mut horizon_client::health::TestLevel::new(0).level(),
+                        &resources.health,
+                        world.scene.health_rules,
+                    )?,
                 "peaceful" => world
                     .player
                     .peaceful_regeneration(world.scene.health_rules)?,
@@ -428,6 +432,7 @@ pub fn main() -> Result<()> {
                         },
                     ));
                     world.player.hurt(
+                        &mut horizon_client::health::TestLevel::new(0).level(),
                         &resources.health,
                         world.scene.health_rules,
                         source,

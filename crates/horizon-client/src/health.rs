@@ -212,13 +212,12 @@ impl LentLevel {
         world.attachment_syncs = self.attachment_syncs;
     }
 }
-/// An empty level for tests of hits: an air-only world whose random is seeded with `seed`.
-#[cfg(any(test, feature = "test-support"))]
+/// An empty level for tests and probes of hits: an air-only world whose random is seeded
+/// with `seed`.
 pub struct TestLevel {
     world: crate::world::World,
     registry: horizon_world::registry::BlockRegistry,
 }
-#[cfg(any(test, feature = "test-support"))]
 impl TestLevel {
     pub fn new(seed: i64) -> Self {
         let facts =
@@ -230,6 +229,10 @@ impl TestLevel {
     }
     pub fn level(&mut self) -> DamageLevel<'_> {
         DamageLevel::of(&mut self.world, &self.registry)
+    }
+    /// The level's random, for a probe that draws from it outside a hit.
+    pub fn random(&mut self) -> &mut horizon_core::random::LegacyRandom {
+        &mut self.world.random
     }
 }
 /// A knockback's strength and direction, as `LivingEntity.knockback` has them
