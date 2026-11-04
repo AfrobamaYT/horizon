@@ -413,59 +413,59 @@ impl NativeStatType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeNoteInstrument {
-    /// Harp.
+    /// The harp, over most blocks.
     Harp,
-    /// Basedrum.
+    /// The bass drum, over stone.
     Basedrum,
-    /// Snare.
+    /// The snare drum, over sand and gravel.
     Snare,
-    /// Hat.
+    /// The clicks, over glass.
     Hat,
-    /// Bass.
+    /// The double bass, over wood.
     Bass,
-    /// Flute.
+    /// The flute, over clay.
     Flute,
-    /// Bell.
+    /// The bell, over a gold block.
     Bell,
-    /// Guitar.
+    /// The guitar, over wool.
     Guitar,
-    /// Chime.
+    /// The chime, over packed ice.
     Chime,
-    /// Xylophone.
+    /// The xylophone, over a bone block.
     Xylophone,
-    /// Iron xylophone.
+    /// The iron xylophone, over an iron block.
     IronXylophone,
-    /// Cow bell.
+    /// The cow bell, over soul sand.
     CowBell,
-    /// Didgeridoo.
+    /// The didgeridoo, over a pumpkin.
     Didgeridoo,
-    /// Bit.
+    /// The bit, over an emerald block.
     Bit,
-    /// Banjo.
+    /// The banjo, over hay.
     Banjo,
-    /// Pling.
+    /// The pling, over glowstone.
     Pling,
-    /// Trumpet.
+    /// The trumpet, over a copper block.
     Trumpet,
-    /// Trumpet exposed.
+    /// The trumpet, over an exposed copper block.
     TrumpetExposed,
-    /// Trumpet oxidized.
+    /// The trumpet, over an oxidized copper block.
     TrumpetOxidized,
-    /// Trumpet weathered.
+    /// The trumpet, over a weathered copper block.
     TrumpetWeathered,
-    /// Zombie.
+    /// A zombie's sound, over a zombie head.
     Zombie,
-    /// Skeleton.
+    /// A skeleton's sound, over a skeleton skull.
     Skeleton,
-    /// Creeper.
+    /// A creeper's sound, over a creeper head.
     Creeper,
-    /// Dragon.
+    /// The ender dragon's sound, over a dragon head.
     Dragon,
-    /// Wither skeleton.
+    /// A wither skeleton's sound, over its skull.
     WitherSkeleton,
-    /// Piglin.
+    /// A piglin's sound, over a piglin head.
     Piglin,
-    /// Custom head.
+    /// The sound set by a player head's own note block sound.
     CustomHead,
 }
 
@@ -747,9 +747,9 @@ pub enum NativePanelEvent {
     /// A click on an item of the panel, by its index in
     /// `native_panel_items`' list.
     Clicked {
-        /// The index.
+        /// The item's index in the panel's list.
         index: u32,
-        /// The right.
+        /// Whether it was a right click.
         right: bool,
     },
     /// The search box's text, each time the player changes it.
@@ -758,22 +758,22 @@ pub enum NativePanelEvent {
     /// while the pointer was on an item: a slot of the screen's, or the
     /// panel's.
     Key {
-        /// The key.
+        /// The key's name, such as `key.keyboard.r`.
         key: String,
-        /// The stack.
+        /// The item the pointer was on.
         stack: NativeStack,
     },
     /// A click on a slot of a recipe the panel shows: the recipe's index in
     /// `native_panel_recipes`' list and the slot's in it (the results come
     /// after the slots), and the stack it showed then.
     SlotClicked {
-        /// The recipe.
+        /// The recipe's index in the panel's list.
         recipe: u32,
-        /// The slot.
+        /// The slot's index in the recipe; results come after the slots.
         slot: u32,
-        /// The stack.
+        /// The stack the slot showed then.
         stack: NativeStack,
-        /// The right.
+        /// Whether it was a right click.
         right: bool,
     },
     /// The action button of the recipe at this index.
@@ -1078,101 +1078,101 @@ pub enum NativeGoal {
     /// `PanicGoal(speed)`, or `TurtlePanicGoal(speed)` with `water_range`
     /// set: always head for water this far away, not only when on fire.
     Panic {
-        /// The speed.
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
         speed: f64,
-        /// The water range.
+        /// Search distance for water in blocks, as `TurtlePanicGoal`'s.
         water_range: Option<i32>,
     },
     /// `RandomStrollGoal(speed, interval)`; `water_avoiding` set to its
     /// probability makes `WaterAvoidingRandomStrollGoal`, `swim`
     /// `RandomSwimmingGoal`, `flying` `WaterAvoidingRandomFlyingGoal`.
     Stroll {
-        /// The speed.
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
         speed: f64,
-        /// The interval.
+        /// Ticks between tries; the goal starts with chance 1 in `interval` each tick.
         interval: i32,
-        /// The water avoiding.
+        /// Probability, 0 to 1, of preferring a spot away from water.
         water_avoiding: Option<f32>,
-        /// The swim.
+        /// Swim around in water instead of walking.
         swim: bool,
-        /// The flying.
+        /// Pick flying destinations.
         flying: bool,
     },
     /// `LookAtPlayerGoal(range, probability, onlyHorizontal)`: the nearest
     /// player, the nearest mob with `mobs`, or only mobs of `only`'s
     /// species.
     LookAtPlayer {
-        /// The range.
+        /// Distance in blocks the goal looks for something to watch.
         range: f32,
-        /// The probability.
+        /// Chance, 0 to 1, each tick that the goal starts.
         probability: f32,
-        /// The only horizontal.
+        /// Turn the head only sideways, never up or down.
         only_horizontal: bool,
-        /// The mobs.
+        /// Also watch the nearest mob, not only the nearest player.
         mobs: bool,
-        /// The only.
+        /// A mob type id (`minecraft:cow`) that restricts the mobs watched to that species.
         only: Option<String>,
     },
     /// `RandomLookAroundGoal`. Vanilla parameters: none.
     RandomLookAround,
     /// `MeleeAttackGoal(speed, followUnseen)`.
     MeleeAttack {
-        /// The speed.
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
         speed: f64,
-        /// The follow unseen.
+        /// Keep chasing a target the mob can no longer see.
         follow_unseen: bool,
     },
     /// `LeapAtTargetGoal(leapMotion)`.
     LeapAtTarget {
-        /// The yd.
+        /// The upward speed of the leap, in blocks per tick.
         yd: f32,
     },
     /// `AvoidEntityGoal(what, maxDist, walk, sprint)`: sprint away from
     /// `what` once it is closer than `max_dist`.
     AvoidEntity {
-        /// The what.
+        /// Which entities the mob avoids.
         what: NativeMobFilter,
-        /// The max dist.
+        /// Distance in blocks within which the mob flees.
         max_dist: f32,
-        /// The walk.
+        /// Speed multiplier while fleeing at a distance.
         walk: f64,
-        /// The sprint.
+        /// Speed multiplier while fleeing close by.
         sprint: f64,
     },
     /// `TemptGoal(speed, items, canScare)`: `items` are item ids
     /// (`minecraft:wheat`; a bare id reads as `minecraft:`'s).
     Tempt {
-        /// The speed.
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
         speed: f64,
-        /// The items.
+        /// Item ids that tempt the mob.
         items: Vec<String>,
-        /// The can scare.
+        /// Whether a moving player holding the item scares the mob off.
         can_scare: bool,
     },
     /// `BreedGoal(speed)`. An animal keeps it; other mobs refuse it.
     Breed {
-        /// The speed.
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
         speed: f64,
     },
     /// `FollowParentGoal(speed)`. An animal keeps it; other mobs refuse it.
     FollowParent {
-        /// The speed.
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
         speed: f64,
     },
     /// `FollowMobGoal(speed, stopDistance, areaSize)`.
     FollowMob {
-        /// The speed.
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
         speed: f64,
-        /// The stop.
+        /// Distance in blocks at which the mob stops following.
         stop: f32,
-        /// The area.
+        /// Radius in blocks searched for a mob to follow.
         area: f32,
     },
     /// `RestrictSunGoal`. Vanilla parameters: none.
     RestrictSun,
     /// `FleeSunGoal(speed)`.
     FleeSun {
-        /// The speed.
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
         speed: f64,
     },
     /// `EatBlockGoal`. Vanilla parameters: none.
@@ -1185,18 +1185,18 @@ pub enum NativeGoal {
     /// checking every `interval` ticks, `must_see` (`mustSee`) and
     /// `must_reach` (`mustReach`).
     NearestTarget {
-        /// The prey.
+        /// Which entities the mob hunts.
         prey: NativeMobFilter,
-        /// The must see.
+        /// Only pick a target the mob can see.
         must_see: bool,
-        /// The must reach.
+        /// Only pick a target the mob can path to.
         must_reach: bool,
-        /// The interval.
+        /// Ticks between tries; the goal starts with chance 1 in `interval` each tick.
         interval: i32,
     },
     /// `HurtByTargetGoal`, `alert` as its `setAlert()`.
     HurtByTarget {
-        /// The alert.
+        /// Also alert nearby mobs of the same kind, as `setAlert()`.
         alert: bool,
     },
 }
@@ -1268,27 +1268,27 @@ impl DragonRef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeDragonPhase {
-    /// Holding pattern.
+    /// Circling the end island (`DragonPhaseHoldingPattern`).
     HoldingPattern,
-    /// Strafe player.
+    /// Flying at a player and shooting fireballs.
     StrafePlayer,
-    /// Landing approach.
+    /// Flying toward the fountain to land.
     LandingApproach,
-    /// Landing.
+    /// Descending onto the fountain.
     Landing,
-    /// Takeoff.
+    /// Lifting off the fountain.
     Takeoff,
-    /// Sitting flaming.
+    /// Perched, breathing fire.
     SittingFlaming,
-    /// Sitting scanning.
+    /// Perched, looking for a target.
     SittingScanning,
-    /// Sitting attacking.
+    /// Perched, about to breathe.
     SittingAttacking,
-    /// Charging player.
+    /// Charging a player in melee.
     ChargingPlayer,
-    /// Dying.
+    /// Dying, flying to the fountain.
     Dying,
-    /// Hover.
+    /// Hovering in place.
     Hover,
 }
 
@@ -1454,25 +1454,25 @@ impl NativeBillboard {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeItemDisplayContext {
-    /// None.
+    /// No transform; the model as authored.
     None,
-    /// Third person left hand.
+    /// Held in the left hand, seen from outside.
     ThirdPersonLeftHand,
-    /// Third person right hand.
+    /// Held in the right hand, seen from outside.
     ThirdPersonRightHand,
-    /// First person left hand.
+    /// Held in the left hand, seen by its owner.
     FirstPersonLeftHand,
-    /// First person right hand.
+    /// Held in the right hand, seen by its owner.
     FirstPersonRightHand,
-    /// Head.
+    /// Worn on the head.
     Head,
-    /// Gui.
+    /// Drawn in an inventory slot.
     Gui,
-    /// Ground.
+    /// Dropped as an item entity.
     Ground,
-    /// Fixed.
+    /// Hung in an item frame.
     Fixed,
-    /// On shelf.
+    /// Standing on a shelf.
     OnShelf,
 }
 
