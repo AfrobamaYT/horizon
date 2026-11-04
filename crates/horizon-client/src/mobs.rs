@@ -3803,7 +3803,7 @@ impl Mob {
     /// `LivingEntity.checkTotemDeathProtection`: the first hand with a
     /// `death_protection` item uses it up, the mob survives at 1 health with
     /// the totem's effects, and entity event 35 tells the clients.
-    fn use_death_protection(&mut self, level: &DamageLevel<'_>, source: &Damage) -> bool {
+    fn use_death_protection(&mut self, level: &mut DamageLevel<'_>, source: &Damage) -> bool {
         // `DamageTypeTags.BYPASSES_INVULNERABILITY`: the void and /kill take it.
         if source.kind.bypasses_invulnerability() {
             return false;
