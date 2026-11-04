@@ -4434,6 +4434,25 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_spawn_phantoms(self, player, name, pos, phantoms, result);
     }
+    /// `ModifyCustomSpawnersEvent`: the level `dimension` builds its custom spawners. `spawners`
+    /// starts as vanilla's list; a mod takes spawners out or adds its own by key.
+    pub(super) fn native_modify_custom_spawners(
+        &self,
+        dimension: &str,
+        spawners: &mut mod_api::CustomSpawners,
+    ) {
+        mod_api::dispatch_modify_custom_spawners(self, dimension, spawners);
+    }
+    /// `CustomSpawner.tick` for a mod's spawner `key` in the level `dimension`, with
+    /// `spawn_enemies` as `ServerLevel.isSpawningMonsters`.
+    pub(super) fn native_custom_spawner_tick(
+        &mut self,
+        dimension: &str,
+        key: mod_api::SpawnerKey,
+        spawn_enemies: bool,
+    ) {
+        mod_api::dispatch_custom_spawner_tick(self, dimension, key, spawn_enemies);
+    }
     /// A server player's book edit or signing packet is about to be applied. `pages` is its page
     /// count; `signing` means the packet has a title. Set `cancel` to drop the edit.
     pub(super) fn native_player_edit_book(
