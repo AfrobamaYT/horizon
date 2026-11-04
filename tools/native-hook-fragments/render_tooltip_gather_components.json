@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "render_tooltip_gather_components",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_render_tooltip_gather_components",
+      "neoforge": "RenderTooltipEvent.GatherComponents",
+      "side": "client",
+      "version": 1,
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}
