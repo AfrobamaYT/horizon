@@ -9,13 +9,19 @@ mod phase;
 pub use phase::{LoadedMods, RegistrationContext, RegistrationPhase};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
+mod client_reload;
+pub(crate) mod reload;
 mod reload_order;
 pub(crate) mod server_reload;
+pub use client_reload::{
+    ClientReloadContext, ClientReloadListener, ClientReloadListeners, VanillaClientListeners,
+};
 pub use horizon_world::identifier::Identifier;
+pub use reload::{ReloadApply, ReloadResourceError};
 pub use reload_order::ReloadOrderError;
 pub use server_reload::{
-    ListenerKey, ServerReloadApply, ServerReloadContext, ServerReloadError, ServerReloadListener,
-    ServerReloadListeners, ServerReloadResources, VanillaServerListeners,
+    ListenerKey, ServerReloadContext, ServerReloadListener, ServerReloadListeners,
+    ServerReloadResources, VanillaServerListeners,
 };
 
 pub use crate::biome::{BiomeColors, SpawnEntry};
@@ -2846,7 +2852,8 @@ pub use resource::{
 };
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
 mod block_entity_type;
-pub use block_entity_type::{BlockEntityTypeBuilder, BlockEntityTypeKey};
+pub(crate) use block_entity_type::validate_block_entity_type_keys;
+pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
 mod part_table;

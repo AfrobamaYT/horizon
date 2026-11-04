@@ -174,7 +174,7 @@ the catalog, not a global API number, source comments or documentation histories
   own GUI textures (`assets/<namespace>/textures/gui`, drawn with `native_sprite`).
 
 - Buttons, tooltips and item icons on mod screens: `native_screen_click` and `native_screen_tooltip` (the client), `native_menu_button`
-  (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `native_data`, `native_block`,
+  (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `native_block`,
   `native_block_property` and `native_cursor`. A mod inserts items through the block's item capability,
   `level.capability(host, &ITEMS, pos, side)`.
 - `click_menu_button(button)`, a client helper, presses button `button` of the open menu as a click on one of its buttons does
@@ -300,6 +300,7 @@ the catalog, not a global API number, source comments or documentation histories
   `native_item_dropped` (a throw; not the items scattered when a player dies) and `native_item_picked_up` (`canceled` leaves the stack on the ground). They name a player by UUID.
 
 - [Server data reload listeners](#server-data-reload-listeners) read a mod's pack resources with datapack overrides, once per reload.
+- [Client asset reload listeners](#client-asset-reload-listeners) read a mod's pack resources with resource-pack overrides, once per reload.
 
 - The item entities near a block, for machines that pick up items as a hopper does:
   `native_item_entities(dimension, min, max)` lists those whose box meets `min`..`max` (vanilla's
@@ -618,8 +619,9 @@ winning bytes from selected datapacks and the mod's own `data/`. Parse once in p
 apply, not on the tick. The original pack trees remain separate from the launcher's code-only
 horizon-mixins input.
 
-Client-side asset reads in mod code come with client reload PR b; server listeners cannot read
-`assets/`. Packaged assets still participate in the game's normal resource packs.
+Client-side asset reads use [client asset reload listeners](#client-asset-reload-listeners); server
+listeners cannot read `assets/`. Packaged assets also participate in the game's normal resource
+packs.
 
 Code-only bytes belong inside the crate: use Cargo's ordinary `build.rs` to generate a table in
 `OUT_DIR`, then compile it with `include_bytes!(concat!(env!("OUT_DIR"), "/table.bin"))`.
@@ -1007,7 +1009,7 @@ trailing `/`, or empty, `.` or `..` components. Converter fields and reload-view
 
 The prepare context is the pack view only, as vanilla's `ResourceManager`. Like vanilla's
 `SimplePreparableReloadListener`, `ServerReloadListener::prepare` parses and validates without
-changing live state and returns `ServerReloadApply::new(move || { /* publish parsed state */ })`.
+changing live state and returns `ReloadApply::new(move || { /* publish parsed state */ })`.
 All listeners prepare before **any** apply runs. Do not read another listener's new published
 state in prepare: dependencies order both phases but do not remove this barrier. Publication
 cannot fail. As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a listener that
@@ -1029,9 +1031,10 @@ listeners run after vanilla by default, in registration order; an explicit depen
 objects, dependencies and vanilla anchor. Horizon does not expose NeoForge's condition
 context here.
 
-`event.listeners.add_retained_listener(id, converter, listener)` also keeps the listener object
-for other hooks, the counterpart of NeoForge's `addRetainedListener`: it returns a typed
-`ListenerKey<T>` that reads the object back from any server hook through
+`event.listeners.add_retained_listener(&key, converter, listener)` also keeps the listener
+object for other hooks, the counterpart of NeoForge's `addRetainedListener(key, listener)`: the
+caller builds the typed key — `let key: ListenerKey<MyListener> = ListenerKey::new(id)` — and
+reads the object back from any server hook through
 `host.reload_resources().listener(&key)` — an `Arc<T>` of the live object the last successful
 reload installed, as NeoForge's `ReloadableServerResources.getListener`. Registration rules and
 prepare/apply semantics are `add_listener`'s. Retention follows the reload: a new reload
@@ -1043,21 +1046,21 @@ for a key whose id or type does not match a registration, `listener` gives `None
 use std::sync::{Arc, RwLock};
 use horizon_client::mod_api::{
     self, AddServerReloadListenersEvent, FileToIdConverter, Host, Hooks, Identifier,
-    ServerReloadApply, ServerReloadContext, ServerReloadError, ServerReloadListener,
+    ReloadApply, ServerReloadContext, ReloadResourceError, ServerReloadListener,
 };
 
 #[derive(Default)]
 struct MachineData(Arc<RwLock<serde_json::Value>>);
 impl ServerReloadListener for MachineData {
-    fn prepare(&self, context: &ServerReloadContext) -> Result<ServerReloadApply, ServerReloadError> {
+    fn prepare(&self, context: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
         let id = Identifier::parse("my_mod:press").unwrap();
         let next = match context.read(&id) {
             Some(bytes) => serde_json::from_slice(bytes)
-                .map_err(|error| ServerReloadError::new(id, error))?,
+                .map_err(|error| ReloadResourceError::new(id, error))?,
             None => serde_json::Value::Null,
         };
         let live = self.0.clone();
-        Ok(ServerReloadApply::new(move || *live.write().unwrap() = next))
+        Ok(ReloadApply::new(move || *live.write().unwrap() = next))
     }
 }
 #[derive(Default)]
@@ -1080,6 +1083,82 @@ The existing post-success server-data notice below is a different moment, not a 
 reload registration path.
 
 - `native_server_data_loaded(reload)` fires once the server's data tables are built (NeoForge's `TagsUpdatedEvent` with `SERVER_DATA_LOAD`): the recipes, tags, loot and advancements of the world's data packs and of `native_data_pack_files` are what the helpers read from then on. `reload` is false on a world's first open, before its chunks and players are loaded, and true after `/reload`, once the players were sent the new data. It is where a mod drops caches derived from the data and rebinds what depends on it. Server-side, the single player's integrated server included; a client connected to a server never fires it.
+
+### Client asset reload listeners
+
+Trait mods implement `Hooks::add_client_reload_listeners` (client only), the counterpart of
+NeoForge 26.3's `AddClientReloadListenersEvent`. Registration runs when a resource reload is
+assembled — the player changed resource packs, pressed F3+T, or a server sent its packs —
+after the selection is known and before the reload's assets are staged. The `&dyn ClientHost`
+beside the event is the client read host. Register an `Arc<impl ClientReloadListener>` with a
+unique `Identifier` and the same converters as the server side
+(`FileToIdConverter::json("ui")`). The listener's `ClientReloadContext` lists converted IDs and
+reads their bytes from `assets/*/ui/` with resource-pack overrides already resolved: a selected
+pack's file wins over the mod's packaged one, and a pack added later wins over both. A file
+`assets/my_mod/ui/theme.json` becomes `my_mod:theme`. It cannot read data files, other
+directories, or filesystem paths. Files resolve like vanilla resource packs: every file
+except `lang/*.json` is delivered as the exact bytes of the winning pack's file, while
+language files arrive key-wise merged across the packs, as vanilla loads them.
+
+Prepare and apply semantics, error handling, crash attribution, dependency ordering and the
+read-only registry views are the [server listener's](#server-data-reload-listeners):
+`ClientReloadListener::prepare` parses without changing live state and returns a `ReloadApply`;
+all prepares finish before any apply, a prepare, registration or ordering error aborts the
+reload and keeps every listener's previous assets, and a panic names the listener and its
+registering mod in the crash report. `VanillaClientListeners::model_manager()` names vanilla's
+model manager, the anchor of the 26.3 `Minecraft` registration order; `first()` and `last()`
+are the ordering boundaries. Mod applies run on the main thread after the staged pack is
+published, before `client_resources_reloaded`. Listeners are registered fresh for every
+load: the initial resource load registers them once, before any prepare runs (as
+NeoForge's construction-time event does — no game exists yet, and a host read during
+registration panics), prepares them beside the rest of the load on the loading thread —
+the title screen's loader worker or the direct launch, one path — and the game applies
+them once it owns the assets; every later reload — F3+T, a pack change, a server's
+packs — registers through the game the same way. A listener whose prepare fails on the
+initial load leaves the game running without mod reload listeners, logged as a
+warning. NeoForge's client event offers no
+retained listeners, and Horizon has none: the `Arc` the mod registers with is the listener's
+own live state.
+
+```rust,ignore
+use std::sync::{Arc, RwLock};
+use horizon_client::mod_api::{
+    self, AddClientReloadListenersEvent, ClientHost, ClientReloadContext, ClientReloadListener,
+    FileToIdConverter, Hooks, Identifier, ReloadApply, ReloadResourceError,
+};
+
+#[derive(Default)]
+struct Theme(Arc<RwLock<serde_json::Value>>);
+impl ClientReloadListener for Theme {
+    fn prepare(&self, context: &ClientReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+        let id = Identifier::parse("my_mod:theme").unwrap();
+        let next = match context.read(&id) {
+            Some(bytes) => serde_json::from_slice(bytes)
+                .map_err(|error| ReloadResourceError::new(id, error))?,
+            None => serde_json::Value::Null,
+        };
+        let live = self.0.clone();
+        Ok(ReloadApply::new(move || *live.write().unwrap() = next))
+    }
+}
+#[derive(Default)]
+struct MyMod(Arc<Theme>);
+#[mod_api::horizon_mod]
+impl Hooks for MyMod {
+    fn add_client_reload_listeners(&self, _host: &dyn ClientHost, event: &mut AddClientReloadListenersEvent<'_>) {
+        event.listeners.add_listener(
+            Identifier::parse("my_mod:theme").unwrap(),
+            FileToIdConverter::json("ui").unwrap(),
+            self.0.clone(),
+        ).unwrap();
+    }
+}
+```
+
+Reload work only: graph ordering, listing selected files, reading the winning bytes and one
+boxed apply closure per listener. No new work or filesystem reads run on the tick path. The
+existing post-success client-resources notice is a different moment, not a second reload
+registration path.
 
 - `native_compute_fov(partial, camera, degrees)` receives the computed world FOV after settings, ordinary FOV effects and zoom, before projection/Nausea. `camera` is its world position and `partial` the interpolation fraction. Mods can narrow or widen the angle; only finite values in 1..=179 degrees are accepted, otherwise the original computed angle is used. It runs for world rendering and near-plane overlays, not just once per frame. Hand/HUD FOV and the title panorama keep their existing paths.
 
@@ -3347,7 +3426,7 @@ Declare a block entity type and its valid blocks during `Hooks::register`, then 
 let press = r.block_entity_type("press")
     .blocks(&["mymod:press", "mymod:big_press"])
     .build();
-r.block_entity_part(&press, Press);
+r.block_entity_part(&press, Press).expect("native block entity type");
 ```
 
 The builder qualifies the type ID with the registering mod's namespace. It owns the save ID, wire type
@@ -3355,11 +3434,22 @@ and valid blocks; `block_entity` returns only initial `Compound` data (or none f
 inside the write that creates the entity (`LevelChunk.setBlockState`) and receives the read-only level, a `LevelSide`,
 on a server and on a client of one.
 Unknown blocks, duplicate types, overlapping membership and attempts to own a `minecraft:` block are
-refused at load. An explicitly declared mod template block uses its declared type; undeclared template
-blocks retain their vanilla behavior. Adding mod blocks to vanilla types is not supported by this builder.
+refused at load. Refused native block, item or block entity declarations stop startup, as does unreadable
+known-components input; the game does not fall back to vanilla content. An explicitly declared mod
+template block uses its declared type; undeclared template blocks retain their vanilla behavior. Adding mod blocks to vanilla types is not supported by this builder.
 The hooks about the entity (`block_entity_tick`, `block_entity_update_tag`, `pre_remove_side_effects`,
 `menu_button`, `menu_quick_move`) find it by that declared type; the others (`block_entity`, `screen`, the
-block hooks) by block.
+block hooks) by block. The factory is a `BlockEntityPart` method, not a global `Hooks` method.
+
+`r.block_entity_type_key("other:press")` looks up another mod's type, and
+`r.block_entity_type_key("minecraft:chest")` looks up a vanilla type. Both return the same opaque
+`BlockEntityTypeKey` as the declaration builder: equality and hashing use the type ID, not its blocks.
+The final registry checks these requests at load and refuses unknown IDs, naming the requesting mod
+and type. Use a canonical type ID, not a block ID (`minecraft:shulker_box`, not
+`minecraft:red_shulker_box`). `BlockEntityRef::kind(host)` returns `Option<BlockEntityTypeKey>`.
+Lookup keys may answer capabilities for vanilla and native types. `block_entity_part` accepts only
+native types and returns `BlockEntityPartError::VanillaType` immediately for a vanilla key. Native
+Parts are expanded after every mod has registered, so a Part can target a type declared later.
 
 `r.block_part_tag("minecraft:logs", Rotates)` and `r.item_part_tag("minecraft:axes", Sharp)` attach a part to
 every member of a tag (its name without `#`). Each game resolves them against its own tags when its world
@@ -3372,9 +3462,10 @@ doesn't have. Scoped hooks run on a game's thread; one dispatched from any other
 does) can't see tag parts, and warns once.
 
 A capability is answered by providers, registered by block entity type as NeoForge's
-`RegisterCapabilitiesEvent` registers them: `r.block_entity_capability(&ITEMS, "mymod:pipe", |host, at|
+`RegisterCapabilitiesEvent` registers them: obtain `pipe` with the declaration builder or
+`r.block_entity_type_key("mymod:pipe")`, then `r.block_entity_capability(&ITEMS, &pipe, |host, at|
 Some(Box::new(PipeItems)))` gives a handler for the block entity and side `at` (a `BlockSide`), or none to
-leave it to the next provider. A provider may answer for a vanilla block entity type too (`minecraft:chest`).
+leave it to the next provider. A provider may answer for a vanilla block entity type too, using its lookup key.
 Providers add up: `level.capability(host, &ITEMS, pos, side)` (`Level.getCapability`, on a `LevelRef`) asks those registered
 with `r.block_entity_capability_before_game` first, then the game's own (a block entity's slots by side, by the
 rules hoppers follow, and a mod block entity's `block_entity_container`), then the others, each in registration
@@ -3537,8 +3628,8 @@ player's slot, and two thirds of one fill none.
 
 Energy is the capability `ENERGY` (NeoForge's `Capabilities.Energy.BLOCK`), answered by an `EnergyHandler`: an
 amount and a capacity, with no resource, and `insert` and `extract` written in a transaction as a
-`ResourceHandler`'s are. `r.block_entity_capability(&ENERGY, "mymod:battery", …)` registers a provider, asked as
-`ITEMS`' are, and `level.capability(host, &ENERGY, pos, side)` finds one. The game's own answer is a mod block
+`ResourceHandler`'s are. `r.block_entity_capability(&ENERGY, &battery, …)` (with a declared or looked-up
+type key) registers a provider, asked as `ITEMS`' are, and `level.capability(host, &ENERGY, pos, side)` finds one. The game's own answer is a mod block
 entity's `block_entity_energy` buffer, as NeoForge's `SimpleEnergyHandler`: a fill through the sides it comes
 through, up to the buffer's room and its limit per insert, and a drain by the sides it leaves by, up to the limit per
 extract; a side that reaches neither finds no handler. `move_energy(host, &from, &to, max, tx)` moves between two
@@ -3592,7 +3683,8 @@ pub const CHEMICALS: CapabilityKey<dyn ResourceHandler<Chemical>> = CapabilityKe
 ```
 
 A mod that names it under `[dependencies]` builds against the same `Chemical` and `CHEMICALS`, so its providers,
-`r.block_entity_capability(&chem_api::CHEMICALS, "chem_pipe:vat", …)`, answer the same capability, and
+`r.block_entity_capability(&chem_api::CHEMICALS, &vat, …)` (where `vat` is a declared type key or
+`r.block_entity_type_key("chem_pipe:vat")`), answer the same capability, and
 `level.capability(host, &chem_api::CHEMICALS, pos, side)` finds either mod's handler. `move_resources` moves a
 chemical as it moves items, in the caller's transaction. The game has no answer of its own for a mod's key, so only
 the mods' providers do, and a lookup with none registered costs one table check. A handler that keeps its amount in

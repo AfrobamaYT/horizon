@@ -1,24 +1,93 @@
-//! Typed declarations of native block entity types.
-use std::sync::Arc;
+//! Typed identities and declarations of block entity types.
+use std::{fmt, sync::Arc};
 
-/// A registered block entity type and the blocks that may hold it.
+/// A block entity type's namespaced registry and save identity.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct BlockEntityTypeKey(pub(super) Arc<BlockEntityType>);
-
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub(super) struct BlockEntityType {
-    pub id: String,
-    pub blocks: Vec<String>,
-}
+pub struct BlockEntityTypeKey(pub(super) Arc<str>);
 
 impl BlockEntityTypeKey {
     /// The namespaced registry and save id.
     pub fn id(&self) -> &str {
-        &self.0.id
+        &self.0
     }
 
-    pub(crate) fn blocks(&self) -> &[String] {
-        &self.0.blocks
+    pub(crate) fn registered(id: &str) -> Option<Self> {
+        let types = crate::containers::block_entity_types::current()?;
+        types.key(id).map(Self)
+    }
+}
+
+impl AsRef<str> for BlockEntityTypeKey {
+    fn as_ref(&self) -> &str {
+        self.id()
+    }
+}
+
+/// A native Part cannot be attached to this type during registration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BlockEntityPartError {
+    /// Vanilla entities do not expose a native Part's payload.
+    VanillaType { kind: BlockEntityTypeKey },
+    /// This Part type is already attached to the entity type.
+    Duplicate {
+        kind: BlockEntityTypeKey,
+        part: &'static str,
+    },
+}
+
+impl fmt::Display for BlockEntityPartError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::VanillaType { kind } => write!(
+                f,
+                "cannot attach a native block entity Part to vanilla type {}",
+                kind.id()
+            ),
+            Self::Duplicate { kind, part } => {
+                write!(f, "Part {part} is attached to type {} twice", kind.id())
+            }
+        }
+    }
+}
+
+impl std::error::Error for BlockEntityPartError {}
+
+#[derive(Debug)]
+pub(crate) struct BlockEntityTypeLookupError {
+    missing: Vec<&'static super::part_table::BlockEntityTypeRequest>,
+}
+
+impl fmt::Display for BlockEntityTypeLookupError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (index, request) in self.missing.iter().enumerate() {
+            if index > 0 {
+                writeln!(f)?;
+            }
+            write!(
+                f,
+                "mod {} requested unknown block entity type {}",
+                request.mod_id,
+                request.kind.id(),
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for BlockEntityTypeLookupError {}
+
+pub(crate) fn validate_block_entity_type_keys(
+    types: &crate::containers::block_entity_types::BlockEntityTypes,
+) -> Result<(), BlockEntityTypeLookupError> {
+    let missing: Vec<_> = super::part_table::requested_block_entity_types()
+        .iter()
+        .filter(|request| types.key(request.kind.id()).is_none())
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(BlockEntityTypeLookupError { missing })
     }
 }
 

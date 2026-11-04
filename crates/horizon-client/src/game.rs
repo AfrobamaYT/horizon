@@ -85,6 +85,7 @@ mod chat;
 mod chat_filter;
 mod chiseled_bookshelf;
 mod client_ambient;
+mod client_reload;
 mod clipboard;
 mod code_of_conduct;
 mod combat;
@@ -19959,6 +19960,9 @@ struct Loaded {
     pack_error: Option<String>,
     resources: Arc<Resources>,
     rest_loader: Option<WorldRestLoader>,
+    /// The client reload listeners' prepared applies, staged by the loader
+    /// thread; `start_game` runs them once the game exists.
+    client_applies: Vec<client_reload::PreparedClientReload>,
     pack: PackResources,
     /// The menu bundle, for the synchronous launch; the loading screen receives
     /// it earlier through its own channel.
@@ -20893,6 +20897,26 @@ fn load_resources(
     } else {
         (None, None)
     };
+    // The client reload listeners register once before any prepare runs (no
+    // game exists yet, as NeoForge's construction-time event fires before
+    // resources load) and prepare here beside the rest of the load, against
+    // the same merged root; the game applies them at handoff. A dedicated
+    // server never fires the client event. A failed prepare keeps the game
+    // running without mod reload listeners, like the reload path's rollback.
+    let client_applies = if headless {
+        Vec::new()
+    } else {
+        match client_reload::stage_client_reload(
+            &root,
+            client_reload::register_startup_client_reload_listeners(),
+        ) {
+            Ok(steps) => steps,
+            Err(error) => {
+                log::warn!("Horizon: resource reload failed: {error}");
+                Vec::new()
+            }
+        }
+    };
     Ok(Loaded {
         game_cpu,
         renderer_cpu,
@@ -20900,6 +20924,7 @@ fn load_resources(
         pack_error,
         resources,
         rest_loader,
+        client_applies,
         pack,
         gui: loaded_gui,
     })
@@ -21349,6 +21374,7 @@ fn start_game<'a>(
     rest_loader: Option<WorldRestLoader>,
     settings: Option<Settings>,
     prepared: Option<GameCpuResources>,
+    client_applies: Vec<client_reload::PreparedClientReload>,
 ) -> Result<Option<Game<'a>>> {
     let handoff = prepared.is_some();
     let mut settings = match settings {
@@ -21383,6 +21409,9 @@ fn start_game<'a>(
         game.mods.dev = game.options.dev_mods.clone();
         game.start_mods();
     }
+    // The initial load's client reload listeners, registered and staged by
+    // the loader thread, publish now that the game owns the assets.
+    client_reload::apply_client_reload(client_applies);
     // After the mods: their templates are among the ids it lists.
     game.preload_registries();
     game.start_agent_control()?;
@@ -21783,7 +21812,7 @@ impl Loading {
             );
         }
     }
-    fn finish(&mut self, loaded: Loaded) -> Result<Option<split::Split<'static>>> {
+    fn finish(&mut self, mut loaded: Loaded) -> Result<Option<split::Split<'static>>> {
         let handoff_at = Instant::now();
         let mut options = self.options.take().ok_or("loading already finished")?;
         options.resources = loaded.root.clone();
@@ -21839,6 +21868,7 @@ impl Loading {
             loaded.rest_loader,
             Some(self.settings.clone()),
             loaded.game_cpu,
+            std::mem::take(&mut loaded.client_applies),
         )?
         else {
             return Ok(None);
@@ -22169,7 +22199,7 @@ pub fn run_with(launch: LaunchArguments) -> Result<()> {
             &options.dev_mods,
         )
     })?;
-    let loaded = load_resources(
+    let mut loaded = load_resources(
         options.resources.clone(),
         launch_world(&options),
         &vanilla_root,
@@ -22200,6 +22230,7 @@ pub fn run_with(launch: LaunchArguments) -> Result<()> {
         loaded.rest_loader,
         None,
         None,
+        std::mem::take(&mut loaded.client_applies),
     )?;
     if let Some(mut game) = game {
         // Minecraft.onGameLoadFinished: a start that made it this far is clean.
