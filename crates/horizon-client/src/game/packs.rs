@@ -7,7 +7,9 @@ use horizon_client::{
     assets::Assets,
     gfx::PreparedTextures,
     hud::HudAtlas,
-    lang, pack_browser,
+    lang,
+    mod_api::ClientReloadListeners,
+    pack_browser,
     pack_screen::{self, Compat, PackInfo, Source as PackSource},
     packs::{self, Pack, Position},
     streaming::WorkerContext,
@@ -294,6 +296,10 @@ impl Game<'_> {
             self.pack.context.clone(),
         );
         let (unicode, japanese) = (self.settings.force_unicode, self.settings.japanese_glyphs);
+        // The reload's mod listeners register here, on the thread that owns
+        // the game, before the staging worker starts: each listener keeps its
+        // registering mod for crash attribution.
+        let client_listeners = self.register_client_reload_listeners();
         self.pack_reload = Some(PackReload::spawn(kind, move |progress| {
             stage_pack(
                 &vanilla,
@@ -301,6 +307,7 @@ impl Game<'_> {
                 &server,
                 &mods,
                 &mod_sources,
+                client_listeners,
                 &assets,
                 &res,
                 &context,
@@ -341,6 +348,7 @@ impl Game<'_> {
     pub(super) fn apply_staged_pack(&mut self, staged: StagedPack) -> horizon_client::Result<()> {
         let StagedPack {
             root,
+            client_applies,
             gui,
             pack,
             textures,
@@ -483,6 +491,7 @@ impl Game<'_> {
         self.ui.chat.rescale(&self.gui.atlas);
         // The creative screen survives the reload; item names may not.
         self.creative_screen.forget_items();
+        super::client_reload::apply_client_reload(client_applies);
         self.native_client_resources_reloaded();
         Ok(())
     }
@@ -498,6 +507,7 @@ pub(super) fn stage_pack(
     server: &[Pack],
     mods_enabled: &BTreeSet<String>,
     mod_sources: &super::mods::ModsState,
+    client_listeners: ClientReloadListeners,
     assets: &Arc<Assets>,
     res: &Resources,
     context: &WorkerContext,
@@ -507,6 +517,11 @@ pub(super) fn stage_pack(
 ) -> horizon_client::Result<StagedPack> {
     let root = startup_root(vanilla_root, selected, server, mods_enabled, mod_sources)?;
     progress.set(1);
+    // The mod listeners prepare against the merged root before the heavy
+    // staging builds run: a listener that fails aborts the reload without the
+    // renderer work, keeping every listener's previous assets.
+    let client_applies = super::client_reload::stage_client_reload(&root, client_listeners)
+        .map_err(|e| e.to_string())?;
     // The world's models and sprites and the GUI atlas read the same root and nothing of
     // each other: about a second each, side by side.
     let mod_image = horizon_client::gfx::native_render::world_drawn_hooked();
@@ -560,6 +575,7 @@ pub(super) fn stage_pack(
     progress.set(3);
     Ok(StagedPack {
         root,
+        client_applies,
         gui,
         pack,
         textures,
@@ -575,6 +591,9 @@ pub(super) fn stage_pack(
 /// it on the render thread).
 pub(super) struct StagedPack {
     pub root: PathBuf,
+    /// The mod reload listeners' prepared applies, run when the rest of the
+    /// staged pack is published.
+    pub client_applies: Vec<super::client_reload::PreparedClientReload>,
     pub gui: UiResources,
     pub pack: PackResources,
     pub textures: PreparedTextures,
