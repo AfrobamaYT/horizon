@@ -17,10 +17,17 @@ pub struct GamePoint {
     /// The listener's host: `host` (`&self`), or the side's writing host (`&mut self`).
     pub host: &'static str,
     pub hot: bool,
+    /// The record its listeners get, in `mod_api::points`.
+    pub record: String,
     /// The parameters passed, with their types, in order.
     pub args: Vec<(String, String)>,
+    /// What its listeners may do with the return: `cancel`, `result` (an API-typed value they
+    /// may set at the head or change at the return) or `none`.
+    pub returns: &'static str,
     #[serde(skip)]
     listener: String,
+    #[serde(skip)]
+    record_item: String,
 }
 
 /// The `#[point]` methods of `Game`, in `game.rs` and under `game/`, by name. Two with one name
@@ -47,7 +54,9 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
         let target = format!("{module}::Game<'_>::{}", method.sig.ident);
         let shape =
             point_shape::shape(tokens, &method.sig).map_err(|e| format!("{target}: {e}"))?;
+        let record_item = shape.record_item(&target).to_string();
         let point = GamePoint {
+            record_item,
             target,
             side: shape.side.name(),
             host: match (shape.mutable, shape.side) {
@@ -66,6 +75,13 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
                 })
                 .collect(),
             listener: shape.listener().to_string(),
+            record: shape.record().to_string(),
+            returns: match shape.returns {
+                point_shape::Returns::Unit | point_shape::Returns::UnitResult => "cancel",
+                point_shape::Returns::Value(_) => "result",
+                point_shape::Returns::Opaque => "none",
+            },
+
             name: shape.name,
         };
         if let Some(other) = points.get(&point.name) {
@@ -79,26 +95,43 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
     Ok(points.into_values().collect())
 }
 
-/// The game's `points` module: a private slot per point and the one exported table of them, so a
-/// Windows DLL spends one export on all of them.
+/// The game's `points` module: a private head and return slot per point, and the one exported
+/// table of them, so a Windows DLL spends one export on all of them.
 pub fn slots(points: &[GamePoint]) -> String {
-    let statics = points.iter().map(|point| {
-        let slot = syn::Ident::new(&point.name.to_uppercase(), proc_macro2::Span::call_site());
+    let ident = |name: String| syn::Ident::new(&name, proc_macro2::Span::call_site());
+    let slots: Vec<_> = points
+        .iter()
+        .flat_map(|point| {
+            let upper = point.name.to_uppercase();
+            [
+                (ident(upper.clone()), point, ident("Head".into())),
+                (ident(upper + "_RETURN"), point, ident("Return".into())),
+            ]
+        })
+        .collect();
+    let statics = slots.iter().map(|(slot, point, at)| {
         let listener: proc_macro2::TokenStream =
             point.listener.parse().expect("generated listener type");
         let target = &point.target;
-        quote!(pub(crate) static #slot: Point<#listener> = Point::new(#target);)
+        quote!(pub(crate) static #slot: Point<#listener> = Point::new(#target, Place::#at);)
     });
-    let slots = points
-        .iter()
-        .map(|point| syn::Ident::new(&point.name.to_uppercase(), proc_macro2::Span::call_site()));
+    let all = slots.iter().map(|(slot, ..)| slot);
     quote! {
-        use mod_api::__private::point::{Attach, Point};
+        use mod_api::__private::point::{Attach, Place, Point};
         #(#statics)*
-        /// Every point, for the launcher's generated `main` to fill by target.
-        pub static POINTS: &[&(dyn Attach + Sync)] = &[#(&#slots),*];
+        /// Every slot, for the launcher's generated `main` to fill by target and place.
+        pub static POINTS: &[&(dyn Attach + Sync)] = &[#(&#all),*];
     }
     .to_string()
+}
+
+/// `mod_api::points`: each point's record, the type its listeners take.
+pub fn records(points: &[GamePoint]) -> String {
+    points
+        .iter()
+        .map(|point| point.record_item.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]
@@ -121,7 +154,16 @@ mod tests {
         assert_eq!(args, ["yaw", "text"]);
         assert_eq!(
             shape.listener().to_string(),
-            quote!(fn(&mut dyn ::mod_api::ClientHost, &mut (f64, &str,))).to_string()
+            quote!(fn(&mut dyn ::mod_api::ClientHost, &mut ::mod_api::points::TurnArgs<'_>))
+                .to_string()
+        );
+        assert!(matches!(shape.returns, point_shape::Returns::Unit));
+        let item = shape.record_item("t").to_string();
+        assert!(
+            item.contains("pub yaw : f64")
+                && item.contains("pub text : & 'a str")
+                && item.contains("pub cancel : bool"),
+            "{item}"
         );
         let read = point(
             r#"side = "server", name = "reach_of""#,
@@ -134,7 +176,35 @@ mod tests {
         );
         assert_eq!(
             read.listener().to_string(),
-            quote!(fn(&dyn ::mod_api::Host, &mut ())).to_string()
+            quote!(fn(&dyn ::mod_api::Host, &mut ::mod_api::points::ReachOfArgs)).to_string()
+        );
+        assert!(
+            read.record_item("t")
+                .to_string()
+                .contains("pub result : Option < f64 >")
+        );
+    }
+
+    #[test]
+    fn what_a_listener_may_do_follows_the_return_type() {
+        let returns = |sig: &str| point(r#"side = "both""#, sig).map(|shape| shape.returns);
+        assert!(matches!(
+            returns("fn tick(&mut self) -> Result<()> {}"),
+            Ok(point_shape::Returns::UnitResult)
+        ));
+        assert!(matches!(
+            returns("fn hit(&self) -> bool {}"),
+            Ok(point_shape::Returns::Value(_))
+        ));
+        assert!(matches!(
+            returns("fn hit(&self) -> Option<(usize, f64)> {}"),
+            Ok(point_shape::Returns::Opaque)
+        ));
+        assert!(
+            point(r#"side = "both""#, "fn f(&mut self, cancel: bool) {}")
+                .err()
+                .expect("refused")
+                .contains("rename")
         );
     }
 

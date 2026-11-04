@@ -48,7 +48,9 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                 println!("cargo:rerun-if-changed={}", path.display());
             }
             fs::write(out_dir.join("mod-api.wit"), &wasm.wit).map_err(|e| e.to_string())?;
+            let points = super::points::records(&super::points::game_points(root)?);
             vec![
+                ("points_api_generated.rs", points),
                 ("mod_api_generated.rs", hooks),
                 ("mod_api_generated_host.rs", generated.host),
                 ("native_render_generated.rs", generated.render),

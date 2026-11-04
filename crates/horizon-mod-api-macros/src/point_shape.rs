@@ -31,6 +31,19 @@ pub struct Arg {
     pub ty: Type,
 }
 
+/// What a point's listeners may do with the function's return value.
+pub enum Returns {
+    /// `()`: a head listener may `cancel`, and the function returns at once.
+    Unit,
+    /// `Result<()>`: the same, returning `Ok(())`.
+    UnitResult,
+    /// An API-typed value: a head listener may set `result`, which the function returns at once;
+    /// a return listener sees the value in `result` and may change it.
+    Value(Type),
+    /// A value the API can't carry: the listeners neither stop the function nor see its value.
+    Opaque,
+}
+
 /// A `#[point]` function's point.
 pub struct Shape {
     /// Unique among the game's points: the function's name, or the attribute's `name`.
@@ -43,6 +56,7 @@ pub struct Shape {
     /// The parameters with API types, in order. The others aren't passed: an internal type
     /// would become API.
     pub args: Vec<Arg>,
+    pub returns: Returns,
 }
 
 /// The point of the function `sig`, from `#[point(side = "…", name = "…", hot)]`'s arguments.
@@ -106,14 +120,48 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
             },
             FnArg::Receiver(_) => None,
         })
-        .collect();
+        .collect::<Vec<_>>();
+    if let Some(arg) = args
+        .iter()
+        .find(|arg| arg.name == "cancel" || arg.name == "result")
+    {
+        return Err(syn::Error::new(
+            arg.name.span(),
+            "a point's record has its own `cancel` and `result`: rename the parameter",
+        ));
+    }
+    let returns = match &sig.output {
+        syn::ReturnType::Default => Returns::Unit,
+        syn::ReturnType::Type(_, ty) if unit_result(ty) => Returns::UnitResult,
+        syn::ReturnType::Type(_, ty) if scalar(ty) => Returns::Value((**ty).clone()),
+        syn::ReturnType::Type(..) => Returns::Opaque,
+    };
     Ok(Shape {
         name,
         side,
         mutable,
         hot,
         args,
+        returns,
     })
+}
+
+/// `Result<()>` (the game's `anyhow` alias) or `Result<(), E>`.
+fn unit_result(ty: &Type) -> bool {
+    let Type::Path(path) = ty else { return false };
+    let Some(last) = path.path.segments.last() else {
+        return false;
+    };
+    let syn::PathArguments::AngleBracketed(generics) = &last.arguments else {
+        return false;
+    };
+    last.ident == "Result"
+        && matches!(generics.args.first(), Some(syn::GenericArgument::Type(Type::Tuple(unit))) if unit.elems.is_empty())
+}
+
+/// A scalar the API carries by value.
+fn scalar(ty: &Type) -> bool {
+    matches!(ty, Type::Path(_)) && api_typed(ty)
 }
 
 /// Whether the API can carry `ty` to a listener: a scalar, or `&str`.
@@ -140,15 +188,103 @@ impl Shape {
         syn::Ident::new(&self.name.to_uppercase(), Span::call_site())
     }
 
-    /// The arguments' record, the listener's second parameter: `(T, …,)`.
-    pub fn record(&self) -> TokenStream {
-        let types = self.args.iter().map(|arg| &arg.ty);
-        quote!((#(#types,)*))
+    /// The slot its return listeners wait in.
+    pub fn return_slot(&self) -> syn::Ident {
+        syn::Ident::new(&format!("{}_RETURN", self.slot()), Span::call_site())
+    }
+
+    /// The record its listeners get, in `mod_api::points`: `TickArgs` for `tick`.
+    pub fn record(&self) -> syn::Ident {
+        let camel: String = self
+            .name
+            .split('_')
+            .map(|word| {
+                let mut chars = word.chars();
+                chars
+                    .next()
+                    .map(|first| first.to_ascii_uppercase().to_string() + chars.as_str())
+                    .unwrap_or_default()
+            })
+            .collect();
+        syn::Ident::new(&format!("{camel}Args"), Span::call_site())
+    }
+
+    /// Whether the record borrows (a `&str` parameter).
+    fn borrows(&self) -> bool {
+        self.args
+            .iter()
+            .any(|arg| matches!(arg.ty, Type::Reference(_)))
+    }
+
+    /// The record's declaration in `mod_api::points`, documented from the function's `target`.
+    pub fn record_item(&self, target: &str) -> TokenStream {
+        let record = self.record();
+        let lifetime = if self.borrows() {
+            quote!(<'a>)
+        } else {
+            quote!()
+        };
+        let names: Vec<_> = self.args.iter().map(|arg| &arg.name).collect();
+        let types: Vec<_> = self
+            .args
+            .iter()
+            .map(|arg| match &arg.ty {
+                Type::Reference(_) => quote!(&'a str),
+                ty => quote!(#ty),
+            })
+            .collect();
+        let field_docs = names.iter().map(|name| {
+            format!(
+                "`{name}`: a head listener may change it, and the function runs with the change."
+            )
+        });
+        let (extra, extra_init) = match &self.returns {
+            Returns::Unit | Returns::UnitResult => (
+                quote! {
+                    /// Set by a head listener: the function returns at once, skipping its body.
+                    pub cancel: bool,
+                },
+                quote!(cancel: false,),
+            ),
+            Returns::Value(ty) => (
+                quote! {
+                    /// Set by a head listener: the function returns this at once, skipping its body.
+                    /// Return listeners find the value it returns here, and may change it.
+                    pub result: Option<#ty>,
+                },
+                quote!(result: None,),
+            ),
+            Returns::Opaque => (quote!(), quote!()),
+        };
+        let doc = format!(
+            "The `{}` point's record: what its listeners get from `{target}`, a slot filled at load.",
+            self.name
+        );
+        quote! {
+            #[doc = #doc]
+            #[non_exhaustive]
+            pub struct #record #lifetime {
+                #( #[doc = #field_docs] pub #names: #types, )*
+                #extra
+            }
+            impl #lifetime #record #lifetime {
+                /// The record of a call, before its listeners run (the game's side of the point).
+                #[doc(hidden)]
+                pub fn __new(#(#names: #types),*) -> Self {
+                    Self { #(#names,)* #extra_init }
+                }
+            }
+        }
     }
 
     /// The listener's function type.
     pub fn listener(&self) -> TokenStream {
         let record = self.record();
+        let record = if self.borrows() {
+            quote!(::mod_api::points::#record<'_>)
+        } else {
+            quote!(::mod_api::points::#record)
+        };
         let host = match (self.mutable, self.side) {
             (false, _) => quote!(&dyn ::mod_api::Host),
             (true, Side::Server) => quote!(&mut dyn ::mod_api::ServerHost),

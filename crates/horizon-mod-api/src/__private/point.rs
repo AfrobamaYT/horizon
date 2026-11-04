@@ -5,17 +5,29 @@
 use std::any::Any;
 use std::sync::OnceLock;
 
-/// One compiled-in point. `F` is its listener's function type, fixed by the function's signature.
+/// Where in its function a slot's listeners run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Place {
+    /// Before the body: a listener may change the arguments, or stop the function.
+    Head,
+    /// After the body: a listener sees the arguments and may change the value it returns.
+    Return,
+}
+
+/// One compiled-in slot. `F` is its listener's function type, fixed by the function's signature.
 pub struct Point<F: 'static> {
     target: &'static str,
+    place: Place,
     listeners: OnceLock<Box<[F]>>,
 }
 
 impl<F: 'static> Point<F> {
-    /// An empty point for the function `target` (an injection's `target` for it).
-    pub const fn new(target: &'static str) -> Self {
+    /// An empty slot at `place` in the function `target` (an injection's `target` for it).
+    pub const fn new(target: &'static str, place: Place) -> Self {
         Self {
             target,
+            place,
             listeners: OnceLock::new(),
         }
     }
@@ -31,6 +43,8 @@ impl<F: 'static> Point<F> {
 pub trait Attach {
     /// The point's function, as an injection's `target` names it.
     fn target(&self) -> &'static str;
+    /// Where in the function its listeners run.
+    fn place(&self) -> Place;
     /// Fills the point once; `listeners` is a `Vec<F>` of this point's `F`, in dispatch order.
     fn attach(&self, listeners: Box<dyn Any>) -> Result<(), AttachError>;
 }
@@ -48,6 +62,10 @@ pub enum AttachError {
 impl<F: Send + Sync + 'static> Attach for Point<F> {
     fn target(&self) -> &'static str {
         self.target
+    }
+
+    fn place(&self) -> Place {
+        self.place
     }
 
     fn attach(&self, listeners: Box<dyn Any>) -> Result<(), AttachError> {
@@ -77,7 +95,8 @@ mod tests {
 
     #[test]
     fn a_point_is_filled_once_with_its_own_listener_type() {
-        static POINT: Point<Listener> = Point::new("horizon_client::game::Game<'_>::tick");
+        static POINT: Point<Listener> =
+            Point::new("horizon_client::game::Game<'_>::tick", Place::Head);
         assert!(POINT.get().is_none());
         assert_eq!(
             POINT.attach(Box::new(vec![|n: &mut u32| *n += 1])),

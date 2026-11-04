@@ -166,16 +166,31 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         Ok(shape) => shape,
         Err(e) => return e.to_compile_error().into(),
     };
-    // The passed parameters are rebound after the listeners ran: their `mut` moves there.
-    let mut bindings = Vec::new();
-    for input in &mut function.sig.inputs {
-        if let syn::FnArg::Typed(typed) = input
-            && let syn::Pat::Ident(pat) = &mut *typed.pat
-            && shape.args.iter().any(|arg| arg.name == pat.ident)
-        {
-            let mutability = pat.mutability.take();
-            let name = &pat.ident;
-            bindings.push(quote!(#mutability #name));
+    // The body moves to an inlined inner function, so the return listeners run however it
+    // returns; the outer function takes each parameter by a plain name.
+    let inner = syn::Ident::new(
+        &format!("__point_{}", function.sig.ident),
+        function.sig.ident.span(),
+    );
+    let mut outer = function.clone();
+    let mut call = Vec::new();
+    let mut passed = Vec::new();
+    for (i, input) in outer.sig.inputs.iter_mut().enumerate() {
+        let syn::FnArg::Typed(typed) = input else {
+            continue;
+        };
+        let original = match &*typed.pat {
+            syn::Pat::Ident(pat) => Some(pat.ident.clone()),
+            _ => None,
+        };
+        let plain = format_ident!("__p{i}");
+        *typed.pat = syn::parse_quote!(#plain);
+        match original.filter(|name| shape.args.iter().any(|arg| arg.name == *name)) {
+            Some(name) => {
+                passed.push(plain);
+                call.push(quote!(__args.#name));
+            }
+            None => call.push(quote!(#plain)),
         }
     }
     // What the listeners get for `self`: the shape's host.
@@ -184,19 +199,50 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         (true, point_shape::Side::Both) => quote!(crate::game::points::host_side(&mut *self)),
         (true, _) => quote!(&mut *self),
     };
-    let slot = shape.slot();
-    let names = shape.args.iter().map(|arg| &arg.name);
-    let head = quote! {
-        let (#(#bindings,)*) = {
-            let mut __point = (#(#names,)*);
-            if let Some(__listeners) = crate::game::points::#slot.get() {
-                ::mod_api::__private::point::fire(__listeners, |__listener| __listener(#host, &mut __point));
-            }
-            __point
-        };
+    let (slot, return_slot, record) = (shape.slot(), shape.return_slot(), shape.record());
+    let fire = quote!(::mod_api::__private::point::fire(__listeners, |__listener| __listener(#host, &mut __args)));
+    let (stop, returned) = match &shape.returns {
+        point_shape::Returns::Unit => (
+            quote!(if __args.cancel {
+                return;
+            }),
+            quote!(#fire;),
+        ),
+        point_shape::Returns::UnitResult => (
+            quote!(if __args.cancel {
+                return Ok(());
+            }),
+            quote!(#fire;),
+        ),
+        point_shape::Returns::Value(_) => (
+            quote!(if let Some(__result) = __args.result.take() {
+                return __result;
+            }),
+            quote! {
+                __args.result = Some(__result);
+                #fire;
+                return __args.result.unwrap_or(__result);
+            },
+        ),
+        point_shape::Returns::Opaque => (quote!(), quote!(#fire;)),
     };
-    function.block.stmts.insert(0, syn::parse_quote!(#head));
-    quote!(#function).into()
+    outer.block = syn::parse_quote!({
+        let mut __args = ::mod_api::points::#record::__new(#(#passed),*);
+        if let Some(__listeners) = crate::game::points::#slot.get() {
+            #fire;
+            #stop
+        }
+        let __result = self.#inner(#(#call),*);
+        if let Some(__listeners) = crate::game::points::#return_slot.get() {
+            #returned
+        }
+        __result
+    });
+    function.sig.ident = inner;
+    function.vis = syn::Visibility::Inherited;
+    function.attrs.retain(|attr| !attr.path().is_ident("doc"));
+    function.attrs.push(syn::parse_quote!(#[inline(always)]));
+    quote!(#outer #function).into()
 }
 
 /// Derive subscriptions for internal test fixtures that construct their own mods.
