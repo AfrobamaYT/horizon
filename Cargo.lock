@@ -412,6 +412,7 @@ dependencies = [
  "sha2",
  "toml",
  "toml_edit",
+ "ureq",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
  "wit-component 0.261.0",
