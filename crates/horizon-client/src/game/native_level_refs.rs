@@ -261,18 +261,6 @@ impl Game<'_> {
         let inside = (world.bottom_y()..world.top_y()).contains(&y);
         (inside && world.chunks.contains_key(&(x >> 4, z >> 4))).then(|| world.block(x, y, z))
     }
-    /// The block state at `pos` (`Level.getBlockState`) as `/setblock` takes
-    /// it: `minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]`.
-    /// None for a chunk that isn't loaded or a `y` outside the world. API
-    /// 381.
-    pub(super) fn native_level_block_state(
-        &self,
-        level: LevelRef,
-        pos: [i32; 3],
-    ) -> Option<String> {
-        self.native_level_state(level, pos)
-            .map(|state| self.state_string(state))
-    }
     /// The block at `pos` without its properties: `minecraft:oak_stairs`.
     /// None as for `block_state`. API 381.
     pub(super) fn native_level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {

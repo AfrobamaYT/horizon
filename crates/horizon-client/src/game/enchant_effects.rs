@@ -1057,7 +1057,14 @@ impl Game<'_> {
             ])
         {
             let Some(stack) = stack else { continue };
-            for (attr, id, amount, op, group) in self.stations().enchantments.modifier_rows(stack) {
+            for horizon_items::item_data::ModifierRow {
+                attribute: attr,
+                id,
+                amount,
+                operation: op,
+                slot: group,
+            } in self.stations().enchantments.modifier_rows(stack)
+            {
                 if super::equipment_modifier_applies(&group, slot) {
                     wanted.push((attr, format!("{id}/{slot}"), amount, op));
                 }

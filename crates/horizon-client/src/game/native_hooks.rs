@@ -2384,16 +2384,6 @@ impl GameLevel<'_> {
     }
 }
 
-/// The camera shake native mods ask for (`native_camera_shake`): turns in
-/// degrees, and an offset in blocks along the camera's right, up and back.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct NativeShake {
-    pub pitch: f32,
-    pub yaw: f32,
-    pub roll: f32,
-    pub offset: [f32; 3],
-}
-
 /// A mod's camera (`native_camera_pose`): each value that isn't finite keeps vanilla's from `view`.
 fn posed_camera(
     view: (glam::DVec3, f32, f32),
@@ -3280,6 +3270,38 @@ impl Game<'_> {
         modifiers: u32,
     ) {
         mod_api::dispatch_input_key(self, key, action, modifiers);
+    }
+    /// A key the game names (`key.keyboard.a`, `key.mouse.left`) went down or
+    /// came up after handling, for `native_key`. Not cancellable.
+    pub(super) fn native_key(&mut self, key: &str, pressed: bool) {
+        mod_api::dispatch_key(self, key, pressed);
+    }
+    /// Wheel steps while playing: set `claimed` to keep them from the hotbar.
+    pub(super) fn native_wheel(&mut self, steps: f32, claimed: &mut bool) {
+        mod_api::dispatch_wheel(self, steps, claimed);
+    }
+    /// A key event for `native_key`: a press a mod panel hears too.
+    pub(super) fn native_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) {
+        if repeat {
+            return;
+        }
+        if let Some(name) = keybinds::key_name(key) {
+            if pressed {
+                self.native_panel_key(name);
+            }
+            self.native_key(name, pressed);
+        }
+    }
+    /// A mouse button while playing, for `native_key`.
+    pub(super) fn native_mouse_event(&mut self, button: MouseButton, pressed: bool) {
+        let name = keybinds::mouse_name(button);
+        self.native_key(&name, pressed);
+    }
+    /// Wheel steps while playing: whether a native mod took them.
+    pub(super) fn native_wheel_event(&mut self, steps: f32) -> bool {
+        let mut claimed = false;
+        self.native_wheel(steps, &mut claimed);
+        claimed
     }
     /// Raw mouse button input on any screen, before dispatch; cancel skips dispatch and Post.
     /// Button/modifiers use the same GLFW encoding as screen hooks. Synthetic clicks skip it.
@@ -12415,15 +12437,6 @@ impl Game<'_> {
         let row = self.settings.mods.installed.get_mut(i);
         if let Some(page) = row.and_then(|m| m.native.as_mut()) {
             page.buttons = buttons;
-        }
-    }
-    /// Deliver a non-repeat key press to the native panel.
-    pub(super) fn native_panel_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) {
-        if pressed
-            && !repeat
-            && let Some(name) = keybinds::key_name(key)
-        {
-            self.native_panel_key(name);
         }
     }
     /// `ClientHooks.onClickInput`: tells `native_interaction_key_mapping_triggered` that

@@ -608,10 +608,11 @@ impl Game<'_> {
                 if action != "up" && self.screen_key_pressed(physical, action == "repeat") {
                     if action == "tap" {
                         self.physical_keys.remove(&physical);
+                        self.native_key_event(physical, false, false);
                     }
                     return ok();
                 }
-                self.native_panel_key_event(physical, action != "up", action == "repeat");
+                self.native_key_event(physical, action != "up", action == "repeat");
                 // The merchant's focused offer and the recipe book's last
                 // recipe take Enter and Space, as the window's.
                 if action != "up"

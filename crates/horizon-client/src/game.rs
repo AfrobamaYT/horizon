@@ -2566,6 +2566,12 @@ struct DragView {
     slots: HashMap<usize, Option<(u32, bool)>>,
     left: Option<u32>,
 }
+fn equipment_modifier_applies(group: &str, slot: &str) -> bool {
+    group == slot
+        || group == "any"
+        || (group == "armor" && slot != "mainhand" && slot != "offhand")
+        || (group == "hand" && (slot == "mainhand" || slot == "offhand"))
+}
 /// Ctrl+Q reads the physical keyboard, independently of sprint key mappings.
 /// A chunk whose ticking future can complete (`ChunkMap.prepareTickingChunk`):
 /// lit, with its neighbours loaded, as `postprocess_chunks` waits for.
@@ -18832,6 +18838,7 @@ impl Game<'_> {
                         && !self.screen_over_playing()
                         && self.sleeping.is_none()
                         && self.player.is_some()
+                        && !self.native_wheel_event(d)
                     {
                         let scroll =
                             self.mouse
@@ -19354,7 +19361,7 @@ impl Game<'_> {
                         && !matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape)) =>
                 {
                     if let PhysicalKey::Code(key) = event.physical_key {
-                        self.native_panel_key_event(key, true, event.repeat);
+                        self.native_key_event(key, true, event.repeat);
                     }
                     if let PhysicalKey::Code(key) = event.physical_key {
                         self.pause_key(key)?;
@@ -19364,7 +19371,7 @@ impl Game<'_> {
                     if self.screen == Screen::Dead && event.state == ElementState::Pressed =>
                 {
                     if let PhysicalKey::Code(key) = event.physical_key {
-                        self.native_panel_key_event(key, true, event.repeat);
+                        self.native_key_event(key, true, event.repeat);
                     }
                     if let PhysicalKey::Code(key) = event.physical_key {
                         self.death_key(key)?;
@@ -19466,11 +19473,8 @@ impl Game<'_> {
                     let PhysicalKey::Code(key) = event.physical_key else {
                         return Ok(());
                     };
-                    self.native_panel_key_event(
-                        key,
-                        event.state == ElementState::Pressed,
-                        event.repeat,
-                    );
+                    self.native_key_event(key, event.state == ElementState::Pressed, event.repeat);
+                    self.native_key_event(key, event.state == ElementState::Pressed, event.repeat);
                     // Screen.keyPressed sees the physical key, repeats included.
                     if event.state == ElementState::Pressed
                         && self.screen == Screen::Inventory
@@ -21152,7 +21156,6 @@ impl<'scope, T: Send + 'scope> Step<'scope, T> {
 struct CoreTables {
     item_data: Arc<horizon_world::item_defaults::ItemData>,
     assets: Assets,
-    item_defaults: Arc<horizon_world::item_defaults::Defaults>,
     render: RenderAssets,
     item_renderer: horizon_client::item_render::ItemRenderer,
     visibility: horizon_world::block_render::FaceVisibility,
@@ -21294,14 +21297,14 @@ fn load_core(
             )
         });
     // The packs' failure first: it rolls back whatever else failed.
-    let (render, item_renderer, item_defaults) = match render {
+    let (render, item_renderer, _) = match render {
         Ok(render) => render,
         Err(e) => return Ok(Err(e)),
     };
     let gameplay = gameplay?;
     progress.set(3);
     Ok(Ok(CoreTables {
-        item_defaults,
+        item_data,
         gameplay,
         biomes: biomes?,
         environment: environment?,
@@ -21446,7 +21449,6 @@ fn load_resources(
     let CoreTables {
         item_data,
         assets,
-        item_defaults,
         render,
         item_renderer,
         visibility,
@@ -21532,7 +21534,6 @@ fn load_resources(
         let handle = std::thread::Builder::new()
             .name("world-rest-loader".into())
             .spawn(move || {
-                let _item_defaults = item_defaults;
                 let _step = startup::step("rest");
                 let rest = load_world_rest(
                     &root,

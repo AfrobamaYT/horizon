@@ -6198,8 +6198,8 @@ impl Game<'_> {
                     damage_hooks: &self.damage_hooks,
                     tag_items: None,
                     block_registries: None,
-                }
-                .passenger_pose_tick()?;
+                };
+                passenger.passenger_pose_tick()?;
                 // LivingEntity.aiStep: a passenger freezes in powder snow too, and the
                 // frostbite overlay shows it (#8156).
                 passenger.passenger_block_effects_tick()?;

@@ -1627,6 +1627,17 @@ pub trait Hooks {
     /// modifier bits the screen hooks' GLFW encoding. Not cancellable.
     #[hook(side = "client", contract = "listen", neoforge = "InputEvent.Key")]
     fn input_key();
+    /// A key the game names (`key.keyboard.a`, `key.mouse.left` for buttons)
+    /// went down or came up after the game handled it, including presses a
+    /// screen took and auto-repeats; a cancelled `native_screen_key_pressed_pre`
+    /// press still reports its release. Not cancellable.
+    #[hook(side = "client", contract = "listen")]
+    fn key();
+    /// Wheel steps while playing, before the hotbar or the spectator menu take
+    /// them: `steps` is the vertical delta. Set `claimed` to keep them from the
+    /// hotbar. A screen over gameplay hears nothing.
+    #[hook(side = "client", contract = "cancel", out = "claimed")]
+    fn wheel();
     /// Gameplay scrolling after accumulation, before hotbar/spectator handling.
     /// `scroll` is scaled x/y, `accumulated` whole x/y steps, `buttons` left/middle/right,
     /// and `cursor` the GUI position. Cancel skips gameplay scrolling.

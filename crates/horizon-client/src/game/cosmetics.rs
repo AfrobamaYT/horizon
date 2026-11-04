@@ -148,8 +148,7 @@ fn covered(m: &Mob, slot: Slot) -> bool {
         // A chestplate, not an elytra.
         Slot::Torso => m
             .extra
-            .chest
-            .as_deref()
+            .slot_id(horizon_items::equipment::CHEST)
             .is_some_and(|c| c != "minecraft:elytra"),
         Slot::NameTag => true,
     }

@@ -270,9 +270,7 @@ impl Game<'_> {
                                     .map(|guest| guest.conn)
                             })
                             .ok_or("command harness: owner is not connected")?;
-                        let mut host = g.lan.take().ok_or("command harness: no hub")?;
                         g.lan_guest_packet(
-                            &mut host,
                             conn,
                             horizon_protocol::packets::play::Serverbound::UseItemOn(
                                 horizon_protocol::packets::play::UseItemOn {
@@ -286,7 +284,6 @@ impl Game<'_> {
                                 },
                             ),
                         );
-                        g.lan = Some(host);
                         Ok(())
                     })?;
                 }

@@ -1019,6 +1019,10 @@ pub struct NativeServerPlayer {
     /// (`living_incoming_damage`, `living_knockback`) give for the player; 0 when not known.
     /// API @API:server_player_entity_id@.
     pub entity_id: i32,
+    /// The IP address the player connects from, without the port (behind
+    /// a Velocity proxy, the address the proxy forwards; empty when not
+    /// known).
+    pub address: String,
 }
 
 /// A command a native mod adds, as one usage: words, then arguments
@@ -5394,6 +5398,7 @@ pub(crate) mod built {
         pub yaw: f32,
         pub pitch: f32,
         pub entity_id: i32,
+        pub address: String,
     }
     impl From<NativeServerPlayer> for super::NativeServerPlayer {
         fn from(v: NativeServerPlayer) -> Self {
@@ -5408,6 +5413,7 @@ pub(crate) mod built {
                 yaw,
                 pitch,
                 entity_id,
+                address,
             } = v;
             Self {
                 uuid,
@@ -5420,6 +5426,7 @@ pub(crate) mod built {
                 yaw,
                 pitch,
                 entity_id,
+                address,
             }
         }
     }

@@ -152,6 +152,13 @@ impl Game<'_> {
     fn datapack_settings_path(&self) -> std::path::PathBuf {
         self.world_root.join("datapacks.json")
     }
+    /// Discover and load the data packs of the world (once, or on `/reload`).
+    pub(super) fn ensure_datapacks(&mut self) {
+        if self.fns.loaded || self.world_root.as_os_str().is_empty() {
+            return;
+        }
+        let _ = self.reload_datapacks(false, &self.level.enabled_features.clone());
+    }
     pub(super) fn reload_datapacks(
         &mut self,
         run_load: bool,
