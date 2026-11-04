@@ -1481,8 +1481,11 @@ impl Game<'_> {
     /// starts as that text; replace it and players see the new message
     /// (`withUnsignedContent`: a signed message keeps its signature), and
     /// the log shows it. Set `cancel` and nobody sees it, and it doesn't
-    /// count toward the chat spam limit. Commands (`/say`, `/msg`...) are
-    /// not chat here. Server-side, with no player's state swapped in.
+    /// count toward the chat spam limit. Lines pushed to `replies` go to the
+    /// sender alone as system chat, whether or not the message is canceled
+    /// (no other player sees them). Commands (`/say`, `/msg`...) are not
+    /// chat here. Server-side, with no player's state swapped in.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn native_server_chat(
         &mut self,
         player_id: i32,
@@ -1490,9 +1493,12 @@ impl Game<'_> {
         username: &str,
         raw_text: &str,
         message: &mut Text,
+        replies: &mut Vec<Text>,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_server_chat(self, player_id, player, username, raw_text, message, cancel);
+        mod_api::dispatch_server_chat(
+            self, player_id, player, username, raw_text, message, replies, cancel,
+        );
     }
     /// NeoForge's `ClientChatEvent`: a client is about to send `message`.
     /// `original_message` is immutable; change `message` or set `cancel` to
