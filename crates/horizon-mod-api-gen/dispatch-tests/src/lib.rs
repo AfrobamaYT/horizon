@@ -64,6 +64,13 @@ mod tests {
         #[derive(Clone, Copy)]
         pub(super) struct BlockHit;
         pub(super) struct NativeBlockClick<'a>(pub &'a ());
+        pub(super) struct NativeItemClick<'a>(pub &'a ());
+        #[derive(Clone, Copy)]
+        pub(super) enum UsePhase {
+            ItemBeforeBlock,
+            Block,
+            ItemAfterBlock,
+        }
         #[derive(Clone, Copy)]
         pub(super) enum BonemealSource {
             Interaction,
