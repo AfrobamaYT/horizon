@@ -20,6 +20,8 @@ pub(super) fn rust_ty(types: &Types<'_>, ty: &Ty, ret: bool) -> String {
         Ty::Str(Str::Static) => "&'static str".into(),
         Ty::Str(Str::Boxed) => "Box<str>".into(),
         Ty::Str(Str::Shared) => "std::sync::Arc<str>".into(),
+        Ty::Str(Str::Cow) => "std::borrow::Cow<'static, str>".into(),
+        Ty::List(item, List::Set(set)) => format!("{set}<{}>", rust_ty(types, item, ret)),
         Ty::List(item, List::Vec) => format!("Vec<{}>", rust_ty(types, item, ret)),
         Ty::List(item, List::Slice) => format!("&[{}]", rust_ty(types, item, ret)),
         Ty::List(item, List::Boxed) => format!("Box<[{}]>", rust_ty(types, item, ret)),
@@ -50,6 +52,7 @@ pub(super) fn rust_ty(types: &Types<'_>, ty: &Ty, ret: bool) -> String {
         Ty::Ref(inner, true) => format!("&mut {}", rust_ty(types, inner, ret)),
         Ty::Ref(inner, false) => format!("&{}", rust_ty(types, inner, ret)),
         Ty::Boxed(inner) => format!("Box<{}>", rust_ty(types, inner, ret)),
+        Ty::Shared(inner) => format!("std::sync::Arc<{}>", rust_ty(types, inner, ret)),
         Ty::Named(def) => rust_path(&types.defs[*def]),
         Ty::Dyn(name, mutable) => {
             let lifetime = if ret { "'static " } else { "" };
@@ -450,7 +453,7 @@ fn wire_type(types: &Types<'_>, ty: &Ty) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        Ty::Ref(inner, _) | Ty::Boxed(inner) => wire_type(types, inner),
+        Ty::Ref(inner, _) | Ty::Boxed(inner) | Ty::Shared(inner) => wire_type(types, inner),
         Ty::Named(def) => format!(
             "{}::{}",
             "horizon::mod_api::types",
@@ -466,20 +469,8 @@ fn wire_type(types: &Types<'_>, ty: &Ty) -> String {
 /// method returns a borrow.
 fn guest_ret(types: &Types<'_>, ty: &Ty, e: &str) -> String {
     match ty {
-        Ty::Ref(inner, _) => format!("super::keep({})", lift(types, inner, e)),
         Ty::Str(Str::Borrowed) => format!("super::intern({e})"),
-        Ty::List(item, List::Slice) => {
-            format!(
-                "super::keep({}).as_slice()",
-                lift(types, &Ty::List(item.clone(), List::Vec), e)
-            )
-        }
-        Ty::Option(inner)
-            if matches!(
-                **inner,
-                Ty::Ref(..) | Ty::Str(Str::Borrowed) | Ty::List(_, List::Slice)
-            ) =>
-        {
+        Ty::Option(inner) if matches!(**inner, Ty::Str(Str::Borrowed)) => {
             format!(
                 "match {e} {{ Some(x) => Some({}), None => None }}",
                 guest_ret(types, inner, "x")
@@ -838,14 +829,16 @@ fn arg(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         Ty::Str(_) | Ty::List(..) | Ty::Array(..) => format!("&{e}"),
         Ty::Option(item) => match &**item {
             Ty::Str(_) | Ty::List(..) | Ty::Array(..) => format!("{e}.as_deref()"),
-            Ty::Ref(inner, _) | Ty::Boxed(inner) => arg(types, &Ty::Option(inner.clone()), e),
+            Ty::Ref(inner, _) | Ty::Boxed(inner) | Ty::Shared(inner) => {
+                arg(types, &Ty::Option(inner.clone()), e)
+            }
             item if wire_is_list(types, item) => {
                 format!("{e}.as_deref()")
             }
             item if heap(types, item) => format!("{e}.as_ref()"),
             _ => e.into(),
         },
-        Ty::Ref(inner, _) | Ty::Boxed(inner) => arg(types, inner, e),
+        Ty::Ref(inner, _) | Ty::Boxed(inner) | Ty::Shared(inner) => arg(types, inner, e),
         Ty::Tuple(items) if items.iter().any(|i| heap(types, i)) => {
             let crossing: Vec<&Ty> = items
                 .iter()
@@ -868,7 +861,9 @@ fn arg(types: &Types<'_>, ty: &Ty, e: &str) -> String {
 fn heap(types: &Types<'_>, ty: &Ty) -> bool {
     match ty {
         Ty::Str(_) | Ty::List(..) | Ty::Array(..) | Ty::Handler(..) => true,
-        Ty::Option(item) | Ty::Ref(item, _) | Ty::Boxed(item) => heap(types, item),
+        Ty::Option(item) | Ty::Ref(item, _) | Ty::Boxed(item) | Ty::Shared(item) => {
+            heap(types, item)
+        }
         Ty::Result(a, b) => heap(types, a) || heap(types, b),
         Ty::Tuple(items) => items.iter().any(|i| heap(types, i)),
         Ty::Named(def) => {

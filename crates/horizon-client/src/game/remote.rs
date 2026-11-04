@@ -467,7 +467,7 @@ pub(super) struct Remote {
     pub session: Session,
     pub brand: String,
     /// This connection's configured feature flags, carried through reconfiguration.
-    pub(super) features: Vec<String>,
+    pub(super) features: std::sync::Arc<[String]>,
     /// The server announced it runs mods' quiet commands.
     pub quiet_commands: bool,
     /// The server announced it carries mod messages.
@@ -1007,7 +1007,7 @@ impl Game<'_> {
         self.remote = Some(Remote {
             session,
             brand: "unknown".into(),
-            features: vec!["minecraft:vanilla".into()],
+            features: ["minecraft:vanilla".to_string()].into(),
             quiet_commands: false,
             mod_net: false,
             logged_out: false,
@@ -1907,7 +1907,7 @@ impl Game<'_> {
                 }
                 Event::Features(features) => {
                     if let Some(remote) = &mut self.remote {
-                        remote.features = features;
+                        remote.features = features.into();
                     }
                 }
                 Event::Brand(brand) => {

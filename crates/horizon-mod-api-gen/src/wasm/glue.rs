@@ -42,9 +42,11 @@ fn wire_path(def: &Def) -> String {
 fn borrows(types: &Types<'_>, ty: &Ty) -> bool {
     match ty {
         Ty::Str(Str::Borrowed) | Ty::List(_, List::Slice) | Ty::Ref(..) | Ty::Dyn(..) => true,
-        Ty::List(item, _) | Ty::Array(item, _) | Ty::Option(item) | Ty::Boxed(item) => {
-            borrows(types, item)
-        }
+        Ty::List(item, _)
+        | Ty::Array(item, _)
+        | Ty::Option(item)
+        | Ty::Boxed(item)
+        | Ty::Shared(item) => borrows(types, item),
         Ty::Result(a, b) => borrows(types, a) || borrows(types, b),
         Ty::Tuple(items) => items.iter().any(|item| borrows(types, item)),
         Ty::Named(def) => types.defs[*def].lifetimes > 0,
@@ -56,9 +58,12 @@ fn borrows(types: &Types<'_>, ty: &Ty) -> bool {
 /// game hands it back to the mod.
 pub(super) fn borrowed_record(types: &Types<'_>, ty: &Ty) -> bool {
     match ty {
-        Ty::List(item, _) | Ty::Array(item, _) | Ty::Option(item) | Ty::Boxed(item) => {
-            borrowed_record(types, item)
-        }
+        Ty::Ref(..) | Ty::List(_, List::Slice) => true,
+        Ty::List(item, _)
+        | Ty::Array(item, _)
+        | Ty::Option(item)
+        | Ty::Boxed(item)
+        | Ty::Shared(item) => borrowed_record(types, item),
         Ty::Result(a, b) => borrowed_record(types, a) || borrowed_record(types, b),
         Ty::Tuple(items) => items.iter().any(|item| borrowed_record(types, item)),
         Ty::Named(def) => types.defs[*def].lifetimes > 0,
@@ -180,7 +185,7 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
             )
         }
         Ty::Ref(inner, _) => lower(types, inner, &format!("(&**{e})")),
-        Ty::Boxed(inner) => lower(types, inner, &format!("(&**{e})")),
+        Ty::Boxed(inner) | Ty::Shared(inner) => lower(types, inner, &format!("(&**{e})")),
         Ty::Named(def) => format!("lower_{def}({e})"),
     }
 }
@@ -262,6 +267,7 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
             match kind {
                 List::Vec => vec,
                 List::Map(map) => format!("{vec}.into_iter().collect::<{map}<_, _>>()"),
+                List::Set(set) => format!("{vec}.into_iter().collect::<{set}<_>>()"),
                 _ => format!("{vec}.into()"),
             }
         }
@@ -296,6 +302,7 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
             )
         }
         Ty::Boxed(inner) => format!("Box::new({})", lift(types, inner, e)),
+        Ty::Shared(inner) => format!("std::sync::Arc::new({})", lift(types, inner, e)),
         Ty::Named(def) => format!("lift_{def}({e})?"),
         Ty::Ref(..) | Ty::Dyn(..) => unreachable!("borrowed values are lifted in place"),
     }

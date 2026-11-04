@@ -236,8 +236,8 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
                 .behaviours
                 .is_raining_at(self, BlockPos::new(pos[0], pos[1], pos[2]))
     }
-    fn enabled_features(&self) -> mod_api::FeatureFlags<'_> {
-        mod_api::FeatureFlags::new(self.enabled_features)
+    fn enabled_features(&self) -> mod_api::FeatureFlags {
+        mod_api::FeatureFlags::new(self.enabled_features.clone())
     }
 }
 
@@ -356,7 +356,7 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::Lev
     fn is_raining_at(&self, pos: [i32; 3]) -> bool {
         mod_api::LevelHost::is_raining_at(&*self.level, pos)
     }
-    fn enabled_features(&self) -> mod_api::FeatureFlags<'_> {
+    fn enabled_features(&self) -> mod_api::FeatureFlags {
         mod_api::LevelHost::enabled_features(&*self.level)
     }
 }

@@ -1036,6 +1036,9 @@ impl Game<'_> {
     /// The open world's folder (`world/`, beside its `level.dat`): a server
     /// mod keeps its data in a folder of its own there, so the world's
     /// backups carry it. None when no world is open.
+    ///
+    /// Not on wasm: a path in the game's file system, which a wasm mod has none of; a wasm mod
+    /// keeps world data in level attachments.
     pub(super) fn native_world_dir(&self) -> Option<PathBuf> {
         (!self.world_root.as_os_str().is_empty()).then(|| self.world_root.clone())
     }

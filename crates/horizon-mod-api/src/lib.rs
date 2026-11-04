@@ -128,7 +128,9 @@ pub use crate::game::{
     NativeMobRender, NativeModEvent, NativePlayerRender, NativeShake, PhantomSpawnResult,
     SleepProblem,
 };
-pub use crate::health::{DamageContainer, HurtSource, Reduction, ShieldBlock, Victim};
+#[horizon_mod_api_macros::wasm(via = horizon_world::living_damage::DamageValues)]
+pub use crate::health::DamageContainer;
+pub use crate::health::{HurtSource, Reduction, ShieldBlock, Victim};
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::item_tooltip::TooltipDisplay;
 pub use crate::menu::{LogicalSide, StackedOnOther};
@@ -1896,16 +1898,17 @@ pub enum LightLayer {
 }
 
 /// The feature flags a world enables (`FeatureFlagSet`, `LevelReader.enabledFeatures`), each
-/// as its id (`minecraft:vanilla`, `minecraft:redstone_experiments`), borrowed from the world.
+/// as its id (`minecraft:vanilla`, `minecraft:redstone_experiments`), shared with the world.
 /// A world that names none enables `minecraft:vanilla` alone, as vanilla's default does.
-/// Reading it allocates nothing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Getting and reading it allocates nothing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[horizon_mod_api_macros::wasm(via = Vec<String>)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct FeatureFlags<'a>(&'a [String]);
+pub struct FeatureFlags(Arc<[String]>);
 
-impl<'a> FeatureFlags<'a> {
+impl FeatureFlags {
     /// The flags of a world's `enabled_features` list; an empty list is vanilla's default.
-    pub fn new(ids: &'a [String]) -> Self {
+    pub fn new(ids: Arc<[String]>) -> Self {
         Self(ids)
     }
     /// `FeatureFlagSet.contains`: whether the flag `flag` (`minecraft:redstone_experiments`, or
@@ -1916,11 +1919,24 @@ impl<'a> FeatureFlags<'a> {
             .any(|id| id == flag || (bare && id.strip_prefix("minecraft:") == Some(flag)))
     }
     /// The enabled flag ids.
-    pub fn iter(&self) -> impl Iterator<Item = &'a str> + use<'a> {
-        let ids = self.0;
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        let ids = &self.0;
         ids.iter()
             .map(String::as_str)
             .chain(ids.is_empty().then_some("minecraft:vanilla"))
+    }
+}
+
+/// The flags as their ids, the form they cross into a wasm mod as.
+impl From<&FeatureFlags> for Vec<String> {
+    fn from(flags: &FeatureFlags) -> Self {
+        flags.0.to_vec()
+    }
+}
+
+impl From<Vec<String>> for FeatureFlags {
+    fn from(ids: Vec<String>) -> Self {
+        Self(ids.into())
     }
 }
 
@@ -3275,7 +3291,7 @@ pub trait LevelHost {
         unimplemented!("LevelHost::is_raining_at")
     }
     /// `LevelReader.enabledFeatures`: the feature flags the world enables.
-    fn enabled_features(&self) -> FeatureFlags<'_> {
+    fn enabled_features(&self) -> FeatureFlags {
         unimplemented!("LevelHost::enabled_features")
     }
 }

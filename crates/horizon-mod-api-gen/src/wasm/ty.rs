@@ -26,6 +26,8 @@ pub(crate) enum Ty {
     /// `&T` or `&mut T`.
     Ref(Box<Ty>, bool),
     Boxed(Box<Ty>),
+    /// `Arc<T>`, crossing as `T`.
+    Shared(Box<Ty>),
     Named(usize),
     /// `&dyn Trait` or `&mut dyn Trait` (the reference is part of it): a frame resource.
     Dyn(String, bool),
@@ -41,6 +43,8 @@ pub(crate) enum Str {
     Static,
     Boxed,
     Shared,
+    /// `Cow<'static, str>`.
+    Cow,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -48,6 +52,8 @@ pub(crate) enum List {
     Vec,
     /// A map, as its container names it, crossing as a list of pairs.
     Map(&'static str),
+    /// A set, as its container names it.
+    Set(&'static str),
     Slice,
     Boxed,
     Shared,
@@ -305,8 +311,21 @@ impl<'a> Types<'a> {
                     Ty::Dyn(name, _) if std == "Arc" => Ty::Handler(name, false),
                     Ty::Str(_) => Ty::Str(Str::Shared),
                     Ty::List(item, _) => Ty::List(item, List::Shared),
+                    ty if std == "Arc" => Ty::Shared(Box::new(ty)),
                     ty => return Err(format!("{std}<{ty:?}>")),
                 },
+                "Cow" => match *one(&args)? {
+                    Ty::Str(Str::Borrowed) => Ty::Str(Str::Cow),
+                    ty => return Err(format!("Cow<{ty:?}>")),
+                },
+                "HashSet" | "BTreeSet" => Ty::List(
+                    one(&args)?,
+                    List::Set(if std == "HashSet" {
+                        "std::collections::HashSet"
+                    } else {
+                        "std::collections::BTreeSet"
+                    }),
+                ),
                 "str" => Ty::Str(Str::Borrowed),
                 "HashMap" | "BTreeMap" => {
                     let value = args.get(1).cloned().ok_or("map needs a value type")?;

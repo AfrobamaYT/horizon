@@ -40,7 +40,7 @@ pub(super) fn wit(types: &Types<'_>, ty: &Ty) -> Result<Option<String>, String> 
                 _ => format!("tuple<{}>", items.join(", ")),
             }
         }
-        Ty::Ref(inner, _) | Ty::Boxed(inner) => return wit(types, inner),
+        Ty::Ref(inner, _) | Ty::Boxed(inner) | Ty::Shared(inner) => return wit(types, inner),
         Ty::Named(id) => {
             if let Some(why) = types.refused.get(*id).and_then(Option::as_ref) {
                 return Err(why.clone());
@@ -109,7 +109,8 @@ pub(super) fn named(types: &Types<'_>, ty: &Ty, out: &mut BTreeSet<usize>) {
         | Ty::Array(item, _)
         | Ty::Option(item)
         | Ty::Ref(item, _)
-        | Ty::Boxed(item) => named(types, item, out),
+        | Ty::Boxed(item)
+        | Ty::Shared(item) => named(types, item, out),
         Ty::Result(a, b) => {
             named(types, a, out);
             named(types, b, out);
@@ -548,7 +549,8 @@ fn holds_handler(ty: &Ty) -> bool {
         | Ty::Array(item, _)
         | Ty::Option(item)
         | Ty::Ref(item, _)
-        | Ty::Boxed(item) => holds_handler(item),
+        | Ty::Boxed(item)
+        | Ty::Shared(item) => holds_handler(item),
         Ty::Result(a, b) => holds_handler(a) || holds_handler(b),
         Ty::Tuple(items) => items.iter().any(holds_handler),
         _ => false,
@@ -562,7 +564,8 @@ fn direct(ty: &Ty, out: &mut BTreeSet<usize>) {
         | Ty::Array(item, _)
         | Ty::Option(item)
         | Ty::Ref(item, _)
-        | Ty::Boxed(item) => direct(item, out),
+        | Ty::Boxed(item)
+        | Ty::Shared(item) => direct(item, out),
         Ty::Result(a, b) => {
             direct(a, out);
             direct(b, out);

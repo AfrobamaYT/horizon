@@ -3860,7 +3860,7 @@ pub struct Level {
     /// `WorldDataConfiguration`'s `enabled_features`: the feature flag ids
     /// the world enables, `minecraft:vanilla` included. Empty is vanilla's
     /// default, which the level.dat omits.
-    pub enabled_features: Vec<String>,
+    pub enabled_features: std::sync::Arc<[String]>,
     /// Game rule values by name without namespace (`keep_inventory`, ...).
     pub game_rules: BTreeMap<String, i32>,
     pub player_uuid: Option<[i32; 4]>,
@@ -4652,7 +4652,7 @@ impl Level {
             // lenientOptionalFieldOf("enabled_features", DEFAULT_FLAGS): the
             // tag is left out when the set is vanilla's default, so a
             // `["minecraft:vanilla"]`-only list does not reach the file.
-            let vanilla_only = self.enabled_features == ["minecraft:vanilla"];
+            let vanilla_only = *self.enabled_features == ["minecraft:vanilla"];
             if !self.enabled_features.is_empty() && !vanilla_only {
                 map.insert(
                     "enabled_features".into(),

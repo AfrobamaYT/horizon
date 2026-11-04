@@ -301,6 +301,29 @@ pub(super) struct Surface<'a> {
     pub(super) types: Types<'a>,
     pub(super) methods: Vec<Method>,
     pub(super) unbound: Vec<Unbound>,
+    /// The methods whose doc says `Not on wasm: <why>.`
+    pub(super) excused: Vec<(&'static str, String)>,
+}
+
+/// The line on a method's doc that keeps it off wasm, and says why.
+const NOT_ON_WASM: &str = "Not on wasm: ";
+
+/// Whether `attrs`' doc has a [`NOT_ON_WASM`] line with a reason.
+fn not_on_wasm(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| match &attr.meta {
+        syn::Meta::NameValue(doc) if doc.path.is_ident("doc") => match &doc.value {
+            syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(line),
+                ..
+            }) => line
+                .value()
+                .trim()
+                .strip_prefix(NOT_ON_WASM)
+                .is_some_and(|why| why.len() > 1),
+            _ => false,
+        },
+        _ => false,
+    })
 }
 
 /// The methods of the bound traits, with their types resolved. `hooks` and `host` are the
@@ -322,6 +345,7 @@ pub(super) fn surface<'a>(
     let _ = EXPORTED.set(exported);
     let mut methods = Vec::new();
     let mut unbound = Vec::new();
+    let mut excused = Vec::new();
     for owner in IMPORTS.iter().chain(exports()) {
         let (path, args) = owner_parts(owner)?;
         let Found::Item(id) = types.index.resolve_path(api, &path)? else {
@@ -342,6 +366,9 @@ pub(super) fn surface<'a>(
             let name = function.sig.ident.to_string();
             if hidden(&function.attrs) || name.ends_with("subscribed") {
                 continue;
+            }
+            if not_on_wasm(&function.attrs) {
+                excused.push((*owner, name.clone()));
             }
             match method(&mut types, id.module, owner, function, &subst) {
                 Ok(method) => methods.push(method),
@@ -379,6 +406,7 @@ pub(super) fn surface<'a>(
         types,
         methods,
         unbound,
+        excused,
     })
 }
 
@@ -405,6 +433,7 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Wasm, String> 
     let hooks = hook_ids(&mut surface.types)?;
     let servers = servers(&mut surface.types)?;
     surface.types.views = views(&mut surface.types)?;
+    let _ = coverage;
     let methods: Vec<&Method> = surface.methods.iter().collect();
     let wit = wit::package(&surface.types, &methods, &api_version(root)?)?;
     Ok(Wasm {
@@ -419,6 +448,45 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Wasm, String> 
             .map(|u| format!("{}::{}: {}", u.owner, u.name, u.why))
             .collect(),
     })
+}
+
+/// The coverage check: every method of the bound traits crosses to wasm, or its doc says why
+/// not (`/// Not on wasm: <why>.`), and no method that crosses says it doesn't. The game's and
+/// the mods' builds both run it, so the wasm side can't fall behind the API.
+fn coverage(surface: &Surface<'_>) -> Result<(), String> {
+    let excused = |owner: &str, name: &str| {
+        surface
+            .excused
+            .iter()
+            .any(|(o, n)| *o == owner && n == name)
+    };
+    let mut problems: Vec<String> = surface
+        .unbound
+        .iter()
+        .filter(|u| !excused(u.owner, &u.name))
+        .map(|u| {
+            format!(
+                "{}::{} doesn't cross to wasm ({}): fix its types, or add `/// {NOT_ON_WASM}<why>.` to its doc",
+                u.owner, u.name, u.why
+            )
+        })
+        .collect();
+    problems.extend(
+        surface
+            .methods
+            .iter()
+            .filter(|m| excused(m.owner, &m.name))
+            .map(|m| {
+                format!(
+                    "{}::{} crosses to wasm: remove `{NOT_ON_WASM}` from its doc",
+                    m.owner, m.name
+                )
+            }),
+    );
+    match problems.is_empty() {
+        true => Ok(()),
+        false => Err(problems.join("\n")),
+    }
 }
 
 /// `horizon-mod-api`'s Cargo version, the one version of the mod API: the WIT package carries it,

@@ -209,7 +209,7 @@ impl WorldRequest {
             // picked feature packs over vanilla's (`FeatureFlags.REGISTRY`'s
             // codec writes the whole set, `minecraft:vanilla` included, and
             // omits the tag when it is the default).
-            level.enabled_features = o.enabled_features(&options.resources);
+            level.enabled_features = o.enabled_features(&options.resources).into();
             // CreateWorldScreen copies the edited rules with the final flags,
             // even when the player never opened the rules screen.
             level.game_rules = o

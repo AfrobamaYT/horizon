@@ -9314,6 +9314,9 @@ impl Game<'_> {
     /// `datapacks/` is in that world's folder (`saves/<world>/datapacks`).
     /// The folder the game runs in (`--player-dir` moves a player's options
     /// and servers only, not the instance). Nothing is created.
+    ///
+    /// Not on wasm: a path in the game's file system, which a wasm mod has none of; a wasm mod
+    /// reads its own data and assets through reload listeners.
     pub(super) fn native_instance_dir(&self) -> PathBuf {
         Self::game_dir()
     }
@@ -9381,11 +9384,15 @@ impl Game<'_> {
     /// single-player window included, sees vanilla's and the content mods' recipes,
     /// not the world's data packs', unless a mod had the server send it the type
     /// (`native_datapack_sync`).
-    pub(super) fn native_recipes_of_type(&self, kind: &str) -> &[RecipeFile] {
+    pub(super) fn native_recipes_of_type(&self, kind: &str) -> Arc<[RecipeFile]> {
         if self.outside_world() {
-            return &[];
+            return Default::default();
         }
-        self.recipes().by_type.get(kind).map_or(&[], Vec::as_slice)
+        self.recipes()
+            .by_type
+            .get(kind)
+            .cloned()
+            .unwrap_or_default()
     }
     /// The validated category and icon of a custom recipe type, or None for
     /// an undeclared/invalid type, before resources load, or outside a world.
