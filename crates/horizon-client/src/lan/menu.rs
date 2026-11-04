@@ -11,6 +11,7 @@ use crate::{
     items::{ItemStack, Items},
     world::World,
 };
+use horizon_world::native_load_context::LoopContext;
 
 /// What the menus need to know about items and the slots' rules.
 pub trait Rules {
@@ -252,6 +253,8 @@ pub struct View<'a> {
     pub shulker: bool,
     /// Container slots that do not exist in this menu (see [`Menu::hidden`]).
     pub hidden: &'a [usize],
+    /// The context the hooks fired inside a click are given.
+    pub loop_context: &'a LoopContext,
 }
 
 impl View<'_> {
@@ -677,6 +680,7 @@ fn pickup(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
                 },
             ),
         };
+        let context = view.loop_context;
         let player = view.guest.uuid;
         let player_entity_id = view.guest.entity_id;
         let mut carried = view.guest.carried.take();
@@ -692,12 +696,11 @@ fn pickup(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
             container,
             container_slot,
             primary: !right,
-            side: crate::menu::LogicalSide::Server,
             carried: crate::menu::CarriedAccess(&mut carried),
             clicked: &mut slot_view,
             cancellation_result: false,
         };
-        crate::menu::native_item_stacked_on_other(&mut event, &mut canceled);
+        crate::menu::native_item_stacked_on_other(context, &mut event, &mut canceled);
         handled = event.cancellation_result;
         view.guest.carried = carried;
     }
@@ -1134,6 +1137,9 @@ mod tests {
             container: Some(&mut chest),
             shulker: false,
             hidden: &[],
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         let mut slot = HostedSlotView {
             view: &mut view,
@@ -1160,6 +1166,9 @@ mod tests {
             container: Some(&mut chest),
             shulker: false,
             hidden: &[],
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         let mut drag = None;
         let (drops, changed) = click(&mut view, &mut drag, 0, 2, input::PICKUP, &rules);
@@ -1199,6 +1208,9 @@ mod tests {
             container: Some(&mut chest),
             shulker: false,
             hidden: &[],
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         // `doClick` only starts the collect when the carried stack is not
         // empty and the clicked slot has no item or may not be taken
@@ -1239,6 +1251,9 @@ mod tests {
             container: Some(&mut chest),
             shulker: false,
             hidden: &[],
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         view.guest.carried = Some(ItemStack::new("minecraft:bundle", 1));
         // Left click with the bundle: the stone goes in.
@@ -1314,6 +1329,9 @@ mod tests {
                 container: Some(&mut read),
                 shulker: false,
                 hidden: &[],
+                loop_context: &crate::test_resources::loop_context(
+                    horizon_world::native_load_context::LoopSide::Server,
+                ),
             };
             click(&mut view, &mut drag, 5 + 27, 0, input::QUICK_MOVE, &rules);
             assert_eq!(view.get(0).map(|s| s.item), Some("minecraft:dirt".into()));
@@ -1351,6 +1369,9 @@ mod tests {
             container: Some(&mut container),
             shulker: false,
             hidden: &hidden,
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         // The hotbar's first slot (menu slot 3 + 27) lands in the one slot shown.
         click(&mut view, &mut drag, 3 + 27, 0, input::QUICK_MOVE, &rules);
@@ -1376,6 +1397,9 @@ mod tests {
             container: Some(&mut chest),
             shulker: false,
             hidden: &[],
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         view.guest.carried = Some(ItemStack::new("minecraft:stone", 64));
         // Start, two slots, end, for the two types a survival guest may not
@@ -1495,6 +1519,9 @@ mod tests {
             container: Some(&mut chest),
             shulker: false,
             hidden: &[],
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         // Key 1 over the refused slot moves neither stack.
         click(&mut view, &mut drag, 0, 0, input::SWAP, &rules);
@@ -1546,6 +1573,9 @@ mod tests {
             container: Some(&mut chest),
             shulker: false,
             hidden: &[],
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         click(&mut view, &mut drag, 0, 40, input::SWAP, &rules);
         assert_eq!(
@@ -1591,6 +1621,9 @@ mod tests {
                 container: Some(&mut container),
                 shulker,
                 hidden: &[],
+                loop_context: &crate::test_resources::loop_context(
+                    horizon_world::native_load_context::LoopSide::Server,
+                ),
             };
             // Carried onto an empty slot, shift-clicked from the hotbar
             // (menu slot 27 + 27) and swapped in with the number key 1.
@@ -1645,6 +1678,9 @@ mod tests {
             container: None,
             shulker: false,
             hidden: &[],
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         // Menu slot 9 is the first main-inventory slot, 45 the off hand.
         view.guest.inventory[9] = Some(ItemStack::new("minecraft:shield", 1));
@@ -1726,6 +1762,9 @@ mod tests {
             container: Some(&mut chest),
             shulker: false,
             hidden: &[],
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         // The refused slot takes no click and gives nothing to the cursor.
         click(&mut view, &mut drag, 0, 0, input::PICKUP, &rules);
@@ -1766,6 +1805,9 @@ mod tests {
             container: Some(&mut chest),
             shulker: false,
             hidden: &[],
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         // One stone short of a full stack, over a slot that holds stone.
         view.guest.carried = Some(ItemStack::new("minecraft:stone", 63));
@@ -1802,6 +1844,9 @@ mod tests {
             container: Some(&mut chest),
             shulker: false,
             hidden: &[],
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         let (drops, _) = click(&mut view, &mut drag, 0, 0, input::THROW, &rules);
         assert!(drops.is_empty());
@@ -1841,6 +1886,9 @@ mod tests {
                     container: None,
                     shulker: false,
                     hidden: &[],
+                    loop_context: &crate::test_resources::loop_context(
+                        horizon_world::native_load_context::LoopSide::Server,
+                    ),
                 };
                 // Menu slot 6 is the chest slot.
                 click(&mut view, &mut drag, 6, 0, mode, &rules);
@@ -1873,6 +1921,9 @@ mod tests {
                     container: None,
                     shulker: false,
                     hidden: &[],
+                    loop_context: &crate::test_resources::loop_context(
+                        horizon_world::native_load_context::LoopSide::Server,
+                    ),
                 };
                 // Menu slot 6 is the chest slot. A drop click throws the
                 // stack out; number key 1 puts it in the first hotbar slot
@@ -1922,6 +1973,9 @@ mod tests {
             container: None,
             shulker: false,
             hidden: &[],
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         // Menu slot 45 is the off hand; 5 to 8 are the armour slots, head first.
         view.guest.offhand = Some(ItemStack::new("minecraft:iron_helmet", 1));
@@ -1980,6 +2034,9 @@ mod tests {
             container: Some(&mut chest),
             shulker: false,
             hidden: &[],
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         // A container's quick move fills the inventory from its end: 16
         // snowballs in the last hotbar slot (menu slot 36), 16 in the one
@@ -2026,6 +2083,9 @@ mod tests {
             container: None,
             shulker: false,
             hidden: &[],
+            loop_context: &crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
         };
         // Menu slot 9 stands for inventory index 9, 36 for the hotbar's first.
         view.guest.inventory[9] = Some(ItemStack::new("minecraft:diamond", 3));

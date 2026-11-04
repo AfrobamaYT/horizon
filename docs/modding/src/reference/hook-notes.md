@@ -2645,14 +2645,22 @@ clicks already.
 
 `LoopContext<'_>` is the read-only view for a hook fired inside a menu, recipe or
 player-list loop, where no game is at hand (a catalog entry names it with
-`"context": "loop"`; `menu_slot_rules` is the first hook to take it). `side()` is `LoopSide::Server` or
+`"context": "loop"`; `menu_slot_rules`, `item_stacked_on_other`, `player_name_format` and
+`player_tab_list_name_format` take it). `side()` is `LoopSide::Server` or
 `LoopSide::Client`, `registry(name)` borrows names in registry ID order,
 `setting(mod_id, key)` returns a loaded mod's setting captured when the context was
 built, and `mods()` is the `LoadedMods` view of registration. It has no game Host,
 handle construction or transaction, and its answers never change while it is held.
 The side that owns the loop builds it, never a hook: the client builds one at window
 start and again after each resource reload, and a server builds one when it starts its
-mods and again on each `/reload`, so a reload captures fresh settings.
+mods and again on each `/reload`, so a reload captures fresh settings. A LAN or dedicated server's hub holds the server's
+current one, so its Tab list and chat names, and the clicks of its players, see it too.
+
+`item_stacked_on_other(context, event, canceled)` is NeoForge's `ItemStackedOnOtherEvent`, fired inside a pickup click on
+either side. The event no longer carries a side: `context.side()` says it. `player_name_format(context, username,
+displayname)` and `player_tab_list_name_format(context, player, name, display_name)` format a player's name for chat and
+commands (both sides) and for the Tab list (server). All three are contract version `2`: a mod written for `1` takes the
+context as a new first argument of the `Hooks` method, and reads the side from it instead of `event.side`.
 
 ### Items' default components
 

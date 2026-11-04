@@ -34,6 +34,7 @@ use horizon_world::{
     block_collision::BlockCollisionRegistry,
     block_collision_scan::BlockCollisionScan,
     collision_context::CollisionContext,
+    native_load_context::LoopContext,
     nbt::{JavaString, Tag},
     world_movement::in_range_of_ground,
 };
@@ -306,6 +307,9 @@ pub struct Hub {
     pub hidden: crate::fast_hash::FxHashMap<u128, u8>,
     pub lan: Lan,
     pub config: HubConfig,
+    /// What the hooks fired inside a click or a name format are given; the
+    /// game replaces it on each reload.
+    pub loop_context: Arc<LoopContext>,
     pub encoder: ChunkEncoder,
     pub guests: Vec<Guest>,
     pub(super) sync: Arc<SyncData>,
@@ -405,18 +409,18 @@ fn string(s: &str) -> Tag {
 /// A player's display name was formatted. Replace `displayname` to change it.
 /// Both sides.
 #[inline(never)]
-pub fn native_player_name_format(username: &Text, displayname: &mut Text) {
-    crate::native_client_hooks::player_name_format(username, displayname);
+pub fn native_player_name_format(context: &LoopContext, username: &Text, displayname: &mut Text) {
+    crate::native_client_hooks::player_name_format(context, username, displayname);
 }
 
-fn formatted_player_name(name: &str, component: Tag) -> Tag {
+fn formatted_player_name(context: &LoopContext, name: &str, component: Tag) -> Tag {
     if !crate::native_client_hooks::has_mods() {
         return component;
     }
     let username = crate::text::Text::literal(name);
     let original = crate::scoreboard::tag_to_json(&component);
     let mut displayname = crate::scoreboard::comp_text(&original).with_component(original.clone());
-    native_player_name_format(&username, &mut displayname);
+    native_player_name_format(context, &username, &mut displayname);
     let result = displayname.component();
     if result == original {
         component
@@ -427,7 +431,7 @@ fn formatted_player_name(name: &str, component: Tag) -> Tag {
 
 /// Player.getDisplayName for a player in no team: the name, suggesting
 /// `/tell NAME `, showing the player on hover and inserting the name.
-pub fn display_name(uuid: u128, name: &str) -> Tag {
+pub fn display_name(context: &LoopContext, uuid: u128, name: &str) -> Tag {
     let words = [
         (uuid >> 96) as i32,
         (uuid >> 64) as i32,
@@ -454,7 +458,7 @@ pub fn display_name(uuid: u128, name: &str) -> Tag {
         ),
         ("insertion", string(name)),
     ]);
-    formatted_player_name(name, component)
+    formatted_player_name(context, name, component)
 }
 
 /// ServerPlayer.getTabListDisplayName: the name the Tab list shows for
@@ -462,11 +466,12 @@ pub fn display_name(uuid: u128, name: &str) -> Tag {
 /// change it.
 #[inline(never)]
 pub fn native_player_tab_list_name_format(
+    context: &LoopContext,
     player: u128,
     name: &str,
     display_name: &mut Option<Text>,
 ) {
-    crate::native_client_hooks::player_tab_list_name_format(player, name, display_name);
+    crate::native_client_hooks::player_tab_list_name_format(context, player, name, display_name);
 }
 
 /// `LivingEntity.DATA_ARROW_COUNT_ID` (12) and `DATA_STINGER_COUNT_ID` (13):
@@ -525,7 +530,7 @@ impl Hub {
         let shown = self.nicknames.get(&uuid).map_or(name, String::as_str);
         let team = self.teams.iter().find(|t| t.players.contains(name));
         if team.is_none() && shown == name {
-            return display_name(uuid, name);
+            return display_name(&self.loop_context, uuid, name);
         }
         let mut c = match team {
             Some(team) => team.formatted_name_comp(&crate::scoreboard::literal(shown)),
@@ -536,7 +541,11 @@ impl Hub {
         c["hover_event"] = serde_json::json!({"action": "show_entity", "id": "minecraft:player",
             "uuid": horizon_protocol::crypto::uuid_string(uuid), "name": name});
         c["insertion"] = name.into();
-        formatted_player_name(name, crate::scoreboard::component_tag(&c))
+        formatted_player_name(
+            &self.loop_context,
+            name,
+            crate::scoreboard::component_tag(&c),
+        )
     }
 }
 
@@ -665,7 +674,13 @@ impl Default for LevelSync {
 }
 
 impl Hub {
-    pub fn new(lan: Lan, sync: Arc<SyncData>, encoder: ChunkEncoder, config: HubConfig) -> Self {
+    pub fn new(
+        lan: Lan,
+        sync: Arc<SyncData>,
+        encoder: ChunkEncoder,
+        config: HubConfig,
+        loop_context: Arc<LoopContext>,
+    ) -> Self {
         let chat_type = sync
             .id("minecraft:chat_type", "minecraft:chat")
             .unwrap_or(0);
@@ -678,6 +693,7 @@ impl Hub {
         Self {
             lan,
             config,
+            loop_context,
             encoder,
             guests: Vec::new(),
             sync,
@@ -1001,7 +1017,7 @@ impl Hub {
                     ),
                 ])
             } else {
-                display_name(uuid, name)
+                display_name(&self.loop_context, uuid, name)
             }
         };
         let names = match players.len() {
@@ -1178,7 +1194,7 @@ impl Hub {
     /// format it.
     fn tab_list_name(&self, uuid: u128, name: &str) -> Option<Tag> {
         let mut display_name = self.nicknames.get(&uuid).map(crate::text::Text::literal);
-        native_player_tab_list_name_format(uuid, name, &mut display_name);
+        native_player_tab_list_name_format(&self.loop_context, uuid, name, &mut display_name);
         display_name.map(|text| crate::scoreboard::component_tag(&text.component()))
     }
     /// ClientboundPlayerInfoUpdatePacket.createPlayerInitializing: every action.
@@ -1302,7 +1318,7 @@ impl Hub {
         let joined = C::SystemChat(play::SystemChat {
             content: yellow_names(
                 "multiplayer.player.joined",
-                vec![display_name(self.guests[i].uuid, &name)],
+                vec![display_name(&self.loop_context, self.guests[i].uuid, &name)],
             ),
             overlay: false,
         })
@@ -2082,7 +2098,7 @@ impl Hub {
         let left = C::SystemChat(play::SystemChat {
             content: yellow_names(
                 "multiplayer.player.left",
-                vec![display_name(g.uuid, &g.name)],
+                vec![display_name(&self.loop_context, g.uuid, &g.name)],
             ),
             overlay: false,
         })
@@ -4626,7 +4642,15 @@ mod tests {
             integrated: false,
             levels: Default::default(),
         };
-        let mut hub = Hub::new(lan, sync, encoder, hub_config);
+        let mut hub = Hub::new(
+            lan,
+            sync,
+            encoder,
+            hub_config,
+            crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
+        );
         let (tx, rx) = std::sync::mpsc::channel();
         let mut bob = Guest::new(
             crate::lan::Joined {
@@ -4845,7 +4869,7 @@ mod tests {
             panic!("expected list reply arguments");
         };
         assert_eq!(args[0], Tag::Int(1));
-        assert_eq!(args[2], display_name(1, "Bob"));
+        assert_eq!(args[2], display_name(&hub.loop_context, 1, "Bob"));
         hub.guests[0].sent_chunks.insert((2, 0));
         let mut world = crate::world::World::new(horizon_world::registry::BlockStateId(0), 0);
         let mut next_entity = 100;

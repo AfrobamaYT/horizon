@@ -341,8 +341,12 @@ impl SlotView for MenuSlotView<'_, '_> {
 
 /// NeoForge's `ItemStackedOnOtherEvent`, before either item override.
 #[inline(never)]
-pub fn native_item_stacked_on_other(event: &mut StackedOnOther<'_>, canceled: &mut bool) {
-    crate::native_client_hooks::item_stacked_on_other(event, canceled);
+pub fn native_item_stacked_on_other(
+    context: &LoopContext,
+    event: &mut StackedOnOther<'_>,
+    canceled: &mut bool,
+) {
+    crate::native_client_hooks::item_stacked_on_other(context, event, canceled);
 }
 
 /// `BeaconBlockEntity.BEACON_EFFECTS`: the powers of each pyramid level.
@@ -3154,16 +3158,11 @@ impl Menu {
                 container: slot.container,
                 container_slot: slot.index,
                 primary,
-                side: if env.loop_context.side() == LoopSide::Server {
-                    LogicalSide::Server
-                } else {
-                    LogicalSide::Client
-                },
                 carried: CarriedAccess(&mut carried),
                 clicked: &mut view,
                 cancellation_result: false,
             };
-            native_item_stacked_on_other(&mut event, &mut canceled);
+            native_item_stacked_on_other(env.loop_context, &mut event, &mut canceled);
             handled = event.cancellation_result;
             self.carried = carried;
         }
@@ -4132,7 +4131,6 @@ pub(crate) mod tests {
                 container: MAIN,
                 container_slot: 0,
                 primary: true,
-                side: LogicalSide::Server,
                 carried: CarriedAccess(&mut carried),
                 clicked: &mut view,
                 cancellation_result: false,
@@ -4307,13 +4305,23 @@ pub(crate) mod tests {
                             .map_or(7, |value| value.parse().unwrap());
                     }
                 },
-                item_stacked_on_other: |_, _| {},
+                item_stacked_on_other: |context, _, canceled| {
+                    *canceled = context.setting("rules_mod", "stack").is_some();
+                },
                 living_heal: |_, _, _| {},
                 living_breathe: |_, _, _, _, _| {},
                 farmland_trample: |_, _, _, _, _| {},
                 has_mods: || false,
-                player_name_format: |_, _| {},
-                player_tab_list_name_format: |_, _, _| {},
+                player_name_format: |context, _, displayname| {
+                    if let Some(value) = context.setting("rules_mod", "stack") {
+                        *displayname = crate::text::Text::literal(&value);
+                    }
+                },
+                player_tab_list_name_format: |context, _, _, display_name| {
+                    *display_name = context
+                        .setting("rules_mod", "stack")
+                        .map(|value| crate::text::Text::literal(&value));
+                },
                 living_drown: |_, _, _, _, _, _| {},
                 living_fall: |_, _, _, _, _| {},
                 living_jump: |_, _| {},
@@ -4329,7 +4337,7 @@ pub(crate) mod tests {
             data_slots: 0,
             results: vec![],
         })));
-        let menu = Menu::new(kind);
+        let mut menu = Menu::new(kind);
         let stack = ItemStack::new("minecraft:stone", 1);
         // A `/reload` builds the next context from the settings then on disk; the
         // next call sees it, and the one before it keeps its own.
@@ -4351,6 +4359,57 @@ pub(crate) mod tests {
         bare_env_in(&before, |env| {
             assert_eq!(menu.mod_slot(env, 0, &stack), (true, 7));
         });
+        // The other loop hooks read the same context: before the reload the
+        // setting is missing, after it every one sees it.
+        let stacked_on_other = |context: &LoopContext, menu: &mut Menu| {
+            let mut canceled = false;
+            bare_env_in(context, |env| {
+                let mut carried = None;
+                let mut view = MenuSlotView {
+                    menu: &mut *menu,
+                    env,
+                    slot: 0,
+                };
+                let mut event = StackedOnOther {
+                    player: None,
+                    player_entity_id: None,
+                    slot: 0,
+                    container: MAIN,
+                    container_slot: 0,
+                    primary: true,
+                    carried: CarriedAccess(&mut carried),
+                    clicked: &mut view,
+                    cancellation_result: false,
+                };
+                native_item_stacked_on_other(context, &mut event, &mut canceled);
+            });
+            canceled
+        };
+        let name = |context: &LoopContext| {
+            let mut displayname = crate::text::Text::literal("Alex");
+            crate::lan::hub::native_player_name_format(
+                context,
+                &crate::text::Text::literal("Alex"),
+                &mut displayname,
+            );
+            displayname.plain()
+        };
+        let tab_list = |context: &LoopContext| {
+            let mut display_name = None;
+            crate::lan::hub::native_player_tab_list_name_format(
+                context,
+                1,
+                "Alex",
+                &mut display_name,
+            );
+            display_name.map(|text| text.plain())
+        };
+        assert!(!stacked_on_other(&before, &mut menu));
+        assert_eq!(name(&before), "Alex");
+        assert_eq!(tab_list(&before), None);
+        assert!(stacked_on_other(&after, &mut menu));
+        assert_eq!(name(&after), "3");
+        assert_eq!(tab_list(&after), Some("3".to_owned()));
         std::fs::remove_dir_all(&settings).unwrap();
     }
 

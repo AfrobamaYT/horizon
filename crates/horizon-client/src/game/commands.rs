@@ -419,7 +419,11 @@ impl Game<'_> {
             return self.player_text(name, uuid);
         }
         let mut displayname = self.target_name(Target::Player);
-        horizon_client::lan::hub::native_player_name_format(&Text::literal(name), &mut displayname);
+        horizon_client::lan::hub::native_player_name_format(
+            &self.loop_context,
+            &Text::literal(name),
+            &mut displayname,
+        );
         displayname
     }
     fn source_position(&self) -> [f64; 3] {
