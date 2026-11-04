@@ -1101,7 +1101,6 @@
   "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod}: Cargo.toml mangler en afhængighed af horizon-mod-api.",
   "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod}: Cargo.toml afhænger af spillet ({key}). Et mod afhænger kun af horizon-mod-api.",
   "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml mangler et pakkenavn.",
-  "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client anmoder om {fields}. Serverbuilds har ingen grafisk brugerflade; launcheren styrer horizon-client-funktioner. Fjern features, og brug default-features = false, eller udelad indstillingen.",
   "{mod}: {error}": "{mod}: {error}",
   "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "Opslag af JAR-metadata mislykkedes: {reason}. Læg de originale filer på præcis disse stier i cachen, og prøv igen:\n"
 }

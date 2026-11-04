@@ -1399,6 +1399,10 @@ pub struct Mesher<'a> {
     pub translucent_layers: &'a [bool],
     /// What the worker does with leaf faces inside a canopy.
     pub leaf_culling: LeafCullingMode,
+    /// By state id, the states a mod hides (`block_render_visibility`): the mesher sees them as air, so
+    /// a hidden block draws nothing, its neighbours' faces toward it show and it never occludes.
+    /// Empty when no mod hides any.
+    pub hidden_states: &'a [bool],
 }
 impl Mesher<'_> {
     /// `region[dz][dx]` are the chunks around the meshed column (centre 1,1).
@@ -1427,6 +1431,13 @@ impl Mesher<'_> {
         }
         let own = scratch.own.get_or_insert_with(|| Box::new([0; 4096]));
         scratch.padded.fill(region, sy, own);
+        if !self.hidden_states.is_empty() {
+            for id in &mut scratch.padded.blocks {
+                if self.hidden_states[*id as usize] {
+                    *id = 0;
+                }
+            }
+        }
         let pad = &scratch.padded;
         solid_rows(pad, &self.tables.solid, &mut scratch.solid_rows);
         let opaque = &scratch.solid_rows;

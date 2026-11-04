@@ -18,6 +18,7 @@ pub(crate) struct ControllerInfo {
 /// one, resolved once there, and it is `Copy`: keep it from `register`, for example in a
 /// `OnceLock`. Another mod's controller does not work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TicketController {
     /// Its place in the installed controller table.
     slot: u32,
@@ -33,27 +34,32 @@ impl TicketController {
         self.info().map_or("", |info| &info.id)
     }
     /// The controller in slot `slot` of the installed table. For the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn from_slot(slot: u32) -> Option<Self> {
         controllers().get(slot as usize).map(|_| Self { slot })
     }
     /// The installed controller with this id. For the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn from_id(id: &str) -> Option<Self> {
         let slot = controllers().iter().position(|info| &*info.id == id)?;
         Some(Self { slot: slot as u32 })
     }
     /// Its slot in the installed table. For the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn slot(self) -> u32 {
         self.slot
     }
     /// The `[mod] id` that owns it. For the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn owner(self) -> Option<&'static str> {
         self.info().map(|info| info.mod_id)
     }
     /// Whether it validates its saved tickets. For the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn validates(self) -> bool {
         self.info().is_some_and(|info| info.validates)

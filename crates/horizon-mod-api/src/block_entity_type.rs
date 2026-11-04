@@ -3,6 +3,7 @@ use std::{fmt, sync::Arc};
 
 /// A block entity type's namespaced registry and save identity.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityTypeKey(pub(super) Arc<str>);
 
 impl BlockEntityTypeKey {
@@ -59,6 +60,7 @@ impl fmt::Display for BlockEntityPartError {
 impl std::error::Error for BlockEntityPartError {}
 
 #[derive(Debug)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityTypeLookupError {
     missing: Vec<&'static super::part_table::BlockEntityTypeRequest>,
 }
@@ -98,6 +100,7 @@ pub fn validate_block_entity_type_keys(
 }
 
 /// Builds one native block entity type during mod registration.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityTypeBuilder<'a> {
     pub(super) registrar: &'a mut super::Registrar,
     pub(super) id: String,

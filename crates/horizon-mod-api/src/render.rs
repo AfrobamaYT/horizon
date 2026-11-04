@@ -434,6 +434,7 @@ mod tests {
 /// normal for `entity.wgsl`'s directional light.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct Vertex {
     pub pos: [f32; 3],
     pub uv: [f32; 2],
@@ -452,6 +453,7 @@ pub struct Vertex {
 /// next span. Recorded only while a shader pack draws entities, so Horizon's own frames carry
 /// none; Horizon itself still draws the whole list at once.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct EntitySpan {
     /// The first vertex.
     pub start: u32,
@@ -505,6 +507,7 @@ impl EntitySpan {
 pub(crate) mod built {
     #[allow(unused_imports)]
     use super::*;
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct WorldDrawn<'a> {
         pub device: &'a wgpu::Device,
         pub queue: &'a wgpu::Queue,
@@ -569,6 +572,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct BlockSpriteArrays<'a> {
         pub views: &'a [wgpu::TextureView],
         pub split: u32,
@@ -594,6 +598,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct HandDrawn<'a> {
         pub device: &'a wgpu::Device,
         pub queue: &'a wgpu::Queue,

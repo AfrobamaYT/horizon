@@ -776,15 +776,17 @@ fn effects_from_blocks(
                     if visited.contains(&p) {
                         continue;
                     }
-                    crate::block_contact::emit(crate::block_contact::Event::Inside(
-                        crate::block_contact::Contact {
-                            entity: m.id as i32,
-                            kind: &m.kind.id,
-                            block: w.block_name(x, y, z),
-                            state: w.world.block(x, y, z),
-                            position: horizon_core::position::BlockPos::new(x, y, z),
-                        },
-                    ));
+                    crate::block_contact::inside(
+                        m.id as i32,
+                        w.world.block(x, y, z),
+                        horizon_core::position::BlockPos::new(x, y, z),
+                        crate::block_contact::is_precise(
+                            m.previous,
+                            m.position,
+                            m.bounds_at(m.position).deflate(Vec3::new(1e-5, 1e-5, 1e-5)),
+                            horizon_core::position::BlockPos::new(x, y, z),
+                        ),
+                    );
                     visited.push(p);
                     match w.block_name(x, y, z) {
                         "minecraft:cactus" => {

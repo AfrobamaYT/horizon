@@ -1242,16 +1242,6 @@
       }
     },
     {
-      "name": "block_entity_inside",
-      "doc": "`Block.entityInside` for each mod block touched along the entity's movement.\nRepeated sweep hits in one contact pass are suppressed; idle overlap still fires.",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_entity_inside",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "block_fall_on",
       "doc": "`Block.fallOn` for a mod block. Change calculated damage before generic fall sounds\nand hurt handling; zero prevents both. Creative and fall-immune entities\nnotify with zero damage and retain their immunity. Server-side only.",
       "version": 1,

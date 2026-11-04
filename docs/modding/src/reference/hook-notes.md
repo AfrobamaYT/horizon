@@ -531,7 +531,8 @@ or transactions. Declarations still go on each event or registrar.
   answers `successful` (`setSuccessful`), false unless the mod sets it, so a player's use still tries the water plant
   beside the clicked face. A mod growing only its own blocks answers the three questions above instead.
 
-- Mod-block entity contacts: `native_block_step_on`, `native_block_entity_inside` and `native_block_fall_on`. Each receives the server dimension, entity id/type, block state and position. The landing hook also receives fall distance and mutable calculated damage; zero prevents fall hurt and its generic fall sounds. Creative and fall-immune entities notify with zero and retain immunity. Invalid non-finite damage changes are ignored; negative damage is clamped to zero. Hooks run synchronously without `self`, like `native_living_incoming_damage`.
+- Mod-block entity contacts: `native_block_step_on` and `native_block_fall_on`. Each receives the server dimension, entity id/type, block state and position. The landing hook also receives fall distance and mutable calculated damage; zero prevents fall hurt and its generic fall sounds. Creative and fall-immune entities notify with zero and retain immunity. Invalid non-finite damage changes are ignored; negative damage is clamped to zero. Hooks run synchronously without `self`, like `native_living_incoming_damage`.
+- `Block.entityInside` is `BlockPart::entity_inside(host, event)` (`EntityInsideEvent { state, pos, entity, precise }`; `precise` is `Entity.checkInsideBlocks`' flag), the Part form of what `block_entity_inside` was; there is no global hook (NeoForge has no bus event for it). It fires for mobs, projectiles, dropped items and players on the server, with a `&mut dyn ServerHost`, once per entity and block per move, and only for a block state a Part listens for; with no listening Part nothing is recorded. The contacts are noted during the sweep and delivered after the entity-kind batch has ticked (mobs, then projectiles, then items), in the order they happened, so a Part's own writes and random draws come after the batch's later entities, not mid-sweep. A contact whose entity is gone (an item that merged later in the batch) or whose block changed is dropped. Players fire it too, after their turn. The `InsideBlockEffectApplier`, and the block's `getEntityInsideCollisionShape`/`insideBlock` shape that decides "inside", are not exposed (tracked on #44).
 
 - A consumable's effect of a mod's own kind. The item's `on_consume_effects` entry of a type in a namespace of its own reaches `native_consume_effect(kind, data)` when the
   item is consumed, on the server thread, for the acting player. The kind and the JSON the file wrote are there;
@@ -702,6 +703,11 @@ there is no per-particle code hook.
 - Biome colours for client mods, for seasons: `native_biome_colors(biome, colors)` changes a biome's grass, foliage, dry
   foliage and water tints, asked for every biome when a mod calls `native_refresh_biome_colors()`, which rebuilds the
   loaded terrain with them.
+- Hidden blocks for client mods (ore scanners, cutaways): the `block_render_visibility` Part method (`state`, `hidden`)
+  makes a state draw nothing: the mesher sees it as air, so its neighbours' faces toward it show and it stops hiding what
+  is behind it. Its fluid layer and block entity are hidden too; light, collision and the server are untouched. It is
+  asked once per state when the client joins a world and again when a mod calls `refresh_render_visibility()`, which
+  remeshes the loaded terrain. Attach it to vanilla blocks with `block_part_tag`. With no part answering, meshing is unchanged.
 
 ### Server data reload listeners
 
@@ -2171,6 +2177,24 @@ handle, an entity the client doesn't track and a level it doesn't show:
   `LivingEntity.collectEquipmentChanges` does (transient: never saved). The map is built when first needed. Mob
   behavior still reads the type's defaults, so a modifier does not yet change how a mob moves or hits, and an item's
   own `attribute_modifiers` component is not read yet, only the item type's.
+- The writes take players, guests (in their own turn), mobs and armor stands, and answer false for an attribute the
+  type lacks, the dragon (`/attribute` refuses it, and nothing reads its attributes yet), a stale handle, or on a
+  client. `living.add_attribute_modifier(host, id, modifier, lifetime)` is `AttributeInstance.addTransientModifier`
+  or `addPermanentModifier` (`ModifierLifetime`), refused when the attribute already has a modifier with that id
+  (vanilla throws) or the amount is not finite. `replace_attribute_modifier` puts the new one in place of the old
+  (`addOrUpdateTransientModifier`, `addOrReplacePermanentModifier`), and the new lifetime wins.
+  `remove_attribute_modifier(host, id, modifier_id)` is `removeModifier` (false when there was none), and
+  `set_attribute_base(host, id, base)` is `setBaseValue`. `AttributeModifier` holds the modifier's id, amount and
+  `AttributeOperation`. A permanent modifier and a base are saved with the entity; a transient modifier lasts until it
+  unloads. The writes take the one path `/attribute` takes, so they go where the game and the attribute sync read:
+  - a player's own attribute map;
+  - for a mob, the store of the nine attributes its behavior uses (max health, movement and flying speed, follow
+    range, attack damage, knockback resistance, jump strength, burning time, reinforcements), so it moves and hits by
+    them at once; its armor map for armor and toughness, which its damage reads; and for its other attributes, as
+    for an armor stand, the generic map `/attribute` reads and the sync sends.
+
+  The live map behind `attribute_value` takes the same write, so the reads agree with `/attribute`, and the entity's
+  save keeps it. A lower max health cuts a mob's health (`LivingEntity.onAttributeUpdated`).
 - `living.set_health(host, health)` is `LivingEntity.setHealth` (Paper's `Damageable#setHealth`), cut to the
   range from zero to the maximum, with no hook; a non-finite value is refused. This raw write can set zero
   or change a dead entity's health without running the death pipeline.

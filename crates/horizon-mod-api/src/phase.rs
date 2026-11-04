@@ -107,6 +107,7 @@ pub fn install_packages(
 }
 
 /// Read-only view of the startup package inventory.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct LoadedMods<'a> {
     entries: &'a [PackageInfo],
 }
@@ -158,6 +159,7 @@ impl LoadedMods<'_> {
 ///     let _: Result<(), ()> = context.transaction(|_, _| Ok(()));
 /// }
 /// ```
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct RegistrationContext<'a> {
     mods: LoadedMods<'a>,
 }
@@ -195,6 +197,7 @@ impl RegistrationContext<'_> {
 ///     let _: Result<(), ()> = context.transaction(|_, _| Ok(()));
 /// }
 /// ```
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct DataLoadContext<'a> {
     source: &'a horizon_world::native_load_context::LoadContext,
     mods: LoadedMods<'a>,

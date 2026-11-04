@@ -32,6 +32,11 @@ mod tests {
         #[derive(Clone, Copy)]
         pub(super) struct PathComputationType;
         pub(super) struct GlobalPos;
+        pub(super) struct AttributeModifier;
+        #[derive(Clone, Copy)]
+        pub(super) enum AttributeOperation {}
+        #[derive(Clone, Copy)]
+        pub(super) enum ModifierLifetime {}
         pub(super) struct Ticks;
         pub(super) trait LevelHost {
             fn state_block(&self, _: BlockStateId) -> Option<&str> {
@@ -188,6 +193,8 @@ mod tests {
         pub(super) struct NativePlayerFood;
         #[derive(Clone, Copy)]
         pub(super) struct LivingRef;
+        #[derive(Clone, Copy)]
+        pub(super) struct EntityRef;
         #[derive(Clone, Copy)]
         pub(super) struct TicketController;
         #[derive(Clone, Copy)]

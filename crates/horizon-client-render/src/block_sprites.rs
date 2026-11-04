@@ -290,6 +290,7 @@ mod tests {
             assets: assets.clone(),
             render,
             biomes: Arc::new(Biomes::load(&root)?),
+            hidden_states: Arc::from([]),
         };
         let lookup = Lookup::new(&context, 2048);
         let whole = [0.0, 0.0, 1.0, 1.0];

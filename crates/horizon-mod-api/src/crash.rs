@@ -17,6 +17,7 @@ pub fn current_native_call() -> Option<NativeModCall> {
 static DETAILS: Mutex<Vec<(&'static str, String)>> = Mutex::new(Vec::new());
 /// A call into one hook of a native mod.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeModCall {
     /// The mod's `[mod] id`.
     pub id: &'static str,
@@ -37,6 +38,7 @@ pub fn current_native_mod() -> Option<&'static str> {
 }
 /// Puts back the call that `enter_native_mod` found.
 #[must_use]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct NativeModGuard {
     outer: Option<NativeModCall>,
 }
