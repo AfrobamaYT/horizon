@@ -1,5 +1,5 @@
 //! `cargo horizon-mod`: make Horizon content mods (`docs/modpacks.md`): blocks,
-//! items, data and assets, no code. Code mods are native (docs/native-mods.md).
+//! items, data and assets, no code. Code mods are native (docs/modding/src/how-to/native-mods.md).
 //!
 //! - `new <path> [--name "Name"]`: a content mod from the template; with
 //!   `--template native [--horizon <commit>]`, a native trait mod's bundle.
@@ -247,7 +247,7 @@ impl std::fmt::Display for RunError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CodeMod => f.write_str(
-                "code mods run through the launcher's native build: horizon-launcher native-build . --trust-native-code (docs/native-mods.md)",
+                "code mods run through the launcher's native build: horizon-launcher native-build . --trust-native-code (docs/modding/src/how-to/native-mods.md)",
             ),
             Self::Build(error) => f.write_str(error),
             Self::Launch { game, error } => write!(

@@ -1,5 +1,5 @@
 //! Removing an entity for native server mods, through an `EntityRef`
-//! (docs/native-mods.md, "Entity and level handles", #7387): `Entity.discard`
+//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): `Entity.discard`
 //! and `Entity.remove` with a reason. Nothing dies and nothing drops loot.
 //! The handle reads as gone from the call on, as `isRemoved` does. A mob
 //! leaves at once; the other kinds leave at the level's next sweep of

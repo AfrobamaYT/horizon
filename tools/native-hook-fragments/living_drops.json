@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "living_drops",
+      "doc": "Not `native_loot_drops`: that is the loot-modifier step, which edits\nthe stacks a table rolled (blocks, shearing, a mob's table). This hook\nfires once after it, on the entity's whole collected drop list, and\nnothing is spawned until it returns.\nA dying mob, server player or armor stand `entity` of `kind` (`player`\nis a player's UUID) is about to drop `drops`, the items\n`LivingEntity.dropAllDeathLoot` collected (NeoForge's\n`LivingDropsEvent`): the loot tables' stacks (after `native_loot_drops`),\nthe equipment that rolled to drop, a mob's own extras (an enderman's\ncarried block, a fox's mouth item, a piglin's inventory, a copper golem's\npreserved equipment) and a player's inventory, each with the position,\nmotion and pickup delay its item entity will have. Edit the list (take\nout, change or add drops) or set `cancel` for no drops at all; empty\nstacks don't drop. `source` is the killing blow (`causing` and `direct`\nentity ids, 0 when none or not known) and `recently_hit` is whether a\nplayer hurt it within 100 ticks, which is what lets a mob drop its\nequipment. An armor stand fires it from `brokenByAnything` with an\nempty list (its stand item and its equipment pop outside the list, as\nin vanilla). Experience orbs are not in the list\n(`native_living_experience_drop`); a spectator, who drops nothing,\ndoesn't call this. Item entity state such as no-gravity, owner and\nlifetime isn't in `NativeItemDrop`. Server-side.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_living_drops",
       "neoforge": "LivingDropsEvent",
       "side": "server",
@@ -13,6 +14,7 @@
     },
     {
       "name": "get_equipment_drop_chance",
+      "doc": "A dying mob `entity` of `kind` is about to roll its drop chance for\nthe item `stack` in `slot` (`Mob.dropCustomDeathLoot`, NeoForge's\n`GetEquipmentDropChanceEvent`). `original_chance` is\n`DropChances.byEquipment`; `chance` starts as the chance after the\nenchantments of the attacker and the victim (`getOriginalChance` and\n`getDropChance`); change `chance` (1.0 or more always drops, 0 or less\nnever does). `preserved` is `DropChances.isPreserved`: the slot drops\nwithout a player kill, whatever the mod chooses. Each slot is asked\nat its own point of the loop, after the mob's loot table was rolled\nand just before the slot's roll, only when it holds an item and its\nrecorded chance isn't 0, in `EquipmentSlot` order. The roll is drawn\nwhatever the chance is, so the mob's random follows vanilla's order.\n`source` and `recently_hit` are as in `native_living_drops`.\nServer-side.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_get_equipment_drop_chance",
       "neoforge": "GetEquipmentDropChanceEvent",
       "side": "server",

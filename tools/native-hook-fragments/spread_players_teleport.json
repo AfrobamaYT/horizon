@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "spread_players_teleport",
+      "doc": "A server entity is about to be placed by `/spreadplayers` (NeoForge's\n`EntityTeleportEvent.SpreadPlayersCommand`, vanilla's\n`SpreadPlayersCommand.setPlayerPositions`): once per entity, after the\nspread worked out its spot. `entity` is its network id, `player` its UUID (None for a\nnon-player), `from` where\nit stands and `target` the spot. A mod may move `target` (a value that\nis not a number is ignored). Canceling leaves the entity where it is;\nthe spread's other entities, its random draws and its feedback are\nunchanged.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_spread_players_teleport",
       "neoforge": "EntityTeleportEvent.SpreadPlayersCommand",
       "side": "server",

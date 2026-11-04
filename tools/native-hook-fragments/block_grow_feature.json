@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "block_grow_feature",
+      "doc": "A sapling, azalea, mushroom or fungus at `pos` is about to grow into the\nconfigured `feature`, `None` when vanilla has none to place (a lone dark\noak sapling). Set `cancel`, or `feature` to `None`, to keep the block;\nset `feature` to another key to grow that one. Server-side.\nMods can use `level.random()` to access the growth random source.",
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_grow_feature",
       "side": "server",
       "cancellable": true,

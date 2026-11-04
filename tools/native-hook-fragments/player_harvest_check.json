@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "player_harvest_check",
+      "doc": "A player's ability to harvest the block at `pos` may be changed.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_harvest_check",
       "neoforge": "PlayerEvent.HarvestCheck",
       "side": "both",

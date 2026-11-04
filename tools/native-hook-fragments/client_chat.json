@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "client_chat",
+      "doc": "NeoForge's `ClientChatEvent`: a client is about to send `message`.\n`original_message` is immutable; change `message` or set `cancel` to\nprevent sending.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_client_chat",
       "neoforge": "ClientChatEvent",
       "side": "client",

@@ -1,4 +1,4 @@
-//! A portable Rust toolchain of the launcher's own, for native mods (docs/native-mods.md), which
+//! A portable Rust toolchain of the launcher's own, for native mods (docs/modding/src/how-to/native-mods.md), which
 //! compile the game. levzzz5154 (2026-10-27): players combine many native mods per build, so they
 //! build on their own computer, and the launcher brings the compiler.
 //!

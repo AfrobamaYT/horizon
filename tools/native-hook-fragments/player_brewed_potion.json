@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "player_brewed_potion",
+      "doc": "A server player took `stack` from a brewing stand bottle slot\n(`BrewingStandMenu.PotionSlot.onTake`): `player` is their UUID and\n`player_entity_id` their network id.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_brewed_potion",
       "side": "server",
       "neoforge": "PlayerBrewedPotionEvent",
