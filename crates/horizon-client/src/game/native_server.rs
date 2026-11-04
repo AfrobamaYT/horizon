@@ -2039,6 +2039,40 @@ mod fake_action_tests {
         });
     }
 
+    /// 1, 64 and 256 fakes each clicking the stone floor with an empty hand every tick, the full
+    /// admission and use path (vanilla passes). Run with `-- --ignored --nocapture`, in release.
+    #[test]
+    #[ignore = "timing"]
+    fn fakes_acting_each_tick_cost() {
+        for count in [1u128, 64, 256] {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let (first, ..) = fake(game, None, 0);
+                let level = game.native_level(game.dim.id()).unwrap();
+                let mut players = vec![first];
+                for i in 1..count {
+                    players.push(
+                        game.native_fake_player(level, 100 + i, &format!("fake{i}"))
+                            .unwrap(),
+                    );
+                }
+                for g in game.lan.as_mut().unwrap().hub.guests.iter_mut() {
+                    g.position = [0.5, 64.0, 0.5];
+                }
+                let ticks = 200;
+                let start = std::time::Instant::now();
+                for _ in 0..ticks {
+                    for &player in &players {
+                        let outcome = game.native_player_perform_action(player, on_top([1, 63, 0]));
+                        assert_eq!(outcome, Ok(ActionOutcome::Passed));
+                    }
+                }
+                let per_tick = start.elapsed() / ticks;
+                let per_action = per_tick / count as u32;
+                println!("{count} fakes: {per_tick:?} a tick, {per_action:?} an action");
+            });
+        }
+    }
+
     #[test]
     fn the_acting_mark_clears_on_a_panic_and_each_action_starts_unblocked() {
         let action = std::sync::Arc::new(super::FakeAction::default());
