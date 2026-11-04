@@ -3257,8 +3257,8 @@ and in the server thread's log line, with the `horizon-mod.toml` id. Each entry 
 `entry::main_with` must bind its id and hooks together: `ModEntry::new("example", example::hooks())`.
 The ordered list is `Mods = Arc<[ModEntry]>`; there is no separate naming step or unnamed entry.
 Before installation, `mod_api::mods()` still returns an empty list. Parts retain their registering mod's
-id for startup errors and hook panics. The game stops. Render hooks and trait injections
-are not named yet.
+id for startup errors and hook panics. The game stops. A trait injection's panic names its mod and
+the generated method (`inject_<mod>_<method>`); render hooks are not named yet.
 
 A code mod may declare its own injection in the trait as a rare escape hatch:
 
