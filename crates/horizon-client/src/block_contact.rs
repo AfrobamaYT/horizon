@@ -1,7 +1,7 @@
 //! Synchronous mod-block contacts from the server's simulation code.
 use crate::health::DamageLevel;
 use horizon_core::position::BlockPos;
-use horizon_world::registry::BlockStateId;
+use horizon_world::{level::LandingWrite, registry::BlockStateId};
 use std::{
     cell::{Cell, RefCell},
     sync::OnceLock,
@@ -24,8 +24,9 @@ pub struct Hooks {
     pub inside_listens: fn(BlockStateId) -> bool,
     pub fall_listens: fn(BlockStateId) -> bool,
     pub bounce_listens: fn(BlockStateId) -> bool,
-    /// `Block.fallOn`: change `damage`, the fall damage `causeFallDamage` calculated.
-    pub fall_on: fn(&str, &mut DamageLevel<'_>, Contact<'_>, f64, &mut f32),
+    /// `Block.fallOn`: change `damage`, the fall damage `causeFallDamage` calculated, and
+    /// push the writes the part asks for.
+    pub fall_on: fn(&str, &mut DamageLevel<'_>, Contact<'_>, f64, &mut f32, &mut Vec<LandingWrite>),
     /// `Block.bounceOn`: change `movement`, the movement the bounce leaves the entity.
     pub bounce_on:
         fn(&str, &mut DamageLevel<'_>, Contact<'_>, f64, &mut horizon_core::geometry::Vec3),
@@ -33,8 +34,23 @@ pub struct Hooks {
 
 pub static HOOKS: OnceLock<Hooks> = OnceLock::new();
 
+/// A contact kept until the entity's batch ends, delivered in the order it happened.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Pending {
+    Inside(Inside),
+    Landed(Landed),
+}
+
+/// An entity that landed on a block whose Part asked for writes (`Block.fallOn`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Landed {
+    pub state: BlockStateId,
+    pub position: BlockPos,
+    pub writes: Vec<LandingWrite>,
+}
+
 /// An entity inside a block whose Part listens to `entity_inside`
-/// (`Block.entityInside`), kept until the entity's batch ends.
+/// (`Block.entityInside`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Inside {
     pub entity: i32,
@@ -47,7 +63,7 @@ pub struct Inside {
 
 thread_local! {
     static LEVEL: Cell<Option<&'static str>> = const { Cell::new(None) };
-    static PENDING: RefCell<Vec<Inside>> = const { RefCell::new(Vec::new()) };
+    static PENDING: RefCell<Vec<Pending>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Scope authority to this thread and restore it even on an error or panic.
@@ -82,7 +98,8 @@ pub fn fall_listens(state: BlockStateId) -> bool {
 
 /// `Block.fallOn`: the fall damage `damage` calculated for the entity that landed on
 /// `contact`'s block, after any part of that block changed it. A non-finite answer is
-/// ignored and a negative one is zero. Nothing runs off the server or without a part.
+/// ignored and a negative one is zero. The writes the part asked for are kept until the
+/// entity's batch ends. Nothing runs off the server or without a part.
 pub fn fall(level: &mut DamageLevel<'_>, contact: Contact<'_>, distance: f64, damage: f32) -> f32 {
     let (Some(dimension), Some(hooks)) = (LEVEL.get(), HOOKS.get()) else {
         return damage;
@@ -91,7 +108,16 @@ pub fn fall(level: &mut DamageLevel<'_>, contact: Contact<'_>, distance: f64, da
         return damage;
     }
     let mut answer = damage;
-    (hooks.fall_on)(dimension, level, contact, distance, &mut answer);
+    let mut writes = Vec::new();
+    (hooks.fall_on)(
+        dimension,
+        level,
+        contact,
+        distance,
+        &mut answer,
+        &mut writes,
+    );
+    landed(contact.state, contact.position, writes);
     accepted_damage(answer, damage)
 }
 
@@ -135,6 +161,20 @@ pub fn bounce(
     accepted_movement(answer, movement)
 }
 
+/// Keep the writes a landing on the block `state` at `position` asked for until the
+/// entity's batch ends; nothing is kept when none were asked.
+pub fn landed(state: BlockStateId, position: BlockPos, writes: Vec<LandingWrite>) {
+    if !writes.is_empty() {
+        PENDING.with_borrow_mut(|pending| {
+            pending.push(Pending::Landed(Landed {
+                state,
+                position,
+                writes,
+            }));
+        });
+    }
+}
+
 /// Note an entity inside a block, if a part there listens; nothing is kept
 /// otherwise, so a world without such a part pays one test per block.
 pub fn inside(entity: i32, state: BlockStateId, position: BlockPos, precise: bool) {
@@ -144,18 +184,18 @@ pub fn inside(entity: i32, state: BlockStateId, position: BlockPos, precise: boo
             .is_some_and(|hooks| (hooks.inside_listens)(state))
     {
         PENDING.with_borrow_mut(|pending| {
-            pending.push(Inside {
+            pending.push(Pending::Inside(Inside {
                 entity,
                 state,
                 position,
                 precise,
-            });
+            }));
         });
     }
 }
 
 /// The contacts noted since the last call, in the order they happened.
-pub fn take_inside() -> Vec<Inside> {
+pub fn take_pending() -> Vec<Pending> {
     PENDING.with_borrow_mut(std::mem::take)
 }
 

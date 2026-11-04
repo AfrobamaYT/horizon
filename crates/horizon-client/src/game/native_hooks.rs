@@ -20,6 +20,7 @@ use super::{
     native_panel_recipes::RecipePage,
 };
 use horizon_assets::item_model::StackView;
+use horizon_client::block_contact::Pending;
 use horizon_client::creative::Creative;
 use horizon_client::{
     atlas_sources::qualified,
@@ -71,8 +72,9 @@ use mod_api::{
 };
 use mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
-    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult,
-    NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion, TooltipElement, UsePhase,
+    LandingWrite, LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeBlockUpdateFlags,
+    NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
+    TooltipElement, UsePhase,
 };
 pub(crate) use mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -7318,24 +7320,57 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_entity_inside(self, state, pos, entity, precise);
     }
-    /// Deliver the contacts the batch just ticked recorded, in order. A contact is skipped
-    /// when its entity is gone (an item merged away later in the batch) or the block at
-    /// `pos` is no longer the state it touched, as vanilla never sees a stale one.
+    /// Deliver the contacts the batch just ticked recorded, in order: `entity_inside` to the
+    /// parts, and the writes a landing asked for to the level. A contact is skipped when its
+    /// entity is gone (an item merged away later in the batch) or the block at its position
+    /// is no longer the state it touched, as vanilla never sees a stale one.
     pub(super) fn drain_entity_inside(&mut self) {
-        for contact in horizon_client::block_contact::take_inside() {
-            let Some(entity) = u32::try_from(contact.entity)
-                .ok()
-                .and_then(|id| self.native_entity(id))
-            else {
+        for contact in horizon_client::block_contact::take_pending() {
+            let (state, pos) = match &contact {
+                Pending::Inside(inside) => (inside.state, inside.position),
+                Pending::Landed(landed) => (landed.state, landed.position),
+            };
+            let Some(level) = self.native_level(self.dim.id()) else {
                 continue;
             };
-            let pos = contact.position;
-            let here = self
-                .native_level(self.dim.id())
-                .and_then(|level| self.native_level_state(level, [pos.x, pos.y, pos.z]));
-            if here == Some(contact.state) {
-                self.native_entity_inside(contact.state, pos, entity, contact.precise);
+            if self.native_level_state(level, [pos.x, pos.y, pos.z]) != Some(state) {
+                continue;
             }
+            match contact {
+                Pending::Inside(inside) => {
+                    if let Some(entity) = u32::try_from(inside.entity)
+                        .ok()
+                        .and_then(|id| self.native_entity(id))
+                    {
+                        self.native_entity_inside(state, pos, entity, inside.precise);
+                    }
+                }
+                Pending::Landed(landed) => {
+                    for write in landed.writes {
+                        self.apply_landing_write(level, pos, write);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Apply one write a landing asked for, at the block the entity landed on.
+    fn apply_landing_write(
+        &mut self,
+        level: mod_api::LevelRef,
+        pos: BlockPos,
+        write: LandingWrite,
+    ) {
+        let at = [pos.x, pos.y, pos.z];
+        match write {
+            LandingWrite::SetBlock(state) => {
+                self.native_level_set_block(level, at, state, NativeBlockUpdateFlags::NEIGHBORS);
+            }
+            LandingWrite::DestroyBlock { drop } => {
+                self.native_level_destroy_block(level, at, drop);
+            }
+            // A write a later API adds that this game does not know is not applied.
+            _ => {}
         }
     }
 }
@@ -7381,8 +7416,11 @@ impl HitLevel<'_> {
         pos: BlockPos,
         distance: f64,
         damage: &mut f32,
+        writes: &mut Vec<LandingWrite>,
     ) {
-        mod_api::dispatch_fall_on(self, dimension, entity, kind, state, pos, distance, damage);
+        mod_api::dispatch_fall_on(
+            self, dimension, entity, kind, state, pos, distance, writes, damage,
+        );
     }
     /// `Block.bounceOn`: entity `entity` of type `kind` bounced off `state` at `pos` and fell
     /// `fall_distance` blocks. `movement` is the movement the bounce leaves it, before
@@ -7695,9 +7733,9 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
         bounce_listens: |state| {
             mod_api::__private::block_listens(mod_api::HookId::BounceOn, "bounce_on", state)
         },
-        fall_on: |dimension, level, c, distance, damage| {
+        fall_on: |dimension, level, c, distance, damage, writes| {
             HitLevel(level.reborrow()).native_fall_on(
-                dimension, c.entity, c.kind, c.state, c.position, distance, damage,
+                dimension, c.entity, c.kind, c.state, c.position, distance, damage, writes,
             );
         },
         bounce_on: |dimension, level, c, fall_distance, movement| {
@@ -11754,6 +11792,52 @@ mod entity_inside_tests {
         BlockPart, EntityInsideEvent, Hooks, ModEntry, Registrar, ServerHost, testing::with_mods,
     };
     use std::sync::{Arc, Mutex};
+
+    /// Landing writes reach the level at the batch end, in the order asked, and only
+    /// where the block is still the state landed on.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn landing_writes_apply_at_the_batch_end() {
+        use horizon_client::block_contact::{landed, take_pending};
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let state = |name| game.pack.assets.registry.default_state(name).unwrap();
+            let (farmland, dirt, stone, air) = (
+                state("minecraft:farmland"),
+                state("minecraft:dirt"),
+                state("minecraft:stone"),
+                state("minecraft:air"),
+            );
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            game.world.set(1, 64, 1, farmland).unwrap();
+            game.world.set(2, 64, 1, farmland).unwrap();
+            game.world.set(3, 64, 1, stone).unwrap();
+            let at = |x| BlockPos::new(x, 64, 1);
+            landed(farmland, at(1), vec![LandingWrite::SetBlock(dirt)]);
+            // The block changed after the landing: dropped.
+            landed(stone, at(2), vec![LandingWrite::SetBlock(dirt)]);
+            landed(
+                stone,
+                at(3),
+                vec![LandingWrite::DestroyBlock { drop: false }],
+            );
+            // Nothing asked: nothing kept.
+            landed(farmland, at(1), Vec::new());
+            assert_eq!(
+                game.world.block(1, 64, 1),
+                farmland,
+                "nothing writes mid-batch"
+            );
+            game.drain_entity_inside();
+            assert_eq!(game.world.block(1, 64, 1), dirt);
+            assert_eq!(game.world.block(2, 64, 1), farmland);
+            assert_eq!(game.world.block(3, 64, 1), air, "the stone is destroyed");
+            assert!(take_pending().is_empty());
+        });
+    }
 
     /// What the part on stone heard: the entity's id, the position and `precise`.
     #[derive(Clone, Default)]
