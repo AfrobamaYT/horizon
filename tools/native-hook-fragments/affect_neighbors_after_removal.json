@@ -1,0 +1,10 @@
+{
+  "hooks": [
+    {
+      "name": "affect_neighbors_after_removal",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_affect_neighbors_after_removal",
+      "side": "server",
+      "mod_api": {"contract": "collect", "out": "updates", "scope": "block", "key": "state"}
+    }
+  ]
+}

@@ -1101,5 +1101,6 @@
     "Save changes switches it. Nothing in its folder is deleted.": "Enregistrer applique le changement. Rien n’est supprimé de son dossier.",
     "Its mods made for {loader} stay in its folder but won't load.": "Ses mods faits pour {loader} restent dans son dossier mais ne se chargeront pas.",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Ses mods faits pour Minecraft {from} restent dans son dossier ; certains peuvent ne pas se charger en {to}.",
-    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Ses mondes ont été enregistrés par Minecraft {from} : {to} les met à jour définitivement, et ne peut pas les ouvrir s’il est plus ancien."
+    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Ses mondes ont été enregistrés par Minecraft {from} : {to} les met à jour définitivement, et ne peut pas les ouvrir s’il est plus ancien.",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "La recherche des métadonnées JAR a échoué : {reason}. Placez les fichiers d’origine exactement à ces emplacements du cache, puis réessayez :\n"
 }
