@@ -625,6 +625,27 @@ impl GameLevel<'_> {
         mod_api::dispatch_fluid_level_change(self, dimension, pos, fluid, from, to, cancel);
     }
 
+    /// The block at `pos` (`state`) is about to tell its neighbours it
+    /// changed (NeoForge's `BlockEvent.NeighborNotifyEvent`): at
+    /// `ServerLevel.updateNeighborsAt`, which notifies all six sides
+    /// (`skipped_side` is `None`), and `updateNeighborsAtExceptFromFacing`,
+    /// which notifies all but `skipped_side`. Set `cancel` and no neighbour
+    /// hears, on both paths. Differs from NeoForge 26.3's implementation
+    /// (which honours the cancel only when a side is skipped), follows its
+    /// documented contract. Asked for every such update, redstone
+    /// included: answer fast. Server-side.
+    #[inline(always)]
+    pub(super) fn native_neighbor_notify(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        skipped_side: Option<Direction>,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_neighbor_notify(self, dimension, pos, state, skipped_side, cancel);
+    }
+
     /// A fluid source at `pos` (`state`) is about to count towards turning
     /// the flowing fluid beside it into a source (NeoForge's
     /// `CreateFluidSourceEvent`, `FlowingFluid.getNewLiquid`): two counted
@@ -1709,9 +1730,15 @@ impl Game<'_> {
             categories,
         );
     }
-    /// Once a frame, in a world or not, after Horizon's extras.
-    pub(super) fn native_frame(&mut self, elapsed: Duration) {
-        mod_api::dispatch_frame(self, elapsed);
+    /// Once a frame, in a world or not, after Horizon's extras and just
+    /// before the frame is rendered (`RenderFrameEvent.Pre`).
+    pub(super) fn native_render_frame_pre(&mut self, elapsed: Duration) {
+        mod_api::dispatch_render_frame_pre(self, elapsed);
+    }
+    /// Once a frame, in a world or not, right after the frame was rendered
+    /// (`RenderFrameEvent.Post`).
+    pub(super) fn native_render_frame_post(&mut self, elapsed: Duration) {
+        mod_api::dispatch_render_frame_post(self, elapsed);
     }
     /// Client-side evaluation of a mod's namespaced conditional item model property.
     /// Set value only for a property your mod owns; unhandled properties stay false.
@@ -9253,8 +9280,8 @@ impl Game<'_> {
     pub(super) fn native_size(&self, draw: &HudBatch) -> [f32; 2] {
         [draw.width, draw.height]
     }
-    /// The width of `text` in GUI pixels.
-    pub(super) fn native_text_width(&self, text: &str) -> f32 {
+    /// The width of `text` in GUI pixels, as `native_text` draws it on `draw` (`Font.width`).
+    pub(super) fn native_text_width(&self, _draw: &HudBatch, text: &str) -> f32 {
         HudBatch::text_width(&self.gui.atlas, text)
     }
     /// A rectangle in GUI pixels, `argb` (0x78000000 is the extras' box).
@@ -9575,8 +9602,9 @@ impl Game<'_> {
             .enchantments
             .can_enchant(self.items(), id, item)
     }
-    /// The size of sprite `name` in its own pixels, if there is one.
-    pub(super) fn native_sprite_size(&self, name: &str) -> Option<[f32; 2]> {
+    /// The size of sprite `name` in its own pixels, as `native_sprite` draws it on `draw`, if
+    /// there is one.
+    pub(super) fn native_sprite_size(&self, _draw: &HudBatch, name: &str) -> Option<[f32; 2]> {
         let r = self.gui.atlas.sprites.get(name)?;
         Some([r.w as f32, r.h as f32])
     }
@@ -9591,7 +9619,7 @@ impl Game<'_> {
         let dst = [at[0], at[1], size, size];
         let sprite = look
             .and_then(|l| l.sprite)
-            .and_then(|s| self.native_sprite_size(&s).map(|size| (s, size)));
+            .and_then(|s| self.native_sprite_size(batch, &s).map(|size| (s, size)));
         if let Some((name, px)) = sprite {
             self.native_sprite(batch, &name, [0.0, 0.0, px[0], px[1]], dst, Some(tint));
         } else {
@@ -11189,6 +11217,28 @@ mod tests {
     }
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_trait_mod_measures_text_and_sprites_through_its_draw_context() {
+        use super::super::mod_api_host::generated::GameDrawContext;
+        use super::super::native_entity_refs::tests::with_game;
+        use mod_api::DrawContext;
+
+        with_game(|game| {
+            let mut batch = horizon_client::hud::HudBatch::new([320, 240]);
+            let draw = GameDrawContext {
+                game,
+                surface: &mut batch,
+            };
+            // A server's HUD atlas holds the fonts: vanilla's ascii sheet is 128 by 128, and an
+            // upper-case A advances 6 GUI pixels.
+            assert_eq!(draw.sprite_size("font/ascii"), Some([128.0, 128.0]));
+            assert_eq!(draw.sprite_size("mymod:no_such_sprite"), None);
+            assert_eq!(draw.text_width("AA"), 12.0);
+            assert_eq!(draw.text_width(""), 0.0);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn declared_types_create_tick_and_reload_through_game() {
         use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
         use horizon_client::{chunk::Chunk, containers::BlockEntity, save};
@@ -12157,6 +12207,9 @@ mod tests {
         let motion_hooks = free_hooks(include_str!("../motion.rs"));
         let hub_hooks = free_hooks(include_str!("../lan/hub.rs"));
         let ender_hooks = free_hooks(include_str!("../mobs/enderman.rs"));
+        let sound_hooks = free_hooks(include_str!(
+            "../../../horizon-client-render/src/sound_engine/hooks.rs"
+        ));
         let declared: BTreeSet<_> = section
             .lines()
             .filter_map(|line| {
@@ -12180,6 +12233,7 @@ mod tests {
             .chain(motion_hooks.iter().copied())
             .chain(hub_hooks.iter().copied())
             .chain(ender_hooks.iter().copied())
+            .chain(sound_hooks.iter().copied())
             .collect();
         let mut names = BTreeSet::new();
         let mut contracts = BTreeSet::new();
@@ -12217,6 +12271,8 @@ mod tests {
                 // menu.rs compiles into horizon-client-lib (#5446's
                 // split): horizon-mixins resolves the crate by its package.
                 format!("horizon_client_lib::menu::native_{name}")
+            } else if sound_hooks.contains(name) {
+                format!("horizon_client_render::sound_engine::hooks::native_{name}")
             } else if ender_hooks.contains(name) {
                 format!("horizon_client_lib::mobs::enderman::native_{name}")
             } else if breath_hooks.contains(name) {

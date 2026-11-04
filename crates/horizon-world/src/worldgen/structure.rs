@@ -9,6 +9,7 @@ pub mod jigsaw;
 pub mod legacy;
 pub mod mansion;
 pub mod mineshaft;
+pub mod mod_types;
 pub mod monument;
 pub mod nether_fossil;
 pub mod ocean_ruin;

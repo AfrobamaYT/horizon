@@ -698,6 +698,7 @@ fn free_function_source(target: &str) -> Option<(&'static str, String)> {
         ("horizon_world::", "horizon-world"),
         ("mod_api::", "horizon-mod-api"),
         ("horizon_client_lib::", "horizon-client"),
+        ("horizon_client_render::", "horizon-client-render"),
     ];
     prefixes
         .into_iter()
@@ -992,11 +993,14 @@ mod tests {
     fn hook_points_come_from_the_catalog_and_its_fragments() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let points = super::hook_points(&root).unwrap();
-        let frame = points.iter().find(|p| p.name == "frame").unwrap();
+        let frame = points
+            .iter()
+            .find(|p| p.name == "render_frame_pre")
+            .unwrap();
         assert_eq!(frame.version, 1);
         assert_eq!(
             frame.target,
-            "horizon_client::game::native_hooks::Game<'_>::native_frame"
+            "horizon_client::game::native_hooks::Game<'_>::native_render_frame_pre"
         );
         assert!(!frame.scoped);
         let scoped = points
@@ -1643,6 +1647,15 @@ mod tests {
             Some((
                 "horizon-client",
                 "breathing::native_living_breathe".to_owned()
+            ))
+        );
+        assert_eq!(
+            super::free_function_source(
+                "horizon_client_render::sound_engine::hooks::native_play_sound"
+            ),
+            Some((
+                "horizon-client-render",
+                "sound_engine::hooks::native_play_sound".to_owned()
             ))
         );
         for target in [

@@ -51,6 +51,8 @@ requires a farmer at work and `mob_griefing` enabled.
   continuing in rows under it, 27 in all; and up to eight `fluid_inputs` and `fluid_outputs`, each a well under the
   slots with its amount in mB, drawn in the fluid's client look (`data/<mod>/horizon/fluid/`, [installing and using mods](../start/installing.md)).
   `native_sprite` takes an optional `tint` (`0xAARRGGBB`) that multiplies every texel, as a fluid's colour does.
+  `DrawContext::text_width(text)` and `DrawContext::sprite_size(name)` measure what `native_text` and `native_sprite`
+  draw, in GUI pixels and in the sprite's own pixels, to lay text and sprites out before drawing them (`Font.width`).
   Slot clicks keep their `SlotClicked` numbering: inputs, then results.
 
 - `GameLevel::native_send_particles` on authoritative servers. It sends supported
@@ -1004,7 +1006,7 @@ registration path.
 
 - A player finishing a sign: `native_sign_changed(player, name, dimension, pos, front, lines, cancel)` is heard when a player sends the text they wrote on a sign they were editing, right before it goes on the sign, once the checks have passed, on a server, with the player's state swapped in (`native_tell` reaches them). A mod may rewrite `lines` (four lines of plain text) or set `cancel` so the sign keeps its old text; a waxed sign is not told.
 
-- Models no blockstate names, as NeoForge's `ModelEvent.RegisterStandalone`: `native_standalone_models(context, models)`, asked once at client startup (not on integrated or dedicated servers), takes the ids of models a block entity or a mob draws as parts (`mymod:block/shaft_half`, from `assets/mymod/models/block/shaft_half.json`), and every resource load, a pack reload included, bakes them beside the block models. `native_draw_model(draw, model, tint)` draws one under `draw`'s pose in `native_block_entity_submit` or `native_mob_submit`, as `native_draw_block` draws a block's model, with `tint` (0xRRGGBB) on its tinted faces. A model that doesn't read is logged and left out, and drawing it gives false; no block has to be registered just to bake a part's model.
+- Models no blockstate names, as NeoForge's `ModelEvent.RegisterStandalone`: `native_standalone_models(context, models)`, asked once at client startup (not on integrated or dedicated servers), takes the ids of models a block entity or a mob draws as parts (`mymod:block/shaft_half`, from `assets/mymod/models/block/shaft_half.json`), and every resource load, a pack reload included, bakes them beside the block models. `BlockEntityDrawContext::model(model, tint)` draws one under `draw`'s pose in `native_block_entity_submit` or `native_mob_submit`, as `native_draw_block` draws a block's model, with `tint` (0xRRGGBB) on its tinted faces. A model that doesn't read is logged and left out, and drawing it gives false; no block has to be registered just to bake a part's model.
 
 - A player opening and closing any menu on a server, on the single player server thread and on a dedicated server: `native_player_container_open(player, name, dimension, menu, pos)` and `native_player_container_close(...)` (NeoForge's `PlayerContainerEvent.Open` and `.Close`), with the menu type's name and, for a block's menu, its position. They run with the player's state swapped in. Unlike the viewer count of a mod container (`native_mod_container_viewers`) they name the player and cover every menu: chests, furnaces, crafting tables, trades, a mod's own. A menu is heard once a tick, so one opened and closed inside a tick is not; each open has one close, also when the player leaves.
 
@@ -1053,6 +1055,7 @@ registration path.
 
 - A recipe ingredient of a mod's own kind. The ingredient entry that names a type in a namespace outside minecraft: reaches native_ingredient(context, kind, data, items) at load time. Fill items with the item ids the ingredient matches (item ids only: components are not checked; a match-time hook follows separately). Duplicates are removed keeping first-seen order. The hook gets the `DataLoadContext` of the load that parses the recipes and hears each occurrence of the kind once per load, nested ones and ones under any slot a recipe reads an ingredient from included, before the load's tables parse the recipes: the client's own recipe load has `origin()` `ClientPreload`, the server's `ServerDataLoad`. A server loads its recipes once however many tables and copies read them (its recipe tables, the stations and the copy synchronised to guests, on a dedicated server too), and a `/reload` asks again once; a client that only joins a remote server is never told `ServerDataLoad`. The answer must be the same every time. An unclaimed kind leaves the list empty and the recipe fails.
 
+- A frame's two moments, as NeoForge's `RenderFrameEvent.Pre` and `.Post`: `render_frame_pre(host, event)` runs once a frame (in a world or not) after Horizon's extras and just before the frame is rendered, and `render_frame_post` right after it was rendered; both carry the frame's time as `event.elapsed`. They replace the single `frame` hook, which fired at the pre moment: a mod that implemented `frame` implements `render_frame_pre`. Client side; a frame with no listener costs one branch.
 - Items a mod's own recipe type takes in a station slot. `native_recipe_property_sets(context, additions)` is asked once per load, after the recipes are resolved, with the `DataLoadContext` of the load that owns them (`origin()` `ServerDataLoad` on a server, `ClientPreload` on a client's own load), and again after `/reload`. Push one `RecipePropertyAddition::new(set, items)` per set to add to (`minecraft:furnace_input`, `blast_furnace_input`, `smoker_input`, `campfire_input`, `smithing_template`, `smithing_base`, `smithing_addition`, `brewing_input`, `brewing_reagent`); the vanilla recipes' items stay in. The furnace shift-click, the smithing and brewing slots and the set a client is sent read the one answer, so the client predicts what the server accepts. An unknown set key or an item that is air is logged and skipped; an item the registry does not know is ignored. The answer must be the same every time.
 
 - Lowering the frame rate limit: `native_framerate_limit(focused, minimized, in_world, limit)` is asked each frame with the limit Horizon is about to use (Max Framerate after the inactivity throttle and Battery Mode, 260 for unlimited), whether the window has focus, whether it is minimised and whether a world is open. A mod may lower `limit`, for example to throttle a window in the background as Dynamic FPS does; Horizon keeps the lower of its own limit and the mod's and ignores values below 1.
@@ -1887,6 +1890,12 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   its egg at `pos`. Set `cancel` to leave the block unchanged.
 - **`native_fluid_level_change(dimension, pos, fluid, from, to, cancel)`** (on `GameLevel`): flowing `water` or `lava`
   at `pos` is about to change level. Levels run from 0 through 8. Set `cancel` to keep the old level.
+- **`native_neighbor_notify(dimension, pos, state, skipped_side, cancel)`** (on `GameLevel`): NeoForge's
+  `NeighborNotifyEvent`. The block at `pos` is about to tell its neighbours it changed: `ServerLevel.updateNeighborsAt`
+  (all six sides, `skipped_side` is `None`) or `updateNeighborsAtExceptFromFacing` (all but `skipped_side`). Set
+  `cancel` and no neighbour hears, on both paths. That differs from NeoForge 26.3's implementation, which honours the
+  cancel only when a side is skipped, and follows its documented contract. Asked for every such update, redstone
+  included: answer fast.
 - **`native_create_fluid_source(dimension, pos, state, can_convert)`** (on `GameLevel`): NeoForge's
   `CreateFluidSourceEvent`. When the game works out a block's new fluid (`FlowingFluid.getNewLiquid`), it asks once
   for each horizontal neighbour that is a source of the same fluid, with that neighbour's `pos` and `state`; two
@@ -2645,8 +2654,8 @@ clicks already.
 
 `LoopContext<'_>` is the read-only view for a hook fired inside a menu, recipe or
 player-list loop, where no game is at hand (a catalog entry names it with
-`"context": "loop"`; `menu_slot_rules`, `item_stacked_on_other`, `player_name_format` and
-`player_tab_list_name_format`, `living_jump_power`, `living_speed` and `living_flying_speed` take it). `side()` is `LoopSide::Server` or
+`"context": "loop"`; `menu_slot_rules`, `item_stacked_on_other`, `player_name_format`,
+`player_tab_list_name_format`, `living_jump_power`, `living_speed`, `living_flying_speed` and the sound hooks below take it). `side()` is `LoopSide::Server` or
 `LoopSide::Client`, `registry(name)` borrows names in registry ID order,
 `setting(mod_id, key)` returns a loaded mod's setting captured when the context was
 built, and `mods()` is the `LoadedMods` view of registration. It has no game Host,
@@ -2661,6 +2670,16 @@ either side. The event no longer carries a side: `context.side()` says it. `play
 displayname)` and `player_tab_list_name_format(context, player, name, display_name)` format a player's name for chat and
 commands (both sides) and for the Tab list (server). All three are contract version `2`: a mod written for `1` takes the
 context as a new first argument of the `Hooks` method, and reads the side from it instead of `event.side`.
+
+### Sound hooks
+
+Four client hooks take the `LoopContext` from the sound engine, which has no game at hand and plays sounds from its own loops:
+
+- `play_sound` is `PlaySoundEvent`. It fires at the start of vanilla's `SoundEngine.play`, before the engine's own checks, for every sound the client plays. `original` is the sound as asked for and `sound` is `&mut Option<SoundPlay>`, a copy of it that later mods see edited: change its volume, pitch, source, position, identifier, looping, delay, attenuation or `relative`, or set it to `None` to play nothing. A changed identifier is resolved again, with its own weighted pick. Only the fields of `SoundPlay` carry over; the engine's random, ticking and resolved sound never leave it. Setting `None` is the mod's own answer (there is no constant): a sound nobody edits plays as before.
+- `play_sound_source` is `PlaySoundSourceEvent` and `play_streaming_source` is `PlayStreamingSourceEvent`. A sound fires exactly one of them, after the engine started it on a channel: streamed sounds (music, records) the second, every other sound the first. They are notices, and `ChannelRef` is an id only: a mod cannot drive the channel. A mod that needs channel control names the mixin it replaces.
+- `sound_engine_load` is `SoundEngineLoadEvent`, which NeoForge fires on the mod bus. It fires when the output is open: at window start, after each resource reload (with the new generation's context) and when the output device changes. With no audio (no device, or `HORIZON_NO_AUDIO`) the engine never loads: this hook and the two source hooks do not fire, while `play_sound` still does, since it comes before the engine's check that it loaded.
+
+All four early-out on the mod's subscription before building a `SoundPlay`, so a game with no listener pays one branch per play. They are client-side only: a server has no sound engine and builds no context.
 
 ### Items' default components
 

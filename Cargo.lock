@@ -1600,6 +1600,7 @@ dependencies = [
  "glam",
  "horizon-assets",
  "horizon-client-core",
+ "horizon-client-render",
  "horizon-core",
  "horizon-items",
  "horizon-mod-api-gen",

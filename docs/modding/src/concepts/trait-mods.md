@@ -130,6 +130,7 @@ none, and a chunk that isn't loaded reads as the game's query does (full sky, no
 so check `is_loaded` first. It also answers tag and fluid questions without a `Host`: `block_in_tag(block_name, tag)`,
 `item_stack_in_tag(&stack, tag)`, `fluid_state(pos)` (`getFluidState`, `None` where the block read is),
 `state_fluid_state(state)` and `fluid_in_tag(fluid_name, tag)`. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client level.
+`LevelHost` has no random, by design: a draw from a read-only hook inside a level write would shift the level's random sequence away from vanilla's order. A hook that may draw is given a `LevelRandomHost`.
 `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
