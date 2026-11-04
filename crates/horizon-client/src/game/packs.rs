@@ -371,6 +371,7 @@ impl Game<'_> {
                     Some(textures),
                     self.settings.horizon.api,
                     self.settings.horizon.translucent_batching,
+                    self.settings.horizon.wide_frame(),
                     super::shader_packs::picked_pack_draws_flat(&self.settings),
                 )
             })
@@ -560,6 +561,7 @@ pub(super) fn stage_pack(
         res.facts(),
         context.biomes.clone(),
         context.light.clone(),
+        &res.core.item_data,
     )?;
     let textures = prepare_renderer_textures(&pack);
     let cem = Arc::new(horizon_client::mobs::cem::CemModels::load(

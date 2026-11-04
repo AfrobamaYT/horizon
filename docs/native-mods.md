@@ -797,6 +797,7 @@ one, where vanilla gives the `by` one.
 
 - Tag and fluid reads from any hook that has a `Host`: `host.block_state_in_tag(state, "minecraft:logs")` (`BlockState.is(TagKey)`), `host.item_stack_in_tag(&stack, tag)` (`ItemStack.is(TagKey)`), `host.state_fluid_state(state)` (`BlockState.getFluidState`: water for a waterlogged state, `None` for an id no state has) and `host.fluid_in_tag(fluid, "minecraft:water")` (`FluidState.is(TagKey)`). The tag may be written with or without `minecraft:`, with no `#`. They read the world's merged tags, data packs and content mods included; an unknown tag is false and an empty stack tests `minecraft:air`. The tag reads are `None` on a client and before the world loads its tags. `host.state_outline(state)` (`BlockState.getShape` with an empty getter at the origin) gives a state's outline boxes in the block's own space, with no random offset and no world context; empty for air, `None` for an id no state has. `host.tag_members(TagRegistry::Block, tag)` (also `Item` and `Fluid`; `HolderSet.Named` iteration) lists a tag's members in vanilla's order, the file's order with nested tags in place and the first occurrence kept: an unknown tag lists nothing, and it is `None` where the tag reads are. `level.fluid_state(host, pos)` (`BlockGetter.getFluidState`) reads the fluid at a position, `None` where the block read is (an unloaded chunk or a `y` outside the world).
 
+- A block part's `is_pathfindable` changes whether a path of a `PathComputationType` (`Land`, `Water`, `Air`) may go through the block's states (`BlockBehaviour.isPathfindable`); `event.pathfindable` starts with the block's own answer. The answer depends on the state and the type alone: the game asks once per state and type when parts resolve (at world load and on every `/reload`) and path finding, spawning and the goals read the stored answer, so a part cannot answer from a position, a level or the time. Server-side.
 - A block part's `should_check_weak_power` adjusts whether a signal query reads indirect power through that block, for its position and input direction.
 
 - A block part's `should_redstone_wire_connect_to` adjusts whether redstone wire connects to that block for the given position and optional direction.
@@ -895,7 +896,7 @@ or transactions. Declarations still go on each event or registrar.
 
 - `native_screen_hovered_item()` answers the id of the item in the slot under the pointer on the open container screen (`AbstractContainerScreen.getHoveredSlot()`'s stack), None over no slot, an empty one, or with no window. A recipe viewer reads it for its look-up keys. Client-side, API next.
 
-- `native_modify_default_components(item, components)`, in `horizon-world`'s `item_defaults.rs`: an item's default
+- `native_modify_default_components(context, item, components)`, in `horizon-world`'s `item_defaults.rs`: an item's default
   components in `items.json`'s form, for any item, vanilla's included (NeoForge's `ModifyDefaultComponentsEvent`). Insert
   or replace a component to set it (`"minecraft:max_stack_size": 16`), remove it to take it away. The item table,
   loot, enchanting and item models all read the changed defaults, and stacks are saved and sent against them as
@@ -926,7 +927,7 @@ or transactions. Declarations still go on each event or registrar.
 
 - `native_render_hand(render, canceled)` before each visible first-person hand, including maps and the empty main-hand arm. `render` carries the player UUID and entity id, hand, displayed stack, partial tick, interpolated pitch, light, swing and inverse equip height including swap animation scale. Adjust its translation (blocks), rotation (pitch, yaw, roll in degrees) and scale; the pose is applied in that order before the ordinary hand and item poses. Non-finite or out-of-range components are ignored individually: offsets must be within -16..=16 blocks, angles within -3600..=3600 degrees and scale within 0.01..=100. Set `canceled` to skip default geometry. Unlike NeoForge's `RenderHandEvent`, this hook does not expose the full pose stack, player render state or submission collector and cannot draw a replacement.
 
-`native_screen_opening(current, new, outcome)` (`ScreenEvent.Opening`), `native_screen_closing(screen)` (`ScreenEvent.Closing`) and `native_screen_init_post(screen)` (`ScreenEvent.Init.Post`) take a `NativeScreenView`. Every change of the game's screen (all of the game's screen assignments) goes through `Game::set_screen`, which mirrors `Gui.setScreen`: when a different screen would open, `screen_opening` fires first with the screen that is open (`current`) and the one about to open (`new`; the id `playing` is vanilla's null, no screen), and answers `ScreenOpening::Cancel` (the current screen stays) or `ScreenOpening::ModScreen(mod_id)` (that mod's own screen opens instead, if it can open there; the replacement fires nothing again); the first mod to answer wins. Then `screen_closing` fires for the screen being left (never for `playing`), and the new screen opens. The same screen again fires nothing, and a game with no native mod assigns the screen with no event. `screen_init_post` is still observed once per frame (an open or a resize). The screens of the game's `Screen` list (inventory, containers, pause, options, chat, creative, stats, advancements, mod screens, dead, win…) announce themselves in `set_screen`, before they change, and honour `Cancel` and `ModScreen`. The title's own screens and the overlays drawn over gameplay (sign editors, book edit/sign/view and lectern screens, dialogs and prompts) have no single place they open or close, so the per-frame observer announces them through the same function, in the same order, after the change: a mod hears `screen_opening` and `screen_closing` for them, but its answer cannot keep them shut. Overlay views use the full window as their rectangle and have no menu or title; anvil rename remains part of its inventory screen. Dialog states share the `dialog` id. A menu swapped inside the open inventory screen is not a change of screen.
+`native_screen_opening(current, new, outcome)` (`ScreenEvent.Opening`), `native_screen_closing(screen)` (`ScreenEvent.Closing`) and `native_screen_init_post(screen)` (`ScreenEvent.Init.Post`) take a `NativeScreenView`. Every change of the game's screen (all of the game's screen assignments) goes through `Game::set_screen`, which mirrors `Gui.setScreen`: when a different screen would open, `screen_opening` fires first with the screen that is open (`current`) and the one about to open (`new`; the id `playing` is vanilla's null, no screen), and answers `ScreenOpening::Cancel` (the current screen stays) or `ScreenOpening::ModScreen` (the answering mod's own screen opens instead, if it can open there; the replacement fires nothing again); the first mod to answer wins, and the dispatch records its id, so a mod can open only its own screen. Then `screen_closing` fires for the screen being left (never for `playing`), and the new screen opens. The same screen again fires nothing, and a game where no mod listens to `screen_opening` or `screen_closing` assigns the screen with no event. `screen_init_post` is still observed once per frame (an open or a resize). The screens of the game's `Screen` list (inventory, containers, pause, options, chat, creative, stats, advancements, mod screens, dead, win…) announce themselves in `set_screen`, before they change, and honour `Cancel` and `ModScreen`. The title's own screens and the overlays drawn over gameplay (sign editors, book edit/sign/view and lectern screens, dialogs and prompts) have no single place they open or close, so the per-frame observer announces them through the same function, in the same order, after the change: a mod hears `screen_opening` and `screen_closing` for them, but its answer cannot keep them shut. Overlay views use the full window as their rectangle and have no menu or title; anvil rename remains part of its inventory screen. Dialog states share the `dialog` id. A menu swapped inside the open inventory screen is not a change of screen.
 
 - `native_client_resources_reloaded()` fires on the render thread after successful client resource-pack application: the atlas, models, renderer and client caches already use the new resources. It covers selection/F3+T and server-pack reloads. Failed staging or application and initial startup do not fire it. This is a completion notification, not a reload-listener registration or staging API.
 
@@ -2807,6 +2808,14 @@ handle, an entity the client doesn't track and a level it doesn't show:
   (Paper's `Entity#isDead` is its inverse; a dying mob, mid death animation, is not alive). During a nested
   player swap an outer player's displaced record is unavailable, and during a player's turn the other
   players' handles read `None` until the hub is back.
+- `living.attribute_value(host, id)` is `AttributeMap.getValue` and `attribute_base` is `getBaseValue`, for a
+  player, a guest, a mob, an armor stand and the dragon (`None` for an attribute the entity type lacks, a stale
+  handle, or on a client). A mob, a stand and the dragon answer from a live attribute map built from the type's
+  defaults, the saved `attributes` list (bases and permanent modifiers, with their ids), and the attribute modifiers
+  of the items they hold and wear, put on and taken off slot by slot in `EquipmentSlot` order as
+  `LivingEntity.collectEquipmentChanges` does (transient: never saved). The map is built when first needed. Mob
+  behavior still reads the type's defaults, so a modifier does not yet change how a mob moves or hits, and an item's
+  own `attribute_modifiers` component is not read yet, only the item type's.
 - `living.set_health(host, health)` is `LivingEntity.setHealth` (Paper's `Damageable#setHealth`), cut to the
   range from zero to the maximum, with no hook; a non-finite value is refused. This raw write can set zero
   or change a dead entity's health without running the death pipeline.
@@ -3185,9 +3194,17 @@ clicks already.
 
 ### Items' default components
 
-`crates/horizon-world/src/item_defaults.rs`: `native_modify_default_components(item, components)`, a free function a
-bundle targets as `horizon_world::item_defaults::native_modify_default_components` (NeoForge's
-`ModifyDefaultComponentsEvent`). `components` is the item's entry in `items.json`, vanilla's default-component report:
+`Hooks::modify_default_components` receives `&DataLoadContext<'_>` before its
+`ModifyDefaultComponentsEvent`. The engine supplies this read-only phase context:
+`origin()` is `DataLoadOrigin::ServerDataLoad` or `ClientPreload`, `registry(name)`
+borrows names in registry ID order, `setting(mod_id, key)` reads a setting lazily,
+and `mods()` borrows the same `LoadedMods` view used during registration. There is
+no game Host, handle construction or transaction. The origin describes the actual
+owning load, not its thread name or the side of a later reader.
+
+The lower firing target is `native_modify_default_components(context, item, components)`
+in `crates/horizon-world/src/item_defaults.rs` (NeoForge's `ModifyDefaultComponentsEvent`).
+`components` is the item's entry in `items.json`, vanilla's default-component report:
 insert or replace a key to set a component (`"minecraft:max_stack_size": 16`), remove it to take the component away.
 Any item can be changed, vanilla's included. Write values as vanilla's codec writes them: nothing decodes them with it.
 Each table reads the fields it understands and takes a default for a field it can't read, but keeps the component, so a
@@ -3196,10 +3213,13 @@ data pack's own is held to `ExtraCodecs.intRange(1, 99)`, a mod's to 1 to `i32::
 carry), and a value that is not a number leaves the data pack's own. Keep a stack above 99 to a server whose clients run
 the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot show it.
 
-- Every table that reads items' defaults reads them through it: the item table, loot, enchanting, item models,
-  banners, pot sherds, item rarity in chat. Stacks are saved and sent as their difference from the changed defaults, as from vanilla's.
-- It's asked for every item each time the defaults are read, from any thread, several times as resources load
-  and again when a world's data packs load. Answer the same each time, from the item alone.
+- One owning load decodes the defaults, asks once per item, then publishes one immutable snapshot. The item
+  table, loot, enchanting, item models, banners, pot sherds and rarity readers borrow that snapshot; workers
+  retain shared ownership. The renderers also share its canonical component prototypes. Stacks are saved and
+  sent as their difference from the changed defaults, as from vanilla's.
+- Reusing client-preloaded item data on the integrated server is not another load. Opening a world or running
+  the data-pack `/reload` does not replay this hook. A dedicated resource load supplies `ServerDataLoad`;
+  the client preload supplies `ClientPreload`. The hook may run on a load worker, before a game Host exists.
 - Client and server each apply their own mods, so both need the mod. A client without it (a vanilla Java client, or
   Horizon without the mod) fills in vanilla's defaults for the same stacks: a stone stack the server caps at 16 still
   looks like it stacks to 64 there.

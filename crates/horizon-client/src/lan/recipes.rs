@@ -63,6 +63,7 @@ fn ingredient(v: &Value) -> Option<Ingredient> {
 pub(super) fn network_recipes(
     resources: &Path,
     overlay: &horizon_world::loot::PackOverlay,
+    defaults: &horizon_world::item_defaults::ItemDefaults,
 ) -> (BTreeMap<String, Box<str>>, HashMap<String, i32>) {
     let mut all: BTreeMap<_, _> = match horizon_items::recipe_sources::sources(resources, overlay) {
         Ok(sources) => sources
@@ -74,7 +75,7 @@ pub(super) fn network_recipes(
             BTreeMap::new()
         }
     };
-    match horizon_client::items::Items::catalog(resources, overlay) {
+    match horizon_client::items::Items::catalog(resources, overlay, defaults) {
         Ok(items) => all.retain(|_, r| normalize_ingredients(r, &items)),
         Err(e) => log::warn!("recipes: NeoForge's ingredient shapes stay unresolved: {e}"),
     }

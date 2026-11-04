@@ -597,7 +597,9 @@ impl NaturalLevel for GameLevel<'_, '_> {
             .map_or(self.w.world.bottom_y(), |y| y + 1)
     }
     fn pathfindable_land(&self, x: i32, y: i32, z: i32) -> bool {
-        self.w.data.state(self.state(x, y, z)).flags & data::LAND != 0
+        self.w
+            .data
+            .pathfindable(self.state(x, y, z), data::PathComputationType::Land)
     }
 }
 impl horizon_client::mobs::spawner::SpawnerLevel for GameLevel<'_, '_> {

@@ -639,11 +639,14 @@ fn cost(v: &Value) -> (i32, i32) {
 }
 
 impl LootData {
-    /// Load from a resource root holding `items.json` and `data/`: loot
-    /// tables, item modifiers, predicates, tags and recipes of every
-    /// namespace, vanilla's enchantments. `overlay` adds a world's data
-    /// packs over it.
-    pub fn load(root: &Path, overlay: &PackOverlay) -> io::Result<Self> {
+    /// Load tables, modifiers, predicates, tags and recipes from `data/`,
+    /// and item metadata from the owning load's default-component snapshot.
+    /// `overlay` adds a world's data packs over the resource root.
+    pub fn load(
+        root: &Path,
+        overlay: &PackOverlay,
+        defaults: &crate::item_defaults::ItemDefaults,
+    ) -> io::Result<Self> {
         let all = root.join("data");
         let data = all.join("minecraft");
         let tables = shared_tables(root, overlay)?;
@@ -653,8 +656,8 @@ impl LootData {
         let mut predicates = HashMap::new();
         load_kind(&all, "predicate", &mut predicates)?;
         overlay_map(overlay, "predicate", &mut predicates);
-        let raw = crate::item_defaults::read(root)?;
-        let items = raw
+        let items = defaults
+            .entries()
             .iter()
             .map(|(name, c)| {
                 (
@@ -2008,7 +2011,8 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
         assert!(data.has_table("minecraft:chests/village"));
         assert!(data.has_table("kaisyn:village/forest/house"));
         assert!(!data.has_table("minecraft:village/forest/house"));
@@ -2021,7 +2025,7 @@ mod namespace_tests {
             table,
         )
         .unwrap();
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
         let filled = data.fill("kaisyn:village/forest/house", 1, 27, None);
         let count: i32 = filled.iter().flatten().map(|s| s.count).sum();
         assert_eq!(count, 3);
@@ -2044,7 +2048,8 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
         let mut seen = std::collections::BTreeSet::new();
         for seed in (0..40).map(|n| n * 7_919) {
             let filled = data.fill("minecraft:chests/horn", seed, 27, None);
@@ -2110,7 +2115,8 @@ mod namespace_tests {
                 ],
             )],
         };
-        let data = LootData::load(&root, &overlay).unwrap();
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let data = LootData::load(&root, &overlay, &defaults).unwrap();
         assert!(data.in_tag("item", "minecraft:food", "minecraft:apple"));
         assert!(!data.in_tag("item", "minecraft:food", "minecraft:bread"));
         assert!(!data.in_tag("item", "minecraft:food", "minecraft:kelp"));
@@ -2128,9 +2134,9 @@ mod native_kinds_tests {
         let dir = root.join("data/minecraft/loot_table");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("test.json"), json).unwrap();
-        // LootData::load reads items.json too.
         std::fs::write(root.join("items.json"), "{}").unwrap();
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
         let _ = std::fs::remove_dir_all(&root);
         data
     }

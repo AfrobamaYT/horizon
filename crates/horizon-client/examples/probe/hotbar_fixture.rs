@@ -14,10 +14,9 @@ use std::{fmt::Write as _, fs};
 pub fn main() -> horizon_client::Result<()> {
     let args: Vec<String> = crate::args().collect();
     let usage = "usage: hotbar_fixture RESOURCES CASES OUTPUT";
-    let items = Items::catalog(
-        Path::new(args.first().and(args.get(1)).ok_or(usage)?),
-        &PackOverlay::NONE,
-    )?;
+    let root = Path::new(args.first().and(args.get(1)).ok_or(usage)?);
+    let defaults = horizon_world::item_defaults::read(root)?;
+    let items = Items::catalog(root, &PackOverlay::NONE, &defaults)?;
     let known = |id: &str| items.get(id).is_some();
     let cases = fs::read_to_string(args.get(2).ok_or(usage)?)?;
     let mut out = String::new();

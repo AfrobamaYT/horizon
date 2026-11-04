@@ -8205,9 +8205,22 @@ mod far_census {
         let assets = Arc::new(crate::assets::Assets::load(&root).expect("assets"));
         let biomes = Arc::new(Biomes::load(&root).expect("biomes"));
         let registry = assets.registry;
+        let item_data = crate::test_resources::item_data(
+            &root,
+            horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
+        )
+        .expect("item data");
         let terrain = Arc::new(
-            crate::vanillagen::VanillaTerrain::new(&root.join("worldgen"), registry, &biomes, seed)
-                .expect("terrain"),
+            crate::vanillagen::VanillaTerrain::new(
+                crate::vanillagen::TerrainResources {
+                    dir: &root.join("worldgen"),
+                    registry,
+                    biomes: &biomes,
+                    item_data: &item_data,
+                },
+                seed,
+            )
+            .expect("terrain"),
         );
         let save = Arc::new(SaveDir::new(
             world.join("dimensions/minecraft/overworld"),

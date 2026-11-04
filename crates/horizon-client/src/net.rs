@@ -17,10 +17,12 @@ use horizon_protocol::{
     servers::parse_address,
     text::{Language, plain, translatable},
 };
-use horizon_world::nbt::{JavaString, Tag};
+use horizon_world::{
+    item_defaults::ItemData,
+    nbt::{JavaString, Tag},
+};
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -115,6 +117,9 @@ pub struct Session {
     /// The far terrain requests waiting for the server (`lod_net`).
     far: Arc<crate::lod_net::Inbox>,
 }
+#[cfg(test)]
+use std::path::PathBuf;
+
 impl Session {
     /// Start connecting in the background, as `auth`'s account when there is one.
     pub fn connect(
@@ -123,7 +128,7 @@ impl Session {
         auth: Option<Arc<AuthSession>>,
         info: cfg::ClientInformation,
         lang: Arc<Language>,
-        resources: PathBuf,
+        resources: Arc<ItemData>,
     ) -> Self {
         Self::start(
             address, name, auth, info, lang, None, None, resources, false,
@@ -138,7 +143,7 @@ impl Session {
         auth: Option<Arc<AuthSession>>,
         info: cfg::ClientInformation,
         lang: Arc<Language>,
-        resources: PathBuf,
+        resources: Arc<ItemData>,
     ) -> Self {
         Self::start(address, name, auth, info, lang, None, None, resources, true)
     }
@@ -151,7 +156,7 @@ impl Session {
         info: cfg::ClientInformation,
         lang: Arc<Language>,
         cookies: Cookies,
-        resources: PathBuf,
+        resources: Arc<ItemData>,
     ) -> Self {
         Self::start(
             address,
@@ -171,7 +176,7 @@ impl Session {
         name: &str,
         info: cfg::ClientInformation,
         lang: Arc<Language>,
-        resources: PathBuf,
+        resources: Arc<ItemData>,
     ) -> Self {
         Self::start(
             "local",
@@ -193,7 +198,7 @@ impl Session {
         lang: Arc<Language>,
         local: Option<horizon_protocol::connection::Pipe>,
         cookies: Option<Cookies>,
-        resources: PathBuf,
+        resources: Arc<ItemData>,
         lan: bool,
     ) -> Self {
         let (send, events) = channel();
@@ -614,7 +619,7 @@ fn run(
     cookies: &Cookies,
     far: &crate::lod_net::Inbox,
     transferred: bool,
-    resources: &Path,
+    resources: &ItemData,
     lan: bool,
 ) -> Result<Reason, Reason> {
     let (host, port, mut c) = if let Some(pipe) = local {
@@ -806,7 +811,7 @@ fn receive_play(
     send: &Sender<Event>,
     cookies: &Cookies,
     far: &crate::lod_net::Inbox,
-    resources: &Path,
+    resources: &ItemData,
 ) -> Result<Reason, Reason> {
     loop {
         let (id, payload) = reader
@@ -906,7 +911,7 @@ fn configure(
     lang: &Language,
     send: &Sender<Event>,
     cookies: &Cookies,
-    resources: &Path,
+    resources: &ItemData,
 ) -> Result<Dynamic, Reason> {
     let mut registries = Dynamic::default();
     let mut content_verified = false;
@@ -927,8 +932,11 @@ fn configure(
         {
             cfg::Clientbound::KeepAlive(k) => reply(cfg::Serverbound::KeepAlive(k))?,
             cfg::Clientbound::CustomPayload(p) if p.channel == crate::content_identity::CHANNEL => {
-                let hash = crate::content_identity::identity(resources)
-                    .map_err(|_| Reason::plain(crate::content_identity::MISMATCH.to_string()))?;
+                let hash =
+                    crate::content_identity::identity(resources.root(), resources.defaults())
+                        .map_err(|_| {
+                            Reason::plain(crate::content_identity::MISMATCH.to_string())
+                        })?;
                 content_verified = p.data == hash;
                 reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
                     channel: crate::content_identity::CHANNEL.into(),
@@ -1233,6 +1241,16 @@ fn continues_after_failed_join(lan: bool, signed_in: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horizon_world::native_load_context::DataLoadOrigin;
+
+    fn empty_item_data(name: &str) -> (PathBuf, Arc<ItemData>) {
+        let root =
+            std::env::temp_dir().join(format!("horizon-net-data-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload).unwrap();
+        (root, data)
+    }
 
     /// Launchers find the last server joined in `latest.log` by vanilla's line.
     #[test]
@@ -1254,6 +1272,7 @@ mod tests {
 
     #[test]
     fn direct_login_preserves_hostname_and_negotiates_brand() {
+        let (root, data) = empty_item_data("brand");
         for server_brand in [
             b"\x07vanilla".as_slice(),
             b"\x07horizon",
@@ -1268,7 +1287,7 @@ mod tests {
                 None,
                 cfg::ClientInformation::new(8),
                 Arc::new(Language::new()),
-                PathBuf::new(),
+                Arc::clone(&data),
             );
             let (stream, _) = listener.accept().unwrap();
             stream
@@ -1350,6 +1369,7 @@ mod tests {
             drop(server);
             drop(session);
         }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1411,6 +1431,7 @@ mod tests {
         let (c, _, _) = connect_tcp("127.0.0.1", port, true, Duration::from_millis(300)).unwrap();
         let _server = held.join().unwrap().unwrap();
         let (mut reader, writer) = c.split();
+        let (root, data) = empty_item_data("timeout");
         let (done, result) = channel();
         std::thread::spawn(move || {
             let (send, _events) = channel();
@@ -1422,7 +1443,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 &crate::lod_net::Inbox::default(),
-                Path::new("."),
+                &data,
             ));
         });
         let ended = result
@@ -1432,6 +1453,7 @@ mod tests {
             ended.map(|r| r.text).map_err(|r| r.text),
             Err("Timed out".to_owned())
         );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1459,7 +1481,9 @@ mod tests {
             br#"{"states":[["minecraft:stone",false,false,"Block{minecraft:stone}",{"id":"minecraft:stone"}]]}"#,
         )
         .unwrap();
-        let expected = crate::content_identity::identity(&root).unwrap();
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload).unwrap();
+        let expected = crate::content_identity::identity(&root, data.defaults()).unwrap();
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let (mut reader, writer) = Connection::local(client).split();
         let writer = Mutex::new(Some(writer));
@@ -1472,7 +1496,7 @@ mod tests {
                 &Language::new(),
                 &send,
                 &Cookies::default(),
-                &root,
+                &data,
             )
         });
         let mut server = Connection::local(server);
@@ -1576,6 +1600,7 @@ mod tests {
 
     #[test]
     fn pings_wait_behind_teleports_but_keepalives_do_not_wait_for_the_game() {
+        let (root, data) = empty_item_data("pings");
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let (mut reader, writer) = Connection::local(client).split();
         let writer = Arc::new(Mutex::new(Some(writer)));
@@ -1590,7 +1615,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 &crate::lod_net::Inbox::default(),
-                Path::new("."),
+                &data,
             )
         });
         let mut server = Connection::local(server);
@@ -1625,10 +1650,12 @@ mod tests {
         );
         writer.lock().unwrap().take().unwrap().shutdown();
         assert!(thread.join().unwrap().is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn play_packets_wait_out_a_reconfiguration() {
+        let (root, data) = empty_item_data("reconfiguration");
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let (mut reader, writer) = Connection::local(client).split();
         let (send, events) = channel();
@@ -1655,7 +1682,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 &crate::lod_net::Inbox::default(),
-                Path::new("."),
+                &data,
             )
         });
         let mut server = Connection::local(server);
@@ -1684,10 +1711,12 @@ mod tests {
         assert_eq!(play::Serverbound::decode(id, &body).unwrap(), tick_end);
         drop(session);
         assert!(thread.join().unwrap().is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn play_answers_cookie_requests_from_stored_cookies_and_follows_transfers() {
+        let (root, data) = empty_item_data("cookies");
         let (client, server) = horizon_protocol::connection::Pipe::pair();
         let (mut reader, writer) = Connection::local(client).split();
         let writer = Arc::new(Mutex::new(Some(writer)));
@@ -1703,7 +1732,7 @@ mod tests {
                 &send,
                 &thread_cookies,
                 &crate::lod_net::Inbox::default(),
-                Path::new("."),
+                &data,
             )
         });
         let mut server = Connection::local(server);
@@ -1748,6 +1777,7 @@ mod tests {
             cookies.lock().unwrap().get("proxy:session"),
             Some(&vec![1, 2, 3])
         );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1773,6 +1803,7 @@ mod tests {
     /// client login listener by test_lan_auth_parity.py.
     #[test]
     fn lan_login_continues_after_authentication_failure() {
+        let (root, data) = empty_item_data("lan-auth");
         for lan in [true, false] {
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let port = listener.local_addr().unwrap().port();
@@ -1839,7 +1870,7 @@ mod tests {
                 None,
                 cfg::ClientInformation::new(8),
                 Arc::new(lang),
-                PathBuf::new(),
+                Arc::clone(&data),
             );
             let reason = loop {
                 if let Event::Disconnected { reason, .. } = session
@@ -1865,5 +1896,6 @@ mod tests {
                 !goes_on
             );
         }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

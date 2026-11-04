@@ -798,7 +798,10 @@ impl Game<'_> {
         cookies: Option<horizon_client::net::Cookies>,
         lan: bool,
     ) -> Result<()> {
-        super::world_loading::preload_server_loot(&self.options.resources);
+        super::world_loading::preload_server_loot(
+            &self.options.resources,
+            &self.res.core.item_data,
+        );
         if self.defer_world_entry(super::PendingWorldEntry::Server {
             address: address.to_owned(),
             name: name.to_owned(),
@@ -855,6 +858,7 @@ impl Game<'_> {
             self.world_biomes_base = None;
         }
         let root = self.options.resources.clone();
+        let item_data = Arc::clone(&self.res.core.item_data);
         let builtin = builtin_registries(&root).ok_or("Resources are incomplete: registries.json is missing or invalid. Click \"Prepare again\" in the launcher (or run horizon-prepare), then try again.")?;
         let lang = Arc::new(horizon_client::net::load_language(&root));
         // Options.createInformation: what the server learns about this player,
@@ -884,7 +888,7 @@ impl Game<'_> {
         self.server_packs_connect(local.is_none().then_some(address), user);
         let session = match local {
             Some(pipe) => {
-                Session::connect_local(pipe, name, info.clone(), lang.clone(), root.clone())
+                Session::connect_local(pipe, name, info.clone(), lang.clone(), item_data.clone())
             }
             None => {
                 self.extras_connecting(address, name, lan);
@@ -896,7 +900,7 @@ impl Game<'_> {
                         info.clone(),
                         lang.clone(),
                         cookies,
-                        root.clone(),
+                        item_data.clone(),
                     ),
                     None => {
                         let connect = if lan {
@@ -910,7 +914,7 @@ impl Game<'_> {
                             auth.clone(),
                             info.clone(),
                             lang.clone(),
-                            root.clone(),
+                            item_data.clone(),
                         )
                     }
                 }
@@ -12190,10 +12194,11 @@ mod tests {
             return;
         }
         let none = &horizon_world::loot::PackOverlay::NONE;
-        let items = Items::catalog(&root, none).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = Items::catalog(&root, none, &defaults).unwrap();
         let recipes = Recipes::load(&root, &items, none).unwrap();
         let brewing = Brewing::load(&root, &items, none);
-        let banners = Banners::load(&root);
+        let banners = Banners::load(&root, &defaults);
         let station_recipes = StationRecipes::load(&root, &items, none);
         let enchantments = Enchantments::default();
         let names = Names::default();
@@ -12440,11 +12445,13 @@ mod tests {
         }
         let registry = horizon_world::level::data::load_registry(&root).unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, &registry).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = horizon_client::items::Items::load(
             &root,
             &registry,
             &facts,
             &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
         )
         .unwrap();
         let rocket = items.get("minecraft:firework_rocket").unwrap();

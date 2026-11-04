@@ -22,11 +22,11 @@ use super::{
 use horizon_assets::item_model::StackView;
 use horizon_client::creative::Creative;
 use horizon_client::mod_api::{
-    self, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef,
-    NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
+    self, Answered, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor,
+    LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
     NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
-    NativeServerPlayer, RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase,
-    TicketController, ToolUse, WorldPhase,
+    NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening,
+    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
@@ -160,40 +160,45 @@ impl Game<'_> {
     /// `screen_opening` first (`ScreenEvent.Opening`: a mod may keep the
     /// current screen or open its own), then `screen_closing` for the screen
     /// it replaces, as NeoForge's `Minecraft.setScreen` does. The same screen
-    /// again, a game with no native mod, and a server's or a guest's `Game`
+    /// again, a game with no mod listening to either, and a server's or a guest's `Game`
     /// are a plain assignment.
     pub(super) fn set_screen(&mut self, screen: Screen) {
         if self.screen == screen {
             return;
         }
-        if mod_api::mods().is_empty()
-            || !self.options.execution_role.is_client()
-            || self.lan_acting.is_some()
-        {
-            self.screen = screen;
-            return;
-        }
-        let outcome = {
-            let current = self.screen_change_view(self.screen);
-            let new = self.screen_change_view(screen);
-            self.screen_change(&current, &new, true, self.screen != Screen::Playing)
-        };
         let mut screen = screen;
         let mut owner = None;
-        match outcome {
-            Some(ScreenOpening::Cancel) => return,
-            Some(ScreenOpening::ModScreen(mod_id)) if !self.mod_screen_blocked() => {
-                screen = Screen::Mod;
-                owner = Some(mod_id);
+        if (mod_api::listened(mod_api::HookId::ScreenOpening)
+            || mod_api::listened(mod_api::HookId::ScreenClosing))
+            && self.options.execution_role.is_client()
+            && self.lan_acting.is_none()
+        {
+            let outcome = {
+                let current = self.screen_change_view(self.screen);
+                let new = self.screen_change_view(screen);
+                self.screen_change(&current, &new, true, self.screen != Screen::Playing)
+            };
+            match outcome {
+                Some(Answered {
+                    answer: ScreenOpening::Cancel,
+                    ..
+                }) => return,
+                Some(Answered {
+                    answer: ScreenOpening::ModScreen,
+                    mod_id,
+                }) if !self.mod_screen_blocked() => {
+                    screen = Screen::Mod;
+                    owner = Some(mod_id);
+                }
+                _ => {}
             }
-            _ => {}
         }
         if self.screen == screen && owner.is_none() {
             return;
         }
         self.screen = screen;
         if let Some(owner) = owner {
-            self.native_mod_screen = Some(owner);
+            self.native_mod_screen = Some(owner.to_owned());
         }
         if screen == Screen::Mod {
             self.keys.clear();
@@ -215,12 +220,16 @@ impl Game<'_> {
         new: &NativeScreenView<'_>,
         opens: bool,
         closes: bool,
-    ) -> Option<ScreenOpening> {
+    ) -> Option<Answered<ScreenOpening>> {
         let mut outcome = None;
         if opens {
             self.native_screen_opening(current, new, &mut outcome);
         }
-        if closes && outcome != Some(ScreenOpening::Cancel) {
+        if closes
+            && outcome
+                .as_ref()
+                .is_none_or(|a| a.answer != ScreenOpening::Cancel)
+        {
             self.native_screen_closing(current);
         }
         outcome
@@ -1508,8 +1517,11 @@ impl Game<'_> {
     /// starts as that text; replace it and players see the new message
     /// (`withUnsignedContent`: a signed message keeps its signature), and
     /// the log shows it. Set `cancel` and nobody sees it, and it doesn't
-    /// count toward the chat spam limit. Commands (`/say`, `/msg`...) are
-    /// not chat here. Server-side, with no player's state swapped in.
+    /// count toward the chat spam limit. Lines pushed to `replies` go to the
+    /// sender alone as system chat, whether or not the message is canceled
+    /// (no other player sees them). Commands (`/say`, `/msg`...) are not
+    /// chat here. Server-side, with no player's state swapped in.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn native_server_chat(
         &mut self,
         player_id: i32,
@@ -1517,9 +1529,12 @@ impl Game<'_> {
         username: &str,
         raw_text: &str,
         message: &mut Text,
+        replies: &mut Vec<Text>,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_server_chat(self, player_id, player, username, raw_text, message, cancel);
+        mod_api::dispatch_server_chat(
+            self, player_id, player, username, raw_text, message, replies, cancel,
+        );
     }
     /// NeoForge's `ClientChatEvent`: a client is about to send `message`.
     /// `original_message` is immutable; change `message` or set `cancel` to
@@ -2500,12 +2515,12 @@ impl Game<'_> {
     /// `Gui.setScreen` is about to replace the `current` screen with `new`
     /// (`ScreenEvent.Opening`; the screen `playing` is none: vanilla's null).
     /// Answer `ScreenOpening::Cancel` to keep the current one, or
-    /// `ScreenOpening::ModScreen` to open a mod's own screen instead.
+    /// `ScreenOpening::ModScreen` to open the answering mod's own screen instead.
     pub(super) fn native_screen_opening(
         &self,
         current: &NativeScreenView<'_>,
         new: &NativeScreenView<'_>,
-        outcome: &mut Option<ScreenOpening>,
+        outcome: &mut Option<Answered<ScreenOpening>>,
     ) {
         mod_api::dispatch_screen_opening(self, current, new, outcome);
     }
@@ -5974,6 +5989,18 @@ impl Game<'_> {
             used,
         );
     }
+    /// `BlockBehaviour.isPathfindable`: set `pathfindable` to change whether a path of `kind`
+    /// may go through `state`. It starts with the block's own answer and depends on the state
+    /// and the type alone, so the game asks once per state when the parts resolve (at load and on
+    /// every `/reload`) and path finding and spawning read the answers. Server-side.
+    pub(super) fn native_is_pathfindable(
+        &self,
+        state: BlockStateId,
+        kind: PathComputationType,
+        pathfindable: &mut bool,
+    ) {
+        mod_api::dispatch_is_pathfindable(self, state, kind, pathfindable);
+    }
     /// `BlockBehaviour.getCloneItemStack`, asked by
     /// `ServerGamePacketListenerImpl.handlePickItemFromBlock`. `include_data`
     /// is true for a creative player picking with Ctrl. Leave `stack` unset to
@@ -8629,13 +8656,16 @@ impl Game<'_> {
     /// where the WebAssembly mod of the same id kept its storage, so a
     /// player's settings carry over. Not created here.
     pub(super) fn native_data_dir(&self, mod_id: &str) -> PathBuf {
-        let mods = Self::game_dir().join(mod_list::DIR);
-        mods.join(".horizon-mod-data").join(mod_id)
+        Self::mod_data_root().join(mod_id)
+    }
+    pub(super) fn mod_data_root() -> PathBuf {
+        Self::game_dir()
+            .join(mod_list::DIR)
+            .join(".horizon-mod-data")
     }
     /// A mod's setting `key` (one file per key in `native_data_dir`).
     pub(super) fn native_setting(&self, mod_id: &str, key: &str) -> Option<String> {
-        let path = self.native_data_dir(mod_id).join(key);
-        fs::read_to_string(path).ok().map(|v| v.trim().to_owned())
+        horizon_world::native_load_context::read_setting(&self.native_data_dir(mod_id), key)
     }
     /// Keeps a mod's setting `key`.
     pub(super) fn native_set_setting(&self, mod_id: &str, key: &str, value: &str) {
@@ -10445,7 +10475,7 @@ mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            super::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!("no menu handoff"),
         )
@@ -11172,6 +11202,23 @@ mod screen_open_tests {
     };
     use std::sync::{Arc, Mutex};
 
+    /// A mod that hears `screen_opening` and passes.
+    struct Passer;
+    #[mod_api::__subscriptions]
+    impl Hooks for Passer {
+        fn screen_opening(
+            &self,
+            _host: &dyn ClientHost,
+            _event: &mut ScreenOpeningEvent<'_>,
+        ) -> Option<ScreenOpening> {
+            None
+        }
+    }
+    /// A mod with no screen hook.
+    struct Idle;
+    #[mod_api::__subscriptions]
+    impl Hooks for Idle {}
+
     /// The creative screen keeps its two tab rows clear: one strip above the window
     /// and one below it, each as wide as the window and a tab row deep (vanilla's
     /// `CreativeModeInventoryScreen` tab buttons, 28 px outside the 195x136 window).
@@ -11222,14 +11269,21 @@ mod screen_open_tests {
     ) {
         let log = Arc::new(Mutex::new(Vec::new()));
         let answer = Arc::new(Mutex::new(None));
-        let mods = vec![ModEntry::new(
-            "screens",
-            Box::new(Probe {
-                log: log.clone(),
-                answer: answer.clone(),
-            }),
-        )]
+        let mods = vec![
+            ModEntry::new("passer", Box::new(Passer)),
+            ModEntry::new(
+                "screens",
+                Box::new(Probe {
+                    log: log.clone(),
+                    answer: answer.clone(),
+                }),
+            ),
+        ]
         .into();
+        with_game_of(mods, |game| test(game, &log, &answer));
+    }
+    /// A client game with a player, under `mods`.
+    fn with_game_of(mods: Arc<[ModEntry]>, test: impl FnOnce(&mut Game<'_>)) {
         with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.options.execution_role = ExecutionRole::Client;
@@ -11240,8 +11294,22 @@ mod screen_open_tests {
                     )
                     .unwrap(),
                 );
-                test(game, &log, &answer);
+                test(game);
             });
+        });
+    }
+
+    /// Only a mod that listens to `screen_opening` or `screen_closing` makes a screen
+    /// change a hook call; a mod with neither leaves it a plain assignment, and a mod
+    /// screen's entry still releases the keys.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_mod_with_no_screen_hook_leaves_set_screen_plain() {
+        with_game_of(vec![ModEntry::new("idle", Box::new(Idle))].into(), |game| {
+            game.keys.insert(KeyCode::KeyW);
+            game.set_screen(Screen::Mod);
+            assert_eq!(game.screen, Screen::Mod);
+            assert!(game.keys.is_empty());
         });
     }
     fn take(log: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
@@ -11286,9 +11354,10 @@ mod screen_open_tests {
         run(|game, log, answer| {
             game.set_screen(Screen::Paused);
             take(log);
-            *answer.lock().unwrap() = Some(ScreenOpening::ModScreen("screens".into()));
+            *answer.lock().unwrap() = Some(ScreenOpening::ModScreen);
             game.set_screen(Screen::Options);
             assert_eq!(game.screen, Screen::Mod);
+            // The second mod answered: the screen is its own, not the passer's.
             assert_eq!(game.native_mod_screen(), Some("screens"));
             // One Opening, for the screen asked for: the replacement does not fire it again.
             assert_eq!(take(log), ["opening paused->options", "closing paused"]);

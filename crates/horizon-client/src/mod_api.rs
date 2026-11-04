@@ -10,7 +10,9 @@ pub use horizon_mods::Side;
 pub(crate) use phase::install_packages;
 #[cfg(test)]
 pub(crate) use phase::with_test_packages;
-pub use phase::{LoadedMods, PackageInfo, PackageKind, RegistrationContext};
+pub use phase::{
+    DataLoadContext, DataLoadOrigin, LoadedMods, PackageInfo, PackageKind, RegistrationContext,
+};
 mod config_files;
 pub use config_files::{
     CONFIG_FILE_MAX, CONFIG_LIST_MAX, ConfigEntry, ConfigEntryKind, ConfigFileError, ConfigFiles,
@@ -66,6 +68,7 @@ pub use crate::items::ItemStack;
 pub use crate::menu::{LogicalSide, StackedOnOther};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
+pub use crate::mobs::data::PathComputationType;
 pub use crate::mod_chunk_tickets::TicketOwner as NativeTicketOwner;
 pub use crate::mod_chunk_tickets::{TicketSet, TicketValidation};
 pub use crate::music::{Music, MusicLayer};
@@ -455,17 +458,27 @@ pub struct NativeItemFished<'a> {
     pub drops: &'a [ItemStack],
 }
 
+/// A replace hook's answer with the mod that gave it: the dispatch fills in `mod_id` (the
+/// answering mod's `[mod] id`), so no mod can answer for another.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Answered<T> {
+    pub answer: T,
+    pub mod_id: &'static str,
+}
+
 /// What a mod answers to `screen_opening` (`ScreenEvent.Opening`): the screen
 /// that was about to open does not. The first mod to answer wins.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ScreenOpening {
     /// `Opening.setCanceled(true)`: the current screen stays open.
     Cancel,
-    /// `Opening.setNewScreen(..)`: the mod's own screen
+    /// `Opening.setNewScreen(..)`: the answering mod's own screen
     /// (`Host::mod_screen_open`) opens instead, if it can open there (not over
     /// the title screen, a book, a prompt or while a world loads; the
     /// screen that was about to open does then).
-    ModScreen(String),
+    ModScreen,
 }
 
 /// The open screen, for the screen hooks (`native_screen_render_post`, the
@@ -2300,6 +2313,14 @@ fn entered(
     hook_id: generated::HookId,
     hook: &'static str,
 ) -> impl Iterator<Item = &'static dyn Hooks> {
+    entered_with_id(hook_id, hook).map(|(_, hooks)| hooks)
+}
+
+/// [`entered`] with each mod's own `[mod] id`, for a hook that names the mod that answered.
+fn entered_with_id(
+    hook_id: generated::HookId,
+    hook: &'static str,
+) -> impl Iterator<Item = (&'static str, &'static dyn Hooks)> {
     installed().into_iter().flat_map(move |installed| {
         let mut crash_guard = None;
         installed
@@ -2310,7 +2331,7 @@ fn entered(
                 let entry = &installed.mods[index];
                 let hooks = &*entry.hooks;
                 crash_guard = Some(mark_mod(entry.id, hook));
-                hooks
+                (entry.id, hooks)
             })
     })
 }

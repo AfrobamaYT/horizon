@@ -27,6 +27,8 @@ mod tests {
         #[derive(Clone, Copy)]
         pub(super) struct LevelDimension;
         pub(super) struct NeighbourUpdate;
+        #[derive(Clone, Copy)]
+        pub(super) struct PathComputationType;
         pub(super) struct GlobalPos;
         pub(super) struct Ticks;
         pub(super) trait LevelHost {
@@ -51,9 +53,15 @@ mod tests {
         pub(super) struct NativeExplosionStart<'a>(pub &'a ());
         pub(super) struct NativeItemFished<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
+        #[derive(Debug, PartialEq)]
         pub(super) enum ScreenOpening {
             Cancel,
-            ModScreen(String),
+            ModScreen,
+        }
+        #[derive(Debug, PartialEq)]
+        pub(super) struct Answered<T> {
+            pub(super) answer: T,
+            pub(super) mod_id: &'static str,
         }
         pub(super) struct StackedOnOther<'a> {
             pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
@@ -165,6 +173,7 @@ mod tests {
         }
         pub(super) struct NativeLifecycleContext;
         pub(super) struct RegistrationContext<'a>(pub &'a str);
+        pub(super) struct DataLoadContext<'a>(pub &'a str);
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
         #[derive(Clone, Copy)]
@@ -341,24 +350,30 @@ mod tests {
             .is_some_and(|installed| installed.subscribers.contains_any(hook as usize))
     }
     fn entered(hook_id: HookId, hook: &'static str) -> impl Iterator<Item = &'static dyn Hooks> {
+        entered_with_id(hook_id, hook).map(|(_, hooks)| hooks)
+    }
+    fn entered_with_id(
+        hook_id: HookId,
+        hook: &'static str,
+    ) -> impl Iterator<Item = (&'static str, &'static dyn Hooks)> {
         MODS.get().into_iter().flat_map(move |installed| {
             installed
                 .subscribers
                 .indices(hook_id as usize)
                 .map(move |index| {
-                    let hooks = &*installed.mods[index].hooks;
+                    let entry = &installed.mods[index];
                     ENTERED.with(|entered| entered.borrow_mut().push((index, hook)));
-                    hooks
+                    (entry.id, &*entry.hooks)
                 })
         })
     }
     struct ModEntry {
-        _id: &'static str,
+        id: &'static str,
         hooks: Box<dyn Hooks>,
     }
     impl ModEntry {
         fn new(id: &'static str, hooks: Box<dyn Hooks>) -> Self {
-            Self { _id: id, hooks }
+            Self { id, hooks }
         }
     }
     struct Registrar;
@@ -541,7 +556,11 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Active {
             fn loot_table_load(&self, event: &mut LootTableLoadEvent<'_>) {
-                dispatch_modify_default_components("test", &mut Map::new());
+                dispatch_modify_default_components(
+                    &DataLoadContext("defaults"),
+                    "test",
+                    &mut Map::new(),
+                );
                 Other.loot_table_load(event);
             }
         }
@@ -702,7 +721,12 @@ mod tests {
         fn loot_table_load(&self, event: &mut LootTableLoadEvent<'_>) {
             event.table.as_array_mut().unwrap().push(self.id.into());
         }
-        fn modify_default_components(&self, event: &mut ModifyDefaultComponentsEvent<'_>) {
+        fn modify_default_components(
+            &self,
+            context: &DataLoadContext<'_>,
+            event: &mut ModifyDefaultComponentsEvent<'_>,
+        ) {
+            assert_eq!(context.0, "defaults");
             let value = event
                 .components
                 .entry("order")
@@ -1025,6 +1049,48 @@ mod tests {
     }
 
     #[test]
+    fn an_answer_names_the_mod_that_gave_it() {
+        struct Passer;
+        #[mod_api::__subscriptions]
+        impl Hooks for Passer {
+            fn screen_opening(
+                &self,
+                _: &dyn ClientHost,
+                _: &mut ScreenOpeningEvent<'_>,
+            ) -> Option<ScreenOpening> {
+                None
+            }
+        }
+        struct Opener;
+        #[mod_api::__subscriptions]
+        impl Hooks for Opener {
+            fn screen_opening(
+                &self,
+                _: &dyn ClientHost,
+                _: &mut ScreenOpeningEvent<'_>,
+            ) -> Option<ScreenOpening> {
+                Some(ScreenOpening::ModScreen)
+            }
+        }
+        let mods: Vec<ModEntry> = vec![
+            ModEntry::new("passer", Box::new(Passer)),
+            ModEntry::new("opener", Box::new(Opener)),
+            ModEntry::new("late", Box::new(Opener)),
+        ];
+        install(mods.into());
+        let view = NativeScreenView(&());
+        let mut outcome = None;
+        dispatch_screen_opening(&TestHost, &view, &view, &mut outcome);
+        assert_eq!(
+            outcome,
+            Some(Answered {
+                answer: ScreenOpening::ModScreen,
+                mod_id: "opener"
+            })
+        );
+    }
+
+    #[test]
     fn dispatch_contracts() {
         struct Weapon;
         #[mod_api::__subscriptions]
@@ -1087,7 +1153,7 @@ mod tests {
         dispatch_loot_table_load("table", &mut table);
         assert_eq!(table, serde_json::json!([1, 2]));
         let mut components = Map::new();
-        dispatch_modify_default_components("item", &mut components);
+        dispatch_modify_default_components(&DataLoadContext("defaults"), "item", &mut components);
         assert_eq!(components["order"], serde_json::json!([1, 2]));
         let mut host = TestHost;
         dispatch_level_tick_pre(&mut host, "overworld");

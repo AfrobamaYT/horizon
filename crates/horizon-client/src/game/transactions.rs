@@ -590,7 +590,7 @@ mod tests {
             &settings,
             Instant::now(),
             false,
-            true,
+            super::super::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )

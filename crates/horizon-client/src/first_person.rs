@@ -966,7 +966,7 @@ mod tests {
                 }))
                 .unwrap(),
             );
-            models.prototypes.insert(
+            std::sync::Arc::make_mut(&mut models.prototypes).insert(
                 item.into(),
                 [("minecraft:item_model".into(), json!(item))].into(),
             );

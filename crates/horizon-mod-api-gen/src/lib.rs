@@ -616,6 +616,7 @@ impl VisitMut for EventLifetimes {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HookContext {
     Registration,
+    DataLoad,
 }
 
 #[derive(Debug)]
@@ -774,6 +775,7 @@ fn catalog_hooks(root: &Path, catalog: &serde_json::Value) -> Result<Vec<Catalog
             None => None,
             Some(value) => Some(match value.as_str() {
                 Some("registration") => HookContext::Registration,
+                Some("data_load") => HookContext::DataLoad,
                 _ => return Err(format!("hook {name}: invalid phase context")),
             }),
         };

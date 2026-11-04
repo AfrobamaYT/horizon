@@ -497,7 +497,7 @@ pub(super) mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -566,6 +566,48 @@ pub(super) mod tests {
                 b.best_neighbor_signal(level, ticks, BlockPos::new(pos.x - 1, pos.y, pos.z))
             });
             assert_eq!(signal, 15);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn block_part_answers_is_pathfindable_once_per_state_and_type() {
+        use horizon_client::mobs::data::PathComputationType::{self, Air, Land, Water};
+
+        // Before any part: every state answers as the vanilla export says.
+        with_game(|game| {
+            let data = &game.res.rest().mob_data;
+            for (i, vanilla) in data.states.iter().enumerate() {
+                for (kind, bit) in [(Land, 1), (Water, 2), (Air, 4)] {
+                    let state = horizon_world::registry::BlockStateId(i as u32);
+                    assert_eq!(data.pathfindable(state, kind), vanilla.flags & bit != 0);
+                }
+            }
+        });
+        horizon_client::mod_api::part_tests::pathfindable_game_thread();
+        with_game(|game| {
+            let registry = game.pack.assets.registry;
+            let asks = |name: &str, kind: PathComputationType| {
+                let state = registry.default_state(name).unwrap();
+                game.res.rest().mob_data.pathfindable(state, kind)
+            };
+            // Glass: land and air answered, water left to the block (vanilla: none of them).
+            assert!(asks("minecraft:glass", Land));
+            assert!(asks("minecraft:glass", Air));
+            assert!(!asks("minecraft:glass", Water));
+            // Air: land refused, water allowed, air left to the block.
+            assert!(!asks("minecraft:air", Land));
+            assert!(asks("minecraft:air", Water));
+            assert!(asks("minecraft:air", Air));
+            // A block with no part answers as before.
+            assert!(!asks("minecraft:stone", Land));
+            // A reload without the mod's answers takes them back.
+            game.res
+                .rest()
+                .mob_data
+                .set_pathfindable(false, |_, _, vanilla| vanilla);
+            assert!(!asks("minecraft:glass", Land));
+            assert!(asks("minecraft:air", Land));
         });
     }
 
@@ -2126,7 +2168,7 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn living_attributes_are_unavailable_for_nonplayers() {
+    fn living_attributes_answer_for_mobs_stands_and_the_dragon() {
         use horizon_client::{entities::ArmorStand, mobs::Mob};
         use horizon_core::geometry::Vec3;
         with_game(|game| {
@@ -2141,10 +2183,17 @@ pub(super) mod tests {
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 14;
             game.dragon = Some(dragon);
-            for id in [12, 13, 14] {
+            for (id, max) in [(12, 20.0), (13, 20.0), (14, 200.0)] {
                 let living = game.native_living(game.native_entity(id).unwrap()).unwrap();
-                assert_eq!(living.attribute_base(game, "minecraft:max_health"), None);
-                assert_eq!(living.attribute_value(game, "minecraft:max_health"), None);
+                assert_eq!(
+                    living.attribute_base(game, "minecraft:max_health"),
+                    Some(max)
+                );
+                assert_eq!(
+                    living.attribute_value(game, "minecraft:max_health"),
+                    Some(max)
+                );
+                assert_eq!(living.attribute_value(game, "missing:attribute"), None);
             }
         });
     }
@@ -2168,7 +2217,7 @@ pub(super) mod tests {
             &settings,
             Instant::now(),
             false,
-            true,
+            super::super::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -2329,7 +2378,7 @@ pub(super) mod tests {
             &settings,
             Instant::now(),
             false,
-            true,
+            super::super::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )

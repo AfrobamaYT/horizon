@@ -349,7 +349,10 @@ impl NaturalLevel for World<'_> {
             .map_or(self.min_y(), |y| y + 1)
     }
     fn pathfindable_land(&self, x: i32, y: i32, z: i32) -> bool {
-        self.s.data.state(self.state(x, y, z)).flags & horizon_client::mobs::data::LAND != 0
+        self.s.data.pathfindable(
+            self.state(x, y, z),
+            horizon_client::mobs::data::PathComputationType::Land,
+        )
     }
 }
 
@@ -523,11 +526,12 @@ pub fn main() -> horizon_client::Result<()> {
     let registry = assets.registry;
     let facts = BlockFacts::load(root, registry)?;
     let data = MobData::load(root, &facts);
-    let items = Items::tags_only(root, &PackOverlay::NONE)?;
+    let defaults = horizon_world::item_defaults::read(root)?;
+    let items = Items::tags_only(root, &PackOverlay::NONE, &defaults)?;
     // Trial spawner rewards: the loot tables and the configs.
     let loot = if input.contains("mode=trial") || input.contains("mode=vault") {
         horizon_client::mobs::trial_spawner::load_registry(root);
-        horizon_client::structure_blocks::loot_data(root, &PackOverlay::NONE)
+        horizon_client::structure_blocks::loot_data(root, &PackOverlay::NONE, &defaults)
     } else {
         None
     };
