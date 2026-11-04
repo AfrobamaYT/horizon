@@ -1,4 +1,0 @@
-{
-  "hooks": [{"name": "ingredient_test", "doc": "A mod's own ingredient kind, matching a concrete stack at craft time:\nthe ingredient's `test` calls here with the kind, its JSON and the\nstack being matched, `accept` already true (the load-time list named\nthe item). Set `accept` to false to refuse the stack — its components\nare the usual reason. The hook may be called many times a craft; the\nanswer must be the same for the same stack. It is given the loop `context` of the side that runs the match (its registries, settings and mod list); it fires inside recipe matching, so it takes no `Host`.", "version": 2, "context": "loop", "side": "both", "target": "mod_api::crafting::native_ingredient_test", "mod_api": {"contract": "listen"}}],
-  "helpers": [{"name": "recipe_ingredient_test", "backend": true, "target": "horizon_client::game::native_hooks::Game<'_>::native_recipe_ingredient_test", "mod_api": {}, "side": "both"}]
-}

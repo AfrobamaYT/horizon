@@ -1,3 +1,0 @@
-{
-  "hooks": [{"name":"render_name_tag", "doc": "Name tag visibility and optional replacement text.", "target":"horizon_client::game::native_hooks::Game<'_>::native_render_name_tag", "neoforge":"RenderNameTagEvent", "side":"client", "cancellable":false, "mod_api":{"contract":"listen"}}]
-}

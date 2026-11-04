@@ -1,8 +1,0 @@
-{
-  "hooks": [],
-  "helpers": [
-    {"name": "block_sprites", "side": "client", "target": "horizon_client::game::native_block_sprites::Game<'_>::native_block_sprites"},
-    {"name": "texture_sprites", "side": "client", "target": "horizon_client::game::native_block_sprites::Game<'_>::native_texture_sprites"},
-    {"name": "block_sprites_version", "side": "client", "target": "horizon_client::game::native_block_sprites::Game<'_>::native_block_sprites_version"}
-  ]
-}
