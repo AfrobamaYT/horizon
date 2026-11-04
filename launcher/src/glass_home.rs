@@ -69,7 +69,7 @@ impl Launcher {
             .pt(px(64. - crate::glass::CONTENT_INSET))
             .child(self.edition_tabs(java.is_some(), cx))
             .child(self.home_title())
-            .child(self.played_text(cx))
+            .child(self.played_text())
             .child(actions)
     }
 
@@ -168,9 +168,8 @@ impl Launcher {
             )
     }
 
-    /// "You've played for 41 h 06 min! Last played today.", or how long it has run now; then
-    /// the players counts the launcher knows (not in the mockup).
-    fn played_text(&self, cx: &mut Context<Self>) -> Div {
+    /// "You've played for 41 h 06 min! Last played today.", or how long it has run now.
+    fn played_text(&self) -> Div {
         let line = match (self.client_since, self.selected_instance()) {
             (Some(since), _) => trf(
                 "Playing for {time} now. Have fun!",
