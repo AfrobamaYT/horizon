@@ -990,7 +990,7 @@ pub trait Hooks {
     /// nothing.
     #[hook(side = "server", contract = "listen")]
     fn consume_effect();
-    /// A native mod's hook point (docs/modding/src/how-to/native-mods.md), listed in `native-hooks.json` with the game's:
+    /// A native mod's hook point (docs/modding/src/how-to/native-mods.md), declared in `hooks/*.rs` with the game's:
     /// the loot table `id` (`minecraft:chests/simple_dungeon`, `minecraft:blocks/stone`,
     /// `minecraft:entities/zombie`) as it loads, its JSON after the data packs', before anything
     /// rolls it (NeoForge's `LootTableLoadEvent`, Fabric's `LootTableEvents.MODIFY`). Add pools to
@@ -1691,7 +1691,7 @@ pub trait Hooks {
         cancellable = true
     )]
     fn experience_orb_merge();
-    /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`
+    /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/*.rs`
     /// with the game's): container slot `slot` of the content mod menu type `menu`
     /// (`data/<id>/horizon/menu/`) is asked whether it takes `stack`
     /// (`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).
