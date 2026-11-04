@@ -510,6 +510,11 @@ impl Guest {
     pub fn participates_in_player_simulation(&self) -> bool {
         self.kind == GuestKind::Network
     }
+    /// A connectionless player a mod made (`Host::fake_player`): what `PlayerRef::is_fake`
+    /// answers, and what may `perform_action`.
+    pub fn is_fake(&self) -> bool {
+        self.kind == GuestKind::Fake
+    }
 
     fn with_defaults(
         kind: GuestKind,
