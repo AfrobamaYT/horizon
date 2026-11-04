@@ -312,8 +312,8 @@ mod tests {
             let game = super::super::Options::from_launch(launch).unwrap().unwrap();
             let selected: Vec<_> =
                 content_packages(game.game_dir.as_deref().unwrap(), &enabled, &game.mods.dev)
-                .map(|p| p.package.manifest.id)
-                .collect();
+                    .map(|p| p.package.manifest.id)
+                    .collect();
             assert_eq!(selected, case.ids);
         }
         fs::remove_dir_all(root).unwrap();
