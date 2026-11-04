@@ -2903,15 +2903,21 @@ fn player_breaks_fire_with_extinguish_not_generic_break_event() {
         let state = w.id(name, &[]);
         w.put(pos, state);
         w.level.events.clear();
+        let player = super::LevelEventPlayer(42);
         assert!(w.f.behaviours.player_destroy_block(
             &mut w.level,
             &mut w.ticks,
             pos,
             false,
             true,
-            None
+            Some(player)
         ));
         let is_fire = name != "white_wool";
+        assert!(w.level.events.iter().any(|event| matches!(
+            event,
+            LevelEvent::LevelEvent { id: 1009 | 2001, pos: at, source: Some(source), .. }
+                if *at == pos && *source == player
+        )));
         assert_eq!(
             w.level
                 .events
