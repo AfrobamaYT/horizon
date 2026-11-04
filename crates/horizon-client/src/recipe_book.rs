@@ -1070,6 +1070,7 @@ mod tests {
         assert!(
             recipes
                 .find(
+                    crate::test_resources::server_loop_context(),
                     &[Some(ItemStack::new("minecraft:flint", 1)), None, None, None],
                     2
                 )
@@ -1095,6 +1096,7 @@ mod tests {
         .unwrap();
         let (_, result) = recipes
             .find(
+                crate::test_resources::server_loop_context(),
                 &[Some(ItemStack::new("minecraft:flint", 1)), None, None, None],
                 2,
             )

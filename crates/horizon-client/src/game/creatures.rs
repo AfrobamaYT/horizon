@@ -13,7 +13,7 @@ use horizon_client::{
     blocks::Fluid,
     collisions::SceneCollisions,
     crafting::Recipes,
-    health::{HurtSource, Hurting, Knock, knockback_canceled},
+    health::{HurtSource, Hurting, Knock},
     items::ItemStack,
     mesher::Vertex,
     mobs::{
@@ -1139,6 +1139,7 @@ impl Game<'_> {
                 &mut lent,
                 Some(world_items!(self)),
                 Some(&self.pack.block_registries),
+                &self.damage_hooks,
             );
             let path_changes = horizon_client::mobs::collision_changes(&base, &path_writes);
             // Each mob keeps its snapshot slot all tick; the first slot of an
@@ -1467,7 +1468,7 @@ impl Game<'_> {
                 self.for_player(who, |g| {
                     // CatalystListener: trigger(player, killedEntity, damageSource).
                     let view = g.mob_entity(m);
-                    let blow = m.last_damage.map(|(d, _)| g.damage_view(d));
+                    let blow = g.last_blow(m);
                     g.trigger_killed_as(
                         "minecraft:kill_mob_near_sculk_catalyst",
                         &view,
@@ -1544,8 +1545,23 @@ impl Game<'_> {
         self.award_custom_stat("mob_kills", 1);
         self.score_player_killed(super::commands::Target::Mob(m.id));
         let view = self.mob_entity(m);
-        let blow = m.last_damage.map(|(d, _)| self.damage_view(d));
+        let blow = self.last_blow(m);
         self.trigger_killed(&view, blow.as_ref());
+    }
+    /// The damage source a mob died to (`die`'s), its direct entity included when the mob
+    /// recorded one ([`Mob::last_direct`]).
+    fn last_blow(&self, m: &Mob) -> Option<horizon_client::advancements::DamageView> {
+        let (d, _) = m.last_damage?;
+        let mut view = self.damage_view(d);
+        if let Some(kind) = m.last_direct {
+            view.direct = Some(horizon_client::advancements::EntityView {
+                kind: kind.into(),
+                position: d.from.unwrap_or_default(),
+                ..Default::default()
+            });
+            view.is_direct = false;
+        }
+        Some(view)
     }
     /// A mob's damage source as advancement predicates see it: its type, the
     /// causing entity, and the projectile when one dealt it.
@@ -3695,6 +3711,7 @@ impl Game<'_> {
                     child.extra.tame = true;
                     child.extra.owner = p.extra.owner;
                     let mixed = dye_mix(
+                        &self.loop_context,
                         self.res.recipes(),
                         &mut self.world.random,
                         p.extra.color,
@@ -3717,6 +3734,7 @@ impl Game<'_> {
                     horizon_client::mobs::tame::set_tame(child, true);
                     child.extra.owner = p.extra.owner;
                     let mixed = dye_mix(
+                        &self.loop_context,
                         self.res.recipes(),
                         &mut self.world.random,
                         p.extra.color,
@@ -3759,6 +3777,7 @@ impl Game<'_> {
             if p.species() == Species::Sheep {
                 let other = q.as_ref().unwrap_or(&p);
                 let mixed = dye_mix(
+                    &self.loop_context,
                     self.res.recipes(),
                     &mut self.world.random,
                     p.extra.color,
@@ -4468,6 +4487,22 @@ impl Game<'_> {
     fn player_hurt_mob(&mut self, p: &Projectile, id: u32) {
         if p.owner == Some(Who::Player) {
             self.remember_mob_player_credit(id);
+        }
+    }
+    /// `LivingEntity.hurtServer` for a snowball, egg or pearl (`kind`) that hurt the mob `id`,
+    /// 0 damage included: the hit is its owner's, and a player's fires PLAYER_HURT_ENTITY.
+    fn thrown_hurt_mob(&mut self, p: &Projectile, id: u32, kind: &str, amount: f32) {
+        self.player_hurt_mob(p, id);
+        if p.owner == Some(Who::Player)
+            && let Some(m) = self.mobs.iter().find(|m| m.id == id)
+        {
+            let victim = self.mob_entity(m);
+            let direct = horizon_client::advancements::EntityView {
+                kind: kind.into(),
+                position: [p.position.x, p.position.y, p.position.z],
+                ..Default::default()
+            };
+            self.player_hit(&victim, "minecraft:thrown", Some(direct), amount);
         }
     }
     /// `projectile_hit` for a projectile the guest `conn` shot, run as them;
@@ -5208,13 +5243,15 @@ impl Game<'_> {
                     } else {
                         0.0
                     };
-                    m.damage_projectile(
+                    if m.damage_projectile(
                         crate::game::entity::damage_level_of!(self),
                         amount,
                         source,
                         aim,
                         [p.velocity.x, p.velocity.z],
-                    );
+                    ) {
+                        self.thrown_hurt_mob(p, id, "minecraft:snowball", amount);
+                    }
                 } else if let Hit::Entity {
                     who: Who::Mob(id), ..
                 } = hit
@@ -5277,13 +5314,15 @@ impl Game<'_> {
                 } = hit
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
-                    m.damage_projectile(
+                    if m.damage_projectile(
                         crate::game::entity::damage_level_of!(self),
                         0.0,
                         source,
                         aim,
                         [p.velocity.x, p.velocity.z],
-                    );
+                    ) {
+                        self.thrown_hurt_mob(p, id, "minecraft:egg", 0.0);
+                    }
                 } else if let Hit::Entity {
                     who: Who::Mob(id), ..
                 } = hit
@@ -5315,13 +5354,15 @@ impl Game<'_> {
                 } = hit
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
-                    m.damage_projectile(
+                    if m.damage_projectile(
                         crate::game::entity::damage_level_of!(self),
                         0.0,
                         source,
                         aim,
                         [p.velocity.x, p.velocity.z],
-                    );
+                    ) {
+                        self.thrown_hurt_mob(p, id, "minecraft:ender_pearl", 0.0);
+                    }
                 } else if let Hit::Entity {
                     who: Who::Mob(id), ..
                 } = hit
@@ -5820,6 +5861,11 @@ impl Game<'_> {
             self.audio
                 .play(sound, Some(self.mobs[index].center()), 1.0, 1.0);
             self.trigger_item("minecraft:filled_bucket", &filled);
+            // PlayerInteractTrigger: the water bucket as it was, and the mob picked up.
+            if let Some(stack) = &held {
+                let target = self.mob_entity(&self.mobs[index]);
+                self.trigger_item_entity("minecraft:player_interacted_with_entity", stack, &target);
+            }
             let species = bucket.trim_end_matches("_bucket").to_owned();
             let id = self.mobs[index].id as i32;
             // Leashable.dropLeash, then discard.
@@ -7913,11 +7959,7 @@ fn knock_back(
         x: xd,
         z: zd,
     };
-    if knockback_canceled(
-        level.reborrow(),
-        Hurting::Player(p.entity_id, source),
-        &mut knock,
-    ) {
+    if level.knockback_canceled(Hurting::Player(p.entity_id, source), &mut knock) {
         return;
     }
     let Knock {
@@ -8433,8 +8475,14 @@ fn killed_by_mob(m: &Mob) -> bool {
 /// is the host, `Some(Some(conn))` a guest. Both animals are spent.
 /// `DyeColor.getMixedColor`: the colour of the crafting recipe that mixes
 /// the two dyes, else one of the two picked at random.
-fn dye_mix(recipes: &Recipes, random: &mut impl RandomSource, a: u8, b: u8) -> u8 {
-    if let Some(mixed) = dye_color_mix_in_recipes(recipes, a, b) {
+fn dye_mix(
+    context: &horizon_world::native_load_context::LoopContext,
+    recipes: &Recipes,
+    random: &mut impl RandomSource,
+    a: u8,
+    b: u8,
+) -> u8 {
+    if let Some(mixed) = dye_color_mix_in_recipes(context, recipes, a, b) {
         return mixed;
     }
     if random.next_boolean() { a } else { b }
@@ -8444,13 +8492,18 @@ fn dye_mix(recipes: &Recipes, random: &mut impl RandomSource, a: u8, b: u8) -> u
 /// makes, when its result is a dye. The two dyes are the grid's first row
 /// (`CraftingInput.of(2, 1, ...)`) and the recipe manager answers for it; the
 /// result's `_dye` item names the colour.
-fn dye_color_mix_in_recipes(recipes: &Recipes, a: u8, b: u8) -> Option<u8> {
+fn dye_color_mix_in_recipes(
+    context: &horizon_world::native_load_context::LoopContext,
+    recipes: &Recipes,
+    a: u8,
+    b: u8,
+) -> Option<u8> {
     let dye = |c: u8| {
         let name = horizon_client::mobs::render::DYE_NAMES[usize::from(c) & 15];
         Some(ItemStack::new(&format!("minecraft:{name}_dye"), 1))
     };
     let grid = [dye(a), dye(b), None, None];
-    let (_, result) = recipes.find(&grid, 2)?;
+    let (_, result) = recipes.find(context, &grid, 2)?;
     let name = result
         .item
         .strip_prefix("minecraft:")?
@@ -8994,15 +9047,14 @@ mod pearl_tests {
 #[cfg(test)]
 mod knockback_tests {
     use super::*;
-    use horizon_client::health::{DamageLevel, KNOCKBACK};
+    use horizon_client::health::{DamageHooks, DamageLevel};
 
     /// What the hook of these tests saw: the player, its source (as damage
     /// type, causing, direct) and the push.
     type Pushes = std::sync::Mutex<Vec<(i32, (String, i32, i32), Knock)>>;
     static PUSHES: Pushes = std::sync::Mutex::new(Vec::new());
 
-    /// Sets the native knockback hook of these tests (global: it stays set for
-    /// the process) for players 9201 to 9203: it records the push, cancels
+    /// Sets the native knockback hook of these tests for players 9201 to 9203: it records the push, cancels
     /// 9201's and doubles 9202's strength and turns its direction around.
     fn hook(_: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
         let Hurting::Player(entity @ 9201..=9203, s) = pushed else {
@@ -9034,12 +9086,13 @@ mod knockback_tests {
         if !root.join("movement-properties.nbt").exists() {
             return;
         }
-        let installed = *KNOCKBACK.get_or_init(|| hook);
-        type Hook = fn(DamageLevel<'_>, Hurting<'_>, &mut Knock) -> bool;
-        assert!(std::ptr::fn_addr_eq(installed, hook as Hook));
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
         let resources = horizon_client::motion::MotionResources::load(&root, &assets).unwrap();
-        let mut test_level = horizon_client::health::TestLevel::new(1);
+        let hooks = DamageHooks {
+            knockback: Some(hook),
+            ..DamageHooks::NONE
+        };
+        let mut test_level = horizon_client::health::TestLevel::with_hooks(1, hooks);
         let hit = HurtSource {
             damage_type: "minecraft:player_attack",
             causing: 5,
@@ -9116,6 +9169,8 @@ mod dye_mix_tests {
             )
             .unwrap()
         };
+        let lc = crate::game::test_server_load()
+            .loop_context(horizon_world::native_load_context::LoopSide::Server, []);
         let mut random = horizon_core::random::LegacyRandom::new(1);
         for (first, second, mixed) in [
             ("red", "yellow", "orange"),
@@ -9125,17 +9180,17 @@ mod dye_mix_tests {
         ] {
             let (a, b, made) = (dye(first), dye(second), dye(mixed));
             assert_eq!(
-                dye_color_mix_in_recipes(&recipes, a, b),
+                dye_color_mix_in_recipes(&lc, &recipes, a, b),
                 Some(made),
                 "{first} + {second} makes {mixed}"
             );
             // The recipe answers, so the coin never has to.
-            assert_eq!(dye_mix(&recipes, &mut random, a, b), made);
+            assert_eq!(dye_mix(&lc, &recipes, &mut random, a, b), made);
         }
         // Two dyes that no recipe mixes keep one of the two colours.
         let (orange, cyan) = (dye("orange"), dye("cyan"));
-        assert_eq!(dye_color_mix_in_recipes(&recipes, orange, cyan), None);
-        let kept = dye_mix(&recipes, &mut random, orange, cyan);
+        assert_eq!(dye_color_mix_in_recipes(&lc, &recipes, orange, cyan), None);
+        let kept = dye_mix(&lc, &recipes, &mut random, orange, cyan);
         assert!(kept == orange || kept == cyan, "kept {kept}");
     }
 }

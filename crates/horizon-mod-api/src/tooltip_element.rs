@@ -4,7 +4,7 @@ use horizon_items::items::ItemStack;
 /// One element of an item's tooltip as `render_tooltip_gather_components`
 /// hands it over, before any wrapping
 /// (`Either<FormattedText, TooltipComponent>`).
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 // exhaustive: a closed set the game matches without a wildcard
 pub enum TooltipElement {
     /// A line (`FormattedText`) with its colour as `rgba` packs it
@@ -17,7 +17,7 @@ pub enum TooltipElement {
 /// An image component of a tooltip: `size` GUI pixels, drawn by the
 /// `tooltip_component_draw` part of `stack`'s item, with `stack`'s data.
 /// An item's own `tooltip_component` part answers the one it starts with.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct TooltipImage {
     /// The stack.

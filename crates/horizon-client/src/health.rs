@@ -22,13 +22,13 @@ use horizon_world::{
     synced_floats::{FloatValue, Observer, SyncedFloats},
 };
 pub use mod_api::health::{HurtSource, ShieldBlock, Victim};
-use std::{cell::Cell, fs, io, path::Path, sync::OnceLock};
+use std::{cell::Cell, fs, io, path::Path};
 pub(crate) type Attributes = LiveAttributes<Box<dyn horizon_world::attributes::live::Identities>>;
 pub(crate) type State = HurtState<DamageTypeId>;
 
 pub use crate::world::HealthRules;
-/// What `LivingEntity.hurtServer` is about to hurt, for [`HURT_SERVER`], or
-/// `LivingEntity.knockback` to push, for [`KNOCKBACK`]: the entity and the
+/// What `LivingEntity.hurtServer` is about to hurt, for [`DamageHooks::incoming`], or
+/// `LivingEntity.knockback` to push, for [`DamageHooks::knockback`]: the entity and the
 /// hit's source.
 pub enum Hurting<'a> {
     /// A player, by its entity id.
@@ -40,23 +40,46 @@ pub enum Hurting<'a> {
     /// An armor stand, by its entity id, for sweep knockback.
     ArmorStand(i32, HurtSource<'a>),
 }
-/// The game's native damage hook (`native_living_incoming_damage`), set once by the
-/// game: `LivingEntity.hurtServer` once its guards passed, in the hit's level. It may
-/// change the container's new damage and post-attack invulnerability ticks; true cancels
-/// the hit.
-pub static HURT_SERVER: OnceLock<
-    fn(DamageLevel<'_>, Hurting<'_>, Victim, &mut DamageContainer) -> bool,
-> = OnceLock::new();
 pub use horizon_world::living_damage::{DamageContainer, Reduction};
-/// The game's native damage-pre hook (`native_living_damage_pre`), set once by the game:
-/// `LivingEntity.actuallyHurt` once armor and magic took their share of a hit, before the
-/// absorption hearts (`LivingDamageEvent.Pre`). It may change the new damage.
-pub static DAMAGE_PRE: OnceLock<fn(DamageLevel<'_>, Hurting<'_>, &mut DamageContainer)> =
-    OnceLock::new();
-/// The game's native damage-post hook (`native_living_damage_post`), set once by the game:
-/// the health has just lost the hit's health damage (`LivingDamageEvent.Post`).
-pub static DAMAGE_POST: OnceLock<fn(DamageLevel<'_>, Hurting<'_>, &DamageContainer)> =
-    OnceLock::new();
+/// The native hooks a hit runs, owned by the game and lent to the level the hit lands in
+/// ([`DamageLevel`]), so no hook is a global. A table with no entry (`NONE`) runs none.
+#[derive(Clone, Copy)]
+pub struct DamageHooks {
+    /// `native_living_incoming_damage`: `LivingEntity.hurtServer` once its guards passed. It
+    /// may change the container's new damage and post-attack invulnerability ticks; true
+    /// cancels the hit.
+    pub incoming: Option<fn(DamageLevel<'_>, Hurting<'_>, Victim, &mut DamageContainer) -> bool>,
+    /// `native_living_damage_pre`: `LivingEntity.actuallyHurt` once armor and magic took their
+    /// share of a hit, before the absorption hearts (`LivingDamageEvent.Pre`). It may change
+    /// the new damage.
+    pub pre: Option<fn(DamageLevel<'_>, Hurting<'_>, &mut DamageContainer)>,
+    /// `native_living_damage_post`: the health has just lost the hit's health damage
+    /// (`LivingDamageEvent.Post`).
+    pub post: Option<fn(DamageLevel<'_>, Hurting<'_>, &DamageContainer)>,
+    /// `native_living_knockback`: `LivingEntity.knockback`, at its start
+    /// (`LivingKnockBackEvent`), on the raw strength and before the knockback resistance and
+    /// the motion change. It may change the [`Knock`]; true cancels it.
+    pub knockback: Option<fn(DamageLevel<'_>, Hurting<'_>, &mut Knock) -> bool>,
+    /// `native_living_use_totem`: a `death_protection` item in the hand (true: the off hand)
+    /// is about to save the entity from a killing blow (`LivingUseTotemEvent`). True cancels
+    /// it: the entity dies.
+    pub totem: Option<fn(Hurting<'_>, bool) -> bool>,
+    /// `native_living_shield_block`: `LivingEntity.applyItemBlocking` of a hit with damage,
+    /// for what it hurts, the damage and whether vanilla blocks. It may change the
+    /// [`ShieldBlock`].
+    pub shield: Option<fn(Hurting<'_>, f32, bool, &mut ShieldBlock)>,
+}
+impl DamageHooks {
+    /// No hooks: what tests of the vanilla behaviour hit through.
+    pub const NONE: Self = Self {
+        incoming: None,
+        pre: None,
+        post: None,
+        knockback: None,
+        totem: None,
+        shield: None,
+    };
+}
 /// The level a hit lands in, as damage code sees it: its blocks, its random
 /// (`Level.random`) and its own attachments, lent to the damage hooks as their level host.
 /// Built from the level's world, or, in the mob tick, which reads the world while mobs
@@ -71,8 +94,8 @@ pub struct DamageLevel<'a> {
     random: &'a mut horizon_core::random::LegacyRandom,
     attachments: &'a mut horizon_world::attachments::Attachments,
     attachment_syncs: &'a mut crate::fast_hash::FxHashSet<horizon_world::attachments::Holder>,
-    /// False on a client predicting its own mount: the hooks are the server's.
-    hooks: bool,
+    /// The game's hooks; none on a client predicting its own mount: they are the server's.
+    hooks: Option<&'a DamageHooks>,
 }
 impl<'a> DamageLevel<'a> {
     /// The level of `world`, whose blocks `registry` names.
@@ -81,6 +104,7 @@ impl<'a> DamageLevel<'a> {
         registry: &'a horizon_world::registry::BlockRegistry,
         tags: Option<&'a crate::items::Items>,
         block_registries: Option<&'a crate::command::args::Registries>,
+        hooks: &'a DamageHooks,
     ) -> Self {
         let crate::world::World {
             chunks,
@@ -101,7 +125,7 @@ impl<'a> DamageLevel<'a> {
             random,
             attachments,
             attachment_syncs,
-            hooks: true,
+            hooks: Some(hooks),
         }
     }
     /// The level of `world`, with the random and attachments `lent` took out of it.
@@ -111,6 +135,7 @@ impl<'a> DamageLevel<'a> {
         lent: &'a mut LentLevel,
         tags: Option<&'a crate::items::Items>,
         block_registries: Option<&'a crate::command::args::Registries>,
+        hooks: &'a DamageHooks,
     ) -> Self {
         Self {
             shape: world.shape,
@@ -122,13 +147,13 @@ impl<'a> DamageLevel<'a> {
             random: &mut lent.random,
             attachments: &mut lent.attachments,
             attachment_syncs: &mut lent.attachment_syncs,
-            hooks: true,
+            hooks: Some(hooks),
         }
     }
     /// The same level on a client predicting a mob it rides: no damage hooks fire.
     pub fn predicted(self) -> Self {
         Self {
-            hooks: false,
+            hooks: None,
             ..self
         }
     }
@@ -191,29 +216,25 @@ impl<'a> DamageLevel<'a> {
         Ok(self.attachments)
     }
     /// Whether `LivingIncomingDamageEvent` canceled the hit on `hurting`, standing as
-    /// `victim` says ([`HURT_SERVER`]; never while it is unset).
+    /// `victim` says ([`DamageHooks::incoming`]; never without it).
     pub fn incoming_canceled(
         &mut self,
         hurting: Hurting<'_>,
         victim: Victim,
         container: &mut DamageContainer,
     ) -> bool {
-        HURT_SERVER
-            .get()
-            .filter(|_| self.hooks)
-            .is_some_and(|hook| hook(self.reborrow(), hurting, victim, container))
+        let hook = self.hooks.and_then(|hooks| hooks.incoming);
+        hook.is_some_and(|hook| hook(self.reborrow(), hurting, victim, container))
     }
-    /// `LivingDamageEvent.Pre` of the hit on `hurting` ([`DAMAGE_PRE`]; nothing while it is
-    /// unset).
+    /// `LivingDamageEvent.Pre` of the hit on `hurting` ([`DamageHooks::pre`]; nothing without it).
     pub fn damage_pre(&mut self, hurting: Hurting<'_>, container: &mut DamageContainer) {
-        if let Some(hook) = DAMAGE_PRE.get().filter(|_| self.hooks) {
+        if let Some(hook) = self.hooks.and_then(|hooks| hooks.pre) {
             hook(self.reborrow(), hurting, container);
         }
     }
-    /// `LivingDamageEvent.Post` of the hit on `hurting` ([`DAMAGE_POST`]; nothing while it
-    /// is unset).
+    /// `LivingDamageEvent.Post` of the hit on `hurting` ([`DamageHooks::post`]; nothing without it).
     pub fn damage_post(&mut self, hurting: Hurting<'_>, container: &DamageContainer) {
-        if let Some(hook) = DAMAGE_POST.get().filter(|_| self.hooks) {
+        if let Some(hook) = self.hooks.and_then(|hooks| hooks.post) {
             hook(self.reborrow(), hurting, container);
         }
     }
@@ -248,20 +269,26 @@ impl LentLevel {
 /// An empty level for tests and probes of hits: an air-only world whose random is seeded
 /// with `seed`.
 pub struct TestLevel {
+    hooks: DamageHooks,
     world: crate::world::World,
     registry: horizon_world::registry::BlockRegistry,
 }
 impl TestLevel {
     pub fn new(seed: i64) -> Self {
+        Self::with_hooks(seed, DamageHooks::NONE)
+    }
+    /// [`Self::new`] whose hits run `hooks`.
+    pub fn with_hooks(seed: i64, hooks: DamageHooks) -> Self {
         let facts =
             br#"{"defaults":{"minecraft:air":0},"states":[["air",true,false,"","minecraft:air"]]}"#;
         Self {
+            hooks,
             world: crate::world::World::new(horizon_world::registry::BlockStateId(0), seed),
             registry: horizon_world::registry::BlockRegistry::from_facts_json(&facts[..]).unwrap(),
         }
     }
     pub fn level(&mut self) -> DamageLevel<'_> {
-        DamageLevel::of(&mut self.world, &self.registry, None, None)
+        DamageLevel::of(&mut self.world, &self.registry, None, None, &self.hooks)
     }
     /// The level's random, for a probe that draws from it outside a hit.
     pub fn random(&mut self) -> &mut horizon_core::random::LegacyRandom {
@@ -277,41 +304,36 @@ pub struct Knock {
     pub x: f64,
     pub z: f64,
 }
-/// The game's native knockback hook (`native_living_knockback`), set once by
-/// the game: `LivingEntity.knockback`, at its start (`LivingKnockBackEvent`), on the raw strength
-/// and before the knockback resistance and the motion change. It may change the [`Knock`]; true
-/// cancels it.
-pub static KNOCKBACK: OnceLock<fn(DamageLevel<'_>, Hurting<'_>, &mut Knock) -> bool> =
-    OnceLock::new();
-/// The game's native totem hook (`native_living_use_totem`), set once by the game: a
-/// `death_protection` item in the hand (true: the off hand) is about to save the entity from
-/// a killing blow (`LivingUseTotemEvent`). True cancels it: the entity dies.
-pub static USE_TOTEM: OnceLock<fn(Hurting<'_>, bool) -> bool> = OnceLock::new();
-/// The game's native shield hook (`native_living_shield_block`), set once by the game:
-/// `LivingEntity.applyItemBlocking` of a hit with damage, for what it hurts, the damage
-/// and whether vanilla blocks. It may change the [`ShieldBlock`].
-pub static SHIELD_BLOCK: OnceLock<fn(Hurting<'_>, f32, bool, &mut ShieldBlock)> = OnceLock::new();
-/// What `applyItemBlocking` stops of `damage` (above 0) once [`SHIELD_BLOCK`] had its say
-/// on `vanilla`, the block vanilla resolved: none when the hook unblocks it.
-pub fn shield_block(
-    hurting: Hurting<'_>,
-    damage: f32,
-    vanilla: ShieldBlock,
-) -> Option<ShieldBlock> {
-    let mut block = vanilla;
-    if let Some(hook) = SHIELD_BLOCK.get() {
-        hook(hurting, damage, vanilla.blocked, &mut block);
+impl DamageLevel<'_> {
+    /// What `applyItemBlocking` stops of `damage` (above 0) once [`DamageHooks::shield`] had
+    /// its say on `vanilla`, the block vanilla resolved: none when the hook unblocks it.
+    pub fn shield_block(
+        &self,
+        hurting: Hurting<'_>,
+        damage: f32,
+        vanilla: ShieldBlock,
+    ) -> Option<ShieldBlock> {
+        let mut block = vanilla;
+        if let Some(hook) = self.hooks.and_then(|hooks| hooks.shield) {
+            hook(hurting, damage, vanilla.blocked, &mut block);
+        }
+        if !block.blocked {
+            return None;
+        }
+        // A value a mod leaves that is not a number stops nothing.
+        block.blocked_damage = if block.blocked_damage.is_nan() {
+            0.0
+        } else {
+            block.blocked_damage.clamp(0.0, damage)
+        };
+        Some(block)
     }
-    if !block.blocked {
-        return None;
+    /// Whether [`DamageHooks::totem`] canceled the totem of `hurting` (never without it).
+    pub fn totem_canceled(&self, hurting: Hurting<'_>, off_hand: bool) -> bool {
+        self.hooks
+            .and_then(|hooks| hooks.totem)
+            .is_some_and(|hook| hook(hurting, off_hand))
     }
-    // A value a mod leaves that is not a number stops nothing.
-    block.blocked_damage = if block.blocked_damage.is_nan() {
-        0.0
-    } else {
-        block.blocked_damage.clamp(0.0, damage)
-    };
-    Some(block)
 }
 /// The block an entity with no raised item is asked about: none, and one a mod forces
 /// stops the whole hit.
@@ -374,24 +396,26 @@ pub fn knockback_from_holding(
     let held = KNOCKBACK_HELD.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), held));
     Restore(KNOCKBACK_ATTACKER.replace(entity), held)
 }
-/// Whether [`KNOCKBACK`] canceled the knockback (never while it is unset). A
-/// value it leaves that is not a finite number is put back as it was.
-pub fn knockback_canceled(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
-    let Some(hook) = KNOCKBACK.get() else {
-        return false;
-    };
-    let before = *knock;
-    let canceled = hook(level, pushed, knock);
-    for (now, was) in [
-        (&mut knock.strength, before.strength),
-        (&mut knock.x, before.x),
-        (&mut knock.z, before.z),
-    ] {
-        if !now.is_finite() {
-            *now = was;
+impl DamageLevel<'_> {
+    /// Whether [`DamageHooks::knockback`] canceled the knockback (never without it). A
+    /// value it leaves that is not a finite number is put back as it was.
+    pub fn knockback_canceled(&mut self, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
+        let Some(hook) = self.hooks.and_then(|hooks| hooks.knockback) else {
+            return false;
+        };
+        let before = *knock;
+        let canceled = hook(self.reborrow(), pushed, knock);
+        for (now, was) in [
+            (&mut knock.strength, before.strength),
+            (&mut knock.x, before.x),
+            (&mut knock.z, before.z),
+        ] {
+            if !now.is_finite() {
+                *now = was;
+            }
         }
+        canceled
     }
-    canceled
 }
 pub struct HealthResources {
     pub damage: Catalog,
@@ -1217,7 +1241,10 @@ impl HurtWorld for Environment<'_> {
             direct: 0,
             position: None,
         };
-        let Some(block) = shield_block(Hurting::Player(self.entity, source), damage, block) else {
+        let Some(block) =
+            self.level
+                .shield_block(Hurting::Player(self.entity, source), damage, block)
+        else {
             return Ok(0.0);
         };
         self.blocked = block.blocked_damage;
@@ -1290,9 +1317,9 @@ impl HurtWorld for Environment<'_> {
             position: None,
         };
         // A native mod may cancel the totem: the player dies.
-        if USE_TOTEM
-            .get()
-            .is_some_and(|hook| hook(Hurting::Player(self.entity, source), self.totem_off_hand))
+        if self
+            .level
+            .totem_canceled(Hurting::Player(self.entity, source), self.totem_off_hand)
         {
             return Ok(false);
         }
@@ -1389,6 +1416,7 @@ impl ServerPlayerHurtWorld for Environment<'_> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     #[test]
     fn knockback_attacker_scopes_restore_on_return_and_unwind() {
         assert_eq!(super::knockback_attacker(), 0);
@@ -1409,6 +1437,46 @@ mod tests {
             );
         }
         assert_eq!(super::knockback_attacker(), 0);
+    }
+    #[test]
+    fn a_knockback_hook_cannot_make_the_push_nonfinite() {
+        fn hook(_: DamageLevel<'_>, _: Hurting<'_>, knock: &mut Knock) -> bool {
+            knock.strength = f64::NAN;
+            knock.x *= 2.0;
+            false
+        }
+        let mut level = crate::health::TestLevel::with_hooks(
+            0,
+            DamageHooks {
+                knockback: Some(hook),
+                ..DamageHooks::NONE
+            },
+        );
+        let source = HurtSource {
+            damage_type: "minecraft:generic",
+            causing: 0,
+            direct: 0,
+            position: None,
+        };
+        let mut knock = Knock {
+            strength: 0.4,
+            x: 1.0,
+            z: 0.5,
+        };
+        assert!(
+            !level
+                .level()
+                .knockback_canceled(Hurting::Player(1, source), &mut knock)
+        );
+        // A value left that is not a number is put back; one that is finite stays changed.
+        assert_eq!(
+            knock,
+            Knock {
+                strength: 0.4,
+                x: 2.0,
+                z: 0.5
+            }
+        );
     }
     #[test]
     fn a_hit_in_the_hurt_cooldown_knocks_nobody_back() {
@@ -1572,7 +1640,7 @@ mod tests {
     /// Sets the native damage hook of these tests (global: it stays set for
     /// the process): for entities 9001 to 9004 and 9011 to 9013 it records the
     /// hit, cancels x1's, doubles x2's, makes 9003's -5 and 9004's NaN.
-    fn set_hook() -> fn(i32) -> Vec<(String, f32)> {
+    fn set_hook() -> (super::DamageHooks, fn(i32) -> Vec<(String, f32)>) {
         use super::{DamageContainer, DamageLevel, Hurting, Victim};
         fn hook(
             _: DamageLevel<'_>,
@@ -1599,22 +1667,23 @@ mod tests {
             }
             entity % 10 == 1
         }
-        type Hook = fn(DamageLevel<'_>, Hurting<'_>, Victim, &mut DamageContainer) -> bool;
-        let installed = *super::HURT_SERVER.get_or_init(|| hook);
-        assert!(std::ptr::fn_addr_eq(installed, hook as Hook));
-        |entity| {
+        let hooks = super::DamageHooks {
+            incoming: Some(hook),
+            ..super::DamageHooks::NONE
+        };
+        (hooks, |entity| {
             let seen = SEEN.lock().unwrap();
             let hits = seen.iter().filter(|s| s.0 == entity);
             hits.map(|s| (s.1.clone(), s.2)).collect()
-        }
+        })
     }
 
     #[test]
     fn the_native_damage_hook_changes_or_cancels_a_mobs_hit() {
-        let mut test_level = crate::health::TestLevel::new(0);
+        let (hooks, seen) = set_hook();
+        let mut test_level = crate::health::TestLevel::with_hooks(0, hooks);
         let level = &mut test_level.level();
         use crate::mobs::{Damage, DamageKind, Mob};
-        let seen = set_hook();
         let mob = |id| {
             Mob::new(
                 id,
@@ -1651,7 +1720,8 @@ mod tests {
     /// without it.
     #[test]
     fn the_native_damage_hook_changes_or_cancels_a_players_hit() {
-        let mut test_level = crate::health::TestLevel::new(0);
+        let (hooks, seen) = set_hook();
+        let mut test_level = crate::health::TestLevel::with_hooks(0, hooks);
         let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
@@ -1659,7 +1729,6 @@ mod tests {
         if !root.join("movement-properties.nbt").exists() {
             return;
         }
-        let seen = set_hook();
         let assets = crate::assets::Assets::load(&root).unwrap();
         let resources = crate::motion::MotionResources::load(&root, &assets).unwrap();
         let (health, rules) = (&resources.health, super::HealthRules::default());
@@ -1686,12 +1755,11 @@ mod tests {
     /// causes it (a mob's damage kind) and the push it was handed.
     static PUSHES: std::sync::Mutex<Vec<(i32, String, super::Knock)>> =
         std::sync::Mutex::new(Vec::new());
-    /// Sets the native knockback hook of these tests (global: it stays set for
-    /// the process), for mobs 9101 to 9106 only: it records the push, cancels
+    /// Sets the native knockback hook of these tests for mobs 9101 to 9106 only: it records the push, cancels
     /// 9101's, doubles 9102's strength and turns its direction around, leaves
     /// 9103 non-finite numbers, and gives 9105 (whose resistance leaves
     /// nothing) a strength of 0.4.
-    fn set_knockback_hook() -> fn(i32) -> Vec<(String, super::Knock)> {
+    fn set_knockback_hook() -> (super::DamageHooks, fn(i32) -> Vec<(String, super::Knock)>) {
         use super::{DamageLevel, Hurting, Knock};
         fn hook(_: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
             let Hurting::Mob(mob, source) = pushed else {
@@ -1719,14 +1787,15 @@ mod tests {
             }
             false
         }
-        type Hook = fn(DamageLevel<'_>, Hurting<'_>, &mut Knock) -> bool;
-        let installed = *super::KNOCKBACK.get_or_init(|| hook);
-        assert!(std::ptr::fn_addr_eq(installed, hook as Hook));
-        |entity| {
+        let hooks = super::DamageHooks {
+            knockback: Some(hook),
+            ..super::DamageHooks::NONE
+        };
+        (hooks, |entity| {
             let seen = PUSHES.lock().unwrap();
             let pushes = seen.iter().filter(|p| p.0 == entity);
             pushes.map(|p| (p.1.clone(), p.2)).collect()
-        }
+        })
     }
 
     /// A zombie in full netherite (0.1 a piece) is pushed 60 % as far as one
@@ -1765,11 +1834,11 @@ mod tests {
     /// speed becomes `min(0.4, vy / 2 + strength)`.
     #[test]
     fn the_native_knockback_hook_changes_or_cancels_a_mobs_push() {
-        let mut test_level = crate::health::TestLevel::new(0);
+        let (hooks, seen) = set_knockback_hook();
+        let mut test_level = crate::health::TestLevel::with_hooks(0, hooks);
         let level = &mut test_level.level();
         use super::Knock;
         use crate::mobs::{Damage, Mob};
-        let seen = set_knockback_hook();
         let mob = |id, resistance| {
             let mut m = Mob::new(
                 id,

@@ -1,0 +1,62 @@
+//! One chat hook doing the work its message names, for `tests/bench.rs`. The test runs this
+//! same source natively and as `mod.wasm` and compares the two.
+//!
+//! - `tick` (the server tick hook, with its small event): nothing; the cost of a call.
+//! - `empty`: nothing, from the chat hook, whose event carries strings and messages.
+//! - `text`: writes a new message, which is lowered back to the game.
+//! - `imports N`: N calls into the game (`host.level`).
+//! - `compute N`: plain mod logic on N values: fill, sort, hash-map counts, a checksum.
+use std::collections::HashMap;
+
+use mod_api::{Flow, Hooks, ServerChatEvent, ServerHost, ServerTickEvent, Text};
+
+#[derive(Default)]
+pub struct Mod;
+
+#[mod_api::horizon_mod]
+impl Hooks for Mod {
+    fn server_tick(&self, _host: &mut dyn ServerHost, _event: &mut ServerTickEvent<'_>) {}
+
+    fn server_chat(&self, host: &mut dyn ServerHost, event: &mut ServerChatEvent<'_>) -> Flow {
+        let (work, n) = event
+            .raw_text
+            .split_once(' ')
+            .unwrap_or((event.raw_text, "0"));
+        let n: u32 = n.parse().unwrap_or(0);
+        match work {
+            "text" => *event.message = Text::literal("a message the mod wrote"),
+            "imports" => {
+                let found = (0..n)
+                    .filter(|_| host.level("minecraft:overworld").is_some())
+                    .count();
+                *event.message = Text::literal(found.to_string());
+            }
+            "compute" => *event.message = Text::literal(compute(n).to_string()),
+            _ => {}
+        }
+        Flow::Continue
+    }
+}
+
+/// A checksum over `n` pseudo-random values, sorted and counted: the same answer native and
+/// wasm, so the test checks both did the work.
+fn compute(n: u32) -> u64 {
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut values: Vec<u32> = (0..n)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 32) as u32
+        })
+        .collect();
+    values.sort_unstable();
+    let mut counts: HashMap<u32, u32> = HashMap::new();
+    for value in &values {
+        *counts.entry(value % 64).or_default() += 1;
+    }
+    let spread: u64 = counts.values().map(|&c| u64::from(c) * u64::from(c)).sum();
+    values.iter().enumerate().fold(spread, |sum, (i, &v)| {
+        sum.wrapping_mul(31).wrapping_add(u64::from(v) ^ i as u64)
+    })
+}

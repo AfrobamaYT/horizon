@@ -96,7 +96,7 @@ impl Game<'_> {
         let found = self
             .res
             .recipes()
-            .find(&grid, 3)
+            .find(&self.loop_context, &grid, 3)
             .map(|(name, result)| (name.to_owned(), result))
             .filter(|(_, result)| result.count > 0);
         let Some((recipe, result)) = found else {
@@ -216,7 +216,7 @@ impl Game<'_> {
     pub(in crate::game) fn crafter_result(&self) -> Option<ItemStack> {
         let key = self.container?;
         let c = self.crafter_at(key)?;
-        self.recipes().craft(&c.items, 3)
+        self.recipes().craft(&self.loop_context, &c.items, 3)
     }
     fn crafter_open(&self) -> bool {
         matches!(self.container_kind(), Some(BlockEntity::Crafter(_)))

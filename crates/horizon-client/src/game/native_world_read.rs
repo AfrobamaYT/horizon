@@ -468,6 +468,7 @@ mod tests {
                         game.pack.assets.registry,
                         Some(world_items!(game)),
                         Some(&game.pack.block_registries),
+                        &game.damage_hooks,
                     ));
                 assert_eq!(
                     hit.block_state_id("minecraft:oak_slab[waterlogged=true]"),
@@ -501,6 +502,7 @@ mod tests {
                         game.pack.assets.registry,
                         None,
                         None,
+                        &game.damage_hooks,
                     ));
                 assert_eq!(hit.block_state_id("minecraft:stone"), None);
                 assert_eq!(hit.block_state_default("minecraft:stone"), None);

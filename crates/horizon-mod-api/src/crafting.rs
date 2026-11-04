@@ -69,12 +69,13 @@ pub fn native_recipe_property_sets(
 /// answer must be the same for the same stack.
 #[inline(never)]
 pub fn native_ingredient_test(
+    context: &horizon_world::native_load_context::LoopContext,
     kind: &str,
     data: &serde_json::Map<String, Value>,
     stack: &ItemStack,
     accept: &mut bool,
 ) {
-    crate::dispatch_ingredient_test(kind, data, stack, accept);
+    crate::dispatch_ingredient_test(&crate::OwningLoop::new(context), kind, data, stack, accept);
 }
 /// Where `Ingredient::resolve` leaves the hook's answer inside the occurrence
 /// it resolved. Written and read only here; the loads that own the sources
@@ -324,17 +325,28 @@ impl Ingredient {
             children: nested,
         })
     }
-    /// `Ingredient.test`: a stack the list names — and for a mod's own
-    /// kind, one the match-time hook accepts (`ICustomIngredient.test`).
-    pub fn test(&self, stack: &ItemStack) -> bool {
+    /// `Ingredient.test`: whether `stack` fits: a stack the list names, and
+    /// for a mod's own kind one the match-time hook accepts
+    /// (`ICustomIngredient.test`). The game answers with the loop context of
+    /// the side `host` runs on; a host without a game refuses every stack.
+    pub fn test(&self, host: &dyn Host, stack: &ItemStack) -> bool {
+        backend_of(host).is_some_and(|backend| backend.recipe_ingredient_test(self, stack))
+    }
+    /// `test` with the loop context the game already holds, for the game's
+    /// own matching.
+    pub(crate) fn test_in(
+        &self,
+        context: &horizon_world::native_load_context::LoopContext,
+        stack: &ItemStack,
+    ) -> bool {
         match &self.children {
             // Each child its own `test`, as on NeoForge — a mod's kind
             // among them answers through its hook.
-            Some((Shape::Compound, kids)) => kids.iter().any(|k| k.test(stack)),
-            Some((Shape::Intersection, kids)) => kids.iter().all(|k| k.test(stack)),
+            Some((Shape::Compound, kids)) => kids.iter().any(|k| k.test_in(context, stack)),
+            Some((Shape::Intersection, kids)) => kids.iter().all(|k| k.test_in(context, stack)),
             Some((Shape::Difference, kids)) => {
-                kids.first().is_some_and(|k| k.test(stack))
-                    && kids.get(1).is_none_or(|k| !k.test(stack))
+                kids.first().is_some_and(|k| k.test_in(context, stack))
+                    && kids.get(1).is_none_or(|k| !k.test_in(context, stack))
             }
             None => {
                 if !self.items.contains(&*stack.item) {
@@ -342,7 +354,7 @@ impl Ingredient {
                 }
                 if let Some((kind, data)) = &self.custom {
                     let mut accept = true;
-                    native_ingredient_test(kind, data, stack, &mut accept);
+                    native_ingredient_test(context, kind, data, stack, &mut accept);
                     return accept;
                 }
                 true
