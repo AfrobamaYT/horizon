@@ -70,10 +70,15 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
         }
         Ok(())
     }
-    for path in ["native-hooks.json", "crates/horizon-mod-api/src/lib.rs"] {
-        println!("cargo:rerun-if-changed={}", root.join(path).display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        root.join("crates/horizon-mod-api/src/lib.rs").display()
+    );
+    for retired in super::catalog::RETIRED {
+        // Tracked while absent too: a file that appears must fail the next build.
+        println!("cargo:rerun-if-changed={}", root.join(retired).display());
     }
-    directory(&root.join("tools/native-hook-fragments"), "json", false)?;
+    directory(&root.join(super::catalog::DECLARATIONS), "rs", false)?;
     directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
     for hook in Catalog::load(root)?.hooks {
         if let Some((krate, path)) = free_function_source(&hook.target) {

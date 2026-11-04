@@ -113,6 +113,27 @@ impl Game<'_> {
         self.native_minecart_edit(cart, Some(CartKind::Furnace), |c| c.fuel = fuel)
     }
 
+    /// A furnace minecart's push (`MinecartFurnace.push`): the way its fuel drives it on rails,
+    /// x and z; its y part stays between ticks and sets the push's length. None for another
+    /// kind of cart.
+    pub(super) fn native_minecart_push(&self, cart: MinecartRef) -> Option<[f64; 3]> {
+        let cart = self.native_minecart(cart)?;
+        (cart.kind == CartKind::Furnace).then_some([cart.push.x, cart.push.y, cart.push.z])
+    }
+
+    /// Sets a furnace minecart's push, as a player's click with fuel sets it toward them
+    /// (`MinecartFurnace.interact`): a cart a mod drives runs that way while it has fuel. False
+    /// for another kind of cart or a push that isn't finite.
+    pub(super) fn native_minecart_set_push(&mut self, cart: MinecartRef, push: [f64; 3]) -> bool {
+        if !push.iter().all(|v| v.is_finite()) {
+            return false;
+        }
+        let [x, y, z] = push;
+        self.native_minecart_edit(cart, Some(CartKind::Furnace), |c| {
+            c.push = horizon_core::geometry::Vec3::new(x, y, z)
+        })
+    }
+
     /// `MinecartTNT`'s fuse ticks, -1 when it is not primed; None for another
     /// kind of cart.
     pub(super) fn native_minecart_fuse(&self, cart: MinecartRef) -> Option<i32> {
@@ -178,6 +199,25 @@ mod tests {
             super::super::minecarts::furnace_fuel_after(i32::MAX),
             Some(i32::MIN + 3599)
         );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_furnace_carts_push_is_read_and_set_through_its_handle() {
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let furnace = spawn(game, 50, CartKind::Furnace);
+            let chest = spawn(game, 51, CartKind::Chest);
+            assert_eq!(game.native_minecart_push(furnace), Some([0.0, 0.0, 0.0]));
+            assert!(game.native_minecart_set_push(furnace, [0.5, 0.0, -0.5]));
+            assert_eq!(game.native_minecart_push(furnace), Some([0.5, 0.0, -0.5]));
+            assert_eq!(game.carts[0].push, Vec3::new(0.5, 0.0, -0.5));
+            // Not a furnace cart, or a push that isn't finite: refused.
+            assert_eq!(game.native_minecart_push(chest), None);
+            assert!(!game.native_minecart_set_push(chest, [0.5, 0.0, 0.0]));
+            assert!(!game.native_minecart_set_push(furnace, [f64::NAN, 0.0, 0.0]));
+            assert_eq!(game.native_minecart_push(furnace), Some([0.5, 0.0, -0.5]));
+        });
     }
 
     #[test]

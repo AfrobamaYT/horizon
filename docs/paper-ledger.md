@@ -14,4 +14,4 @@ The Paper/Bukkit references below are public Javadoc, not implementation sources
 | [CommandExecutor](https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/command/CommandExecutor.html) and Brigadier | **Partial:** register `NativeCommand` usages through `native_register_commands`, then handle player commands in `native_perform_command` and dedicated-console commands in `native_perform_console_command`. Horizon builds a command tree from its supported usage syntax; this is not a general Bukkit executor or arbitrary Brigadier registration. See `crates/horizon-client/src/game/native_server.rs` and [server commands](modding/src/reference/hook-notes.md#server-commands-and-players). |
 
 For callback signatures, side and current limitations, use [native mods](modding/src/how-to/native-mods.md)
-and `native-hooks.json` at the fork revision being targeted.
+and the hook declarations under `crates/horizon-mod-api/src/hooks/` at the fork revision being targeted.

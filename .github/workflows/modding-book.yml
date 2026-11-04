@@ -2,9 +2,9 @@ name: modding-book
 on:
   push:
     branches: [main]
-    paths: ["docs/modding/**", "crates/horizon-mod-api/**", "native-hooks.json", "tools/native-hook-fragments/**"]
+    paths: ["docs/modding/**", "crates/horizon-mod-api/**"]
   pull_request:
-    paths: ["docs/modding/**", "crates/horizon-mod-api/**", "native-hooks.json", "tools/native-hook-fragments/**"]
+    paths: ["docs/modding/**", "crates/horizon-mod-api/**"]
 jobs:
   book:
     runs-on: ubuntu-latest

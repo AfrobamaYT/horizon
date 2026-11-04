@@ -124,7 +124,7 @@ the same mod: for example, `LevelRef::set_block` fires `block_changed`. Mods kee
 state with interior mutability so these calls can share the instance safely. Data-load
 hooks can run on any loading thread; item default changes must be identical on every side.
 
-The trait has every hook in `native-hooks.json` and the pending fragments ([Adding a hook](#adding-a-hook)).
+The trait has every hook declared under `crates/horizon-mod-api/src/hooks/` ([Adding a hook](#adding-a-hook)).
 Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `block_state` through `LevelAccess::block_state`, client-side detection and
 `state_with_property`. `state_string(state)` serializes the full name and properties, or returns `None`
@@ -540,6 +540,50 @@ each other's handlers. So the game refuses that at startup, naming both mods and
 `CapabilityRegistry.create` refuses one name created with a different type, and it refuses a key whose name has no
 namespace. Both checks run once, when the mods register.
 
+### Block-state facts
+
+A `BlockStateId` is a registry value, not a live object, so the facts about one that need no world are a small
+read-only service on any host, both sides: `host.block_states()` (import `HostBlockStates`). Each reads the game's own
+tables and allocates nothing:
+
+| Method | Vanilla |
+|---|---|
+| `replaceable(state) -> Option<bool>` | `BlockState.canBeReplaced()` |
+| `destroy_speed(state) -> Option<f32>` | `BlockBehaviour.Properties.destroyTime` (`getDestroySpeed`): stone 1.5, -1 unbreakable |
+| `sound(state) -> Option<BlockSoundType>` | `BlockState.getSoundType()`: volume, pitch and the break, step, place, hit and fall events |
+| `has_block_entity(state) -> Option<bool>` | `BlockState.hasBlockEntity()` |
+| `states_of(block) -> Option<BlockStateRange>` | `StateDefinition.getPossibleStates`, as the block's consecutive ids |
+
+None for an unknown state or block, and on a host with no game behind it (a mod's test double).
+
+### Fake players
+
+`host.fake_player(level, uuid, name)` makes, or finds again, a player with no connection in the level in place, as
+NeoForge's `FakePlayerFactory` does: a machine that acts as a player (a deployer, a block breaker). It is no
+online player: the tab list, player counts, sleeping, natural spawning, chunk tickets, statistics and saves leave
+it out. `player.is_fake(host)` tells one apart; `player.remove_fake(host)` removes it.
+
+`player.perform_action(host, action)` makes it act as a player does, through the game's own path for the action, as
+that player's packet would run it:
+- `PlayerAction::UseOn { hand, pos, hit }` is a click on a block (`ServerPlayerGameMode.useItemOn`): reach, the
+  hit's place on the block, the build height, spawn protection and the border, then the block's use and the item's
+  `useOn`, which is how a block item is placed;
+- `PlayerAction::UseItem { hand }` is a use in the air (`ServerPlayerGameMode.useItem`), by the item's own ray from
+  the player's eyes and look: a bucket clicked on a block passes, as vanilla's does, and empties when used.
+
+Its items are its own inventory: set the stack in its hand first (through `ENTITY_ITEMS` or an `ItemPlace`), and
+read what is left after. The answer says what happened:
+
+| Answer | Meaning |
+|---|---|
+| `Ok(ActionOutcome::Consumed)` | Vanilla's `InteractionResult` consumed (a success or a consume) |
+| `Ok(ActionOutcome::Passed)` | Nothing used the click |
+| `Ok(ActionOutcome::EffectBlocked(effect))` | The click ran, but what it would start was stopped: a menu or screen, sleeping, riding, or going to another dimension (`FakeEffect`). The click's own side effects have still happened then: the swing seen by others, the hooks that run before the use, vanilla's `Success` |
+| `Err(ActionRefused::…)` | Nothing ran: `NotFake` (a real player's handle), `Stale`, `Busy` (another player's turn, an open transaction, or a hook inside another `perform_action`), `OutOfReach` or `Protected` |
+
+What a machine does beyond a player's action stays in the mod: a deployer's reach and eye height, its own mining
+progress, catching its drops.
+
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it, so a test double implements only what its hook calls, and an
@@ -577,11 +621,11 @@ hosts are small enough to implement whole. NeoForge's GameTest is the in-game co
 
 ### Adding a hook
 
-A new hook needs its fragment in `tools/native-hook-fragments/` with its `mod_api` entry (for example
-`{"contract": "cancel", "out": "cancel"}`), its `native_*` function with the placeholder body
+A new hook needs its declaration in the area file of `crates/horizon-mod-api/src/hooks/` (`///` lines and
+`#[hook(side = "server", contract = "cancel", out = "cancel")]` on `fn name();`; the argument list is in that folder's `mod.rs`), its `native_*` function with the placeholder body
 `let _ = (every, parameter);` (all its parameters, in order), and a run of `cargo run -p xtask -- mod-api`.
 That command only replaces the placeholder in `native_hooks.rs` with the `dispatch_<hook>` call; commit
-that source change and the fragment. The `horizon-mod-api-gen` build dependency generates the hook traits,
+that source change and the declaration. The `horizon-mod-api-gen` build dependency generates the hook traits,
 `Host` methods and dispatch code into Cargo's `OUT_DIR` when the game and renderer build, including release
 builds. These generated Rust files are not kept in the source tree or committed, and no manual regeneration
 is needed after a merge. Every hook needs a `mod_api` entry: the build fails naming any hook without one. A hook that stands in for a
@@ -685,8 +729,8 @@ optional server-side persistence, player-respawn option and `sync` with a `Strea
 custom copy handler, conditional serialization, the `sendToPlayer` predicate,
 `AttachmentSyncHandler` partial updates or a wire codec apart from the disk codec.
 
-`Host` exposes the documented `Game` helpers listed under `helpers` in
-`native-hooks.json`, without their `native_` prefix. Each keeps the helper's
+`Host` exposes the documented `Game` helpers declared in the `Helpers` traits of
+`crates/horizon-mod-api/src/hooks/`, without their `native_` prefix. Each keeps the helper's
 receiver and documentation; a helper without `self` (`config_files`) takes
 `&self` in `Host`. Level services stay on the level hosts above.
 For item registry facts, `host.item_crafting_remainder(&stack)` returns a count-one

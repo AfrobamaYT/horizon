@@ -51,7 +51,10 @@ Hook points are functions the game calls at fixed places. Their names, parameter
 game source and may change. Per-hook catalog versions describe individual contracts, not minimum game versions
 or a cross-release compatibility range.
 
-Hook and helper authors add [catalog fragments](../../../../tools/native-hook-fragments/README.md). Collection updates
+Hooks are declared in Rust now, not in JSON: a hook or helper author adds a `#[hook(...)]` (or `#[helper(...)]`)
+declaration, with its `///` doc, to a file under `crates/horizon-mod-api/src/hooks/` (a new file for a new area, named
+for it, plus one `mod` line for it in `hooks/mod.rs`, in name order). `native-hooks.json` and
+`tools/native-hook-fragments/` are retired, and a file there fails the build. Collection updates
 the catalog, not a global API number, source comments or documentation histories.
 
 ## Runtime packages and identity
@@ -121,8 +124,8 @@ forms are in the modding book: [Injections](../injections.md).
 
 ### Named hook points
 
-`native-hooks.json` at the root of the source names each hook point and the version of its contract (signature,
-when it is called, what it does): `{"name": "render_gui_post", "version": 1, "target": "horizon_client::game::native_hooks::Game<'_>::native_render_gui_post"}`.
+The declarations under `crates/horizon-mod-api/src/hooks/` name each hook point and the version of its contract (signature,
+when it is called, what it does): `#[hook(side = "client", contract = "listen", ...)] fn render_gui_post();`, fired by `horizon_client::game::native_hooks::Game<'_>::native_render_gui_post`.
 An injection names `hook` and `hook_version` instead of `target`, and horizon-mixins resolves it from the catalog
 of the source it applies to, so a hook point can move in the source without breaking the mods that use it. A name
 the catalog lacks is `E_HOOK_UNKNOWN` (the error lists the names it has), a version it lacks `E_HOOK_VERSION`. A
@@ -322,8 +325,9 @@ spacing, the structure's `biomes` and `terrain_adaptation` are placed by the eng
 for a fortress.
 
 Each piece is a `StructurePiece` (`Debug + Send + Sync`): `bounding_box`, `post_process` and
-`add_additional_save_data` are required, `after_place` (vanilla's `Structure.afterPlace`, on the
-first piece once per chunk, with every piece's current box) defaults to doing nothing. The
+`add_additional_save_data` are required. After all pieces of the start were placed, the type's own
+`after_place` (vanilla's `Structure.afterPlace`) runs once per chunk with every piece's current
+box; it defaults to doing nothing. The
 `PieceContext` of `post_process` and `after_place` is the chunk being placed: `set_block` writes a
 block and drops a position outside the writable box silently, as vanilla's
 `StructurePiece.placeBlock` skips it; `block` and `height` read, `state`/`state_with` resolve a

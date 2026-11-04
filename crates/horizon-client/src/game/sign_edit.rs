@@ -319,6 +319,9 @@ impl Game<'_> {
     }
     /// `SignBlock.openTextEdit` for the front side after placement.
     pub(super) fn open_sign_editor(&mut self, pos: (i32, i32, i32), front: bool) {
+        if self.fake_blocks(mod_api::FakeEffect::Menu) {
+            return;
+        }
         self.open_screen_overlay("sign_editor", |game| {
             // Minecraft.setScreen: the editor already open is removed first.
             game.close_sign_editor();

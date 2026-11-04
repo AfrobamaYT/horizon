@@ -1,7 +1,0 @@
-{
-  "hooks": [],
-  "helpers": [
-    {"name": "camera", "side": "client", "target": "horizon_client::game::native_hooks::Game<'_>::native_camera", "mod_api": {}},
-    {"name": "block_collision", "side": "both", "target": "horizon_client::game::native_hooks::Game<'_>::native_block_collision", "mod_api": {}}
-  ]
-}

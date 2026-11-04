@@ -182,7 +182,7 @@ impl Game<'_> {
     /// `LivingEntity.hurtServer` of the mob at `index` by the player's hit:
     /// the weapon's `armor_effectiveness` enchantments (Breach) thin its armor.
     pub(super) fn hurt_by_player(&mut self, index: usize, amount: f32, source: Damage) -> bool {
-        let _attacker = self.knockback_scope(self.player.as_ref().map_or(0, |p| p.entity_id));
+        let attack = self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id));
         let held = self.held().cloned();
         let aim = self.attacker_aim(source.attacker);
         let kind = self.mobs[index].kind.id.clone();
@@ -215,7 +215,7 @@ impl Game<'_> {
         // (`SulfurCube.knockback`).
         self.mobs[index].attacker_aim = aim;
         let hurt = self.mobs[index].damage_with(
-            crate::game::entity::damage_level_of!(self),
+            crate::game::entity::damage_level_of!(self, &attack),
             amount,
             source,
             Some(&mut breach),
@@ -461,7 +461,7 @@ impl Game<'_> {
         let Some(player) = self.player.as_ref() else {
             return;
         };
-        let _attacker = self.knockback_scope(player.entity_id);
+        let attack = self.attack_of(player.entity_id);
         let from = [player.position.x, player.position.y, player.position.z];
         let area = target.inflate(Vec3::new(1.0, 0.25, 1.0));
         let near = |at: Vec3| {
@@ -543,11 +543,11 @@ impl Game<'_> {
                 };
                 let source = mod_api::health::HurtSource {
                     damage_type: "minecraft:player_attack",
-                    causing: horizon_client::health::knockback_attacker(),
-                    direct: horizon_client::health::knockback_attacker(),
+                    causing: attack.attacker,
+                    direct: attack.attacker,
                     position: None,
                 };
-                let level = crate::game::entity::damage_level_of!(self);
+                let level = crate::game::entity::damage_level_of!(self, &attack);
                 let pushed = horizon_client::health::Hurting::ArmorStand(id as i32, source);
                 if level.knockback_canceled(pushed, &mut knock) || knock.strength <= 0.0 {
                     continue;
@@ -586,7 +586,7 @@ impl Game<'_> {
                 if old_health > 0.0 && !self.mobs[i].alive() {
                     self.native_kill_event(i);
                 }
-                let level = crate::game::entity::damage_level_of!(self);
+                let level = crate::game::entity::damage_level_of!(self, &attack);
                 self.mobs[i].knockback(level, 0.4, xd, zd, &source);
                 self.remember_mob_player_credit(self.mobs[i].id);
                 self.post_attack(i);

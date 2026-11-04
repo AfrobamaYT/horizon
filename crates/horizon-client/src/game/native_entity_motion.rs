@@ -135,6 +135,36 @@ impl Game<'_> {
         }
         true
     }
+    /// `Entity.resetFallDistance`: how far the entity has fallen is forgotten, so its next
+    /// landing hurts it as a step does (a fan's or a launcher's push, a mod's soft block).
+    /// Players too, the acting one and guests. False for a stale handle or an entity not in
+    /// the level in place; true for a kind that keeps no fall distance, which has none to forget.
+    pub(super) fn native_entity_reset_fall_distance(&mut self, entity: EntityRef) -> bool {
+        let Some(target) = self.native_entity_target(entity) else {
+            return false;
+        };
+        if matches!(target, Target::Player | Target::Guest(_)) {
+            let motion = match target {
+                Target::Player => self.player.as_mut(),
+                Target::Guest(conn) => self
+                    .lan
+                    .as_mut()
+                    .and_then(|host| host.hub.guest_mut(conn))
+                    .and_then(|g| g.motion.as_deref_mut()),
+                _ => None,
+            };
+            let Some(motion) = motion else {
+                return false;
+            };
+            motion.fall_distance = 0.0;
+            return true;
+        }
+        let Some(h) = self.native_walk_entity(entity.id()) else {
+            return false;
+        };
+        with_entity_mut!(self, h, e => e.reset_fall_distance());
+        true
+    }
     /// Whether the entity stands on a block (`Entity.onGround`).
     pub(super) fn native_entity_on_ground(&self, entity: EntityRef) -> Option<bool> {
         let t = self.native_entity_target(entity)?;
@@ -201,6 +231,55 @@ mod tests {
     fn corners_are_lowest_then_highest() {
         let b = Aabb::new(Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0));
         assert_eq!(super::corners(b), [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn reset_fall_distance_forgets_a_fall_for_mobs_carts_and_players() {
+        use super::super::minecarts::{CartKind, Minecart};
+        use horizon_client::mobs::Mob;
+        fn fake_fall<'a>(game: &'a mut super::super::Game<'_>) -> &'a mut f64 {
+            let host = game.lan.as_mut().unwrap();
+            let g = host.hub.guests.iter_mut().find(|g| g.uuid == 2).unwrap();
+            &mut g
+                .motion
+                .as_deref_mut()
+                .expect("a fake has a motion")
+                .fall_distance
+        }
+        super::super::native_entity_refs::tests::with_game(|game| {
+            super::super::bossbars::audience_tests::add_real_and_fake(game);
+            game.options.dedicated = Some(Vec::new());
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            let mut zombie = Mob::new(40, kind, Vec3::ZERO, 0.0);
+            zombie.fall_distance = 12.0;
+            game.mobs.push(zombie);
+            let mut cart = Minecart::new(41, CartKind::Rideable, Vec3::ZERO);
+            cart.fall_distance = 7.0;
+            game.carts.push(cart);
+            let (zombie, cart) = (
+                game.native_entity(40).unwrap(),
+                game.native_entity(41).unwrap(),
+            );
+            assert!(game.native_entity_reset_fall_distance(zombie));
+            assert!(game.native_entity_reset_fall_distance(cart));
+            assert_eq!(game.mobs[0].fall_distance, 0.0);
+            assert_eq!(game.carts[0].fall_distance, 0.0);
+            // A player: the fake guest's own motion.
+            let level = game.native_level(game.dim.id()).unwrap();
+            let fake = game.native_fake_player(level, 2, "fake").unwrap().entity();
+            *fake_fall(game) = 9.0;
+            assert!(game.native_entity_reset_fall_distance(fake));
+            assert_eq!(*fake_fall(game), 0.0);
+            // An entity that is gone: nothing.
+            game.mobs.clear();
+            assert!(!game.native_entity_reset_fall_distance(zombie));
+        });
     }
 
     #[test]

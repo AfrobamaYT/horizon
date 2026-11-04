@@ -270,8 +270,11 @@ requires a farmer at work and `mob_griefing` enabled.
 
 - Redstone from a mod's block, on authoritative servers. `native_block_signal` may change the signal a block gives on
   a face, weak or direct, and `native_is_signal_source` lets redstone wire connect to it. Both are asked very often, so check the
-  block first and answer from the mod's own state. When the output changes, and once the block is placed (a direct signal past a conductor isn't read before), `native_update_signal_neighbors(dimension, pos)` makes the blocks around
-  it read it again; it acts on the level in place and is refused for another dimension.
+  block first and answer from the mod's own state. When the output changes, and once the block is placed (a direct signal past a conductor isn't read before),
+  `level.update_neighbors(host, pos, state, NeighbourUpdate::Neighbours)` makes the blocks around it read it again
+  (`Level.updateNeighborsAt`; a block that powers what it is attached to, as a lever does, also updates there). A
+  diode's front takes `level.neighbor_changed(host, front, state)` then `NeighbourUpdate::NeighboursExcept(facing)`
+  (`DiodeBlock.updateNeighborsInFront`). Both act on the level in place and are refused elsewhere.
 
 - Item behaviour, on the server for every player: `native_hurt_enemy` hears a player's hit land on a mob with the
   held stack, `native_inventory_tick` runs each tick for every stack a player carries (armour and off hand included), and
@@ -449,6 +452,13 @@ one, where vanilla gives the `by` one.
   entity that didn't have it, and `native_mob_effect_added` (NeoForge's `MobEffectEvent.Added`) every time it is given.
   A mob is its `Entity.getId`; a player is None, with their state swapped in (`native_acting_player`). Vanilla's effects
   never reach them.
+  The three moments around them cover every effect, vanilla's included: `mob_effect_applicable`
+  (NeoForge's `MobEffectEvent.Applicable`, vanilla's `canBeAffected`) answers whether an effect can land — the first
+  mod to answer `Allow` or `Deny` overrides the vanilla tag check, and an unanswered hook falls
+  back to it; `mob_effect_expired` (`.Expired`) hears one count down to nothing — cancelling
+  refuses the expiry, and the effect stays, kept at no ticks and asked again next tick;
+  `mob_effect_remove` (`.Remove`) hears one about to be removed by any path — a command, milk or a
+  mod's removal helper — and cancelling keeps it. All three name their entity as a `LivingRef`, the player's own included.
 
 - Chunks and players coming and going, on the server: `native_chunk_load` (with whether the chunk is new), `native_chunk_unload`, and
   `native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Changes made to the departing chunk in `native_chunk_unload` aren't saved: as in vanilla, the chunk is saved before it unloads.
@@ -489,7 +499,7 @@ one, where vanilla gives the `by` one.
 
 - A mod block's comparator output, as vanilla's `BlockBehaviour.hasAnalogOutputSignal` and `getAnalogOutputSignal`: `native_has_analog_output` says a block of yours has one,
   and `native_analog_output` gives it (0 to 15) for its state and position. A state change with neighbour updates tells the comparators itself; when the output
-  changes otherwise, `native_update_output_neighbors(dimension, pos)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
+  changes otherwise, `level.update_neighbors(host, pos, state, NeighbourUpdate::OutputSignal)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
 
 `Hooks::component_types`, `blocks`, `items` and `standalone_models` take
 `&RegistrationContext` before their event; `Hooks::register` takes it after
@@ -1467,7 +1477,7 @@ mod mixin or use it replaces in its design or PR.
 
 ## Named hook catalog (draft)
 
-`native-hooks.json` maps stable hook names and contract versions to the current
+The declarations under `crates/horizon-mod-api/src/hooks/` map stable hook names and contract versions to the current
 source targets. A contract includes the signature, call timing and behavior.
 Keep an existing contract or add a new version when it changes incompatibly.
 The catalog does not cover helper methods or arbitrary private game code.
@@ -2781,6 +2791,8 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 The six combat hooks (`living_incoming_damage`, `damage_pre`, `damage_post`, `living_knockback`, `living_use_totem`, `living_shield_block`) are lent to each hit by the game that runs it, not installed once per process. A mod sees no difference: order, arguments and cancel rules are unchanged.
 
 **Migration (`living_use_totem`, `living_shield_block`, now version 2):** both now take the hit's level host as their first argument, as `living_incoming_damage` does: its blocks, random and own attachments, with no writes beyond them. Add the parameter (`level: &mut dyn LevelRandomHost`); the event, its fields, its order and its cancel rules are unchanged. `living_shield_block` fires inside `hurtServer` before the armor and enchantment reductions and sees the hit's `damage` as it came in; `living_use_totem` fires after health reached 0 and before `die`. Tick-time effect: one extra pointer in the hit and the same `listened` early-outs. Diverges from upstream: the two hooks gain the level host that upstream's catalog rows did not have.
+
+**Attacker and held stacks (`living_knockback`, the weapon of `living_incoming_damage`):** the attacker's id and the stacks it holds come from the hit that started the attack, not from process state, so a hit nested inside another (a thorns reply, a guest's attack during the host's) names its own attacker and nothing is left behind afterwards. No event field, order, random draw or cancel rule changes, so neither hook's version does. The game copies the held stacks only while a mod listens; without one the hit carries the attacker id and two empty slots, no allocation.
 
 ## Block drops
 
