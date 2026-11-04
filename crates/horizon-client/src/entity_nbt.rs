@@ -2025,7 +2025,7 @@ pub fn item_entity_to_nbt(e: &ItemEntity, uuid: [i32; 4], raw: Option<&Tag>) -> 
         motion: e.velocity,
         rotation: [0.0, 0.0],
         on_ground: e.on_ground,
-        fall_distance: 0.0,
+        fall_distance: e.fall_distance,
     };
     let mut tag = base.tag(raw);
     for (key, value) in [
@@ -2130,6 +2130,7 @@ pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemE
     let stack = item_from_nbt(tag.get("Item")?)?;
     let position = position(tag)?;
     Some(ItemEntity {
+        fall_distance: float(tag.get("fall_distance")).unwrap_or(0.0),
         join: Default::default(),
         no_gravity: flag(tag, "NoGravity"),
         health: number(tag.get("Health")).unwrap_or(5) as i32,
@@ -3959,6 +3960,7 @@ mod tests {
     #[test]
     fn item_entities_round_trip() {
         let e = ItemEntity {
+            fall_distance: 2.5,
             join: Default::default(),
             no_gravity: false,
             health: 2,
@@ -3997,6 +3999,7 @@ mod tests {
             (120, 10, true)
         );
         assert_eq!(back.position.x, 100.5);
+        assert_eq!(back.fall_distance, 2.5);
         assert_eq!(back.thrower, e.thrower);
         let mut cleared = back;
         cleared.thrower = None;
