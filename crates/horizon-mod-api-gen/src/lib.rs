@@ -1,6 +1,7 @@
 //! Generate the typed mod interface from native hook signatures and catalog contracts.
 mod catalog;
 mod host;
+pub use catalog::DECLARATIONS;
 use catalog::{Catalog, Contract, DrawContext, Hook, HostAccess, PartKind, PhaseContext, Side};
 use heck::ToSnakeCase;
 use quote::ToTokens;
@@ -675,8 +676,7 @@ pub struct HookPoint {
     pub scoped: bool,
 }
 
-/// The catalog's hook points, `native-hooks.json` and the fragments beside it, as the
-/// generator reads them.
+/// The catalog's hook points, from the declaration files, as the generator reads them.
 pub fn hook_points(root: &Path) -> Result<Vec<HookPoint>, String> {
     Ok(Catalog::load(root)?
         .hooks
@@ -990,7 +990,6 @@ mod tests {
         assert!(super::matching_helper_signatures(server, wrong_receiver, "value").is_err());
     }
     use quote::ToTokens;
-    use serde_json::Value;
     #[test]
     fn hook_points_come_from_the_catalog_and_its_fragments() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -1476,7 +1475,7 @@ mod tests {
 
     /// `item_damaged` taken back to how a new hook arrives (its body the
     /// placeholder) in a copy of the sources: the check reports it, any other
-    /// body is left alone, a missing `mod_api` entry fails by name, and the
+    /// body is left alone, a hook without its attribute fails by name, and the
     /// generator brings back the shipped file byte for byte with the generated
     /// code unchanged.
     #[test]
@@ -1497,8 +1496,7 @@ mod tests {
             .join("target")
             .join(format!("mod-api-fill-{}", std::process::id()));
         let mut inputs: Vec<String> = [
-            "native-hooks.json",
-            "tools/native-hook-fragments",
+            "crates/horizon-mod-api/src/hooks",
             "crates/horizon-client/src/game",
             "crates/horizon-mod-api/src/lib.rs",
         ]
@@ -1516,36 +1514,40 @@ mod tests {
         for input in &inputs {
             copy(&real.join(input), &root.join(input));
         }
-        let catalog_path = root.join("native-hooks.json");
-        let original_catalog = std::fs::read_to_string(&catalog_path).unwrap();
-        for group in ["helpers", "hooks"] {
-            let mut missing: Value = serde_json::from_str(&original_catalog).unwrap();
-            let entry = &mut missing[group][0];
-            let name = entry["name"].as_str().unwrap().to_owned();
-            entry.as_object_mut().unwrap().remove("side").unwrap();
-            std::fs::write(&catalog_path, missing.to_string()).unwrap();
-            let kind = if group == "hooks" { "hook" } else { "helper" };
-            assert_eq!(
-                super::sources(&root, super::FillMode::Require).unwrap_err(),
-                format!("{kind} {name}: missing field `side`")
-            );
-        }
-        std::fs::write(&catalog_path, &original_catalog).unwrap();
+        // The first hook and helper, by declaration order, and the file declaring each.
+        let catalog = super::Catalog::load(&real).unwrap();
+        let declaring = |name: &str| {
+            std::fs::read_dir(root.join(super::catalog::DECLARATIONS))
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .find(|path| {
+                    std::fs::read_to_string(path)
+                        .unwrap()
+                        .contains(&format!("fn {name}();"))
+                })
+                .unwrap()
+        };
+        let first = declaring(&catalog.hooks[0].name);
+        let original = std::fs::read_to_string(&first).unwrap();
         let without_counterparts = super::sources(&root, super::FillMode::Require)
             .unwrap()
             .hooks;
-        let mut with_counterparts: Value = serde_json::from_str(&original_catalog).unwrap();
-        let first = &mut with_counterparts["hooks"][0];
-        first["fabric"] = serde_json::json!(["Example.ONE", "Example.TWO"]);
-        first["paper"] = serde_json::json!("ExampleEvent");
-        std::fs::write(&catalog_path, with_counterparts.to_string()).unwrap();
+        std::fs::write(
+            &first,
+            original.replacen(
+                "#[hook(",
+                "#[hook(fabric = [\"Example.ONE\", \"Example.TWO\"], paper = \"ExampleEvent\", ",
+                1,
+            ),
+        )
+        .unwrap();
         assert_eq!(
             super::sources(&root, super::FillMode::Require)
                 .unwrap()
                 .hooks,
             without_counterparts
         );
-        std::fs::write(&catalog_path, original_catalog).unwrap();
+        std::fs::write(&first, original).unwrap();
         let hooks = root.join("crates/horizon-client/src/game/native_hooks.rs");
         let shipped = std::fs::read_to_string(&hooks).unwrap();
         let call = "mod_api::dispatch_item_damaged(self, player, name, item, amount, cancel);";
@@ -1565,23 +1567,28 @@ mod tests {
             "native_item_damaged: the let _ = (…); placeholder needs its dispatch call; run cargo run -p xtask -- mod-api"
         );
         assert_eq!(std::fs::read_to_string(&hooks).unwrap(), placeholder);
-        // A stamped hook lives in the catalog, not in a fragment.
-        let catalog_path = root.join("native-hooks.json");
-        let shipped_catalog = std::fs::read_to_string(&catalog_path).unwrap();
-        let mut json: Value = serde_json::from_str(&shipped_catalog).unwrap();
-        let hook = json["hooks"]
-            .as_array_mut()
-            .unwrap()
-            .iter_mut()
-            .find(|hook| hook["name"] == "item_damaged")
+        // A hook without its attribute fails by name.
+        let declared = declaring("item_damaged");
+        let shipped_declarations = std::fs::read_to_string(&declared).unwrap();
+        let declaration = shipped_declarations.find("fn item_damaged();").unwrap();
+        let attribute = shipped_declarations[..declaration]
+            .rfind("#[hook(")
             .unwrap();
-        hook.as_object_mut().unwrap().remove("mod_api").unwrap();
-        std::fs::write(&catalog_path, json.to_string()).unwrap();
-        assert_eq!(
-            super::fill_hooks(&root).unwrap_err(),
-            "hook item_damaged: missing field `mod_api`"
+        std::fs::write(
+            &declared,
+            format!(
+                "{}{}",
+                &shipped_declarations[..attribute],
+                &shipped_declarations[declaration..]
+            ),
+        )
+        .unwrap();
+        assert!(
+            super::fill_hooks(&root)
+                .unwrap_err()
+                .contains("item_damaged: needs a #[hook(...)] attribute")
         );
-        std::fs::write(&catalog_path, shipped_catalog).unwrap();
+        std::fs::write(&declared, shipped_declarations).unwrap();
         super::fill_hooks(&root).unwrap();
         // The generator writes LF; a Windows checkout (core.autocrlf) has CRLF.
         let lf = |s: &str| s.replace("\r\n", "\n");

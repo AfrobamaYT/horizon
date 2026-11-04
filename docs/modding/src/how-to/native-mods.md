@@ -51,7 +51,7 @@ Hook points are functions the game calls at fixed places. Their names, parameter
 game source and may change. Per-hook catalog versions describe individual contracts, not minimum game versions
 or a cross-release compatibility range.
 
-Hook and helper authors add [catalog fragments](../../../../tools/native-hook-fragments/README.md). Collection updates
+Hook and helper authors add declarations to the catalog (`crates/horizon-mod-api/src/hooks/`). Collection updates
 the catalog, not a global API number, source comments or documentation histories.
 
 ## Runtime packages and identity
@@ -121,8 +121,8 @@ forms are in the modding book: [Injections](../injections.md).
 
 ### Named hook points
 
-`native-hooks.json` at the root of the source names each hook point and the version of its contract (signature,
-when it is called, what it does): `{"name": "render_gui_post", "version": 1, "target": "horizon_client::game::native_hooks::Game<'_>::native_render_gui_post"}`.
+The declarations under `crates/horizon-mod-api/src/hooks/` name each hook point and the version of its contract (signature,
+when it is called, what it does): `#[hook(side = "client", contract = "listen", ...)] fn render_gui_post();`, fired by `horizon_client::game::native_hooks::Game<'_>::native_render_gui_post`.
 An injection names `hook` and `hook_version` instead of `target`, and horizon-mixins resolves it from the catalog
 of the source it applies to, so a hook point can move in the source without breaking the mods that use it. A name
 the catalog lacks is `E_HOOK_UNKNOWN` (the error lists the names it has), a version it lacks `E_HOOK_VERSION`. A

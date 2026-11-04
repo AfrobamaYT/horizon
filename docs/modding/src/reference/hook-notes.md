@@ -1459,7 +1459,7 @@ mod mixin or use it replaces in its design or PR.
 
 ## Named hook catalog (draft)
 
-`native-hooks.json` maps stable hook names and contract versions to the current
+The declarations under `crates/horizon-mod-api/src/hooks/` map stable hook names and contract versions to the current
 source targets. A contract includes the signature, call timing and behavior.
 Keep an existing contract or add a new version when it changes incompatibly.
 The catalog does not cover helper methods or arbitrary private game code.

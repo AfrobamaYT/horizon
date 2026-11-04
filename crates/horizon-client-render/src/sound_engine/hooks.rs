@@ -5,7 +5,7 @@ use super::{Attenuation, ChannelId, SoundEngine, SoundInstance};
 use mod_api::__private::built;
 use mod_api::{ChannelRef, HookId, OwningLoop, SoundAttenuation, SoundPlay, SoundSource};
 
-/// Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`
+/// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/`
 /// with the game's): a sound is about to play (`PlaySoundEvent`, vanilla's `SoundEngine.play`).
 /// `original` is the sound as asked for; `sound` starts as a copy of it, and a mod edits it or
 /// sets it `None` to play nothing. It is asked before the engine's own checks (library loaded,
@@ -19,7 +19,7 @@ pub fn native_play_sound(
     mod_api::dispatch_play_sound(&OwningLoop::new(context), original, sound);
 }
 
-/// Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`
+/// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/`
 /// with the game's): a sound that is not streamed has started on `channel`
 /// (`PlaySoundSourceEvent`), after the engine set its pitch, volume and position.
 #[inline(never)]
@@ -31,7 +31,7 @@ pub fn native_play_sound_source(
     mod_api::dispatch_play_sound_source(&OwningLoop::new(context), sound, channel);
 }
 
-/// Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`
+/// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/`
 /// with the game's): a streamed sound (music, a record) has started on `channel`
 /// (`PlayStreamingSourceEvent`).
 #[inline(never)]
@@ -43,7 +43,7 @@ pub fn native_play_streaming_source(
     mod_api::dispatch_play_streaming_source(&OwningLoop::new(context), sound, channel);
 }
 
-/// Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`
+/// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/`
 /// with the game's): the sound engine opened its output, at window start, after a resource
 /// reload and when the output device changes (`SoundEngineLoadEvent`).
 #[inline(never)]

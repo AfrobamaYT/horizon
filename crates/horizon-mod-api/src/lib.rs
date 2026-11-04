@@ -5,6 +5,9 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 #![deny(missing_docs)]
 extern crate self as mod_api;
+// Never compiled: the generator reads these declarations to build the `Hooks` trait and its dispatch.
+#[cfg(any())]
+mod hooks;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod biome;

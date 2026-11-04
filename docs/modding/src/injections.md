@@ -13,8 +13,8 @@ until the hook exists.
 Apply these rules in order and stop at the first that fits.
 
 1. A hook or a Part method exists for the moment: implement it. **No injection.**
-2. No hook, but the moment is a catalog hook point (`native-hooks.json`, or a fragment in
-   `tools/native-hook-fragments/`): `hook = "<name>"`, `hook_version = <N>`, with `trait_method`.
+2. No hook, but the moment is a catalog hook point (declared under
+   `crates/horizon-mod-api/src/hooks/`): `hook = "<name>"`, `hook_version = <N>`, with `trait_method`.
 3. No hook point: `trait_method`, `kind`, `target`, and one binding
    `{ name = "host", ty = "&mut dyn crate::mod_api::Host", value = "&mut *self" }`. The body uses only
    `mod_api` types (handles, attachments, services). This is the default injection.
