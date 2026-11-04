@@ -187,8 +187,7 @@ impl Game<'_> {
                     Some(Target::Mob(i)) => Some(Some(i)),
                     _ => Some(None),
                 };
-                // resolvePlayerResponsibleForDamage: the causing player, by entity id,
-                // for a native mod's experience drop.
+                // resolvePlayerResponsibleForDamage: remember the causing player's UUID.
                 let by_player = match cause.or(by) {
                     Some(Target::Player) => self.lan_acting,
                     Some(Target::Guest(conn)) => Some(conn),

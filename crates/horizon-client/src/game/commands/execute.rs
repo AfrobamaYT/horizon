@@ -778,7 +778,11 @@ impl Game<'_> {
                             horizon_client::mobs::Who::Player => {
                                 // LivingEntity.getLastHurtByMob is the player
                                 // who hit it, not whichever client is reading it.
-                                match self.last_hurt_by_player.get(&id).and_then(|credit| self.resolve_player_credit(*credit)) {
+                                match self
+                                    .last_hurt_by_player
+                                    .get(&id)
+                                    .and_then(|credit| self.resolve_player_credit(*credit))
+                                {
                                     Some(Some(conn))
                                         if attacker && self.lan_acting != Some(conn) =>
                                     {

@@ -45,8 +45,9 @@ impl CombatTracker {
     /// `LivingEntity.lastHurtByPlayer`, remembered for 100 ticks (taken, as a
     /// dead player's memory goes with them).
     pub(super) fn take_hurt_by_player(&mut self, now: i64) -> Option<PlayerCredit> {
-        let (credit, at) = self.last_hurt_by_player.take()?;
-        (now - at < 100).then_some(credit)
+        let credit = self.player_credit(now);
+        self.last_hurt_by_player = None;
+        credit
     }
     /// Whether a player hurt this body within the last 100 ticks
     /// (`lastHurtByPlayerMemoryTime > 0`), without forgetting them.

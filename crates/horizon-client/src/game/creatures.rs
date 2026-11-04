@@ -1125,6 +1125,7 @@ impl Game<'_> {
             _ => Vec::new(),
         };
         let mut guest_events = Vec::new();
+        let mut player_credit = std::mem::take(&mut self.last_hurt_by_player);
         // The block writes since the last tick: mobs re-path around them.
         let path_writes = self
             .world
@@ -1214,7 +1215,11 @@ impl Game<'_> {
                 horizon_client::mobs::apply_mob_pushes(m, &mut pushes);
                 horizon_client::mobs::blocks_changed(m, &path_changes);
                 let from = events.len();
+                let credit_expiring = m.ai.last_hurt_by_player == 1;
                 let kept = m.tick(&w, &mut scratch, &mut events);
+                if credit_expiring && m.ai.last_hurt_by_player == 0 {
+                    player_credit.remove(&m.id);
+                }
                 // A killed mob's body is removed: its effects that act on
                 // death run (`LivingEntity.remove` with KILLED).
                 if !kept && !m.alive() && !m.removed && !m.extra.effects.is_empty() {
@@ -1272,6 +1277,7 @@ impl Game<'_> {
             level_random = scratch;
         }
         self.world.random = level_random;
+        self.last_hurt_by_player = player_credit;
         if let Some(host) = self.lan.as_mut()
             && !guests.is_empty()
         {
@@ -1441,6 +1447,9 @@ impl Game<'_> {
         // the mob gets KILL_MOB_NEAR_SCULK_CATALYST.
         if consumed && catalyst_xp > 0 {
             let who = match killer {
+                Some(Some(conn)) if self.lan_acting == Some(conn) => {
+                    Some(super::commands::Target::Player)
+                }
                 Some(Some(conn)) => Some(super::commands::Target::Guest(conn)),
                 Some(None) if self.lan_acting.is_none() => Some(super::commands::Target::Player),
                 _ => None,
@@ -7845,7 +7854,12 @@ mod tests {
                     (0, 0),
                     Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
                 );
-                let catalyst = game.pack.assets.registry.default_state("minecraft:sculk_catalyst").unwrap();
+                let catalyst = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:sculk_catalyst")
+                    .unwrap();
                 game.with_level(|b, level, ticks| {
                     b.set_block(level, ticks, BlockPos::new(1, 0, 0), catalyst, 2 | 16);
                 });
@@ -7869,8 +7883,27 @@ mod tests {
                 game.mob_died(&victim);
                 let stats = &game.lan.as_ref().unwrap().play.get(&12).unwrap().stats;
                 assert_eq!(stats.get("custom", "minecraft:mob_kills"), 1);
-                let guest = &game.lan.as_ref().unwrap().hub.guests[0];
+                let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
                 assert!(guest.advancements.has("test:catalyst", "kill"));
+                guest.advancements = Default::default();
+                let mut second = victim.clone();
+                second.id = 102;
+                game.last_hurt_by_player
+                    .insert(102, super::super::combat::PlayerCredit(12));
+                game.as_guest(12, |game| game.mob_died(&second)).unwrap();
+                let host = game.lan.as_ref().unwrap();
+                assert_eq!(
+                    host.play[&12].stats.get("custom", "minecraft:mob_kills"),
+                    2
+                );
+                assert!(
+                    host.hub.guests[0]
+                        .advancements
+                        .has("test:catalyst", "kill")
+                );
+                game.mobs[0].extra.owner = None;
+                game.resolve_player_responsible(101, Damage::mob(100, [0.0; 3]));
+                assert!(!game.last_hurt_by_player.contains_key(&101));
             });
         }
     }
