@@ -3032,6 +3032,7 @@ pub struct BlockPlacement {
 
 impl BlockPlacement {
     /// Create a placement for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(pos: BlockPos, state: BlockStateId) -> Self {
         Self { pos, state }
