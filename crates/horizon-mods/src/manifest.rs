@@ -84,6 +84,25 @@ pub struct Native {
     pub mixins: String,
     #[serde(default)]
     pub injection: Vec<Injection>,
+    #[serde(default)]
+    pub module: Vec<Module>,
+}
+
+/// A support module merged into a game crate, forwarded as horizon-mixins'
+/// `[[module]]`: self-contained Rust items, emitted into `file` as
+/// `mod name`, for helpers that need more than one function.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Module {
+    pub id: String,
+    /// The game source file that receives the module, as the pin indexes it.
+    pub file: String,
+    /// The module's Rust name under the destination file's top level.
+    pub name: String,
+    /// The payload's file in this package, under `src/`.
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -245,6 +264,7 @@ impl Manifest {
                 if injection.id.is_empty() || !ids.insert(&injection.id) {
                     return Err(format!("{MANIFEST}: empty or duplicate injection id"));
                 }
+                // Modules share horizon-mixins' one id space with injections.
                 if injection.hook.is_some() == injection.target.is_some() {
                     return Err(format!(
                         "{MANIFEST}: injection needs exactly one hook or target"
@@ -263,6 +283,35 @@ impl Manifest {
                             "{MANIFEST}: injection needs one source helper or trait_method"
                         ));
                     }
+                }
+            }
+            for module in &native.module {
+                if module.id.is_empty() || !ids.insert(&module.id) {
+                    return Err(format!("{MANIFEST}: empty or duplicate module id"));
+                }
+                if !plain_path(&module.file) {
+                    return Err(format!("{MANIFEST}: module file must be a plain path"));
+                }
+                let name_ok = !module.name.is_empty()
+                    && module
+                        .name
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                    && !module.name.as_bytes()[0].is_ascii_digit();
+                if !name_ok {
+                    return Err(format!("{MANIFEST}: module name must be an identifier"));
+                }
+                if !plain_path(&module.source) || !source_file(&module.source) {
+                    return Err(format!(
+                        "{MANIFEST}: module source must be a file under src/"
+                    ));
+                }
+                if let Some(visibility) = &module.visibility
+                    && !matches!(visibility.as_str(), "pub" | "pub(crate)")
+                {
+                    return Err(format!(
+                        "{MANIFEST}: module visibility must be pub or pub(crate)"
+                    ));
                 }
             }
             if m.version.is_empty()
@@ -837,6 +886,52 @@ capabilities = ["registries"]
         for unsupported in ["unexpected = true", "[[native.post_build]]\nbin = 'bake'"] {
             assert!(Manifest::parse(&format!("{EXAMPLE}{native}{unsupported}\n")).is_err());
         }
+    }
+
+    #[test]
+    fn native_modules_are_validated_like_injections() {
+        let native = format!(
+            "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        let module = "[[native.module]]\nid = 'runtime'\nfile = 'crates/horizon-client/src/game.rs'\nname = 'runtime'\nsource = 'src/runtime.rs'\n";
+        let manifest = Manifest::parse(&format!("{EXAMPLE}{native}{module}")).unwrap();
+        let module = &manifest.native.as_ref().unwrap().module[0];
+        assert_eq!(module.name, "runtime");
+        assert_eq!(module.visibility, None);
+        // Forwarded whole to horizon-mixins, like `injection`.
+        let forwarded = toml::to_string(manifest.native.as_ref().unwrap()).unwrap();
+        assert!(forwarded.contains("[[module]]"));
+        assert!(forwarded.contains("id = \"runtime\""));
+        let valid = "[[native.module]]\nid = 'runtime'\nfile = 'crates/horizon-client/src/game.rs'\nname = 'runtime'\nsource = 'src/runtime.rs'\n";
+        for bad in [
+            // escapes the package's src/
+            valid.replace("source = 'src/runtime.rs'", "source = '../escape.rs'"),
+            // unknown field
+            format!("{valid}order = 1\n"),
+            // duplicate id, also against an injection's
+            format!("{valid}{valid}"),
+            format!(
+                "{valid}[[native.injection]]\nid = 'runtime'\ntarget = 'a'\nkind = 'HEAD'\ntrait_method = 'b'\n"
+            ),
+            // not an identifier
+            valid.replace("name = 'runtime'", "name = 'run time'"),
+            // file must stay a plain path
+            valid.replace(
+                "file = 'crates/horizon-client/src/game.rs'",
+                "file = '/abs.rs'",
+            ),
+            // horizon-mixins accepts exactly pub and pub(crate)
+            valid.to_owned() + "visibility = 'public'\n",
+        ] {
+            assert!(
+                Manifest::parse(&format!("{EXAMPLE}{native}{bad}")).is_err(),
+                "accepted: {bad}"
+            );
+        }
+        let public = valid.to_owned() + "visibility = 'pub(crate)'\n";
+        assert!(Manifest::parse(&format!("{EXAMPLE}{native}{public}")).is_ok());
     }
 
     #[test]

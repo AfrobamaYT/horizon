@@ -1,6 +1,6 @@
 //! Validated flat packages and launcher-owned horizon-mixins input.
 use super::{Bundle, Injection, InjectionSite, MANIFEST};
-use horizon_mods::{manifest, Package};
+use horizon_mods::{Package, manifest};
 use std::{fs, path::Path};
 
 pub(super) fn read(dir: &Path) -> Result<Option<Bundle>, String> {
@@ -71,6 +71,12 @@ pub(super) fn tool_manifest(bundle: &Bundle) -> Result<(), String> {
         manifest.insert(
             "injection".into(),
             toml::Value::try_from(&bundle.native().injection).map_err(|e| e.to_string())?,
+        );
+    }
+    if !bundle.native().module.is_empty() {
+        manifest.insert(
+            "module".into(),
+            toml::Value::try_from(&bundle.native().module).map_err(|e| e.to_string())?,
         );
     }
     fs::write(

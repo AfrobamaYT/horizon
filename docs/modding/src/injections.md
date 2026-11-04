@@ -191,6 +191,32 @@ stop the build:
 A panic inside a trait injection reports the mod and the generated method
 (`in native mod <id>, hook inject_<mod>_<method>`).
 
+## Support modules
+
+A `[[native.module]]` table contributes a whole Rust module to a game crate, beside the injections:
+self-contained items that a helper or trait injection calls through ordinary paths. It is the shape
+for support code a moment needs and one function cannot hold — Portizon's runtime is the case that
+asked for it.
+
+```toml
+[[native.module]]
+id = "runtime"
+file = "crates/horizon-client/src/game.rs"
+name = "portizon"
+source = "src/runtime.rs"
+visibility = "pub"          # optional: "pub" or "pub(crate)" (the default)
+```
+
+`source` holds the module's items without an outer wrapper; the tool emits them into `file` as
+`mod name`. The destination file must carry no top-level glob import — horizon-mixins refuses one,
+because it cannot prove which names the glob introduces — and the payload must be self-contained: no
+`mod` items, `#[path]`, `include!` or file attributes; assemble multi-file code into one file first.
+Ids are unique across a package's injections and modules together.
+
+Modules are **native-only** and last-resort support code for helpers, outside the `mod_api`-only
+line: a mod's behaviour still goes through hooks, handles and Parts. Any capability a module needs
+that the API lacks is a hook request in #44's row form, not a reason to grow the module.
+
 ## Reference
 
 - A trait injection's generated method is `inject_<mod_id>_<trait_method>`; its event is that name in CamelCase

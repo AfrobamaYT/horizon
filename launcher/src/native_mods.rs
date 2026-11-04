@@ -455,7 +455,7 @@ impl Bundle {
     }
 
     fn needs_mixins(&self) -> bool {
-        !self.native().injection.is_empty()
+        !(self.native().injection.is_empty() && self.native().module.is_empty())
     }
 }
 
