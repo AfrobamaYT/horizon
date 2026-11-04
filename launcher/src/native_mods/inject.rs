@@ -321,6 +321,7 @@ mod tests {
                     static MODS: OnceLock<Vec<ModEntry>> = OnceLock::new();
                     MODS.get_or_init(|| vec![ModEntry {{ id: "plain", hooks: Box::new(Other) }}, ModEntry {{ id: "example", hooks: Box::new(Owner) }}, ModEntry {{ id: "other", hooks: Box::new(Other) }}])
                 }}
+                pub mod __private {{ pub use super::mods; }}
             }}
             {helper}
             fn main() {{
@@ -386,6 +387,7 @@ mod tests {
                     }}
                     MODS.get_or_init(|| vec![ModEntry {{ id: "owner", hooks: Box::new(Owner) }}, ModEntry {{ id: "other", hooks: Box::new(Other) }}])
                 }}
+                pub mod __private {{ pub use super::mods; }}
             }}
             {helper}
             fn main() {{
