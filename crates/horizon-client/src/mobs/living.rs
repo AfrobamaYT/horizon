@@ -3,7 +3,6 @@
 //! fluid slowdown and falling adjustment), fluid immersion heights, fall
 //! damage, fire and the walk animation.
 use super::{Mob, MobEvent, MobWorld};
-use horizon_world::native_load_context::LoopContext;
 use crate::health::DamageLevel;
 use crate::{
     blocks::Fluid,
@@ -14,6 +13,7 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
+use horizon_world::native_load_context::LoopContext;
 use horizon_world::{
     block_landing::LandingEntityKind,
     entity_fluid::{CurrentAccumulator, CurrentTarget},

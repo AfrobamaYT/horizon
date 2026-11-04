@@ -10,6 +10,7 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
+use horizon_world::native_load_context::LoopContext;
 use horizon_world::{
     block_entity_push::BlockPushWorld,
     block_landing::{
@@ -23,7 +24,6 @@ use horizon_world::{
     movement_properties::MovementProperties,
     registry::BlockStateId,
 };
-use horizon_world::native_load_context::LoopContext;
 use std::{collections::BTreeMap, fs, path::Path};
 
 /// Called on the server before a landing converts farmland to its base block.

@@ -1,7 +1,6 @@
 //! Endermen: anger from being stared at, teleporting (randomly in daylight,
 //! when hit by projectiles or water, and towards a distant target), freezing
 //! while looked at, and picking up / placing `enderman_holdable` blocks.
-use horizon_world::native_load_context::LoopContext;
 use super::{
     Damage, Mob, MobEvent, MobWorld, Species, Who,
     anim::{Poses, State},
@@ -19,6 +18,7 @@ use horizon_core::{
     geometry::{Aabb, Vec3},
     random::RandomSource,
 };
+use horizon_world::native_load_context::LoopContext;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
 
 pub fn register(m: &mut Mob) {
@@ -614,6 +614,15 @@ mod tests {
             let mut free = enderman();
             assert!((0..64).any(|_| teleport_random(&mut free, w, &mut events)));
             assert!(!events.is_empty());
+
+            // No mod installed: a teleport try draws its three values and nothing else.
+            let mut tried = enderman();
+            let mut expected = enderman().random;
+            teleport_random(&mut tried, w, &mut events);
+            expected.next_double();
+            expected.next_int_bound(64).unwrap();
+            expected.next_double();
+            assert_eq!(tried.random.next_int(), expected.next_int());
 
             let mut seated = enderman();
             seated.extra.passenger = true;
