@@ -7851,6 +7851,19 @@ fn put_block_entity(world: &mut horizon_client::world::World, pos: [i32; 3], ent
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
 impl Game<'_> {
+    /// The local player's main inventory (hotbar and the 27 slots above it,
+    /// `Inventory.items`): the item id and count of each non-empty stack, in
+    /// slot order. Empty outside a world. Client-side.
+    pub(super) fn native_local_player_items(&self) -> Vec<(String, u32)> {
+        if self.player.is_none() {
+            return Vec::new();
+        }
+        self.inventory
+            .iter()
+            .flatten()
+            .map(|s| (s.item.to_string(), s.count))
+            .collect()
+    }
     /// Access a server-owned holder's attachment map. On a client it is the
     /// copy of what the server synced: `set` and `remove` change only the copy.
     pub(super) fn native_attachments(
