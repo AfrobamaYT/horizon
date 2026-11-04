@@ -353,7 +353,8 @@ impl Game<'_> {
     /// `Mob.aiStep` item pickup for villagers (`InventoryCarrier`): food,
     /// seeds and what their profession wants, from within a block.
     pub(super) fn villager_pickups(&mut self) {
-        if self.dropped.is_empty() || !self.ui.rules.bool("mob_griefing") {
+        let griefing = self.ui.rules.bool("mob_griefing");
+        if self.dropped.is_empty() || (!griefing && !self.grief_hooked()) {
             return;
         }
         let picks_up = self
@@ -364,7 +365,8 @@ impl Game<'_> {
             .cloned();
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
-            if m.species() != Species::Villager || !m.alive() {
+            if m.species() != Species::Villager || !m.alive() || !self.entity_grief(m.id, griefing)
+            {
                 continue;
             }
             let (pos, half) = (m.position, f64::from(m.width()) / 2.0 + 1.0);

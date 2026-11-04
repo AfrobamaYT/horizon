@@ -328,6 +328,8 @@ pub struct ArrowScene<'a, 'r> {
     /// The `mob_griefing` and `tnt_explodes` game rules.
     pub mob_griefing: bool,
     pub tnt_explodes: bool,
+    /// The mod hooks a mob-owned arrow asks (`MobWorld::mob_hooks`).
+    pub mob_hooks: Option<&'a dyn crate::mobs::MobHooks>,
 }
 impl ArrowScene<'_, '_> {
     fn block(&self, p: BlockPos) -> BlockStateId {
@@ -1027,9 +1029,16 @@ impl Ticker<'_, '_, '_, '_> {
         self.st.pierce = 0;
         self.st.pierced.clear();
     }
-    /// `Projectile.mayInteract`: a mob's arrows need `mob_griefing`.
+    /// `Projectile.mayInteract`: a mob's arrows need `mob_griefing`, or a
+    /// mod's yes for the owner (NeoForge's `canEntityGrief(level, owner)`).
     fn may_interact(&self) -> bool {
-        !matches!(self.p.owner, Some(Who::Mob(_))) || self.scene.mob_griefing
+        match self.p.owner {
+            Some(Who::Mob(owner)) => match self.scene.mob_hooks {
+                Some(hooks) => hooks.can_grief(owner, self.scene.mob_griefing),
+                None => self.scene.mob_griefing,
+            },
+            _ => true,
+        }
     }
     /// `onProjectileHit` of the blocks a burning projectile lights.
     fn block_reaction(&self, state: BlockStateId) -> Option<BlockReaction> {

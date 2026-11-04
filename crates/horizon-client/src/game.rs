@@ -9955,7 +9955,7 @@ impl Game<'_> {
         let scale = |id: i32| self.maps.data.get(&id).map(|m| m.scale);
         self.res
             .recipes()
-            .find_with(&grid, n, &scale)
+            .find_with(&self.loop_context, &grid, n, &scale)
             .map(|(name, result)| (name.to_owned(), result))
     }
     fn draw_inventory_slots(&mut self, batch: &mut HudBatch, ox: f32, oy: f32) {
@@ -10890,7 +10890,7 @@ impl Game<'_> {
                 .and_then(|k| self.world.block_entities.get_mut(&k))
         {
             // AbstractFurnaceBlockEntity.setItem: only a new input restarts cooking.
-            f.input_clicked(world_recipes!(self), before[0].clone());
+            f.input_clicked(&self.loop_context, world_recipes!(self), before[0].clone());
         }
         match equipment_before {
             Some(before) => self.player_equipment_changed(&before),
@@ -11598,7 +11598,7 @@ impl Game<'_> {
                 .container
                 .and_then(|k| self.world.block_entities.get_mut(&k))
         {
-            f.input_clicked(world_recipes!(self), before);
+            f.input_clicked(&self.loop_context, world_recipes!(self), before);
         }
     }
     /// `Camera.setRotation`: the camera's orientation, turned round in
@@ -12777,9 +12777,10 @@ impl Game<'_> {
     /// ServerExplosion: rays from a 16^3 grid lose (resistance + 0.3) * 0.3 per step.
     /// A mob explosion (`ServerLevel.explode` with `ExplosionInteraction.MOB`:
     /// blocks are kept without mobGriefing, else the mob_explosion_drop_decay
-    /// rule picks decay).
-    fn explode(&mut self, center: [f64; 3], radius: f32) -> Result<()> {
-        let interaction = if !self.ui.rules.bool("mob_griefing") {
+    /// rule picks decay). NeoForge asks `canEntityGrief` for `source`, the
+    /// exploding entity (the rule alone without one).
+    fn explode(&mut self, source: Option<u32>, center: [f64; 3], radius: f32) -> Result<()> {
+        let interaction = if !self.can_entity_grief(source) {
             explosion::BlockInteraction::Keep
         } else {
             self.destroy_type("mob_explosion_drop_decay")

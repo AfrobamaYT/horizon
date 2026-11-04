@@ -62,6 +62,7 @@ use horizon_world::{
     nbt::{Compound, Tag},
     registry::{BlockRegistry, BlockStateId},
 };
+use mod_api::__private::game::IngredientTest;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EnchantmentInfo,
@@ -7882,6 +7883,11 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_enderman_anger(self, enderman, player, cancel);
     }
+    /// `EntityMobGriefingEvent` (`EventHooks.canEntityGrief`): may `entity`
+    /// change the world? `can_grief` starts as the `mob_griefing` rule.
+    pub(super) fn native_entity_mob_griefing(&self, entity: EntityRef, can_grief: &mut bool) {
+        mod_api::dispatch_entity_mob_griefing(self, entity, can_grief);
+    }
     /// `MobEffect.shouldApplyEffectTickThisTick` for a content mod's effect
     /// `effect` (`ruby:bleeding`), each tick a player or a mob has it, in
     /// `MobEffectInstance.tickServer` before it counts down: `tick_count` is
@@ -9942,6 +9948,15 @@ impl Game<'_> {
             .filter(|item| items.get(item).is_some())
             .collect();
         (!known.is_empty()).then(|| Ingredient::of(known))
+    }
+    /// Whether `stack` fits `ingredient` (`Ingredient.test`), matched with this
+    /// game's loop context.
+    pub(super) fn native_recipe_ingredient_test(
+        &self,
+        ingredient: &Ingredient,
+        stack: &ItemStack,
+    ) -> bool {
+        ingredient.test_in(&self.loop_context, stack)
     }
     /// A stack as a recipe's `result` names it: `id` (a bare one as
     /// `minecraft:`), `count` (1 by default, up to 99) and `components`. None

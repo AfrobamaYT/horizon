@@ -235,6 +235,7 @@ impl Game<'_> {
                 return Ok(());
             };
             let lit = f.tick(
+                &self.loop_context,
                 world_recipes!(self),
                 world_items!(self),
                 self.res.providers(),
