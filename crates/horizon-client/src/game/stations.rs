@@ -3337,10 +3337,10 @@ mod tests {
             ) -> mod_api::Flow {
                 assert_eq!(event.stack.item.as_ref(), "minecraft:stick");
                 assert_eq!((event.screen_width, event.screen_height), (320, 240));
-                assert_eq!(*event.max_width, -1);
+                assert_eq!(event.max_width, -1);
                 match MODE.load(Ordering::Relaxed) {
                     1 => {
-                        *event.max_width = 40;
+                        event.max_width = 40;
                         event.elements.push(TooltipElement::Image(TooltipImage {
                             stack: event.stack.clone(),
                             size: [16.0, 8.0],
