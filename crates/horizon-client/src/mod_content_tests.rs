@@ -4888,6 +4888,94 @@ fn signs_take_their_form_wood_and_wall_block_from_their_declaration() {
     let _ = fs::remove_dir_all(&scratch);
 }
 
+/// A block's item is one value in its gameplay row: its own id by default, the
+/// `block_item` it names (a mod's own item or a vanilla one), or none with
+/// `item` false. A `block_item` that is no item refuses the load.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn a_block_yields_the_item_it_names_or_its_own_or_none() {
+    use horizon_world::level::Behaviours;
+
+    let Some(base) = prepared() else {
+        return;
+    };
+    let scratch =
+        std::env::temp_dir().join(format!("horizon-mod-blockitem-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let m = folder_mod(
+        &scratch.join("pick"),
+        &[
+            ("horizon-mod.toml", &manifest("pick", "")),
+            (
+                "data/pick/horizon/block/plain.json",
+                r#"{"template": "minecraft:stone"}"#,
+            ),
+            (
+                "data/pick/horizon/block/pillar.json",
+                r#"{"template": "minecraft:stone", "item": false, "block_item": "pick:rod"}"#,
+            ),
+            (
+                "data/pick/horizon/block/gem_ore.json",
+                r#"{"template": "minecraft:stone", "item": false, "block_item": "minecraft:diamond"}"#,
+            ),
+            (
+                "data/pick/horizon/block/ghost.json",
+                r#"{"template": "minecraft:stone", "item": false}"#,
+            ),
+            (
+                "data/pick/horizon/item/rod.json",
+                r#"{"template": "minecraft:stick"}"#,
+            ),
+        ],
+    );
+    let root = resource_root(
+        &base,
+        Path::new(""),
+        std::slice::from_ref(&m),
+        &scratch.join("cache"),
+    )
+    .unwrap();
+    let registry = Assets::load(&root).unwrap().registry;
+    let facts = BlockFacts::load(&root, registry).unwrap();
+    let behaviours = Behaviours::load(registry, &root).unwrap();
+    let item = |name: &str| {
+        let state = registry.default_state(name).unwrap();
+        facts.get(state).item.to_string()
+    };
+    assert_eq!(item("pick:plain"), "pick:plain");
+    assert_eq!(item("pick:pillar"), "pick:rod");
+    assert_eq!(item("pick:gem_ore"), "minecraft:diamond");
+    assert_eq!(item("pick:ghost"), "minecraft:air");
+    let id = |name: &str| behaviours.table.block_by_name(name).unwrap();
+    assert_eq!(&*behaviours.block_data(id("pick:pillar")).item, "pick:rod");
+    assert_eq!(
+        &*behaviours.block_data(id("pick:ghost")).item,
+        "minecraft:air"
+    );
+
+    let missing = folder_mod(
+        &scratch.join("lost"),
+        &[
+            ("horizon-mod.toml", &manifest("lost", "")),
+            (
+                "data/lost/horizon/block/pillar.json",
+                r#"{"template": "minecraft:stone", "item": false, "block_item": "lost:rod"}"#,
+            ),
+        ],
+    );
+    let e = resource_root(
+        &base,
+        Path::new(""),
+        std::slice::from_ref(&missing),
+        &scratch.join("cache2"),
+    )
+    .err()
+    .unwrap()
+    .to_string();
+    assert!(e.contains("lost:pillar") && e.contains("lost:rod"), "{e}");
+    let _ = fs::remove_dir_all(&scratch);
+}
+
 /// `WorldGenRegion.setBlock`: a feature that places a mod's sign leaves it its
 /// block entity, which goes by the template's class and not the block's name.
 #[test]
