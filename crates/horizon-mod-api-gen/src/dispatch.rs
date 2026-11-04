@@ -65,9 +65,9 @@ pub(super) fn emit(
                 .collect();
             (
                 one_function(functions.iter(), &native)?.clone(),
-                // A hook in the mod API crate calls its dispatch directly; one below it calls
-                // the callback the game installs.
-                if krate == "horizon-mod-api" {
+                // A hook in the mod API crate, or in a crate above it, calls its dispatch
+                // directly; one below it calls the callback the game installs.
+                if matches!(krate, "horizon-mod-api" | "horizon-client-render") {
                     format!("dispatch_{name}")
                 } else {
                     name.to_owned()

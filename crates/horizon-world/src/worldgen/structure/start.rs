@@ -6,6 +6,7 @@ use super::{
         JigsawConfig, JigsawContext, PlaceFeature, PoolPiece, Pools, Projection, assemble_drawing,
     },
     legacy::{LegacyPiece, PieceContext},
+    mod_types::{ModStructureType, ModStructureTypes},
 };
 use crate::{
     heightmap::HeightmapType,
@@ -96,8 +97,26 @@ pub enum StructureKind {
     EndCity,
     /// `horizon:formations`: Formations' SimpleStructure.
     Formations(super::formations::Def),
+    /// A structure type a mod registered (`"type": "modid:tower"`): vanilla's
+    /// `StructureType` as code, with the structure's own JSON config.
+    Mod(ModType),
     /// A structure type whose generator is not implemented yet.
     Unsupported(String),
+}
+
+/// A mod's structure type as a structure's kind carries it: the type's engine
+/// side and the structure's own JSON config, which its
+/// `find_generation_point` reads.
+pub struct ModType {
+    pub ty: Arc<dyn ModStructureType>,
+    pub config: Value,
+}
+impl std::fmt::Debug for ModType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModType")
+            .field("type", &self.config["type"])
+            .finish()
+    }
 }
 #[derive(Debug)]
 pub struct StructureDef {
@@ -337,6 +356,9 @@ impl StructureRegistry {
         sets: &BTreeMap<String, String>,
         pools: BTreeMap<String, String>,
         biome_set: &dyn Fn(&Value) -> Result<BTreeSet<BiomeId>, DecodeError>,
+        // The structure types the executable's mods registered, looked up
+        // before `Unsupported` (`"type": "modid:tower"`).
+        mod_types: &ModStructureTypes,
     ) -> Result<Self, DecodeError> {
         let mut defs = Vec::new();
         for (name, json) in structures {
@@ -419,7 +441,13 @@ impl StructureRegistry {
                     Ok(def) => StructureKind::Formations(def),
                     Err(_) => StructureKind::Unsupported("horizon:formations".into()),
                 },
-                other => StructureKind::Unsupported(other.to_owned()),
+                other => match mod_types.get(other) {
+                    Some(ty) => StructureKind::Mod(ModType {
+                        ty: ty.clone(),
+                        config: v.clone(),
+                    }),
+                    None => StructureKind::Unsupported(other.to_owned()),
+                },
             };
             defs.push(StructureDef {
                 name: name.clone(),
@@ -1325,6 +1353,16 @@ pub(crate) fn try_generate(
             )?;
             (position, pieces.into_iter().map(Piece::Pool).collect())
         }
+        StructureKind::Mod(mod_type) => {
+            // The type's own start and pieces; the biome check below and the
+            // set's spacing stay the game's, as for every other kind.
+            let context: &mut dyn StartContext = context;
+            let (position, pieces) =
+                mod_type
+                    .ty
+                    .find_generation_point(context, chunk, &mod_type.config, &mut random)?;
+            (position, pieces.into_iter().map(Piece::Legacy).collect())
+        }
         StructureKind::Unsupported(_) => return None,
     };
     let quart = position.map(|v| v >> 2);
@@ -1569,13 +1607,19 @@ mod tests {
                 .collect::<BTreeMap<_, _>>()
         };
         // Biome tags: `#t:one` is biome 1, `#t:two` biome 2.
-        StructureRegistry::new(&text(structures), &text(sets), BTreeMap::new(), &|v| {
-            Ok(match v.as_str() {
-                Some("#t:one") => BTreeSet::from([BiomeId(1)]),
-                Some("#t:two") => BTreeSet::from([BiomeId(2)]),
-                _ => BTreeSet::new(),
-            })
-        })
+        StructureRegistry::new(
+            &text(structures),
+            &text(sets),
+            BTreeMap::new(),
+            &|v| {
+                Ok(match v.as_str() {
+                    Some("#t:one") => BTreeSet::from([BiomeId(1)]),
+                    Some("#t:two") => BTreeSet::from([BiomeId(2)]),
+                    _ => BTreeSet::new(),
+                })
+            },
+            &ModStructureTypes::new(),
+        )
         .unwrap()
     }
 
@@ -1595,6 +1639,7 @@ mod tests {
             &sets,
             BTreeMap::new(),
             &|_| Ok(BTreeSet::new()),
+            &ModStructureTypes::new(),
         )
     }
 

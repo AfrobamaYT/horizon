@@ -60,7 +60,7 @@ impl Game<'_> {
         // For mods (`render.frame-stats`, `native_frame_rate`).
         let now = self.extras_now();
         self.extras.fps.record(now, elapsed.as_secs_f32() * 1000.0);
-        self.native_frame(elapsed);
+        self.native_render_frame_pre(elapsed);
         self.recipes_received_now();
     }
     /// The frame counter for mods: fps, min, 1% low.

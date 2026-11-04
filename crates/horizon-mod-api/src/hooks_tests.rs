@@ -230,3 +230,32 @@ fn recipe_book_categories_accept_mod_declarations() {
     assert_eq!(declarations[0].recipe_type, "mymod:crusher");
     assert_eq!(declarations[0].icon, "minecraft:stone");
 }
+
+#[test]
+fn render_frame_pre_and_post_hear_their_own_moment_with_the_frames_time() {
+    use std::{sync::Mutex, time::Duration};
+    struct TestHost;
+    impl Host for TestHost {}
+    impl ClientHost for TestHost {}
+    struct Frames(Arc<Mutex<Vec<(&'static str, Duration)>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Frames {
+        fn render_frame_pre(&self, _: &mut dyn ClientHost, event: &mut RenderFramePreEvent) {
+            self.0.lock().unwrap().push(("pre", event.elapsed));
+        }
+        fn render_frame_post(&self, _: &mut dyn ClientHost, event: &mut RenderFramePostEvent) {
+            self.0.lock().unwrap().push(("post", event.elapsed));
+        }
+    }
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    testing::with_mods(
+        vec![ModEntry::new("frames", Box::new(Frames(heard.clone())))].into(),
+        || {
+            let frame = Duration::from_millis(16);
+            dispatch_render_frame_pre(&mut TestHost, frame);
+            dispatch_render_frame_post(&mut TestHost, frame);
+        },
+    );
+    let frame = Duration::from_millis(16);
+    assert_eq!(*heard.lock().unwrap(), [("pre", frame), ("post", frame)]);
+}

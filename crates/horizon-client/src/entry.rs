@@ -158,6 +158,9 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
         living_flying_speed: |entity, kind, speed| {
             mod_api::dispatch_living_flying_speed(entity, kind, speed);
         },
+        player_stays_on_ground_surface: |entity, staying| {
+            mod_api::dispatch_player_stays_on_ground_surface(entity, staying);
+        },
         ender_entity_teleport: |entity, kind, from, target, cancel| {
             mod_api::dispatch_ender_entity_teleport(entity, kind, from, target, cancel);
         },
