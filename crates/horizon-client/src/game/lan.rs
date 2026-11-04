@@ -25,6 +25,7 @@ use horizon_world::block_collision::BlockCollisionRegistry;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 /// What `sync_data` loaded: whether it was with data packs over the game's
@@ -1071,10 +1072,21 @@ fn mob_freeze_meta(
     meta: &mut Vec<(u8, i32, Value)>,
     defaults: &mut Vec<(u8, i32, Value)>,
 ) {
-    if m.ticks_frozen > 0 {
+    // `setTicksFrozen` can go negative (a mob warming up), and a client reads
+    // the count as is, so anything but the default 0 goes out.
+    if m.ticks_frozen != 0 {
         meta.push((7, serializer::INT, Value::Int(m.ticks_frozen)));
     }
     defaults.push((7, serializer::INT, Value::Int(0)));
+    // Entity.DATA_AIR_SUPPLY_ID (1): only an axolotl ticks `Mob.air` (its
+    // default is its 6000 max air supply).
+    if m.species() == horizon_client::mobs::Species::Axolotl {
+        let max = horizon_client::mobs::axolotl::MAX_AIR;
+        if m.air != max {
+            meta.push((1, serializer::INT, Value::Int(m.air)));
+        }
+        defaults.push((1, serializer::INT, Value::Int(max)));
+    }
     if m.kind.id == "minecraft:strider" {
         if m.extra.flag {
             meta.push((19, serializer::BOOLEAN, Value::Bool(true)));
@@ -1727,6 +1739,13 @@ impl Game<'_> {
         }
     }
 
+    /// Update whether the server answers connection status requests.
+    pub(super) fn set_status_replies(&mut self, enable: bool) {
+        if let Some(host) = self.lan.as_ref() {
+            host.hub.lan.shared.set_enable_status(enable);
+        }
+    }
+
     /// New command access and game mode forcing settings of the open world.
     pub(super) fn lan_apply_settings(&mut self, guest_commands: bool, force: bool) {
         if let Some(server) = &self.integrated {
@@ -1849,11 +1868,27 @@ impl Game<'_> {
     /// command closed the hub.
     fn lan_process_events(
         &mut self,
+        host: LanHost,
         events: impl IntoIterator<Item = HostEvent>,
         entities: &[EntityState],
         spawn: [f64; 3],
-    ) {
+    ) -> Option<LanHost> {
+        // A slow tick's line says which event took it, and whose (`spans::note`): each event's
+        // time is noted when the next one starts (an event's arm may `continue`), the last's
+        // after the loop.
+        let timed = horizon_client::spans::recording_here();
+        let mut previous = None;
+        // The arms below borrow the hub through `self.lan` (their helpers take no host:
+        // the fork's borrow shape), so the host is put back for the match and taken out
+        // again on the way through.
+        self.lan = Some(host);
         for event in events {
+            if timed && let Some(host) = self.lan.as_ref() {
+                note_event(host, previous.take());
+            }
+            if timed {
+                previous = Some((Instant::now(), event_kind(&event)));
+            }
             match event {
                 event @ (HostEvent::Chat { .. } | HostEvent::Warn(_) | HostEvent::Error(_)) => {
                     self.lan_log_event(event);
@@ -1878,7 +1913,7 @@ impl Game<'_> {
                     name,
                 } => {
                     let Some(host) = self.lan.as_ref() else {
-                        return;
+                        return None;
                     };
                     let Some(id) = host
                         .hub
@@ -1911,7 +1946,7 @@ impl Game<'_> {
                     }
                     let mut chat = Vec::new();
                     let Some(host) = self.lan.as_mut() else {
-                        return;
+                        return None;
                     };
                     host.hub.broadcast_chat(&message, &bound, line, &mut chat);
                     for event in chat {
@@ -1921,7 +1956,7 @@ impl Game<'_> {
                 }
                 HostEvent::ChatSessionStarted(update) => {
                     let Some(host) = self.lan.as_mut() else {
-                        return;
+                        return None;
                     };
                     host.hub.broadcast(&C::PlayerInfoUpdate(*update));
                 }
@@ -1947,7 +1982,7 @@ impl Game<'_> {
                                 ),
                             };
                             let Some(host) = self.lan.as_mut() else {
-                                return;
+                                return None;
                             };
                             host.hub.kick(conn, reason);
                             continue;
@@ -1955,7 +1990,7 @@ impl Game<'_> {
                     }
                     self.lan_guest_joined(conn, entities, spawn);
                     let Some(host) = self.lan.as_ref() else {
-                        return;
+                        return None;
                     };
                     if self.options.dedicated.is_some()
                         && let Some(g) = host.hub.guest(conn)
@@ -2010,7 +2045,7 @@ impl Game<'_> {
                 HostEvent::Left(mut guest) => {
                     if !guest.participates_online() {
                         let Some(mut host) = self.lan.take() else {
-                            return;
+                            return None;
                         };
                         self.cleanup_fake_player(&mut host, &guest);
                         self.lan = Some(host);
@@ -2024,7 +2059,7 @@ impl Game<'_> {
                         if self.enter_level(theirs).is_ok() {
                             let conn = guest.conn;
                             let Some(host) = self.lan.as_mut() else {
-                                return;
+                                return None;
                             };
                             let at = host.hub.guests.len();
                             host.hub.guests.push(*guest);
@@ -2048,7 +2083,7 @@ impl Game<'_> {
                     self.save_guest(&mut guest);
                     self.guest_attachments.remove(&guest.conn);
                     let Some(host) = self.lan.as_mut() else {
-                        return;
+                        return None;
                     };
                     host.play.remove(&guest.conn);
                     self.guest_combat.remove(&guest.conn);
@@ -2172,6 +2207,10 @@ impl Game<'_> {
                 }
             }
         }
+        if timed && let Some(host) = self.lan.as_ref() {
+            note_event(host, previous);
+        }
+        self.lan.take()
     }
 
     /// Handle this level's player packets before scheduled block ticks
@@ -2183,7 +2222,7 @@ impl Game<'_> {
         if self.level_pass.packets_drained {
             return;
         }
-        let Some(host) = self.lan.as_mut() else {
+        let Some(mut host) = self.lan.take() else {
             return;
         };
         let holding = lan::Holding::start();
@@ -2193,9 +2232,6 @@ impl Game<'_> {
         let spawn = self.spawn.map_or([0.5, 80.0, 0.5], |s| [s.x, s.y, s.z]);
         let events = {
             let clock_rate = self.network_clock_rate();
-            let Some(host) = self.lan.as_mut() else {
-                return;
-            };
             let mut ctx = TickCtx {
                 world: &mut self.world,
                 entities: entities.as_slice(),
@@ -2218,37 +2254,51 @@ impl Game<'_> {
             host.hub.mods_loaded = !horizon_client::mod_api::mods().is_empty();
             let pass = self.level_pass;
             let mut events = if pass.first {
-                host.hub.poll(&mut ctx)
+                horizon_client::spans::time("lan_poll", || host.hub.poll(&mut ctx))
             } else {
                 Vec::new()
             };
-            events.extend(host.hub.drain_packets(&mut ctx));
+            events.extend(horizon_client::spans::time("lan_drain", || {
+                host.hub.drain_packets(&mut ctx)
+            }));
             events
         };
-        self.lan_process_events(events, entities.as_slice(), spawn);
-        if self.lan.as_ref().is_some_and(|host| !host.quiet.is_empty()) {
-            self.run_quiet_commands();
-        }
-        if self
-            .lan
-            .as_ref()
-            .is_some_and(|host| !host.hub.native_advancement_grants.is_empty())
-        {
-            self.run_native_advancement_grants();
-        }
-        if self
-            .lan
-            .as_ref()
-            .is_some_and(|host| !host.hub.native_menu_events.is_empty())
-        {
-            self.run_native_menu_events();
-        }
-        let Some(host) = self.lan.as_mut() else {
+        let Some(back) = horizon_client::spans::time("lan_events", || {
+            self.lan_process_events(host, events, entities.as_slice(), spawn)
+        }) else {
             return;
         };
+        host = back;
+        if !host.quiet.is_empty() {
+            self.lan = Some(host);
+            horizon_client::spans::time("lan_quiet_commands", || self.run_quiet_commands());
+            host = self
+                .lan
+                .take()
+                .expect("the hub is back after the quiet commands");
+        }
+        if !host.hub.native_advancement_grants.is_empty() {
+            self.lan = Some(host);
+            horizon_client::spans::time("lan_advancement_grants", || {
+                self.run_native_advancement_grants()
+            });
+            host = self
+                .lan
+                .take()
+                .expect("the hub is back after the advancement grants");
+        }
+        if !host.hub.native_menu_events.is_empty() {
+            self.lan = Some(host);
+            horizon_client::spans::time("lan_menu_events", || self.run_native_menu_events());
+            host = self
+                .lan
+                .take()
+                .expect("the hub is back after the menu events");
+        }
         host.states = entities;
         self.level_pass.packets_drained = true;
         drop(holding);
+        self.lan = Some(host);
     }
 
     /// The entity id counter, once the entities Horizon keeps without one
@@ -2322,11 +2372,6 @@ impl Game<'_> {
     pub(super) fn spend_forced_meta(&mut self) {
         self.persist.forced_meta.clear();
     }
-
-    /// Run the hub for this tick and apply what the guests did. While the
-    /// single player game is `paused` only the connections run
-    /// (`IntegratedServer.tickPaused`): `ServerGamePacketListenerImpl.tick`
-    /// skips `tickPlayer`, so no player's air, hunger or damage moves on.
     pub(super) fn tick_lan(&mut self, paused: bool) {
         // A frozen level does not reach tick_lan_packets through tick_world.
         // Apply its packets before taking the snapshot too.
@@ -2517,7 +2562,13 @@ impl Game<'_> {
                 events
             };
             self.wake_woken_guests();
-            self.lan_process_events(events, entities, spawn);
+            let Some(host) = self.lan.take() else {
+                return;
+            };
+            let Some(back) = self.lan_process_events(host, events, entities, spawn) else {
+                return;
+            };
+            self.lan = Some(back);
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
@@ -3183,9 +3234,98 @@ fn equipment_slot_name(slot: horizon_world::player_inventory::EquipmentSlot) -> 
     }
 }
 
+/// What a hub event is, whose connection, and the name of a player who left (no longer in the
+/// hub once it is handled): for a slow tick's notes.
+type EventKind = (&'static str, Option<u32>, Option<String>);
+
+fn event_kind(event: &HostEvent) -> EventKind {
+    match event {
+        HostEvent::Joined(c) => ("join", Some(*c), None),
+        HostEvent::Left(g) => ("leave", None, Some(g.name.clone())),
+        HostEvent::Packet(c, p) => (p.name(), Some(*c), None),
+        HostEvent::ClientInformation(c, _, _) => ("client settings", Some(*c), None),
+        HostEvent::ChatSubmitted { .. } => ("chat submitted", None, None),
+        HostEvent::ChatSessionStarted(_) => ("chat session", None, None),
+        HostEvent::PlayerLoaded(c) => ("loaded", Some(*c), None),
+        HostEvent::RecipeBookSettings { conn, .. } => ("recipe book", Some(*conn), None),
+        HostEvent::Sneak { conn, .. } => ("sneak", Some(*conn), None),
+        HostEvent::Input { conn, .. } => ("input", Some(*conn), None),
+        HostEvent::Kicked { name, .. } => ("kick", None, Some(name.clone())),
+        HostEvent::Flight { conn, .. } => ("flight", Some(*conn), None),
+        HostEvent::Chat { .. } => ("chat line", None, None),
+        HostEvent::PlayerChat { .. } => ("chat", None, None),
+        HostEvent::ChatFiltered { name, .. } => ("filtered chat", None, Some(name.clone())),
+        HostEvent::Warn(_) => ("warning", None, None),
+        HostEvent::Error(_) => ("error", None, None),
+        HostEvent::Ban { name, .. } => ("ban", None, Some(name.clone())),
+    }
+}
+
+/// Notes how long the event that started at `started` took (`spans::note`).
+fn note_event(host: &LanHost, started: Option<(Instant, EventKind)>) {
+    let Some((started, (kind, conn, name))) = started else {
+        return;
+    };
+    horizon_client::spans::note(started.elapsed().as_secs_f32() * 1000.0, || {
+        let who = name
+            .or_else(|| conn.and_then(|c| host.hub.guest(c)).map(|g| g.name.clone()))
+            .or_else(|| conn.map(|c| format!("connection {c}")));
+        match who {
+            Some(who) => format!("{kind} of {who}"),
+            None => kind.to_owned(),
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{OFFHAND_SLOT, equipment_slot_name, living_flags};
+    use super::{OFFHAND_SLOT, equipment_slot_name, living_flags, mob_freeze_meta};
+    use horizon_client::mobs::Mob;
+    use horizon_protocol::entity_data::{Value, serializer};
+
+    fn mob_of(kind: &str) -> Option<Mob> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        let types = horizon_client::mobs::MobTypes::load(&root).ok()?;
+        let t = std::sync::Arc::new(types.types.get(kind)?.clone());
+        Some(Mob::new(
+            1,
+            t,
+            horizon_core::geometry::Vec3::new(0.0, 64.0, 0.0),
+            0.0,
+        ))
+    }
+
+    fn freeze_meta(m: &Mob) -> (Vec<(u8, i32, Value)>, Vec<(u8, i32, Value)>) {
+        let (mut meta, mut defaults) = (Vec::new(), Vec::new());
+        mob_freeze_meta(m, &mut meta, &mut defaults);
+        (meta, defaults)
+    }
+
+    /// Entity.setTicksFrozen can go negative; index 7 must carry it. Index 1
+    /// (air supply) goes out for an axolotl only, against its 6000 default.
+    #[test]
+    fn negative_frozen_ticks_and_axolotl_air_are_synced() {
+        let Some(mut cow) = mob_of("minecraft:cow") else {
+            return;
+        };
+        cow.ticks_frozen = -3;
+        let (meta, _) = freeze_meta(&cow);
+        assert!(meta.contains(&(7, serializer::INT, Value::Int(-3))));
+        cow.air = 100;
+        assert!(freeze_meta(&cow).0.iter().all(|e| e.0 != 1));
+
+        let Some(mut axolotl) = mob_of("minecraft:axolotl") else {
+            return;
+        };
+        axolotl.air = 5000;
+        let (meta, defaults) = freeze_meta(&axolotl);
+        assert!(meta.contains(&(1, serializer::INT, Value::Int(5000))));
+        assert!(defaults.contains(&(1, serializer::INT, Value::Int(6000))));
+        axolotl.air = 6000;
+        assert!(freeze_meta(&axolotl).0.iter().all(|e| e.0 != 1));
+    }
 
     /// `LivingEntity.startUsingItem` sets flag 1 for the use and flag 2 for
     /// the off hand, so an off-hand use is 3, not 2. A reader takes bit 0 as
