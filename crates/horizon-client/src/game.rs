@@ -7598,7 +7598,10 @@ impl Game<'_> {
                     };
                     if let Some(living) = mob {
                         let effect = mod_api::NativeActiveEffect::new(
-                            horizon_client::brewing::namespaced(def.id),
+                            mod_api::Identifier::parse_namespaced(
+                                horizon_client::brewing::namespaced(def.id),
+                            )
+                            .expect("the game's effect ids are namespaced"),
                             eff.duration,
                             eff.amplifier,
                             eff.ambient,
