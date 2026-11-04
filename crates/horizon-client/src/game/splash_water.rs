@@ -157,7 +157,7 @@ impl Game<'_> {
                 }
                 if hurts && sensitive {
                     let invulnerable = m.invulnerable_flag;
-                    m.damage(1.0, source);
+                    m.damage(crate::game::entity::damage_level_of!(self), 1.0, source);
                     // `Enderman.hurtServer` for a thrown potion: the hit is
                     // `Enderman.hurtWithCleanWater`, then
                     // `Enderman.repeatedlyTryToTeleport`, which does nothing

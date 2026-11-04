@@ -10,6 +10,7 @@ description = "Shared server configuration, installation layout and dedicated-en
 horizon-server-files = { path = "../horizon-server-files" }
 horizon-anticheat = { path = "../horizon-anticheat" }
 horizon-chat-filter = { path = "../horizon-chat-filter" }
+horizon-core = { path = "../horizon-core" }
 serde = { version = "1", features = ["derive"] }
 toml = "1.1"
 toml_edit = "0.25"

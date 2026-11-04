@@ -75,12 +75,14 @@ mod tests {
         pub(super) enum BonemealSource {
             Interaction,
         }
+        pub(super) struct TooltipDisplay<'a>(pub &'a ());
         pub(super) struct NativeTriState;
         pub(super) struct NativeInteractionResult;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
         pub(super) struct NativeShake;
         pub(super) struct ShieldBlock;
         pub(super) struct HurtSource<'a>(pub &'a ());
+        pub(super) struct DamageContainer;
         #[derive(Clone, Copy)]
         pub(super) struct PhantomSpawnResult;
         #[derive(Clone, Copy)]

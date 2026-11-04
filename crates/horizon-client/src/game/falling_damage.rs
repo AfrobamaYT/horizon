@@ -22,6 +22,7 @@ impl Game<'_> {
                     horizon_client::mobs::DamageKind::FallingBlock
                 };
                 falling_block::hurt_mobs_with_kind(
+                    crate::game::entity::damage_level_of!(self),
                     &mut self.mobs,
                     block.position,
                     impact.amount,
@@ -198,7 +199,14 @@ impl Game<'_> {
         if let Some(p) = self.player.as_mut()
             && let Some(id) = self.motion.health.damage.id(kind)
         {
-            let _ = p.hurt(&self.motion.health, self.world.health_rules, id, amount);
+            let rules = self.world.health_rules;
+            let _ = p.hurt(
+                crate::game::entity::damage_level_of!(self),
+                &self.motion.health,
+                rules,
+                id,
+                amount,
+            );
         }
     }
 }

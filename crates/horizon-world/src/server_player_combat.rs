@@ -5,6 +5,7 @@ use crate::{
     combat_rules::ArmorWorld,
     damage_immunity::{self, ImmunityWorld},
     food::{Difficulty, FoodData},
+    living_damage::DamageContainer,
     living_hurt::{HurtState, HurtTag, HurtWorld},
     player_health::PlayerFloatIds,
     player_hurt::{
@@ -77,6 +78,7 @@ impl<A: HealthAttributes, E: CombatEnvironment<A>> HurtWorld for ServerPlayerCom
     fn actually_hurt(
         &mut self,
         _: &mut HurtState<Self::Source>,
+        container: &mut DamageContainer,
         damage: f32,
     ) -> Result<(), Self::Error> {
         if damage_immunity::server_player_immunity(self.environment)
@@ -92,7 +94,7 @@ impl<A: HealthAttributes, E: CombatEnvironment<A>> HurtWorld for ServerPlayerCom
             self.environment,
         )
         .expect("validated immutable player schema")
-        .apply_after_immunity_check(damage)
+        .apply_after_immunity_check(container, damage)
     }
     fn blocking_component(&mut self, item: Self::UseItem) -> Option<Self::Blocking> {
         self.environment.blocking_component(item)

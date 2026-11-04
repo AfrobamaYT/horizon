@@ -1765,6 +1765,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-anticheat",
  "horizon-chat-filter",
+ "horizon-core",
  "horizon-server-files",
  "serde",
  "toml",

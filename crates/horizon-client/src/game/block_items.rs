@@ -264,6 +264,20 @@ impl Game<'_> {
         }
     }
 
+    /// `BlockItem.updateBlockEntityComponents` on a client's level, for the
+    /// block it predicts at `pos`: the block entity takes the stack's
+    /// components but not its `block_entity_data` (`updateCustomBlockEntityTag`
+    /// returns on a client), so a copied sign's editor opens with its text (#8102).
+    pub(super) fn apply_predicted_item(&mut self, pos: [i32; 3], stack: &ItemStack) {
+        let mut stack = stack.clone();
+        if stack.data().is_some() {
+            stack
+                .data_mut()
+                .set_other(block_entity_item::BLOCK_ENTITY_DATA, None);
+        }
+        self.apply_placed_item(pos, &stack, false);
+    }
+
     /// `BlockItem.updateCustomBlockEntityTag` and `updateBlockEntityComponents`
     /// for the block entity just placed at `pos` from `stack`; `game_master`:
     /// the placer can use game master blocks (a dispenser can't).
@@ -429,7 +443,7 @@ mod tests {
         impl BlockEntityPart for Crate {
             fn block_entity(
                 &self,
-                _: HostSide<'_>,
+                _: LevelSide<'_>,
                 _: &mut BlockEntityEvent<'_>,
             ) -> Option<Compound> {
                 Some(Compound::from([("Amount".into(), Tag::Int(0))]))
@@ -464,7 +478,9 @@ mod tests {
         horizon_client::mod_api::install(mods.clone());
         horizon_client::mod_api::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root = super::super::mods::content_root(&base, &Default::default(), &[]).unwrap();
+        let root =
+            super::super::mods::content_root(&base, &Default::default(), &Default::default())
+                .unwrap();
         with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world

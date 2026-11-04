@@ -134,6 +134,10 @@ validates identity against its embedded inventory.
 
 - Item tooltips: an `ItemPart`'s `tooltip` adds its item's own lines where `Item.appendHoverText` does, after
   the name and before the components' lines, never for a tooltip the stack hides.
+  `Hooks::item_tooltip` (NeoForge's `ItemTooltipEvent`) then gets every item's whole tooltip once it is
+  complete, with the local player, the stack's `TooltipDisplay` and its `TooltipFlag` (`advanced`, `creative`),
+  and may add, change or remove any line. Horizon's creative search reads vanilla's exported tooltip text, so it
+  does not fire with no player while search trees are built, as NeoForge does.
 
 - An item's own server behaviour: `ItemPart::use_on(host, event)` hears a right click with its item on a
   block once the block let it through (`ItemStack.useOn`), and `ItemPart::use_item(host, event)` hears the
@@ -236,9 +240,13 @@ validates identity against its embedded inventory.
   was queued, not whether a player heard it. The server discards unknown sound events when it dispatches
   the queue.
 
-- `Game::native_config_dir()`: the game's shared `config/` folder beside `options.txt` (beside
-  `server.properties` on a dedicated server), where a mod names its own files, made when missing. It takes no `self`, so
-  it works from any hook ([mods.md](mods.md#native-mods)).
+- `Host::config_files()`: the calling mod's own files in the game's shared `config/` folder beside `options.txt` (beside
+  `server.properties` on a dedicated server): its folder `config/<mod id>/` and the files beside it named
+  `<mod id>.<ext>` or `<mod id>-<rest>`. `ConfigFiles` reads, writes, lists and stats them through `&dyn Host` on
+  either side, at most 4 MiB a file; a write replaces the file at once. The service is bound to the mod whose hook or
+  part is running (a mod never names its id), so another mod's path, a symbolic link on the way or a call outside any
+  mod's hook is refused with a typed `ConfigFileError`. A path is a `ConfigPath`, checked once when it is made. A
+  world's `serverconfig/` copy is read only through `native_config_loading` ([mods.md](mods.md#native-mods)).
 
 - The player-health HUD rows through `native_health_hud`: every frame the HUD draws them, the
   hook hears the layout's inputs (`HealthInputs`) and the screen's GUI size, and a mod that answers with
@@ -3343,7 +3351,8 @@ mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `set_block(pos, state, flags)` is `Level.setBlock` on a whole state, as `LevelRef::set_block` takes it: it
 removes the old block's block entity and creates the new block's in the write (`LevelChunk.setBlockState`), runs
 the neighbour and shape updates `flags` ask for, and queues the write's level events in order. A mod block entity
-it creates starts with empty data, because `native_block_entity` needs a `Host`. It returns true when the block
+it creates starts with the data the `block_entity` hook gives, which is fired in the write and receives the level
+(`LevelSide`, read-only: vanilla's `newBlockEntity` gets no level), as the `Host`'s `native_set_block` fires it. It returns true when the block
 changed, and false off an authoritative server, for a position that is not loaded or outside the build height,
 an invalid state, or the state the block already has. It never loads a chunk. The game owns
 the tick queue; mods do not pass it back to these helpers.
@@ -3472,7 +3481,9 @@ r.block_entity_part(&press, Press).expect("native block entity type");
 ```
 
 The builder qualifies the type ID with the registering mod's namespace. It owns the save ID, wire type
-and valid blocks; `block_entity` returns only initial `Compound` data (or none for an empty compound).
+and valid blocks; `block_entity` returns only initial `Compound` data (or none for an empty compound). It is fired
+inside the write that creates the entity (`LevelChunk.setBlockState`) and receives the read-only level, a `LevelSide`,
+on a server and on a client of one.
 Unknown blocks, duplicate types, overlapping membership and attempts to own a `minecraft:` block are
 refused at load. Refused native block, item or block entity declarations stop startup, as does unreadable
 known-components input; the game does not fall back to vanilla content. An explicitly declared mod
@@ -3600,8 +3611,22 @@ entity energy and fluid handlers (NeoForge 26.3's `Capabilities.Energy.ENTITY` a
 `side` is the `Option<Direction>` of the entity the lookup reaches it from, `None` for no particular side. Vanilla
 answers neither; register a provider with `r.entity_capability(&ENTITY_ENERGY, "mymod:robot", |host, robot, side| …)`,
 which is given that side and may answer differently for each. An entity capability's context is its key's second type:
-`()` for `ENTITY_ITEMS`, `Option<Direction>` for these two. The existing `move_energy` and `move_resources` transfer
+`()` for `ENTITY_ITEMS`, `Option<Direction>` for these two and for `ENTITY_AUTOMATION`. The existing `move_energy` and `move_resources` transfer
 between these and block or item handlers inside a transaction.
+
+#### Entity automation
+
+`entity.capability(host, &ENTITY_AUTOMATION, side)` (NeoForge 26.3's `Capabilities.Item.ENTITY_AUTOMATION`, "automation-accessible
+inventory of an entity (boats, minecarts, etc)") is the items of an entity as a hopper reaches them, with the same
+`Option<Direction>` context as the energy and fluid keys. The game answers it for the container entities
+`EntitySelector.CONTAINER_ENTITY_SELECTOR` picks (chest and hopper minecarts, chest boats) with the slots their
+[`ENTITY_ITEMS`](#an-entitys-items) handler has; a player and a chested donkey, mule or llama answer none. A hopper
+pushing into the entity in front of it asks for the side it faces the entity from (`Up` for a hopper over it), a hopper
+pulling from the entity above it for `Down`, and a dropper for the side it drops onto. Beside the game's container
+entities, those entities at the target whose mod provider answers it join the candidates, and the hopper picks one at
+random with the draw `getEntityContainer` makes; a mod handler takes the container's place and moves one item at a time
+in a transaction, as a mod block's `ITEMS` does. `r.entity_capability(&ENTITY_AUTOMATION, "mymod:robot", |host, robot, side| …)`
+registers one, and `r.entity_capability_before_game` answers ahead of the game's own for a minecart or a boat.
 
 #### A menu's slots
 
@@ -3881,7 +3906,7 @@ custom copy handler, conditional serialization, the `sendToPlayer` predicate,
 
 `Host` exposes the documented `Game` helpers listed under `helpers` in
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's
-receiver and documentation; a helper without `self` (`config_dir`) takes
+receiver and documentation; a helper without `self` (`config_files`) takes
 `&self` in `Host`. Level services stay on the level hosts above.
 A helper's `receiver` also exposes it on that handle. Receivers come from public
 `*Ref` structs in `mod_api.rs`: `BlockEntityRef` gives `block_entity`, for example.
