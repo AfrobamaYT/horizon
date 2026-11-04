@@ -394,6 +394,10 @@ impl Group {
                 Err(TryLockError::WouldBlock) => return Err(CallRefused::Busy),
             }
         };
+        // A call that waited may find the group stopped by the trap of the one it waited for.
+        if self.poisoned.load(Ordering::Relaxed) {
+            return Err(CallRefused::Stopped);
+        }
         self.running.store(me, Ordering::Release);
         INSIDE.with(|n| n.set(n.get() + 1));
         Ok(Entered { group: self, store })
@@ -479,11 +483,14 @@ impl Running {
         .and_then(|()| f(&self.exports, store));
         CALLER.set(caller);
         CURRENT.set(previous);
+        // Stopped before the group is let go, so no call waiting for it runs on.
+        if result.is_err() {
+            self.group.poisoned.store(true, Ordering::Relaxed);
+        }
         drop(entered);
         match result {
             Ok(value) => value,
             Err(error) => {
-                self.group.poisoned.store(true, Ordering::Relaxed);
                 log::error!("wasm mod {} stopped its group: {error:#}", self.id);
                 no_answer()
             }
@@ -907,6 +914,18 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         drop(inside);
         assert!(waiting.join().unwrap());
+    }
+
+    #[test]
+    fn a_worldgen_call_queued_behind_a_trap_finds_the_group_stopped() {
+        let group = group(Duration::from_millis(1));
+        let inside = group.enter(Call::Hook).unwrap();
+        let other = group.clone();
+        let waiting = std::thread::spawn(move || other.enter(Call::Worldgen).err());
+        std::thread::sleep(Duration::from_millis(50));
+        group.poisoned.store(true, Ordering::Relaxed);
+        drop(inside);
+        assert_eq!(waiting.join().unwrap(), Some(CallRefused::Stopped));
     }
 
     #[test]
