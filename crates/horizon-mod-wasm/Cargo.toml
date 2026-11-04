@@ -18,6 +18,10 @@ log = "0.4"
 # A component built in the test, importing a function this game doesn't have.
 wasm-encoder = "0.261"
 wit-parser = "0.261"
+# The worldgen side of a mod's structure type, driven from worker threads in the bench test.
+horizon-core = { path = "../horizon-core" }
+horizon-world = { path = "../horizon-world" }
+serde_json = "1"
 
 [lints]
 workspace = true

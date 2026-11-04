@@ -1927,10 +1927,13 @@ dependencies = [
 name = "horizon-mod-wasm"
 version = "0.1.0"
 dependencies = [
+ "horizon-core",
  "horizon-mod-api",
  "horizon-mods",
+ "horizon-world",
  "log",
  "semver",
+ "serde_json",
  "wasm-encoder 0.261.0",
  "wasmtime",
  "wit-component 0.261.0",
