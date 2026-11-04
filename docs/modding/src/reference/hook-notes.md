@@ -449,6 +449,13 @@ one, where vanilla gives the `by` one.
   entity that didn't have it, and `native_mob_effect_added` (NeoForge's `MobEffectEvent.Added`) every time it is given.
   A mob is its `Entity.getId`; a player is None, with their state swapped in (`native_acting_player`). Vanilla's effects
   never reach them.
+  The three moments around them cover every effect, vanilla's included: `mob_effect_applicable`
+  (NeoForge's `MobEffectEvent.Applicable`, vanilla's `canBeAffected`) answers whether an effect can land — the first
+  mod to answer `Allow` or `Deny` overrides the vanilla tag check, and an unanswered hook falls
+  back to it; `mob_effect_expired` (`.Expired`) hears one count down to nothing — cancelling
+  refuses the expiry, and the effect stays, kept at no ticks and asked again next tick;
+  `mob_effect_remove` (`.Remove`) hears one about to be removed by any path — a command, milk or a
+  mod's removal helper — and cancelling keeps it. All three name their entity as a `LivingRef`, the player's own included.
 
 - Chunks and players coming and going, on the server: `native_chunk_load` (with whether the chunk is new), `native_chunk_unload`, and
   `native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Changes made to the departing chunk in `native_chunk_unload` aren't saved: as in vanilla, the chunk is saved before it unloads.

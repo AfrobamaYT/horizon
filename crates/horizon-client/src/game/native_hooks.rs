@@ -8053,6 +8053,17 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_on_effect_added(self, effect, entity, amplifier);
     }
+    /// The living entity an effect decision names: `Some(id)` a mob's
+    /// `Entity.getId`, `None` the acting player. `None` when no native
+    /// world runs, and the decision falls back to vanilla's.
+    pub(super) fn effect_living_ref(&self, entity: Option<i32>) -> Option<LivingRef> {
+        let epoch = self.native_lifecycle.epoch()?;
+        let id = match entity {
+            Some(id) => id as u32,
+            None => self.own_entity_id() as u32,
+        };
+        Some(LivingRef::new(EntityRef::new(epoch, id)))
+    }
     /// NeoForge's `MobEffectEvent.Added`, vanilla's `MobEffect.onEffectStarted`:
     /// every `LivingEntity.addEffect` of the content mod's effect `effect`,
     /// new or not, changed or not, after `native_on_effect_added`.
@@ -8064,6 +8075,49 @@ impl Game<'_> {
         amplifier: i32,
     ) {
         mod_api::dispatch_mob_effect_added(self, effect, entity, amplifier);
+    }
+    /// NeoForge's `MobEffectEvent.Applicable`, vanilla's
+    /// `LivingEntity.canBeAffected`: asked wherever the game checks whether
+    /// the effect `effect` can land on the living entity `entity` (a
+    /// `LivingRef`, the player's own included), before `addEffect`
+    /// accepts it. `applicable` starts unanswered: leave it and the vanilla
+    /// tag check decides; `Allow` or `Deny` overrides it. Server-side.
+    pub(super) fn native_mob_effect_applicable(
+        &mut self,
+        entity: LivingRef,
+        effect: &str,
+        applicable: &mut Option<mod_api::EffectApplicable>,
+    ) {
+        mod_api::dispatch_mob_effect_applicable(self, entity, effect, applicable);
+    }
+    /// NeoForge's `MobEffectEvent.Expired`, vanilla `LivingEntity.tickEffects`:
+    /// the effect `effect` (`minecraft:speed`, amplifier `amplifier`) on
+    /// the living entity `entity` counted down to nothing and is about to
+    /// leave. Cancel holds it there, asked again next tick; unanswered, the
+    /// expiry runs. It runs inside the entity's tick, so the game is
+    /// read-only there. Server-side.
+    pub(super) fn native_mob_effect_expired(
+        &self,
+        entity: LivingRef,
+        effect: &str,
+        amplifier: i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_mob_effect_expired(self, entity, effect, amplifier, cancel);
+    }
+    /// NeoForge's `MobEffectEvent.Remove`, vanilla `LivingEntity.removeEffect`:
+    /// the effect `effect` on the living entity `entity` is about to be
+    /// removed by any path that walks the vanilla funnel: a command or milk
+    /// for the player, a cure for a zombie villager, a mod's removal
+    /// helper. Cancel and the effect stays. Server-side.
+    pub(super) fn native_mob_effect_remove(
+        &mut self,
+        entity: LivingRef,
+        effect: &str,
+        amplifier: i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_mob_effect_remove(self, entity, effect, amplifier, cancel);
     }
     /// Whether a mod hears projectiles' impacts (`native_projectile_impact`):
     /// set `hears`. Asked once a server tick before the projectiles fly; only

@@ -252,6 +252,7 @@ impl PlayerEffects {
         &mut self,
         omen: &mut dyn FnMut(&EffectInstance, i32, &mut Vec<EffectAction>, bool) -> OmenTick,
         absorption_empty: bool,
+        keep_expired: &[&'static str],
     ) -> (Vec<EffectAction>, bool) {
         self.tick_count = self.tick_count.wrapping_add(1);
         let mut actions = Vec::new();
@@ -260,7 +261,13 @@ impl PlayerEffects {
         while i < self.list.len() {
             let e = &self.list[i];
             if !(e.infinite() || e.duration > 0) {
-                self.list.remove(i);
+                // `MobEffectEvent.Expired`: a refused expiry keeps the
+                // effect at no ticks, asking again next tick.
+                if keep_expired.contains(&e.id) {
+                    i += 1;
+                } else {
+                    self.list.remove(i);
+                }
                 continue;
             }
             let t = if e.infinite() {
@@ -299,7 +306,9 @@ impl PlayerEffects {
             let e = &mut self.list[i];
             e.tick_down();
             e.downgrade();
-            if e.infinite() || e.duration > 0 {
+            // `MobEffectEvent.Expired`: a kept expiry leaves the effect at
+            // no ticks instead of removing it here.
+            if e.infinite() || e.duration > 0 || keep_expired.contains(&e.id) {
                 i += 1;
             } else {
                 self.list.remove(i);
@@ -524,13 +533,13 @@ mod tests {
         };
         // The first tick adds Raid Omen and stops there (the iterator's
         // ConcurrentModificationException): Bad Omen and Speed stay as they were.
-        let (_, added) = fx.tick_with(&mut convert, false);
+        let (_, added) = fx.tick_with(&mut convert, false, &[]);
         assert!(added);
         assert_eq!(fx.get("bad_omen").unwrap().duration, 100);
         assert_eq!(fx.get("speed").unwrap().duration, 50);
         assert_eq!(fx.get("raid_omen").unwrap().duration, 600);
         // The second refreshes Raid Omen and drops Bad Omen.
-        let (_, added) = fx.tick_with(&mut convert, false);
+        let (_, added) = fx.tick_with(&mut convert, false, &[]);
         assert!(!added);
         assert!(fx.get("bad_omen").is_none());
         assert_eq!(fx.get("speed").unwrap().duration, 49);
@@ -565,6 +574,7 @@ mod tests {
                 OmenTick::Continue
             },
             false,
+            &[],
         );
         assert_eq!(
             actions,
@@ -599,8 +609,8 @@ mod tests {
                 _ => OmenTick::Continue,
             }
         };
-        fx.tick_with(&mut answer, false);
-        fx.tick_with(&mut answer, false);
+        fx.tick_with(&mut answer, false, &[]);
+        fx.tick_with(&mut answer, false, &[]);
         let ticks = [
             ("ruby:glow", 3),
             ("ruby:bleed", 1),
@@ -623,9 +633,9 @@ mod tests {
             seen.push(e.duration);
             OmenTick::Remove
         };
-        fx.tick_with(&mut watch, false);
+        fx.tick_with(&mut watch, false, &[]);
         assert!(fx.get("raid_omen").is_some());
-        fx.tick_with(&mut watch, false);
+        fx.tick_with(&mut watch, false, &[]);
         assert!(fx.get("raid_omen").is_none());
         assert_eq!(seen, vec![1]);
     }
