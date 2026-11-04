@@ -11,7 +11,7 @@ use crate::{
 };
 use horizon_server_launch::config;
 use serde_json::{Value, json};
-use std::{path::Path, sync::atomic::Ordering};
+use std::path::Path;
 
 /// A method's result (`short`: its name without `minecraft:`).
 pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Result<Value, Failure> {
@@ -28,8 +28,9 @@ pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Resu
             game.console(if flush { "save-all flush" } else { "save-all" })?;
             Ok(json!(true))
         }
+        // `ServerStateService.stop` submits `MinecraftServer.halt(false)`: the server stops and its process exits.
         "server/stop" => {
-            shared.stop.store(true, Ordering::SeqCst);
+            shared.shut_down();
             Ok(json!(true))
         }
         "server/system_message" => game.system_message(argument),
