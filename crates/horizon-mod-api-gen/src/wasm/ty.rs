@@ -600,11 +600,7 @@ pub(super) fn trait_name(object: &syn::TypeTraitObject) -> Result<String, String
                 let args = match &s.arguments {
                     PathArguments::AngleBracketed(args) => format!(
                         "<{}>",
-                        args.args
-                            .iter()
-                            .map(|a| written(a))
-                            .collect::<Vec<_>>()
-                            .join(", ")
+                        args.args.iter().map(written).collect::<Vec<_>>().join(", ")
                     ),
                     _ => String::new(),
                 };
