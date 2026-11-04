@@ -728,6 +728,50 @@ pub(super) mod tests {
             assert!(level.neighbor_changed(game, east, state));
             assert!(lit(game, east) && !lit(game, above));
         });
+        // A repeater in front of the lever, reading it, schedules its own tick when told (a
+        // diode's `checkTickOnNeighbor`), through the level's queue; told again while that tick
+        // is pending, it schedules no second one (`willTickThisTick` / `hasScheduledTick`).
+        // Hooks that run inside the update get level hosts, not a `ServerHost`, so a mod
+        // can't call `update_neighbors` from within one: re-entry goes through the queue.
+        with_game(|game| {
+            lever_on(game, "minecraft:stone");
+            game.block_ticks
+                .add_empty_chunk(horizon_core::position::ChunkPos::new(0, 0))
+                .unwrap();
+            let level = game.native_level(game.dim.id()).unwrap();
+            set(game, [7, 63, 5], "minecraft:stone");
+            let repeater = game
+                .pack
+                .assets
+                .registry
+                .resolve(&horizon_world::chunk::BlockState {
+                    name: "minecraft:repeater".into(),
+                    properties: [
+                        ("facing", "west"),
+                        ("delay", "1"),
+                        ("locked", "false"),
+                        ("powered", "false"),
+                    ]
+                    .into_iter()
+                    .map(|(key, value)| (key.into(), value.into()))
+                    .collect(),
+                })
+                .unwrap();
+            game.world.set(7, 64, 5, repeater).unwrap();
+            let block = game.res.behaviours().block(repeater);
+            let at = horizon_core::position::BlockPos::new(7, 64, 5);
+            let state = game.world.block(6, 64, 5);
+            assert!(!game.block_ticks.has_block_tick(at, block));
+            assert!(level.update_neighbors(game, lever, state, Neighbours));
+            assert!(game.block_ticks.has_block_tick(at, block));
+            assert!(level.update_neighbors(game, lever, state, Neighbours));
+            assert!(game.block_ticks.has_block_tick(at, block));
+            assert_eq!(
+                game.world.block(7, 64, 5),
+                repeater,
+                "unpowered until its tick runs"
+            );
+        });
         // `updateNeighbourForOutputSignal(cake)`: the comparator reading the cake, which
         // outputs 14 when whole while the comparator still reads 0, schedules its tick.
         with_game(|game| {
