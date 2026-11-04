@@ -3529,7 +3529,7 @@ pub use horizon_mod_api_macros::__subscriptions;
 /// #[mod_api::horizon_mod] impl Hooks for A {}
 /// #[mod_api::horizon_mod] impl Hooks for B {}
 /// ```
-pub use horizon_mod_api_macros::{horizon_mod, horizon_part};
+pub use horizon_mod_api_macros::{horizon_mod, horizon_part, if_installed};
 
 #[cfg(test)]
 mod hooks_tests;
@@ -3551,6 +3551,26 @@ mod tests {
         let _: &mut dyn LevelRandomHost = &mut Empty;
         let _: &mut dyn LevelTicksHost = &mut Empty;
         let _: &mut dyn LevelWriteHost = &mut Empty;
+    }
+
+    #[test]
+    fn an_optional_dependency_runs_only_when_built_with_and_installed() {
+        struct Installed(&'static str);
+        impl Host for Installed {
+            fn is_loaded(&self, id: &str) -> bool {
+                id == self.0
+            }
+        }
+        // The `testing` feature stands for a dependency's: without it the block isn't compiled,
+        // with it the game is asked.
+        let ran = std::cell::Cell::new(0);
+        for host in [Installed("testing"), Installed("other")] {
+            let host: &dyn Host = &host;
+            if_installed!(host, testing, {
+                ran.set(ran.get() + 1);
+            });
+        }
+        assert_eq!(ran.get(), usize::from(cfg!(feature = "testing")));
     }
 
     #[test]

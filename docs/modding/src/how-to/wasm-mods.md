@@ -36,7 +36,9 @@ letter (`hello_wasm`, not `mod_2`).
 crate in `Cargo.toml`; build the library with `--wasm` first. The game links a mod with its
 dependencies at load, one copy of each library shared by every mod that uses it, and refuses a
 mod whose library is missing or another build than the one it was linked against, naming it on
-the Mods page.
+the Mods page. An optional dependency is built in with the Cargo feature of its id, so its crate's
+entry in `Cargo.toml` is `optional = true` under that id; an absent one is left out of the group at
+load, and `if_installed!` keeps the mod from calling it.
 
 ## In the game
 

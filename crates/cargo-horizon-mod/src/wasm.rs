@@ -154,10 +154,14 @@ fn cargo_member(
     toolchain: &Toolchain,
     role: &str,
     provided: &[String],
+    features: &[String],
 ) -> Result<Vec<u8>, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut command = pinned("cargo");
     command.args(["rustc", "--lib", "--crate-type", "cdylib"]);
+    if !features.is_empty() {
+        command.args(["--features", &features.join(",")]);
+    }
     command
         .args([
             "--target",
@@ -229,7 +233,7 @@ fn std_member(target_dir: &Path, toolchain: &Toolchain) -> Result<Vec<u8>, Strin
         "// The group's one std: linked whole and exported.\n",
     )
     .map_err(|e| e.to_string())?;
-    cargo_member(&dir, target_dir, toolchain, "std", &[])
+    cargo_member(&dir, target_dir, toolchain, "std", &[], &[])
 }
 
 /// `wasm-std <out>`: the std member the game ships beside its executable.
@@ -247,6 +251,8 @@ pub fn wasm_std(args: &[String]) -> Result<(), String> {
 /// A library mod this mod depends on: its crate, and its built `mod.wasm`.
 struct Library {
     id: String,
+    /// Declared `optional = true`: the mod is built with the Cargo feature of its id.
+    optional: bool,
     krate: String,
     module: Vec<u8>,
     sha512: String,
@@ -254,10 +260,20 @@ struct Library {
 
 /// The mod's `[dependencies]` that are wasm library mods among its crate's dependencies.
 fn libraries(root: &Path, manifest: &toml_edit::DocumentMut) -> Result<Vec<Library>, String> {
-    let wanted: Vec<&str> = manifest
+    let wanted: Vec<(&str, bool)> = manifest
         .get("dependencies")
         .and_then(|d| d.as_table_like())
-        .map(|d| d.iter().map(|(id, _)| id).collect())
+        .map(|d| {
+            d.iter()
+                .map(|(id, item)| {
+                    let optional = item
+                        .as_table_like()
+                        .and_then(|t| t.get("optional"))
+                        .and_then(|o| o.as_bool());
+                    (id, optional == Some(true))
+                })
+                .collect()
+        })
         .unwrap_or_default();
     if wanted.is_empty() {
         return Ok(Vec::new());
@@ -286,9 +302,9 @@ fn libraries(root: &Path, manifest: &toml_edit::DocumentMut) -> Result<Vec<Libra
         };
         let theirs =
             horizon_mods::Manifest::parse(&text).map_err(|e| format!("{}: {e}", dir.display()))?;
-        if !wanted.contains(&theirs.id.as_str()) {
+        let Some(&(_, optional)) = wanted.iter().find(|(id, _)| *id == theirs.id) else {
             continue;
-        }
+        };
         let wasm = theirs.wasm.ok_or_else(|| {
             format!(
                 "{}: a wasm mod's dependency must be a wasm mod too",
@@ -301,6 +317,7 @@ fn libraries(root: &Path, manifest: &toml_edit::DocumentMut) -> Result<Vec<Libra
             .map_err(|e| format!("{}: {e}; rebuild it with --wasm", theirs.id))?;
         found.push(Library {
             id: theirs.id,
+            optional,
             krate: lib_name(package).ok_or("a library mod has no [lib]")?,
             module,
             sha512: wasm.sha512().to_owned(),
@@ -329,8 +346,14 @@ pub fn build(root: &Path) -> Result<(), String> {
     let target = std::path::absolute(root.join("target/horizon-mod")).map_err(|e| e.to_string())?;
     let libraries = libraries(root, &manifest)?;
     let provided: Vec<String> = libraries.iter().map(|l| l.krate.clone()).collect();
+    // An optional library is linked when installed and guarded at the call (`if_installed!`).
+    let features: Vec<String> = libraries
+        .iter()
+        .filter(|l| l.optional)
+        .map(|l| l.id.clone())
+        .collect();
     let module = rename(
-        &cargo_member(root, &target, &toolchain, "member", &provided)?,
+        &cargo_member(root, &target, &toolchain, "member", &provided, &features)?,
         &id,
     )?;
     // Linked here as the game will, so a member that can't link fails now, not on load.

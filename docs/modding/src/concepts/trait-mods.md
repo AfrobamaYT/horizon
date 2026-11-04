@@ -50,8 +50,17 @@ An absent optional dependency is permitted; an installed optional dependency mus
 
 The launcher adds a path dependency using the mod ID as the Cargo alias and the target's actual Cargo
 package name. Optional dependencies also get a Cargo feature named exactly as their mod ID, enabled
-only when that mod is installed. Guard calls with
-`#[cfg(feature = "extra_mod")]`. Do not define these dependencies or features yourself in Cargo.toml.
+only when that mod is installed. Guard calls with `if_installed!`, which builds the block only with
+that feature and runs it only when the mod is installed, so the same source works when built to
+`mod.wasm`, where the library is linked at load and an absent one's functions trap:
+
+```rust,ignore
+mod_api::if_installed!(host, extra_mod, {
+    extra_mod::register_extra(host);
+});
+```
+
+Do not define these dependencies or features yourself in Cargo.toml.
 Public statics must use appropriate synchronization for shared and reentrant hooks; private state in
 another mod's hook object is not exposed.
 
