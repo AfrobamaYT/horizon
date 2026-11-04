@@ -18,7 +18,7 @@ use horizon_world::{
     },
     nbt::Tag,
 };
-use std::{fmt, io, sync::Arc};
+use std::{cell::OnceCell, fmt, io, sync::Arc};
 
 /// An entity's attribute instances, as a player has them.
 pub type Live = LiveAttributes<Box<dyn Identities>>;
@@ -172,11 +172,12 @@ pub fn apply_saved(attributes: &mut Live, saved: Option<&Tag>) -> Result<()> {
 /// The attribute map of a mob, an armor stand or the dragon.
 ///
 /// Nothing is allocated for an entity that wears nothing with modifiers and is
-/// not asked: `map` and `worn` stay `None`, and `saved` holds only the loaded
-/// `attributes` entries nothing else models.
+/// not asked: `map` and `worn` stay empty, and `saved` holds only the loaded
+/// `attributes` entries nothing else models. Once built, by a read too, the
+/// map stays until `invalidate` drops it.
 #[derive(Clone, Default)]
 pub struct LivingAttributes {
-    map: Option<Box<Live>>,
+    map: OnceCell<Box<Live>>,
     /// The items whose modifiers the map holds, by `EquipmentSlot` ordinal
     /// (`LivingEntity.lastEquipmentItems`).
     worn: Option<Box<[Option<Arc<str>>; 8]>>,
@@ -186,7 +187,7 @@ pub struct LivingAttributes {
 impl fmt::Debug for LivingAttributes {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LivingAttributes")
-            .field("live", &self.map.is_some())
+            .field("live", &self.map.get().is_some())
             .field("saved", &self.saved.as_ref().map_or(0, |s| s.len()))
             .finish()
     }
@@ -204,8 +205,7 @@ impl LivingAttributes {
             .cloned()
             .collect();
         self.saved = (!kept.is_empty()).then(|| kept.into_boxed_slice());
-        self.map = None;
-        self.worn = None;
+        self.invalidate();
     }
 
     /// Forgets the loaded attributes the entity type has no instance of, as
@@ -237,8 +237,13 @@ impl LivingAttributes {
     /// Drops the map, because what it was built from changed: the next use
     /// builds it again and the next equipment pass puts the item modifiers back.
     pub fn invalidate(&mut self) {
-        self.map = None;
+        self.map.take();
         self.worn = None;
+    }
+
+    /// The map, if it is built.
+    pub fn built(&self) -> Option<&Live> {
+        self.map.get().map(|map| &**map)
     }
 
     fn build(&self, catalog: &Arc<Catalog>, entity: &str, seed: Vec<Tag>) -> Result<Live> {
@@ -253,8 +258,8 @@ impl LivingAttributes {
     /// `AttributeMap.getValue` or `getBaseValue` of `name`: None for an
     /// attribute the entity type does not have. `seed` is what the entity keeps
     /// of its attributes elsewhere, in the `attributes` list's form; it is only
-    /// asked for when the map is not built yet, and the answer comes from a
-    /// map that is dropped again.
+    /// asked for when the map is not built yet. The map built for the read is
+    /// kept, so the next read allocates nothing.
     pub fn read(
         &self,
         catalog: &Arc<Catalog>,
@@ -263,10 +268,13 @@ impl LivingAttributes {
         kind: ValueKind,
         seed: impl FnOnce() -> Vec<Tag>,
     ) -> Option<f64> {
-        if let Some(map) = &self.map {
-            return map.value(Some(map.key(name)?), kind).ok();
-        }
-        let map = self.build(catalog, entity, seed()).ok()?;
+        let map = match self.map.get() {
+            Some(map) => map,
+            None => {
+                let built = self.build(catalog, entity, seed()).ok()?;
+                self.map.get_or_init(|| Box::new(built))
+            }
+        };
         map.value(Some(map.key(name)?), kind).ok()
     }
 
@@ -301,7 +309,7 @@ impl LivingAttributes {
             if changed & (1 << slot) == 0 {
                 continue;
             }
-            let (Some(map), Some(old)) = (self.map.as_mut(), worn[slot].take()) else {
+            let (Some(map), Some(old)) = (self.map.get_mut(), worn[slot].take()) else {
                 worn[slot] = None;
                 continue;
             };
@@ -318,11 +326,12 @@ impl LivingAttributes {
             if items.get(new).is_none_or(|i| i.modifiers.is_empty()) {
                 continue;
             }
-            if self.map.is_none() {
+            if self.map.get().is_none() {
                 let seed = seed.take().map_or_else(Vec::new, |f| f());
-                self.map = Some(Box::new(self.build(catalog, entity, seed)?));
+                let built = self.build(catalog, entity, seed)?;
+                self.map.get_or_init(|| Box::new(built));
             }
-            if let Some(map) = self.map.as_mut() {
+            if let Some(map) = self.map.get_mut() {
                 apply_item(map, new, slot, items, true)?;
             }
         }
@@ -344,7 +353,7 @@ impl LivingAttributes {
         for entry in self.saved.iter().flat_map(|s| s.iter()) {
             put(entry.clone());
         }
-        if let Some(map) = &self.map {
+        if let Some(map) = self.map.get() {
             for entry in pack(map, true) {
                 put(entry);
             }

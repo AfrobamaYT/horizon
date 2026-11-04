@@ -21,7 +21,7 @@ impl Game<'_> {
             }
             // The map is taken out so the seed can read the mob.
             let mut live = std::mem::take(&mut m.extra.live);
-            let _ = live.collect_equipment_changes(
+            let changed = live.collect_equipment_changes(
                 &catalog,
                 &m.kind.id,
                 &m.extra.equipment,
@@ -33,31 +33,42 @@ impl Game<'_> {
                         .collect()
                 },
             );
+            warn_failed(m.id, &m.kind.id, changed);
             m.extra.live = live;
         }
         for a in self.armor_stands.iter_mut() {
             if a.equipment.is_empty() && !a.live.has_worn() {
                 continue;
             }
-            let _ = a.live.collect_equipment_changes(
+            let changed = a.live.collect_equipment_changes(
                 &catalog,
                 "minecraft:armor_stand",
                 &a.equipment,
                 items,
                 Vec::new,
             );
+            warn_failed(a.id, "minecraft:armor_stand", changed);
         }
         if let Some(d) = self.dragon.as_mut()
             && !(d.equipment.is_empty() && !d.live.has_worn())
         {
-            let _ = d.live.collect_equipment_changes(
+            let changed = d.live.collect_equipment_changes(
                 &catalog,
                 "minecraft:ender_dragon",
                 &d.equipment,
                 items,
                 Vec::new,
             );
+            warn_failed(d.id, "minecraft:ender_dragon", changed);
         }
+    }
+}
+
+/// An item modifier the map refused (a bad modifier id) is logged, naming the
+/// entity, instead of being lost.
+fn warn_failed(id: u32, kind: &str, result: horizon_client::Result<()>) {
+    if let Err(error) = result {
+        log::warn!("equipment attributes of {kind} {id}: {error}");
     }
 }
 
@@ -111,6 +122,30 @@ mod tests {
             );
             // Not an attribute of an armor stand.
             assert_eq!(read(game, 13, "minecraft:attack_damage"), (None, None));
+        });
+    }
+
+    /// A read of a mob that wears nothing builds its map once and keeps it,
+    /// so the next reads allocate nothing.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_read_builds_the_map_once() {
+        with_game(|game| {
+            spawn(game);
+            assert!(game.mobs[0].extra.live.built().is_none());
+            read(game, 12, "minecraft:max_health");
+            let first: *const _ = game.mobs[0].extra.live.built().unwrap();
+            read(game, 12, "minecraft:attack_damage");
+            read(game, 12, "minecraft:max_health");
+            let again: *const _ = game.mobs[0].extra.live.built().unwrap();
+            assert!(std::ptr::eq(first, again));
+            // A changed base drops it; the next read builds it from the new base.
+            game.mobs[0].extra.live.invalidate();
+            assert!(game.mobs[0].extra.live.built().is_none());
+            assert_eq!(
+                read(game, 12, "minecraft:max_health"),
+                (Some(20.0), Some(20.0))
+            );
         });
     }
 
