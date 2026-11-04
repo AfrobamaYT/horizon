@@ -1045,15 +1045,8 @@
     "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml में horizon-client निर्भरता नहीं है।",
     "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client को {fields} चाहिए। सर्वर बिल्ड बिना इंटरफ़ेस के हैं; horizon-client की सुविधाएँ लॉन्चर तय करता है। features हटाएँ और default-features = false का उपयोग करें या इसे हटा दें।",
     "{mod}: {error}": "{mod}: {error}",
-    "Building {name}'s post-build step": "{name} का पोस्ट-बिल्ड चरण बनाया जा रहा है",
-    "These mods were made for different Horizon versions": "ये मॉड अलग-अलग Horizon संस्करणों के लिए बनाए गए थे",
-    "They often still work together. If the build fails, install versions made for the same Nightly.": "वे अक्सर अभी भी एक साथ काम करते हैं। यदि बिल्ड विफल हो जाता है, तो उसी Nightly के लिए बनाए गए संस्करण इंस्टॉल करें।",
     "{mode} · stopped": "{mode} · बंद",
     "{online} of {max}": "{max} में से {online}",
-    "Running {name}'s post-build step": "{name} का पोस्ट-बिल्ड चरण चल रहा है",
-    "The source of {source}. Its release ships {file}, a content mod: installing those from GitHub is not supported yet.": "{source} का स्रोत। इसकी रिलीज़ में {file} है, जो एक कंटेंट मॉड है: GitHub से इन्हें इंस्टॉल करना अभी समर्थित नहीं है।",
-    "Build anyway": "फिर भी बनाएं",
-    "{error} They often still build: pass --allow-version-mismatch to try.": "{error} वे अक्सर अभी भी बनते हैं: कोशिश करने के लिए --allow-version-mismatch पास करें।",
     "Accent colour, glass, blur, language and the options above go back to how Horizon ships.": "एक्सेंट रंग, ग्लास, ब्लर, भाषा और ऊपर के विकल्प Horizon के मूल रूप में लौट आते हैं।",
     "Reset the launcher's look": "लॉन्चर का रूप रीसेट करें",
     "Reset to defaults": "डिफ़ॉल्ट पर रीसेट करें",
@@ -1108,6 +1101,5 @@
     "Save changes switches it. Nothing in its folder is deleted.": "बदलाव सहेजें इसे बदल देता है। इसके फ़ोल्डर से कुछ भी नहीं हटता।",
     "Its mods made for {loader} stay in its folder but won't load.": "{loader} के लिए बने इसके मॉड इसके फ़ोल्डर में रहते हैं, पर लोड नहीं होंगे।",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Minecraft {from} के लिए बने इसके मॉड इसके फ़ोल्डर में रहते हैं; कुछ {to} में शायद लोड न हों।",
-    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "इसकी दुनिया Minecraft {from} से सहेजी गई थीं: {to} उन्हें हमेशा के लिए अपग्रेड करता है, और पुराना हो तो उन्हें खोल नहीं सकता।",
-    "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "इस गेम के स्रोत में पढ़ने योग्य नेटिव एंट्री टेम्प्लेट नहीं है। Horizon अपडेट करें और इस गेम के लिए मॉड फिर से बिल्ड करें।"
+    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "इसकी दुनिया Minecraft {from} से सहेजी गई थीं: {to} उन्हें हमेशा के लिए अपग्रेड करता है, और पुराना हो तो उन्हें खोल नहीं सकता।"
 }
