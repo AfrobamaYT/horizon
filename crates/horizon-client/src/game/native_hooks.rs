@@ -7500,18 +7500,18 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_food_level_changed(self, player, name, from, to, cancel);
     }
-    /// Whether a mod hears `native_experience_orb_pickup`: set `listened`
+    /// Whether a mod hears `native_pickup_xp`: set `listened`
     /// (a HEAD injection), or the server skips swapping the player in for it,
     /// and with this empty the pickup costs nothing more without mods.
     /// Server-side.
-    pub(super) fn native_experience_orb_pickup_listened(&mut self, listened: &mut bool) {
-        mod_api::dispatch_experience_orb_pickup_listened(self, listened);
+    pub(super) fn native_pickup_xp_listened(&mut self, listened: &mut bool) {
+        mod_api::dispatch_pickup_xp_listened(self, listened);
     }
     /// Before `player` picks up orb `orb` in `dimension`. Mutations to `value`
     /// and `count` take effect only when not canceled; value is clamped to
     /// 1..=i32::MAX and count to at least one.
     /// Canceling leaves the orb and pickup delay unchanged. Server-side.
-    pub(super) fn native_experience_orb_pickup(
+    pub(super) fn native_pickup_xp(
         &mut self,
         player: u128,
         dimension: &str,
@@ -7520,9 +7520,7 @@ impl Game<'_> {
         count: &mut u32,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_experience_orb_pickup(
-            self, player, dimension, orb, value, count, canceled,
-        );
+        mod_api::dispatch_pickup_xp(self, player, dimension, orb, value, count, canceled);
     }
     /// The selected damaged Mending `stack` and the proposed durability repair
     /// for `experience` points. The amount is clamped to the stack's current damage. Zero leaves the
