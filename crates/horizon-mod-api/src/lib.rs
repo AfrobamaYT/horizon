@@ -279,6 +279,16 @@ pub struct NativeArmorHurt {
     pub new_damage: f32,
 }
 
+/// A vanilla key mapping as the client holds it (`ClientHost::mapping`).
+#[derive(Clone, Debug)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct NativeKeyMapping {
+    /// Whether it is held (`KeyMapping.isDown`).
+    pub down: bool,
+    /// The name of the key it is bound to, as Controls shows it (`KeyMapping.getTranslatedKeyMessage`).
+    pub label: Text,
+}
+
 /// Camera values from the most recently extracted world frame.
 #[derive(Clone, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
