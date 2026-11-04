@@ -7850,10 +7850,9 @@ mod tests {
                 );
                 game.adv.tree = Arc::new(tree);
                 game.adv.loaded = true;
-                game.world.chunks.insert(
-                    (0, 0),
-                    Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-                );
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
                 let catalyst = game
                     .pack
                     .assets
@@ -7892,15 +7891,8 @@ mod tests {
                     .insert(102, super::super::combat::PlayerCredit(12));
                 game.as_guest(12, |game| game.mob_died(&second)).unwrap();
                 let host = game.lan.as_ref().unwrap();
-                assert_eq!(
-                    host.play[&12].stats.get("custom", "minecraft:mob_kills"),
-                    2
-                );
-                assert!(
-                    host.hub.guests[0]
-                        .advancements
-                        .has("test:catalyst", "kill")
-                );
+                assert_eq!(host.play[&12].stats.get("custom", "minecraft:mob_kills"), 2);
+                assert!(host.hub.guests[0].advancements.has("test:catalyst", "kill"));
                 game.mobs[0].extra.owner = None;
                 game.resolve_player_responsible(101, Damage::mob(100, [0.0; 3]));
                 assert!(!game.last_hurt_by_player.contains_key(&101));
