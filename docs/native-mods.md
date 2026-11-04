@@ -74,6 +74,30 @@ or a cross-release compatibility range.
 Hook and helper authors add [catalog fragments](../tools/native-hook-fragments/README.md). Collection updates
 the catalog, not a global API number, source comments or documentation histories.
 
+## Runtime packages and identity
+
+The launcher generates the game's embedded native inventory from the selected `horizon-mod.toml`
+manifests: mod id, version and side. Cargo package metadata and hook factories do not supply identity.
+The game validates each compiled mod's package at
+`<executable directory>/horizon-native-mods/<id>/` before installing hooks or starting a world.
+Missing, unreadable, content-only or identity-mismatched packages refuse startup with the affected
+mods and paths; restore the packages exported with that executable or rebuild it. There is no
+build-record fallback and no discovery of native runtime packages from the working directory.
+Content-only mods still follow the working directory, player toggles and explicit `--dev-mod` paths;
+a content package cannot shadow a compiled mod's id.
+
+Move the executable, prepared resources and canonical package directory together. The copied
+projects retain their flat manifest, crate, assets and data. The game's mod list and crash details
+use its embedded inventory, including code-only mods. Display names and descriptions come from the
+validated manifests; `NativeMod.title` and `NativeMod.description` are removed.
+
+`native-mods.json` is provenance and rebuild status, not game identity, authentication, announcements
+or startup input. The launcher retains it for build/status displays. The separate `horizon-server`
+supervisor may report the adjacent record as a provenance snapshot, not a query of the running engine.
+Its SHA-256 values and revision describe the built binary's inputs, not the running mod set.
+The launcher prepares jar data from canonical manifests as non-authoritative candidates; the engine
+validates identity against its embedded inventory.
+
 ## Hook and helper capabilities
 
 - The item panel beside container screens and its recipe pages (`native_panel_items`,
@@ -110,6 +134,10 @@ the catalog, not a global API number, source comments or documentation histories
 
 - Item tooltips: an `ItemPart`'s `tooltip` adds its item's own lines where `Item.appendHoverText` does, after
   the name and before the components' lines, never for a tooltip the stack hides.
+  `Hooks::item_tooltip` (NeoForge's `ItemTooltipEvent`) then gets every item's whole tooltip once it is
+  complete, with the local player, the stack's `TooltipDisplay` and its `TooltipFlag` (`advanced`, `creative`),
+  and may add, change or remove any line. Horizon's creative search reads vanilla's exported tooltip text, so it
+  does not fire with no player while search trees are built, as NeoForge does.
 
 - An item's own server behaviour: `ItemPart::use_on(host, event)` hears a right click with its item on a
   block once the block let it through (`ItemStack.useOn`), and `ItemPart::use_item(host, event)` hears the
@@ -212,9 +240,13 @@ the catalog, not a global API number, source comments or documentation histories
   was queued, not whether a player heard it. The server discards unknown sound events when it dispatches
   the queue.
 
-- `Game::native_config_dir()`: the game's shared `config/` folder beside `options.txt` (beside
-  `server.properties` on a dedicated server), where a mod names its own files, made when missing. It takes no `self`, so
-  it works from any hook ([mods.md](mods.md#native-mods)).
+- `Host::config_files()`: the calling mod's own files in the game's shared `config/` folder beside `options.txt` (beside
+  `server.properties` on a dedicated server): its folder `config/<mod id>/` and the files beside it named
+  `<mod id>.<ext>` or `<mod id>-<rest>`. `ConfigFiles` reads, writes, lists and stats them through `&dyn Host` on
+  either side, at most 4 MiB a file; a write replaces the file at once. The service is bound to the mod whose hook or
+  part is running (a mod never names its id), so another mod's path, a symbolic link on the way or a call outside any
+  mod's hook is refused with a typed `ConfigFileError`. A path is a `ConfigPath`, checked once when it is made. A
+  world's `serverconfig/` copy is read only through `native_config_loading` ([mods.md](mods.md#native-mods)).
 
 - The player-health HUD rows through `native_health_hud`: every frame the HUD draws them, the
   hook hears the layout's inputs (`HealthInputs`) and the screen's GUI size, and a mod that answers with
@@ -1778,7 +1810,8 @@ trusting native code is the player's decision, never an agent's.
 6. **Install**: a new version, `native-<commit>-<key>`, a copy of the starting version's folder (resources
    included, cloned on APFS, Btrfs and ReFS) with the built game in place of its own, and a `native-mods.json`
    saying which release or Nightly it started from (`base`) and which commit, mods, horizon-mixins and Rust made
-   it. The game lists its `mods` with their versions in a crash report's details (`Native Mods: id version, …`;
+   it. Canonical mod projects are copied into `horizon-native-mods/<id>/` beside the executable.
+   The game lists its embedded inventory in a crash report's details (`Native Mods: id version, …`;
    they stay in the local report, not in crash telemetry). The instance the mods are installed in plays it, the default **Horizon** instance included: the build
    pins its version, as picking a version does. Updates of the launcher's version leave a pinned instance where
    it is, and their clean-up never removes a native build. The **Native mods**
@@ -1944,23 +1977,36 @@ each was built or last used): switching a mod off and on again plays the kept bu
 
 - **Single player and LAN host:** the mods run in the host's game and its integrated server, so a server-side
   hook applies to every player of the world.
-- **Joining a server:** only client-side hooks do anything; the protocol is unchanged.
+- **Joining a server:** client-side hooks run locally. Configuration requires matching both-side mod ids
+  and versions; a refusal names the missing, extra or different-version mods ([configuration policy](mods.md)).
 - **Dedicated server:** native mods run in a standalone engine export built with `--server-output`, not in an
   instance build (`--server-output` conflicts with `--instance` and needs an explicit mod `FOLDER`). See
   [Standalone server export](#standalone-server-export).
 
 ### Standalone server export
 
-`horizon-launcher native-build FOLDER --server-output DIR --version TAG --trust-native-code [--profile PROFILE]`
+`horizon-launcher native-build FOLDER --server-output DIR --version TAG --trust-native-code [--profile PROFILE] [--allow-jar-downloads]`
 
 Builds a standalone dedicated-server engine into `DIR`, which must not exist yet. `FOLDER` (a mod folder or a
 folder of them) is required; no instance is read, selected, edited or played, and no launcher config is written.
 It reuses the pinned toolchain, source and horizon-mixins and compiles `--no-default-features` (no audio or
 controllers). `--version` pins the Horizon release/Nightly the
 export reuses (explicit for reproducibility). The export holds the built `horizon-engine` executable, prepared resources
-and `native-mods.json`, and prints its absolute path. It runs on the same OS/architecture as the
+the canonical `horizon-native-mods/<id>/` projects and the provenance `native-mods.json`, and prints its absolute path. It runs on the same OS/architecture as the
 host only (no cross compilation), needs a prepared installed launcher base release, and survives cache pruning
 because it is copied outside the managed folders. On Windows use the printed `horizon-engine.exe` path.
+
+Server projects must not request `horizon-client`'s `default-features = true` or any dependency
+`features` field, even an empty array. This covers aliases, target-specific declarations and SDK
+feature requests through Cargo feature tables. Omit `default-features` or set it to `false`; the
+launcher stages the server SDK dependencies with defaults disabled. Refusals name the mod and the
+requested fields, before toolchain work. Client build behavior is unchanged.
+
+Declared jars use the same exact-hash preparation as ordinary launches. A server export refuses
+missing jars by default and never asks interactively; `--allow-jar-downloads` permits the shared
+preparer to download the exact files into the local cache. Cached jar bytes are **never exported**.
+When moving the runtime to another machine or game home, prepare its jar cache separately; errors
+name the required files and cache paths. No Java code from a jar runs.
 
 Point a server at it:
 
@@ -1969,8 +2015,9 @@ Point a server at it:
 
 Updates do not rebuild a pinned `engine.path`: build a new export folder, set `engine.path` to it, restart, and keep
 the old folder for manual rollback. The supervisor does not auto-update or rebuild a pinned engine path, and there
-is no compatibility handshake yet (shared server build crate / native config / updates / handshake are follow-up
-#6304, not implemented). Native mods run unsandboxed: only build code you have read and trust.
+is no supervisor-to-engine inventory query or managed native rebuild/update workflow yet (remaining work in
+horizon-rust/horizon#6304). Configuration mod matching is implemented as described above.
+Native mods run unsandboxed: only build code you have read and trust.
 `--trust-native-code` records the operator's decision; an agent must not supply that consent.
 
 ### Developer acceptance workflow
@@ -2558,6 +2605,10 @@ Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global l
   NeoForge's `GetEquipmentDropChanceEvent`. Change the chance a dying mob rolls for the item `stack` in `slot`; `original_chance`
   is the recorded chance before enchantments and `preserved` says the slot drops without a player kill. Each slot is asked at its
   own point of `Mob.dropCustomDeathLoot`, just before its roll, and the roll is drawn whatever the chance is.
+
+### A mod block entity's data on its item
+
+A mod's block entity carries its saved data on the item as vanilla's do: Ctrl + Pick Block, a loot function that copies the block entity (`minecraft:copy_components`-style) or a `/give` with `minecraft:block_entity_data:{id:"mod:type",...}` puts the compound (without `x`, `y`, `z`) in the item's `minecraft:block_entity_data`, and placing the item merges it into the new block entity before `native_place_block` runs, the counterpart of NeoForge's `BlockItem.updateCustomBlockEntityTag` and `BlockEntity.saveToItem`. Data tagged with another type is ignored. `/give` and `item replace` accept a type id a mod declared (its content's block entity types) and refuse any other as vanilla refuses an unknown one. The data is the compound the block entity saves, without its position and its components (`saveCustomOnly`): a component patch, a custom name say, rides as the item's own components and comes back as the block entity's on placing. A mod reads the data back in its own load as it does for a chunk.
 
 ### A block's items
 
@@ -3302,7 +3353,8 @@ mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `set_block(pos, state, flags)` is `Level.setBlock` on a whole state, as `LevelRef::set_block` takes it: it
 removes the old block's block entity and creates the new block's in the write (`LevelChunk.setBlockState`), runs
 the neighbour and shape updates `flags` ask for, and queues the write's level events in order. A mod block entity
-it creates starts with empty data, because `native_block_entity` needs a `Host`. It returns true when the block
+it creates starts with the data the `block_entity` hook gives, which is fired in the write and receives the level
+(`LevelSide`, read-only: vanilla's `newBlockEntity` gets no level), as the `Host`'s `native_set_block` fires it. It returns true when the block
 changed, and false off an authoritative server, for a position that is not loaded or outside the build height,
 an invalid state, or the state the block already has. It never loads a chunk. The game owns
 the tick queue; mods do not pass it back to these helpers.
@@ -3431,7 +3483,9 @@ r.block_entity_part(&press, Press).expect("native block entity type");
 ```
 
 The builder qualifies the type ID with the registering mod's namespace. It owns the save ID, wire type
-and valid blocks; `block_entity` returns only initial `Compound` data (or none for an empty compound).
+and valid blocks; `block_entity` returns only initial `Compound` data (or none for an empty compound). It is fired
+inside the write that creates the entity (`LevelChunk.setBlockState`) and receives the read-only level, a `LevelSide`,
+on a server and on a client of one.
 Unknown blocks, duplicate types, overlapping membership and attempts to own a `minecraft:` block are
 refused at load. Refused native block, item or block entity declarations stop startup, as does unreadable
 known-components input; the game does not fall back to vanilla content. An explicitly declared mod
@@ -3559,8 +3613,22 @@ entity energy and fluid handlers (NeoForge 26.3's `Capabilities.Energy.ENTITY` a
 `side` is the `Option<Direction>` of the entity the lookup reaches it from, `None` for no particular side. Vanilla
 answers neither; register a provider with `r.entity_capability(&ENTITY_ENERGY, "mymod:robot", |host, robot, side| …)`,
 which is given that side and may answer differently for each. An entity capability's context is its key's second type:
-`()` for `ENTITY_ITEMS`, `Option<Direction>` for these two. The existing `move_energy` and `move_resources` transfer
+`()` for `ENTITY_ITEMS`, `Option<Direction>` for these two and for `ENTITY_AUTOMATION`. The existing `move_energy` and `move_resources` transfer
 between these and block or item handlers inside a transaction.
+
+#### Entity automation
+
+`entity.capability(host, &ENTITY_AUTOMATION, side)` (NeoForge 26.3's `Capabilities.Item.ENTITY_AUTOMATION`, "automation-accessible
+inventory of an entity (boats, minecarts, etc)") is the items of an entity as a hopper reaches them, with the same
+`Option<Direction>` context as the energy and fluid keys. The game answers it for the container entities
+`EntitySelector.CONTAINER_ENTITY_SELECTOR` picks (chest and hopper minecarts, chest boats) with the slots their
+[`ENTITY_ITEMS`](#an-entitys-items) handler has; a player and a chested donkey, mule or llama answer none. A hopper
+pushing into the entity in front of it asks for the side it faces the entity from (`Up` for a hopper over it), a hopper
+pulling from the entity above it for `Down`, and a dropper for the side it drops onto. Beside the game's container
+entities, those entities at the target whose mod provider answers it join the candidates, and the hopper picks one at
+random with the draw `getEntityContainer` makes; a mod handler takes the container's place and moves one item at a time
+in a transaction, as a mod block's `ITEMS` does. `r.entity_capability(&ENTITY_AUTOMATION, "mymod:robot", |host, robot, side| …)`
+registers one, and `r.entity_capability_before_game` answers ahead of the game's own for a minecart or a boat.
 
 #### A menu's slots
 
@@ -3840,7 +3908,7 @@ custom copy handler, conditional serialization, the `sendToPlayer` predicate,
 
 `Host` exposes the documented `Game` helpers listed under `helpers` in
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's
-receiver and documentation; a helper without `self` (`config_dir`) takes
+receiver and documentation; a helper without `self` (`config_files`) takes
 `&self` in `Host`. Level services stay on the level hosts above.
 A helper's `receiver` also exposes it on that handle. Receivers come from public
 `*Ref` structs in `mod_api.rs`: `BlockEntityRef` gives `block_entity`, for example.

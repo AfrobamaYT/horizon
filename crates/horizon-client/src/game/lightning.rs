@@ -583,7 +583,11 @@ impl Game<'_> {
                     continue;
                 }
                 Species::Turtle => {
-                    m.damage(f32::MAX, damage);
+                    m.damage(
+                        crate::game::entity::damage_level_of!(self),
+                        f32::MAX,
+                        damage,
+                    );
                     continue;
                 }
                 Species::Creeper => {
@@ -610,7 +614,7 @@ impl Game<'_> {
                 m.ignite_for_ticks(160);
             }
 
-            m.damage(5.0, damage);
+            m.damage(crate::game::entity::damage_level_of!(self), 5.0, damage);
         }
         for entity in powered {
             self.native_creeper_power(entity, [at[0], at[1], at[2]]);

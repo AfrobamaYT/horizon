@@ -162,6 +162,7 @@ impl Game<'_> {
                         && illagers.contains(&(m.extra.counter2 as u32)));
             if m.id != f.owner && !ally && m.alive() && m.bounds().intersects(b) {
                 m.damage(
+                    crate::game::entity::damage_level_of!(self),
                     6.0,
                     horizon_client::mobs::Damage {
                         kind: horizon_client::mobs::DamageKind::Magic,
