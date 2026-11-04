@@ -502,6 +502,116 @@ fn neighbor_observation_follows_dispatch_order() {
     );
 }
 
+/// A level that hears every `neighborChanged`, and answers `affectNeighborsAfterRemoval` for a
+/// mod's part with three requests when `asks`.
+struct Asker {
+    inner: TestLevel,
+    seen: std::cell::RefCell<Vec<BlockPos>>,
+    asks: bool,
+}
+impl LevelAccess for Asker {
+    fn block_state(&self, pos: BlockPos) -> BlockStateId {
+        self.inner.block_state(pos)
+    }
+    fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
+        self.inner.set_raw(pos, state)
+    }
+    fn is_loaded(&self, pos: BlockPos) -> bool {
+        self.inner.is_loaded(pos)
+    }
+    fn random(&mut self) -> &mut LegacyRandom {
+        self.inner.random()
+    }
+    fn game_time(&self) -> i64 {
+        self.inner.game_time()
+    }
+    fn observe_neighbor_changed(&self, pos: BlockPos, _: BlockStateId, _: BlockId, _: bool) {
+        self.seen.borrow_mut().push(pos);
+    }
+    fn affect_neighbors_after_removal(
+        &self,
+        _: BlockPos,
+        _: BlockStateId,
+        _: bool,
+        updates: &mut Vec<super::NeighbourUpdate>,
+    ) {
+        if self.asks {
+            updates.extend([
+                super::NeighbourUpdate::NeighboursExcept(Direction::Up),
+                super::NeighbourUpdate::OutputSignal,
+                super::NeighbourUpdate::Neighbours,
+            ]);
+        }
+    }
+}
+
+/// The positions told of a neighbour change when `state` is removed from the origin.
+fn removal_notices(f: &Fixture, state: BlockStateId, asks: bool) -> Vec<BlockPos> {
+    let b = &f.behaviours;
+    let mut level = Asker {
+        inner: TestLevel::new(b),
+        seen: Default::default(),
+        asks,
+    };
+    let mut ticks = Ticks::new(0);
+    b.sim(&mut level, &mut ticks)
+        .affect_neighbors_after_removal(state, BlockPos::new(0, 0, 0), false);
+    level.seen.into_inner()
+}
+
+#[test]
+fn a_part_asks_for_neighbour_updates_in_the_order_it_asked() {
+    let Some(f) = fixture() else { return };
+    let stone = f.registry.default_state("minecraft:stone").unwrap();
+    let at = |x, y, z| BlockPos::new(x, y, z);
+    // Stone has no updates of its own: five neighbours without the one above, no comparator to
+    // hear the output signal, then all six.
+    assert_eq!(
+        removal_notices(f, stone, true),
+        [
+            at(-1, 0, 0),
+            at(1, 0, 0),
+            at(0, -1, 0),
+            at(0, 0, -1),
+            at(0, 0, 1),
+            at(-1, 0, 0),
+            at(1, 0, 0),
+            at(0, -1, 0),
+            at(0, 1, 0),
+            at(0, 0, -1),
+            at(0, 0, 1),
+        ]
+    );
+}
+
+#[test]
+fn a_parts_updates_follow_the_blocks_own_as_an_override_calling_super() {
+    let Some(f) = fixture() else { return };
+    // A powered lever tells its neighbours when removed: those come first, the part's after.
+    let lever = f
+        .registry
+        .resolve(&BlockState {
+            name: "minecraft:lever".into(),
+            properties: [("face", "wall"), ("facing", "east"), ("powered", "true")]
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .into(),
+        })
+        .unwrap();
+    let own = removal_notices(f, lever, false);
+    let both = removal_notices(f, lever, true);
+    assert!(!own.is_empty());
+    assert_eq!(both[..own.len()], own);
+    assert_eq!(both.len(), own.len() + 11);
+    assert_eq!(
+        both[own.len()..],
+        removal_notices(
+            f,
+            f.registry.default_state("minecraft:stone").unwrap(),
+            true
+        )
+    );
+}
+
 #[test]
 fn random_tick_hook_can_change_the_block_and_skip_its_own_tick() {
     use std::cell::Cell;

@@ -229,9 +229,11 @@ impl Game<'_> {
         if deals_knockback {
             let (xd, zd) = self.extra_knockback_direction();
             let source = Damage::spear(from);
-            self.mobs[index].knockback(0.4, xd, zd, &source);
+            let level = crate::game::entity::damage_level_of!(self);
+            self.mobs[index].knockback(level, 0.4, xd, zd, &source);
             let (strength, _) = self.extra_knockback(&kind, 0.0);
-            self.mobs[index].knockback(f64::from(strength), xd, zd, &source);
+            let level = crate::game::entity::damage_level_of!(self);
+            self.mobs[index].knockback(level, f64::from(strength), xd, zd, &source);
             // ...and the attacker stops sprinting.
             self.stop_sprint_after_extra_knockback();
         }

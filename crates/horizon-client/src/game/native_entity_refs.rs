@@ -571,6 +571,60 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn block_part_asks_neighbours_to_update_when_its_block_is_removed() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::position::BlockPos;
+        use std::sync::Arc;
+
+        horizon_client::mod_api::part_tests::removal_game_thread();
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let glass = registry.default_state("minecraft:glass").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let lamp_state = |lit: &str| {
+                registry
+                    .resolve(&horizon_world::chunk::BlockState {
+                        name: "minecraft:redstone_lamp".into(),
+                        properties: [("lit".into(), lit.into())].into_iter().collect(),
+                    })
+                    .unwrap()
+            };
+            let power = registry.default_state("minecraft:redstone_block").unwrap();
+            // An unlit lamp beside a redstone block lights when told a neighbour changed, and
+            // set into the world it hears nothing: the proof the update reached it. Moved by a
+            // piston, a removal tells no neighbour itself, so only the part's request can.
+            let lamp = BlockPos::new(6, 64, 5);
+            for (state, heard) in [(stone, false), (glass, true)] {
+                game.world.set(5, 64, 5, state).unwrap();
+                game.world.set(6, 64, 5, lamp_state("false")).unwrap();
+                game.world.set(7, 64, 5, power).unwrap();
+                let lit = game.with_level(|b, level, ticks| {
+                    // Flags 82: how a piston pushes a block out (`PistonBaseBlock.moveBlocks`).
+                    use horizon_world::level::flags;
+                    let flags = flags::UPDATE_MOVE_BY_PISTON
+                        | flags::UPDATE_KNOWN_SHAPE
+                        | flags::UPDATE_CLIENTS;
+                    b.set_block(
+                        level,
+                        ticks,
+                        BlockPos::new(5, 64, 5),
+                        registry.default_state("minecraft:air").unwrap(),
+                        flags,
+                    );
+                    horizon_world::level::LevelAccess::block_state(level, lamp)
+                        == lamp_state("true")
+                });
+                assert_eq!(lit, heard);
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn block_part_connects_wire_in_a_real_game_level() {
         use horizon_client::chunk::Chunk;
         use horizon_core::{geometry::Direction, position::BlockPos};
