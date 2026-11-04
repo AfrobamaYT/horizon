@@ -2894,6 +2894,21 @@ fn creaking_heart_follows_its_logs_and_the_night() {
 }
 
 #[test]
+fn composter_fill_event_has_no_excluded_player() {
+    let mut w = world!();
+    let pos = BlockPos::new(0, 1, 0);
+    let composter = w.id("composter", &[("level", "0")]);
+    w.put(pos, composter);
+    w.level.events.clear();
+    w.f.behaviours
+        .composter_insert(&mut w.level, &mut w.ticks, pos, 1);
+    assert!(w.level.events.iter().any(|event| matches!(
+        event,
+        LevelEvent::LevelEvent { id: 1500, pos: at, data: 1, source: None } if *at == pos
+    )));
+}
+
+#[test]
 fn player_breaks_fire_with_extinguish_not_generic_break_event() {
     for name in ["fire", "soul_fire", "white_wool"] {
         let mut w = world!();
