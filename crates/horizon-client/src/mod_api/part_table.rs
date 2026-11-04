@@ -2612,6 +2612,34 @@ pub(crate) mod tests {
         mark_game_thread();
     }
 
+    /// Install a part on glass that asks, when a glass block is removed, for every neighbour to
+    /// be told, as an override of `affectNeighborsAfterRemoval` calling `updateNeighborsAt`.
+    pub(crate) fn removal_game_thread() {
+        struct Leaver;
+        #[mod_api::horizon_part]
+        impl BlockPart for Leaver {
+            fn affect_neighbors_after_removal(
+                &self,
+                _: &dyn LevelHost,
+                event: &mut AffectNeighborsAfterRemovalEvent<'_>,
+            ) {
+                event.updates.push(NeighbourUpdate::Neighbours);
+            }
+        }
+        struct LeaverMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for LeaverMod {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+                r.block_part("minecraft:glass", Leaver);
+            }
+        }
+        let mods: super::super::Mods =
+            vec![ModEntry::new("leaver_test", Box::new(LeaverMod))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        mark_game_thread();
+    }
+
     /// Install a redstone connector on glass for real-game tests.
     pub(crate) fn redstone_game_thread() {
         struct RedstoneMod;

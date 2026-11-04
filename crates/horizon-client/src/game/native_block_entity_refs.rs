@@ -5,7 +5,7 @@ use super::{Game, transactions::After};
 use horizon_client::{
     block_entity_nbt,
     containers::BlockEntity,
-    mod_api::{BlockEntityRef, BlockEntityTypeKey, LevelRef},
+    mod_api::{BlockEntityRef, BlockEntityTypeKey, LevelRef, PlayerRef},
     save,
     world::World,
 };
@@ -29,6 +29,40 @@ impl Game<'_> {
             position: pos,
         };
         self.native_block_entity_target(entity).map(|_| entity)
+    }
+
+    /// Opens a block entity's menu for a connected player (`ServerPlayer.openMenu`).
+    /// Returns false for a stale or wrong-level handle, a non-provider, a cancelled
+    /// open, or an unconnected player such as a fake player.
+    pub(super) fn native_player_open_block_menu(
+        &mut self,
+        player: PlayerRef,
+        entity: BlockEntityRef,
+    ) -> bool {
+        if self.player_handle_read(player).is_none()
+            || !self.native_level_in_place(entity.level)
+            || self.native_block_entity_target(entity).is_none()
+        {
+            return false;
+        }
+        let Some(conn) = self.lan.as_ref().and_then(|host| {
+            host.hub
+                .guests
+                .iter()
+                .find(|guest| {
+                    guest.uuid == player.uuid
+                        && guest.placed
+                        && guest.dimension == entity.level.dimension()
+                })
+                .map(|guest| guest.conn)
+        }) else {
+            return false;
+        };
+        let [x, y, z] = entity.position;
+        matches!(
+            self.open_block_menu(conn, (x, y, z)),
+            super::lan_actions::MenuOpen::Opened
+        )
     }
 
     /// The block entity's type (`BlockEntity.getType`).
@@ -334,6 +368,65 @@ mod tests {
             Tag::Compound(c) => c,
             _ => panic!("not a compound"),
         }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn player_opens_provider_and_refuses_non_provider() {
+        use horizon_client::mod_api::NativeBlockUpdateFlags;
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            for (x, name) in [
+                (0, "minecraft:chest"),
+                (2, "minecraft:furnace"),
+                (4, "minecraft:oak_sign"),
+            ] {
+                let state = game.pack.assets.registry.default_state(name).unwrap();
+                assert!(game.native_level_set_block(
+                    level,
+                    [x, 64, 0],
+                    state,
+                    NativeBlockUpdateFlags::NEIGHBORS
+                ));
+            }
+            let player = game.native_player_ref(12).unwrap();
+            let chest = game.native_block_entity_ref(level, [0, 64, 0]).unwrap();
+            let furnace = game.native_block_entity_ref(level, [2, 64, 0]).unwrap();
+            let sign = game.native_block_entity_ref(level, [4, 64, 0]).unwrap();
+            use super::super::lan_actions::MenuOpen;
+            assert!(!player.open_menu(game, sign));
+            assert_eq!(game.open_block_menu(999, (0, 64, 0)), MenuOpen::Refused);
+            game.world
+                .block_entities
+                .insert((0, 64, 0), BlockEntity::Chest(vec![None; 2]));
+            assert!(!player.open_menu(game, chest));
+            game.world
+                .block_entities
+                .insert((0, 64, 0), BlockEntity::Chest(vec![None; 27]));
+            let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
+            let dimension =
+                std::mem::replace(&mut guest.dimension, "minecraft:the_nether".to_owned());
+            assert!(!player.open_menu(game, chest));
+            game.lan.as_mut().unwrap().hub.guests[0].dimension = dimension;
+            let host = game.lan.take();
+            assert!(!player.open_menu(game, chest));
+            assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::Refused);
+            game.lan = host;
+            game.lan.as_mut().unwrap().hub.guests[0].kind =
+                horizon_client::lan::guest::GuestKind::Fake;
+            assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::Cancelled);
+            assert!(!player.open_menu(game, chest));
+            game.lan.as_mut().unwrap().hub.guests[0].kind =
+                horizon_client::lan::guest::GuestKind::Network;
+            assert!(player.open_menu(game, chest));
+            assert!(player.open_menu(game, furnace));
+            game.world.block_entities.remove(&(2, 64, 0));
+            assert!(!player.open_menu(game, furnace));
+        });
     }
 
     #[test]
