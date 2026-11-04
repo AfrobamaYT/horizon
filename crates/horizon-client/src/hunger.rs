@@ -9,6 +9,7 @@ use crate::{
     },
     motion::{MotionEvent, PlayerMotion},
 };
+use horizon_world::native_load_context::LoopContext;
 use horizon_world::{
     food::{Difficulty, FoodData, FoodWorld},
     player_health::{PlayerAttributeHealth, PlayerFloatIds},
@@ -19,8 +20,8 @@ use horizon_world::{
 /// A living entity is about to heal. Mods may change the amount or cancel.
 /// `entity` identifies the affected entity.
 #[inline(never)]
-pub fn native_living_heal(entity: u32, amount: &mut f32, cancel: &mut bool) {
-    crate::native_client_hooks::living_heal(entity, amount, cancel);
+pub fn native_living_heal(context: &LoopContext, entity: u32, amount: &mut f32, cancel: &mut bool) {
+    crate::native_client_hooks::living_heal(context, entity, amount, cancel);
 }
 
 impl PlayerMotion {
@@ -35,7 +36,11 @@ impl PlayerMotion {
     /// ServerPlayer.tickRegeneration, dispatched from Player.aiStep before
     /// inventory and living movement. The separately invoked food tick follows
     /// movement in ServerPlayer.doTick.
-    pub fn peaceful_regeneration(&mut self, rules: HealthRules) -> Result<()> {
+    pub fn peaceful_regeneration(
+        &mut self,
+        context: &LoopContext,
+        rules: HealthRules,
+    ) -> Result<()> {
         if rules.difficulty != Difficulty::Peaceful || !rules.natural_regeneration {
             return Ok(());
         }
@@ -45,7 +50,7 @@ impl PlayerMotion {
             if health < maximum {
                 let mut amount = 1.0;
                 let mut cancel = false;
-                native_living_heal(self.entity_id as u32, &mut amount, &mut cancel);
+                native_living_heal(context, self.entity_id as u32, &mut amount, &mut cancel);
                 if !cancel {
                     let h = &mut self.health;
                     let mut observer = Updates(&mut self.events);
@@ -72,6 +77,7 @@ impl PlayerMotion {
     /// `FoodData.tick` in `level`, where starvation hurts.
     pub fn food_tick(
         &mut self,
+        context: &LoopContext,
         level: &mut DamageLevel<'_>,
         resources: &HealthResources,
         rules: HealthRules,
@@ -82,6 +88,7 @@ impl PlayerMotion {
         let victim = self.victim();
         let h = &mut self.health;
         let mut world = TickWorld {
+            context,
             level: level.reborrow(),
             entity: self.entity_id,
             victim,
@@ -103,6 +110,7 @@ impl PlayerMotion {
     }
 }
 struct TickWorld<'a> {
+    context: &'a LoopContext,
     level: DamageLevel<'a>,
     entity: i32,
     victim: crate::health::Victim,
@@ -145,7 +153,7 @@ impl FoodWorld for TickWorld<'_> {
     }
     fn heal(&mut self, _: &mut FoodData, mut amount: f32) -> Result<()> {
         let mut cancel = false;
-        native_living_heal(self.entity as u32, &mut amount, &mut cancel);
+        native_living_heal(self.context, self.entity as u32, &mut amount, &mut cancel);
         if cancel {
             return Ok(());
         }

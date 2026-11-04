@@ -232,6 +232,19 @@ mod tests {
                 .find(|recipe| recipe.id == "minecraft:iron_ingot_from_smelting_raw_iron")
                 .expect("vanilla's smelting recipe of raw iron");
             assert_eq!(iron.json["cookingtime"], 200);
+            assert_eq!(iron.cooking_time, Some(200));
+            assert_eq!(iron.experience, Some(0.7));
+            assert_eq!(iron.ingredients.len(), 1);
+            assert!(iron.ingredients[0].items.contains("minecraft:raw_iron"));
+            assert_eq!(iron.results[0].item.as_ref(), "minecraft:iron_ingot");
+            let bucket = game
+                .native_recipes_of_type("minecraft:crafting_shaped")
+                .iter()
+                .find(|recipe| recipe.id == "minecraft:bucket")
+                .expect("vanilla's bucket recipe");
+            assert_eq!(bucket.ingredients.len(), 3, "its pattern's three cells");
+            assert_eq!(bucket.results[0].item.as_ref(), "minecraft:bucket");
+            assert_eq!(bucket.cooking_time, None);
             assert!(
                 !game
                     .native_recipes_of_type("minecraft:campfire_cooking")

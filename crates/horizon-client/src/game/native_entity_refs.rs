@@ -589,6 +589,81 @@ pub(super) mod tests {
         });
     }
 
+    /// A world with block `support` at (5, 64, 5) and a powered lever on its east face.
+    fn lever_on(game: &mut super::super::Game<'_>, support: &str) {
+        use horizon_client::chunk::Chunk;
+        use std::sync::Arc;
+
+        game.options.dedicated = Some(Vec::new());
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        let registry = game.pack.assets.registry;
+        let support = registry.default_state(support).unwrap();
+        let lever = registry
+            .resolve(&horizon_world::chunk::BlockState {
+                name: "minecraft:lever".into(),
+                properties: [("face", "wall"), ("facing", "east"), ("powered", "true")]
+                    .into_iter()
+                    .map(|(key, value)| (key.into(), value.into()))
+                    .collect(),
+            })
+            .unwrap();
+        game.world.set(5, 64, 5, support).unwrap();
+        game.world.set(6, 64, 5, lever).unwrap();
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_level_handle_reads_redstone_as_signal_getter_does() {
+        use horizon_core::geometry::Direction::{East, North, West};
+
+        with_game(|game| {
+            lever_on(game, "minecraft:stone");
+            let level = game.native_level(game.dim.id()).unwrap();
+            let (stone, lever, beside, far) = ([5, 64, 5], [6, 64, 5], [4, 64, 5], [5, 64, 9]);
+            // A powered lever: weak 15 every way, strong 15 only into the block it hangs on,
+            // which lies the way it faces from that block (LeverBlock.getDirectSignal).
+            assert_eq!(level.signal(game, lever, North), Some(15));
+            assert_eq!(level.direct_signal(game, lever, East), Some(15));
+            assert_eq!(level.direct_signal(game, lever, North), Some(0));
+            // Stone conducts the strong power to the block west of it.
+            assert_eq!(level.direct_signal_to(game, stone), Some(15));
+            assert_eq!(level.signal(game, stone, West), Some(15));
+            assert_eq!(level.best_neighbor_signal(game, beside), Some(15));
+            assert!(level.has_neighbor_signal(game, beside));
+            // Nothing gives strong power into `beside`, and nothing reaches `far`.
+            assert_eq!(level.direct_signal_to(game, beside), Some(0));
+            assert_eq!(level.best_neighbor_signal(game, far), Some(0));
+            assert!(!level.has_neighbor_signal(game, far));
+        });
+        // Glass is no conductor: the lever's power stops at it.
+        with_game(|game| {
+            lever_on(game, "minecraft:glass");
+            let level = game.native_level(game.dim.id()).unwrap();
+            assert_eq!(level.best_neighbor_signal(game, [4, 64, 5]), Some(0));
+            assert_eq!(level.signal(game, [5, 64, 5], West), Some(0));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_level_handle_reads_redstone_through_should_check_weak_power() {
+        use horizon_core::geometry::Direction::West;
+
+        // The fixture's part lets glass conduct (`should_check_weak_power`).
+        mod_api::__private::part_tests::weak_power_game_thread();
+        with_game(|game| {
+            lever_on(game, "minecraft:glass");
+            let level = game.native_level(game.dim.id()).unwrap();
+            assert_eq!(level.signal(game, [5, 64, 5], West), Some(15));
+            assert_eq!(level.best_neighbor_signal(game, [4, 64, 5]), Some(15));
+            // Strong power into the glass is its own; the part changes only what it conducts.
+            assert_eq!(level.direct_signal_to(game, [5, 64, 5]), Some(15));
+            assert_eq!(level.direct_signal_to(game, [4, 64, 5]), Some(0));
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn block_part_answers_is_pathfindable_once_per_state_and_type() {

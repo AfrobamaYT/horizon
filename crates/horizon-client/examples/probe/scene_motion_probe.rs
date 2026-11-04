@@ -326,6 +326,7 @@ pub fn main() -> Result<()> {
                 resources: &resources,
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
             };
             match op["mode"].as_str().unwrap() {
                 "shift" => world.player.shift_key_down = op["value"].as_bool().unwrap(),
@@ -393,13 +394,14 @@ pub fn main() -> Result<()> {
                     single(&op["value"]),
                 ),
                 "food_tick" => world.player.food_tick(
+                    world.loop_context,
                     &mut horizon_client::health::TestLevel::new(0).level(),
                     &resources.health,
                     world.scene.health_rules,
                 )?,
                 "peaceful" => world
                     .player
-                    .peaceful_regeneration(world.scene.health_rules)?,
+                    .peaceful_regeneration(world.loop_context, world.scene.health_rules)?,
                 "simulation_tick" => {
                     let v = vector(&op["value"]);
                     world.simulation_tick(

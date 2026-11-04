@@ -313,7 +313,7 @@ impl Game<'_> {
             loved = true;
         }
         if m.health < m.attrs.max_health && heal > 0.0 {
-            m.heal(heal);
+            m.heal(&self.loop_context, heal);
             used = true;
         }
         if m.is_baby() && age_up > 0 && !m.extra.age_locked {
@@ -699,6 +699,7 @@ impl Game<'_> {
         {
             let mut events = Vec::new();
             r.cause_fall_damage_from(
+                &self.loop_context,
                 crate::game::entity::damage_level_of!(self),
                 distance,
                 modifier,
@@ -723,6 +724,7 @@ impl Game<'_> {
             assets: &self.pack.assets,
             collision_binding: self.collision,
             resources: self.motion,
+            loop_context: &self.loop_context,
             tag_items: Some(world_items!(self)),
             block_registries: Some(&self.pack.block_registries),
         }
@@ -1184,7 +1186,11 @@ mod tests {
         // pushes along the rider's look, starts the 40-tick dash clock, raises
         // DASH and queues the dash sound.
         m.extra.set_saddled(true);
-        equine::ridden_step(&mut m);
+        equine::ridden_step(
+            &mut m,
+            &crate::game::test_server_load()
+                .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+        );
         assert_eq!(m.rider.expect("the rider stays on").jump, 0.0);
         assert_eq!(m.extra.anim_ticks, 40, "the dash clock");
         assert!(m.extra.flag2, "DASH");

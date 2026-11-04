@@ -9214,7 +9214,12 @@ impl Game<'_> {
         // the sleep overlay, debug screen and open screens still draw.
         let spectator = self.spectator();
         let (wi, hi) = (w as i32, h as i32);
-        let show_hud = !self.ui.hide_gui;
+        let mut gui_canceled = false;
+        if !self.ui.hide_gui {
+            self.native_render_gui_pre(&mut gui_canceled);
+        }
+        // RenderGuiEvent.Pre: a mod's cancel hides the HUD as F1 does.
+        let show_hud = !self.ui.hide_gui && !gui_canceled;
         // max(Hud.leftHeight, Hud.rightHeight) after the bars: the item name and
         // the action bar sit above it.
         let mut bar_height = 39;

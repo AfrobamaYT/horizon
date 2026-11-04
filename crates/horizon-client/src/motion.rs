@@ -11,6 +11,7 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
+use horizon_world::native_load_context::LoopContext;
 use horizon_world::{
     attribute_map::ValueKind,
     attributes::{Modifier, Operation, entity::Catalog, live::LiveAttributes},
@@ -48,31 +49,31 @@ use std::{
 
 /// A living entity jumped (`LivingEvent.LivingJumpEvent`).
 #[inline(never)]
-pub fn native_living_jump(entity: u32, kind: &str) {
-    crate::native_client_hooks::living_jump(entity, kind);
+pub fn native_living_jump(context: &LoopContext, entity: u32, kind: &str) {
+    crate::native_client_hooks::living_jump(context, entity, kind);
 }
 
 /// A living entity's jump power is about to be used (beyond NeoForge: there is no counterpart).
 /// Mods may change it. Fires on replayed ticks too, so a listener must be a pure function of its inputs.
 #[inline(never)]
-pub fn native_living_jump_power(entity: u32, kind: &str, power: &mut f32) {
-    crate::native_client_hooks::living_jump_power(entity, kind, power);
+pub fn native_living_jump_power(context: &LoopContext, entity: u32, kind: &str, power: &mut f32) {
+    crate::native_client_hooks::living_jump_power(context, entity, kind, power);
 }
 
 /// A living entity's movement speed is about to drive its travel (beyond NeoForge: there is no
 /// counterpart). Mods may change it. Fires on replayed ticks too, so a listener must be a pure
 /// function of its inputs.
 #[inline(never)]
-pub fn native_living_speed(entity: u32, kind: &str, speed: &mut f32) {
-    crate::native_client_hooks::living_speed(entity, kind, speed);
+pub fn native_living_speed(context: &LoopContext, entity: u32, kind: &str, speed: &mut f32) {
+    crate::native_client_hooks::living_speed(context, entity, kind, speed);
 }
 
 /// A living entity's airborne acceleration is about to be used (beyond NeoForge: there is no
 /// counterpart). Mods may change it. Fires on replayed ticks too, so a listener must be a pure
 /// function of its inputs.
 #[inline(never)]
-pub fn native_living_flying_speed(entity: u32, kind: &str, speed: &mut f32) {
-    crate::native_client_hooks::living_flying_speed(entity, kind, speed);
+pub fn native_living_flying_speed(context: &LoopContext, entity: u32, kind: &str, speed: &mut f32) {
+    crate::native_client_hooks::living_flying_speed(context, entity, kind, speed);
 }
 
 /// The player's crouch edge backoff asks whether it is staying on the ground surface
@@ -81,6 +82,26 @@ pub fn native_living_flying_speed(entity: u32, kind: &str, speed: &mut f32) {
 #[inline(never)]
 pub fn native_player_stays_on_ground_surface(entity: u32, staying: &mut bool) {
     crate::native_client_hooks::player_stays_on_ground_surface(entity, staying);
+}
+
+/// The current a fluid block pushes with (`FlowingFluid.getFlow`) is about to push an entity
+/// (beyond NeoForge: there is no counterpart). Mods may change it. Fires on replayed ticks too, so a
+/// listener must be a pure function of its inputs.
+#[inline(never)]
+pub fn native_fluid_flow(fluid: &str, pos: BlockPos, flow: &mut [f64; 3]) {
+    crate::native_client_hooks::fluid_flow(fluid, pos, flow);
+}
+
+/// `FlowingFluid.getFlow` as it pushes an entity: the vanilla vector, then `fluid_flow`.
+pub(crate) fn pushing_flow<W: horizon_world::fluid_flow::FluidFlowWorld>(
+    world: &mut W,
+    state: horizon_world::fluid::FluidState,
+    pos: BlockPos,
+) -> std::result::Result<Vec3, W::Error> {
+    let flow = horizon_world::fluid_flow::flow_at(world, state, pos)?;
+    let mut edited = [flow.x, flow.y, flow.z];
+    native_fluid_flow(state.kind().name(), pos, &mut edited);
+    Ok(Vec3::new(edited[0], edited[1], edited[2]))
 }
 
 pub(crate) mod environment;
@@ -954,6 +975,9 @@ pub struct MotionWorld<'p, 'w, 'r> {
     pub resources: &'w MotionResources,
     /// Authoritative merged tags, absent on client prediction.
     pub tag_items: Option<&'w crate::items::Items>,
+    /// What the motion value hooks are given: the side that owns this player's
+    /// tick builds it (server, or the client for its own prediction and replay).
+    pub loop_context: &'w LoopContext,
     /// The cached block parser table, when available to level hooks.
     pub block_registries: Option<&'w crate::command::args::Registries>,
 }
@@ -1066,7 +1090,8 @@ impl MotionWorld<'_, '_, '_> {
         if self.player.jump_trigger_time > 0 {
             self.player.jump_trigger_time -= 1;
         }
-        self.player.peaceful_regeneration(self.scene.health_rules)?;
+        self.player
+            .peaceful_regeneration(self.loop_context, self.scene.health_rules)?;
         // LocalPlayer.aiStep: double-tap jump toggles creative flight.
         let was_jumping = std::mem::replace(&mut self.player.was_jumping, jumping);
         let flying_before = self.player.flying;
@@ -1204,6 +1229,7 @@ impl MotionWorld<'_, '_, '_> {
         self.check_movement_statistics(previous.vector_to(self.player.position))?;
         let rules = self.scene.health_rules;
         self.player.food_tick(
+            self.loop_context,
             &mut crate::health::DamageLevel::of(
                 self.scene,
                 self.assets.registry,
@@ -2004,7 +2030,11 @@ impl MotionWorld<'_, '_, '_> {
     pub fn jump_from_ground(&mut self) -> Result<()> {
         living_motion::jump_from_ground(self)?;
         if !self.player.replaying {
-            native_living_jump(self.player.entity_id as u32, "minecraft:player");
+            native_living_jump(
+                self.loop_context,
+                self.player.entity_id as u32,
+                "minecraft:player",
+            );
         }
         self.player
             .events
@@ -2791,7 +2821,12 @@ impl LivingAirWorld for MotionWorld<'_, '_, '_> {
     }
     fn speed(&mut self) -> Result<f32> {
         let mut speed = self.player.attribute("minecraft:movement_speed")? as f32;
-        native_living_speed(self.player.entity_id as u32, "minecraft:player", &mut speed);
+        native_living_speed(
+            self.loop_context,
+            self.player.entity_id as u32,
+            "minecraft:player",
+            &mut speed,
+        );
         Ok(speed)
     }
     fn flying_speed(&mut self) -> Result<f32> {
@@ -2803,7 +2838,12 @@ impl LivingAirWorld for MotionWorld<'_, '_, '_> {
         } else {
             0.02
         };
-        native_living_flying_speed(self.player.entity_id as u32, "minecraft:player", &mut speed);
+        native_living_flying_speed(
+            self.loop_context,
+            self.player.entity_id as u32,
+            "minecraft:player",
+            &mut speed,
+        );
         Ok(speed)
     }
     fn yaw(&mut self) -> Result<f32> {
@@ -2891,7 +2931,12 @@ impl LivingMotionWorld for MotionWorld<'_, '_, '_> {
         Ok(())
     }
     fn adjust_jump_power(&mut self, mut power: f32) -> f32 {
-        native_living_jump_power(self.player.entity_id as u32, "minecraft:player", &mut power);
+        native_living_jump_power(
+            self.loop_context,
+            self.player.entity_id as u32,
+            "minecraft:player",
+            &mut power,
+        );
         power
     }
     fn jump_strength(&mut self) -> Result<f64> {
@@ -3254,6 +3299,7 @@ mod tests {
             MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &entities,
                 player,
                 scene: &mut scene,
@@ -3342,6 +3388,7 @@ mod tests {
             MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -3360,6 +3407,7 @@ mod tests {
             MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -3399,6 +3447,7 @@ mod tests {
             MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player,
                 scene: &mut scene,
@@ -3452,6 +3501,7 @@ mod tests {
             MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player,
                 scene: &mut scene,
@@ -3515,6 +3565,7 @@ mod tests {
         MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -3531,6 +3582,7 @@ mod tests {
         MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -3546,6 +3598,7 @@ mod tests {
         MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut away,
             scene: &mut scene,
@@ -3597,6 +3650,7 @@ mod tests {
             MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -3629,6 +3683,7 @@ mod tests {
         MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -3644,6 +3699,7 @@ mod tests {
         MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -3675,6 +3731,7 @@ mod tests {
             MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player,
                 scene: &mut scene,
@@ -3752,6 +3809,7 @@ mod tests {
         MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -3793,6 +3851,7 @@ mod tests {
             MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -3853,6 +3912,7 @@ mod tests {
                 MotionWorld {
                     tag_items: None,
                     block_registries: None,
+                    loop_context: crate::test_resources::server_loop_context(),
                     entities: &[],
                     player: &mut player,
                     scene: &mut scene,
@@ -3912,7 +3972,12 @@ mod tests {
                 for _ in 0..160 {
                     player.cause_food_exhaustion(0.2);
                     player
-                        .food_tick(level, &resources.health, Default::default())
+                        .food_tick(
+                            crate::test_resources::server_loop_context(),
+                            level,
+                            &resources.health,
+                            Default::default(),
+                        )
                         .unwrap();
                 }
                 assert_eq!(player.health.food.food, food);
@@ -3927,7 +3992,12 @@ mod tests {
                 player.health.food.exhaustion = 5.0;
                 player.health.food.timer = 79;
                 player
-                    .food_tick(level, &resources.health, Default::default())
+                    .food_tick(
+                        crate::test_resources::server_loop_context(),
+                        level,
+                        &resources.health,
+                        Default::default(),
+                    )
                     .unwrap();
                 assert_eq!(player.health.food.food, (food - 1).max(0));
                 assert_eq!(player.health.food.exhaustion, 1.0);
@@ -3944,7 +4014,12 @@ mod tests {
                 player.health.food.exhaustion = 5.0;
                 player.health.food.timer = 79;
                 player
-                    .food_tick(level, &resources.health, Default::default())
+                    .food_tick(
+                        crate::test_resources::server_loop_context(),
+                        level,
+                        &resources.health,
+                        Default::default(),
+                    )
                     .unwrap();
                 assert_eq!(player.health.food.food, (food - 1).max(0));
                 assert_eq!(player.health.health(), if food <= 1 { 19.0 } else { 20.0 });
@@ -4147,7 +4222,12 @@ mod tests {
         starving.health.food.food = 0;
         starving.health.food.timer = 79;
         starving
-            .food_tick(level, &resources.health, Default::default())
+            .food_tick(
+                crate::test_resources::server_loop_context(),
+                level,
+                &resources.health,
+                Default::default(),
+            )
             .unwrap();
         assert_eq!(starving.health.health(), 19.0);
         assert_eq!(
@@ -4201,6 +4281,7 @@ mod tests {
             let mut w = MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -4241,6 +4322,7 @@ mod tests {
             let mut w = MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -4295,6 +4377,7 @@ mod tests {
             let mut w = MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -4334,6 +4417,7 @@ mod tests {
             let mut w = MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -4369,6 +4453,7 @@ mod tests {
             let mut w = MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -4424,6 +4509,7 @@ mod tests {
             let mut w = MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -4465,6 +4551,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -4510,6 +4597,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -4564,6 +4652,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -4599,6 +4688,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -4675,6 +4765,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -4725,6 +4816,7 @@ mod tests {
             let mut w = MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -4764,6 +4856,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -4814,6 +4907,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -4888,6 +4982,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -5143,6 +5238,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -5221,6 +5317,7 @@ mod tests {
             let mut w = MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -5275,6 +5372,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -5362,6 +5460,7 @@ mod tests {
             let mut w = MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -5402,6 +5501,7 @@ mod tests {
                 MotionWorld {
                     tag_items: None,
                     block_registries: None,
+                    loop_context: crate::test_resources::server_loop_context(),
                     entities: &[],
                     player: &mut *player,
                     scene: &mut scene,
@@ -5475,6 +5575,7 @@ mod tests {
             let mut w = MotionWorld {
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
                 entities: &[],
                 player: &mut player,
                 scene: &mut scene,
@@ -5527,6 +5628,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -5586,6 +5688,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -5639,6 +5742,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -5690,6 +5794,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,
@@ -5744,6 +5849,7 @@ mod tests {
         let mut w = MotionWorld {
             tag_items: None,
             block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
             entities: &[],
             player: &mut player,
             scene: &mut scene,

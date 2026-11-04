@@ -5,11 +5,18 @@
 //! block in a chunk that isn't loaded.
 use super::Game;
 use horizon_client::{streaming::Streaming, world::World};
-use horizon_core::position::ChunkPos;
+use horizon_core::{
+    geometry::Direction,
+    position::{BlockPos, ChunkPos},
+};
 use mod_api::mod_chunk_tickets::ModTicket;
 use mod_api::{
     BlockStateId, ChunkRef, ChunkStatus, LevelRef, LightLayer, NativeTicketOwner, TicketController,
 };
+
+fn block_pos([x, y, z]: [i32; 3]) -> BlockPos {
+    BlockPos::new(x, y, z)
+}
 
 /// Whether chunk `pos` lies inside the world (`/forceload`'s 30 million block bound).
 fn chunk_in_world(pos: [i32; 2]) -> bool {
@@ -286,6 +293,72 @@ impl Game<'_> {
         self.is_logical_server()
             && self.native_lifecycle.epoch() == Some(level.epoch())
             && self.dim.id() == level.dimension()
+    }
+    /// `f` over the game's own `SignalGetter` for the level in place, as the level's blocks
+    /// and mods' parts answer it; `None` for another level, a stale handle or a client.
+    /// The reads take the server host mutably: the signal path asks mods' `block_signal`,
+    /// `is_signal_source`, `should_check_weak_power` and `should_redstone_wire_connect_to`
+    /// parts, which get the level itself as their host, and only `with_level` builds it.
+    fn native_level_signals<R>(
+        &mut self,
+        level: LevelRef,
+        f: impl FnOnce(&horizon_world::level::Signals<'_, super::GameLevel<'_>>) -> R,
+    ) -> Option<R> {
+        if !self.native_level_in_place(level) {
+            return None;
+        }
+        Some(self.with_level(|b, level, ticks| f(&b.signals(&*level, &*ticks))))
+    }
+    /// How strongly the block at `pos` powers the block on its `direction` side, power it
+    /// conducts included (`SignalGetter.getSignal(pos, direction)`, as a block reads its
+    /// neighbour `pos` that lies `direction` from it), 0 to 15. None for another level, a stale
+    /// handle or a client.
+    pub(super) fn native_level_signal(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        direction: Direction,
+    ) -> Option<i32> {
+        self.native_level_signals(level, |s| s.signal(block_pos(pos), direction))
+    }
+    /// The strong power alone that the block at `pos` gives that way
+    /// (`SignalGetter.getDirectSignal(pos, direction)`), 0 to 15. None as for `signal`.
+    pub(super) fn native_level_direct_signal(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        direction: Direction,
+    ) -> Option<i32> {
+        self.native_level_signals(level, |s| s.direct_signal(block_pos(pos), direction))
+    }
+    /// The strongest strong power reaching the block at `pos` from its six neighbours
+    /// (`SignalGetter.getDirectSignalTo`), 0 to 15. None as for `signal`.
+    pub(super) fn native_level_direct_signal_to(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+    ) -> Option<i32> {
+        self.native_level_signals(level, |s| s.direct_signal_to(block_pos(pos)))
+    }
+    /// The strongest power reaching the block at `pos` from its six neighbours
+    /// (`SignalGetter.getBestNeighborSignal`, what a dispenser or a piston reads), 0 to 15.
+    /// None as for `signal`.
+    pub(super) fn native_level_best_neighbor_signal(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+    ) -> Option<i32> {
+        self.native_level_signals(level, |s| s.best_neighbor_signal(block_pos(pos)))
+    }
+    /// Whether any neighbour powers the block at `pos` (`SignalGetter.hasNeighborSignal`),
+    /// asking no side past the first that does. False where `signal` is None.
+    pub(super) fn native_level_has_neighbor_signal(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+    ) -> bool {
+        self.native_level_signals(level, |s| s.has_neighbor_signal(block_pos(pos)))
+            .unwrap_or(false)
     }
     /// Whether `pos` is inside the world's height and its chunk is loaded
     /// (`Level.isLoaded`, which is false outside `isInValidBounds`): a block

@@ -834,7 +834,7 @@ impl Game<'_> {
                                     Damage::of(DamageKind::Magic),
                                 );
                             } else {
-                                m.heal((4 << amp.min(30)) as f32);
+                                m.heal(&self.loop_context, (4 << amp.min(30)) as f32);
                             }
                         }
                         _ => {
@@ -857,6 +857,7 @@ impl Game<'_> {
                 if let Some(player) = self.player.as_ref() {
                     let mut cancel = false;
                     horizon_client::hunger::native_living_heal(
+                        &self.loop_context,
                         player.entity_id as u32,
                         &mut amount,
                         &mut cancel,
@@ -1569,7 +1570,7 @@ impl Game<'_> {
                                 let harm = m.potion_harm(amount(6));
                                 m.hurt(crate::game::entity::damage_level_of!(self), harm, Some(at));
                             } else {
-                                m.heal(amount(4));
+                                m.heal(&self.loop_context, amount(4));
                             }
                         }
                         _ => {
@@ -1917,7 +1918,10 @@ impl Game<'_> {
                         Some([at.x, at.y, at.z]),
                     );
                 } else {
-                    m.heal((intensity * f64::from(4 << amp) + 0.5) as i32 as f32);
+                    m.heal(
+                        &self.loop_context,
+                        (intensity * f64::from(4 << amp) + 0.5) as i32 as f32,
+                    );
                 }
             }
         }
@@ -2088,7 +2092,7 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
         );
         for change in changes {
             match change {
-                EffectTickChange::Heal(amount) => mob.heal(amount),
+                EffectTickChange::Heal(amount) => mob.heal(&self.loop_context, amount),
                 EffectTickChange::Hurt(source, amount) => {
                     mob.damage(level, amount, Damage::of(source.into()));
                 }

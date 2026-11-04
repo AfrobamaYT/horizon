@@ -459,6 +459,7 @@ pub(crate) fn with_resource_test_world(
     let lid_openers = std::collections::HashMap::new();
     let w = MobWorld {
         teams: Default::default(),
+        loop_context: crate::test_resources::server_loop_context(),
         world: &world,
         registry,
         facts: &facts,
@@ -496,6 +497,7 @@ pub(crate) fn with_resource_test_world(
         items: Some(&items),
         lid_openers: &lid_openers,
         mod_effects: None,
+        mob_hooks: None,
         asks_animal_tame: false,
         asks_living_destroy_block: false,
         asks_baby_spawn: false,

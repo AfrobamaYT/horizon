@@ -126,10 +126,6 @@
       "target": "horizon_client::game::native_biome_colors::Game<'_>::native_refresh_biome_colors", "side": "client"
     },
     {
-      "name": "neighbor_signal",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_neighbor_signal", "side": "server"
-    },
-    {
       "name": "weather",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_weather", "side": "both"
     },
@@ -481,14 +477,6 @@
         "out": "new",
         "scope": "block",
         "key": "state"
-      }
-    },
-    {
-      "name": "hud", "doc": "The HUD (not drawn under F1), after the minimap: place a box with\n`corners.place` (boxes stack away from their edge) and draw it with\n`native_fill` and `native_text`. Skip a corner `native_corner_shown`\nsays is taken.", "side": "client",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_hud",
-      "mod_api": {
-        "contract": "listen"
       }
     },
     {
@@ -2012,8 +2000,9 @@
     },
     {
       "name": "living_breathe",
-      "doc": "An entity's breathing this tick (`LivingBreatheEvent`, posted from\n`LivingEntity.baseTick` every tick for a living entity with the generic\nair logic): `entity` is its ID and `kind` its type (`minecraft:player`,\n`minecraft:zombie`). `can_breathe`, `consume` and `refill` come in as\nHorizon does it today (a mod-free game changes nothing); set them to\nchange this tick. With `can_breathe` the air rises by `refill`, up to its\nmaximum (300); without, it falls by `consume`, and at -20 it is set to 0\nand the entity takes 2 drowning damage. Negative amounts count as 0.\nAsked on servers for players and for mobs, except those with a\n`WaterAnimal`'s or an axolotl's own air logic.",
-      "version": 1,
+      "doc": "An entity's breathing this tick (`LivingBreatheEvent`, posted from\n`LivingEntity.baseTick` every tick for a living entity with the generic\nair logic): `entity` is its ID and `kind` its type (`minecraft:player`,\n`minecraft:zombie`). `can_breathe`, `consume` and `refill` come in as\nHorizon does it today (a mod-free game changes nothing); set them to\nchange this tick. With `can_breathe` the air rises by `refill`, up to its\nmaximum (300); without, it falls by `consume`, and at -20 it is set to 0\nand the entity takes 2 drowning damage. Negative amounts count as 0.\nAsked on servers for players and for mobs, except those with a\n`WaterAnimal`'s or an axolotl's own air logic. It is given the loop `context` of the server that ticks the entity (its registries, settings and mod list), because it fires inside the tick's own air update.",
+      "version": 2,
+      "context": "loop",
       "target": "horizon_client_lib::breathing::native_living_breathe",
       "neoforge": "LivingBreatheEvent",
       "side": "server",
@@ -4339,8 +4328,9 @@
     },
     {
       "name": "living_drown",
-      "doc": "An entity that can't breathe and has no air (`LivingDrownEvent`, posted\nfrom `LivingEntity.baseTick`), with vanilla's answers as the defaults: it\ndrowns at -20 air, for 2 damage and 8 bubbles. Bubble count is read-only;\nchanges to the event field do not affect the vanilla entity event. Asked on\nservers, for the entities `native_living_breathe` is.",
-      "version": 1,
+      "doc": "An entity that can't breathe and has no air (`LivingDrownEvent`, posted\nfrom `LivingEntity.baseTick`), with vanilla's answers as the defaults: it\ndrowns at -20 air, for 2 damage and 8 bubbles. Bubble count is read-only;\nchanges to the event field do not affect the vanilla entity event. Asked on\nservers, for the entities `native_living_breathe` is. It is given the loop `context` of the server that ticks the entity (its registries, settings and mod list), because it fires inside the tick's own air and damage update.",
+      "version": 2,
+      "context": "loop",
       "target": "horizon_client_lib::breathing::native_living_drown",
       "neoforge": "LivingDrownEvent",
       "side": "server",
@@ -4351,8 +4341,9 @@
     },
     {
       "name": "living_fall",
-      "doc": "A living entity is about to handle a fall (`LivingFallEvent`). Mods may\nchange the distance and damage multiplier, or cancel fall handling.",
-      "version": 1,
+      "doc": "A living entity is about to handle a fall (`LivingFallEvent`). Mods may\nchange the distance and damage multiplier, or cancel fall handling. It is given the loop `context` of the side that ticks the entity (its registries, settings and mod list); it fires inside the tick's own landing, before its damage and block effects, so it takes no `Host`.",
+      "version": 2,
+      "context": "loop",
       "target": "horizon_client_lib::landing::native_living_fall",
       "neoforge": "LivingFallEvent",
       "side": "both",
@@ -4363,8 +4354,9 @@
     },
     {
       "name": "living_heal",
-      "doc": "A living entity is about to heal. Mods may change the amount or cancel.\n`entity` identifies the affected entity.",
-      "version": 1,
+      "doc": "A living entity is about to heal. Mods may change the amount or cancel.\n`entity` identifies the affected entity. It is given the loop `context` of the side that ticks the entity (its registries, settings and mod list), because it fires inside the tick's own health update, where a deferred call would reorder vanilla's effects.",
+      "version": 2,
+      "context": "loop",
       "target": "horizon_client_lib::hunger::native_living_heal",
       "neoforge": "LivingHealEvent",
       "side": "both",
@@ -4375,8 +4367,9 @@
     },
     {
       "name": "living_jump",
-      "doc": "A living entity jumped (`LivingEvent.LivingJumpEvent`).",
-      "version": 1,
+      "doc": "A living entity jumped (`LivingEvent.LivingJumpEvent`). It is given the loop `context` of the side that ticks the entity (its registries, settings and mod list); it fires inside the tick's own jump, after the velocity write, so it takes no `Host`.",
+      "version": 2,
+      "context": "loop",
       "target": "horizon_client_lib::motion::native_living_jump",
       "neoforge": "LivingEvent.LivingJumpEvent",
       "side": "both",

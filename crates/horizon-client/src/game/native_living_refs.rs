@@ -392,7 +392,7 @@ impl Game<'_> {
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                     return false;
                 };
-                m.heal(amount);
+                m.heal(&self.loop_context, amount);
                 m.needs_sync = true;
                 true
             }

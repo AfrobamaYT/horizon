@@ -3583,7 +3583,13 @@ mod tests {
         let level = &mut test_level.level();
         for (fuse, expected) in [(Some(1), -4), (None, 25), (Some(40), 35)] {
             let (mut mob, _) = fused_creeper(fuse);
-            mob.cause_fall_damage_from(level, 100.0, 0.0, &mut Vec::new());
+            mob.cause_fall_damage_from(
+                crate::test_resources::server_loop_context(),
+                level,
+                100.0,
+                0.0,
+                &mut Vec::new(),
+            );
             assert_eq!(mob.swell, expected, "Fuse={fuse:?}");
         }
     }

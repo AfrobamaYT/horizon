@@ -350,11 +350,53 @@ impl Ingredient {
         }
     }
 }
-/// A recipe as its file says, whatever its type (vanilla's or a mod's own): the mod reads it.
-#[derive(Clone, Debug, PartialEq)]
-// exhaustive: the game builds it with a literal; mods only read it
-pub struct RecipeFile {
+/// A recipe in force (`RecipeManager.getAllRecipesFor`), whatever its type
+/// (vanilla's or a mod's own): its typed parts, and its file for whatever a
+/// mod's own type keeps there. Plain data.
+///
+/// A recipe the game could not parse (an ingredient it cannot read, no
+/// result) is not in force and is not listed.
+///
+/// `ingredients` and `results` are filled from the game's own parse of the
+/// shaped, shapeless and cooking types: a shaped recipe's pattern cells row
+/// by row (empty cells left out), a shapeless recipe's list, a cooking
+/// recipe's `ingredient`, and the result as `results[0]`. Any other type (a
+/// mod's own, stonecutting, smithing and the special ones) leaves both
+/// empty: read `json`.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct Recipe {
     /// `<namespace>:<path>`, its place under `data/<namespace>/recipe/`.
     pub id: String,
+    /// The recipe type, `minecraft:smelting` or `mymod:crusher`.
+    pub kind: String,
+    /// The recipe book group, empty for none.
+    pub group: String,
+    /// What it takes, as above.
+    pub ingredients: Vec<Ingredient>,
+    /// What it makes, as above.
+    pub results: Vec<ItemStack>,
+    /// Ticks a cooking recipe (`smelting`, `blasting`, `smoking`,
+    /// `campfire_cooking`) takes, its file's `cookingtime`; `None` for any
+    /// other type.
+    pub cooking_time: Option<u32>,
+    /// Experience a cooking recipe gives, `None` for any other type.
+    pub experience: Option<f32>,
+    /// The recipe's file, as the data pack wrote it.
     pub json: Arc<Value>,
+}
+impl Recipe {
+    /// The recipe `id` of type `kind` with its file `json`, the typed parts empty.
+    pub fn new(id: impl Into<String>, kind: impl Into<String>, json: Arc<Value>) -> Self {
+        Self {
+            id: id.into(),
+            kind: kind.into(),
+            group: String::new(),
+            ingredients: Vec::new(),
+            results: Vec::new(),
+            cooking_time: None,
+            experience: None,
+            json,
+        }
+    }
 }

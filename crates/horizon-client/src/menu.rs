@@ -4295,6 +4295,7 @@ pub(crate) mod tests {
 
     #[test]
     fn installed_slot_rules_change_mod_menu_placement() {
+        static JUMPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let installed =
             crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
                 menu_slot_rules: |context, menu, slot, _, may_place, max_stack| {
@@ -4308,9 +4309,21 @@ pub(crate) mod tests {
                 item_stacked_on_other: |context, _, canceled| {
                     *canceled = context.setting("rules_mod", "stack").is_some();
                 },
-                living_heal: |_, _, _| {},
-                living_breathe: |_, _, _, _, _| {},
-                farmland_trample: |_, _, _, _, _| {},
+                living_heal: |context, _, amount, cancel| {
+                    if context.setting("rules_mod", "stack").is_some() {
+                        *cancel = true;
+                        *amount += 1.0;
+                    }
+                },
+                living_breathe: |context, _, _, can_breathe, consume, _| {
+                    if context.setting("rules_mod", "stack").is_some() {
+                        *can_breathe = false;
+                        *consume += 4;
+                    }
+                },
+                farmland_trample: |context, _, _, _, _, cancel| {
+                    *cancel = context.setting("rules_mod", "stack").is_some();
+                },
                 has_mods: || false,
                 player_name_format: |context, _, displayname| {
                     if let Some(value) = context.setting("rules_mod", "stack") {
@@ -4322,14 +4335,41 @@ pub(crate) mod tests {
                         .setting("rules_mod", "stack")
                         .map(|value| crate::text::Text::literal(&value));
                 },
-                living_drown: |_, _, _, _, _, _| {},
-                living_fall: |_, _, _, _, _| {},
-                living_jump: |_, _| {},
-                living_jump_power: |_, _, _| {},
-                living_speed: |_, _, _| {},
-                living_flying_speed: |_, _, _| {},
+                living_drown: |context, _, _, drowning, damage, _, _| {
+                    if context.setting("rules_mod", "stack").is_some() {
+                        *drowning = true;
+                        *damage += 1.0;
+                    }
+                },
+                living_fall: |context, _, _, distance, multiplier, _| {
+                    if context.setting("rules_mod", "stack").is_some() {
+                        *distance += 1.0;
+                        *multiplier *= 2.0;
+                    }
+                },
+                living_jump: |context, _, _| {
+                    JUMPS.fetch_add(
+                        usize::from(context.side() == LoopSide::Server),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                },
+                living_jump_power: |context, _, _, power| {
+                    *power += context.setting("rules_mod", "stack").map_or(0.0, |_| 1.0);
+                },
+                living_speed: |context, _, _, speed| {
+                    *speed += context.setting("rules_mod", "stack").map_or(0.0, |_| 2.0);
+                },
+                living_flying_speed: |context, _, _, speed| {
+                    *speed += context.setting("rules_mod", "stack").map_or(0.0, |_| 3.0);
+                },
                 player_stays_on_ground_surface: |_, _| {},
-                ender_entity_teleport: |_, _, _, _, _| {},
+                ender_entity_teleport: |context, _, _, _, target, cancel| {
+                    if context.setting("rules_mod", "stack").is_some() {
+                        target[1] += 1.0;
+                        *cancel = true;
+                    }
+                },
+                fluid_flow: |_, _, _| {},
             });
         assert!(installed);
         let kind = Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {
@@ -4411,6 +4451,77 @@ pub(crate) mod tests {
         assert!(stacked_on_other(&after, &mut menu));
         assert_eq!(name(&after), "3");
         assert_eq!(tab_list(&after), Some("3".to_owned()));
+        // The motion value hooks read it too, and change nothing without it.
+        let values = |context: &LoopContext| {
+            let (mut jump, mut speed, mut flying) = (0.5, 0.1, 0.02);
+            crate::motion::native_living_jump_power(context, 1, "minecraft:cow", &mut jump);
+            crate::motion::native_living_speed(context, 1, "minecraft:cow", &mut speed);
+            crate::motion::native_living_flying_speed(context, 1, "minecraft:cow", &mut flying);
+            (jump, speed, flying)
+        };
+        assert_eq!(values(&before), (0.5, 0.1, 0.02));
+        assert_eq!(values(&after), (1.5, 2.1, 3.02));
+        // Fall, trample, jump and the ender teleport read it as well.
+        let landing = |context: &LoopContext| {
+            let (mut distance, mut multiplier, mut cancel) = (3.0, 1.0, false);
+            crate::landing::native_living_fall(
+                context,
+                1,
+                "minecraft:cow",
+                &mut distance,
+                &mut multiplier,
+                &mut cancel,
+            );
+            let mut trample = false;
+            crate::landing::native_farmland_trample(context, 1, [0, 0, 0], 0, 1.0, &mut trample);
+            let (mut target, mut teleport) = ([1.0, 2.0, 3.0], false);
+            crate::mobs::enderman::native_ender_entity_teleport(
+                context,
+                1,
+                "minecraft:enderman",
+                [0.0; 3],
+                &mut target,
+                &mut teleport,
+            );
+            crate::motion::native_living_jump(context, 1, "minecraft:cow");
+            (distance, multiplier, cancel, trample, target, teleport)
+        };
+        assert_eq!(
+            landing(&before),
+            (3.0, 1.0, false, false, [1.0, 2.0, 3.0], false)
+        );
+        assert_eq!(
+            landing(&after),
+            (4.0, 2.0, false, true, [1.0, 3.0, 3.0], true)
+        );
+        assert_eq!(JUMPS.load(std::sync::atomic::Ordering::Relaxed), 2);
+        // Heal, breathe and drown read it as well.
+        let health = |context: &LoopContext| {
+            let (mut amount, mut cancel) = (2.0, false);
+            crate::hunger::native_living_heal(context, 1, &mut amount, &mut cancel);
+            let (mut can_breathe, mut consume, mut refill) = (true, 1, 4);
+            crate::breathing::native_living_breathe(
+                context,
+                1,
+                "minecraft:zombie",
+                &mut can_breathe,
+                &mut consume,
+                &mut refill,
+            );
+            let (mut drowning, mut damage, mut cancel_drown) = (false, 2.0, false);
+            crate::breathing::native_living_drown(
+                context,
+                1,
+                "minecraft:zombie",
+                &mut drowning,
+                &mut damage,
+                8,
+                &mut cancel_drown,
+            );
+            (amount, cancel, can_breathe, consume, drowning, damage)
+        };
+        assert_eq!(health(&before), (2.0, false, true, 1, false, 2.0));
+        assert_eq!(health(&after), (3.0, true, false, 5, true, 3.0));
         std::fs::remove_dir_all(&settings).unwrap();
     }
 

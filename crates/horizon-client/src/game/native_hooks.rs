@@ -31,7 +31,7 @@ use horizon_client::{
         BlockEntity, MOD_MENUS, ModBlockEntity, ModBlockEntityFields, ModContainer,
         ModEnergyBuffer, ModFluidTanks,
     },
-    crafting::{Ingredient, RecipeFile, recipe_result},
+    crafting::{Ingredient, recipe_result},
     extras::Corner,
     extras_hud::Corners,
     fast_hash::FxHashMap,
@@ -62,7 +62,6 @@ use horizon_world::{
     nbt::{Compound, Tag},
     registry::{BlockRegistry, BlockStateId},
 };
-use mod_api::NativePermissionLevel;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EnchantmentInfo,
@@ -83,6 +82,7 @@ pub(crate) use mod_api::{
     NativeMinimap, NativeMod, NativeNoteInstrument, NativePanelEvent, NativePortalShape,
     NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
+use mod_api::{NativePermissionLevel, Recipe};
 use std::{
     collections::HashMap,
     fs,
@@ -2131,12 +2131,17 @@ impl Game<'_> {
     pub(super) fn native_level_tick_post(&mut self, dimension: &str) {
         mod_api::dispatch_level_tick_post(self, dimension);
     }
-    /// The HUD (not drawn under F1), after the minimap: place a box with
-    /// `corners.place` (boxes stack away from their edge) and draw it with
-    /// `native_fill` and `native_text`. Skip a corner `native_corner_shown`
-    /// says is taken.
-    pub(super) fn native_hud(&self, draw: &mut HudBatch, corners: &mut Corners) {
-        mod_api::dispatch_hud(
+    /// Before the in-world HUD (`RenderGuiEvent.Pre`): `canceled` hides it as
+    /// F1 does.
+    pub(super) fn native_render_gui_pre(&self, canceled: &mut bool) {
+        mod_api::dispatch_render_gui_pre(self, canceled);
+    }
+    /// The HUD (not drawn under F1), after the minimap (`RenderGuiEvent.Post`):
+    /// place a box with `corners.place` (boxes stack away from their edge) and
+    /// draw it with `native_fill` and `native_text`. Skip a corner
+    /// `native_corner_shown` says is taken.
+    pub(super) fn native_render_gui_post(&self, draw: &mut HudBatch, corners: &mut Corners) {
+        mod_api::dispatch_render_gui_post(
             self,
             &mut super::mod_api_host::generated::GameDrawContext {
                 game: self,
@@ -7833,6 +7838,17 @@ impl Game<'_> {
     pub(super) fn native_on_equip(&mut self, slot: &str, new: Option<&ItemStack>) {
         mod_api::dispatch_on_equip(self, slot, new);
     }
+    /// `EnderManAngerEvent`: `player` stares at enderman `enderman`
+    /// (`Enderman.isBeingStaredBy` passed). Set `cancel` and the stare
+    /// doesn't count: no anger, no freezing in place, no teleport closer.
+    pub(super) fn native_enderman_anger(
+        &self,
+        enderman: EntityRef,
+        player: PlayerRef,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_enderman_anger(self, enderman, player, cancel);
+    }
     /// `MobEffect.shouldApplyEffectTickThisTick` for a content mod's effect
     /// `effect` (`ruby:bleeding`), each tick a player or a mob has it, in
     /// `MobEffectInstance.tickServer` before it counts down: `tick_count` is
@@ -8025,8 +8041,18 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_entity_inside(self, state, pos, entity, precise);
     }
-    /// Deliver the contacts the batch just ticked recorded, in order: `entity_inside` to the
-    /// parts, and the writes a landing asked for to the level. A contact is skipped when its
+    /// A minecart passed over a rail with a part for it. The part gets `&mut dyn ServerHost`
+    /// once the cart's batch has ticked, so its writes are not lost to the cart's own tick.
+    pub(super) fn native_minecart_pass(
+        &mut self,
+        state: BlockStateId,
+        pos: BlockPos,
+        entity: EntityRef,
+    ) {
+        mod_api::dispatch_minecart_pass(self, state, pos, entity);
+    }
+    /// Deliver the contacts the batch just ticked recorded, in order: `entity_inside` and
+    /// `minecart_pass` to the parts, and the writes a landing asked for to the level. A contact is skipped when its
     /// entity is gone (an item merged away later in the batch) or the block at its position
     /// is no longer the state it touched, as vanilla never sees a stale one.
     pub(super) fn drain_entity_inside(&mut self) {
@@ -8034,6 +8060,7 @@ impl Game<'_> {
             let (state, pos) = match &contact {
                 Pending::Inside(inside) => (inside.state, inside.position),
                 Pending::Landed(landed) => (landed.state, landed.position),
+                Pending::MinecartPass(pass) => (pass.state, pass.position),
             };
             let Some(level) = self.native_level(self.dim.id()) else {
                 continue;
@@ -8048,6 +8075,14 @@ impl Game<'_> {
                         .and_then(|id| self.native_entity(id))
                     {
                         self.native_entity_inside(state, pos, entity, inside.precise);
+                    }
+                }
+                Pending::MinecartPass(pass) => {
+                    if let Some(entity) = u32::try_from(pass.entity)
+                        .ok()
+                        .and_then(|id| self.native_entity(id))
+                    {
+                        self.native_minecart_pass(state, pos, entity);
                     }
                 }
                 Pending::Landed(landed) => {
@@ -8420,6 +8455,9 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
         any_inside: || mod_api::__private::has_scoped_hook(mod_api::HookId::EntityInside),
         inside_listens: |state| {
             mod_api::__private::block_listens(mod_api::HookId::EntityInside, "entity_inside", state)
+        },
+        pass_listens: |state| {
+            mod_api::__private::block_listens(mod_api::HookId::MinecartPass, "minecart_pass", state)
         },
         fall_listens: |state| {
             mod_api::__private::block_listens(mod_api::HookId::FallOn, "fall_on", state)
@@ -8989,21 +9027,6 @@ impl Game<'_> {
             self.with_level(|_, level, ticks| level.native_set_block(ticks, pos, state, flags));
         let _ = self.process_level_events();
         changed
-    }
-    /// The strongest redstone signal reaching the block at `pos` from its six
-    /// neighbours, 0 to 15 (`SignalGetter.getBestNeighborSignal`, what a
-    /// dispenser or a piston reads), in the level in place, `dimension`. 0 on
-    /// a client's copy of the world and for another dimension. A mod's
-    /// explosive, launcher or machine reads it in its block entity's tick to
-    /// go off or switch on.
-    pub(super) fn native_neighbor_signal(&mut self, dimension: &str, pos: [i32; 3]) -> i32 {
-        if (self.serving.is_none() && self.options.dedicated.is_none())
-            || dimension != self.dim.id()
-        {
-            return 0;
-        }
-        let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        self.with_level(|b, level, ticks| b.best_neighbor_signal(level, ticks, at))
     }
     /// The rain and thunder levels of the world in place, each 0.0 to 1.0
     /// (`Level.getRainLevel` and `Level.getThunderLevel`): what a solar panel
@@ -9828,7 +9851,7 @@ impl Game<'_> {
     /// The recipes of type `kind` (`minecraft:smelting`, `mymod:crusher`), vanilla's
     /// types and mods' own alike, from `data/<namespace>/recipe/*.json` of vanilla,
     /// the content mods (`.hmod`) and the world's data packs, in file order: each
-    /// one's id and its file as JSON, for the mod to read as it likes. These are the
+    /// one typed (`Recipe`: its ingredients, results, group and cooking time and experience) with its file as JSON for a mod's own type. These are the
     /// recipes in force (`RecipeManager.getAllRecipesFor`): data packs merged and
     /// load conditions held, so a pack's override or removal shows. A data pack
     /// changes them on `/reload`, so look them up again when you need them. Empty
@@ -9837,7 +9860,7 @@ impl Game<'_> {
     /// single-player window included, sees vanilla's and the content mods' recipes,
     /// not the world's data packs', unless a mod had the server send it the type
     /// (`native_datapack_sync`).
-    pub(super) fn native_recipes_of_type(&self, kind: &str) -> Arc<[RecipeFile]> {
+    pub(super) fn native_recipes_of_type(&self, kind: &str) -> Arc<[Recipe]> {
         if self.outside_world() {
             return Default::default();
         }

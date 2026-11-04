@@ -13,6 +13,7 @@ use super::{
 use horizon_core::geometry::Vec3;
 use horizon_core::geometry::trig::Mth;
 use horizon_core::random::RandomSource;
+use horizon_world::native_load_context::LoopContext;
 use std::f32::consts::PI;
 
 pub const COLORS: [&str; 7] = [
@@ -655,7 +656,7 @@ fn is_wood_sound_type(sounds: &horizon_items::blocks::Sounds) -> bool {
     }
 }
 /// The mount takes its rider's input (`getRiddenInput`, `tickRidden`).
-pub fn ridden_step(m: &mut Mob) {
+pub fn ridden_step(m: &mut Mob, context: &LoopContext) {
     let Some(r) = m.rider else {
         return;
     };
@@ -729,7 +730,7 @@ pub fn ridden_step(m: &mut Mob) {
         m.ai.zza = forward;
         if r.jump > 0.0 {
             let mut ev = Vec::new();
-            if super::camel::dash(m, r.jump, &mut ev)
+            if super::camel::dash(m, context, r.jump, &mut ev)
                 && let Some(rider) = m.rider.as_mut()
             {
                 rider.jump = 0.0;
@@ -763,7 +764,7 @@ pub fn ridden_step(m: &mut Mob) {
             m.velocity.x += f64::from(-0.4 * s * r.jump);
             m.velocity.z += f64::from(0.4 * c * r.jump);
         }
-        crate::motion::native_living_jump(m.id, &m.kind.id);
+        crate::motion::native_living_jump(context, m.id, &m.kind.id);
         if let Some(rider) = m.rider.as_mut() {
             rider.jump = 0.0;
         }
@@ -797,7 +798,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         return super::llama::ai_step(m, w);
     }
     if m.alive() && m.random.next_int_bound(900).unwrap_or(1) == 0 && m.death_time == 0 {
-        m.heal(1.0);
+        m.heal(w.loop_context, 1.0);
     }
     // Grazing (canEatGrass: horses and donkeys alike).
     if m.alive() && m.rider.is_none() {
