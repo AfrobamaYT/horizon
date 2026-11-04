@@ -1271,13 +1271,14 @@ impl LevelAccess for GameLevel<'_> {
     }
     fn observe_neighbor_changed(
         &self,
+        ticks: &mut Ticks,
         pos: BlockPos,
         state: BlockStateId,
         changed: horizon_world::level::BlockId,
         moved: bool,
     ) {
         if self.native_authoritative {
-            self.native_neighbor_changed(self.dimension, pos, state, changed, moved);
+            self.native_neighbor_changed(ticks, self.dimension, pos, state, changed, moved);
         }
     }
     fn affect_neighbors_after_removal(

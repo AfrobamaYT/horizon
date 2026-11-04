@@ -823,16 +823,27 @@ impl GameLevel<'_> {
 
     /// An authoritative server is about to deliver `neighborChanged`.
     /// State and block IDs are valid in this level's registries for this call.
+    /// The host is the level with its ticks, as vanilla's `neighborChanged` gets the
+    /// level: a part may read its inputs (`signal`, `has_neighbor_signal`) and
+    /// schedule its tick here, as a diode does (`DiodeBlock.checkTickOnNeighbor`).
     #[inline(always)]
     pub(super) fn native_neighbor_changed(
         &self,
+        ticks: &mut Ticks,
         dimension: LevelDimension,
         pos: BlockPos,
         state: BlockStateId,
         changed: BlockId,
         moved: bool,
     ) {
-        mod_api::dispatch_neighbor_changed(self, dimension, pos, state, changed, moved);
+        mod_api::dispatch_neighbor_changed(
+            &mut super::mod_api_host::LevelTicks { level: self, ticks },
+            dimension,
+            pos,
+            state,
+            changed,
+            moved,
+        );
     }
 
     /// On an authoritative server, a fluid flows or fire spreads from `from`
