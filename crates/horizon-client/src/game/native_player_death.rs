@@ -1,5 +1,5 @@
 //! A server player's last death location for native mods, through a
-//! `PlayerRef` (docs/native-mods.md): `Player.getLastDeathLocation` and
+//! `PlayerRef` (docs/modding/src/how-to/native-mods.md): `Player.getLastDeathLocation` and
 //! `setLastDeathLocation`, as a `GlobalPos` (the dimension's key and the
 //! block), so a death in a dimension that is not open still reads. It is kept
 //! in the player's record (swapped into `level.last_death` for the player's

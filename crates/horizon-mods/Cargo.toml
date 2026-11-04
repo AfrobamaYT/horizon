@@ -21,7 +21,7 @@ minisign-verify = { version = "0.3", optional = true }
 horizon-shader-api = { path = "../horizon-shader-api", optional = true }
 
 [features]
-# The mod registry's index (docs/api/mod-index.md): the launcher, the registry server and its CI.
+# The mod registry's index (docs/modding/src/reference/registry-index.md): the launcher, the registry server and its CI.
 index = ["dep:sha2", "dep:minisign-verify", "dep:horizon-shader-api"]
 
 [lints]

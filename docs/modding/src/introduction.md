@@ -13,11 +13,9 @@ difference between them is the build target.
 
 ## How this book is organised
 
-The book follows [Diátaxis](https://diataxis.fr): each page is one of four kinds, and says so by where it lives.
-
-The book is being filled in by kind: tutorials, concepts, how-to guides and reference. Today it holds the
-[injections](injections.md) how-to; the pages in `docs/native-mods.md`, `docs/mods.md` and `docs/api/` move here as
-they are rewritten. The reference is the generated rustdoc of the `horizon-mod-api` crate.
+The book follows [Diátaxis](https://diataxis.fr): each page is one of four kinds, and says so by where it lives:
+**Start** (a tutorial), **Concepts** (explanation), **How-to** and **Reference**. See
+[where each doc lives](contributing.md).
 
 An [agents page](agents.md) and `llms.txt` give a coding agent the rules in one place.
 

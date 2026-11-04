@@ -1,5 +1,5 @@
 //! A level's world settings for native server mods, through a `LevelRef`
-//! (docs/native-mods.md, "Entity and level handles", #7387): the seed, the
+//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): the seed, the
 //! difficulty, game rules and weather. They return `None` on a client or for
 //! a handle of an earlier open.
 use super::{Dim, Game};

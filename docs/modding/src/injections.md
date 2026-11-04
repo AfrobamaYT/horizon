@@ -42,7 +42,7 @@ the event, and writes take `host`.
 
 ## The decision ladder
 
-1. **A hook or Part method exists: use it.** Read [Hooks](concepts/hooks.md) and the
+1. **A hook or Part method exists: use it.** Read [Hooks](concepts/trait-mods.md) and the
    [rustdoc](reference/api.md). A per-block, per-item or per-entity moment is a Part method. Nothing in this
    chapter applies.
 2. **No hook, but the moment is a named hook point: `hook = "<name>"`.** The catalog names each hook point and

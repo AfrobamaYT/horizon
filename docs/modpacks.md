@@ -156,8 +156,8 @@ with advice if needed.
 ## What packs need, and what runs today
 
 Content mods (`.hmod`, API 0.2) carry data: blocks, items, and everything in the 26.3 data-pack and resource-pack
-formats ([mods.md](mods.md#content-mods-api-02)). Behaviour that needs code is not a content-mod feature: it is
-written as a native mod ([native-mods.md](native-mods.md)), one per ported mod. What a content pack needs:
+formats ([mods.md](modding/src/how-to/content-mods.md#content-mods-api-02)). Behaviour that needs code is not a content-mod feature: it is
+written as a native mod ([modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md)), one per ported mod. What a content pack needs:
 
 | Feature | Content mod today | Needed by (ATM10 content+integration, by tier) |
 |---|---|---|
@@ -775,7 +775,7 @@ For tiers logic, machines and deep, in dependency order, as many agents at once 
 budget allows:
 
 - **Input:** the inventory record, the carried-over data, the oracle's exports and traces, the
-  harness, [native-mods.md](native-mods.md), the ports of its dependencies, and the mod's public
+  harness, [modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md), the ports of its dependencies, and the mod's public
   documentation. Never its code: the agent doesn't decompile, read or quote it.
 - **Output:** a native mod, a horizon-mixins bundle started from
   [horizon-native-mod-template](https://github.com/horizon-rust/horizon-native-mod-template), and its `.hmod`.

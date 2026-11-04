@@ -1,4 +1,4 @@
-//! Mod messages for native mods (docs/native-mods.md, "Mod messages"): a
+//! Mod messages for native mods (docs/modding/src/how-to/native-mods.md, "Mod messages"): a
 //! mod's server half and its client half send each other bytes
 //! (`horizon_protocol::mod_net`). Messages wait here: what a guest sent
 //! reaches `native_net_from_client` when the queue runs, and what a mod sends

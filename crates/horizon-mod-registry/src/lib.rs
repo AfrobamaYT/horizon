@@ -1,5 +1,5 @@
 //! `horizon-mod-registry`: the submission form's service at
-//! `playhorizon.dev/api/mods/*` (docs/api/mod-index.md). A creator signs in
+//! `playhorizon.dev/api/mods/*` (docs/modding/src/reference/registry-index.md). A creator signs in
 //! with GitHub, sends a file and its page; the service runs the file's own
 //! checks, uploads it to the registry's `staging` release and opens a pull
 //! request with the entry. Reviewers decide; merging publishes. Signed-in
@@ -1087,7 +1087,7 @@ pub fn publish(
 
 /// A new project listed by its repository: the entry (a link and a page) on a new branch and a
 /// pull request opened. Its versions are the repository's GitHub releases, read by the registry
-/// without a pull request (docs/api/mod-index.md); a reviewer reads the repository now, once.
+/// without a pull request (docs/modding/src/reference/registry-index.md); a reviewer reads the repository now, once.
 pub fn list(config: &Config, login: &str, user_id: u64, form: &Form) -> Result<String, Refusal> {
     let gh = &config.github;
     let kind = Kind::from(form.kind.clone());

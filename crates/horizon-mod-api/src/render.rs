@@ -1,4 +1,4 @@
-//! Render hook points for native mods (docs/native-mods.md): empty functions the renderer calls at
+//! Render hook points for native mods (docs/modding/src/how-to/native-mods.md): empty functions the renderer calls at
 //! fixed places of a frame, which a mod's mixins hook like those of
 //! `horizon-client/src/game/native_hooks.rs`, and listed with them in `native-hooks.json`.
 

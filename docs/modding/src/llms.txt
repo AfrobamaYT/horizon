@@ -6,22 +6,21 @@ Prefer a hook or Part method; otherwise a `trait_method` injection with a `Host`
 
 ## Rules
 
-- [For agents](agents.md): the rules in order, the manifest fields, the error codes.
+- [Rules for agents](agents.md): the rules in order and the manifest fields.
 - [Injections](injections.md): the decision ladder, convertible injections, the hook-request template, ordering.
 
 ## Guide
 
-- [A first mod](start/first-mod.md)
-- [Hooks](concepts/hooks.md)
-- [Parts](concepts/parts.md)
-- [Host, sides and handles](concepts/host-and-sides.md)
-- [Attachments](concepts/attachments.md)
-- [Package layout](how-to/package-layout.md)
+- [Your first native mod](start/first-mod.md)
+- [Installing and using mods](start/installing.md)
+- [Making a content mod](how-to/content-mods.md)
 - [Native mods](how-to/native-mods.md)
+- [Trait mods, Parts and attachments](concepts/trait-mods.md)
+- [Publishing your mod](how-to/publish.md)
 
 ## Reference
 
-- [The manifest](reference/manifest.md)
-- [Error codes](reference/errors.md)
-- [Stability](reference/stability.md)
+- [The manifest and the package](reference/manifest.md)
+- [The registry index](reference/registry-index.md)
+- [Hook notes](reference/hook-notes.md)
 - [The mod API (rustdoc)](reference/api.md)

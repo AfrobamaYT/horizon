@@ -1,5 +1,5 @@
 //! Moving and turning an entity for native server mods, through an
-//! `EntityRef` (docs/native-mods.md, "Entity and level handles", #7387):
+//! `EntityRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387):
 //! teleport, rotation, head yaw, facing, size and pushes. Writes move the
 //! entity as `/tp` and `/rotate` do, so clients see it as they see those.
 //! Reads return `None`, writes false, for a stale handle or on a client.

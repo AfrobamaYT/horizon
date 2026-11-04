@@ -1,4 +1,4 @@
-//! Energy in a block's buffer for native server mods (docs/native-mods.md): the buffer a mod
+//! Energy in a block's buffer for native server mods (docs/modding/src/how-to/native-mods.md): the buffer a mod
 //! block declared through `native_block_entity_energy`, as the game's own `ENERGY` capability
 //! reaches it through a side. Vanilla has no energy; the contract is NeoForge's
 //! `SimpleEnergyHandler`. They act where the world is simulated, never on a client's copy, and

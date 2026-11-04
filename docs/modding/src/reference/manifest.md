@@ -2,7 +2,7 @@
 
 A `.hmod` is one mod: content, native code, or both. `horizon_mods::Package` reads the shared manifest and
 validates the package; `horizon_mods::Content` reads its resources, and `horizon_mods::index::native::Bundle`
-reads its code. Content is preview, native code experimental ([data-formats.md](data-formats.md)).
+reads its code. Content is preview, native code experimental ([data-formats.md](../../../api/data-formats.md)).
 
 ## The zip
 
@@ -37,7 +37,7 @@ folders are unsupported.
 
 ## `horizon-mod.toml`
 
-The shared [manifest fields](../mods.md#the-manifest) include `id`, `name`, `version`, `api = "0.2"`
+The shared [manifest fields](../how-to/content-mods.md#the-manifest) include `id`, `name`, `version`, `api = "0.2"`
 and `capabilities = ["registries"]`. The content API is checked for exact equality. Unknown fields
 refuse the manifest. Code adds `[native]`:
 
@@ -50,20 +50,20 @@ refuse the manifest. Code adds `[native]`:
 
 An injection has a unique, nonempty `id` and a `kind`; it selects exactly one of `hook` or `target`, and
 exactly one of `helper` or `trait_method`. A helper is a selected `.rs` file under `src/`, or `build.rs`.
-See [Injections](../modding/src/injections.md) for the fields, bindings and trait injections, and
-[Native mods](../native-mods.md#named-hook-points) for the named hook contracts.
+See [Injections](../injections.md) for the fields, bindings and trait injections, and
+[Native mods](../how-to/native-mods.md#named-hook-points) for the named hook contracts.
 
 Top-level `[dependencies]` declares other code mods by id: a semver requirement string, or
 `{ version = "^1", optional = true }`. These versions refer to `horizon-mod.toml`, not Cargo metadata.
 Content-only mods cannot declare nonempty dependencies yet
-([Dependencies between trait mods](../native-mods.md#dependencies-between-trait-mods)).
+([Dependencies between trait mods](../concepts/trait-mods.md#dependencies-between-trait-mods)).
 
 ## Source paths
 
 A code package contains root `Cargo.toml`, optional `build.rs`, `.rs` and `.toml` files under `src/`,
 and root text files named `README*`, `LICENSE*`, `LICENCE*`, `COPYING*` or `NOTICE*`.
 The marked root `impl Hooks` uses `#[mod_api::horizon_mod]`; the attribute generates the factory
-([Trait mods](../native-mods.md#trait-mods-draft)).
+([Trait mods](../concepts/trait-mods.md#trait-mods-draft)).
 
 Folder packaging selects source and resource files, excluding `.git/` and `target/`. It validates selected
 files before copying them. Whole archives are checked, not treated as source folders with ignored extra entries.
