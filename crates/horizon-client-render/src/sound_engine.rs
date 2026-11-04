@@ -13,6 +13,8 @@ use crate::sound_events::{INTENTIONALLY_EMPTY, Sentinel, Sound, SoundRegistry};
 use horizon_core::random::LegacyRandom;
 use std::collections::HashMap;
 
+pub mod hooks;
+
 /// `SoundSource` indices (vanilla order).
 pub const MASTER: usize = 0;
 pub const MUSIC: usize = 1;
@@ -827,6 +829,9 @@ pub struct SoundEngine {
     /// listener: 0 as vanilla, `HEARD_RESERVE` with the `uiSoundReserve` extra.
     pub listener_reserve: usize,
     pub notifications: Vec<Notification>,
+    /// The client's loop context, rebuilt with each resource generation, for the
+    /// sound hooks (`hooks`). Absent on a server, which has no sound.
+    loop_context: Option<horizon_world::native_load_context::LoopContext>,
 }
 fn handle_channel(h: &Handle) -> Option<ChannelId> {
     h.channel
@@ -855,6 +860,7 @@ impl SoundEngine {
             listening: false,
             listener_reserve: 0,
             notifications: Vec::new(),
+            loop_context: None,
         }
     }
     /// Hand an instance to the engine. A retained instance stays until
@@ -1108,7 +1114,7 @@ impl SoundEngine {
         (id, self.play(id, backend))
     }
     fn play_inner(&mut self, id: InstanceId, backend: &mut impl Backend) -> PlayResult {
-        if !self.loaded || !self.instances.contains_key(&id) {
+        if !self.instances.contains_key(&id) || !self.play_sound_allowed(id) || !self.loaded {
             return PlayResult::NotStarted;
         }
         self.resolve(id);
@@ -1190,6 +1196,7 @@ impl SoundEngine {
         backend.set_position(channel, position);
         backend.set_relative(channel, relative);
         backend.start(channel, &sound, looping);
+        self.notify_source_started(id, channel, streaming);
         if tickable {
             self.ticking.push(id);
         }

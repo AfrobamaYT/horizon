@@ -279,6 +279,16 @@ pub struct NativeArmorHurt {
     pub new_damage: f32,
 }
 
+/// A vanilla key mapping as the client holds it (`ClientHost::mapping`).
+#[derive(Clone, Debug)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct NativeKeyMapping {
+    /// Whether it is held (`KeyMapping.isDown`).
+    pub down: bool,
+    /// The name of the key it is bound to, as Controls shows it (`KeyMapping.getTranslatedKeyMessage`).
+    pub label: Text,
+}
+
 /// Camera values from the most recently extracted world frame.
 #[derive(Clone, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
@@ -584,6 +594,97 @@ pub struct NativePortalShape {
     pub width: i32,
     /// The portal frame's inner height in blocks.
     pub height: i32,
+}
+
+/// The mixer group a sound plays on (`SoundSource`), in vanilla's order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SoundSource {
+    /// The master volume, which scales every other source.
+    Master,
+    /// Music discs aside, the game's music.
+    Music,
+    /// Jukeboxes and music discs.
+    Records,
+    /// Rain and thunder.
+    Weather,
+    /// Sounds blocks make.
+    Blocks,
+    /// Hostile creatures.
+    Hostile,
+    /// Friendly and neutral creatures.
+    Neutral,
+    /// Players.
+    Players,
+    /// Ambient and cave sounds.
+    Ambient,
+    /// Voice sounds.
+    Voice,
+    /// Interface sounds, such as a button click.
+    Ui,
+}
+
+impl SoundSource {
+    /// Every source, in vanilla's order (`SoundSource.values()`).
+    pub const ALL: [SoundSource; 11] = [
+        Self::Master,
+        Self::Music,
+        Self::Records,
+        Self::Weather,
+        Self::Blocks,
+        Self::Hostile,
+        Self::Neutral,
+        Self::Players,
+        Self::Ambient,
+        Self::Voice,
+        Self::Ui,
+    ];
+}
+
+/// How a sound fades with distance (`SoundInstance.Attenuation`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SoundAttenuation {
+    /// Heard at full volume everywhere.
+    None,
+    /// Fades linearly to silence at the sound's range.
+    Linear,
+}
+
+/// A sound about to play, for `play_sound` (`SoundInstance`'s own settings:
+/// vanilla's `getIdentifier`, `getSource`, `getVolume`, `getPitch`, `getX/Y/Z`,
+/// `isLooping`, `getDelay`, `getAttenuation` and `isRelative`).
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct SoundPlay {
+    /// The sound event (`minecraft:entity.pig.ambient`).
+    pub identifier: String,
+    /// The mixer group it plays on.
+    pub source: SoundSource,
+    /// Its own volume, before the source's and the master's.
+    pub volume: f32,
+    /// Its pitch, 1.0 unchanged.
+    pub pitch: f32,
+    /// Where it plays, in blocks; meaningless when `relative`.
+    pub position: [f64; 3],
+    /// It restarts when it ends.
+    pub looping: bool,
+    /// Ticks to wait before it starts.
+    pub delay: i32,
+    /// How it fades with distance.
+    pub attenuation: SoundAttenuation,
+    /// It plays at the listener, wherever they move.
+    pub relative: bool,
+}
+
+/// A playing sound's channel, for `play_sound_source` and
+/// `play_streaming_source`: an id only, to tell sounds apart across the two
+/// hooks. It gives no control over the channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct ChannelRef {
+    /// The channel's id, unique among the live ones.
+    pub id: u64,
 }
 
 /// A server explosion about to happen, for `explosion_start`
@@ -3675,6 +3776,13 @@ mod block_entity_type;
 pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
+mod structure_type;
+/// The structure box a piece's `bounding_box` answers, in world blocks.
+pub use horizon_world::worldgen::structure::BoundingBox;
+pub use structure_type::{
+    BiomeId, ChunkPos, FoundStructure, GenerationContext, HeightmapType, NoiseBlock, NoiseColumn,
+    PieceContext, PieceRandom, StructureError, StructurePiece, StructureType, WorldgenRandom,
+};
 mod part_table;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use part_table::install_parts;
@@ -4926,6 +5034,54 @@ pub(crate) mod built {
                 yaw,
                 pitch,
                 entity_id,
+            }
+        }
+    }
+    // exhaustive: the game builds it with a literal; mods only read it
+    pub struct ChannelRef {
+        pub id: u64,
+    }
+    impl From<ChannelRef> for super::ChannelRef {
+        fn from(v: ChannelRef) -> Self {
+            let ChannelRef { id } = v;
+            Self { id }
+        }
+    }
+    // exhaustive: the game builds it with a literal; mods read it and edit its fields
+    pub struct SoundPlay {
+        pub identifier: String,
+        pub source: super::SoundSource,
+        pub volume: f32,
+        pub pitch: f32,
+        pub position: [f64; 3],
+        pub looping: bool,
+        pub delay: i32,
+        pub attenuation: super::SoundAttenuation,
+        pub relative: bool,
+    }
+    impl From<SoundPlay> for super::SoundPlay {
+        fn from(v: SoundPlay) -> Self {
+            let SoundPlay {
+                identifier,
+                source,
+                volume,
+                pitch,
+                position,
+                looping,
+                delay,
+                attenuation,
+                relative,
+            } = v;
+            Self {
+                identifier,
+                source,
+                volume,
+                pitch,
+                position,
+                looping,
+                delay,
+                attenuation,
+                relative,
             }
         }
     }

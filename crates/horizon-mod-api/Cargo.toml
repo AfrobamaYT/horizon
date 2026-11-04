@@ -28,6 +28,10 @@ wgpu = { version = "30.0.1", default-features = false, features = ["std"] }
 [build-dependencies]
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 
+[dev-dependencies]
+# Tests load the real block registry (`Assets::load`); normal builds stay wasm32-clean.
+horizon-client-render = { path = "../horizon-client-render" }
+
 [features]
 # Scoped mod installation for other crates' tests (`mod_api::testing`).
 testing = []

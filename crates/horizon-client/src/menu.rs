@@ -4349,9 +4349,10 @@ pub(crate) mod tests {
                 living_flying_speed: |context, _, _, speed| {
                     *speed += context.setting("rules_mod", "stack").map_or(0.0, |_| 3.0);
                 },
+                player_stays_on_ground_surface: |_, _| {},
                 ender_entity_teleport: |_, _, _, _, _| {},
             });
-        assert!(installed.is_ok());
+        assert!(installed);
         let kind = Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {
             id: "test:rules",
             slots: 1,

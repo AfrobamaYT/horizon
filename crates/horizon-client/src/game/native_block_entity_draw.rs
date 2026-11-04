@@ -643,6 +643,24 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_trait_mod_draws_only_the_standalone_models_it_named() {
+        use super::super::mod_api_host::generated::GameBlockEntityDrawContext;
+        use mod_api::BlockEntityDrawContext;
+
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let mut surface = draw();
+            let mut drawn = GameBlockEntityDrawContext {
+                game,
+                surface: &mut surface,
+            };
+            // No mod named it in `standalone_models`, so nothing baked it.
+            assert!(!drawn.model("mymod:block/shaft_half", 0xFFFFFF));
+            assert!(surface.vertices.is_empty());
+        });
+    }
+
+    #[test]
     fn the_pose_stack_turns_about_its_pivot_and_pops_back() {
         let mut d = draw();
         d.push();

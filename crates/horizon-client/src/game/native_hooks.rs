@@ -67,10 +67,10 @@ pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProbl
 use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EnchantmentInfo,
     EntityRef, EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera,
-    NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
-    NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
-    PathComputationType, Placement, PlayerRef, RecipeBookCategory, ScreenOpening,
-    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop, NativeKeyMapping,
+    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
+    NativeServerPlayer, PathComputationType, Placement, PlayerRef, RecipeBookCategory,
+    ScreenOpening, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
@@ -623,6 +623,27 @@ impl GameLevel<'_> {
         cancel: &mut bool,
     ) {
         mod_api::dispatch_fluid_level_change(self, dimension, pos, fluid, from, to, cancel);
+    }
+
+    /// The block at `pos` (`state`) is about to tell its neighbours it
+    /// changed (NeoForge's `BlockEvent.NeighborNotifyEvent`): at
+    /// `ServerLevel.updateNeighborsAt`, which notifies all six sides
+    /// (`skipped_side` is `None`), and `updateNeighborsAtExceptFromFacing`,
+    /// which notifies all but `skipped_side`. Set `cancel` and no neighbour
+    /// hears, on both paths. Differs from NeoForge 26.3's implementation
+    /// (which honours the cancel only when a side is skipped), follows its
+    /// documented contract. Asked for every such update, redstone
+    /// included: answer fast. Server-side.
+    #[inline(always)]
+    pub(super) fn native_neighbor_notify(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        skipped_side: Option<Direction>,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_neighbor_notify(self, dimension, pos, state, skipped_side, cancel);
     }
 
     /// A fluid source at `pos` (`state`) is about to count towards turning
@@ -1635,7 +1656,6 @@ pub(crate) struct NativeRecipes {
 
 /// The mappings `native_mapping` answers for, with the key their default
 /// binding is (none: a mouse button, attack or use).
-#[allow(dead_code)]
 const MAPPINGS: [(&str, Option<KeyCode>); 9] = [
     ("key.forward", Some(KeyCode::KeyW)),
     ("key.left", Some(KeyCode::KeyA)),
@@ -1709,9 +1729,15 @@ impl Game<'_> {
             categories,
         );
     }
-    /// Once a frame, in a world or not, after Horizon's extras.
-    pub(super) fn native_frame(&mut self, elapsed: Duration) {
-        mod_api::dispatch_frame(self, elapsed);
+    /// Once a frame, in a world or not, after Horizon's extras and just
+    /// before the frame is rendered (`RenderFrameEvent.Pre`).
+    pub(super) fn native_render_frame_pre(&mut self, elapsed: Duration) {
+        mod_api::dispatch_render_frame_pre(self, elapsed);
+    }
+    /// Once a frame, in a world or not, right after the frame was rendered
+    /// (`RenderFrameEvent.Post`).
+    pub(super) fn native_render_frame_post(&mut self, elapsed: Duration) {
+        mod_api::dispatch_render_frame_post(self, elapsed);
     }
     /// Client-side evaluation of a mod's namespaced conditional item model property.
     /// Set value only for a property your mod owns; unhandled properties stay false.
@@ -1885,11 +1911,13 @@ impl Game<'_> {
             new_game_type,
         );
     }
-    /// Once a tick, in every `Game`: the window's (in single player, on LAN
-    /// and on servers), and the server's own (`native_window` is false
-    /// there: the single player server thread, a dedicated server).
-    pub(super) fn native_tick(&mut self) {
-        mod_api::dispatch_tick(super::execution_role::host_side(self));
+    /// Once a client tick, before the window's tick runs (`ClientTickEvent.Pre`).
+    pub(super) fn native_client_tick_pre(&mut self) {
+        mod_api::dispatch_client_tick_pre(self);
+    }
+    /// Once a client tick, after the window's tick ran (`ClientTickEvent.Post`).
+    pub(super) fn native_client_tick_post(&mut self) {
+        mod_api::dispatch_client_tick_post(self);
     }
     /// Before an eligible targeted block's selection outline is built.
     /// Cancel skips only the default block highlight, after normal HUD and game-mode gates.
@@ -6034,6 +6062,23 @@ impl Game<'_> {
         mod_api::dispatch_creeper_ignite(self, entity, player, item);
     }
 
+    /// A lightning bolt is about to hit `entity` (NeoForge's
+    /// `EntityStruckByLightningEvent`, before `Entity.thunderHit`): once per
+    /// bolt strike for each entity whose box meets the strike box (3 blocks
+    /// around, 9 up), players included. `bolt` is the lightning bolt. Set
+    /// `cancel` to spare the entity: no fire or damage, and no conversion
+    /// (pig, villager, mooshroom, creeper, copper golem). It still counts
+    /// as struck for Channeling's advancement. Not asked for a visual-only
+    /// bolt, which hits nothing. Server-side.
+    pub(super) fn native_entity_struck_by_lightning(
+        &mut self,
+        entity: EntityRef,
+        bolt: EntityRef,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_entity_struck_by_lightning(self, entity, bolt, cancel);
+    }
+
     /// Lightning charged a creeper.
     pub(super) fn native_creeper_power(&mut self, entity: u32, lightning: [f64; 3]) {
         mod_api::dispatch_creeper_power(self, entity, lightning);
@@ -9253,8 +9298,8 @@ impl Game<'_> {
     pub(super) fn native_size(&self, draw: &HudBatch) -> [f32; 2] {
         [draw.width, draw.height]
     }
-    /// The width of `text` in GUI pixels.
-    pub(super) fn native_text_width(&self, text: &str) -> f32 {
+    /// The width of `text` in GUI pixels, as `native_text` draws it on `draw` (`Font.width`).
+    pub(super) fn native_text_width(&self, _draw: &HudBatch, text: &str) -> f32 {
         HudBatch::text_width(&self.gui.atlas, text)
     }
     /// A rectangle in GUI pixels, `argb` (0x78000000 is the extras' box).
@@ -9575,8 +9620,9 @@ impl Game<'_> {
             .enchantments
             .can_enchant(self.items(), id, item)
     }
-    /// The size of sprite `name` in its own pixels, if there is one.
-    pub(super) fn native_sprite_size(&self, name: &str) -> Option<[f32; 2]> {
+    /// The size of sprite `name` in its own pixels, as `native_sprite` draws it on `draw`, if
+    /// there is one.
+    pub(super) fn native_sprite_size(&self, _draw: &HudBatch, name: &str) -> Option<[f32; 2]> {
         let r = self.gui.atlas.sprites.get(name)?;
         Some([r.w as f32, r.h as f32])
     }
@@ -9591,7 +9637,7 @@ impl Game<'_> {
         let dst = [at[0], at[1], size, size];
         let sprite = look
             .and_then(|l| l.sprite)
-            .and_then(|s| self.native_sprite_size(&s).map(|size| (s, size)));
+            .and_then(|s| self.native_sprite_size(batch, &s).map(|size| (s, size)));
         if let Some((name, px)) = sprite {
             self.native_sprite(batch, &name, [0.0, 0.0, px[0], px[1]], dst, Some(tint));
         } else {
@@ -9654,18 +9700,21 @@ impl Game<'_> {
     }
     /// Attack and use clicks in the last second.
     pub(super) fn native_clicks(&mut self) -> (u32, u32) {
-        self.mouse_reading().0
+        self.click_reading()
     }
     /// A vanilla mapping (`key.forward`, `key.jump`, `key.attack`…): whether
-    /// it is held, and its key's label as Controls shows it.
-    pub(super) fn native_mapping(&mut self, name: &str) -> Option<(bool, String)> {
+    /// it is held (`KeyMapping.isDown`), and its key's name as Controls shows
+    /// it. None for a mapping it doesn't answer for.
+    pub(super) fn native_mapping(&self, name: &str) -> Option<NativeKeyMapping> {
         let &(_, key) = MAPPINGS.iter().find(|m| m.0 == name)?;
-        let label = keybinds::display_name(self.settings.keys.get(name)).plain();
         let down = match key {
             Some(k) => self.keys.contains(&k),
-            None => self.mouse_reading().1[usize::from(name == "key.use")],
+            None => self.mouse_held()[usize::from(name == "key.use")],
         };
-        Some((down, label))
+        Some(NativeKeyMapping {
+            down,
+            label: keybinds::display_name(self.settings.keys.get(name)),
+        })
     }
     /// The key the player chose for a mod's key `name`, else `default`
     /// (`key.keyboard.z`), as the WebAssembly mods' keys were kept
@@ -11189,6 +11238,28 @@ mod tests {
     }
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_trait_mod_measures_text_and_sprites_through_its_draw_context() {
+        use super::super::mod_api_host::generated::GameDrawContext;
+        use super::super::native_entity_refs::tests::with_game;
+        use mod_api::DrawContext;
+
+        with_game(|game| {
+            let mut batch = horizon_client::hud::HudBatch::new([320, 240]);
+            let draw = GameDrawContext {
+                game,
+                surface: &mut batch,
+            };
+            // A server's HUD atlas holds the fonts: vanilla's ascii sheet is 128 by 128, and an
+            // upper-case A advances 6 GUI pixels.
+            assert_eq!(draw.sprite_size("font/ascii"), Some([128.0, 128.0]));
+            assert_eq!(draw.sprite_size("mymod:no_such_sprite"), None);
+            assert_eq!(draw.text_width("AA"), 12.0);
+            assert_eq!(draw.text_width(""), 0.0);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn declared_types_create_tick_and_reload_through_game() {
         use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
         use horizon_client::{chunk::Chunk, containers::BlockEntity, save};
@@ -11463,6 +11534,36 @@ mod tests {
             assert!(!ClientHost::is_paused(game));
             game.pause = true;
             assert!(ClientHost::is_paused(game));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_host_reads_playing_and_key_mappings() {
+        use super::super::Screen;
+        use super::super::execution_role::ExecutionRole;
+        use super::super::native_entity_refs::tests::with_game;
+        use mod_api::ClientHost;
+        use winit::keyboard::KeyCode;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            game.screen = Screen::Playing;
+            assert!(ClientHost::playing(game));
+            game.screen = Screen::Chat;
+            assert!(!ClientHost::playing(game));
+
+            // Vanilla's default bindings: forward is W, attack the left mouse button.
+            let forward = ClientHost::mapping(game, "key.forward").unwrap();
+            assert_eq!(
+                (forward.down, forward.label.plain()),
+                (false, "W".to_owned())
+            );
+            game.keys.insert(KeyCode::KeyW);
+            assert!(ClientHost::mapping(game, "key.forward").unwrap().down);
+            let attack = ClientHost::mapping(game, "key.attack").unwrap();
+            assert_eq!(attack.label.plain(), "Left Button");
+            assert!(ClientHost::mapping(game, "key.mymod.boost").is_none());
         });
     }
 
@@ -12157,6 +12258,9 @@ mod tests {
         let motion_hooks = free_hooks(include_str!("../motion.rs"));
         let hub_hooks = free_hooks(include_str!("../lan/hub.rs"));
         let ender_hooks = free_hooks(include_str!("../mobs/enderman.rs"));
+        let sound_hooks = free_hooks(include_str!(
+            "../../../horizon-client-render/src/sound_engine/hooks.rs"
+        ));
         let declared: BTreeSet<_> = section
             .lines()
             .filter_map(|line| {
@@ -12180,6 +12284,7 @@ mod tests {
             .chain(motion_hooks.iter().copied())
             .chain(hub_hooks.iter().copied())
             .chain(ender_hooks.iter().copied())
+            .chain(sound_hooks.iter().copied())
             .collect();
         let mut names = BTreeSet::new();
         let mut contracts = BTreeSet::new();
@@ -12217,6 +12322,8 @@ mod tests {
                 // menu.rs compiles into horizon-client-lib (#5446's
                 // split): horizon-mixins resolves the crate by its package.
                 format!("horizon_client_lib::menu::native_{name}")
+            } else if sound_hooks.contains(name) {
+                format!("horizon_client_render::sound_engine::hooks::native_{name}")
             } else if ender_hooks.contains(name) {
                 format!("horizon_client_lib::mobs::enderman::native_{name}")
             } else if breath_hooks.contains(name) {

@@ -222,9 +222,6 @@ pub struct Audio {
     random: LegacyRandom,
     /// A `SoundSource` index the next sound plays on (`/playsound`).
     source_override: Option<usize>,
-    /// The client's loop context, rebuilt with each resource generation, for the
-    /// sound hooks fired on this audio. Absent on a server, which has no sound.
-    loop_context: Option<horizon_world::native_load_context::LoopContext>,
     /// Positional sounds played since the last drain, kept while the world
     /// is open to the network so guests hear them too.
     pub capture: Option<Vec<(String, [f64; 3], f32, f32)>>,
@@ -865,11 +862,13 @@ impl Audio {
     }
     /// The loop context of this client's current resource generation.
     pub fn loop_context(&self) -> Option<&horizon_world::native_load_context::LoopContext> {
-        self.loop_context.as_ref()
+        self.engine.loop_context()
     }
-    /// Replace the loop context when a resource generation starts or reloads.
+    /// Replace the loop context when a resource generation starts or reloads, and tell
+    /// the sound hooks the engine is loaded with it.
     pub fn set_loop_context(&mut self, context: horizon_world::native_load_context::LoopContext) {
-        self.loop_context = Some(context);
+        self.engine.set_loop_context(context);
+        self.engine.notify_loaded();
     }
     fn with_output(root: &Path, output: bool, target_device: &str) -> Self {
         let registry = SoundRegistry::load(root);
@@ -931,7 +930,6 @@ impl Audio {
             master: 1.0,
             random: LegacyRandom::new(crate::sound_engine::unique_seed()),
             source_override: None,
-            loop_context: None,
             capture: None,
             heard: Default::default(),
             stopped: Default::default(),
@@ -994,6 +992,7 @@ impl Audio {
         self.device_name = name.to_owned();
         self.backend.live = true;
         self.engine.loaded = true;
+        self.engine.notify_loaded();
         Ok(())
     }
     #[cfg(not(feature = "audio"))]
@@ -1091,7 +1090,6 @@ impl Audio {
             master: self.master,
             random: LegacyRandom::new(crate::sound_engine::unique_seed()),
             source_override: None,
-            loop_context: None,
             capture: None,
             heard: Default::default(),
             stopped: Default::default(),
