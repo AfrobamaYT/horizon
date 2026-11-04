@@ -1102,5 +1102,19 @@
     "Its mods made for {loader} stay in its folder but won't load.": "Ihre Mods für {loader} bleiben in ihrem Ordner, laden aber nicht.",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Ihre Mods für Minecraft {from} bleiben in ihrem Ordner; manche laden in {to} vielleicht nicht.",
     "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Ihre Welten wurden von Minecraft {from} gespeichert: {to} aktualisiert sie endgültig und kann sie nicht öffnen, wenn es älter ist.",
-  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "Abruf der JAR-Metadaten fehlgeschlagen: {reason}. Lege die Originaldateien genau unter diesen Cache-Pfaden ab und versuche es erneut:\n"
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "Abruf der JAR-Metadaten fehlgeschlagen: {reason}. Lege die Originaldateien genau unter diesen Cache-Pfaden ab und versuche es erneut:\n",
+    "Compiling the mods against the prebuilt game": "Compiling the mods against the prebuilt game",
+    "Downloading the prebuilt game at {revision} (once)": "Downloading the prebuilt game at {revision} (once)",
+    "Prebuilt game: only the mods compile (seconds)": "Prebuilt game: only the mods compile (seconds)",
+    "The prebuilt game for {revision} was made for another build ({commit}, {target}, {side}, {rustc}).": "The prebuilt game for {revision} was made for another build ({commit}, {target}, {side}, {rustc}).",
+    "The prebuilt game has no {crate}.": "The prebuilt game has no {crate}.",
+    "The prebuilt game {name} doesn't match its release's checksum. Try again.": "The prebuilt game {name} doesn't match its release's checksum. Try again.",
+    "no prebuilt game for this computer, so the game builds from source": "no prebuilt game for this computer, so the game builds from source",
+    "no prebuilt game for {revision}, so the game builds from source": "no prebuilt game for {revision}, so the game builds from source",
+    "the prebuilt game couldn't be downloaded ({why}), so the game builds from source": "the prebuilt game couldn't be downloaded ({why}), so the game builds from source",
+    "the {profile} profile builds the game from source; the prebuilt game is performance only": "the {profile} profile builds the game from source; the prebuilt game is performance only",
+    "{mod} depends on the crate {crate}, so the game builds from source": "{mod} depends on the crate {crate}, so the game builds from source",
+    "{mod} has a build script, so the game builds from source": "{mod} has a build script, so the game builds from source",
+    "{mod} injects into the game's code, so the game builds from source": "{mod} injects into the game's code, so the game builds from source",
+    "{mod} uses Cargo features, so the game builds from source": "{mod} uses Cargo features, so the game builds from source"
 }
