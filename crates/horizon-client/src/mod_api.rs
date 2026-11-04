@@ -7,15 +7,26 @@ use std::sync::{Arc, OnceLock};
 
 mod phase;
 pub use phase::{LoadedMods, RegistrationContext, RegistrationPhase};
+mod config_files;
+pub use config_files::{
+    CONFIG_FILE_MAX, CONFIG_LIST_MAX, ConfigEntry, ConfigEntryKind, ConfigFileError, ConfigFiles,
+    ConfigPath, ConfigStat,
+};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
+mod client_reload;
+pub(crate) mod reload;
 mod reload_order;
 pub(crate) mod server_reload;
+pub use client_reload::{
+    ClientReloadContext, ClientReloadListener, ClientReloadListeners, VanillaClientListeners,
+};
 pub use horizon_world::identifier::Identifier;
+pub use reload::{ReloadApply, ReloadResourceError};
 pub use reload_order::ReloadOrderError;
 pub use server_reload::{
-    ListenerKey, ServerReloadApply, ServerReloadContext, ServerReloadError, ServerReloadListener,
-    ServerReloadListeners, ServerReloadResources, VanillaServerListeners,
+    ListenerKey, ServerReloadContext, ServerReloadListener, ServerReloadListeners,
+    ServerReloadResources, VanillaServerListeners,
 };
 
 pub use crate::biome::{BiomeColors, SpawnEntry};
@@ -44,6 +55,7 @@ pub use crate::gfx::native_render::{
 pub use crate::health::{DamageContainer, HurtSource, Reduction, ShieldBlock, Victim};
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
+pub use crate::item_tooltip::TooltipDisplay;
 pub use crate::items::ItemStack;
 pub use crate::menu::{LogicalSide, StackedOnOther};
 pub use crate::merchant::MerchantOffer;
@@ -536,14 +548,12 @@ pub struct NativeScreen {
     pub own_background: bool,
 }
 
-/// A native mod as Options > Mods lists it (`native_mods`).
+/// Key definitions for a compiled mod's Options > Mods page (`native_mods`).
+/// Its display metadata comes from its validated runtime package.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NativeMod {
     /// Its id: its settings folder and its keys' lines.
     pub id: String,
-    /// `Name 1.0`.
-    pub title: String,
-    pub description: String,
     /// Its keys: name, label and default key (`key.keyboard.z`). The page
     /// lists them first; `native_mod_key` reads the player's choice.
     pub keys: Vec<[String; 3]>,
@@ -621,6 +631,10 @@ pub struct NativeServerPlayer {
     /// the server.
     pub yaw: f32,
     pub pitch: f32,
+    /// The network entity id the player has this session, the one hooks that only know entity ids
+    /// (`living_incoming_damage`, `living_knockback`) give for the player; 0 when not known.
+    /// API @API:server_player_entity_id@.
+    pub entity_id: i32,
 }
 
 /// A command a native mod adds, as one usage: words, then arguments
@@ -2762,8 +2776,8 @@ pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
     /// Replace the block at `pos` with `state` through `Level.setBlock(pos, state, flags)`, as
     /// `LevelRef::set_block` does: the old block's block entity goes and the new block's is
     /// created in the write, its neighbour and shape updates run per `flags`, and its level events
-    /// queue in order with the caller's. A mod block entity starts with empty data
-    /// (`native_block_entity` needs a full `Host`). True when the block changed; false off an
+    /// queue in order with the caller's. A mod block entity starts with the data its
+    /// `block_entity` hook gives, which gets this level. True when the block changed; false off an
     /// authoritative server, for a position that is not loaded or outside the build height, an
     /// invalid state, or the state it already is. It never loads a chunk.
     fn set_block(
@@ -2829,7 +2843,9 @@ level_attachment_host!(LevelRandomHost, LevelWriteHost);
 mod capability;
 pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS};
 mod entity_capability;
-pub use entity_capability::{ENTITY_ENERGY, ENTITY_FLUIDS, ENTITY_ITEMS, EntityCapabilityKey};
+pub use entity_capability::{
+    ENTITY_AUTOMATION, ENTITY_ENERGY, ENTITY_FLUIDS, ENTITY_ITEMS, EntityCapabilityKey,
+};
 mod energy_capability;
 pub use energy_capability::{ENERGY, EnergyHandler, ITEM_ENERGY, move_energy};
 mod fluid_capability;
@@ -2852,8 +2868,8 @@ mod ticket_controller;
 pub use ticket_controller::TicketController;
 mod part_table;
 pub use part_table::{
-    Attached, BlockEntityProviders, BlockProvider, EntityProvider, ItemProvider, Parts, Registrar,
-    block_entity_providers,
+    Attached, BlockEntityProviders, BlockProvider, EntityProvider, EntityProviders, ItemProvider,
+    Parts, Registrar, block_entity_providers, entity_providers, has_entity_providers,
 };
 pub(crate) use part_table::{
     KnownIds, ProvidedBy, answered, ask_providers, block_entity_types, has_part_hook,
@@ -2988,6 +3004,7 @@ mod tests {
                 health: 20.0,
                 yaw: 0.0,
                 pitch: 0.0,
+                entity_id: 0,
             })
         }
         fn action_bar(&mut self, _uuid: u128, line: Text) -> bool {

@@ -530,6 +530,76 @@ mod tests {
     }
 
     #[test]
+    fn a_mod_block_entity_rides_its_item() {
+        // The declared types are frozen once per process: install them in a fresh one.
+        const CHILD: &str = "HORIZON_TEST_MOD_BLOCK_ENTITY_ITEM";
+        if std::env::var_os(CHILD).is_none() {
+            assert!(
+                std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "block_entity_item::tests::a_mod_block_entity_rides_its_item",
+                        "--nocapture"
+                    ])
+                    .env(CHILD, "1")
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            return;
+        }
+        use crate::block_entity_types::{self, BlockEntityTypes};
+        block_entity_types::install(BlockEntityTypes::new(
+            [
+                ("example:crate".into(), "example:crate".into()),
+                ("example:tank".into(), "example:tank".into()),
+            ]
+            .into(),
+            vec!["example:crate".into(), "example:tank".into()],
+        ))
+        .unwrap();
+        // A named crate: its custom name is its own component patch.
+        let tank = saved(
+            "{id:\"example:crate\",x:3,y:4,z:5,Fluid:\"minecraft:water\",Amount:2000,\
+             components:{\"minecraft:custom_name\":\"Box\"}}",
+        );
+        let patch = pick(&tank);
+        let data = patch
+            .get(&JavaString::from(BLOCK_ENTITY_DATA))
+            .expect("data");
+        assert_eq!(data.get("Amount"), Some(&Tag::Int(2000)));
+        assert_eq!(data.get("id"), Some(&Tag::String("example:crate".into())));
+        // `saveCustomOnly`: no position and no components in the data; the
+        // patch goes to the item's own components (`collectComponents`).
+        assert_eq!(data.get("x"), None);
+        assert_eq!(data.get("components"), None);
+        assert_eq!(
+            patch.get(&JavaString::from("minecraft:custom_name")),
+            Some(&Tag::String("Box".into()))
+        );
+        let fresh = saved("{id:\"example:crate\",x:9,y:9,z:9}");
+        let placed = place(&fresh, &patch, false);
+        assert_eq!(placed.get("Amount"), Some(&Tag::Int(2000)));
+        assert_eq!(placed.get("x"), Some(&Tag::Int(9)));
+        // The item's name becomes the block entity's own component again.
+        assert_eq!(
+            placed
+                .get("components")
+                .and_then(|c| c.get("minecraft:custom_name")),
+            Some(&Tag::String("Box".into()))
+        );
+        // An item without a patch places no empty one, as a chunk saves it.
+        let mut bare = patch.clone();
+        bare.remove(&JavaString::from("minecraft:custom_name"));
+        assert_eq!(place(&fresh, &bare, false).get("components"), None);
+        // Another type's data is ignored.
+        let other = saved("{id:\"example:tank\",x:9,y:9,z:9}");
+        assert_eq!(place(&other, &patch, false).get("Amount"), None);
+        // An undeclared type has no saved form.
+        assert_eq!(canonical(&snbt("{id:\"example:nope\",x:0,y:0,z:0}")), None);
+    }
+
+    #[test]
     fn a_spawn_egg_sets_its_data_type_and_an_ops_data() {
         let egg = |entity_data: Option<&str>| {
             let mut stack = crate::items::ItemStack::new("minecraft:zombie_spawn_egg", 1);

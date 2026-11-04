@@ -1146,6 +1146,7 @@ pub fn main() -> horizon_client::Result<()> {
                 sleeping: false,
                 sleep_timer: 0,
                 passenger: false,
+                riding_vehicle: None,
                 vehicle: None,
             }
         });
@@ -1175,6 +1176,7 @@ pub fn main() -> horizon_client::Result<()> {
                     collision: &collision,
                     data: &data,
                     player: player.clone(),
+                    controlling_player_movement: None,
                     nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
                     others: $snapshot,
                     dragon: None,
@@ -1494,7 +1496,14 @@ pub fn main() -> horizon_client::Result<()> {
                     created: &mut created,
                     spawning: s.spawning,
                 };
-                creaking_heart::server_tick(h, *at, &w, test_level.random(), &mut host, &mut heart_events);
+                creaking_heart::server_tick(
+                    h,
+                    *at,
+                    &w,
+                    test_level.random(),
+                    &mut host,
+                    &mut heart_events,
+                );
                 added.append(&mut host.added);
             }
             drop(w);

@@ -11,20 +11,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// What the launcher writes beside a game it built with native mods: their ids under `mods`.
-pub const BUILD_INFO: &str = "native-mods.json";
-
-/// IDs compiled into this executable, from the launcher's build record.
-pub fn built_ids(built: &str) -> std::collections::BTreeSet<String> {
-    let info: serde_json::Value = serde_json::from_str(built).unwrap_or_default();
-    info["mods"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|m| m["id"].as_str().map(str::to_owned))
-        .collect()
-}
-
 /// A selected package, read and validated once at the filesystem boundary.
 pub struct SelectedPackage {
     pub path: PathBuf,
@@ -39,39 +25,14 @@ pub fn content_packages<'a>(
     enabled: &'a BTreeSet<String>,
     dev: &'a [PathBuf],
 ) -> impl Iterator<Item = SelectedPackage> + 'a {
-    selected_packages(game_dir, enabled, None, dev)
-}
-
-/// Native content follows the compiled build, not the next build's toggles.
-/// Content-only packages follow the player's toggles. Explicit development
-/// paths take precedence over discovery and are enabled independently of both.
-/// Content validation and duplicate-ID acceptance remain the caller's job.
-pub fn packages<'a>(
-    game_dir: &Path,
-    enabled: &'a BTreeSet<String>,
-    built: &'a BTreeSet<String>,
-    dev: &'a [PathBuf],
-) -> impl Iterator<Item = SelectedPackage> + 'a {
-    selected_packages(game_dir, enabled, Some(built), dev)
-}
-
-fn selected_packages<'a>(
-    game_dir: &Path,
-    enabled: &'a BTreeSet<String>,
-    native: Option<&'a BTreeSet<String>>,
-    dev: &'a [PathBuf],
-) -> impl Iterator<Item = SelectedPackage> + 'a {
     let mut paths = find(&game_dir.join(DIR));
     paths.extend(find(&game_dir.join(NATIVE_DIR)));
     paths.retain(|path| !dev.contains(path));
     paths.extend(dev.iter().cloned());
     paths.into_iter().filter_map(move |path| {
         let package = Package::read(&path).ok()?;
-        let selected = if package.is_native() {
-            native.is_some_and(|ids| ids.contains(&package.manifest.id) || dev.contains(&path))
-        } else {
-            enabled.contains(&package.manifest.id) || dev.contains(&path)
-        };
+        let selected =
+            !package.is_native() && (enabled.contains(&package.manifest.id) || dev.contains(&path));
         selected.then_some(SelectedPackage { path, package })
     })
 }
@@ -124,34 +85,17 @@ mod tests {
     }
 
     #[test]
-    fn built_native_ids_and_content_toggles_apply_in_both_folders() {
+    fn content_toggles_apply_in_both_folders() {
         let home = Scratch::new();
-        // Deliberately put both kinds in the opposite folders too.
-        let built = home.package("horizon-mods", "compiled", true);
-        home.package("horizon-mods", "next_build", true);
+        let first = home.package("horizon-mods", "first", false);
+        let second = home.package("horizon-native-mods", "second", false);
         home.package("horizon-mods", "disabled", false);
-        let content = home.package("horizon-native-mods", "plain", false);
-        let native = home.package("horizon-native-mods", "other_compiled", true);
-        let source = home.package("workspace", "directory_compiled", true);
-        let directory = home.0.join("horizon-native-mods/source");
-        zip::ZipArchive::new(fs::File::open(source).unwrap())
-            .unwrap()
-            .extract(&directory)
-            .unwrap();
-        let enabled = BTreeSet::from(["next_build".into(), "plain".into()]);
-        let compiled = BTreeSet::from([
-            "compiled".into(),
-            "other_compiled".into(),
-            "directory_compiled".into(),
-        ]);
-        let selected: Vec<_> = packages(&home.0, &enabled, &compiled, &[])
+        home.package("horizon-native-mods", "also_disabled", false);
+        let enabled = BTreeSet::from(["first".into(), "second".into()]);
+        let selected: Vec<_> = content_packages(&home.0, &enabled, &[])
             .map(|p| p.path)
             .collect();
-        assert_eq!(selected, [built, native, content.clone(), directory]);
-        let rebuilt: Vec<_> = packages(&home.0, &enabled, &BTreeSet::new(), &[])
-            .map(|p| p.path)
-            .collect();
-        assert_eq!(rebuilt, [content]);
+        assert_eq!(selected, [first, second]);
     }
 
     #[test]
@@ -172,12 +116,12 @@ mod tests {
     fn development_paths_are_appended_once_and_invalid_packages_are_skipped() {
         let home = Scratch::new();
         let discovered = home.package("horizon-mods", "discovered", false);
-        let external = home.package("workspace", "external", true);
+        let external = home.package("workspace", "external", false);
         let invalid = home.0.join("horizon-mods/invalid.hmod");
         fs::write(&invalid, b"not a package").unwrap();
         let enabled = BTreeSet::from(["discovered".into(), "invalid".into()]);
         let dev = [discovered.clone(), external.clone(), invalid];
-        let selected: Vec<_> = packages(&home.0, &enabled, &BTreeSet::new(), &dev)
+        let selected: Vec<_> = content_packages(&home.0, &enabled, &dev)
             .map(|p| p.path)
             .collect();
         assert_eq!(selected, [discovered, external]);

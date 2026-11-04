@@ -12,7 +12,7 @@ impl BlockEntityTypeKey {
     }
 
     pub(crate) fn registered(id: &str) -> Option<Self> {
-        let types = crate::containers::block_entity_types::current()?;
+        let types = crate::block_entity_types::current()?;
         types.key(id).map(Self)
     }
 }
@@ -78,7 +78,7 @@ impl fmt::Display for BlockEntityTypeLookupError {
 impl std::error::Error for BlockEntityTypeLookupError {}
 
 pub(crate) fn validate_block_entity_type_keys(
-    types: &crate::containers::block_entity_types::BlockEntityTypes,
+    types: &crate::block_entity_types::BlockEntityTypes,
 ) -> Result<(), BlockEntityTypeLookupError> {
     let missing: Vec<_> = super::part_table::requested_block_entity_types()
         .iter()

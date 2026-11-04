@@ -128,7 +128,7 @@ impl VanillaTerrain {
         for (state, kind) in self.block_entity_types.iter_mut().enumerate() {
             let state = horizon_world::registry::BlockStateId(state as u32);
             let block = facts.get(state);
-            if let Some(declared) = crate::containers::block_entity_types::type_for(&block.name) {
+            if let Some(declared) = crate::block_entity_types::type_for(&block.name) {
                 *kind = Some(declared);
             } else if let Some(form) = block.sign_form() {
                 *kind = Some(form.block_entity_type());
