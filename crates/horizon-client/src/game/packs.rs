@@ -410,8 +410,10 @@ impl Game<'_> {
             .set_resource_root(self.options.resources.clone());
         self.maps.slots.forget();
         self.map_patches.clear();
-        // Kept mod block entities name the old atlas's sprites.
+        // Kept mod block entities name the old atlas's sprites, and their view distances the old
+        // registry's states.
         self.kept_block_entities.get_mut().clear();
+        self.mod_view_distances.take();
         // The atlas's sprites moved: the particle engine re-reads every rect
         // and the packs' sprite sets, or every particle draws a stale region.
         self.particles
