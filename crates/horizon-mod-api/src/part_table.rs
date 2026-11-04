@@ -1274,6 +1274,15 @@ pub mod tests {
         }
     }
 
+    /// Makes an oak fence refuse every connection, and a spruce fence accept glass.
+    struct FenceRule;
+    #[mod_api::horizon_part]
+    impl BlockPart for FenceRule {
+        fn fence_connects_to(&self, _: &dyn LevelHost, event: &mut FenceConnectsToEvent) {
+            event.connected = !event.connected;
+        }
+    }
+
     /// The block entity of type `doubler:press_entity`, held by block `test:press`: it ticks, and
     /// each tick adds a data slot.
     struct Press;
@@ -2748,6 +2757,21 @@ pub mod tests {
         }
         let mods: super::super::Mods =
             vec![ModEntry::new("leaver_test", Box::new(LeaverMod))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        mark_game_thread();
+    }
+
+    /// Install a fence rule on oak fences for real-game tests: it flips vanilla's answer.
+    pub fn fence_game_thread() {
+        struct FenceMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for FenceMod {
+            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+                r.block_part("minecraft:oak_fence", FenceRule);
+            }
+        }
+        let mods: super::super::Mods = vec![ModEntry::new("fence_test", Box::new(FenceMod))].into();
         super::super::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
