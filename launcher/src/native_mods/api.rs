@@ -324,10 +324,19 @@ mod tests {
     fn projects_refuse_a_game_dependency_and_need_the_mod_api() {
         let dir = fixture();
         for (dependencies, game) in [
-            ("[dependencies]\nhorizon-mod-api='0.1'\nhorizon-client='0.1'", Some("horizon-client")),
-            ("[dependencies.api]\npackage='horizon-mod-api'\nversion='0.1'\n[target.'cfg(unix)'.dependencies.game]\npackage='horizon-client'\nversion='0.1'", Some("game")),
+            (
+                "[dependencies]\nhorizon-mod-api='0.1'\nhorizon-client='0.1'",
+                Some("horizon-client"),
+            ),
+            (
+                "[dependencies.api]\npackage='horizon-mod-api'\nversion='0.1'\n[target.'cfg(unix)'.dependencies.game]\npackage='horizon-client'\nversion='0.1'",
+                Some("game"),
+            ),
             ("[dependencies]\nserde='1'", None),
-            ("[target.'cfg(unix)'.dependencies]\nhorizon-mod-api='0.1'", None),
+            (
+                "[target.'cfg(unix)'.dependencies]\nhorizon-mod-api='0.1'",
+                None,
+            ),
         ] {
             let text = format!("[package]\nname='example-mod'\nversion='1.0.0'\n{dependencies}\n");
             fs::write(dir.join("Cargo.toml"), text).unwrap();
@@ -338,7 +347,10 @@ mod tests {
                     matches!(&error, ProjectError::GameDependency { mod_id, key } if mod_id == "example" && key == game),
                     "{error}"
                 ),
-                None => assert!(matches!(&error, ProjectError::ApiDependency { .. }), "{error}"),
+                None => assert!(
+                    matches!(&error, ProjectError::ApiDependency { .. }),
+                    "{error}"
+                ),
             }
         }
         fs::remove_dir_all(dir).unwrap();
@@ -393,10 +405,13 @@ mod tests {
                 .lines()
                 .filter(|line| line.contains("BuiltMod {"))
                 .collect();
-            assert_eq!(inventory, &[
-                "    horizon_mods::runtime::BuiltMod { id: \"base\", version: \"1.2.3\", side: horizon_mods::Side::Both },",
-                "    horizon_mods::runtime::BuiltMod { id: \"extra\", version: \"2.0.0\", side: horizon_mods::Side::Client },",
-            ][..count]);
+            assert_eq!(
+                inventory,
+                &[
+                    "    horizon_mods::runtime::BuiltMod { id: \"base\", version: \"1.2.3\", side: horizon_mods::Side::Both },",
+                    "    horizon_mods::runtime::BuiltMod { id: \"extra\", version: \"2.0.0\", side: horizon_mods::Side::Client },",
+                ][..count]
+            );
         }
         fs::remove_dir_all(dir).unwrap();
     }
