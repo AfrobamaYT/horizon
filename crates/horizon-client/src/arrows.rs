@@ -323,6 +323,8 @@ pub struct ArrowScene<'a, 'r> {
     pub facts: &'a BlockFacts,
     pub collision: &'a BlockCollisionRegistry<'r>,
     pub fluids: &'a FluidResources,
+    /// The loop context of the side that ticks the arrow, for the movement hooks.
+    pub loop_context: &'a horizon_world::native_load_context::LoopContext,
     /// `Level.isRainingAt`.
     pub raining: &'a dyn Fn(BlockPos) -> bool,
     /// The `mob_griefing` and `tnt_explodes` game rules.
@@ -1431,7 +1433,7 @@ impl FluidInteractionWorld for Ticker<'_, '_, '_, '_> {
         f.camera_height_at(self, [p.x, p.y, p.z])
     }
     fn flow(&mut self, f: FluidState, p: BlockPos) -> Result<Vec3, Error> {
-        crate::motion::pushing_flow(self, f, p)
+        crate::motion::pushing_flow(self.scene.loop_context, self, f, p)
     }
 }
 impl EntityFluidTickWorld for Ticker<'_, '_, '_, '_> {

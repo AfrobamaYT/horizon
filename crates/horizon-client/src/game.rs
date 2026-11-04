@@ -4684,6 +4684,7 @@ impl Game<'_> {
                 self.res.facts(),
                 self.collision,
                 &self.res.motion().fluids,
+                &self.loop_context,
                 no_physics,
                 &nearby,
                 Some(self.border.geometry()),

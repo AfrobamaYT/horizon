@@ -6909,6 +6909,7 @@ impl Game<'_> {
                     &mut next_float,
                     border,
                     &self.res.motion().fluids,
+                    &self.loop_context,
                 );
                 // `tick` set `previous` to the stepped position: keep the
                 // pre-step one, as `xo` is in vanilla.
@@ -6943,6 +6944,7 @@ impl Game<'_> {
                 facts,
                 collision,
                 &self.res.motion().fluids,
+                &self.loop_context,
                 false,
                 // The server decides what an item rests on; this copy only moves between updates.
                 &[],

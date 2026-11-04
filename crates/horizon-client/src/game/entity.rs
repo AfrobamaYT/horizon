@@ -188,6 +188,7 @@ pub(super) trait Entity: EntityRules {
         &mut self,
         world: &horizon_client::world::World,
         fluids: &horizon_client::motion::FluidResources,
+        context: &horizon_world::native_load_context::LoopContext,
     ) -> (f64, f64) {
         if !self.is_pushed_by_fluid() {
             return (0.0, 0.0);
@@ -200,6 +201,7 @@ pub(super) trait Entity: EntityRules {
             self.velocity_mut(),
             world,
             fluids,
+            context,
         )
     }
     /// `BubbleColumnBlock.entityInside` through `applyEffectsFromBlocks`: a
@@ -312,12 +314,13 @@ pub(super) fn tick_item(
     facts: &horizon_client::blocks::BlockFacts,
     collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
     fluids: &horizon_client::motion::FluidResources,
+    context: &horizon_world::native_load_context::LoopContext,
     no_physics: bool,
     entity_boxes: &[Aabb],
     border: Option<&horizon_core::geometry::border::BorderGeometry>,
     splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
 ) -> bool {
-    let (water, _lava) = item.push_by_fluid(world, fluids);
+    let (water, _lava) = item.push_by_fluid(world, fluids, context);
     // `Entity.baseTick` splashes before the item moves. The first tick does not.
     item.water_entry(water > 0.0, item.ticks == 0, splash);
     let step = item.tick_move(
@@ -333,7 +336,7 @@ pub(super) fn tick_item(
     let alive = item.tick_settle(world, facts, no_physics, step);
     // `ItemEntity.tick` refreshes immersion after moving and splashes if that
     // move is what entered the water.
-    let (water, _) = item.push_by_fluid(world, fluids);
+    let (water, _) = item.push_by_fluid(world, fluids, context);
     item.water_entry(water > 0.0, false, splash);
     alive
 }
