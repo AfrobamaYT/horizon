@@ -753,6 +753,61 @@ impl From<&Text> for serde_json::Value {
     }
 }
 
+/// Text as it crosses to a wasm mod: its JSON component, and the current language's template
+/// for each key the component translates. Where no language is loaded (a wasm mod), the text
+/// is rebuilt with those, so it reads exactly as the game built it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextForm {
+    /// The component (`Text::component`).
+    pub component: Value,
+    /// Each translated key with its template in the current language; empty with no language.
+    pub translations: Vec<(String, String)>,
+}
+
+impl From<&Text> for TextForm {
+    fn from(text: &Text) -> Self {
+        fn keys<'a>(v: &'a Value, out: &mut Vec<&'a str>) {
+            match v {
+                Value::Object(o) => {
+                    if let Some(Value::String(key)) = o.get("translate") {
+                        out.push(key);
+                    }
+                    o.values().for_each(|v| keys(v, out));
+                }
+                Value::Array(items) => items.iter().for_each(|v| keys(v, out)),
+                _ => {}
+            }
+        }
+        let component = text.component();
+        // Most texts translate nothing: the language is asked only for the keys found.
+        let mut found = Vec::new();
+        keys(&component, &mut found);
+        let translations = match (found.is_empty(), lang::current()) {
+            (false, Some(language)) => found
+                .into_iter()
+                .filter_map(|key| Some((key.to_owned(), language.get(key)?.to_owned())))
+                .collect(),
+            _ => Vec::new(),
+        };
+        Self {
+            component,
+            translations,
+        }
+    }
+}
+
+/// Text from its form: rebuilt from the component in the current language, or, carried where
+/// no language is loaded, in the translations the form brought.
+impl From<TextForm> for Text {
+    fn from(form: TextForm) -> Self {
+        if form.translations.is_empty() || lang::current().is_some() {
+            return Text::from(form.component);
+        }
+        let language = lang::Language::of(lang::DEFAULT, form.translations);
+        lang::scoped(language, || Text::from(form.component)).0
+    }
+}
+
 /// Text from its JSON component, its translations left as their keys.
 impl From<serde_json::Value> for Text {
     fn from(component: serde_json::Value) -> Self {
@@ -763,6 +818,29 @@ impl From<serde_json::Value> for Text {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// A translated text crossing to where no language is loaded reads as the game built it:
+    /// the same spans, so the same `plain()`.
+    #[test]
+    fn a_text_form_reads_the_same_without_a_language() {
+        let language = lang::Language::of(
+            lang::DEFAULT,
+            [("chat.type.text".to_owned(), "<%s> %s".to_owned())],
+        );
+        let ((form, built), _) = lang::scoped(language, || {
+            let text = Text::translate(
+                "chat.type.text",
+                &[Text::literal("Steve"), Text::literal("hello")],
+            );
+            (TextForm::from(&text), text)
+        });
+        assert_eq!(built.plain(), "<Steve> hello");
+        // The component alone, rebuilt with no language, reads as its key.
+        assert_eq!(Text::from(form.component.clone()).plain(), "chat.type.text");
+        let crossed = Text::from(form);
+        assert_eq!(crossed, built);
+        assert_eq!(crossed.plain(), "<Steve> hello");
+    }
+
     #[test]
     fn click_events_serialize_and_inherit_as_one_style_field() {
         for (event, json) in [
