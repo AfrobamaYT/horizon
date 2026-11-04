@@ -348,14 +348,6 @@
   ],
   "hooks": [
     {
-      "name": "tick", "doc": "Once a tick, in every `Game`: the window's (in single player, on LAN\nand on servers), and the server's own (`native_window` is false\nthere: the single player server thread, a dedicated server).", "side": "both",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_tick",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "visuals", "doc": "The world frame's local visual sources. Push requests; Horizon validates\nand limits them before rendering. Called only while a world is visible.", "side": "client",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_visuals",

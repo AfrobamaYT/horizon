@@ -5898,9 +5898,7 @@ impl Game<'_> {
         // The rockets boosting this player tick after it, also while it waits
         // for chunks.
         self.tick_own_rockets();
-        // Client mods tick on any server, single player's own included.
         self.native_net.to_server = 0;
-        self.native_tick();
         // Far tiles the samplers asked for (`lod_net`).
         if let Some(r) = &self.remote {
             r.session.send_far_terrain();
@@ -6160,6 +6158,7 @@ impl Game<'_> {
                 assets: &self.pack.assets,
                 collision_binding: self.collision,
                 resources: self.motion,
+                loop_context: &self.loop_context,
                 tag_items: None,
                 block_registries: None,
             }
@@ -6177,6 +6176,7 @@ impl Game<'_> {
                     assets: &self.pack.assets,
                     collision_binding: self.collision,
                     resources: self.motion,
+                    loop_context: &self.loop_context,
                     tag_items: None,
                     block_registries: None,
                 }

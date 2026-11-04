@@ -2780,6 +2780,9 @@ pub fn breeding_experience(parent: &mut Mob, mob_drops: bool) -> Option<u32> {
 
 #[derive(Clone)]
 pub struct MobWorld<'a> {
+    /// What the motion value hooks are given: the loop context of the side that
+    /// ticks these mobs.
+    pub loop_context: &'a horizon_world::native_load_context::LoopContext,
     pub world: &'a World,
     pub registry: &'a horizon_world::registry::BlockRegistry,
     pub facts: &'a BlockFacts,

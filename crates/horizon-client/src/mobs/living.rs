@@ -17,7 +17,7 @@ use horizon_world::{
     block_landing::LandingEntityKind,
     entity_fluid::{CurrentAccumulator, CurrentTarget},
     fluid::{FluidKind, FluidState},
-    fluid_flow::{FluidFlowWorld, flow_at},
+    fluid_flow::FluidFlowWorld,
     movement_restitution::{RestitutionInput, RestitutionWorld, restitute_movement},
     registry::BlockStateId,
 };
@@ -246,7 +246,8 @@ impl MobWorld<'_> {
                         continue;
                     }
                     current.height = current.height.max(surface - base_y);
-                    let mut flow = flow_at(&mut scene, state, p).unwrap_or(Vec3::ZERO);
+                    let mut flow =
+                        crate::motion::pushing_flow(&mut scene, state, p).unwrap_or(Vec3::ZERO);
                     if current.height < 0.4 {
                         flow = flow.scale(current.height);
                     }
@@ -1244,28 +1245,33 @@ impl Mob {
         }
     }
     /// LivingEntity.getFrictionInfluencedSpeed.
-    fn friction_speed(&self, friction: f32) -> f32 {
+    fn friction_speed(&self, w: &MobWorld, friction: f32) -> f32 {
         if self.on_ground {
-            let speed = self.speed();
+            let speed = self.speed(w);
             if friction > 0.6 {
                 speed * (0.216_000_02 / (friction * friction * friction))
             } else {
                 speed
             }
         } else {
-            self.flying_speed()
+            self.flying_speed(w)
         }
     }
     /// `LivingEntity.getSpeed`, through the `living_speed` hook.
-    fn speed(&self) -> f32 {
+    fn speed(&self, w: &MobWorld) -> f32 {
         let mut speed = self.ai.speed;
-        crate::motion::native_living_speed(self.id, &self.kind.id, &mut speed);
+        crate::motion::native_living_speed(w.loop_context, self.id, &self.kind.id, &mut speed);
         speed
     }
     /// `LivingEntity.getFlyingSpeed`, through the `living_flying_speed` hook.
-    fn flying_speed(&self) -> f32 {
+    fn flying_speed(&self, w: &MobWorld) -> f32 {
         let mut speed = 0.02;
-        crate::motion::native_living_flying_speed(self.id, &self.kind.id, &mut speed);
+        crate::motion::native_living_flying_speed(
+            w.loop_context,
+            self.id,
+            &self.kind.id,
+            &mut speed,
+        );
         speed
     }
     /// `LivingEntity.getEffectiveGravity`: the gravity, floored to 0.01 while a
@@ -1419,7 +1425,7 @@ impl Mob {
         } else {
             1.0
         };
-        let speed = self.friction_speed(friction);
+        let speed = self.friction_speed(w, friction);
         self.move_relative(speed, input);
         // LivingEntity.handleRelativeFrictionAndCalculateMovement:
         // handleOnClimbable, the move, then the climb up a wall.
@@ -1495,7 +1501,7 @@ impl Mob {
             }
             if efficiency > 0.0 {
                 slow += (0.546_000_06 - slow) * efficiency;
-                speed += (self.speed() - speed) * efficiency;
+                speed += (self.speed(w) - speed) * efficiency;
             }
             self.move_relative(speed, input);
             self.do_move(w, level, events);
@@ -1626,11 +1632,11 @@ impl Mob {
             self.species(),
             super::Species::Slime | super::Species::MagmaCube | super::Species::SulfurCube
         ) {
-            super::cube::jump(self);
+            super::cube::jump(self, w);
             crate::motion::native_living_jump(self.id, &self.kind.id);
             return;
         }
-        let power = self.jump_power();
+        let power = self.jump_power(w.loop_context);
         if power > 1.0e-5 {
             self.velocity.y = f64::from(power).max(self.velocity.y);
             // A sprint jump (a dashing cat or ocelot) adds 0.2 along its yaw.
@@ -1651,9 +1657,9 @@ impl Mob {
         crate::motion::native_living_jump(self.id, &self.kind.id);
     }
     /// `LivingEntity.getJumpPower`, through the `living_jump_power` hook.
-    pub fn jump_power(&self) -> f32 {
+    pub fn jump_power(&self, context: &horizon_world::native_load_context::LoopContext) -> f32 {
         let mut power = self.kind.jump_strength as f32;
-        crate::motion::native_living_jump_power(self.id, &self.kind.id, &mut power);
+        crate::motion::native_living_jump_power(context, self.id, &self.kind.id, &mut power);
         power
     }
     /// LivingEntity.updateWalkAnimation (client calculateEntityAnimation).
@@ -2016,6 +2022,7 @@ mod tests {
             }
             let w = MobWorld {
                 teams: Default::default(),
+                loop_context: crate::test_resources::server_loop_context(),
                 world: &world,
                 registry,
                 facts: &facts,
@@ -2137,6 +2144,7 @@ mod tests {
         }
         let w = MobWorld {
             teams: Default::default(),
+            loop_context: crate::test_resources::server_loop_context(),
             world: &world,
             registry,
             facts: &facts,
