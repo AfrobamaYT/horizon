@@ -100,6 +100,7 @@ mod ender_entity_teleport;
 mod enderman_anger;
 mod energy_capability;
 mod entity_data;
+mod entity_fall_and_push;
 mod entity_handles;
 mod entity_inside;
 mod entity_invulnerable;
