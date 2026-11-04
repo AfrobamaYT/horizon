@@ -3,7 +3,7 @@
 //! writes what Horizon makes of every block state, drop, recipe and tag the
 //! NeoForge oracle exported.
 //!
-//! cargo run -p horizon-client --example mod_port_probe -- PREPARED WORK OUT.json [MOD...]
+//! cargo run -p horizon-client-lib --example mod_port_probe -- PREPARED WORK OUT.json [MOD...]
 //!
 //! WORK is a `horizon-port-pack` work folder: `oracle/facts.json` and
 //! `mods/<id>/carry/`. The root is built in `WORK/horizon-root`.
