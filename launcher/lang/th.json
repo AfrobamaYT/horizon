@@ -1101,5 +1101,6 @@
   "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml ไม่มีการพึ่งพา horizon-client",
   "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml ไม่มีชื่อแพ็กเกจ",
   "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client ร้องขอ {fields} บิลด์เซิร์ฟเวอร์ไม่มีส่วนติดต่อแบบกราฟิก ตัวเรียกใช้งานเป็นผู้กำหนดฟีเจอร์ของ horizon-client ให้ลบ features แล้วใช้ default-features = false หรือไม่ระบุการตั้งค่านี้",
-  "{mod}: {error}": "{mod}: {error}"
+  "{mod}: {error}": "{mod}: {error}",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "การค้นหาข้อมูลกำกับ JAR ล้มเหลว: {reason} วางไฟล์ต้นฉบับไว้ในพาธแคชต่อไปนี้ให้ตรงทุกตำแหน่ง แล้วลองอีกครั้ง:\n"
 }

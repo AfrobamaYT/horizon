@@ -1101,5 +1101,6 @@
   "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: v Cargo.toml chybí závislost na horizon-client.",
   "{mod}: Cargo.toml has no package name.": "{mod}: v Cargo.toml chybí název balíčku.",
   "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client požaduje {fields}. Serverová sestavení nemají grafické rozhraní; funkce horizon-client spravuje spouštěč. Odstraňte features a použijte default-features = false nebo tuto volbu vynechte.",
-  "{mod}: {error}": "{mod}: {error}"
+  "{mod}: {error}": "{mod}: {error}",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "Vyhledání metadat JAR selhalo: {reason}. Umístěte původní soubory přesně na tyto cesty v mezipaměti a zkuste to znovu:\n"
 }
