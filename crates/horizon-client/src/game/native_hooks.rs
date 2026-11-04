@@ -225,13 +225,9 @@ impl Game<'_> {
             self.native_screen_opening(current, new, &mut outcome);
         }
         if closes
-            && !matches!(
-                outcome,
-                Some(Answered {
-                    answer: ScreenOpening::Cancel,
-                    ..
-                })
-            )
+            && outcome
+                .as_ref()
+                .is_none_or(|a| a.answer != ScreenOpening::Cancel)
         {
             self.native_screen_closing(current);
         }
