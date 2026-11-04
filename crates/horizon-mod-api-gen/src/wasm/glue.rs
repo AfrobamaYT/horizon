@@ -273,7 +273,9 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
             }
         }
         Ty::Str(Str::Owned) => e.into(),
-        Ty::Str(Str::Static) => format!("super::intern({e})"),
+        // The game charges a mod's new names to its group; the guest keeps its own.
+        Ty::Str(Str::Static) if types.guest.get() => format!("super::intern({e})"),
+        Ty::Str(Str::Static) => format!("super::intern({e})?"),
         Ty::Str(_) => format!("{e}.into()"),
         Ty::List(item, kind) => {
             let vec = format!(

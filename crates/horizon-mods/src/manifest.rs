@@ -380,19 +380,22 @@ impl Package {
             .manifest
             .wasm
             .ok_or(WasmError::Undeclared.to_string())?;
-        let bytes = if path.is_dir() {
-            std::fs::read(path.join(WASM)).map_err(|e| format!("{WASM}: {e}"))?
+        // Read at most one byte past the cap, so an oversized file is refused unread.
+        let mut bytes = Vec::new();
+        let read = if path.is_dir() {
+            std::fs::File::open(path.join(WASM))
+                .map_err(|e| format!("{WASM}: {e}"))?
+                .take(MAX_WASM + 1)
+                .read_to_end(&mut bytes)
         } else {
             let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
             let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-            let mut bytes = Vec::new();
             zip.by_name(WASM)
                 .map_err(|_| WasmError::Missing.to_string())?
                 .take(MAX_WASM + 1)
                 .read_to_end(&mut bytes)
-                .map_err(|e| format!("{WASM}: {e}"))?;
-            bytes
         };
+        read.map_err(|e| format!("{WASM}: {e}"))?;
         wasm.check(&bytes).map_err(|e| e.to_string())?;
         Ok(bytes)
     }

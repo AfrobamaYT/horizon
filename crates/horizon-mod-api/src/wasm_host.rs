@@ -8,7 +8,7 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
 use wasmtime::Store;
@@ -73,6 +73,9 @@ pub struct Budgets {
     pub init: u64,
     /// The most memory one group may grow to, in bytes.
     pub memory: usize,
+    /// The most bytes of new names (a `&'static str` the game keeps for good) one group may
+    /// give the game, beside its memory.
+    pub names: usize,
 }
 
 impl Default for Budgets {
@@ -81,6 +84,7 @@ impl Default for Budgets {
             call: 50_000_000,
             init: 4_000_000_000,
             memory: 256 << 20,
+            names: 1 << 20,
         }
     }
 }
@@ -115,19 +119,25 @@ fn array<T, const N: usize>(items: Vec<T>) -> Result<[T; N], Refused> {
     items.try_into().map_err(|_| Refused)
 }
 
-/// The one `&'static str` for each distinct string a mod names.
-fn intern(value: String) -> &'static str {
+/// The one `&'static str` for each distinct string a mod names. The game keeps each for good,
+/// so a new one is charged to the calling mod's group, which is refused past `Budgets::names`.
+fn intern(value: String) -> Result<&'static str, Refused> {
     static INTERNED: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
     let mut interned = INTERNED.lock().unwrap_or_else(|e| e.into_inner());
     let set = interned.get_or_insert_with(HashSet::new);
-    match set.get(value.as_str()) {
-        Some(existing) => existing,
-        None => {
-            let leaked: &'static str = Box::leak(value.into_boxed_str());
-            set.insert(leaked);
-            leaked
-        }
+    if let Some(existing) = set.get(value.as_str()) {
+        return Ok(existing);
     }
+    let module = CALLER.take().ok_or(Refused)?;
+    let group = &module.group;
+    let charged = group.names.fetch_add(value.len(), Ordering::Relaxed) + value.len();
+    CALLER.set(Some(module.clone()));
+    if charged > group.budgets.names {
+        return Err(Refused);
+    }
+    let leaked: &'static str = Box::leak(value.into_boxed_str());
+    set.insert(leaked);
+    Ok(leaked)
 }
 
 /// One call's storage for the values its borrowed arguments point into, as on the guest.
@@ -181,6 +191,8 @@ pub struct Group {
     running: AtomicU64,
     poisoned: AtomicBool,
     budgets: Budgets,
+    /// The bytes of new names it gave the game, against `budgets.names`.
+    names: AtomicUsize,
     wait: Duration,
 }
 
@@ -228,6 +240,7 @@ impl Group {
             running: AtomicU64::new(0),
             poisoned: AtomicBool::new(false),
             budgets,
+            names: AtomicUsize::new(0),
             wait,
         }
     }

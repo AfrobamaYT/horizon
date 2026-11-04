@@ -41,51 +41,50 @@ pub struct DamageContainer {
     inflicted: f32,
     health_damage: f32,
 }
-/// A hit's damage sequence as its values, in field order: the form it crosses into a wasm mod
-/// as.
-pub type DamageValues = (f32, f32, f32, f32, i32, [f32; 6], f32, f32, f32);
+/// A hit's damage sequence as plain values, field for field: the form it crosses into a wasm
+/// mod as.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DamageValues {
+    pub original: f32,
+    pub new_damage: f32,
+    pub blocked: f32,
+    pub shield_damage: f32,
+    pub post_attack_invulnerability_ticks: i32,
+    pub reductions: [f32; 6],
+    pub entered_pre: f32,
+    pub inflicted: f32,
+    pub health_damage: f32,
+}
 
 impl From<&DamageContainer> for DamageValues {
     fn from(d: &DamageContainer) -> Self {
-        (
-            d.original,
-            d.new_damage,
-            d.blocked,
-            d.shield_damage,
-            d.post_attack_invulnerability_ticks,
-            d.reductions,
-            d.entered_pre,
-            d.inflicted,
-            d.health_damage,
-        )
+        Self {
+            original: d.original,
+            new_damage: d.new_damage,
+            blocked: d.blocked,
+            shield_damage: d.shield_damage,
+            post_attack_invulnerability_ticks: d.post_attack_invulnerability_ticks,
+            reductions: d.reductions,
+            entered_pre: d.entered_pre,
+            inflicted: d.inflicted,
+            health_damage: d.health_damage,
+        }
     }
 }
 
 /// A damage sequence from its values (the form a wasm mod gives it back in).
 impl From<DamageValues> for DamageContainer {
-    fn from(
-        (
-            original,
-            new_damage,
-            blocked,
-            shield_damage,
-            post_attack_invulnerability_ticks,
-            reductions,
-            entered_pre,
-            inflicted,
-            health_damage,
-        ): DamageValues,
-    ) -> Self {
+    fn from(v: DamageValues) -> Self {
         Self {
-            original,
-            new_damage,
-            blocked,
-            shield_damage,
-            post_attack_invulnerability_ticks,
-            reductions,
-            entered_pre,
-            inflicted,
-            health_damage,
+            original: v.original,
+            new_damage: v.new_damage,
+            blocked: v.blocked,
+            shield_damage: v.shield_damage,
+            post_attack_invulnerability_ticks: v.post_attack_invulnerability_ticks,
+            reductions: v.reductions,
+            entered_pre: v.entered_pre,
+            inflicted: v.inflicted,
+            health_damage: v.health_damage,
         }
     }
 }

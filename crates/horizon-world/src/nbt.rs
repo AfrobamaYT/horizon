@@ -870,10 +870,15 @@ impl Snbt<'_> {
     }
 }
 
-/// A tag as its network NBT bytes (`write_network`); a tag past the default limits writes none.
+/// A tag as its network NBT bytes (`write_network`), the form it crosses to a wasm mod in. A tag
+/// past the default limits writes none, which the other side refuses: the reason is logged
+/// here, where it is known.
 impl From<&Tag> for Vec<u8> {
     fn from(tag: &Tag) -> Self {
-        write_network(tag, Limits::default()).unwrap_or_default()
+        write_network(tag, Limits::default()).unwrap_or_else(|e| {
+            log::error!("Horizon: an NBT tag can't cross to or from a wasm mod: {e}");
+            Vec::new()
+        })
     }
 }
 

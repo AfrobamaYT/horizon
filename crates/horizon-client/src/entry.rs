@@ -140,15 +140,15 @@ pub fn main_with(
             mod_api::dispatch_item_stacked_on_other(&context, event, canceled);
         },
         living_heal: |context, entity, amount, cancel| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_heal(&context, entity, amount, cancel);
         },
         living_breathe: |context, entity, kind, can_breathe, consume, refill| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_breathe(&context, entity, kind, can_breathe, consume, refill);
         },
         farmland_trample: |context, entity, pos, state, distance, cancel| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_farmland_trample(&context, entity, pos, state, distance, cancel);
         },
         has_mods: || !mod_api::__private::mods().is_empty(),
@@ -161,7 +161,7 @@ pub fn main_with(
             mod_api::dispatch_player_tab_list_name_format(&context, player, name, display_name);
         },
         living_drown: |context, entity, kind, is_drowning, damage_amount, bubble_count, cancel| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_drown(
                 &context,
                 entity,
@@ -173,30 +173,30 @@ pub fn main_with(
             );
         },
         living_fall: |context, entity, kind, distance, multiplier, cancel| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_fall(&context, entity, kind, distance, multiplier, cancel);
         },
         living_jump: |context, entity, kind| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_jump(&context, entity, kind);
         },
         living_jump_power: |context, entity, kind, power| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_jump_power(&context, entity, kind, power);
         },
         living_speed: |context, entity, kind, speed| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_speed(&context, entity, kind, speed);
         },
         living_flying_speed: |context, entity, kind, speed| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_flying_speed(&context, entity, kind, speed);
         },
         player_stays_on_ground_surface: |entity, staying| {
             mod_api::dispatch_player_stays_on_ground_surface(entity, staying);
         },
         ender_entity_teleport: |context, entity, kind, from, target, cancel| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_ender_entity_teleport(&context, entity, kind, from, target, cancel);
         },
         fluid_flow: |fluid, pos, flow| {
