@@ -2206,7 +2206,7 @@ impl Game<'_> {
         let display = horizon_client::item_tooltip::TooltipDisplay::for_stack(stack);
         let mut lines = Vec::new();
         // `getTooltipLines`' own branch: a tooltip the stack doesn't hide.
-        let shown = !nested && display.name_visible(self.screen == Screen::Creative);
+        let shown = !nested && display.name_visible(creative);
         if shown {
             let name =
                 horizon_client::item_tooltip::styled_name(stack, || self.stack_hover_name(stack));
@@ -2492,12 +2492,9 @@ impl Game<'_> {
         }
         // SuspiciousStewEffects.addToTooltip: the creative flag, which vanilla
         // sets for the creative screen's own slots, as `name_visible` above.
-        for (text, c) in horizon_client::item_tooltip::stew_lines(
-            stack,
-            !nested && self.screen == Screen::Creative,
-            &display,
-            &translate,
-        ) {
+        for (text, c) in
+            horizon_client::item_tooltip::stew_lines(stack, creative, &display, &translate)
+        {
             push(&mut lines, text, c);
         }
         // BlockItemStateProperties.addToTooltip.
@@ -3178,12 +3175,11 @@ mod tests {
             }
             fn item_tooltip(&self, _: &dyn ClientHost, event: &mut ItemTooltipEvent<'_>) {
                 let plain: Vec<String> = event.lines.iter().map(|(t, _)| t.plain()).collect();
-                assert_eq!(
-                    plain,
-                    ["Stick", "part", "minecraft:stick", "14 component(s)"]
-                );
-                assert!(event.advanced && !event.creative);
-                assert!(event.display.shows("minecraft:lore"));
+                assert_eq!(plain[..3], ["Stick", "part", "minecraft:stick"]);
+                assert!(event.advanced);
+                // Only the hidden stack is asked from a creative slot, where its
+                // display hides every component's lines.
+                assert_eq!(event.display.shows("minecraft:lore"), !event.creative);
                 // Every line is the mod's to change: drop the count, add one at the end.
                 event.lines.pop();
                 event.lines.push((Text::literal("event"), u32::MAX));
@@ -3224,6 +3220,13 @@ mod tests {
                         .any(|l| l == "Stick" || l == "part" || l == "event"),
                     "{lines:?}"
                 );
+                // A creative tab's own slot (`TooltipFlag.isCreative`) shows it anyway.
+                let creative: Vec<String> = game
+                    .stack_tooltip_lines(&hidden, false, true)
+                    .iter()
+                    .map(|(text, _)| text.plain())
+                    .collect();
+                assert_eq!(creative[..2], ["Stick", "part"]);
             });
         });
     }
