@@ -506,7 +506,8 @@ impl Goal for LeaveBlock {
             && bf.full_collision
             && free
         {
-            cx.events.push(MobEvent::SetBlock {
+            cx.events.push(MobEvent::PlaceBlock {
+                mob: m.id,
                 pos: [x, y, z],
                 state: carried,
             });

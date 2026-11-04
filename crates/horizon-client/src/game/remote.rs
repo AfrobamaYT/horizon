@@ -49,6 +49,7 @@ use horizon_world::{
     registry::BlockStateId,
     stepped_interpolation::{Path, PosRot, Start, SteppedInterpolation},
 };
+use mod_api::InteractionKey;
 use std::{
     collections::{HashMap, VecDeque},
     sync::Arc,
@@ -814,19 +815,22 @@ impl Game<'_> {
         self.client_logging_out();
         if let Err(error) = self.join_server(address, name, None, cookies, lan) {
             log::warn!("Horizon: could not join server: {error}");
-            if self.title.is_none() {
-                self.title = Some(
-                    horizon_client::title::Title::new(
+            let skip = self.settings.file.bool("skipMultiplayerWarning");
+            match &mut self.title {
+                Some(title) => {
+                    title.skip_multiplayer_warning = skip;
+                    title.failed(error);
+                }
+                None => {
+                    let mut title = horizon_client::title::Title::new(
                         std::env::current_dir()?.join("saves"),
                         &self.options.resources,
                     )
-                    .with_user(|| self.options.player_name()),
-                );
-            }
-            let skip = self.settings.file.bool("skipMultiplayerWarning");
-            if let Some(title) = &mut self.title {
-                title.skip_multiplayer_warning = skip;
-                title.failed(error);
+                    .with_user(|| self.options.player_name());
+                    title.skip_multiplayer_warning = skip;
+                    title.failed(error);
+                    self.show_title(title);
+                }
             }
             self.capture(false);
         }
@@ -969,7 +973,7 @@ impl Game<'_> {
         self.ui.registries.permission = 0;
         self.ui.chat.clear();
         self.set_screen(Screen::Playing);
-        self.title = None;
+        self.hide_title();
         self.dim = Dim::Overworld;
         self.clear_lod();
         self.pending_uploads.clear();
@@ -1241,7 +1245,7 @@ impl Game<'_> {
         title.last_server = self.settings.file.string("lastServer");
         title.skip_multiplayer_warning = self.settings.file.bool("skipMultiplayerWarning");
         if single_player && reason.is_none() {
-            self.title = Some(title);
+            self.show_title(title);
             self.capture(false);
             return Ok(());
         }
@@ -1252,7 +1256,7 @@ impl Game<'_> {
             },
             None => horizon_client::multiplayer::Screen::list(&saves),
         });
-        self.title = Some(title);
+        self.show_title(title);
         self.capture(false);
         Ok(())
     }
@@ -3155,6 +3159,7 @@ impl Game<'_> {
                 if let Err(e) = self.resolve_parts() {
                     log::warn!("Horizon: {e}");
                 }
+                self.native_refresh_render_visibility();
                 self.test_highlights.clear();
                 self.forget_synced_recipes();
                 self.level.hardcore = p.hardcore;
@@ -7445,7 +7450,7 @@ impl Game<'_> {
         }
         // InputEvent.InteractionKeyMappingTriggered for the main hand: a cancel
         // ends the whole click, the off hand gets no turn.
-        if let Some(swing) = self.native_interaction(1, Hand::Main) {
+        if let Some(swing) = self.native_interaction(InteractionKey::Use, Hand::Main) {
             if swing {
                 self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
             }
@@ -8577,7 +8582,7 @@ impl Game<'_> {
             return;
         }
         // The off hand's turn: the event again, then the entity or the block.
-        if let Some(swing) = self.native_interaction(1, Hand::Off) {
+        if let Some(swing) = self.native_interaction(InteractionKey::Use, Hand::Off) {
             if swing {
                 self.swing_hand(Hand::Off, SwingAnimation::DEFAULT);
             }
@@ -8889,7 +8894,7 @@ impl Game<'_> {
         }
         // InputEvent.InteractionKeyMappingTriggered, after the checks that stop
         // an attack: a cancel ends it there, swinging unless the mod said not to.
-        if let Some(swing) = self.native_interaction(0, Hand::Main) {
+        if let Some(swing) = self.native_interaction(InteractionKey::Attack, Hand::Main) {
             if swing {
                 let animation = spear.map_or(SwingAnimation::DEFAULT, |k| k.attack_animation());
                 self.swing_hand(Hand::Main, animation);
@@ -9120,7 +9125,7 @@ impl Game<'_> {
             let canceled = if air {
                 None
             } else {
-                self.native_interaction(0, Hand::Main)
+                self.native_interaction(InteractionKey::Attack, Hand::Main)
             };
             if let Some(swing) = canceled {
                 if swing {
@@ -10638,7 +10643,11 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
         // for (`handlePickItemFromEntity`), else the block.
         if let Some(entity) = self.0.pick_entity_hit() {
             if let Some(id) = entity {
-                if self.0.native_interaction(2, Hand::Main).is_some() {
+                if self
+                    .0
+                    .native_interaction(InteractionKey::PickBlock, Hand::Main)
+                    .is_some()
+                {
                     return;
                 }
                 self.0.send(S::PickItemFromEntity(play::PickItemFromEntity {
@@ -10647,7 +10656,11 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
                 }));
             }
         } else if let Some(hit) = self.0.pick() {
-            if self.0.native_interaction(2, Hand::Main).is_some() {
+            if self
+                .0
+                .native_interaction(InteractionKey::PickBlock, Hand::Main)
+                .is_some()
+            {
                 return;
             }
             self.0.send(S::PickItemFromBlock(play::PickItemFromBlock {
@@ -12281,10 +12294,11 @@ mod tests {
         let none = &horizon_world::loot::PackOverlay::NONE;
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = Items::catalog(&root, none, &defaults).unwrap();
-        let recipes = Recipes::load(&root, &items, none).unwrap();
+        let recipes = Recipes::load(&root, &items, none, &crate::game::test_server_load()).unwrap();
         let brewing = Brewing::load(&root, &items, none);
         let banners = Banners::load(&root, &defaults);
-        let station_recipes = StationRecipes::load(&root, &items, none);
+        let station_recipes =
+            StationRecipes::load(&root, &items, none, &crate::game::test_server_load());
         let enchantments = Enchantments::default();
         let names = Names::default();
         let env = Env {

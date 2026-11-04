@@ -2,6 +2,7 @@
 #[allow(unused_imports)]
 use crate::*;
 #[derive(Clone, Debug)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct SpawnEntry {
     pub entity: String,
     pub weight: u32,
@@ -15,6 +16,7 @@ pub struct SpawnEntry {
 /// noise colours replace it), leaves and vines, dry foliage (leaf litter) and
 /// water.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct BiomeColors {
     pub grass: u32,
     pub foliage: u32,

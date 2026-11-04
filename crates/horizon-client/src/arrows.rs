@@ -1067,15 +1067,7 @@ impl Ticker<'_, '_, '_, '_> {
         let (fire_ticks, extinguished) =
             scene.apply_block_effects(from, to, self.st.fire_ticks, |state, p, precise| {
                 let name = &*scene.facts.get(state).name;
-                crate::block_contact::emit(crate::block_contact::Event::Inside(
-                    crate::block_contact::Contact {
-                        entity: self.p.id as i32,
-                        kind: self.p.kind.id(),
-                        block: name,
-                        state,
-                        position: p,
-                    },
-                ));
+                crate::block_contact::inside(self.p.id as i32, state, p, precise);
                 if name == "minecraft:bubble_column" && precise {
                     self.bubble_column(state, p);
                 }

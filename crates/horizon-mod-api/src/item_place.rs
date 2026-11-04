@@ -127,6 +127,7 @@ pub trait PlaceProvider: Send + Sync + 'static {
 
 /// An item capability: its name, the handler trait `T` it answers with, and the game's own
 /// provider, if the game has one.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ItemCapabilityKey<T: ?Sized + 'static> {
     /// The capability's name.
     pub name: &'static str,

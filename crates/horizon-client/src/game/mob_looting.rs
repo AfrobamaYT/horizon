@@ -132,7 +132,7 @@ impl Game<'_> {
         if species == Species::Drowned && &*current == "minecraft:nautilus_shell" {
             return false;
         }
-        let (armor, toughness, attack) = self.attributes(m, &stack.item, slot);
+        let (armor, toughness, attack) = self.attributes(m, stack, slot);
         let new = Facts {
             armor,
             armor_toughness: toughness,
@@ -144,7 +144,7 @@ impl Game<'_> {
                 .enchantments
                 .prevents_armor_change(stack),
         };
-        let (armor, toughness, attack) = self.attributes(m, &current, slot);
+        let (armor, toughness, attack) = self.attributes(m, &worn_stack, slot);
         let worn = Facts {
             armor,
             armor_toughness: toughness,
@@ -165,14 +165,11 @@ impl Game<'_> {
         equip::can_replace_current_item(&new, Some(&worn), slot, preferred)
     }
 
-    /// `Mob.getApproximateAttributeWith` for the item `id` in `slot`: each
+    /// `Mob.getApproximateAttributeWith` for `stack` in `slot`: each
     /// attribute starts from the mob's own value. (armour, toughness, damage)
-    fn attributes(&self, m: &Mob, id: &str, slot: Slot) -> (f64, f64, f64) {
-        let empty: &[(String, String, f64, String, String)] = &[];
-        let modifiers = self
-            .items()
-            .get(id)
-            .map_or(empty, |i| i.modifiers.as_slice());
+    fn attributes(&self, m: &Mob, stack: &ItemStack, slot: Slot) -> (f64, f64, f64) {
+        let modifiers = horizon_client::item_attributes::attribute_modifiers(stack, self.items());
+        let modifiers = &*modifiers;
         (
             equip::attribute_with(modifiers, "minecraft:armor", f64::from(m.kind.armor), slot),
             equip::attribute_with(

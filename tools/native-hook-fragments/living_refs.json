@@ -16,6 +16,26 @@
       "receiver": "living"
     },
     {
+      "name": "living_add_attribute_modifier", "side": "server",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_add_attribute_modifier",
+      "receiver": "living"
+    },
+    {
+      "name": "living_replace_attribute_modifier", "side": "server",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_replace_attribute_modifier",
+      "receiver": "living"
+    },
+    {
+      "name": "living_remove_attribute_modifier", "side": "server",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_remove_attribute_modifier",
+      "receiver": "living"
+    },
+    {
+      "name": "living_set_attribute_base", "side": "server",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_set_attribute_base",
+      "receiver": "living"
+    },
+    {
       "name": "living_equipment", "side": "both",
       "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_equipment",
       "receiver": "living"
@@ -29,6 +49,12 @@
       "name": "living_set_equipment", "side": "server",
       "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_set_equipment",
       "receiver": "living"
+    },
+    {
+      "name": "living_hurt_and_break", "side": "server",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_hurt_and_break",
+      "receiver": "living",
+      "doc": "Changes the durability of an equipped stack by a signed amount. Negative amounts repair. Returns the pre-shrink broken stack only if it broke; returns None for no break or an unavailable entity or slot. Creative players do not consume durability."
     },
     {
       "name": "living_drop", "side": "server",

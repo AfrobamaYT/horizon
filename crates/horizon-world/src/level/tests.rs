@@ -206,6 +206,7 @@ impl LevelAccess for TestLevel {
         &self,
         _piston: BlockPos,
         direction: Direction,
+        _extending: bool,
         push: &[BlockPos],
         destroy: &[BlockPos],
     ) -> bool {

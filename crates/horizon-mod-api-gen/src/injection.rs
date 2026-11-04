@@ -10,6 +10,8 @@ pub struct TraitInjection {
     event: syn::Ident,
     parameters: Vec<(syn::Ident, syn::Type)>,
     contract: TraitContract,
+    /// What the injection is, for the docs the generated method and event carry.
+    origin: String,
 }
 
 /// What a trait method may do with its event.
@@ -33,6 +35,7 @@ impl TraitInjection {
     /// Prepare a mod-owned trait method from parsed bindings and its return contract.
     pub fn new(
         name: syn::Ident,
+        origin: String,
         parameters: Vec<(syn::Ident, syn::Type)>,
         contract: TraitContract,
     ) -> Self {
@@ -53,6 +56,7 @@ impl TraitInjection {
             event,
             parameters,
             contract,
+            origin,
         }
     }
 
@@ -145,7 +149,9 @@ impl TraitInjection {
             (true, false) => quote!(<'_>),
             (false, false) => quote!(),
         };
-        quote!(fn #name(&self, _: &mut #event #elided) #output { #default }).to_string()
+        let doc = format!(" {}", self.origin);
+        quote!(#[doc = #doc] fn #name(&self, _: &mut #event #elided) #output { #default })
+            .to_string()
     }
 
     /// Which lifetimes the event takes, its fields' types and which of them are scalars.
@@ -182,10 +188,14 @@ impl TraitInjection {
             (false, false) => quote!(),
         };
         let names = self.parameters.iter().map(|(n, _)| n);
-        let doc = format!(" What [`Hooks::{name}`] is told.");
+        let field_docs = self
+            .parameters
+            .iter()
+            .map(|(n, _)| format!(" The `{n}` binding. {}", self.origin));
+        let doc = format!(" What [`Hooks::{name}`] is told. {}", self.origin);
         quote! {
             #[doc = #doc]
-            pub struct #event #generics { #(pub #names: #types),* }
+            pub struct #event #generics { #(#[doc = #field_docs] pub #names: #types),* }
         }
         .to_string()
     }
