@@ -6,12 +6,13 @@
 
 use crate::{
     admin::{self, Action},
-    backup,
-    config::Config,
-    engine,
+    backup, engine,
     http::{self, Request, Response},
-    panel, settings,
-    update::{self, Install},
+    panel, settings, update,
+};
+use horizon_server_launch::{
+    Install,
+    config::{self, Config},
 };
 use serde_json::{Value, json};
 use std::{
@@ -589,7 +590,7 @@ pub fn start(shared: Arc<Shared>) -> Result<Endpoint, String> {
         "" => random_token(),
         token => token.to_owned(),
     };
-    let public = !crate::config::private(address.ip());
+    let public = !config::private(address.ip());
     if public {
         crate::supervisor::note(
             &shared,
@@ -974,7 +975,7 @@ mod tests {
     fn the_api_wants_its_token() {
         let dir = std::env::temp_dir().join(format!("horizon-server-api-{}", std::process::id()));
         std::fs::create_dir_all(dir.join(".horizon")).unwrap();
-        std::fs::write(dir.join(crate::config::FILE), crate::config::TEMPLATE).unwrap();
+        std::fs::write(dir.join(config::FILE), config::TEMPLATE).unwrap();
         let shared = Shared::new(&dir);
         let _endpoint = start(shared.clone()).unwrap();
         let v: Value =
@@ -1033,13 +1034,13 @@ mod tests {
             .unwrap()
             .port();
         let token = "a-token-for-the-discord-bot";
-        let toml = crate::config::TEMPLATE
+        let toml = config::TEMPLATE
             .replace(
                 "[api]\nbind = \"\"",
                 &format!("[api]\nbind = \"127.0.0.1:{port}\""),
             )
             .replace("token = \"\"", &format!("token = \"{token}\""));
-        std::fs::write(dir.join(crate::config::FILE), toml).unwrap();
+        std::fs::write(dir.join(config::FILE), toml).unwrap();
         let _endpoint = start(Shared::new(&dir)).unwrap();
         let address: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
         let get = |token: &str| {
@@ -1064,9 +1065,9 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("horizon-server-api-admin-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("backups")).unwrap();
-        let toml = crate::config::TEMPLATE
-            .replace("token = \"\"", "token = \"a-token-for-the-discord-bot\"");
-        std::fs::write(dir.join(crate::config::FILE), toml).unwrap();
+        let toml =
+            config::TEMPLATE.replace("token = \"\"", "token = \"a-token-for-the-discord-bot\"");
+        std::fs::write(dir.join(config::FILE), toml).unwrap();
         std::fs::write(
             dir.join("backups/2026-10-31T12-00-00Z-manual.zip"),
             b"PK\x05\x06zip",
@@ -1108,7 +1109,7 @@ mod tests {
             outcome["restart"],
             json!(["server.max_players", "world.difficulty"])
         );
-        let saved = crate::config::Config::load(&dir).unwrap();
+        let saved = config::Config::load(&dir).unwrap();
         assert_eq!(
             (saved.world.difficulty.as_str(), saved.server.max_players),
             ("hard", 50)
@@ -1134,10 +1135,7 @@ mod tests {
             json!({ "changes": { "world.difficulty": "brutal" } }),
         );
         assert_eq!(status, 400);
-        assert_eq!(
-            crate::config::Config::load(&dir).unwrap().world.difficulty,
-            "hard"
-        );
+        assert_eq!(config::Config::load(&dir).unwrap().world.difficulty, "hard");
 
         let name = "2026-10-31T12-00-00Z-manual.zip";
         let response = route(
@@ -1179,8 +1177,8 @@ mod tests {
             std::env::temp_dir().join(format!("horizon-server-api-stopped-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(crate::config::FILE), crate::config::TEMPLATE).unwrap();
-        crate::config::update(&dir, "server", "online_mode", toml::Value::Boolean(false)).unwrap();
+        std::fs::write(dir.join(config::FILE), config::TEMPLATE).unwrap();
+        config::update(&dir, "server", "online_mode", toml::Value::Boolean(false)).unwrap();
         let shared = Shared::with_install(&dir, None);
         shared.set_phase(Phase::Stopped);
         let request = |method: &str, path: &str, body: &[u8]| {

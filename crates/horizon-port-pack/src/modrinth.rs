@@ -77,10 +77,12 @@ impl Cache {
     }
 }
 
-/// The exact file named by a validated manifest jar, if Modrinth has it.
-pub fn jar_url(jar: &horizon_mods::manifest::JarRef) -> Result<Option<String>, String> {
-    let found = version_files([jar.sha512()], "sha512")?;
-    jar_file_url(found, jar.sha512())
+/// Resolve the missing manifest jars in one exact-SHA-512 request, after download consent.
+pub fn jar_urls(
+    jars: &[&horizon_mods::manifest::JarRef],
+) -> Result<BTreeMap<String, String>, String> {
+    let hashes: Vec<_> = jars.iter().map(|jar| jar.sha512()).collect();
+    jar_file_urls(version_files(hashes, "sha512")?)
 }
 
 fn version_files(hashes: impl Serialize, algorithm: &str) -> Result<Value, String> {
@@ -90,7 +92,7 @@ fn version_files(hashes: impl Serialize, algorithm: &str) -> Result<Value, Strin
     )
 }
 
-fn jar_file_url(found: Value, hash: &str) -> Result<Option<String>, String> {
+fn jar_file_urls(found: Value) -> Result<BTreeMap<String, String>, String> {
     #[derive(Deserialize)]
     struct Version {
         files: Vec<File>,
@@ -100,18 +102,22 @@ fn jar_file_url(found: Value, hash: &str) -> Result<Option<String>, String> {
         hashes: BTreeMap<String, String>,
         url: String,
     }
-    let mut versions: BTreeMap<String, Version> =
+    let versions: BTreeMap<String, Version> =
         serde_json::from_value(found).map_err(|e| format!("Modrinth version files: {e}"))?;
-    Ok(versions.remove(hash).and_then(|v| {
-        v.files
-            .into_iter()
-            .find(|f| {
-                f.hashes
-                    .get("sha512")
-                    .is_some_and(|h| h.eq_ignore_ascii_case(hash))
-            })
-            .map(|f| f.url)
-    }))
+    Ok(versions
+        .into_iter()
+        .filter_map(|(hash, version)| {
+            version
+                .files
+                .into_iter()
+                .find(|file| {
+                    file.hashes
+                        .get("sha512")
+                        .is_some_and(|actual| actual.eq_ignore_ascii_case(&hash))
+                })
+                .map(|file| (hash, file.url))
+        })
+        .collect())
 }
 
 fn post(url: &str, body: &Value) -> Result<Value, String> {
@@ -157,26 +163,30 @@ mod tests {
     #[test]
     fn exact_hash_selects_the_file_not_the_versions_primary_jar() {
         let hash = "a".repeat(128);
-        let found = serde_json::json!({hash.clone(): {"files": [
-            {"primary": true, "url": "wrong.jar", "hashes": {"sha512": "b".repeat(128)}},
-            {"url": "exact.jar", "hashes": {"sha512": hash}}
-        ]}});
+        let other = "b".repeat(128);
+        let found = serde_json::json!({
+            hash.clone(): {"files": [
+                {"primary": true, "url": "wrong.jar", "hashes": {"sha512": other}},
+                {"url": "exact.jar", "hashes": {"sha512": hash}}
+            ]},
+            other.clone(): {"files": [
+                {"url": "other.jar", "hashes": {"sha512": other.to_uppercase()}}
+            ]}
+        });
         assert_eq!(
-            jar_file_url(found, &hash).unwrap().as_deref(),
-            Some("exact.jar")
+            jar_file_urls(found).unwrap(),
+            BTreeMap::from([
+                (hash.clone(), "exact.jar".into()),
+                (other, "other.jar".into()),
+            ])
         );
-        assert_eq!(jar_file_url(serde_json::json!({}), &hash).unwrap(), None);
-        assert_eq!(
-            jar_file_url(serde_json::json!({hash.clone(): {"files": []}}), &hash).unwrap(),
-            None
-        );
+        assert!(jar_file_urls(serde_json::json!({})).unwrap().is_empty());
         assert!(
-            jar_file_url(
-                serde_json::json!({hash.clone(): {"files": "broken"}}),
-                &hash
-            )
-            .is_err()
+            jar_file_urls(serde_json::json!({hash.clone(): {"files": []}}))
+                .unwrap()
+                .is_empty()
         );
-        assert!(jar_file_url(serde_json::json!([]), &hash).is_err());
+        assert!(jar_file_urls(serde_json::json!({hash.clone(): {"files": "broken"}})).is_err());
+        assert!(jar_file_urls(serde_json::json!([])).is_err());
     }
 }

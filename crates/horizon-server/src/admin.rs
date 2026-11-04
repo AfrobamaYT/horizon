@@ -13,6 +13,7 @@ use crate::{
 use horizon_server_files::user_lists::{
     BanList, IpBanList, OpList, UserList, WhiteList, format_date,
 };
+use horizon_server_launch::{self as launch, config};
 use serde_json::{Value, json};
 use std::{fmt::Write, path::Path, sync::Mutex};
 
@@ -198,9 +199,9 @@ fn load<E: horizon_server_files::user_lists::Entry>(dir: &Path, file: &str) -> U
 /// `GET /api/v1/mods`: the native mods the game program was built with. The launcher writes them to
 /// `native-mods.json` beside a build it makes; a release or Nightly has none, so the list is empty.
 pub fn mods(shared: &Shared) -> Response {
-    let built = crate::config::Config::load(&shared.dir)
+    let built = config::Config::load(&shared.dir)
         .ok()
-        .and_then(|c| engine::program_in(&c, &shared.dir, shared.install.as_ref()).ok())
+        .and_then(|c| launch::program_in(&c, &shared.dir, shared.install.as_ref()).ok())
         .and_then(|p| std::fs::read_to_string(p.with_file_name("native-mods.json")).ok());
     Response::json(200, &built_with(built.as_deref()))
 }
@@ -311,15 +312,11 @@ fn uuid(id: u128) -> String {
 /// Whether the whitelist is on: the game writes `white-list` to server.properties when `/whitelist on|off`
 /// changes it; server.toml catches up when it stops.
 fn whitelist_on(dir: &Path) -> bool {
-    std::fs::read(dir.join(crate::config::PROPERTIES))
+    std::fs::read(dir.join(config::PROPERTIES))
         .ok()
         .and_then(|b| horizon_server_files::java_properties::Properties::load_file(&b).ok())
         .and_then(|p| p.get("white-list").map(|v| v == "true"))
-        .or_else(|| {
-            crate::config::Config::load(dir)
-                .ok()
-                .map(|c| c.server.whitelist)
-        })
+        .or_else(|| config::Config::load(dir).ok().map(|c| c.server.whitelist))
         .unwrap_or(false)
 }
 
@@ -475,9 +472,9 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(crate::config::FILE), crate::config::TEMPLATE).unwrap();
-        crate::config::update(&dir, "server", "online_mode", toml::Value::Boolean(false)).unwrap();
-        crate::config::update(&dir, "server", "whitelist", toml::Value::Boolean(false)).unwrap();
+        std::fs::write(dir.join(config::FILE), config::TEMPLATE).unwrap();
+        config::update(&dir, "server", "online_mode", toml::Value::Boolean(false)).unwrap();
+        config::update(&dir, "server", "whitelist", toml::Value::Boolean(false)).unwrap();
         let shared = Shared::with_install(&dir, None);
         shared.set_phase(Phase::Stopped);
 
@@ -516,7 +513,7 @@ mod tests {
                 .unwrap()
                 .contains("Alex")
         );
-        assert!(crate::config::Config::load(&dir).unwrap().server.whitelist);
+        assert!(config::Config::load(&dir).unwrap().server.whitelist);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
