@@ -110,6 +110,10 @@ the catalog, not a global API number, source comments or documentation histories
 
 - Item tooltips: an `ItemPart`'s `tooltip` adds its item's own lines where `Item.appendHoverText` does, after
   the name and before the components' lines, never for a tooltip the stack hides.
+  `Hooks::item_tooltip` (NeoForge's `ItemTooltipEvent`) then gets every item's whole tooltip once it is
+  complete, with the local player, the stack's `TooltipDisplay` and its `TooltipFlag` (`advanced`, `creative`),
+  and may add, change or remove any line. Horizon's creative search reads vanilla's exported tooltip text, so it
+  does not fire with no player while search trees are built, as NeoForge does.
 
 - Using an item, on the server for every player: `native_use_on` hears a right click with an item on a
   block once the block let it through (`ItemStack.useOn`), and `native_use_item` hears the item's own use, in the air or

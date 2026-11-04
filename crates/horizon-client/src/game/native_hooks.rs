@@ -53,6 +53,7 @@ use horizon_client::{
     first_person::Hand,
     health::{HurtSource, Hurting, Knock, ShieldBlock},
     hud::{HudBatch, rgba},
+    item_tooltip::TooltipDisplay,
     items::ItemStack,
     keybinds,
     lan::menu::Slots,
@@ -5292,6 +5293,36 @@ impl Game<'_> {
     /// projectile.
     pub(super) fn native_tooltip(&self, stack: &ItemStack, lines: &mut Vec<(Text, u32)>) {
         mod_api::dispatch_tooltip(self, stack, lines);
+    }
+    /// `ItemTooltipEvent`: the whole tooltip of `stack` (`ItemStack.getTooltipLines`),
+    /// once its name, the item's own lines, the components' lines, the
+    /// advanced lines and the operator warning are in `lines`, each with a
+    /// colour as `rgba` packs it (`u32::MAX` keeps the text's own). Add,
+    /// change, reorder or remove lines. `player` and `player_entity_id` are
+    /// the local player's, `display` the stack's `minecraft:tooltip_display`,
+    /// `advanced` (F3+H) and `creative` (a creative tab's own slot) its
+    /// `TooltipFlag`. Asked each frame the tooltip shows, never for one the
+    /// stack hides or a crossbow's loaded projectile. Client-side.
+    pub(super) fn native_item_tooltip(
+        &self,
+        player: u128,
+        player_entity_id: i32,
+        stack: &ItemStack,
+        display: &TooltipDisplay<'_>,
+        advanced: bool,
+        creative: bool,
+        lines: &mut Vec<(Text, u32)>,
+    ) {
+        mod_api::dispatch_item_tooltip(
+            self,
+            player,
+            player_entity_id,
+            stack,
+            display,
+            advanced,
+            creative,
+            lines,
+        );
     }
     /// Change a tooltip box's background and border gradient colors, as ARGB.
     /// Stack is None for tooltips not associated with an item.
