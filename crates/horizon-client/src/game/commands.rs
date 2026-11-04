@@ -216,6 +216,7 @@ impl Game<'_> {
     }
 
     /// Commands.performCommand for a line without its slash.
+    #[horizon_mod_api_macros::point(side = "both")]
     pub(super) fn run_command(&mut self, command: &str) -> bool {
         if self.client_mod_command(command) {
             return true;

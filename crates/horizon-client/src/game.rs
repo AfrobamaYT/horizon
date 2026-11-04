@@ -130,6 +130,16 @@ mod entity_culling;
 mod event_loop;
 mod events;
 mod execution_role;
+/// The injection points' slots (`#[point]`, #589), generated from the game's source.
+#[doc(hidden)]
+pub mod points {
+    include!(concat!(env!("OUT_DIR"), "/points_generated.rs"));
+
+    /// A `side = "both"` point's host.
+    pub(super) fn host_side<'a>(game: &'a mut super::Game<'_>) -> mod_api::HostSide<'a> {
+        super::execution_role::host_side(game)
+    }
+}
 mod explosion;
 mod extras;
 mod falling_damage;
@@ -3776,6 +3786,7 @@ impl Game<'_> {
         Some((self.eye_position()?, view_vector(self.yaw, self.pitch)))
     }
     /// `Player.blockInteractionRange`: the block pick's and mining's reach.
+    #[horizon_mod_api_macros::point(side = "both")]
     fn reach(&self) -> f64 {
         self.block_reach
     }
@@ -4081,6 +4092,7 @@ impl Game<'_> {
     /// (PowderSnowBlock.canEntityWalkOnPowderSnow), freeze-immune wear
     /// (LivingEntity.canFreeze), the dimension's FAST_LAVA, the sleeping
     /// pose and blindness (Player.isMobilityRestricted, which stops a sprint).
+    #[horizon_mod_api_macros::point(side = "both")]
     pub(crate) fn sync_player_body(&mut self) {
         let glider = self.glider_worn();
         let sleeping = self.sleeping.is_some();
@@ -8101,6 +8113,7 @@ impl Game<'_> {
         }
         None
     }
+    #[horizon_mod_api_macros::point(side = "both")]
     fn spawn_player(&mut self) -> Result<()> {
         if self.player.is_some() || self.remote.is_some() {
             return Ok(());
@@ -8248,6 +8261,7 @@ impl Game<'_> {
         };
         self.with_level(|b, level, ticks| b.notify_written(level, ticks, position, flags));
     }
+    #[horizon_mod_api_macros::point(side = "both")]
     fn tick(&mut self) -> Result<()> {
         if self.agent.hold_server {
             return Ok(());
@@ -8686,6 +8700,7 @@ impl Game<'_> {
     /// `MouseHandler.handleAccumulatedMovement` and `Entity.turn`, once per frame.
     /// An agent moving the mouse (`mouse-move`) counts as a grabbed pointer in
     /// an active window, as it cannot grab the real one.
+    #[horizon_mod_api_macros::point(side = "client", hot)]
     fn apply_mouse_look(&mut self) {
         let mut look = self.look_options();
         let time = self.started.elapsed().as_secs_f64();
@@ -12346,6 +12361,7 @@ impl Game<'_> {
         self.sky_darken_memo.set(Some((key, darken)));
         darken
     }
+    #[horizon_mod_api_macros::point(side = "both")]
     fn mob_hit(&self) -> Option<(usize, f64)> {
         if let Some(hit) = self.tick_mob {
             return hit;
@@ -12584,6 +12600,7 @@ impl Game<'_> {
         scale > 0.9 && falling && !restricted
     }
     /// Player.attack with the attack-strength charge, crits and knockback.
+    #[horizon_mod_api_macros::point(side = "both")]
     fn attack(&mut self) -> bool {
         if self.spectator() {
             return false;
@@ -16490,6 +16507,7 @@ impl Game<'_> {
             scaled: false,
         });
     }
+    #[horizon_mod_api_macros::point(side = "client", hot)]
     fn render(&mut self) -> Result<bool> {
         // The window's GPU holds the atlas: its copy in memory is kept
         // compressed (a no-op once it is).
