@@ -243,7 +243,12 @@ pub fn main() -> horizon_client::Result<()> {
     let enchantments = Enchantments::load(root, &defaults);
     let names = horizon_client::creative::Names::default();
     let trades = Trades::load(root, &PackOverlay::NONE);
-    let recipes = horizon_client::crafting::Recipes::load(root, &items, &PackOverlay::NONE)?;
+    let recipes = horizon_client::crafting::Recipes::load(
+        root,
+        &items,
+        &PackOverlay::NONE,
+        &crate::test_resources::server_load(),
+    )?;
     let brewing = horizon_client::brewing::Brewing::load(root, &items, &PackOverlay::NONE);
     let banners = horizon_client::banner::Banners::load(root, &defaults);
     let station_recipes = horizon_client::stations::StationRecipes::default();

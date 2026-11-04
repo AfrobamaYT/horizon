@@ -1512,8 +1512,11 @@ fn pipeline(
         return Err(format!("{MISMATCH}{list}; rebuild against this game."));
     }
     if target == Target::Server {
-        let jars = crate::jars::collect(mods.iter().map(|bundle| &bundle.manifest))
-            .map_err(|error| error.to_string())?;
+        let jars = horizon_mods::manifest::collect_jar_requirements(
+            mods.iter()
+                .map(|bundle| (bundle.manifest.id.as_str(), bundle.manifest.jar.as_slice())),
+        )
+        .map_err(|error| crate::jars::LaunchError::Conflict(error).to_string())?;
         crate::jars::prepare(
             &backend::game_home(),
             &jars,

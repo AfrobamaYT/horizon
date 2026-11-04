@@ -421,6 +421,13 @@ pub struct Menu {
     /// for `ItemSmeltedEvent`: the stack (`None` for vanilla's empty one)
     /// and `removeCount`.
     pub item_smelted: Vec<(Option<ItemStack>, u32)>,
+    /// Set by a server caller when a mod listens: every smithing result
+    /// taken then goes to `item_smithed`.
+    pub item_smithed_hook: bool,
+    /// Each smithing result taken (`SmithingMenu.onTake`, or `onQuickCraft`
+    /// for a shift-click), for `ItemSmithedEvent`: the template, base and
+    /// addition as they were before the take used them, and the stack taken.
+    pub item_smithed: Vec<([Option<ItemStack>; 3], ItemStack)>,
     /// `FurnaceResultSlot.removeCount`.
     output_removed: u32,
     /// `LivingEntity.onEquipItem` calls that change the item: the
@@ -887,6 +894,8 @@ impl Menu {
             brewed_potion_takes: Vec::new(),
             item_smelted_hook: false,
             item_smelted: Vec::new(),
+            item_smithed_hook: false,
+            item_smithed: Vec::new(),
             output_removed: 0,
             equipped: Vec::new(),
             merchant: None,
@@ -2028,9 +2037,13 @@ impl Menu {
             return;
         }
         if self.slots[s].role == Role::CombineResult {
-            // SmithingMenu.onTake: awardUsedRecipes, then one of each input.
+            // SmithingMenu.onTake: NeoForge's ItemSmithedEvent first, then
+            // awardUsedRecipes, then one of each input.
             if self.kind == Kind::Smithing {
                 let inputs = [0, 1, 2].map(|i| self.containers[MAIN][i].clone());
+                if self.item_smithed_hook && env.side == LogicalSide::Server && taken.count > 0 {
+                    self.item_smithed.push((inputs.clone(), taken.clone()));
+                }
                 if let Some((id, _)) = env.station_recipes.smithing_recipe(
                     env.enchantments,
                     inputs[0].as_ref(),
@@ -3602,11 +3615,21 @@ pub(crate) mod tests {
         }
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = Items::catalog(&root, &PackOverlay::NONE, &defaults).unwrap();
-        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let recipes = Recipes::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
         let banners = Banners::load(&root, &defaults);
-        let station_recipes =
-            crate::stations::StationRecipes::load(&root, &items, &PackOverlay::NONE);
+        let station_recipes = crate::stations::StationRecipes::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        );
         let enchantments = crate::enchant::Enchantments::default();
         let names = crate::creative::Names::default();
         let env = Env {
@@ -3700,7 +3723,13 @@ pub(crate) mod tests {
         let root = std::env::temp_dir().join(format!("horizon-bare-{}-{run}", std::process::id()));
         std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
         let items = Items::for_tests(Default::default());
-        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let recipes = Recipes::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
         let _ = std::fs::remove_dir_all(&root);
         let (banners, station_recipes) = (Default::default(), Default::default());
@@ -3945,6 +3974,47 @@ pub(crate) mod tests {
         });
     }
 
+    /// A smithing result taken is recorded for `ItemSmithedEvent` while a mod
+    /// listens: the inputs before the take used them and the stack taken.
+    /// A shift-click records it too (`onQuickCraft`).
+    #[test]
+    fn taking_a_smithing_result_records_its_inputs() {
+        for input in [Input::Pickup, Input::QuickMove] {
+            with_menu(Kind::Smithing, |env, menu| {
+                menu.creative = false;
+                menu.item_smithed_hook = true;
+                let inputs = [
+                    stack("netherite_upgrade_smithing_template", 1),
+                    stack("diamond_sword", 1),
+                    stack("netherite_ingot", 2),
+                ];
+                for (i, input) in inputs.iter().enumerate() {
+                    menu.set_slot(env, i, input.clone());
+                }
+                menu.settle(env);
+                menu.click(env, 3, 0, input).unwrap();
+                assert_eq!(
+                    menu.item_smithed,
+                    vec![(inputs, stack("netherite_sword", 1).unwrap())],
+                    "{input:?}"
+                );
+                // One ingot is left, and nothing more is recorded.
+                assert_eq!(menu.slot(2).map(|s| s.count), Some(1));
+            });
+        }
+        // With no mod listening nothing is kept.
+        with_menu(Kind::Smithing, |env, menu| {
+            menu.creative = false;
+            menu.set_slot(env, 0, stack("netherite_upgrade_smithing_template", 1));
+            menu.set_slot(env, 1, stack("diamond_sword", 1));
+            menu.set_slot(env, 2, stack("netherite_ingot", 1));
+            menu.settle(env);
+            menu.click(env, 3, 0, Input::Pickup).unwrap();
+            assert!(menu.item_smithed.is_empty());
+            assert!(menu.carried.is_some());
+        });
+    }
+
     /// A crafting grid's result taken is recorded for `native_item_crafted`:
     /// the recipe the grid matched and the stack the player took.
     #[test]
@@ -4185,7 +4255,13 @@ pub(crate) mod tests {
             std::env::temp_dir().join(format!("horizon-anvil-cancel-{}", std::process::id()));
         std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
         let items = Items::for_tests(Default::default());
-        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let recipes = Recipes::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
         let _ = std::fs::remove_dir_all(&root);
         let (banners, station_recipes) = (Banners::default(), Default::default());
@@ -4265,7 +4341,13 @@ pub(crate) mod tests {
         let root = std::env::temp_dir().join(format!("horizon-mod-menu-{}", std::process::id()));
         std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
         let items = Items::for_tests(Default::default());
-        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let recipes = Recipes::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
         let _ = std::fs::remove_dir_all(&root);
         let (banners, station_recipes) = (Banners::default(), Default::default());
@@ -4728,7 +4810,13 @@ pub(crate) mod tests {
         std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
         let items = horizon_items::items::Items::for_tests(Default::default());
         let overlay = &horizon_world::loot::PackOverlay::NONE;
-        let recipes = Recipes::load(&root, &items, overlay).unwrap();
+        let recipes = Recipes::load(
+            &root,
+            &items,
+            overlay,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let brewing = Brewing::load(&root, &items, overlay);
         let _ = std::fs::remove_dir_all(&root);
         let (banners, station_recipes) = (Default::default(), Default::default());

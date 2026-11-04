@@ -19,23 +19,64 @@ pub struct EffectPanel {
     pub spacing: i32,
 }
 
-/// Lay out panels using the container's actual origin (including recipe book
-/// shifts). Vanilla hides them when fewer than 32 GUI pixels remain.
+/// Where the effect panels may go: the window's width, the container's
+/// origin (including recipe book shifts) and its image width.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EffectsSpace {
+    pub screen_width: i32,
+    pub origin: [i32; 2],
+    pub image_width: i32,
+}
+
+impl EffectsSpace {
+    fn left(&self) -> i32 {
+        self.origin[0] + self.image_width + 2
+    }
+
+    /// The width right of the container (`availableSpace`); vanilla draws
+    /// nothing below 32.
+    pub fn available(&self) -> i32 {
+        self.screen_width - self.left()
+    }
+}
+
+/// How the panels are laid out: compact icons or full panels, shifted
+/// `offset` GUI pixels right, or `hidden` (a native mod drew its own).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EffectsLayout {
+    pub compact: bool,
+    pub offset: i32,
+    pub hidden: bool,
+}
+
+impl EffectsLayout {
+    /// Vanilla's: full panels from 120 GUI pixels of room, compact below.
+    pub fn vanilla(available: i32) -> Self {
+        Self {
+            compact: available < 120,
+            offset: 0,
+            hidden: false,
+        }
+    }
+}
+
+/// Lay out panels as `layout` says. Vanilla hides them when fewer than 32 GUI
+/// pixels remain.
 pub fn panels(
-    screen_width: i32,
-    origin: [i32; 2],
-    image_width: i32,
+    space: &EffectsSpace,
+    layout: &EffectsLayout,
     effects: &[EffectInstance],
     tick_rate: f32,
     translate: &dyn Fn(&str) -> Option<String>,
     text_width: &dyn Fn(&str) -> i32,
 ) -> Vec<EffectPanel> {
-    let x = origin[0] + image_width + 2;
-    let available = screen_width - x;
-    if effects.is_empty() || available < 32 {
+    let available = space.available();
+    if effects.is_empty() || available < 32 || layout.hidden {
         return Vec::new();
     }
-    let max_width = if available >= 120 { available - 7 } else { 32 };
+    let x = space.left() + layout.offset;
+    let origin = space.origin;
+    let max_width = if layout.compact { 32 } else { available - 7 };
     let spacing = if effects.len() > 5 {
         132 / (effects.len() as i32 - 1)
     } else {
@@ -176,10 +217,14 @@ mod tests {
     use super::*;
 
     fn layout(width: i32, effects: &[EffectInstance]) -> Vec<EffectPanel> {
+        let space = EffectsSpace {
+            screen_width: width,
+            origin: [72, 37],
+            image_width: 176,
+        };
         panels(
-            width,
-            [72, 37],
-            176,
+            &space,
+            &EffectsLayout::vanilla(space.available()),
             effects,
             20.0,
             &|key| match key {
@@ -240,11 +285,36 @@ mod tests {
     #[test]
     fn creative_origin_recipe_book_shift_and_tick_rate() {
         let effects = [EffectInstance::new("speed", 72000, 10)];
-        let p = panels(640, [222, 43], 195, &effects, 10.0, &|_| None, &|_| 60);
+        let space = EffectsSpace {
+            screen_width: 640,
+            origin: [222, 43],
+            image_width: 195,
+        };
+        let vanilla = EffectsLayout::vanilla(space.available());
+        let p = panels(&space, &vanilla, &effects, 10.0, &|_| None, &|_| 60);
         assert_eq!((p[0].x, p[0].y), (419, 43));
         assert_eq!(p[0].name, "speed");
         assert_eq!(p[0].duration, "02:00:00");
-        let p = panels(480, [149, 37], 176, &effects, 20.0, &|_| None, &|_| 150);
+        let space = EffectsSpace {
+            screen_width: 480,
+            origin: [149, 37],
+            image_width: 176,
+        };
+        let vanilla = EffectsLayout::vanilla(space.available());
+        let p = panels(&space, &vanilla, &effects, 20.0, &|_| None, &|_| 150);
         assert_eq!((p[0].x, p[0].width), (327, 146));
+        // A mod's layout: compact icons, nudged right; hidden draws none.
+        let moved = EffectsLayout {
+            compact: true,
+            offset: 5,
+            hidden: false,
+        };
+        let p = panels(&space, &moved, &effects, 20.0, &|_| None, &|_| 150);
+        assert_eq!((p[0].x, p[0].width), (332, 32));
+        let hidden = EffectsLayout {
+            hidden: true,
+            ..moved
+        };
+        assert!(panels(&space, &hidden, &effects, 20.0, &|_| None, &|_| 150).is_empty());
     }
 }

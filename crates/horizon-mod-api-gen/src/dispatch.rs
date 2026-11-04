@@ -17,7 +17,7 @@ pub(super) struct HookSources {
 
 pub(super) fn emit(
     root: &Path,
-    hooks: &[CatalogHook],
+    hooks: &[Hook],
     methods: &[syn::ItemFn],
     contexts: &[DrawContext],
 ) -> Result<HookSources, String> {
@@ -34,12 +34,9 @@ pub(super) fn emit(
     let mut part_traits: BTreeMap<&str, String> = BTreeMap::new();
     let mut fills = Vec::new();
     for hook in hooks {
-        let name = hook["name"].as_str().ok_or("hook name missing")?;
-        let api = hook
-            .get("mod_api")
-            .ok_or_else(|| format!("hook {name} has no mod_api entry: add one"))?;
+        let name = hook.name.as_str();
         let native = format!("native_{name}");
-        let target = hook["target"].as_str().ok_or("target missing")?;
+        let target = hook.target.as_str();
         let is_render = target.starts_with("mod_api::render::");
         let external = free_function_source(target);
         let in_game = external.is_none();
@@ -120,19 +117,9 @@ pub(super) fn emit(
         let part_item = fresh_name("part", &mut used);
         let part_table = fresh_name("part_table", &mut used);
         let replacement = fresh_name("replacement", &mut used);
-        let contract = api["contract"].as_str().ok_or("contract missing")?;
-        let out = api.get("out").and_then(|v| v.as_str());
-        // A replace hook that names which mod answered: its output holds `Answered<T>`.
-        let answered = api.get("answered_by").is_some_and(|v| v == "mod");
-        if answered && (contract != "replace" || api.get("scope").is_some()) {
-            return Err(format!("{name}: answered_by needs a global replace hook"));
-        }
-        if !matches!(
-            (contract, out),
-            ("cancel" | "replace" | "collect", Some(_)) | ("listen", None)
-        ) {
-            return Err(format!("invalid contract for {name}"));
-        }
+        let contract = hook.contract;
+        let out = hook.out.as_deref();
+        let answered = hook.answered_by_mod;
         let output = if let Some(out) = out {
             let index = args
                 .iter()
@@ -150,16 +137,16 @@ pub(super) fn emit(
                 return Err(format!("output must be a mutable reference in {name}"));
             }
             match contract {
-                "cancel" if reference.elem.to_token_stream().to_string() == "bool" => {
+                Contract::Cancel if reference.elem.to_token_stream().to_string() == "bool" => {
                     " -> Flow".to_owned()
                 }
-                "replace" if answered => {
+                Contract::Replace if answered => {
                     let answer = answered_type(&reference.elem)
                         .ok_or_else(|| format!("{name}: output must be Option<Answered<T>>"))?;
                     format!(" -> Option<{}>", answer.to_token_stream())
                 }
-                "replace" => format!(" -> {}", reference.elem.to_token_stream()),
-                "collect" => String::new(),
+                Contract::Replace => format!(" -> {}", reference.elem.to_token_stream()),
+                Contract::Collect => String::new(),
                 _ => return Err(format!("unexpected output type for {name}")),
             }
         } else {
@@ -184,16 +171,15 @@ pub(super) fn emit(
             });
         // A scoped hook's parts: the trait its method goes on, and the lookup
         // of the parts attached to the thing its `key` argument names.
-        let scoped = match (api.get("scope"), api.get("key")) {
-            (None, None) => None,
-            (Some(scope), Some(key)) => {
-                let key = key.as_str().ok_or("key must be a string")?;
-                let (part_trait, table) = match scope.as_str() {
-                    Some("block") => ("BlockPart", "block"),
-                    Some("block_entity") => ("BlockEntityPart", "block_entity"),
-                    Some("item") => ("ItemPart", "item"),
-                    Some("menu") => ("MenuPart", "menu"),
-                    _ => return Err(format!("unknown scope for {name}")),
+        let scoped = match &hook.scope {
+            None => None,
+            Some(scope) => {
+                let key = scope.key.as_str();
+                let (part_trait, table) = match scope.kind {
+                    PartKind::Block => ("BlockPart", "block"),
+                    PartKind::BlockEntity => ("BlockEntityPart", "block_entity"),
+                    PartKind::Item => ("ItemPart", "item"),
+                    PartKind::Menu => ("MenuPart", "menu"),
                 };
                 if is_render {
                     return Err(format!("render hook {name} cannot be scoped"));
@@ -208,7 +194,7 @@ pub(super) fn emit(
                         let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
                             return Err(format!("{name} has no level to name {key}'s block"));
                         };
-                        if hook.side == HelperSide::Both {
+                        if hook.side == Side::Both {
                             format!(
                                 "{table}(|| match &{level} {{ LevelSide::Server({level}) | LevelSide::Client({level}) => {level}.state_block({key}), }})"
                             )
@@ -226,7 +212,6 @@ pub(super) fn emit(
                 };
                 Some((part_trait, lookup))
             }
-            _ => return Err(format!("{name} needs both scope and key, or neither")),
         };
         let event = fresh_name("event", &mut used);
         let event_type = format!("{}Event", hook_id(name));
@@ -268,7 +253,7 @@ pub(super) fn emit(
         let mut fields = String::new();
         let mut inits = Vec::new();
         let mut write_back = String::new();
-        let collected = output.as_ref().filter(|_| contract == "collect");
+        let collected = output.as_ref().filter(|_| contract == Contract::Collect);
         // A draw surface reaches mods as its context's trait object, which the native call
         // builds from `Game` and the surface.
         let mut surface_calls = std::collections::HashMap::new();
@@ -278,7 +263,7 @@ pub(super) fn emit(
                 if !mutable || receiver_mut != Some(false) {
                     return Err(format!(
                         "{}: a drawing hook takes &self and its surface as &mut",
-                        hook["name"].as_str().unwrap_or_default()
+                        hook.name
                     ));
                 }
                 surface_calls.insert(
@@ -319,7 +304,7 @@ pub(super) fn emit(
                 inits.push(name.clone());
             }
         }
-        if let Some((name, ty)) = output.as_ref().filter(|_| contract != "collect") {
+        if let Some((name, ty)) = output.as_ref().filter(|_| contract != Contract::Collect) {
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
         }
         let (generics, elided) = match (lifetimes.a, lifetimes.b) {
@@ -334,8 +319,8 @@ pub(super) fn emit(
             .map(|param| format!("let _ = {};", param.split(':').next().unwrap()))
             .collect::<String>();
         let default = match contract {
-            "cancel" => "Flow::Continue",
-            "replace" => "None",
+            Contract::Cancel => "Flow::Continue",
+            Contract::Replace => "None",
             _ => "",
         };
         if fill {
@@ -372,28 +357,28 @@ pub(super) fn emit(
             &mut dispatch
         };
         let mut method_source = String::new();
-        for line in hook["doc"].as_str().ok_or("doc missing")?.trim().lines() {
+        for line in hook.doc.trim().lines() {
             method_source.push_str(&format!(
                 "///{}{line}\n",
                 if line.is_empty() { "" } else { " " }
             ));
         }
         let side = match hook.side {
-            HelperSide::Server => "server",
-            HelperSide::Client => "client",
-            HelperSide::Both => "both",
+            Side::Server => "server",
+            Side::Client => "client",
+            Side::Both => "both",
         };
         method_source.push_str(&format!("/// Side: {side}.\n"));
         // A scoped hook is its part's method alone: a global moment beside it is its own hook.
         let callee = if scoped.is_some() { "part" } else { "mod" };
         match (contract, out) {
-            ("cancel", Some(out)) => method_source.push_str(&format!(
+            (Contract::Cancel, Some(out)) => method_source.push_str(&format!(
                 "///\n/// Return `Flow::Cancel` to take it: this sets `{out}`, and later {callee}s are skipped.\n"
             )),
-            ("replace", Some(out)) => method_source.push_str(&format!(
+            (Contract::Replace, Some(out)) => method_source.push_str(&format!(
                 "///\n/// Return `Some` to set `{out}`; the first {callee} returning `Some` wins.\n"
             )),
-            ("collect", Some(out)) => method_source.push_str(&format!(
+            (Contract::Collect, Some(out)) => method_source.push_str(&format!(
                 "///\n/// Every {callee} gets `{event}.{out}` in order and may add, change or remove {out}.\n"
             )),
             _ => {}
@@ -425,15 +410,15 @@ pub(super) fn emit(
         };
         // One callee's call: a mod's, or a scoped hook's part's.
         let call = |callee: &str, exit: &str| match contract {
-            "cancel" => format!(
+            Contract::Cancel => format!(
                 "if matches!({callee}.{name}({invoke}), Flow::Cancel) {{ *{o} = true; {exit}; }}",
                 o = out.unwrap()
             ),
-            "replace" if answered => format!(
+            Contract::Replace if answered => format!(
                 "if let Some({replacement}) = {callee}.{name}({invoke}) {{ *{o} = Some(Answered {{ answer: {replacement}, mod_id }}); {exit}; }}",
                 o = out.unwrap()
             ),
-            "replace" => format!(
+            Contract::Replace => format!(
                 "if let Some({replacement}) = {callee}.{name}({invoke}) {{ *{o} = Some({replacement}); {exit}; }}",
                 o = out.unwrap()
             ),
@@ -461,11 +446,11 @@ pub(super) fn emit(
             ),
         };
         let body = match contract {
-            "cancel" => format!(
+            Contract::Cancel => format!(
                 "if *{o} {{ return; }} {lookup} {build} {calls} {write_back}",
                 o = out.unwrap()
             ),
-            "replace" => format!(
+            Contract::Replace => format!(
                 "if {o}.is_some() {{ return; }} {lookup} {build} {calls} {write_back}",
                 o = out.unwrap()
             ),

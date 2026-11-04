@@ -530,6 +530,78 @@ mod tests {
         });
     }
 
+    /// The live map takes a held stack's own `attribute_modifiers`, and
+    /// another stack of the same item with other components is a change.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_stacks_own_modifiers_replace_its_items() {
+        use horizon_world::nbt::Tag;
+        with_game(|game| {
+            spawn(game);
+            let damage = "minecraft:attack_damage";
+            let mut own = ItemStack::new("minecraft:diamond_sword", 1);
+            own.data_mut().set_other(
+                "minecraft:attribute_modifiers",
+                Some(Tag::List(vec![Tag::compound([
+                    ("type", Tag::String(damage.into())),
+                    ("id", Tag::String("test:dull".into())),
+                    ("amount", Tag::Double(1.0f64.to_bits())),
+                    ("operation", Tag::String("add_value".into())),
+                    ("slot", Tag::String("mainhand".into())),
+                ])])),
+            );
+            game.mobs[0].set_equipment_stack(MAINHAND, Some(own));
+            game.tick_equipment_attributes();
+            // +1 from its own list, not the sword's +6.
+            assert_eq!(read(game, 12, damage), (Some(4.0), Some(3.0)));
+            game.mobs[0].set_equipment_stack(MAINHAND, stack("minecraft:diamond_sword"));
+            game.tick_equipment_attributes();
+            assert_eq!(read(game, 12, damage), (Some(9.0), Some(3.0)));
+        });
+    }
+
+    /// A mob's gear knockback resistance reads its stacks once, keeps what it
+    /// read while the same stacks are worn, and reads them again when one
+    /// changes: here a chestplate with its own list.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn gear_knockback_is_read_again_only_when_the_gear_changes() {
+        use horizon_world::nbt::Tag;
+        with_game(|game| {
+            spawn(game);
+            let read_at = |game: &Game<'_>| {
+                let m = &game.mobs[0];
+                let gear = m.extra.gear_knockback.as_deref();
+                (gear.map(std::ptr::from_ref), m.gear_knockback_resistance)
+            };
+            let close = |value: Option<f64>, to: f64| value.is_some_and(|v| (v - to).abs() < 1e-6);
+            game.mobs[0].set_equipment_stack(CHEST, stack("minecraft:netherite_chestplate"));
+            game.refresh_gear_knockback_resistance();
+            let (first, value) = read_at(game);
+            assert!(first.is_some() && close(value, 0.1), "{value:?}");
+            game.refresh_gear_knockback_resistance();
+            assert_eq!(read_at(game).0, first, "the same gear is not read again");
+            let mut own = ItemStack::new("minecraft:netherite_chestplate", 1);
+            own.data_mut().set_other(
+                "minecraft:attribute_modifiers",
+                Some(Tag::List(vec![Tag::compound([
+                    ("type", Tag::String("minecraft:knockback_resistance".into())),
+                    ("id", Tag::String("test:anchor".into())),
+                    ("amount", Tag::Double(0.5f64.to_bits())),
+                    ("operation", Tag::String("add_value".into())),
+                    ("slot", Tag::String("chest".into())),
+                ])])),
+            );
+            game.mobs[0].set_equipment_stack(CHEST, Some(own));
+            game.refresh_gear_knockback_resistance();
+            let (second, value) = read_at(game);
+            assert!(second != first && close(value, 0.5), "{value:?}");
+            game.mobs[0].set_equipment_stack(CHEST, None);
+            game.refresh_gear_knockback_resistance();
+            assert_eq!(read_at(game), (None, None));
+        });
+    }
+
     fn modifier(id: &str, amount: f64, operation: AttributeOperation) -> AttributeModifier {
         AttributeModifier::new(Identifier::parse(id).unwrap(), amount, operation)
     }
@@ -658,7 +730,11 @@ mod tests {
             assert_eq!(map.value(key).unwrap(), 0.2);
             let mut synced = Vec::new();
             let zombie_mob = game.mobs[0].clone();
-            game.mob_attributes(&zombie_mob, &mut synced);
+            game.mob_attributes(
+                &zombie_mob,
+                &mut crate::game::lan_attributes::SpeedByType::default(),
+                &mut synced,
+            );
             let registry = key.registry_id();
             let sent = synced.iter().find(|s| s.attribute == registry).unwrap();
             assert_eq!(sent.base, 0.1);
@@ -730,6 +806,51 @@ mod tests {
             let zombie = living(game, 12);
             game.mobs.clear();
             assert!(!zombie.set_attribute_base(game, "minecraft:gravity", 1.0));
+        });
+    }
+
+    /// Plates every chestplate with +0.4 knockback resistance and no armor
+    /// toughness (`item_attribute_modifier`).
+    struct Plated;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Plated {
+        fn item_attribute_modifier(&self, event: &mut mod_api::ItemAttributeModifierEvent<'_>) {
+            if !event.stack.item.ends_with("_chestplate") {
+                return;
+            }
+            let id = |text: &str| Identifier::parse(text).unwrap();
+            event.modifiers.add(
+                id("minecraft:knockback_resistance"),
+                modifier("test:plated", 0.4, AttributeOperation::AddValue),
+                mod_api::EquipmentSlotGroup::Chest,
+            );
+            event
+                .modifiers
+                .remove_all_for(&id("minecraft:armor_toughness"));
+        }
+    }
+
+    /// A mod's answer to `item_attribute_modifier` is what the zombie's
+    /// gameplay reads: its knockback and its live map.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mods_item_modifiers_reach_the_wearer() {
+        let mods = vec![mod_api::ModEntry::new("plated", Box::new(Plated))].into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                spawn(game);
+                let chestplate = stack("minecraft:netherite_chestplate");
+                game.mobs[0].set_equipment_stack(CHEST, chestplate);
+                game.refresh_gear_knockback_resistance();
+                game.tick_equipment_attributes();
+                // Netherite's own 0.1, and the mod's 0.4.
+                let resistance = game.mobs[0].gear_knockback_resistance.unwrap();
+                assert!((resistance - 0.5).abs() < 1e-6, "{resistance}");
+                let toughness = read(game, 12, "minecraft:armor_toughness");
+                assert_eq!(toughness, (Some(0.0), Some(0.0)));
+                // Netherite's 8 armor still counts, on the zombie's own 2.
+                assert_eq!(read(game, 12, "minecraft:armor"), (Some(10.0), Some(2.0)));
+            });
         });
     }
 }

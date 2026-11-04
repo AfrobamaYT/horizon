@@ -437,7 +437,13 @@ impl Game<'_> {
             let of = |v: &serde_json::Value| types.iter().any(|t| v["type"].as_str() == Some(t));
             let mut all: Vec<_> = own.into_iter().filter(|(_, v)| !of(v)).collect();
             all.extend(received);
-            horizon_client::crafting::Recipes::from_sources(root, self.items(), &overlay, all)
+            horizon_client::crafting::Recipes::from_sources(
+                root,
+                self.items(),
+                &overlay,
+                all,
+                self.res.core.item_data.context(),
+            )
         });
         match built {
             Ok(recipes) => {

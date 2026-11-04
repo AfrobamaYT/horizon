@@ -5056,6 +5056,7 @@ mod tests {
             states: vec![],
             air: BlockStateId(0),
             woods: HashMap::new(),
+            sign_texts: HashMap::new(),
         };
         let world = World::new(BlockStateId(0), 0);
         let level = ParticleLevel {
@@ -5147,6 +5148,7 @@ mod tests {
             states: vec![],
             air: BlockStateId(0),
             woods: HashMap::new(),
+            sign_texts: HashMap::new(),
         };
         let world = World::new(BlockStateId(0), 0);
         let level = ParticleLevel {

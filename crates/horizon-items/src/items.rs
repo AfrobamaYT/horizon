@@ -175,8 +175,8 @@ pub struct ItemInfo {
     pub equip_slot: Option<String>,
     /// `equippable.asset_id`: the equipment asset drawn when worn.
     pub equip_asset: Option<String>,
-    /// All `attribute_modifiers`: (attribute, id, amount, operation, slot group).
-    pub modifiers: Vec<(String, String, f64, String, String)>,
+    /// All `attribute_modifiers`.
+    pub modifiers: Vec<crate::item_data::ModifierRow>,
     /// `blocks_attacks` (shields).
     pub blocks_attacks: Option<BlocksAttacks>,
     /// `weapon.disable_blocking_for_seconds` (axes).
@@ -923,12 +923,12 @@ impl Items {
                         .into_iter()
                         .flatten()
                         .filter_map(|m| {
-                            Some((
-                                m["type"].as_str()?.to_owned(),
-                                m["id"].as_str()?.to_owned(),
+                            Some(crate::item_data::ModifierRow::new(
+                                m["type"].as_str()?,
+                                m["id"].as_str()?,
                                 m["amount"].as_f64()?,
-                                m["operation"].as_str().unwrap_or("add_value").to_owned(),
-                                m["slot"].as_str().unwrap_or("any").to_owned(),
+                                m["operation"].as_str().unwrap_or("add_value"),
+                                m["slot"].as_str().unwrap_or("any"),
                             ))
                         })
                         .collect(),

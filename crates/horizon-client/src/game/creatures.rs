@@ -549,7 +549,7 @@ impl Game<'_> {
         };
         let slot = m.sun_protection_slot();
         let body = slot == EquipmentSlot::Body;
-        let Some(mut stack) = m.item_by_slot(slot) else {
+        let Some(stack) = m.item_by_slot(slot) else {
             return;
         };
         if !horizon_client::stations::is_damageable(self.res.items(), &stack) {
@@ -563,33 +563,15 @@ impl Game<'_> {
         if amount == 0 {
             return;
         }
-        let loss = self.durability_loss(&stack, amount);
-        if loss == 0 {
-            return;
-        }
-        let max = self
-            .res
-            .items()
-            .get(&stack.item)
-            .map_or(0, |i| i.max_damage);
-        stack.damage += loss;
-        let broke = stack.damage >= max;
+        let (updated, broken) = self.damage_stack(&stack, amount as i32, false);
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return;
         };
-        match (body, broke) {
-            (true, false) => m.extra.set_body_damage(stack.damage as i32),
-            (true, true) => {
-                m.extra.set_body_stack(None);
-            }
-            (false, false) => m
-                .extra
-                .set_slot_stack(horizon_items::equipment::HEAD, Some(stack)),
-            (false, true) => {
-                m.extra.set_slot_stack(horizon_items::equipment::HEAD, None);
-            }
+        if m.item_by_slot(slot).as_ref() != Some(&stack) {
+            return;
         }
-        if broke {
+        m.set_equipment_stack(slot as usize, updated);
+        if broken.is_some() {
             // LivingEntity.entityEventForEquipmentBreak: head 49, body 65.
             self.lan_entity_event(id as i32, if body { 65 } else { 49 }, at);
         }
@@ -646,9 +628,9 @@ impl Game<'_> {
         else {
             return;
         };
-        let Some(max) = wearable(self, &body, fire, name) else {
+        if wearable(self, &body, fire, name).is_none() {
             return;
-        };
+        }
         // ArmorHurtEvent for a mob's body armor.
         let mut amount = amount;
         if mod_api::__private::listened(mod_api::HookId::ArmorHurt) {
@@ -690,24 +672,15 @@ impl Game<'_> {
                 return;
             }
         }
-        let loss = self.durability_loss(&body, amount);
-        if loss == 0 {
+        let (updated, broken) = self.damage_stack(&body, amount.min(i32::MAX as u32) as i32, false);
+        let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
+            return;
+        };
+        if m.item_by_slot(EquipmentSlot::Body).as_ref() != Some(&body) {
             return;
         }
-        let lost = body.damage + loss;
-        let broke = {
-            let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
-                return;
-            };
-            if lost >= max {
-                m.extra.set_body_stack(None);
-                true
-            } else {
-                m.extra.set_body_damage(lost as i32);
-                false
-            }
-        };
-        if broke {
+        m.set_equipment_stack(EquipmentSlot::Body as usize, updated);
+        if broken.is_some() {
             // LivingEntity.onEquippedItemBroken through the level's broadcast.
             let event =
                 horizon_client::mobs::item_break::equipment_break_event(EquipmentSlot::Body);
@@ -2636,7 +2609,7 @@ impl Game<'_> {
                                 .mobs
                                 .iter()
                                 .find(|m| m.id == id)
-                                .map_or(0.0, |m| self.mob_knockback_resistance(m));
+                                .map_or(0.0, super::lan_attributes::mob_knockback_resistance);
                             (hurt, resistance)
                         }
                     };
@@ -2841,6 +2814,9 @@ impl Game<'_> {
                 // `Level.setBlockAndUpdate`: neighbour and shape updates, so a crop
                 // above trampled farmland breaks and drops.
                 MobEvent::SetBlock { pos, state } => self.level_set(pos, state)?,
+                MobEvent::PlaceBlock { mob, pos, state } => {
+                    self.mob_place_block(mob, pos, state)?
+                }
                 MobEvent::CropRaided {
                     pos,
                     state,
@@ -3162,8 +3138,9 @@ impl Game<'_> {
                     effect,
                     ticks,
                     amplifier,
+                    ambient,
                 } => {
-                    self.give_player_effect(effect, ticks, amplifier);
+                    self.give_mob_effect(effect, ticks, amplifier, ambient);
                 }
                 MobEvent::Ignite { target, seconds } => match target {
                     Who::Player => {
@@ -4074,15 +4051,16 @@ impl Game<'_> {
     }
     /// A status effect from a mob, arrow or splash potion (`addEffect`).
     pub(super) fn give_player_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) {
-        if self.creative || self.spectator() {
-            return;
+        self.give_mob_effect(effect, ticks, amplifier, false);
+    }
+    /// A mob's effect on the player. Creative and spectator players shrug off
+    /// the damaging effects here, but the nautilus's ambient Breath is plain
+    /// `addEffect` and lands in every game mode.
+    fn give_mob_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32, ambient: bool) {
+        let immune = self.creative || self.spectator();
+        if let Some(instance) = mob_effect_instance(effect, ticks, amplifier, ambient, immune) {
+            self.potions.effects.add(instance);
         }
-        let id = effect.strip_prefix("minecraft:").unwrap_or(effect);
-        self.potions
-            .effects
-            .add(horizon_client::effects::EffectInstance::new(
-                id, ticks, amplifier,
-            ));
     }
     /// `WitherRoseBlock.entityInside` for the player: on a server level that
     /// isn't peaceful, `getBeeInteractionEffect` (Wither, 40 ticks) unless the
@@ -7810,13 +7788,15 @@ pub(super) fn damage_type(kind: horizon_client::mobs::DamageKind, caused: bool) 
     }
 }
 /// A Horizon item stack as a loot stack (id, count, damage, enchantments).
+/// The killer's gear: its enchantments are the ones gameplay sees, as
+/// `EnchantmentHelper.getEnchantmentLevel` reads them for Looting.
 fn to_loot(stack: &ItemStack) -> horizon_world::loot::LootStack {
     horizon_world::loot::LootStack {
         item: stack.item.to_string(),
         count: stack.count as i32,
         damage: stack.damage as i32,
         enchantments: stack
-            .enchantments()
+            .all_enchantments()
             .iter()
             .map(|(e, l)| (e.to_string(), *l as i32))
             .collect(),
@@ -7948,9 +7928,28 @@ fn knock_back(
     );
 }
 
+/// The instance a mob effect gives the player; `None` for a creative or
+/// spectator player (`immune`) unless it is ambient (the nautilus's Breath).
+fn mob_effect_instance(
+    effect: &'static str,
+    ticks: i32,
+    amplifier: i32,
+    ambient: bool,
+    immune: bool,
+) -> Option<horizon_client::effects::EffectInstance> {
+    if immune && !ambient {
+        return None;
+    }
+    let id = effect.strip_prefix("minecraft:").unwrap_or(effect);
+    let mut instance = horizon_client::effects::EffectInstance::new(id, ticks, amplifier);
+    instance.ambient = ambient;
+    Some(instance)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::perspective::CameraType;
+    use super::mob_effect_instance;
     use super::thrown_item_axes;
     use super::thrown_item_quad;
     use super::{ProjectileKind, is_item_billboard};
@@ -8053,6 +8052,30 @@ mod tests {
             corners.iter().copied().reduce(glam::Vec3::min).unwrap(),
             corners.iter().copied().reduce(glam::Vec3::max).unwrap(),
         )
+    }
+
+    #[test]
+    fn nautilus_breath_lands_in_creative_as_ambient() {
+        // AbstractNautilus.applyEffects: MobEffectInstance(BREATH_OF_THE_NAUTILUS,
+        // 60, 0, ambient true, visible true, showIcon true), no game-mode gate.
+        let e = mob_effect_instance("minecraft:breath_of_the_nautilus", 60, 0, true, true)
+            .expect("applies to a creative player");
+        assert_eq!(
+            (e.id, e.duration, e.amplifier),
+            ("breath_of_the_nautilus", 60, 0)
+        );
+        assert!(e.ambient && e.visible);
+        // Survival gets the same ambient instance.
+        let e =
+            mob_effect_instance("minecraft:breath_of_the_nautilus", 60, 0, true, false).unwrap();
+        assert!(e.ambient);
+    }
+
+    #[test]
+    fn other_mob_effects_stay_blocked_in_creative() {
+        assert!(mob_effect_instance("minecraft:poison", 140, 0, false, true).is_none());
+        let e = mob_effect_instance("minecraft:poison", 140, 0, false, false).unwrap();
+        assert!(!e.ambient);
     }
 
     #[test]
@@ -8799,7 +8822,8 @@ mod dye_mix_tests {
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items =
             crate::items::Items::load(&root, &registry, &facts, &overlay, &defaults).unwrap();
-        let recipes = Recipes::load(&root, &items, &overlay).unwrap();
+        let recipes =
+            Recipes::load(&root, &items, &overlay, &crate::game::test_server_load()).unwrap();
         let dye = |name: &str| {
             u8::try_from(
                 horizon_client::mobs::render::DYE_NAMES
@@ -9017,6 +9041,64 @@ mod living_drops_tests {
 #[cfg(test)]
 mod armor_destroy_tests {
     use super::MobEvent;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn body_armor_guards_and_break_event_are_preserved() {
+        use horizon_client::mobs::{DamageKind, Mob};
+        use horizon_core::geometry::Vec3;
+        use horizon_world::player_inventory::EquipmentSlot;
+        with_game(|game| {
+            let kind = game.res.mob_types().get("minecraft:horse").unwrap().clone();
+            game.mobs.push(Mob::new(21, kind, Vec3::ZERO, 0.0));
+            game.audio.capture = Some(Vec::new());
+            let sword = ItemStack::new("minecraft:diamond_sword", 1);
+            game.mobs[0].set_equipment_stack(EquipmentSlot::Body as usize, Some(sword.clone()));
+            game.hurt_mob_armor(21, 4.0, DamageKind::Generic);
+            assert_eq!(game.mobs[0].item_by_slot(EquipmentSlot::Body), Some(sword));
+            let resistant = ItemStack::new("minecraft:netherite_chestplate", 1);
+            assert!(game.items().resists_fire(&resistant, "minecraft:lava"));
+            game.mobs[0].set_equipment_stack(EquipmentSlot::Body as usize, Some(resistant.clone()));
+            game.hurt_mob_armor(21, 4.0, DamageKind::Lava);
+            assert_eq!(
+                game.mobs[0].item_by_slot(EquipmentSlot::Body),
+                Some(resistant)
+            );
+            let mut armor = ItemStack::new("minecraft:wolf_armor", 1);
+            armor.damage = game.items().get(&armor.item).unwrap().max_damage - 1;
+            game.mobs[0].set_equipment_stack(EquipmentSlot::Body as usize, Some(armor));
+            game.hurt_mob_armor(21, 4.0, DamageKind::Generic);
+            assert!(game.mobs[0].item_by_slot(EquipmentSlot::Body).is_none());
+            assert_eq!(game.lan_entity_events.last().map(|event| event.1), Some(65));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn sun_protection_uses_mob_draw_and_broadcasts_break() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::{geometry::Vec3, random::RandomSource};
+        use horizon_world::player_inventory::EquipmentSlot;
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(21, kind, Vec3::ZERO, 0.0));
+            let mut helmet = ItemStack::new("minecraft:diamond_helmet", 1);
+            helmet.damage = game.items().get(&helmet.item).unwrap().max_damage - 1;
+            game.mobs[0].set_equipment_stack(EquipmentSlot::Head as usize, Some(helmet));
+            game.audio.capture = Some(Vec::new());
+            while game.mobs[0].random.clone().next_int_bound(2) != Ok(1) {
+                let _ = game.mobs[0].random.next_int_bound(2);
+            }
+            game.wear_sun_protection(21);
+            assert!(game.mobs[0].item_by_slot(EquipmentSlot::Head).is_none());
+            assert_eq!(game.lan_entity_events.last().map(|event| event.1), Some(49));
+        });
+    }
     use crate::game::{answered_wear, durability_damage, native_entity_refs::tests::with_game};
     use mod_api::{EquipmentSlot, ItemStack, NativeArmorHurt};
 

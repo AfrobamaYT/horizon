@@ -1168,6 +1168,17 @@ pub struct Extra {
     /// attribute modifiers is worn or it is read. Mob logic still reads
     /// `MobType::attributes` and `attributes` above.
     pub live: crate::living_attributes::LivingAttributes,
+    /// The knockback resistance modifiers of the items it wears or holds.
+    pub gear_knockback: Option<Box<GearKnockback>>,
+}
+/// The knockback resistance modifiers of the items a mob wears or holds, with
+/// the stacks they were read from: the game reads them again only when one
+/// of those stacks changes (`ItemStack.matches`).
+#[derive(Clone, Debug, Default)]
+pub struct GearKnockback {
+    /// The hand and armor stacks, mainhand to head.
+    pub worn: [Option<crate::items::ItemStack>; 6],
+    pub modifiers: Vec<(f64, finalize::Op)>,
 }
 impl Extra {
     /// The body item id (`getItemBySlot(BODY)`).
@@ -1287,8 +1298,9 @@ pub struct Mob {
     /// last sent it, so the next update goes out at once.
     pub needs_sync: bool,
     /// `getAttributeValue(KNOCKBACK_RESISTANCE)` with the modifiers of the
-    /// items it wears or holds, which the game works out each tick for a mob
-    /// that has any (the mob itself knows no item): `None` for the rest.
+    /// items it wears or holds (`Extra::gear_knockback`), which the game
+    /// works out each tick for a mob that has any (the mob itself knows no
+    /// item): `None` for the rest.
     pub gear_knockback_resistance: Option<f64>,
     pub health: f32,
     pub hurt_time: i32,
@@ -1873,6 +1885,14 @@ pub enum MobEvent {
         pos: [i32; 3],
         state: horizon_world::registry::BlockStateId,
     },
+    /// A mob placing a block (an enderman putting its carried block down, a
+    /// snow golem's trail): `entity_place` may refuse it, and a refused
+    /// enderman keeps carrying `state`.
+    PlaceBlock {
+        mob: u32,
+        pos: [i32; 3],
+        state: horizon_world::registry::BlockStateId,
+    },
     /// `TurtleEggBlock.decreaseEggs` after a mob's step won its 1 in 100: the
     /// break sound, then one egg fewer, or the block destroyed when it was
     /// the last.
@@ -2004,6 +2024,8 @@ pub enum MobEvent {
         effect: &'static str,
         ticks: i32,
         amplifier: i32,
+        /// `MobEffectInstance` ambient flag (the beacon-style translucent icon).
+        ambient: bool,
     },
     /// Set an entity on fire.
     Ignite {

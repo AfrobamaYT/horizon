@@ -542,7 +542,7 @@ impl Enchantments {
     ) -> f32 {
         let Some(stack) = stack else { return value };
         let mut value = value;
-        for (id, level) in stack.enchantments() {
+        for (id, level) in stack.all_enchantments().iter() {
             value = self.modify_value_with(id, *level, component, ctx, random, value);
         }
         value
@@ -567,7 +567,8 @@ impl Enchantments {
         }
         value
     }
-    /// Whether `stack` has any enchantment providing `component`.
+    /// `EnchantmentHelper.has`: whether `stack` has any enchantment providing
+    /// `component`. It reads the stack's own component, as NeoForge leaves it.
     pub fn has_component(&self, stack: &ItemStack, component: &str) -> bool {
         stack.enchantments().iter().any(|(id, _)| {
             self.get(id)
@@ -582,7 +583,7 @@ impl Enchantments {
     /// `minecraft:attributes` contributions of `stack`: (attribute, id, amount, operation).
     pub fn attributes(&self, stack: &ItemStack) -> Vec<(String, String, f64, String)> {
         let mut out = Vec::new();
-        for (id, level) in stack.enchantments() {
+        for (id, level) in stack.all_enchantments().iter() {
             let Some(e) = self.get(id) else { continue };
             for a in e.effects["minecraft:attributes"]
                 .as_array()
@@ -600,12 +601,11 @@ impl Enchantments {
         out
     }
     /// `EnchantmentHelper.forEachModifier` as an item's tooltip lists them: the
-    /// `minecraft:attributes` effects of `stack`'s enchantments as rows of
-    /// (attribute, id, amount, operation, slot group), one per slot group the
-    /// enchantment lists.
-    pub fn modifier_rows(&self, stack: &ItemStack) -> Vec<(String, String, f64, String, String)> {
+    /// `minecraft:attributes` effects of `stack`'s enchantments, one row per
+    /// slot group the enchantment lists.
+    pub fn modifier_rows(&self, stack: &ItemStack) -> Vec<crate::item_data::ModifierRow> {
         let mut rows = Vec::new();
-        for (id, level) in stack.enchantments() {
+        for (id, level) in stack.all_enchantments().iter() {
             let Some(e) = self.get(id) else { continue };
             for a in e.effects["minecraft:attributes"]
                 .as_array()
@@ -613,12 +613,12 @@ impl Enchantments {
                 .flatten()
             {
                 for slot in &e.slots {
-                    rows.push((
-                        a["attribute"].as_str().unwrap_or("").to_owned(),
-                        a["id"].as_str().unwrap_or("").to_owned(),
+                    rows.push(crate::item_data::ModifierRow::new(
+                        a["attribute"].as_str().unwrap_or(""),
+                        a["id"].as_str().unwrap_or(""),
                         f64::from(level_value(&a["amount"], *level)),
-                        a["operation"].as_str().unwrap_or("add_value").to_owned(),
-                        slot.clone(),
+                        a["operation"].as_str().unwrap_or("add_value"),
+                        slot,
                     ));
                 }
             }
