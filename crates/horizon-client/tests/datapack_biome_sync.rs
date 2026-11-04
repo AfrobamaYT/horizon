@@ -54,7 +54,11 @@ fn a_pack_biome_is_sent_with_its_data_and_read_back_by_a_client() {
         &horizon_world::loot::PackOverlay::NONE,
         Some(&world),
         &defaults,
-        &server_load(),
+        &horizon_client::crafting::ResolvedSources::load_or_empty(
+            &root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &server_load(),
+        ),
     )
     .unwrap();
 

@@ -1885,6 +1885,14 @@ pub enum MobEvent {
         pos: [i32; 3],
         state: horizon_world::registry::BlockStateId,
     },
+    /// A mob placing a block (an enderman putting its carried block down, a
+    /// snow golem's trail): `entity_place` may refuse it, and a refused
+    /// enderman keeps carrying `state`.
+    PlaceBlock {
+        mob: u32,
+        pos: [i32; 3],
+        state: horizon_world::registry::BlockStateId,
+    },
     /// `TurtleEggBlock.decreaseEggs` after a mob's step won its 1 in 100: the
     /// break sound, then one egg fewer, or the block destroyed when it was
     /// the last.
@@ -2016,6 +2024,8 @@ pub enum MobEvent {
         effect: &'static str,
         ticks: i32,
         amplifier: i32,
+        /// `MobEffectInstance` ambient flag (the beacon-style translucent icon).
+        ambient: bool,
     },
     /// Set an entity on fire.
     Ignite {

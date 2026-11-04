@@ -10,9 +10,10 @@ use std::collections::HashSet;
 /// The kind and the JSON the file wrote are here; fill `items` with the
 /// item ids the ingredient matches (item ids only: components are not
 /// checked here; a match-time hook follows separately). Duplicates are
-/// removed keeping first-seen order. The hook may be called more than
-/// once per recipe; the answer must be the same. An unclaimed kind
-/// leaves the list empty and the recipe fails, as an unknown kind does.
+/// removed keeping first-seen order. The load calls it once per occurrence
+/// (nested ones included), before any table parses the recipes; the
+/// answer must be the same every time. An unclaimed kind leaves the list
+/// empty and the recipe fails, as an unknown kind does.
 #[inline(never)]
 pub fn native_ingredient(
     context: &LoadContext,
@@ -36,6 +37,33 @@ pub fn native_ingredient_test(
     accept: &mut bool,
 ) {
     crate::dispatch_ingredient_test(kind, data, stack, accept);
+}
+/// Where `Ingredient::resolve` leaves the hook's answer inside the occurrence
+/// it resolved. Written and read only here; the loads that own the sources
+/// never send or save it.
+const RESOLVED_ITEMS: &str = "horizon:resolved_items";
+
+/// The kind an ingredient object names: `neoforge:ingredient_type` in
+/// current NeoForge, `type` in older packs.
+fn ingredient_kind(o: &serde_json::Map<String, Value>) -> Option<&str> {
+    o.get("neoforge:ingredient_type")
+        .or_else(|| o.get("type"))?
+        .as_str()
+}
+
+/// A mod's own kind: a namespaced type that is not minecraft's.
+fn is_custom(kind: &str) -> bool {
+    kind.contains(':') && !kind.starts_with("minecraft:")
+}
+
+/// Takes the answer `resolve` left out of `data`.
+fn resolved_items(data: &mut serde_json::Map<String, Value>) -> Option<Vec<String>> {
+    let answer = data.remove(RESOLVED_ITEMS)?;
+    answer
+        .as_array()?
+        .iter()
+        .map(|i| i.as_str().map(str::to_owned))
+        .collect()
 }
 /// Keep first-seen order, drop the rest.
 // hidden: a game-side helper, not part of the mod surface
@@ -82,7 +110,76 @@ impl Ingredient {
             children: None,
         }
     }
-    pub fn parse(v: &Value, items: &Items, context: &LoadContext) -> Option<Self> {
+    /// Asks the `ingredient` hook once for each mod kind in `v`, nested ones
+    /// included, and leaves each answer with its occurrence for `parse`: the
+    /// one place the hook is called, so every table that reads the recipes
+    /// shares the same answers. A file's own answer is dropped first, so data
+    /// cannot forge one. `true`: `v` changed.
+    // hidden: the load's half of the ingredient hook, not part of the mod surface
+    #[doc(hidden)]
+    pub fn resolve(v: &mut Value, context: &LoadContext) -> bool {
+        match v {
+            Value::Array(entries) => entries
+                .iter_mut()
+                .fold(false, |changed, e| Self::resolve(e, context) | changed),
+            Value::Object(o) => {
+                let mut changed = o.remove(RESOLVED_ITEMS).is_some();
+                let kind = ingredient_kind(o).map(str::to_owned);
+                match kind.as_deref() {
+                    Some("neoforge:compound" | "neoforge:intersection") => {
+                        for key in ["children", "ingredients"] {
+                            if let Some(children) = o.get_mut(key) {
+                                changed |= Self::resolve(children, context);
+                            }
+                        }
+                    }
+                    Some("neoforge:difference") => {
+                        for key in ["base", "subtracted"] {
+                            if let Some(part) = o.get_mut(key) {
+                                changed |= Self::resolve(part, context);
+                            }
+                        }
+                    }
+                    Some(k) if is_custom(k) => {
+                        let mut list = Vec::new();
+                        native_ingredient(context, k, o, &mut list);
+                        dedup_keep_order(&mut list);
+                        o.insert(RESOLVED_ITEMS.to_owned(), list.into());
+                        changed = true;
+                    }
+                    Some(_) => {}
+                    // A brewing slot's item predicate wraps its ingredient.
+                    None => {
+                        if let Some(item) = o.get_mut("item") {
+                            changed |= Self::resolve(item, context);
+                        }
+                    }
+                }
+                changed
+            }
+            _ => false,
+        }
+    }
+    /// Drops every answer `resolve` left anywhere in `v`: what a load sends
+    /// or shows is the files' own JSON. `true`: `v` changed.
+    // hidden: the load's half of the ingredient hook, not part of the mod surface
+    #[doc(hidden)]
+    pub fn forget_answers(v: &mut Value) -> bool {
+        match v {
+            Value::Array(entries) => entries
+                .iter_mut()
+                .fold(false, |changed, e| Self::forget_answers(e) | changed),
+            Value::Object(o) => {
+                let mut changed = o.remove(RESOLVED_ITEMS).is_some();
+                for part in o.values_mut() {
+                    changed |= Self::forget_answers(part);
+                }
+                changed
+            }
+            _ => false,
+        }
+    }
+    pub fn parse(v: &Value, items: &Items) -> Option<Self> {
         let mut list: Vec<String> = Vec::new();
         let mut add = |s: &str| {
             let more: Vec<String> = match s.strip_prefix('#') {
@@ -98,7 +195,7 @@ impl Ingredient {
         match v {
             Value::String(s) => add(s),
             Value::Array(a) => a.iter().filter_map(Value::as_str).for_each(&mut add),
-            Value::Object(o) => return Self::parse_object(o, items, context),
+            Value::Object(o) => return Self::parse_object(o, items),
             _ => return None,
         }
         (!list.is_empty()).then(|| Self::of(list))
@@ -107,17 +204,10 @@ impl Ingredient {
     /// the standard shapes mods' recipes carry, each resolved to the flat item
     /// list it matches. A kind outside these still fails the file: a mod's
     /// own ingredient types come with their own hook, not the loader.
-    fn parse_object(
-        o: &serde_json::Map<String, Value>,
-        items: &Items,
-        context: &LoadContext,
-    ) -> Option<Self> {
+    fn parse_object(o: &serde_json::Map<String, Value>, items: &Items) -> Option<Self> {
         // Current NeoForge marks a custom ingredient with
         // `neoforge:ingredient_type`; `type` is the older packs' key.
-        let kind = o
-            .get("neoforge:ingredient_type")
-            .or_else(|| o.get("type"))?
-            .as_str()?;
+        let kind = ingredient_kind(o)?;
         let children = || {
             o.get("children")
                 .or_else(|| o.get("ingredients"))
@@ -132,7 +222,7 @@ impl Ingredient {
             "neoforge:compound" => {
                 let subs: Vec<Self> = children()?
                     .iter()
-                    .map(|s| Self::parse(s, items, context))
+                    .map(|s| Self::parse(s, items))
                     .collect::<Option<_>>()?;
                 let mut seen = Vec::new();
                 for sub in &subs {
@@ -150,7 +240,7 @@ impl Ingredient {
             "neoforge:intersection" => {
                 let subs: Vec<Self> = children()?
                     .iter()
-                    .map(|s| Self::parse(s, items, context))
+                    .map(|s| Self::parse(s, items))
                     .collect::<Option<_>>()?;
                 nested = Some((Shape::Intersection, subs.clone()));
                 subs.first()?
@@ -162,8 +252,8 @@ impl Ingredient {
             }
             // The base's items without the subtracted's.
             "neoforge:difference" => {
-                let base = Self::parse(o.get("base")?, items, context)?;
-                let gone = Self::parse(o.get("subtracted")?, items, context)?;
+                let base = Self::parse(o.get("base")?, items)?;
+                let gone = Self::parse(o.get("subtracted")?, items)?;
                 nested = Some((Shape::Difference, vec![base.clone(), gone.clone()]));
                 base.order
                     .iter()
@@ -171,19 +261,19 @@ impl Ingredient {
                     .cloned()
                     .collect()
             }
-            // A mod's own kind: the hook answers with the item list it
-            // matches; a bare type name is minecraft's own, not a mod's.
-            k if k.contains(':') && !k.starts_with("minecraft:") => {
-                let mut list = Vec::new();
-                native_ingredient(context, k, o, &mut list);
-                dedup_keep_order(&mut list);
+            // A mod's own kind: `resolve` asked the hook once at load and
+            // left the item list it matches with the occurrence; one no load
+            // resolved fails the file.
+            k if is_custom(k) => {
+                let mut data = o.clone();
+                let list = resolved_items(&mut data)?;
                 // The kind and its JSON stay with the ingredient: the
                 // load-time list only names items, and matching a concrete
                 // stack (its components) is the match-time hook's.
                 return (!list.is_empty()).then(|| Self {
                     order: list.clone(),
                     items: list.iter().cloned().collect(),
-                    custom: Some((k.to_owned(), o.clone())),
+                    custom: Some((k.to_owned(), data)),
                     children: None,
                 });
             }

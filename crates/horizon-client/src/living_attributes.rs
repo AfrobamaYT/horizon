@@ -413,7 +413,7 @@ impl LivingAttributes {
             let Some(new) = &worn[slot] else {
                 continue;
             };
-            if new.attribute_modifiers(items).is_empty() {
+            if crate::item_attributes::attribute_modifiers(new, items).is_empty() {
                 continue;
             }
             if self.map.get().is_none() {
@@ -465,7 +465,7 @@ fn apply_item(
         amount,
         operation,
         slot: group,
-    } in stack.attribute_modifiers(items).iter()
+    } in crate::item_attributes::attribute_modifiers(stack, items).iter()
     {
         if modifier_applies(group, slot_name) {
             set_modifier(map, attribute, id, *amount, operation, present)?;

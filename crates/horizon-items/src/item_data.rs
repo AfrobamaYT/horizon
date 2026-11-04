@@ -339,12 +339,32 @@ impl ItemStack {
     pub fn stored_enchantments(&self) -> &[(Arc<str>, u32)] {
         self.data().map_or(&[], |d| &d.stored_enchantments)
     }
-    /// `EnchantmentHelper.getItemEnchantmentLevel` (0 when absent).
+    /// `IItemStackExtension.getAllEnchantments`: the enchantments gameplay
+    /// sees on the stack, its `minecraft:enchantments` as the mods'
+    /// `get_enchantment_level` leaves them. Borrowed when no mod changes
+    /// them. Tooltips, the anvil, the grindstone, saves and the network read
+    /// the component itself ([`Self::enchantments`]).
+    pub fn all_enchantments(&self) -> std::borrow::Cow<'_, [(Arc<str>, u32)]> {
+        let own = self.enchantments();
+        match crate::native_enchantment_hooks::get_enchantment_level(self, None, own) {
+            Some(levels) => std::borrow::Cow::Owned(levels),
+            None => std::borrow::Cow::Borrowed(own),
+        }
+    }
+    /// `EnchantmentHelper.getItemEnchantmentLevel` as NeoForge has it
+    /// (`IItemStackExtension.getEnchantmentLevel`): the level gameplay sees,
+    /// after the mods' `get_enchantment_level` (0 when absent).
     pub fn enchantment_level(&self, id: &str) -> u32 {
-        self.enchantments()
-            .iter()
-            .find(|(e, _)| &**e == id)
-            .map_or(0, |(_, l)| *l)
+        let own = self.enchantments();
+        match crate::native_enchantment_hooks::get_enchantment_level(self, Some(id), own) {
+            Some(levels) => level_in(&levels, id),
+            None => level_in(own, id),
+        }
+    }
+    /// `EnchantmentHelper.getTagEnchantmentLevel`: the level in the stack's
+    /// own `minecraft:enchantments`, without the mods (0 when absent).
+    pub fn tag_enchantment_level(&self, id: &str) -> u32 {
+        level_in(self.enchantments(), id)
     }
     /// The component an anvil/grindstone works on: stored for books.
     pub fn crafting_enchantments(&self) -> &[(Arc<str>, u32)] {
@@ -463,14 +483,14 @@ impl ItemStack {
     /// `attribute_modifiers` component when it has one (none at all when it
     /// removed the component), else its item type's. Borrowed unless the stack
     /// has its own list.
-    pub fn attribute_modifiers<'a>(
+    pub fn default_attribute_modifiers<'a>(
         &self,
         items: &'a crate::items::Items,
     ) -> std::borrow::Cow<'a, [ModifierRow]> {
-        self.attribute_modifiers_or(items.get(&self.item).map_or(&[], |i| &i.modifiers))
+        self.default_attribute_modifiers_or(items.get(&self.item).map_or(&[], |i| &i.modifiers))
     }
-    /// `attribute_modifiers` with the item type's list given: `default`.
-    pub fn attribute_modifiers_or<'a>(
+    /// `default_attribute_modifiers` with the item type's list given: `default`.
+    pub fn default_attribute_modifiers_or<'a>(
         &self,
         default: &'a [ModifierRow],
     ) -> std::borrow::Cow<'a, [ModifierRow]> {
@@ -495,6 +515,10 @@ impl ItemStack {
         stack.tidy();
         stack
     }
+}
+/// `ItemEnchantments.getLevel`: `id`'s level in `list` (0 when absent).
+fn level_in(list: &[(Arc<str>, u32)], id: &str) -> u32 {
+    list.iter().find(|(e, _)| &**e == id).map_or(0, |(_, l)| *l)
 }
 /// `ItemEnchantments.Mutable.upgrade`.
 pub fn upgrade(list: &mut Levels, id: &str, level: u32) {
@@ -1209,7 +1233,7 @@ mod tests {
             "mainhand",
         )];
         let mut stack = ItemStack::new("minecraft:diamond_sword", 1);
-        assert_eq!(&*stack.attribute_modifiers_or(&types), &types[..]);
+        assert_eq!(&*stack.default_attribute_modifiers_or(&types), &types[..]);
         stack.data_mut().set_other(
             "minecraft:attribute_modifiers",
             Some(Tag::List(vec![
@@ -1219,7 +1243,7 @@ mod tests {
                 Tag::compound([("type", Tag::String("minecraft:luck".into()))]),
             ])),
         );
-        let own = stack.attribute_modifiers_or(&types);
+        let own = stack.default_attribute_modifiers_or(&types);
         assert_eq!(
             &*own,
             &[
@@ -1232,7 +1256,7 @@ mod tests {
             "!minecraft:attribute_modifiers",
             Some(Tag::compound(Vec::<(&str, Tag)>::new())),
         );
-        assert!(removed.attribute_modifiers_or(&types).is_empty());
+        assert!(removed.default_attribute_modifiers_or(&types).is_empty());
         // `matches` also compares the count.
         let one = ItemStack::new("minecraft:diamond_sword", 1);
         assert!(one.matches(&ItemStack::new("minecraft:diamond_sword", 1)));

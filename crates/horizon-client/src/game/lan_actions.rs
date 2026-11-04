@@ -5918,13 +5918,13 @@ impl Game<'_> {
         // Swapping the guest in costs: only when a mod hears the pickup.
         let mut listened = false;
         if self.serving.is_some() || self.options.dedicated.is_some() {
-            self.native_experience_orb_pickup_listened(&mut listened);
+            self.native_pickup_xp_listened(&mut listened);
         }
         if listened {
             let dimension = self.dim.id();
             let called = self.as_guest(conn, |game| {
                 let player = game.native_acting_id();
-                game.native_experience_orb_pickup(
+                game.native_pickup_xp(
                     player,
                     dimension,
                     orb.id,

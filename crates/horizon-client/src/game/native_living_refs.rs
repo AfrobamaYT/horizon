@@ -60,6 +60,20 @@ fn slot_name(slot: EquipmentSlot) -> &'static str {
     }
 }
 
+fn world_equipment_slot(slot: EquipmentSlot) -> horizon_world::player_inventory::EquipmentSlot {
+    use horizon_world::player_inventory::EquipmentSlot as WorldSlot;
+    match slot {
+        EquipmentSlot::MainHand => WorldSlot::MainHand,
+        EquipmentSlot::OffHand => WorldSlot::OffHand,
+        EquipmentSlot::Head => WorldSlot::Head,
+        EquipmentSlot::Chest => WorldSlot::Chest,
+        EquipmentSlot::Legs => WorldSlot::Legs,
+        EquipmentSlot::Feet => WorldSlot::Feet,
+        EquipmentSlot::Body => WorldSlot::Body,
+        EquipmentSlot::Saddle => WorldSlot::Saddle,
+    }
+}
+
 /// `LivingEntity.isAlive`'s health test: above 0, so a NaN health loaded from
 /// a save is not alive either.
 fn alive_at(health: f32) -> bool {
@@ -513,6 +527,105 @@ impl Game<'_> {
             _ => None,
         }
     }
+    /// Damage an equipped stack without an equip/unequip notification.
+    pub(super) fn native_living_hurt_and_break(
+        &mut self,
+        living: LivingRef,
+        slot: EquipmentSlot,
+        amount: i32,
+    ) -> Option<ItemStack> {
+        let target = self.native_living_target(living)?;
+        if matches!(target, Target::Player | Target::Guest(_)) {
+            return self
+                .for_player(target, |game| game.damage_player_equipment(slot, amount))
+                .flatten();
+        }
+        let stack = self.native_living_equipment(living, slot)?;
+        let (updated, broken) = self.damage_stack(&stack, amount, false);
+        if updated.as_ref() == Some(&stack) {
+            return None;
+        }
+        if self.native_living_equipment(living, slot).as_ref() != Some(&stack) {
+            return None;
+        }
+        match target {
+            Target::Mob(id) => {
+                self.mobs
+                    .iter_mut()
+                    .find(|mob| mob.id == id)?
+                    .set_equipment_stack(slot as usize, updated);
+            }
+            Target::Stand(id) => {
+                self.armor_stands
+                    .iter_mut()
+                    .find(|stand| stand.id == id)?
+                    .equipment
+                    .set(slot as usize, updated);
+            }
+            Target::Dragon(id) => {
+                self.dragon
+                    .as_mut()
+                    .filter(|dragon| dragon.id == id)?
+                    .equipment
+                    .set(slot as usize, updated);
+            }
+            _ => return None,
+        }
+        if broken.is_some() {
+            let event =
+                horizon_client::mobs::item_break::equipment_break_event(world_equipment_slot(slot));
+            self.native_entity_broadcast_event(living.entity(), event as u8);
+        }
+        broken
+    }
+
+    pub(super) fn damage_player_equipment(
+        &mut self,
+        slot: EquipmentSlot,
+        amount: i32,
+    ) -> Option<ItemStack> {
+        let stack = player_slot(
+            &self.inventory,
+            self.selected,
+            &self.armor,
+            &self.offhand,
+            &self.equipment,
+            slot,
+        )?;
+        let (updated, broken) = self.damage_stack(&stack, amount, true);
+        if updated.as_ref() == Some(&stack) {
+            return None;
+        }
+        let cell = match slot {
+            EquipmentSlot::MainHand => &mut self.inventory[self.selected],
+            EquipmentSlot::OffHand => &mut self.offhand,
+            EquipmentSlot::Body | EquipmentSlot::Saddle => {
+                if self.equipment.get(slot as usize) != Some(&stack) {
+                    return None;
+                }
+                self.equipment.set(slot as usize, updated);
+                if let Some(ref broken) = broken {
+                    self.award_stat("broken", &broken.item, 1);
+                    self.player_equipment_broke(world_equipment_slot(slot), broken);
+                }
+                return broken;
+            }
+            _ => &mut self.armor[armor_index(slot)?],
+        };
+        if cell.as_ref() != Some(&stack) {
+            return None;
+        }
+        *cell = updated;
+        if let Some(ref broken) = broken {
+            self.award_stat("broken", &broken.item, 1);
+            self.player_equipment_broke(world_equipment_slot(slot), broken);
+            if armor_index(slot).is_some() {
+                self.apply_equipment();
+            }
+        }
+        broken
+    }
+
     /// The stack in hand `hand` (`LivingEntity.getItemInHand`).
     pub(super) fn native_living_hand_item(
         &self,
@@ -676,7 +789,7 @@ impl Game<'_> {
     /// `ServerPlayer.drop`), never through a slot: along the view with a
     /// main-hand swing, or with `throw_randomly` scattered with none, as a
     /// death's drops. `include_thrower_name` sets the thrower, and a player's
-    /// throw along the view then counts in its stats and fires `item_dropped`.
+    /// throw along the view then counts in its stats and fires `item_toss`.
     /// None for an empty stack, a stand or the dragon, a stale handle, or an
     /// item a mod kept out. API @API:living_refs@.
     pub(super) fn native_living_drop(
@@ -775,6 +888,208 @@ impl Game<'_> {
 mod tests {
     use super::*;
     use horizon_core::geometry::Vec3;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn durability_handle_and_held_path_share_rng_and_damage() {
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::random::RandomSource;
+        use mod_api::ServerHost;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let living = game.native_living(game.native_entity(20).unwrap()).unwrap();
+            let mut stack = ItemStack::new("minecraft:diamond_sword", 1);
+            stack.data_mut().enchantments = vec![("minecraft:unbreaking".into(), 3)];
+            game.inventory[game.selected] = Some(stack.clone());
+            let random = game.world.random.clone();
+            // Before the migration, damage_held called wear and added its result.
+            let old_loss = game.wear(&stack, 20);
+            let old_next_random = game.world.random.next_float();
+            game.world.random = random.clone();
+            game.damage_held(20);
+            let held_result = game.inventory[game.selected].clone();
+            let next_random = game.world.random.next_float();
+            assert_eq!(held_result.as_ref().unwrap().damage, old_loss);
+            assert_eq!(next_random, old_next_random);
+            game.world.random = random;
+            game.inventory[game.selected] = Some(stack);
+            let host: &mut dyn ServerHost = game;
+            assert!(
+                living
+                    .hurt_and_break(host, EquipmentSlot::MainHand, 20)
+                    .is_none()
+            );
+            assert_eq!(game.inventory[game.selected], held_result);
+            assert_eq!(game.world.random.next_float(), next_random);
+
+            let mut stack = ItemStack::new("minecraft:diamond_sword", 1);
+            stack.damage = 10;
+            game.inventory[game.selected] = Some(stack.clone());
+            let mut repair_random = game.world.random.clone();
+            assert!(
+                living
+                    .hurt_and_break(game, EquipmentSlot::MainHand, -4)
+                    .is_none()
+            );
+            assert_eq!(game.world.random.next_float(), repair_random.next_float());
+            assert_eq!(game.inventory[game.selected].as_ref().unwrap().damage, 6);
+            game.creative = true;
+            assert!(
+                living
+                    .hurt_and_break(game, EquipmentSlot::MainHand, 100)
+                    .is_none()
+            );
+            assert_eq!(game.inventory[game.selected].as_ref().unwrap().damage, 6);
+            game.creative = false;
+            let mut unbreakable = stack.clone();
+            unbreakable.data_mut().set_other(
+                "minecraft:unbreakable",
+                Some(horizon_world::nbt::Tag::Byte(1)),
+            );
+            game.inventory[game.selected] = Some(unbreakable.clone());
+            assert!(
+                living
+                    .hurt_and_break(game, EquipmentSlot::MainHand, 100)
+                    .is_none()
+            );
+            assert_eq!(game.inventory[game.selected], Some(unbreakable));
+            let max = game.items().get(&stack.item).unwrap().max_damage;
+            stack.damage = max - 1;
+            game.inventory[game.selected] = Some(stack);
+            let broken = living
+                .hurt_and_break(game, EquipmentSlot::MainHand, 1)
+                .unwrap();
+            assert_eq!(broken.damage, max);
+            assert!(game.inventory[game.selected].is_none());
+
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(21, kind, Vec3::ZERO, 0.0));
+            let mob = game.native_living(game.native_entity(21).unwrap()).unwrap();
+            let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+            sword.damage = max - 1;
+            assert!(mob.set_equipment(game, EquipmentSlot::MainHand, Some(sword)));
+            let broken = mob
+                .hurt_and_break(game, EquipmentSlot::MainHand, 1)
+                .unwrap();
+            assert_eq!(broken.damage, max);
+            assert!(mob.equipment(game, EquipmentSlot::MainHand).is_none());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn armor_hit_matches_old_draws_and_break_order() {
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::random::RandomSource;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.audio.engine.loaded = true;
+            game.audio.engine.registry.add_file("minecraft", br#"{"entity.item.break":{"sounds":["test/item"]},"block.anvil.break":{"sounds":["test/anvil"]}}"#, &|_, _| true);
+            let source = game.motion.health.damage.id("minecraft:generic").unwrap();
+            let mut armor: [Option<ItemStack>; 4] = std::array::from_fn(|_| None);
+            for (i, name) in ["minecraft:diamond_helmet", "minecraft:diamond_chestplate"]
+                .into_iter()
+                .enumerate()
+            {
+                let mut stack = ItemStack::new(name, 1);
+                stack.damage = game.items().get(name).unwrap().max_damage - 1;
+                let sound = ["minecraft:entity.item.break", "minecraft:block.anvil.break"][i];
+                stack.data_mut().set_other(
+                    "minecraft:break_sound",
+                    Some(horizon_world::nbt::Tag::String(sound.into())),
+                );
+                armor[i] = Some(stack);
+            }
+            let mut leggings = ItemStack::new("minecraft:diamond_leggings", 1);
+            leggings.data_mut().enchantments = vec![("minecraft:unbreaking".into(), 3)];
+            armor[2] = Some(leggings);
+            for guest in [false, true] {
+                game.armor = armor.clone();
+                game.lan_acting = guest.then_some(1);
+                game.audio.capture = Some(Vec::new());
+                game.audio.record_heard = true;
+                game.audio.engine.notifications.clear();
+                game.audio.heard.clear();
+                game.guest_equipment_breaks.clear();
+                let random = game.world.random.clone();
+                // Pre-migration: decide all losses before mutating any slot.
+                let losses: [Option<(u32, u32)>; 4] = std::array::from_fn(|i| {
+                    let stack = game.armor[i].clone()?;
+                    let max = game.items().get(&stack.item)?.max_damage;
+                    let loss = game.wear(&stack, 1);
+                    (loss > 0).then_some((loss, max))
+                });
+                let mut broken = Vec::new();
+                for (index, (cell, loss)) in game.armor.iter_mut().zip(losses).enumerate() {
+                    if let (Some(stack), Some((loss, max))) = (cell.as_mut(), loss) {
+                        stack.damage = stack.damage.saturating_add(loss).min(max);
+                        if stack.damage >= max {
+                            broken.push((stack.clone(), index));
+                            *cell = None;
+                        }
+                    }
+                }
+                for (stack, index) in &broken {
+                    game.player_equipment_broke(super::super::armor_slot(*index), stack);
+                }
+                let expected_armor = game.armor.clone();
+                let expected_events = game.guest_equipment_breaks.clone();
+                let expected_sounds = game.audio.heard.clone();
+                let expected_sound_order: Vec<_> = game
+                    .audio
+                    .engine
+                    .notifications
+                    .iter()
+                    .map(|event| event.identifier.clone())
+                    .collect();
+                let expected_random = game.world.random.next_float();
+                assert_eq!(broken.len(), 2);
+                if guest {
+                    assert_eq!(
+                        expected_events
+                            .iter()
+                            .map(|event| event.0)
+                            .collect::<Vec<_>>(),
+                        [49, 50]
+                    );
+                } else {
+                    assert_eq!(expected_sounds.get("minecraft:entity.item.break"), Some(&1));
+                    assert_eq!(expected_sounds.get("minecraft:block.anvil.break"), Some(&1));
+                    assert_eq!(
+                        expected_sound_order,
+                        ["minecraft:entity.item.break", "minecraft:block.anvil.break"]
+                    );
+                }
+                game.armor = armor.clone();
+                game.guest_equipment_breaks.clear();
+                game.audio.capture = Some(Vec::new());
+                game.audio.heard.clear();
+                game.audio.engine.notifications.clear();
+                game.world.random = random;
+                game.hurt_armor(source, 4.0);
+                assert_eq!(game.armor, expected_armor);
+                assert_eq!(game.guest_equipment_breaks, expected_events);
+                assert_eq!(game.audio.heard, expected_sounds);
+                assert_eq!(
+                    game.audio
+                        .engine
+                        .notifications
+                        .iter()
+                        .map(|event| event.identifier.clone())
+                        .collect::<Vec<_>>(),
+                    expected_sound_order
+                );
+                assert_eq!(game.world.random.next_float(), expected_random);
+            }
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

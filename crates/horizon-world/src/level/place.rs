@@ -47,6 +47,18 @@ pub enum PlaceOutcome {
     Failed,
 }
 
+/// What a placement would write (`Behaviours::placement_preview`): the block,
+/// and the second half `Block.setPlacedBy` adds for a bed, door or tall plant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlacementPreview {
+    /// Where the block goes.
+    pub pos: BlockPos,
+    /// The state it is placed in.
+    pub state: BlockStateId,
+    /// The companion half, when the block places one.
+    pub companion: Option<(BlockPos, BlockStateId)>,
+}
+
 /// `BlockPlaceContext` after resolving the replaced position: what
 /// `Block.getStateForPlacement` reads, and what a mod block is handed when it
 /// chooses the state it is placed in
@@ -1478,34 +1490,24 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
     }
 
-    /// `Block.setPlacedBy` for the blocks that place companions.
-    fn set_placed_by(&mut self, pos: BlockPos, state: BlockStateId) {
+    /// The second half `Block.setPlacedBy` places beside `pos`: a bed's
+    /// head, a door's or a tall plant's upper half.
+    fn placed_companion(
+        &mut self,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) -> Option<(BlockPos, BlockStateId)> {
         let b = self.b;
         let p = b.props;
         let data = b.data(state);
         let block = b.block(state);
         if data.is(Class::AbstractBed) {
-            let other = rel(pos, b.facing(state));
-            self.set_block_and_update(other, b.table.set_text(state, p.part, "head"));
-        } else if data.is(Class::Crafter) {
-            if b.table.bool(state, p.triggered) {
-                self.schedule_tick(pos, block, 4);
-            }
-        } else if data.is(Class::Diode) {
-            if self.diode_should_turn_on(pos, state) {
-                self.schedule_tick(pos, block, 1);
-            }
+            Some((
+                rel(pos, b.facing(state)),
+                b.table.set_text(state, p.part, "head"),
+            ))
         } else if data.is(Class::Door) {
-            self.set_block_and_update(above(pos), b.table.set_text(state, p.half, "upper"));
-        } else if data.is(Class::DriedGhast) {
-            // DriedGhastBlock.setPlacedBy: the place sound, the water one when waterlogged.
-            let sound = if b.table.bool(state, p.waterlogged) {
-                "minecraft:block.dried_ghast.place_in_water"
-            } else {
-                "minecraft:block.dried_ghast.place"
-            };
-            self.sound(pos, &sound.into(), 1.0, 1.0);
-        } else if data.is(Class::PitcherCrop) {
+            Some((above(pos), b.table.set_text(state, p.half, "upper")))
         } else if data.is(Class::SmallDripleaf) {
             let above_pos = above(pos);
             let upper = b.table.set_dir(
@@ -1518,8 +1520,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 .table
                 .with_bool(upper, p.waterlogged, water)
                 .unwrap_or(upper);
-            self.set_block_and_update(above_pos, upper);
-        } else if data.is(Class::DoublePlant) {
+            Some((above_pos, upper))
+        } else if data.is(Class::DoublePlant) && !data.is(Class::PitcherCrop) {
             let above_pos = above(pos);
             let upper = b.table.set_text(b.default_of(block), p.half, "upper");
             let water = self.is_water_at(above_pos);
@@ -1527,7 +1529,38 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 .table
                 .with_bool(upper, p.waterlogged, water)
                 .unwrap_or(upper);
-            self.set_block_and_update(above_pos, upper);
+            Some((above_pos, upper))
+        } else {
+            None
+        }
+    }
+
+    /// `Block.setPlacedBy` for the blocks that place companions.
+    fn set_placed_by(&mut self, pos: BlockPos, state: BlockStateId) {
+        if let Some((at, companion)) = self.placed_companion(pos, state) {
+            self.set_block_and_update(at, companion);
+            return;
+        }
+        let b = self.b;
+        let p = b.props;
+        let data = b.data(state);
+        let block = b.block(state);
+        if data.is(Class::Crafter) {
+            if b.table.bool(state, p.triggered) {
+                self.schedule_tick(pos, block, 4);
+            }
+        } else if data.is(Class::Diode) {
+            if self.diode_should_turn_on(pos, state) {
+                self.schedule_tick(pos, block, 1);
+            }
+        } else if data.is(Class::DriedGhast) {
+            // DriedGhastBlock.setPlacedBy: the place sound, the water one when waterlogged.
+            let sound = if b.table.bool(state, p.waterlogged) {
+                "minecraft:block.dried_ghast.place_in_water"
+            } else {
+                "minecraft:block.dried_ghast.place"
+            };
+            self.sound(pos, &sound.into(), 1.0, 1.0);
         } else if data.is(Class::PistonBase) {
             self.piston_check_if_extend(pos, state);
         } else if data.is(Class::TripWireHook) {
@@ -1777,17 +1810,22 @@ impl Behaviours {
         };
         sim.can_be_replaced(sim.state(ctx.clicked_pos), &inner)
     }
-    /// The position and state `BlockItem.place` would place for `ctx`, without
-    /// writing anything (None when vanilla's placement fails).
-    pub fn placement_state<L: LevelAccess + ?Sized>(
+    /// What `BlockItem.place` would place for `ctx`, without writing anything
+    /// (None when vanilla's placement fails).
+    pub fn placement_preview<L: LevelAccess + ?Sized>(
         &self,
         level: &mut L,
         ticks: &mut Ticks,
         ctx: &PlaceContext,
-    ) -> Option<(BlockPos, BlockStateId)> {
-        self.sim(level, ticks)
-            .placement(ctx)
-            .map(|(ctx, _, state)| (ctx.pos, state))
+    ) -> Option<PlacementPreview> {
+        let mut sim = self.sim(level, ticks);
+        let (placement, _, state) = sim.placement(ctx)?;
+        let companion = sim.placed_companion(placement.pos, state);
+        Some(PlacementPreview {
+            pos: placement.pos,
+            state,
+            companion,
+        })
     }
     /// `getStateForPlacement` of `block` for `ctx` without placing anything
     /// (`None` when vanilla refuses the placement). The position is resolved

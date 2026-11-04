@@ -1,0 +1,15 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "fluid",
+      "side": "client",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_fluid"
+    },
+    {
+      "name": "fluid_name",
+      "side": "client",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_fluid_name"
+    }
+  ]
+}

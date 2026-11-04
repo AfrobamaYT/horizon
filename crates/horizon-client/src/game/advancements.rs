@@ -1203,17 +1203,24 @@ impl Game<'_> {
     /// damage and `new_damage` the unclamped damage value it is about to get.
     /// `durability` tests `maxDamage - newDamage`, `delta` tests
     /// `damageValue - newDamage`.
-    pub(super) fn trigger_item_durability(&mut self, stack: &ItemStack, new_damage: u32) {
+    pub(super) fn trigger_item_durability(&mut self, stack: &ItemStack, new_damage: i32) {
         if self.remote.is_some() || self.no_player_here() {
             return;
         }
         let me = self.player_entity();
         let item = item_view(stack);
-        let max = self
-            .res
-            .items()
-            .get(&stack.item)
-            .map_or(0, |i| i.max_damage) as i64;
+        let max = match stack
+            .data()
+            .and_then(|data| data.other("minecraft:max_damage"))
+        {
+            Some(horizon_world::nbt::Tag::Int(value)) => i64::from(*value),
+            _ => i64::from(
+                self.res
+                    .items()
+                    .get(&stack.item)
+                    .map_or(0, |i| i.max_damage),
+            ),
+        };
         // ItemStack.getDamageValue clamps to 0..=getMaxDamage.
         let damage = i64::from(stack.damage).clamp(0, max);
         let new_damage = i64::from(new_damage);
