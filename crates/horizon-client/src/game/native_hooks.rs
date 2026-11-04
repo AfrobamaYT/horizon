@@ -3918,7 +3918,7 @@ impl Game<'_> {
     }
     /// A server player who ate chorus fruit (or another item with the
     /// `teleport_randomly` consume effect) is about to try a random spot
-    /// (NeoForge's `EntityTeleportEvent.ChorusFruit`, vanilla's
+    /// (NeoForge's `EntityTeleportEvent.ItemConsumption`, vanilla's
     /// `TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),
     /// after they stopped riding. `from` is their feet, `target` the spot
     /// drawn; a mod may move it (its y kept inside the level's height, a
@@ -3926,7 +3926,7 @@ impl Game<'_> {
     /// from it for ground it may land on. Canceling ends the effect: no teleport and no
     /// more attempts. The player's state is swapped in
     /// (`native_acting_player`). Foxes are not heard.
-    pub(super) fn native_chorus_fruit_teleport(
+    pub(super) fn native_item_consumption_teleport(
         &mut self,
         player: u128,
         name: &str,
@@ -3934,7 +3934,7 @@ impl Game<'_> {
         target: &mut [f64; 3],
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_chorus_fruit_teleport(self, player, name, from, target, cancel);
+        mod_api::dispatch_item_consumption_teleport(self, player, name, from, target, cancel);
     }
     /// Armor is about to take durability damage from a hit (NeoForge's
     /// `ArmorHurtEvent`, vanilla's `LivingEntity.doHurtEquipment`): once per
