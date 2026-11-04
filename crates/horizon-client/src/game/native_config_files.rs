@@ -94,21 +94,24 @@ fn read(root: &Path, file: &ConfigPath) -> Result<Vec<u8>, ConfigFileError> {
     Ok(bytes)
 }
 
-/// Written beside the file, then renamed over it.
+/// Written beside the file, then renamed over it. The temporary name starts
+/// with the file's own, so it stays the mod's own, and `list` shows it, if a
+/// crash leaves it behind.
 fn write(root: &Path, file: &ConfigPath, bytes: &[u8]) -> Result<(), ConfigFileError> {
     static WRITES: AtomicU64 = AtomicU64::new(0);
     if bytes.len() as u64 > CONFIG_FILE_MAX {
         return Err(ConfigFileError::TooLarge);
     }
     let path = resolve(root, file)?;
-    if path.is_dir() {
+    // `config/<mod id>` is the mod's folder, so it can't be a file.
+    if path.is_dir() || Some(file.as_str()) == horizon_client::crash::current_native_mod() {
         return Err(ConfigFileError::NotAFile);
     }
     let folder = path.parent().unwrap_or(root);
     fs::create_dir_all(folder).map_err(io)?;
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let temp = folder.join(format!(
-        ".{name}.{}-{}.tmp",
+        "{name}.{}-{}.tmp",
         std::process::id(),
         WRITES.fetch_add(1, Ordering::Relaxed)
     ));
@@ -241,6 +244,24 @@ mod tests {
             assert_eq!(read(root, &path("fd/gone")), Err(ConfigFileError::NotFound));
         });
         assert_eq!(fs::read(root.join("fd/state.json")).unwrap(), b"{}");
+    }
+
+    #[test]
+    fn a_file_named_for_the_mod_cant_block_its_folder_and_a_leftover_temp_is_its_own() {
+        let root = Root::new("folder-name");
+        let root = &root.0;
+        as_mod("fd", || {
+            assert_eq!(
+                write(root, &path("fd"), b"x"),
+                Err(ConfigFileError::NotAFile)
+            );
+            assert!(!root.join("fd").exists());
+            write(root, &path("fd/state.json"), b"{}").unwrap();
+            // What a crash between the temp file and the rename leaves behind.
+            fs::write(root.join("fd.json.1-0.tmp"), b"half").unwrap();
+            assert!(path("fd.json.1-0.tmp").owned_by("fd"));
+            assert_eq!(read(root, &path("fd.json.1-0.tmp")).unwrap(), b"half");
+        });
     }
 
     #[test]
