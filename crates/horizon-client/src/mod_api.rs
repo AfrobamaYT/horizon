@@ -7,6 +7,11 @@ use std::sync::{Arc, OnceLock};
 
 mod phase;
 pub use phase::{LoadedMods, RegistrationContext, RegistrationPhase};
+mod config_files;
+pub use config_files::{
+    CONFIG_FILE_MAX, CONFIG_LIST_MAX, ConfigEntry, ConfigEntryKind, ConfigFileError, ConfigFiles,
+    ConfigPath, ConfigStat,
+};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod client_reload;
@@ -47,7 +52,7 @@ pub use crate::gfx::native_render::{
     BlockSpriteArrays, RenderHookId, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn,
     WorldDrawnEvent, render_hook_ids, wgpu,
 };
-pub use crate::health::{HurtSource, ShieldBlock};
+pub use crate::health::{DamageContainer, HurtSource, Reduction, ShieldBlock};
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::item_tooltip::TooltipDisplay;
@@ -626,6 +631,10 @@ pub struct NativeServerPlayer {
     /// the server.
     pub yaw: f32,
     pub pitch: f32,
+    /// The network entity id the player has this session, the one hooks that only know entity ids
+    /// (`living_incoming_damage`, `living_knockback`) give for the player; 0 when not known.
+    /// API @API:server_player_entity_id@.
+    pub entity_id: i32,
 }
 
 /// A command a native mod adds, as one usage: words, then arguments
@@ -2995,6 +3004,7 @@ mod tests {
                 health: 20.0,
                 yaw: 0.0,
                 pitch: 0.0,
+                entity_id: 0,
             })
         }
         fn action_bar(&mut self, _uuid: u128, line: Text) -> bool {

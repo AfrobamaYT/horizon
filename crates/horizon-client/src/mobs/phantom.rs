@@ -423,10 +423,11 @@ mod tests {
             // rule is about roofs and full walls, not foot walls).
             let mut target = AttackPlayerTarget { next_scan: 0 };
             let mut events = Vec::new();
-            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            let mut test_level = crate::health::TestLevel::new(0);
+            let level = &mut test_level.level();
             let mut cx = Cx {
                 w: &w,
-                lr: &mut lr,
+                level,
                 events: &mut events,
             };
             m.ai.seen_cache.clear();
@@ -442,7 +443,7 @@ mod tests {
             let mut events = Vec::new();
             let mut cx = Cx {
                 w: &w,
-                lr: &mut lr,
+                level,
                 events: &mut events,
             };
             sweep.tick(&mut m, &mut cx);
@@ -470,10 +471,11 @@ mod tests {
             register(&mut m);
             let mut target = AttackPlayerTarget { next_scan: 0 };
             let mut events = Vec::new();
-            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            let mut test_level = crate::health::TestLevel::new(0);
+            let level = &mut test_level.level();
             let mut cx = Cx {
                 w: &w,
-                lr: &mut lr,
+                level,
                 events: &mut events,
             };
             m.ai.seen_cache.clear();
@@ -522,10 +524,11 @@ mod tests {
                     let mut m = Mob::new(1, kind, Vec3::new(0.5, 80.0, 0.5), 0.0);
                     let mut target = AttackPlayerTarget { next_scan: 0 };
                     let mut events = Vec::new();
-                    let mut lr = horizon_core::random::LegacyRandom::new(0);
+                    let mut test_level = crate::health::TestLevel::new(0);
+                    let level = &mut test_level.level();
                     let mut cx = Cx {
                         w: &w,
-                        lr: &mut lr,
+                        level,
                         events: &mut events,
                     };
                     assert_eq!(target.can_use(&mut m, &mut cx), roof.is_none(), "{roof:?}");

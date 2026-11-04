@@ -158,8 +158,9 @@ pub(super) trait Entity: EntityRules {
         let b = self.explosion_box();
         f64::from((b.max_position().y - b.min_position().y) as f32 * 0.85f32)
     }
-    /// Whether this kind ticks after the projectiles do (orbs, falling blocks,
-    /// primed TNT), where vanilla ticks every entity in the order it joined.
+    /// Whether this kind can still be waiting for its tick when a projectile
+    /// ticks, though it joined before it (orbs, falling blocks, primed TNT: they
+    /// tick between the batches, `game/ordered_tick.rs`).
     fn ticks_after_projectiles(&self) -> bool {
         false
     }
@@ -546,6 +547,14 @@ macro_rules! entity_lists_of {
     };
 }
 pub(super) use entity_lists_of;
+/// The level `$game` ticks, lent to a hit's damage hooks: it borrows only the game's world
+/// and block registry, so a mob or the player beside them can take the hit.
+macro_rules! damage_level_of {
+    ($game:expr) => {
+        &mut horizon_client::health::DamageLevel::of(&mut $game.world, $game.pack.assets.registry)
+    };
+}
+pub(super) use damage_level_of;
 
 macro_rules! walk_lists {
     (($lists:expr, $entity:ident, $body:block)

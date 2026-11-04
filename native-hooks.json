@@ -253,8 +253,8 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_set_block_property_with", "side": "server"
     },
     {
-      "name": "config_dir",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_config_dir", "side": "both"
+      "name": "config_files",
+      "target": "horizon_client::game::native_config_files::Game<'_>::native_config_files", "side": "both"
     },
     {
       "name": "panel_items",
