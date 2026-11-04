@@ -103,6 +103,7 @@ pub struct Parts {
 }
 
 #[derive(Clone, Default)]
+/// The Parts attached to blocks for one hook, with which hooks have a subscriber.
 pub struct HookParts {
     blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
     block_states: Vec<Option<NonZeroU32>>,
@@ -177,6 +178,7 @@ struct Installed {
     hook_bits: Vec<bool>,
 }
 
+/// The block entity types mods registered.
 pub fn block_entity_types() -> &'static [BlockEntityType] {
     installed().map_or(&[], |installed| &installed.block_entity_types)
 }
@@ -229,7 +231,9 @@ pub fn has_scoped_hook(hook: HookId) -> bool {
 
 /// The parts table a dispatch reads: the process-wide one, or this game thread's.
 pub enum PartsRef {
+    /// The process-wide table.
     Shared(&'static Parts),
+    /// This game thread's table.
     Game(Rc<Parts>),
 }
 
@@ -277,9 +281,13 @@ pub fn mark_game_thread() {
 
 /// The ids a game knows, which a part's key must name.
 pub struct KnownIds<'a> {
+    /// Whether a block id is known.
     pub block: &'a dyn Fn(&str) -> bool,
+    /// Whether an item id is known.
     pub item: &'a dyn Fn(&str) -> bool,
+    /// How many block states the game has.
     pub state_count: usize,
+    /// The block id of a block state, by state index.
     pub state_block: &'a dyn Fn(usize) -> &'a str,
 }
 
@@ -394,6 +402,7 @@ fn add_tagged<P: ?Sized>(
 }
 
 impl HookParts {
+    /// The block Parts attached to a block state, in dispatch order.
     pub fn block_state(&self, state: BlockStateId) -> &[Attached<dyn BlockPart>] {
         self.block_states
             .get(state.0 as usize)
@@ -1147,6 +1156,7 @@ pub fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
     Ok(())
 }
 
+/// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
     use super::super::*;
@@ -2466,6 +2476,7 @@ pub mod tests {
         copy_on_death: false,
         sync: false,
     };
+    /// A fluid attachment type for the tests.
     pub const ROBOT_FLUID: AttachmentType<u32> = AttachmentType {
         namespace: "test",
         name: "fluid",

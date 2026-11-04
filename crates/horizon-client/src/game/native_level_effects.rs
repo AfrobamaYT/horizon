@@ -1,5 +1,5 @@
 //! Sounds and particles in a level for native server mods, through a
-//! `LevelRef` (docs/native-mods.md, "Entity and level handles", #7387).
+//! `LevelRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387).
 //! Every player in range hears or sees them, as `ServerLevel.playSound` and
 //! `sendParticles` send them. They return false on a client, for a handle of
 //! an earlier open, or for arguments the network can't carry.

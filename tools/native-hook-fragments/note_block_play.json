@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "note_block_play",
+      "doc": "The note block at `pos` is about to play (NeoForge's\n`NoteBlockEvent.Play`, in `NoteBlock.playNote`), once a block above\nno longer mutes it. `player` and `player_entity_id` name the player\nwho tuned or punched it, and are `None` for redstone.\n`instrument` is its instrument and `note` its note, 0 to 24; change\neither to play another (a note out of range keeps the block's own).\nSet `cancel` and it doesn't play: no sound, no particle, no\n`note_block_play` game event. Server-side.",
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_note_block_play",
       "neoforge": "NoteBlockEvent.Play",
       "side": "server",

@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "living_get_projectile",
+      "doc": "`LivingEntity.getProjectile(weapon)` (NeoForge's\n`LivingGetProjectileEvent`) for a player (`player` and `name`) or a\nmob (`entity`, `kind`): a skeleton or illusioner's shot, or the crossbow\nload of a pillager or piglin. `projectile` is the vanilla\nammunition; replace it to choose another. A replaced stack is not taken\nfrom the inventory.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_living_get_projectile",
       "side": "both",
       "neoforge": "net.neoforged.neoforge.event.entity.living.LivingGetProjectileEvent (NeoForge.EVENT_BUS, not cancellable)",

@@ -1,5 +1,5 @@
 //! Native mods' config files, loaded and reloaded (NeoForge's `ModConfig`
-//! and `ModConfigEvent`, docs/native-mods.md). A mod lists its configs
+//! and `ModConfigEvent`, docs/modding/src/how-to/native-mods.md). A mod lists its configs
 //! (`native_register_configs`), each a file of a kind: `Client` on the
 //! window, `Common` once per process (the window, or a dedicated server),
 //! `Server` on the server for each world it opens, which a world may

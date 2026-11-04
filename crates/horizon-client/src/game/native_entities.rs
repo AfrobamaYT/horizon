@@ -1,4 +1,4 @@
-//! Entities for native server mods (docs/native-mods.md, "Entities"): spawn
+//! Entities for native server mods (docs/modding/src/how-to/native-mods.md, "Entities"): spawn
 //! any entity from its compound as `/summon` does, and move, show or remove
 //! the entities Horizon keeps without simulating them (displays, markers,
 //! interactions); `native_display_refs.rs` poses displays. They act where
