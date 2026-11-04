@@ -2193,7 +2193,7 @@ impl Game<'_> {
     /// id is that namespace when it is on (your models, textures, loot and
     /// recipes are its files), else one of their own, with the template's
     /// look. Ids, saves and the check that a joining client has the same
-    /// blocks are the files' (docs/mods.md). Asked once at start, on every
+    /// blocks are the files' (docs/modding/src/how-to/content-mods.md). Asked once at start, on every
     /// side, before any resource loads: push the same ones every time, from
     /// nothing but your code. Declarations that don't pass the files' checks
     /// are logged and that namespace's are left out.

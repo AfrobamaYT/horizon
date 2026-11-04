@@ -6,7 +6,7 @@
 writes a flat project: `horizon-mod.toml` with `[native]`, `Cargo.toml`, `src/lib.rs`, and empty `assets/`
 and `data/` directories. The template greets each player who joins. Build it with
 `horizon-launcher native-build <path> --trust-native-code`; `cargo horizon-mod build` packages the same
-project into a `.hmod` without compiling it ([api/mod-files.md](../reference/manifest.md)).
+project into a `.hmod` without compiling it ([the manifest](../reference/manifest.md)).
 
 The root Rust package depends on `horizon-mod-api` (lib `mod_api`), never on the game. Its root `src/lib.rs` marks one
 `impl Hooks` with the attribute:

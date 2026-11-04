@@ -6,7 +6,7 @@ Behaviour that needs code (a new key, a HUD, a tool that changes how mining work
 It is one flat Rust project with `horizon-mod.toml`, `Cargo.toml` and `src/`, beside its `assets/` and `data/`.
 Start with `cargo horizon-mod new my_mod --template native --horizon <commit>` and implement the typed hooks;
 raw injections are a rare escape hatch ([Injections](../injections.md)). How the launcher builds one, what it pins and why it is not sandboxed:
-[native-mods.md](native-mods.md).
+[native mods](native-mods.md).
 The typed hook API is generated automatically at build time, in debug and release builds alike; its generated
 Rust files are build output, not files to regenerate or commit. Engine contributors adding a hook only run
 `cargo run -p xtask -- mod-api` to fill its hand-written placeholder body
@@ -18,7 +18,7 @@ beside `server.properties`), as Fabric and NeoForge mods' do: the mod picks its 
 bound to the calling mod and refuses any other mod's files. A mod that lists its files with
 `native_register_configs` gets them read for it, written from their defaults when missing, and handed over again
 when edited (`native_config_loading`, `native_config_reloading`, as NeoForge's `ModConfigEvent`), and a world can
-keep its own server config in `serverconfig/` ([native-mods.md](native-mods.md)). Settings kept with `native_set_setting` stay where they were, in `horizon-mods/.horizon-mod-data/<id>/`.
+keep its own server config in `serverconfig/` ([native mods](native-mods.md)). Settings kept with `native_set_setting` stay where they were, in `horizon-mods/.horizon-mod-data/<id>/`.
 8c838a6b381b93150deaeed2057acd1
 
 `native_compute_fov_modifier(player, base, modifier)` runs on the client each tick for the local player's FOV scale, after vanilla effects and before zoom and camera easing. `player` contains the calculation inputs and `base` is the original scale. Non-finite modifiers or values outside 0.01..=10 fall back to `base`. It does not affect a spectator camera on a mob.
@@ -308,7 +308,7 @@ They are not runtime pack resources and do not participate in resource reloads.
 **What a native bundle holds.** The one manifest, optional icon, root `Cargo.toml` and `build.rs`,
 `.rs` and `.toml` files under `src/`, `assets/` and `data/`, and root text files (`README*`, `LICENSE*`,
 `LICENCE*`, `COPYING*`, `NOTICE*`). Source and resource size limits are checked separately;
-anything else refuses the archive ([api/mod-files.md](../reference/manifest.md)).
+anything else refuses the archive ([the manifest](../reference/manifest.md)).
 
 **One `.hmod` for content and code.** Without root `Cargo.toml`, nothing compiles. With it and `[native]`,
 the launcher builds the code and the game loads the same package's content through `horizon_mods::Content`.

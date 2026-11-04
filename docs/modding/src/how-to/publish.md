@@ -32,7 +32,7 @@ who rated.
 Your page can live in your repository too: a `horizon-registry.toml` at its root (on the newest release's tag) with
 `name`, `summary`, `description`, `authors` and `license` fills what the registry's entry leaves out; the entry's own
 words win. Its owners, key and icon are the registry's, changed by a pull request; its kind never changes. Hosted releases in an entry's
-`versions` remain listed. The formats: [api/mod-index.md](../reference/registry-index.md).
+`versions` remain listed. The formats: [the registry index](../reference/registry-index.md).
 
 ### Integrity and signing
 

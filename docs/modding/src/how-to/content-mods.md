@@ -18,7 +18,7 @@ cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks
   a flat trait mod instead: `horizon-mod.toml` with `[native]` pinned to that exact commit, root `Cargo.toml`
   and `src/lib.rs`, and empty `assets/` and `data/` directories. Its root `impl Hooks` uses
   `#[mod_api::horizon_mod]`. Compile it with `horizon-launcher native-build <path> --trust-native-code`
-  ([native-mods.md](../concepts/trait-mods.md#trait-mods-draft)). Any other `--template` is refused.
+  ([trait mods](../concepts/trait-mods.md#trait-mods-draft)). Any other `--template` is refused.
 - `build` packs the checked project into `target/horizon-mod/<id>.hmod`: `horizon-mod.toml`, `assets/`,
   `data/`, optional `icon.png` and, for code, the root Cargo project. It validates content with the same
   checks as the game; it does not compile code. Code requires both `Cargo.toml` and `[native]`; inconsistent
@@ -29,7 +29,7 @@ cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks
 - `check <file>` runs what the registry runs: the file's size and SHA-256, its manifest and content, and a signature
   with `--key <public key> --signature <file>.minisig`. It reads `.hmod`, `.hpack`, resource pack `.zip`
   and `.hshader` files.
-- `registry build|review|check|list|release|page` is the registry repository's CI ([api/mod-index.md](../reference/registry-index.md)).
+- `registry build|review|check|list|release|page` is the registry repository's CI ([the registry index](../reference/registry-index.md)).
 - `use-jar <path>` records an original Java jar as an external asset/data source, without copying it into the mod
   ([Java jars as external assets](#java-jars-as-external-assets)).
 
@@ -358,7 +358,7 @@ from (`results`, as a furnace's result slot):
 ```
 
 It is the menu type `<id>:<name>`, with its network id after vanilla's. A mod block's container opens it when its
-`menu` names it with as many slots ([native-mods.md](native-mods.md), `native_block_entity_container`). The menu holds
+`menu` names it with as many slots ([native mods](native-mods.md), `native_block_entity_container`). The menu holds
 its slots, then the player's 36. A shift-click from the inventory goes to the first slots with room, never a result
 slot, and one on the container goes to the inventory, as a chest's does. `results` fence players only: hoppers follow the
 container's faces and `inputs`, so leave result slots out of `inputs`. The data slots are the block entity's `data`
@@ -366,7 +366,7 @@ container's faces and `inputs`, so leave result slots out of `inputs`. The data 
 mod's own screen (`native_screen`); without one it closes again. Clients join a server only with the same mods' menu
 types, as with its blocks, and a client that isn't Horizon's is never sent one: the block opens nothing for it. Its
 clicks run on the server's vanilla menu engine (`menu::Kind::Mod`), shift-clicks routed as `ChestMenu`'s, and a native
-mod can decide what a slot takes in code with `native_menu_slot_rules` ([native-mods.md](../reference/hook-notes.md#menu-slot-rules)).
+mod can decide what a slot takes in code with `native_menu_slot_rules` ([hook notes](../reference/hook-notes.md#menu-slot-rules)).
 Not yet: declared per-slot rules beyond `results`, hooks for shift-click routing and `stillValid`, opening with extra
 data, and client prediction of its clicks.
 

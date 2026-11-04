@@ -6,7 +6,7 @@ registry for Horizon's own mods, modpacks, resource packs and shader packs; see 
 
 ## What it offers
 
-Horizon doesn't run Java code ([mods.md](mods.md)). It ports what a Java mod
+Horizon doesn't run Java code ([mods.md](modding/src/how-to/content-mods.md)). It ports what a Java mod
 carries as data (blocks, items, recipes, loot tables, tags, worldgen, textures, names) with `horizon-port-pack`, and
 says before install which of the mod's features that leaves out. Horizon's own mods (content mods, `.hmod`, and native
 mods, `.hmod`) aren't on Modrinth or CurseForge yet (Modrinth has no `horizon` loader).

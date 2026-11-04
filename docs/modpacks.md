@@ -7,7 +7,7 @@ pipeline, not a list of hand ports. It takes a pack as players download it and p
 Horizon mods. The pipeline is AI agents in dependency order, each port checked against the
 original mod running in a dev-only Java instance.
 
-This page is the design. It builds on [mods.md](mods.md) (content mods, native mods, and
+This page is the design. It builds on [mods.md](modding/src/how-to/content-mods.md) (content mods, native mods, and
 why Java jars cannot run in Horizon, so we port instead). The ATM10 inventory behind the numbers below is
 [modpacks/atm10-mods.csv](modpacks/atm10-mods.csv).
 
@@ -261,7 +261,7 @@ How the game loads them, without touching vanilla's path:
   vanilla does. With no mods there is only `minecraft`, so nothing changes.
 - **Namespaces.** A mod's files go under its id, and under the namespaces its manifest lists
   when its Java original ships them so (`namespaces = ["kaisyn", "towns_and_towers"]` for Towns
-  and Towers, mod id `t_and_t`; docs/mods.md). No namespace has two owners: a mod whose id or
+  and Towers, mod id `t_and_t`; docs/modding/src/how-to/content-mods.md). No namespace has two owners: a mod whose id or
   listed namespace another mod that is on already owns is left out, with both named in the log.
   `horizon-port-pack` avoids that inside a pack: a namespace two carried mods both claim (YUNG's
   structure mods all ship files under `yungsapi`, the namespace of YUNG's API, whose own jar isn't
@@ -394,7 +394,7 @@ the mod's own content that the game's content loader would refuse whole also go 
 listed with the reason in the report's `unreadable`: paths vanilla does not read (upper case),
 and JSON that does not parse. Vanilla skips them one by one. A vanilla or convention tag
 with `"replace": true` is carried as it is: the game honours it as a data pack's, with a warning
-(docs/mods.md); Towns and Towers' seven `minecraft:has_structure/*` biome tags are such.
+(docs/modding/src/how-to/content-mods.md); Towns and Towers' seven `minecraft:has_structure/*` biome tags are such.
 A byte-order mark is dropped. For ATM10's 42 mods that is 6 files in 4 mods, and the 42 load as
 carried. No class file is copied. It upgrades from 1.21.1 to 26.3: vanilla-type recipes (ingredients), loot tables
 (`conditions` lists become one `condition`, `functions` become `modifier`, kinds move to `type`,
@@ -654,7 +654,7 @@ Two cases the oracle fills in:
     structures under `kaisyn` and `towns_and_towers`, which carry used to leave in `outside/`.
     Carry now claims a namespace for the mod when the mod's own files (its id's, its tag
     additions and the namespaces already claimed) name ids in it, and no mod of the pack has
-    it as its id; it lists them in the manifest's `namespaces` (docs/mods.md). Files for mods
+    it as its id; it lists them in the manifest's `namespaces` (docs/modding/src/how-to/content-mods.md). Files for mods
     it supports (CTOV's `wares` and `monobank`, YUNG's `morevillagers` tags) and configs of
     pack mods (`cristellib`) stay outside: of ATM10's 42 jars only T&T claims any. A tag of a
     mod's own namespace that `replace`s is carried as an addition (no pack before it defines
@@ -677,7 +677,7 @@ Two cases the oracle fills in:
     Arise main pieces and two Nullscape pieces. They used to load as empty templates, so their
     structures never started.
   - **Additions to other sets and pools** (#832 in the game, #833 in carry). A set or pool file
-    holding `horizon:add_to` appends its entries to the sets or pools it names (docs/mods.md).
+    holding `horizon:add_to` appends its entries to the sets or pools it names (docs/modding/src/how-to/content-mods.md).
     Carry writes these from lithostitched's `add_structure_set_entries` and
     `add_template_pool_elements` modifiers whose load conditions hold for the mods ported
     along, and from CTOV's Java registration: its 21 village types and 11 outposts join
@@ -706,7 +706,7 @@ Two cases the oracle fills in:
   - **Enhanced terrain adaptation.** YUNG's API and MoogsStructureLib add a kernel of their
     own to the Beardifier: its own size and falloff, carving or burying above and below each
     piece's floor. Carry writes it as `horizon:enhanced_terrain_adaptation` on the structure
-    and on pool elements with their own (docs/mods.md), and the game sums it after vanilla's
+    and on pool elements with their own (docs/modding/src/how-to/content-mods.md), and the game sums it after vanilla's
     terrain density. In seed 1234's terrain before structures are placed, Better Fortresses'
     pieces held 39 to 41 % netherrack and now 3 to 7 %, the mod's open bridges; Moog's mega
     fortress band 45 % and now 30 %; Better Strongholds' pieces, buried, go from 92 to 97 %

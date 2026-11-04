@@ -49,7 +49,7 @@ requires a farmer at work and `mob_griefing` enabled.
   recipe viewer needs. A recipe page (`NativeRecipeView`) also shows machine recipes: up to four `results`, each
   cycling its stacks with an optional `chance` in percent written under it ("25%"); input slots past a 3 x 3 grid
   continuing in rows under it, 27 in all; and up to eight `fluid_inputs` and `fluid_outputs`, each a well under the
-  slots with its amount in mB, drawn in the fluid's client look (`data/<mod>/horizon/fluid/`, [mods.md](../start/installing.md)).
+  slots with its amount in mB, drawn in the fluid's client look (`data/<mod>/horizon/fluid/`, [installing and using mods](../start/installing.md)).
   `native_sprite` takes an optional `tint` (`0xAARRGGBB`) that multiplies every texel, as a fluid's colour does.
   Slot clicks keep their `SlotClicked` numbering: inputs, then results.
 
@@ -189,7 +189,7 @@ requires a farmer at work and `mob_griefing` enabled.
   either side, at most 4 MiB a file; a write replaces the file at once. The service is bound to the mod whose hook or
   part is running (a mod never names its id), so another mod's path, a symbolic link on the way or a call outside any
   mod's hook is refused with a typed `ConfigFileError`. A path is a `ConfigPath`, checked once when it is made. A
-  world's `serverconfig/` copy is read only through `native_config_loading` ([mods.md](../how-to/native-mods.md#native-mods)).
+  world's `serverconfig/` copy is read only through `native_config_loading` ([native mods](../how-to/native-mods.md#native-mods)).
 
 - The player-health HUD rows through `native_health_hud`: every frame the HUD draws them, the
   hook hears the layout's inputs (`HealthInputs`) and the screen's GUI size, and a mod that answers with
@@ -423,7 +423,7 @@ one, where vanilla gives the `by` one.
   `fluids`, so they survive restarts, and the block's own tick reads them there. Other blocks and mods reach them, and a
   cauldron's, through the [`FLUIDS` capability](../concepts/trait-mods.md#a-blocks-fluids).
 
-- What the mob effects of a content mod ([mods.md](../start/installing.md)) do, named after vanilla's `MobEffect` methods,
+- What the mob effects of a content mod ([installing and using mods](../start/installing.md)) do, named after vanilla's `MobEffect` methods,
   or NeoForge's event where it has one. On the server, each tick a player or a mob has one,
   `native_should_apply_effect_tick_this_tick` says whether it acts (vanilla's base answer is no) and
   `native_apply_effect_tick` acts, and may end it, before it counts down, as in `MobEffectInstance.tickServer`. These
@@ -575,7 +575,7 @@ or transactions. Declarations still go on each event or registrar.
   every stage of a Horizon shader pack reads as `frame.mods`, so a mod can tell the pack it bundles where and when
   something happened (an explosion's centre and age for a cloud drawn in a post pass).
 
-- Menus of content mods' own menu types (vanilla's `MenuType`): a mod container's `menu` may name a menu type its content mod declares in `data/<id>/horizon/menu/` with as many slots ([mods.md](../how-to/content-mods.md#menu-types)). It opens when the block is used, its data slots are the block entity's `data`, and a Horizon client shows it through the mod's `native_screen`.
+- Menus of content mods' own menu types (vanilla's `MenuType`): a mod container's `menu` may name a menu type its content mod declares in `data/<id>/horizon/menu/` with as many slots ([making a content mod](../how-to/content-mods.md#menu-types)). It opens when the block is used, its data slots are the block entity's `data`, and a Horizon client shows it through the mod's `native_screen`.
 
 - `native_block_highlight(pos, state, partial, canceled)` runs before building the eligible targeted block's selection outline, after hidden-HUD and game-mode restrictions. Set `canceled` to suppress only that outline; default behavior is unchanged otherwise. Position is block coordinates and state is the current block state ID. No entity outlines are affected.
 
@@ -927,7 +927,7 @@ registration path.
 
 - `native_block_entity` gives a block a block entity whatever its template: a mod's stone casing or thin part can use any template. The engine removes it when its block is broken or replaced, no piston moves it, and a mod that draws it (`native_block_entity_submit`) is asked for it.
 
-- Slot rules a mod decides in code for its content menu types: `native_menu_slot_rules(menu, slot, stack, may_place, max_stack)`, in `horizon-client`'s `menu.rs`, is given the type's own answer (false on one of its `results`, [mods.md](../how-to/content-mods.md#menu-types), true elsewhere, and 99) and may change both, as a NeoForge mod overrides `Slot.mayPlace` and `Slot.getMaxStackSize`. A mod menu type's clicks run on the vanilla menu engine (`menu::Kind::Mod`).
+- Slot rules a mod decides in code for its content menu types: `native_menu_slot_rules(menu, slot, stack, may_place, max_stack)`, in `horizon-client`'s `menu.rs`, is given the type's own answer (false on one of its `results`, [making a content mod](../how-to/content-mods.md#menu-types), true elsewhere, and 99) and may change both, as a NeoForge mod overrides `Slot.mayPlace` and `Slot.getMaxStackSize`. A mod menu type's clicks run on the vanilla menu engine (`menu::Kind::Mod`).
 
 - An item's use tick and release, as vanilla's `Item.onUseTick` and `releaseUsing` and NeoForge's `LivingEntityUseItemEvent.Tick` and `.Stop`. Each tick of a use, `native_living_entity_use_item_tick` may change the ticks left: at 0 or less, or on a cancel, the server finishes the use, as NeoForge's code does, and an item used on release stays frozen until let go. `native_on_use_tick` is what a mod's own item does then (cook, charge). When the player lets go early, `native_living_entity_use_item_stop` may skip the release, and `native_release_using` acts with the ticks left (a bow-like item shoots by its charge); setting `used` starts the item's cooldown. All four run on both sides, as vanilla's do, and take the using entity, None for a player; the tick and stop take the hand too. Change the world only where this game runs the world, not on a server's client.
 
@@ -2497,7 +2497,7 @@ Look blocks up once and keep what you need (a few words a block for your own sha
 a bundle targets as `horizon_client::menu::native_menu_slot_rules`. A content mod menu type's container slot `slot`
 (from 0) is asked whether it takes `stack` (`Slot.mayPlace`) and how many it holds (`Slot.getMaxStackSize`), as a
 NeoForge mod's own `Slot` overrides them. `may_place` and `max_stack` come in with the type's own answer (false on one
-of its `results` ([mods.md](../how-to/content-mods.md#menu-types)), true elsewhere, and 99): change them for your own menu types.
+of its `results` ([making a content mod](../how-to/content-mods.md#menu-types)), true elsewhere, and 99): change them for your own menu types.
 `max_stack` is kept to 1 to 99, and the item's own stack size still caps it. It runs inside a click, a drag or a
 shift-click (several times for one), with no level or player at hand: answer from the stack, and fast. It is asked
 only for a server's players (single player's server thread, LAN guests, a dedicated server), and vanilla's menus
