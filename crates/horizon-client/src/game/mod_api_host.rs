@@ -181,6 +181,17 @@ impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
     fn state_block(&self, state: BlockStateId) -> Option<&str> {
         self.native_state_block(state)
     }
+    fn state_string(&self, state: BlockStateId) -> Option<String> {
+        self.registry
+            .state(state)
+            .map(super::native_block_states::serialize)
+    }
+    fn min_y(&self) -> i32 {
+        self.world.shape.min_y
+    }
+    fn height(&self) -> i32 {
+        self.world.shape.height
+    }
     fn block_state_in_tag(&self, state: BlockStateId, tag: &str) -> Option<bool> {
         self.native_authoritative
             .then(|| super::native_world_read::state_in_tag(self.items, self.registry, state, tag))
@@ -266,6 +277,18 @@ impl horizon_client::mod_api::LevelHost for super::native_hooks::HitLevel<'_> {
     fn state_block(&self, state: BlockStateId) -> Option<&str> {
         self.0.registry().state(state).map(|s| &*s.name)
     }
+    fn state_string(&self, state: BlockStateId) -> Option<String> {
+        self.0
+            .registry()
+            .state(state)
+            .map(super::native_block_states::serialize)
+    }
+    fn min_y(&self) -> i32 {
+        self.0.shape().min_y
+    }
+    fn height(&self) -> i32 {
+        self.0.shape().height
+    }
     fn state_with_property(
         &self,
         state: BlockStateId,
@@ -302,6 +325,15 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>>
     }
     fn state_block(&self, state: BlockStateId) -> Option<&str> {
         self.level.registry.state(state).map(|s| &*s.name)
+    }
+    fn state_string(&self, state: BlockStateId) -> Option<String> {
+        horizon_client::mod_api::LevelHost::state_string(&*self.level, state)
+    }
+    fn min_y(&self) -> i32 {
+        horizon_client::mod_api::LevelHost::min_y(&*self.level)
+    }
+    fn height(&self) -> i32 {
+        horizon_client::mod_api::LevelHost::height(&*self.level)
     }
     fn block_state_in_tag(&self, state: BlockStateId, tag: &str) -> Option<bool> {
         horizon_client::mod_api::LevelHost::block_state_in_tag(&*self.level, state, tag)
