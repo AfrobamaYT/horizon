@@ -2376,6 +2376,18 @@ handle, an entity the client doesn't track and a level it doesn't show:
 
 A helper whose catalog entry names a `receiver` (`entity`, `level`, `block_entity`) is called on that handle (for example `entity.position(host)`), rather than as an ID-based `Host` method.
 
+### Client menu input
+
+Client input uses `menu.click(host, &[mod_api::MenuClick::QuickMove { slot }])` on a mutable `ClientHost`.
+Actions use menu-order slots; only `Pickup` accepts `None` for outside. Typed `MouseButton`,
+`SwapWith` and `DragKind` values replace vanilla's wire codes, and `Drag { kind, slots }` expands
+to a complete gesture. All actions are validated before the first is predicted or sent through the
+normal `ContainerClick` path. A stale handle, invalid slot/hotbar index, creative-only action in survival,
+spectator, non-client host or creative inventory screen returns `false` without side effects.
+`true` is submission, not server acceptance; authoritative slot/cursor corrections still win.
+See [A menu's slots](../concepts/trait-mods.md#a-menus-slots) for actions and an example.
+Diverges from upstream: new helper.
+
 ### Mob AI goals
 
 `crates/horizon-client/src/game/native_mob_goals.rs` (#29's "movement and goals"): a mob's AI is vanilla's two goal

@@ -407,6 +407,28 @@ unavailable and `Some(None)` for an empty slot. Each read checks the world epoch
 so a handle cannot read a replacement, reopened or respawned menu. These methods do not click or
 change slots.
 
+Mutable client hooks can submit a vanilla click with
+`menu.click(host, &[mod_api::MenuClick::QuickMove { slot }])`. The slot is the same menu-order
+index used by `slot`, not a hotbar index or a GUI slot id. For example:
+
+```rust,ignore
+{{#include ../../examples/src/lib.rs:menu_quick_move}}
+```
+
+The typed actions are `Pickup` (with `MouseButton::Left` or `Right`), `QuickMove`,
+`Swap` (with `SwapWith::Hotbar(0..=8)` or `Offhand`), `Clone`, `Throw`,
+`Drag` and `PickupAll`. `Pickup` accepts `None` for outside, dropping the carried stack.
+A `Drag { kind, slots }` owns its menu-order slot list and always submits a complete gesture;
+`DragKind::Split` divides evenly, `One` places one per slot and `Clone` fills slots in creative mode.
+Every action in a batch is validated before any prediction or sending; out-of-range slots/hotbar
+indices, creative-only actions in survival and empty batches refuse without effects.
+Stale/replaced/respawned menus, spectators, non-client hosts and the creative inventory screen refuse with `false`.
+`true` means submitted, not server acceptance: prediction uses the normal menu engine and sends
+`ContainerClick` with its state id, changed slots and carried item. Server corrections still win.
+Inventory reads and direct server-side item transactions keep their existing contracts; a click does
+not expose direct client inventory writes or enforce a mod's locked-slot policy. Call from an explicit
+input action rather than submitting every render/tick. Diverges from upstream: new helper.
+
 `ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`player.container_menu(host)`). It is
 a fork addition: NeoForge 26.3's `ItemAccess` reaches a player's inventory slot (`forPlayerSlot`) and cursor
 (`forPlayerCursor`), not a menu's slot. It is the storage the slot shows, named by `menu.slot_backing(host, slot)`

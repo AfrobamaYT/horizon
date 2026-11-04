@@ -349,6 +349,15 @@ pub mod game {
         }
     }
 
+    pub trait ClientBackendMutRefOf<'a> {
+        fn of(inner: &'a mut dyn ClientBackendMut) -> Self;
+    }
+    impl<'a> ClientBackendMutRefOf<'a> for ClientBackendMutRef<'a> {
+        fn of(inner: &'a mut dyn ClientBackendMut) -> Self {
+            ClientBackendMutRef::of(inner)
+        }
+    }
+
     pub use self::modblockentityviewnew::ModBlockEntityViewNew;
     mod modblockentityviewnew {
         #[allow(unused_imports)]
