@@ -46,7 +46,7 @@ use horizon_client::{
         BlockEntity, MOD_MENUS, ModBlockEntity, ModBlockEntityFields, ModContainer,
         ModEnergyBuffer, ModFluidTanks,
     },
-    crafting::{CustomRecipe, Ingredient, recipe_result},
+    crafting::{Ingredient, RecipeFile, recipe_result},
     extras::Corner,
     extras_hud::Corners,
     fast_hash::FxHashMap,
@@ -8656,21 +8656,23 @@ impl Game<'_> {
         let page = RecipePage::new(title, tabs, tab, views);
         self.panel.show_recipes(mod_id, page);
     }
-    /// The recipes of type `kind` (`mymod:crusher`), a type outside `minecraft`,
-    /// from `data/<namespace>/recipe/*.json` of the content mods (`.hmod`) and
-    /// the world's data packs, in file order: each one's id and its file as
-    /// JSON, for the mod to read as it likes. A data pack changes them on
-    /// `/reload`, so look them up again when you need them. Empty for a type
-    /// nobody uses and outside a world. These are the server's table on the
-    /// server thread, a dedicated server or a LAN host; a client, the
-    /// single-player window included, sees only the content mods' recipes, not
-    /// the world's data packs', unless a mod had the server send it the type
+    /// The recipes of type `kind` (`minecraft:smelting`, `mymod:crusher`), vanilla's
+    /// types and mods' own alike, from `data/<namespace>/recipe/*.json` of vanilla,
+    /// the content mods (`.hmod`) and the world's data packs, in file order: each
+    /// one's id and its file as JSON, for the mod to read as it likes. These are the
+    /// recipes in force (`RecipeManager.getAllRecipesFor`): data packs merged and
+    /// load conditions held, so a pack's override or removal shows. A data pack
+    /// changes them on `/reload`, so look them up again when you need them. Empty
+    /// for a type nobody uses and outside a world. These are the server's table on
+    /// the server thread, a dedicated server or a LAN host; a client, the
+    /// single-player window included, sees vanilla's and the content mods' recipes,
+    /// not the world's data packs', unless a mod had the server send it the type
     /// (`native_datapack_sync`).
-    pub(super) fn native_recipes_of_type(&self, kind: &str) -> &[CustomRecipe] {
+    pub(super) fn native_recipes_of_type(&self, kind: &str) -> &[RecipeFile] {
         if self.outside_world() {
             return &[];
         }
-        self.recipes().custom.get(kind).map_or(&[], Vec::as_slice)
+        self.recipes().by_type.get(kind).map_or(&[], Vec::as_slice)
     }
     /// The validated category and icon of a custom recipe type, or None for
     /// an undeclared/invalid type, before resources load, or outside a world.

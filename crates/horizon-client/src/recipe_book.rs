@@ -48,7 +48,7 @@ pub fn mod_categories(
             Some("invalid or reserved category id")
         } else if !valid_id(&category.recipe_type)
             || category.recipe_type.starts_with("minecraft:")
-            || !recipes.custom.contains_key(&category.recipe_type)
+            || !recipes.by_type.contains_key(&category.recipe_type)
         {
             Some("unknown or vanilla recipe type")
         } else if !valid_id(&category.icon)

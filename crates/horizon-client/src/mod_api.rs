@@ -40,7 +40,7 @@ pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::command::Suggestion;
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
-pub use crate::crafting::{CustomRecipe, Ingredient};
+pub use crate::crafting::{Ingredient, RecipeFile};
 pub use crate::extras::Corner;
 pub use crate::extras_hud::Corners;
 pub use crate::first_person::Hand;
@@ -78,6 +78,7 @@ pub use horizon_core::{
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
+pub use horizon_items::items::TagRegistry;
 pub use horizon_world::consumable::UseAnimation;
 pub use horizon_world::player_inventory::EquipmentSlot;
 pub use horizon_world::{

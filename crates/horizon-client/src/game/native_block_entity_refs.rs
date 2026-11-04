@@ -96,6 +96,26 @@ impl Game<'_> {
         entity: BlockEntityRef,
         data: Compound,
     ) -> bool {
+        self.write_block_entity_data(entity, data, false)
+    }
+
+    /// Replaces the saved payload, retaining identity and position metadata.
+    /// Uses the same transactional load and client update path as `merge_data`.
+    /// False for a missing or stale block entity, unsupported data, or no change.
+    pub(super) fn native_block_entity_replace_data(
+        &mut self,
+        entity: BlockEntityRef,
+        data: Compound,
+    ) -> bool {
+        self.write_block_entity_data(entity, data, true)
+    }
+
+    fn write_block_entity_data(
+        &mut self,
+        entity: BlockEntityRef,
+        data: Compound,
+        replace: bool,
+    ) -> bool {
         let Some((key, block)) = self.native_block_entity_write_target(entity) else {
             return false;
         };
@@ -116,7 +136,20 @@ impl Game<'_> {
         else {
             return false;
         };
-        let merged = horizon_client::data_cmd::merged(&old, &nbt);
+        let base = if replace {
+            let mut metadata = Compound::new();
+            if let Tag::Compound(fields) = &old {
+                for key in ["id", "x", "y", "z"] {
+                    if let Some(value) = fields.get(&key.into()) {
+                        metadata.insert(key.into(), value.clone());
+                    }
+                }
+            }
+            Tag::Compound(metadata)
+        } else {
+            old.clone()
+        };
+        let merged = horizon_client::data_cmd::merged(&base, &nbt);
         if merged == old {
             return false;
         }
@@ -389,6 +422,15 @@ mod tests {
                 (Some(3), Some("Kept".to_owned()))
             );
 
+            // Merge preserves omitted data; replacement clears the name and items.
+            assert!(chest.merge_data(game, compound("{CustomName:\"Changed\"}")));
+            assert_eq!(slot3(game), Some(3));
+            assert_eq!(chest.name(game), Some("Changed".to_owned()));
+            game.world.block_log = Some(Vec::new());
+            assert!(chest.replace_data(game, compound("{}")));
+            assert_eq!((slot3(game), chest.name(game)), (None, None));
+            assert_eq!(game.world.block_log, Some(vec![(0, 64, 0)]));
+
             // Clients are told: the block log names the position, and the chunk is dirty.
             game.world.block_log = Some(Vec::new());
             game.world.modified.clear();
@@ -401,6 +443,7 @@ mod tests {
 
             // A removed block entity is a stale handle.
             game.world.block_entities.remove(&(0, 64, 0));
+            assert!(!chest.replace_data(game, compound("{}")));
             assert!(!chest.set_changed(game));
             assert!(!chest.merge_data(game, compound(stick)));
             assert!(!chest.set_name(game, Some("x")));
