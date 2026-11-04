@@ -308,7 +308,9 @@ fn failed_metadata_lookup_names_every_missing_jar_but_not_cache_hits() {
         assert_eq!(prompts.get(), 1);
         assert_eq!(lookups.get(), 1);
         assert_eq!(reason, "transport failed");
-        assert_eq!(display.lines().next(), Some("transport failed"));
+        assert!(display.starts_with(
+            "Jar metadata lookup failed: transport failed. Put the original files at these exact cache paths, then retry:\n"
+        ));
         assert_eq!(missing.len(), 2);
         for (entry, jar) in missing.iter().zip([&first, &second]) {
             let path = cache.join(format!("{}.jar", jar.sha512()));

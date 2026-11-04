@@ -1101,5 +1101,6 @@
   "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml-tiedostosta puuttuu horizon-client-riippuvuus.",
   "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml-tiedostosta puuttuu paketin nimi.",
   "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client pyytää ominaisuuksia {fields}. Palvelinkoontiversioissa ei ole graafista käyttöliittymää; käynnistin hallitsee horizon-client-ominaisuuksia. Poista features ja käytä asetusta default-features = false tai jätä asetus pois.",
-  "{mod}: {error}": "{mod}: {error}"
+  "{mod}: {error}": "{mod}: {error}",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "JAR-metatietojen haku epäonnistui: {reason}. Aseta alkuperäiset tiedostot täsmälleen näihin välimuistipolkuihin ja yritä uudelleen:\n"
 }
