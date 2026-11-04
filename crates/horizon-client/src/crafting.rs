@@ -1297,6 +1297,33 @@ pub fn recipe_result(v: &Value) -> Option<ItemStack> {
     let template = Template::parse(v)?;
     template.item.is_some().then(|| template.create())
 }
+/// The `minecraft` recipe types 26.3's `RecipeType` registry has; a recipe of any
+/// other `minecraft` type is no recipe, as `RecipeManager` never holds one.
+const VANILLA_RECIPE_TYPES: [&str; 22] = [
+    "minecraft:blasting",
+    "minecraft:brewing",
+    "minecraft:campfire_cooking",
+    "minecraft:crafting_decorated_pot",
+    "minecraft:crafting_dye",
+    "minecraft:crafting_imbue",
+    "minecraft:crafting_shaped",
+    "minecraft:crafting_shapeless",
+    "minecraft:crafting_special_bannerduplicate",
+    "minecraft:crafting_special_bookcloning",
+    "minecraft:crafting_special_firework_rocket",
+    "minecraft:crafting_special_firework_star",
+    "minecraft:crafting_special_firework_star_fade",
+    "minecraft:crafting_special_mapextending",
+    "minecraft:crafting_special_repairitem",
+    "minecraft:crafting_special_shielddecoration",
+    "minecraft:crafting_transmute",
+    "minecraft:smelting",
+    "minecraft:smithing_transform",
+    "minecraft:smithing_trim",
+    "minecraft:smoking",
+    "minecraft:stonecutting",
+];
+
 /// The type of a recipe the game doesn't craft itself: one outside `minecraft`.
 fn custom_type(v: &Value) -> Option<&str> {
     v["type"]
@@ -1429,7 +1456,10 @@ impl Recipes {
         let mut meta = HashMap::new();
         for (name, v) in sources {
             let json = Arc::new(v);
-            if let Some(kind) = json["type"].as_str() {
+            if let Some(kind) = json["type"]
+                .as_str()
+                .filter(|t| !t.starts_with("minecraft:") || VANILLA_RECIPE_TYPES.contains(t))
+            {
                 let id = if name.contains(':') {
                     name.clone()
                 } else {
@@ -2165,8 +2195,12 @@ mod tests {
         };
         assert_eq!(ids("mymod:crusher"), ["mymod:a", "mymod:b"]);
         assert_eq!(ids("mymod:mixer"), ["mymod:c", "mymod:deep/er/d"]);
-        // A `minecraft` type the game doesn't know is kept as a file but never crafted.
-        assert_eq!(ids("minecraft:from_a_later_version"), ["minecraft:later"]);
+        // A `minecraft` type 26.3 doesn't have is no recipe, as in `RecipeManager`.
+        assert!(
+            !recipes
+                .by_type
+                .contains_key("minecraft:from_a_later_version")
+        );
         // Vanilla's types answer through the same table.
         assert_eq!(ids("minecraft:smelting"), ["minecraft:iron_ingot"]);
         // Not crafted, and no recipe-book meta of their own.
