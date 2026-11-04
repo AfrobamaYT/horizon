@@ -20613,6 +20613,7 @@ fn load_core(
     progress: &Progress,
     launch_world: Option<&str>,
 ) -> std::result::Result<std::result::Result<CoreTables, String>, String> {
+    let headless = !role.is_client();
     // The model library reads every file under `assets/` and needs no
     // block registry, so it is parsed beside `Assets::load` rather than
     // after it. It used to sit inside `reload` behind both the registry
@@ -20636,7 +20637,6 @@ fn load_core(
     };
     progress.set(1);
     let item_data = Arc::new(mods::load_item_data(root, role).map_err(|e| e.to_string())?);
-    let headless = !role.is_client();
     let registry = assets.registry;
     let (render, gameplay, visibility, biomes, environment, collision) =
         std::thread::scope(|scope| {
@@ -21137,9 +21137,7 @@ fn load_world_rest(
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
-        let recipes = startup::time("rest.recipes", || {
-            Recipes::load(root, &items, overlay)
-        })?;
+        let recipes = startup::time("rest.recipes", || Recipes::load(root, &items, overlay))?;
         let stations = startup::time("rest.stations", || {
             horizon_client::stations::StationData::load(
                 root,
