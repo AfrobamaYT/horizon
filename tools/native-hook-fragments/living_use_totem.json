@@ -2,15 +2,17 @@
   "hooks": [
     {
       "name": "living_use_totem",
-      "doc": "NeoForge's `LivingUseTotemEvent`: a killing blow on entity `entity` of type `kind`\nfrom `source` (named as `native_living_incoming_damage` names it) would be taken by the\n`death_protection` item `item` in its `hand` (main or off;\n`LivingEntity.checkTotemDeathProtection`). Set `cancel` and the entity gets no\nprotection: it dies and the item is kept. A player or a mob holding a totem fires it; a\nsource that bypasses invulnerability never reaches it. `native_player_totem` still\nhears a server player's totem that did save them, after this. No `self`, as\n`native_living_shield_block`: the game is in the middle of the hit.",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_use_totem",
+      "doc": "NeoForge's `LivingUseTotemEvent`: a killing blow on entity `entity` of type `kind`\nfrom `source` (named as `native_living_incoming_damage` names it) would be taken by the\n`death_protection` item `item` in its `hand` (main or off;\n`LivingEntity.checkTotemDeathProtection`). Set `cancel` and the entity gets no\nprotection: it dies and the item is kept. A player or a mob holding a totem fires it; a\nsource that bypasses invulnerability never reaches it. `native_player_totem` still\nhears a server player's totem that did save them, after this. The level is the hit's: its blocks, random and own\nattachments.",
+      "target": "horizon_client::game::native_hooks::HitLevel<'_>::native_living_use_totem",
       "neoforge": "LivingUseTotemEvent",
       "side": "server",
       "cancellable": true,
       "mod_api": {
         "contract": "cancel",
         "out": "cancel"
-      }
+      },
+      "host": "level",
+      "version": 2
     }
   ]
 }

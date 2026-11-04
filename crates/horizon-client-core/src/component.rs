@@ -346,16 +346,78 @@ pub fn to_text_with(
     resolve: &mut dyn FnMut(&str) -> Text,
     contents: &mut dyn FnMut(&serde_json::Map<String, Value>) -> Option<Text>,
 ) -> Text {
+    build(v, resolve, contents, Sourced(true))
+}
+
+/// The spans of `v` alone, as [`to_text`] decodes them, with `v` itself as the text's
+/// component: what a text received whole is (`From<Value> for Text`). It skips building a
+/// component for each part, which the whole one replaces.
+pub(crate) fn spans_of(v: Value) -> Text {
+    build(&v, &mut |s| Text::literal(s), &mut |_| None, Sourced(false)).with_component(v)
+}
+
+/// Whether [`build`] keeps each part's component, or only its spans.
+#[derive(Clone, Copy)]
+struct Sourced(bool);
+
+impl Sourced {
+    fn literal(self, text: String) -> Text {
+        match self.0 {
+            true => Text::literal(text),
+            false => {
+                let mut out = Text::empty();
+                if !text.is_empty() {
+                    out.spans.push(crate::text::Span {
+                        text,
+                        style: Style::default(),
+                    });
+                }
+                out
+            }
+        }
+    }
+    /// MutableComponent.append.
+    fn append(self, base: &mut Text, other: Text) {
+        match self.0 {
+            true => base.push(other),
+            false => base.spans.extend(other.spans),
+        }
+    }
+    fn styled(self, mut text: Text, style: &Style) -> Text {
+        match self.0 {
+            true => text.with_style(style),
+            false => {
+                for span in &mut text.spans {
+                    span.style.inherit(style);
+                }
+                text
+            }
+        }
+    }
+    fn translate(self, key: &str, args: &[Text]) -> Text {
+        match self.0 {
+            true => Text::translate(key, args),
+            false => crate::text::format_translation(&crate::lang::get(key), args),
+        }
+    }
+}
+
+fn build(
+    v: &Value,
+    resolve: &mut dyn FnMut(&str) -> Text,
+    contents: &mut dyn FnMut(&serde_json::Map<String, Value>) -> Option<Text>,
+    sourced: Sourced,
+) -> Text {
     match v {
-        Value::String(s) => Text::literal(s.clone()),
-        Value::Number(n) => Text::literal(n.to_string()),
-        Value::Bool(b) => Text::literal(b.to_string()),
+        Value::String(s) => sourced.literal(s.clone()),
+        Value::Number(n) => sourced.literal(n.to_string()),
+        Value::Bool(b) => sourced.literal(b.to_string()),
         // A list is its first element with the rest as siblings.
         Value::Array(list) => {
             let Some((first, rest)) = list.split_first() else {
                 return Text::empty();
             };
-            let mut base = to_text_with(first, resolve, contents);
+            let mut base = build(first, resolve, contents, sourced);
             // The siblings take the first component's own style, even when
             // its text is empty.
             let style = match first {
@@ -367,7 +429,8 @@ pub fn to_text_with(
                     .unwrap_or_default(),
             };
             for sibling in rest {
-                base.push(to_text_with(sibling, resolve, contents).with_style(&style));
+                let sibling = build(sibling, resolve, contents, sourced);
+                sourced.append(&mut base, sourced.styled(sibling, &style));
             }
             base
         }
@@ -381,8 +444,8 @@ pub fn to_text_with(
                 text
             } else if let Some(t) = o.get("text") {
                 match t {
-                    Value::String(s) => Text::literal(s.clone()),
-                    other => Text::literal(other.to_string()),
+                    Value::String(s) => sourced.literal(s.clone()),
+                    other => sourced.literal(other.to_string()),
                 }
             } else if let Some(key) = o.get("translate").and_then(Value::as_str) {
                 let args: Vec<Text> = o
@@ -390,13 +453,15 @@ pub fn to_text_with(
                     .and_then(Value::as_array)
                     .map(|a| {
                         a.iter()
-                            .map(|x| to_text_with(x, resolve, contents))
+                            .map(|x| build(x, resolve, contents, sourced))
                             .collect()
                     })
                     .unwrap_or_default();
-                let translated = Text::translate(key, &args);
+                let translated = sourced.translate(key, &args);
                 match o.get("fallback").and_then(Value::as_str) {
-                    Some(fallback) if translated.plain() == key => Text::translate(fallback, &args),
+                    Some(fallback) if translated.plain() == key => {
+                        sourced.translate(fallback, &args)
+                    }
                     _ => translated,
                 }
             } else if let Some(sel) = o.get("selector").and_then(Value::as_str) {
@@ -406,16 +471,21 @@ pub fn to_text_with(
             } else {
                 Text::empty()
             };
-            let mut out = content.with_style(&style);
+            let mut out = sourced.styled(content, &style);
             for extra in o
                 .get("extra")
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
             {
-                out.push(to_text_with(extra, resolve, contents).with_style(&style));
+                let extra = build(extra, resolve, contents, sourced);
+                sourced.append(&mut out, sourced.styled(extra, &style));
             }
-            if o.contains_key("object") || o.contains_key("player") || o.contains_key("sprite") {
+            if sourced.0
+                && (o.contains_key("object")
+                    || o.contains_key("player")
+                    || o.contains_key("sprite"))
+            {
                 out.with_component(Value::Object(o.clone()))
             } else {
                 out
@@ -495,6 +565,28 @@ pub fn name_text(tag: &Tag) -> Text {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_text_received_whole_has_the_spans_its_parts_would() {
+        use serde_json::json;
+        for v in [
+            json!(""),
+            json!(7),
+            json!(["a", {"text": "b", "color": "red"}, "c"]),
+            json!({"text": "hello", "color": "red", "bold": true}),
+            json!({"translate": "chat.type.text", "with": [{"text": "Steve", "color": "yellow"}, "hi"]}),
+            json!({"translate": "no.such.key", "fallback": "Fell %s", "with": ["back"]}),
+            json!({"text": "", "italic": true, "extra": ["a", {"text": "b", "underlined": true, "extra": ["d", 2]}]}),
+            json!({"keybind": "key.jump", "color": "blue"}),
+            json!({"selector": "@p"}),
+            json!({"text": "x", "hover_event": {"action": "show_text", "value": "tip"}, "click_event": {"action": "open_url", "url": "https://example.com"}}),
+        ] {
+            let whole = spans_of(v.clone());
+            let parts = to_text(&v, &mut |s| Text::literal(s));
+            assert_eq!(whole.spans, parts.spans, "{v}");
+            assert_eq!(whole.component(), v, "{v}");
+        }
+    }
 
     #[test]
     fn hex_color_follows_text_color_parse_color() {

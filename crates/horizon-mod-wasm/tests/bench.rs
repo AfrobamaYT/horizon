@@ -21,9 +21,16 @@ impl Host for World {
         (dimension == "minecraft:overworld")
             .then(|| LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld"))
     }
+    fn entity(&self, _id: u32) -> Option<mod_api::EntityRef> {
+        None
+    }
 }
 
-impl ServerHost for World {}
+impl ServerHost for World {
+    fn tick_stats(&self) -> (f32, f64) {
+        (20.0, 50.0)
+    }
+}
 
 /// One call of the hook `work` names: the server tick for `tick`, else the chat hook with
 /// `work` as the message; what the mod wrote back.
@@ -151,6 +158,16 @@ fn a_wasm_mod_against_the_same_mod_native() {
         ("text", "a message lowered back", 20_000),
         ("untouched", "100 replies left as they were", 2_000),
         ("imports 100", "100 calls into the game", 1_000),
+        (
+            "entities 100",
+            "100 entity lookups (an id in, none out)",
+            1_000,
+        ),
+        (
+            "tickstats 100",
+            "100 tick stats (nothing in, two numbers out)",
+            1_000,
+        ),
         ("compute 1000", "logic on 1,000 values", 1_000),
         ("compute 10000", "logic on 10,000 values", 100),
         ("compute 100000", "logic on 100,000 values", 10),
