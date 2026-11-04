@@ -3220,6 +3220,15 @@ mod tests {
                         .any(|l| l == "Stick" || l == "part" || l == "event"),
                     "{lines:?}"
                 );
+                // The creative screen's inventory and hotbar slots aren't creative
+                // tab slots: still hidden there.
+                game.screen = super::Screen::Creative;
+                let inventory: Vec<String> = game
+                    .stack_tooltip_lines(&hidden, false, false)
+                    .iter()
+                    .map(|(text, _)| text.plain())
+                    .collect();
+                assert!(!inventory.iter().any(|l| l == "Stick"), "{inventory:?}");
                 // A creative tab's own slot (`TooltipFlag.isCreative`) shows it anyway.
                 let creative: Vec<String> = game
                     .stack_tooltip_lines(&hidden, false, true)
