@@ -4017,6 +4017,32 @@ impl Game<'_> {
                 f64::from(c.pos[2]) + 0.5,
             ]
         });
+        // PlayerRespawnPositionEvent: an Overworld forced point needs no
+        // block, so it is final now, before the Respawn packet goes out, and
+        // a mod's other level or point costs no extra one. A bed or anchor,
+        // or the world spawn's column, is final only once its trip arrives
+        // (`arrive_server_trips`).
+        let forced_spawn = host.hub.guests[i].spawn;
+        let point_level = level;
+        let (yaw, pitch) = (host.hub.guests[i].yaw, host.hub.guests[i].pitch);
+        let found = super::respawn_position::Respawn {
+            dim: level,
+            at: horizon_core::geometry::Vec3::new(spawn[0], spawn[1], spawn[2]),
+            yaw,
+            pitch,
+        };
+        let decision = (server && elsewhere.is_none() && forced_spawn.is_some())
+            .then(|| self.respawn_position(conn, found, None))
+            .flatten();
+        let keep_point = decision.is_none_or(|d| d.copy);
+        let (level, spawn) = match decision {
+            Some(d) => (d.to.dim, [d.to.at.x, d.to.at.y, d.to.at.z]),
+            None => (level, spawn),
+        };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
+        let rotation = decision.map(|d| [d.to.yaw, d.to.pitch]);
         let back = self.dim;
         let left = super::Dim::from_id(&host.hub.guests[i].dimension);
         let away = server && host.hub.guests[i].dimension != level.id();
@@ -4074,7 +4100,7 @@ impl Game<'_> {
             streaming: Some(&self.streaming),
         };
         if let Some(host) = self.lan.as_mut() {
-            host.hub.respawn(i, spawn, &ctx);
+            host.hub.respawn(i, spawn, rotation, &ctx);
         }
         // ServerGamePacketListenerImpl.handleClientCommand: a hardcore world's
         // respawned player only watches.
@@ -4100,11 +4126,13 @@ impl Game<'_> {
         // point (`spawn`). A point with a block is copied once the block is
         // found. A cancel leaves the new player with none; it still comes
         // back here this time, as vanilla placed it before the copy.
-        let Some(host) = self.lan.as_ref() else {
+        let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let forced_spawn = host.hub.guests[i].spawn;
-        if let Some(point) = copied_respawn_point(own.is_some(), forced_spawn) {
+        if !keep_point {
+            // copyOriginalSpawnPosition false: the fresh player has none.
+            host.hub.guests[i].spawn = None;
+        } else if let Some(point) = copied_respawn_point(own.is_some(), forced_spawn) {
             let g = &host.hub.guests[i];
             let (uuid, id, name) = (g.uuid, g.entity_id, g.name.clone());
             let mut cancel = false;
@@ -4112,7 +4140,7 @@ impl Game<'_> {
                 uuid,
                 id,
                 &name,
-                level.id(),
+                point_level.id(),
                 point,
                 point.is_some(),
                 &mut cancel,
@@ -4126,7 +4154,7 @@ impl Game<'_> {
         } else if in_frame_bed.is_none() && forced_spawn.is_none() {
             // TeleportTransition.createDefault: no point of its own, so the
             // world spawn's free column once its chunks have loaded.
-            self.world_spawn_trip(conn);
+            self.world_spawn_trip(conn, None);
         }
         if let Some(c) = in_frame_bed
             && self.dim == super::Dim::Overworld
@@ -4151,7 +4179,7 @@ impl Game<'_> {
             if found.is_none() {
                 // TeleportTransition.missingRespawnBlock.
                 host.hub.missing_respawn_block(conn);
-                self.world_spawn_trip(conn);
+                self.world_spawn_trip(conn, None);
             }
             if let Some(host) = self.lan.as_mut() {
                 host.hub.teleport(i, Some(at));
@@ -7400,6 +7428,80 @@ mod hotbar_tests {
                         ("pre", 123, 20, 3, 8),
                     ]
                 );
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod respawn_position_tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use super::super::native_item_places::tests::{guest, open_to_lan};
+    use horizon_client::chunk::Chunk;
+    use mod_api::{Hooks, LevelDimension, ModEntry, PlayerRespawnPositionEvent, ServerHost};
+    use std::sync::{Arc, Mutex};
+
+    /// What the hook heard: the player's UUID, the original level and point,
+    /// and whether the block was missing.
+    type Heard = Arc<Mutex<Vec<(u128, LevelDimension, [f64; 3], bool)>>>;
+
+    /// Moves every respawn ten blocks east, turns the player north, and
+    /// keeps no respawn point for next time.
+    struct East(Heard);
+    #[mod_api::__subscriptions]
+    impl Hooks for East {
+        fn player_respawn_position(
+            &self,
+            _: &mut dyn ServerHost,
+            e: &mut PlayerRespawnPositionEvent,
+        ) {
+            let row = (
+                e.player.uuid(),
+                e.original_level,
+                e.original_position,
+                e.missing_respawn_block,
+            );
+            self.0.lock().unwrap().push(row);
+            e.position[0] += 10.0;
+            e.yaw = 180.0;
+            e.copy_original_spawn_position = false;
+        }
+    }
+
+    /// `PlayerRespawnPositionEvent` on a server: a guest whose forced point
+    /// needs no block respawns there, the mod hears that point with the
+    /// player's handle, and its new point, facing and copy choice are what
+    /// the player gets.
+    #[test]
+    #[ignore = "requires prepared game resources"]
+    fn a_mod_moves_a_respawn_and_drops_the_point() {
+        let heard = Heard::default();
+        let mods = vec![ModEntry::new("east", Box::new(East(heard.clone())))].into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                open_to_lan(game);
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let mut player = guest(1);
+                player.dead = true;
+                player.spawn = Some([5.5, 64.0, 5.5]);
+                game.lan.as_mut().unwrap().hub.guests.push(player);
+                game.guest_respawn(1);
+                let heard = heard.lock().unwrap();
+                let [(uuid, level, original, missing)] = heard[..] else {
+                    panic!("heard {heard:?}");
+                };
+                assert_eq!(
+                    (uuid, level, missing),
+                    (123, LevelDimension::Overworld, false)
+                );
+                let g = &game.lan.as_ref().unwrap().hub.guests[0];
+                assert!(!g.dead);
+                assert_eq!(g.position, [original[0] + 10.0, original[1], original[2]]);
+                assert_eq!(g.yaw, 180.0);
+                assert_eq!((g.spawn, &g.respawn_elsewhere), (None, &None));
             });
         });
     }
