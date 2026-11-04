@@ -939,8 +939,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 for direction in HORIZONTAL {
                     let neighbour = self.rel_state(pos, direction);
                     let sturdy = b.is_face_sturdy(neighbour, direction.opposite());
-                    let connect =
-                        self.fence_connects_to(default, neighbour, sturdy, direction.opposite());
+                    let connect = self.fence_connects_to(
+                        pos,
+                        default,
+                        neighbour,
+                        sturdy,
+                        direction.opposite(),
+                    );
                     state = table.set_bool(state, self.direction_prop(direction), connect);
                 }
                 Some(wl(state))

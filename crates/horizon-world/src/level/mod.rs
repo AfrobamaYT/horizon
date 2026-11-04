@@ -773,6 +773,25 @@ pub trait LevelAccess {
     ) -> bool {
         vanilla
     }
+    /// Whether fence connection queries need the level hook.
+    fn has_fence_connection_hook(&self) -> bool {
+        false
+    }
+    /// `FenceBlock.connectsTo` once the library answered `vanilla` for the fence
+    /// `fence` at `pos` and the `neighbour` state beside it, `direction`
+    /// pointing from the fence toward it and `face_solid` its face's
+    /// sturdiness: whether the fence connects an arm. The default keeps it.
+    fn adjust_fence_connects_to(
+        &self,
+        _pos: BlockPos,
+        _fence: BlockStateId,
+        _neighbour: BlockStateId,
+        _direction: Direction,
+        _face_solid: bool,
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
     /// `BlockState.hasAnalogOutputSignal` once the library answered `vanilla`:
     /// whether comparators read the block. The default keeps it.
     fn adjust_has_analog_output(&self, _state: BlockStateId, vanilla: bool) -> bool {

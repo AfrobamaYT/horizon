@@ -476,7 +476,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     table.set_bool(
                         state,
                         self.direction_prop(dir),
-                        self.fence_connects_to(state, nstate, sturdy, dir.opposite()),
+                        self.fence_connects_to(pos, state, nstate, sturdy, dir.opposite()),
                     )
                 } else {
                     sup!()
@@ -923,9 +923,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             counter_clockwise(facing)
         }
     }
-    /// `FenceBlock.connectsTo`.
+    /// `FenceBlock.connectsTo` for the fence `fence` at `pos`, then the hook.
     pub(crate) fn fence_connects_to(
         &self,
+        pos: BlockPos,
         fence: BlockStateId,
         state: BlockStateId,
         face_solid: bool,
@@ -937,7 +938,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             && b.in_set(state, &t.wooden_fences) == b.in_set(fence, &t.wooden_fences);
         let gate = b.instance_of(state, Class::FenceGate)
             && axis_of(b.facing(state)) == axis_of(clockwise(direction));
-        (!b.is_exception_for_connection(state) && face_solid) || same_fence || gate
+        let vanilla = (!b.is_exception_for_connection(state) && face_solid) || same_fence || gate;
+        if self.level.has_fence_connection_hook() {
+            self.level
+                .adjust_fence_connects_to(pos, fence, state, direction, face_solid, vanilla)
+        } else {
+            vanilla
+        }
     }
     /// `IronBarsBlock.attachsTo`.
     pub(crate) fn bars_attach_to(&self, state: BlockStateId, face_solid: bool) -> bool {
