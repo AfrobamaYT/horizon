@@ -8277,7 +8277,6 @@ impl Game<'_> {
         self.tick_totem();
         self.update_totem_ready();
         self.tick_command_extras();
-        self.native_tick();
         self.tick_world(running)
     }
     /// What the tick runs after the local player's own update: effects, the
@@ -19410,7 +19409,9 @@ impl Game<'_> {
                     for _ in 0..steps {
                         let started = Instant::now();
                         if self.title.is_none() && !self.pause {
+                            self.native_client_tick_pre();
                             horizon_client::spans::time("tick", || self.tick())?;
+                            self.native_client_tick_post();
                             self.tick_ambience();
                             self.tick_fov();
                         }

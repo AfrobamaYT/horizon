@@ -6,23 +6,23 @@ fn subscriber_tick_benchmark() {
     use std::{hint::black_box, time::Instant};
     struct TestHost;
     impl Host for TestHost {}
-    impl ServerHost for TestHost {}
+    impl ClientHost for TestHost {}
     struct Quiet;
     #[mod_api::__subscriptions]
     impl Hooks for Quiet {}
     struct Listener;
     #[mod_api::__subscriptions]
     impl Hooks for Listener {
-        fn tick(&self, _: crate::HostSide, event: &mut TickEvent) {
+        fn client_tick_pre(&self, _: &mut dyn ClientHost, event: &mut ClientTickPreEvent) {
             black_box(event);
         }
     }
     trait Before {
-        fn tick(&self, _: crate::HostSide, _: &mut TickEvent) {}
+        fn client_tick_pre(&self, _: &mut dyn ClientHost, _: &mut ClientTickPreEvent) {}
     }
     impl Before for Quiet {}
     impl Before for Listener {
-        fn tick(&self, _: crate::HostSide, event: &mut TickEvent) {
+        fn client_tick_pre(&self, _: &mut dyn ClientHost, event: &mut ClientTickPreEvent) {
             black_box(event);
         }
     }
@@ -46,20 +46,20 @@ fn subscriber_tick_benchmark() {
     installed.push(ModEntry::new("listener", Box::new(Listener)));
     install(installed.into());
     let mut host = TestHost;
-    dispatch_tick(HostSide::Server(&mut host)); // Warm the dispatch outside the timed loop.
+    dispatch_client_tick_pre(&mut host); // Warm the dispatch outside the timed loop.
     let iterations = 1_000_000;
     let start = Instant::now();
     for _ in 0..iterations {
-        let mut event = TickEvent {};
+        let mut event = ClientTickPreEvent {};
         for entry in black_box(&before) {
-            let _guard = mark_mod(entry.id, "tick");
-            entry.hooks.tick(HostSide::Server(&mut host), &mut event);
+            let _guard = mark_mod(entry.id, "client_tick_pre");
+            entry.hooks.client_tick_pre(&mut host, &mut event);
         }
     }
     let baseline = start.elapsed().as_nanos() as f64 / f64::from(iterations);
     let start = Instant::now();
     for _ in 0..iterations {
-        dispatch_tick(HostSide::Server(black_box(&mut host)));
+        dispatch_client_tick_pre(black_box(&mut host));
     }
     let subscribed = start.elapsed().as_nanos() as f64 / f64::from(iterations);
     println!(
@@ -134,11 +134,11 @@ fn scoped_mods_dispatch_and_restore_after_panic() {
 
     struct HostDouble;
     impl Host for HostDouble {}
-    impl ServerHost for HostDouble {}
+    impl ClientHost for HostDouble {}
     struct Counter(Arc<AtomicUsize>);
     #[mod_api::__subscriptions]
     impl Hooks for Counter {
-        fn tick(&self, _: crate::HostSide, _: &mut TickEvent) {
+        fn client_tick_pre(&self, _: &mut dyn ClientHost, _: &mut ClientTickPreEvent) {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -152,7 +152,7 @@ fn scoped_mods_dispatch_and_restore_after_panic() {
         )]
         .into(),
         || {
-            dispatch_tick(HostSide::Server(&mut HostDouble));
+            dispatch_client_tick_pre(&mut HostDouble);
             let result = std::panic::catch_unwind(|| {
                 with_mods(
                     vec![ModEntry::new(
@@ -161,13 +161,13 @@ fn scoped_mods_dispatch_and_restore_after_panic() {
                     )]
                     .into(),
                     || {
-                        dispatch_tick(HostSide::Server(&mut HostDouble));
+                        dispatch_client_tick_pre(&mut HostDouble);
                         panic!("test unwind");
                     },
                 );
             });
             assert!(result.is_err());
-            dispatch_tick(HostSide::Server(&mut HostDouble));
+            dispatch_client_tick_pre(&mut HostDouble);
         },
     );
     assert_eq!(outer.load(Ordering::Relaxed), 2);
@@ -229,4 +229,31 @@ fn recipe_book_categories_accept_mod_declarations() {
     assert_eq!(declarations[0].id, "mymod:crushing");
     assert_eq!(declarations[0].recipe_type, "mymod:crusher");
     assert_eq!(declarations[0].icon, "minecraft:stone");
+}
+
+#[test]
+fn client_tick_pre_and_post_hear_their_own_moment() {
+    use std::sync::Mutex;
+    struct TestHost;
+    impl Host for TestHost {}
+    impl ClientHost for TestHost {}
+    struct Ticks(Arc<Mutex<Vec<&'static str>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Ticks {
+        fn client_tick_pre(&self, _: &mut dyn ClientHost, _: &mut ClientTickPreEvent) {
+            self.0.lock().unwrap().push("pre");
+        }
+        fn client_tick_post(&self, _: &mut dyn ClientHost, _: &mut ClientTickPostEvent) {
+            self.0.lock().unwrap().push("post");
+        }
+    }
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    testing::with_mods(
+        vec![ModEntry::new("ticks", Box::new(Ticks(heard.clone())))].into(),
+        || {
+            dispatch_client_tick_pre(&mut TestHost);
+            dispatch_client_tick_post(&mut TestHost);
+        },
+    );
+    assert_eq!(*heard.lock().unwrap(), ["pre", "post"]);
 }

@@ -1885,11 +1885,13 @@ impl Game<'_> {
             new_game_type,
         );
     }
-    /// Once a tick, in every `Game`: the window's (in single player, on LAN
-    /// and on servers), and the server's own (`native_window` is false
-    /// there: the single player server thread, a dedicated server).
-    pub(super) fn native_tick(&mut self) {
-        mod_api::dispatch_tick(super::execution_role::host_side(self));
+    /// Once a client tick, before the window's tick runs (`ClientTickEvent.Pre`).
+    pub(super) fn native_client_tick_pre(&mut self) {
+        mod_api::dispatch_client_tick_pre(self);
+    }
+    /// Once a client tick, after the window's tick ran (`ClientTickEvent.Post`).
+    pub(super) fn native_client_tick_post(&mut self) {
+        mod_api::dispatch_client_tick_post(self);
     }
     /// Before an eligible targeted block's selection outline is built.
     /// Cancel skips only the default block highlight, after normal HUD and game-mode gates.
