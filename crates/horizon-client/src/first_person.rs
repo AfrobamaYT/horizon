@@ -1442,7 +1442,7 @@ mod action_result_tests {
         );
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items =
-            crate::items::Items::catalog(&root, &crate::items::PackOverlay::NONE, &defaults)
+            crate::items::Items::catalog(&root, &horizon_world::loot::PackOverlay::NONE, &defaults)
                 .unwrap();
         for (id, expected) in [
             ("minecraft:bread", Eat),

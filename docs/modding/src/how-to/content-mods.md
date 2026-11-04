@@ -245,6 +245,12 @@ gets its own damage and durability, or a tool its mining speed:
     "!minecraft:repairable": {} } }
 ```
 
+A held item's third-person arm pose follows its use animation, as vanilla's `AvatarRenderer.getArmPose` reads it: the
+`minecraft:consumable` component's `animation` (`eat`, `drink`, `block`, `bow`, `trident`, `crossbow`, `spyglass`,
+`toot_horn`, `brush`, `bundle`, `spear` or `none`), else `block` for an item with `minecraft:blocks_attacks`. A content
+item with `"minecraft:consumable": { "animation": "toot_horn", "consume_seconds": 7 }` raises its arm like a goat horn
+while it is used, for players and in other players' views.
+
 An item can place a block by naming it with `block`, whether it is a vanilla block or a declared mod block:
 
 ```json
