@@ -15,6 +15,47 @@ pub(super) struct HookSources {
     pub render_hook_count: usize,
 }
 
+/// The most parameters a `native_*` target takes, receiver included (clippy's limit): a hook
+/// with more declares its parameters in `hooks/*.rs` and its target takes one `<Name>Call`.
+const MAX_TARGET_PARAMETERS: usize = 7;
+
+/// The hooks whose flat targets already take more than [`MAX_TARGET_PARAMETERS`]. This list only
+/// shrinks and takes no new entries: convert a hook to a carrier and delete its line. A PR that
+/// adds a hook never edits it, so no two PRs collide on it.
+const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[
+    "use_on",
+    "piston_pre",
+    "living_incoming_damage",
+    "apply_effect_tick",
+    "living_knockback",
+    "projectile_impact",
+    "entity_mount",
+    "sign_changed",
+    "cauldron_level_changed",
+    "ender_pearl_teleport",
+    "block_drops",
+    "fall_on",
+    "bounce_on",
+    "bonemeal",
+    "fence_connects_to",
+    "finalize_spawn",
+    "item_tooltip",
+    "living_drops",
+    "get_equipment_drop_chance",
+    "note_block_play",
+    "player_set_spawn",
+];
+
+/// Refuses a flat target of a new hook that takes more than [`MAX_TARGET_PARAMETERS`].
+fn target_parameters(name: &str, native: &str, count: usize, carrier: &str) -> Result<(), String> {
+    if count > MAX_TARGET_PARAMETERS && !FLAT_TARGETS_OVER_THE_LIMIT.contains(&name) {
+        return Err(format!(
+            "{name}: {native} takes {count} parameters, more than {MAX_TARGET_PARAMETERS}: declare them on the hook in hooks/*.rs so it takes one {carrier}"
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn emit(
     root: &Path,
     hooks: &[Hook],
@@ -111,17 +152,7 @@ pub(super) fn emit(
             .collect::<Result<Vec<_>, syn::Error>>()
             .map_err(|e| format!("{name}: {e}"))?;
         let mut args: Vec<(String, &Type)> = if declared.is_empty() {
-            if method.attrs.iter().any(|attr| {
-                attr.path().is_ident("allow")
-                    && attr
-                        .to_token_stream()
-                        .to_string()
-                        .contains("too_many_arguments")
-            }) {
-                return Err(format!(
-                    "{name}: {native} allows too_many_arguments: declare the parameters on the hook in hooks/*.rs so it takes one {carrier}"
-                ));
-            }
+            target_parameters(name, &native, sig.inputs.len(), &carrier)?;
             native_args
         } else {
             let taken_ticks = native_args.iter().position(|(arg, _)| arg == "ticks");
@@ -599,5 +630,18 @@ fn generic_of<'a>(ty: &'a Type, name: &str) -> Option<&'a Type> {
     match args.args.first()? {
         syn::GenericArgument::Type(ty) => Some(ty),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_new_hook_over_the_limit_needs_the_carrier() {
+        assert!(target_parameters("new_hook", "native_new_hook", 7, "NewHookCall").is_ok());
+        let refused = target_parameters("new_hook", "native_new_hook", 8, "NewHookCall");
+        assert!(refused.unwrap_err().contains("one NewHookCall"));
+        assert!(target_parameters("use_on", "native_use_on", 9, "UseOnCall").is_ok());
     }
 }
