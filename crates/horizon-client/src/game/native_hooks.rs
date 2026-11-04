@@ -12131,6 +12131,7 @@ mod tests {
         use mod_api::{ClientHost, Flow, Hooks, ModEntry};
         use std::sync::{Arc, Mutex};
 
+        #[derive(Default)]
         struct Listener(usize, Arc<Mutex<Vec<usize>>>);
         #[mod_api::horizon_mod]
         impl Hooks for Listener {
@@ -12252,7 +12253,7 @@ mod tests {
                 )
             };
             let old = run(false);
-            assert_eq!(old.0, true);
+            assert!(old.0);
             assert_eq!(old.1, [0, 1]);
             assert_eq!(old.3, [0, 1, 2]);
             assert_eq!(old.4, 4.0);
