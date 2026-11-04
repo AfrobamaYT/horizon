@@ -2892,14 +2892,14 @@ pub trait MobHooks {
     fn living_visibility(&self, player: &PlayerView, looking: u32, visibility: f64) -> f64;
 }
 impl MobWorld<'_> {
-    /// `EventHooks.canEntityGrief(level, mob)`: the `mob_griefing` rule, or
-    /// what a mod answers for this mob. Asked where NeoForge asks it; the
-    /// places vanilla reads the rule with no entity still read `mob_griefing`.
     /// Whether a mob may grief here at all: the rule, or a mod that may say
     /// yes against it.
     pub fn griefing_possible(&self) -> bool {
         self.mob_griefing || self.mob_hooks.is_some_and(|hooks| hooks.grief_hooked())
     }
+    /// `EventHooks.canEntityGrief(level, mob)`: the `mob_griefing` rule, or
+    /// what a mod answers for this mob. Asked where NeoForge asks it; the
+    /// places vanilla reads the rule with no entity still read `mob_griefing`.
     pub fn can_grief(&self, mob: u32) -> bool {
         match self.mob_hooks {
             Some(hooks) => hooks.can_grief(mob, self.mob_griefing),
