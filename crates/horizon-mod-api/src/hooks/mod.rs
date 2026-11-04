@@ -57,6 +57,7 @@ mod block_entity_refs;
 mod block_grow_feature;
 mod block_landing;
 mod block_render_visibility;
+mod block_state_facts;
 mod block_state_ids;
 mod block_tool_modification;
 mod block_use_item_on;
