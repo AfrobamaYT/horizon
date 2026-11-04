@@ -1521,6 +1521,37 @@ mod tests {
             super::host_param::validate(&read, "test", true, Some(false), false).unwrap_err(),
             "test: this entry takes no host marker"
         );
+        // A hit's level: another receiver than `GameLevel`, marked as a level host.
+        let hit = super::CatalogHook {
+            entry: serde_json::json!({"target": "horizon_client::game::native_hooks::HitLevel<'_>::native_test", "host": "level"}),
+            side: super::HelperSide::Server,
+            context: None,
+        };
+        assert!(super::host_param::is_level(&hit));
+        assert_eq!(
+            host_param(&hit, Some(true), false),
+            param("&mut dyn LevelRandomHost", "self")
+        );
+        super::host_param::validate(&hit, "test", true, Some(true), false).unwrap();
+        for (entry, side, mutable) in [
+            (hit.entry.clone(), super::HelperSide::Server, Some(false)),
+            (hit.entry.clone(), super::HelperSide::Both, Some(true)),
+            (
+                serde_json::json!({"target": "horizon_client::game::GameLevel<'_>::native_test", "host": "level"}),
+                super::HelperSide::Server,
+                Some(true),
+            ),
+        ] {
+            let hook = super::CatalogHook {
+                entry,
+                side,
+                context: None,
+            };
+            assert_eq!(
+                super::host_param::validate(&hook, "test", true, mutable, false).unwrap_err(),
+                "test: this entry takes no host marker"
+            );
+        }
     }
 
     #[test]

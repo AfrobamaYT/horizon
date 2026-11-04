@@ -811,21 +811,21 @@ impl Goal for PiglinSpear {
             && m.extra.piglin.spear.status.is_none()
             && approach_check_extra_start_conditions(m, cx.w)
         {
-            self.approach.begin(cx.lr, now);
+            self.approach.begin(cx.level.random(), now);
             approach_start(m);
         }
         if !self.attack.running
             && m.extra.piglin.spear.status.is_some()
             && attack_check_extra_start_conditions(m, cx.w)
         {
-            self.attack.begin(cx.lr, now);
+            self.attack.begin(cx.level.random(), now);
             attack_start(m);
         }
         if !self.retreat.running
             && m.extra.piglin.spear.status.is_some()
             && retreat_check_extra_start_conditions(m, cx)
         {
-            self.retreat.begin(cx.lr, now);
+            self.retreat.begin(cx.level.random(), now);
             retreat_start(m);
         }
         if self.approach.running {

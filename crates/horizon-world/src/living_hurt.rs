@@ -1,5 +1,5 @@
 //! Outer living damage dispatch, cooldown writes and post-hit service ordering.
-use crate::living_damage::{STAT_LIMIT, stat_amount};
+use crate::living_damage::{DamageContainer, Reduction, STAT_LIMIT, stat_amount};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HurtTag {
     Fire,
@@ -57,9 +57,11 @@ pub trait HurtWorld {
         s: &mut HurtState<Self::Source>,
         damage: f32,
     ) -> Result<(), Self::Error>;
+    /// `actuallyHurt` of `damage`, the hit's sequence in `container`.
     fn actually_hurt(
         &mut self,
         s: &mut HurtState<Self::Source>,
+        container: &mut DamageContainer,
         damage: f32,
     ) -> Result<(), Self::Error>;
     fn resolve_mob(&mut self, s: &mut HurtState<Self::Source>) -> Result<(), Self::Error>;
@@ -115,6 +117,20 @@ pub trait HurtWorld {
         blocked: bool,
     ) -> Result<(), Self::Error>;
 }
+/// What `LivingDamageEvent.Pre` changed, back in the cooldown: NeoForge bubbles the damage
+/// Pre left up to `lastHurt` (here vanilla's `lastHurt` plus what Pre added) and applies the
+/// cooldown Pre set, which was `cooldown`. A hit Pre left alone writes nothing more, so a
+/// write `actuallyHurt` made itself stands as in vanilla.
+fn after_pre<S>(s: &mut HurtState<S>, container: &DamageContainer, cooldown: i32) {
+    let change = container.pre_change();
+    if change != 0.0 {
+        s.last_hurt += change;
+    }
+    let ticks = container.post_attack_invulnerability_ticks();
+    if ticks != cooldown {
+        s.cooldown = ticks;
+    }
+}
 pub fn hurt_server<W: HurtWorld>(
     s: &mut HurtState<W::Source>,
     w: &mut W,
@@ -126,6 +142,7 @@ pub fn hurt_server<W: HurtWorld>(
     if w.tag(s, HurtTag::Fire)? && w.fire_resistance(s)? {
         return Ok(false);
     }
+    let mut container = DamageContainer::new(damage);
     if w.hurt_start(s, &mut damage)? {
         return Ok(false);
     }
@@ -141,6 +158,7 @@ pub fn hurt_server<W: HurtWorld>(
     let blocked_amount = w.apply_blocking(s, damage)?;
     damage -= blocked_amount;
     let blocked = blocked_amount > 0.0;
+    container.record_block(blocked_amount);
     if w.tag(s, HurtTag::Freezing)? && w.freeze_hurts_extra(s)? {
         damage *= 5.0;
     }
@@ -155,13 +173,19 @@ pub fn hurt_server<W: HurtWorld>(
         if damage <= s.last_hurt {
             return Ok(false);
         }
-        w.actually_hurt(s, damage - s.last_hurt)?;
+        container.record_reduction(Reduction::Invulnerability, s.last_hurt);
+        let cooldown = s.cooldown;
+        container.set_post_attack_invulnerability_ticks(cooldown);
+        w.actually_hurt(s, &mut container, damage - s.last_hurt)?;
         s.last_hurt = damage;
+        after_pre(s, &container, cooldown);
         false
     } else {
         s.last_hurt = damage;
         s.cooldown = 20;
-        w.actually_hurt(s, damage)?;
+        container.set_post_attack_invulnerability_ticks(20);
+        w.actually_hurt(s, &mut container, damage)?;
+        after_pre(s, &container, 20);
         s.hurt_duration = 10;
         s.hurt_time = s.hurt_duration;
         true

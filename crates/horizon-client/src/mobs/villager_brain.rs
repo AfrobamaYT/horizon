@@ -14,6 +14,7 @@ use super::{
     brain::{Timed, living_near},
     path::{Path, PathNode},
 };
+use crate::health::DamageLevel;
 use horizon_core::{
     geometry::Vec3,
     random::{LegacyRandom, RandomSource},
@@ -447,9 +448,9 @@ pub fn init(m: &mut Mob, game_time: i64, day_time: i64, shuffle_seed: i64) {
 }
 
 /// What behaviours read and emit during a brain tick.
-pub struct Bx<'a, 'w> {
+pub struct Bx<'a, 'w, 'l> {
     pub w: &'a MobWorld<'w>,
-    pub lr: &'a mut LegacyRandom,
+    pub level: &'a mut DamageLevel<'l>,
     pub events: &'a mut Vec<MobEvent>,
     pub now: i64,
     /// `Villager.refreshBrain` was asked for.
@@ -457,18 +458,18 @@ pub struct Bx<'a, 'w> {
 }
 
 /// `Brain.tick` (from `Villager.customServerAiStep`).
-pub fn tick(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom, events: &mut Vec<MobEvent>) {
+pub fn tick(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut Vec<MobEvent>) {
     if brain(m).is_none() {
         let seed = i64::from(m.id);
         init(m, w.game_time, w.day_time, seed);
     }
     // forgetOutdatedMemories
     mem(m).tick();
-    tick_sensors(m, w, lr);
+    tick_sensors(m, w, level.random());
     let mut list = std::mem::take(&mut brain_mut(m).list);
     let mut cx = Bx {
         w,
-        lr,
+        level,
         events,
         now: w.game_time,
         refresh: false,
@@ -508,7 +509,7 @@ pub fn tick(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom, events: &mut Vec<M
 pub fn age_boundary_reached(
     m: &mut Mob,
     w: &MobWorld,
-    lr: &mut LegacyRandom,
+    level: &mut DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
 ) {
     if brain(m).is_none() {
@@ -517,7 +518,7 @@ pub fn age_boundary_reached(
     let mut list = std::mem::take(&mut brain_mut(m).list);
     let mut cx = Bx {
         w,
-        lr,
+        level,
         events,
         now: w.game_time,
         refresh: false,
@@ -1414,7 +1415,7 @@ impl Retry {
     }
     fn mark(&mut self, cx: &mut Bx, now: i64) {
         self.previous = now;
-        let suggested = self.delay + cx.lr.next_int_bound(40).unwrap_or(0) + 40;
+        let suggested = self.delay + cx.level.random().next_int_bound(40).unwrap_or(0) + 40;
         self.delay = suggested.min(400);
         self.next = now + i64::from(self.delay);
     }
@@ -1540,18 +1541,18 @@ impl B {
                 if !swim_condition(m) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::LookAtTargetSink(t) => {
                 if !mem(m).look_target.present() {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::PanicTrigger(t) => {
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 // VillagerPanicTrigger.start
                 if panic_condition(m) {
                     if !brain_mut(m).is_active(Act::Panic) {
@@ -1586,7 +1587,7 @@ impl B {
                 let reached = reached(m, cx.w, &walk);
                 if !reached && compute_path(m, cx.w, cx.now, &walk, path, speed, cant_reach) {
                     *last_target = walk.target.block(cx.w);
-                    t.begin(cx.lr, cx.now);
+                    t.begin(cx.level.random(), cx.now);
                     // start
                     mem(m).path.set_opt(path.clone());
                     m.nav_move_to_path(cx.w, path.clone(), f64::from(*speed));
@@ -1603,7 +1604,7 @@ impl B {
                 if !follow_trading_condition(m, cx.w) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 follow_trading_player(m);
                 true
             }
@@ -1615,7 +1616,7 @@ impl B {
                 if !matches!(a, Act::Idle | Act::Work | Act::Play) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::JumpOnBed {
@@ -1632,16 +1633,16 @@ impl B {
                 if mm.walk_target.present() || !m.is_baby() {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 *bed = Some(nearest);
                 *time_left = 100;
-                *jumps = 3 + cx.lr.next_int_bound(4).unwrap_or(0);
+                *jumps = 3 + cx.level.random().next_int_bound(4).unwrap_or(0);
                 *cooldown = 0;
                 mem(m).walk_target.set(WalkTarget::block(nearest, 0.5, 0));
                 true
             }
             B::DoNothing(t) => {
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::GiveGiftToHero {
@@ -1660,7 +1661,7 @@ impl B {
                     *until_next -= 1;
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 *given = false;
                 *started = now;
                 let mm = mem(m);
@@ -1678,7 +1679,7 @@ impl B {
                 if !mem(m).interaction_target.present() || !show_trades_condition(m, cx.w) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 // start
                 if let Some(target) = mem(m).interaction_target.value() {
                     mem(m).look_target.set(Tracker::Entity(target, true));
@@ -1696,7 +1697,7 @@ impl B {
                 if !villager_target_valid(m, cx.w, Mem::InteractionTarget) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 let target = mem(m).interaction_target.value().unwrap();
                 lock_gaze(m, target, cx);
                 true
@@ -1709,7 +1710,7 @@ impl B {
                 if !breeding_possible(m, cx.w) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 let target = mem(m).breed_target.value().unwrap();
                 lock_gaze(m, target, cx);
                 *birth = now + 275 + i64::from(m.random.next_int_bound(50).unwrap_or(0));
@@ -1727,14 +1728,14 @@ impl B {
                 if now - *last_check < 300 {
                     return false;
                 }
-                if cx.lr.next_int_bound(2).unwrap_or(0) != 0 {
+                if cx.level.random().next_int_bound(2).unwrap_or(0) != 0 {
                     return false;
                 }
                 *last_check = now;
                 if !closer_to_center(site, m.position, 1.73) {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 // start
                 let mm = mem(m);
                 mm.last_worked_at_poi.set(now);
@@ -1770,7 +1771,7 @@ impl B {
                 *valid = farmland_around(m, cx.w);
                 *target = pick_farmland(valid, cx);
                 let Some(p) = *target else { return false };
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 if now > *next_ok {
                     let mm = mem(m);
                     mm.look_target.set(Tracker::Block(p));
@@ -1803,7 +1804,7 @@ impl B {
                 if crop.is_none() {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 bonemeal_target(m, *crop);
                 m.extra.set_main_hand(Some("minecraft:bone_meal".into()));
                 *next_work = cx.now;
@@ -1867,7 +1868,7 @@ impl B {
             ),
             B::SetRaidStatus(r) => one(
                 || {
-                    if cx.lr.next_int_bound(20).unwrap_or(0) != 0 {
+                    if cx.level.random().next_int_bound(20).unwrap_or(0) != 0 {
                         return false;
                     }
                     match super::villager::raid_state(m) {
@@ -1992,13 +1993,14 @@ impl B {
                     return false;
                 }
                 if *next == 0 {
-                    *next = cx.w.game_time + i64::from(cx.lr.next_int_bound(20).unwrap_or(0));
+                    *next = cx.w.game_time
+                        + i64::from(cx.level.random().next_int_bound(20).unwrap_or(0));
                     return false;
                 }
                 if cx.w.game_time < *next {
                     return false;
                 }
-                *next = now + 20 + i64::from(cx.lr.next_int_bound(20).unwrap_or(0));
+                *next = now + 20 + i64::from(cx.level.random().next_int_bound(20).unwrap_or(0));
                 retries.retain(|(_, r)| now - r.previous < 400);
                 let w = cx.w;
                 let mut found = pois_in_range(m, w, *filter, 48, |_| true);
@@ -2351,7 +2353,11 @@ impl B {
                 if list.is_empty() {
                     return false;
                 }
-                let target = list[cx.lr.next_int_bound(list.len() as i32).unwrap_or(0) as usize];
+                let target = list[cx
+                    .level
+                    .random()
+                    .next_int_bound(list.len() as i32)
+                    .unwrap_or(0) as usize];
                 if !closer_to_center(site, m.position, 6.0) {
                     return false;
                 }
@@ -2395,7 +2401,7 @@ impl B {
                 {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 if now > *next_ok {
                     close_doors(m, cx, None, None);
                     if super::villager::start_sleeping(m, home, w, cx.events) {
@@ -2430,7 +2436,8 @@ impl B {
                     return false;
                 }
                 let mut tried = 0;
-                *last_update = cx.w.game_time + i64::from(cx.lr.next_int_bound(20).unwrap_or(0));
+                *last_update =
+                    cx.w.game_time + i64::from(cx.level.random().next_int_bound(20).unwrap_or(0));
                 let mut targets = Vec::new();
                 for p in homes {
                     if cache.iter().any(|(q, _)| *q == p) {
@@ -2559,7 +2566,7 @@ impl B {
                     }
                     let w = cx.w;
                     let is_villager = |who: Who| matches!(who, Who::Mob(id) if w.seen(id).is_some_and(|s| s.species == Species::Villager));
-                    if cx.lr.next_int_bound(100).unwrap_or(1) != 0
+                    if cx.level.random().next_int_bound(100).unwrap_or(1) != 0
                         || !closer_to_center(bell, m.position, 4.0)
                         || find_closest(m, w, |_, who| is_villager(who)).is_none()
                     {
@@ -2633,7 +2640,7 @@ impl B {
                     let Some(bell) = mem(m).meeting_point.value() else {
                         return false;
                     };
-                    if cx.lr.next_float() <= 0.95 {
+                    if cx.level.random().next_float() <= 0.95 {
                         return false;
                     }
                     if dist_sqr(bell, block_of(m.position)) < 9
@@ -2647,7 +2654,7 @@ impl B {
             ),
             B::ResetRaidStatus(r) => one(
                 || {
-                    if cx.lr.next_int_bound(20).unwrap_or(0) != 0 {
+                    if cx.level.random().next_int_bound(20).unwrap_or(0) != 0 {
                         return false;
                     }
                     if super::villager::raid_over_or_lost(m) {
@@ -2708,7 +2715,7 @@ impl B {
                 {
                     return false;
                 }
-                t.begin(cx.lr, cx.now);
+                t.begin(cx.level.random(), cx.now);
                 true
             }
             B::LocateHidingPlace {
@@ -2782,7 +2789,7 @@ impl B {
                     if mm.walk_target.present() {
                         return false;
                     }
-                    if cx.lr.next_int_bound(10).unwrap_or(0) != 0 {
+                    if cx.level.random().next_int_bound(10).unwrap_or(0) != 0 {
                         return false;
                     }
                     // What a friend chases is its INTERACTION_TARGET.
@@ -3286,7 +3293,7 @@ impl B {
                     && !reached(m, cx.w, &walk)
                     && m.ai.nav.stuck
                 {
-                    *cooldown = cx.lr.next_int_bound(40).unwrap_or(0);
+                    *cooldown = cx.level.random().next_int_bound(40).unwrap_or(0);
                 }
                 m.nav_stop();
                 let mm = mem(m);
@@ -3306,7 +3313,7 @@ impl B {
             }
             B::GiveGiftToHero { t, until_next, .. } => {
                 t.running = false;
-                *until_next = 600 + cx.lr.next_int_bound(6001).unwrap_or(0);
+                *until_next = 600 + cx.level.random().next_int_bound(6001).unwrap_or(0);
                 let mm = mem(m);
                 mm.interaction_target.clear();
                 mm.walk_target.clear();
@@ -3540,7 +3547,11 @@ fn pick_farmland(valid: &[[i32; 3]], cx: &mut Bx) -> Option<[i32; 3]> {
     if valid.is_empty() {
         return None;
     }
-    let i = cx.lr.next_int_bound(valid.len() as i32).unwrap_or(0) as usize;
+    let i = cx
+        .level
+        .random()
+        .next_int_bound(valid.len() as i32)
+        .unwrap_or(0) as usize;
     Some(valid[i])
 }
 /// A tagged BlockItem plants its block's default state.
@@ -3627,7 +3638,7 @@ fn pick_bonemeal_crop(m: &Mob, cx: &mut Bx) -> Option<[i32; 3]> {
                 let p = [c[0] + x, c[1] + y, c[2] + z];
                 if bonemeal_valid(cx.w, p) {
                     count += 1;
-                    if cx.lr.next_int_bound(count).unwrap_or(1) == 0 {
+                    if cx.level.random().next_int_bound(count).unwrap_or(1) == 0 {
                         result = Some(p);
                     }
                 }

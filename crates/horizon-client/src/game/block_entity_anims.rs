@@ -680,7 +680,11 @@ impl Game<'_> {
             return;
         };
         let at = [m.position.x, m.position.y, m.position.z];
-        m.damage(4.0, Damage::of(DamageKind::Magic));
+        m.damage(
+            crate::game::entity::damage_level_of!(self),
+            4.0,
+            Damage::of(DamageKind::Magic),
+        );
         self.audio
             .play("minecraft:block.conduit.attack.target", Some(at), 1.0, 1.0);
     }
