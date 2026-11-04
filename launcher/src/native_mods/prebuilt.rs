@@ -4,7 +4,7 @@
 //! anything runs: a mod set the prebuilt game can't serve, or a revision with no prebuilt
 //! release, builds from source, and the build log says why. A prebuilt build that fails is an
 //! error like any other build's, never retried from source.
-use super::{api, dependencies, Target};
+use super::{api, dependencies, Profile, Target};
 use crate::i18n::{tr, trf};
 use crate::rust_toolchain::{self, Toolchain};
 use horizon_mods::index::native;
@@ -33,8 +33,12 @@ pub(super) enum SourceReason {
     Features { mod_id: String },
     /// A mod depends on a crate other than the mod API and other mods.
     Crate { mod_id: String, krate: String },
+    /// The player chose a profile other than the prebuilt game's `performance` (`fast`).
+    Profile { profile: &'static str },
     /// No prebuilt game for this computer.
     Host,
+    /// The prebuilt game's release couldn't be downloaded.
+    Download { why: String },
     /// No prebuilt game was released for this revision and target.
     NoRelease { revision: String },
 }
@@ -58,9 +62,17 @@ impl std::fmt::Display for SourceReason {
                 "{mod} depends on the crate {crate}, so the game builds from source",
                 &[("mod", mod_id), ("crate", krate)],
             ),
+            Self::Profile { profile } => trf(
+                "the {profile} profile builds the game from source; the prebuilt game is performance only",
+                &[("profile", profile)],
+            ),
             Self::Host => {
                 tr("no prebuilt game for this computer, so the game builds from source").into()
             }
+            Self::Download { why } => trf(
+                "the prebuilt game couldn't be downloaded ({why}), so the game builds from source",
+                &[("why", why)],
+            ),
             Self::NoRelease { revision } => trf(
                 "no prebuilt game for {revision}, so the game builds from source",
                 &[("revision", &revision[..revision.len().min(10)])],
@@ -70,10 +82,16 @@ impl std::fmt::Display for SourceReason {
     }
 }
 
-/// The first reason `projects` can't build against the prebuilt game, or `None` when they can:
-/// each is a crate that depends on the mod API (with its default features) and on other mods,
-/// with no injections, build script or features of its own.
-pub(super) fn refusal(projects: &[api::Project<'_>]) -> Option<SourceReason> {
+/// The first reason `projects` can't build against the prebuilt game with `profile`, or `None`
+/// when they can: the profile is `performance`, the one the game is prebuilt with, and each mod is
+/// a crate that depends on the mod API (with its default features) and on other mods, with no
+/// injections, build script or features of its own.
+pub(super) fn refusal(projects: &[api::Project<'_>], profile: Profile) -> Option<SourceReason> {
+    if profile != Profile::Performance {
+        return Some(SourceReason::Profile {
+            profile: profile.name(),
+        });
+    }
     projects.iter().find_map(|project| {
         let mod_id = || project.bundle.manifest.id.clone();
         if project.bundle.needs_mixins() {
@@ -125,9 +143,9 @@ pub(super) fn refusal(projects: &[api::Project<'_>]) -> Option<SourceReason> {
 
 /// The prebuilt game for `revision` and `target`, downloaded and checked once, then kept in the
 /// launcher's data (`downloading` is told before a download starts); `Err(reason)` inside when
-/// there is none to use. The archive must match the
-/// release's `SHA256SUMS` before it is unpacked, and its identity this revision, this computer
-/// and the launcher's Rust.
+/// there is none to use, or its download failed. An archive that arrives must match the release's
+/// `SHA256SUMS` before it is unpacked, and its identity this revision, this computer and the
+/// launcher's Rust: a mismatch is an error, never a source build.
 pub(super) fn fetch(
     revision: &str,
     target: Target,
@@ -148,15 +166,21 @@ pub(super) fn fetch(
         native::PREBUILT_REPO,
         native::PREBUILT_TAG
     );
-    let Some(sums) = crate::backend::get_unless_missing(&format!("{release}/{SUMS}"))? else {
-        return Ok(Err(SourceReason::NoRelease {
-            revision: revision.to_owned(),
-        }));
+    // A download that fails builds from source, saying why; a file that arrives wrong is refused.
+    let download = |why: String| Ok(Err(SourceReason::Download { why }));
+    let sums = match crate::backend::get_unless_missing(&format!("{release}/{SUMS}")) {
+        Ok(Some(sums)) => sums,
+        Ok(None) => {
+            return Ok(Err(SourceReason::NoRelease {
+                revision: revision.to_owned(),
+            }))
+        }
+        Err(why) => return download(why),
     };
     let mut text = String::new();
-    sums.into_reader()
-        .read_to_string(&mut text)
-        .map_err(|e| e.to_string())?;
+    if let Err(e) = sums.into_reader().read_to_string(&mut text) {
+        return download(e.to_string());
+    }
     let Some(expected) = expected_sum(&text, &name) else {
         return Ok(Err(SourceReason::NoRelease {
             revision: revision.to_owned(),
@@ -169,14 +193,21 @@ pub(super) fn fetch(
     fs::create_dir_all(&partial).map_err(|e| e.to_string())?;
     downloading();
     let file = partial.join(&name);
-    let mut body = crate::backend::get(&format!("{release}/{name}"))?.into_reader();
+    let mut body = match crate::backend::get(&format!("{release}/{name}")) {
+        Ok(response) => response.into_reader(),
+        Err(why) => return download(why),
+    };
     let mut out = fs::File::create(&file).map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0; 1 << 20];
     loop {
-        let read = body
-            .read(&mut buffer)
-            .map_err(|e| format!("Download interrupted: {e}"))?;
+        let read = match body.read(&mut buffer) {
+            Ok(read) => read,
+            Err(e) => {
+                let _ = fs::remove_dir_all(&partial);
+                return download(e.to_string());
+            }
+        };
         if read == 0 {
             break;
         }
@@ -440,7 +471,23 @@ mod tests {
         )
         .unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
-        refusal(&[api::Project::read(&bundle).unwrap()])
+        refusal(
+            &[api::Project::read(&bundle).unwrap()],
+            Profile::Performance,
+        )
+    }
+
+    #[test]
+    fn only_the_performance_profile_takes_the_prebuilt_game() {
+        for profile in [Profile::Dev, Profile::Release] {
+            assert_eq!(
+                refusal(&[], profile),
+                Some(SourceReason::Profile {
+                    profile: profile.name()
+                })
+            );
+        }
+        assert_eq!(refusal(&[], Profile::Performance), None);
     }
 
     #[test]

@@ -1569,7 +1569,7 @@ fn pipeline(
     let prebuilt = if exists {
         None
     } else {
-        let game = match prebuilt::refusal(&projects) {
+        let game = match prebuilt::refusal(&projects, profile) {
             Some(reason) => Err(reason),
             None => prebuilt::fetch(&revision, target, || {
                 progress(Step::PrebuiltGame(revision.clone()))
