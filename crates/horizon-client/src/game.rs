@@ -21792,6 +21792,7 @@ fn start_game<'a>(
     // The initial load's client reload listeners, registered and staged by
     // the loader thread, publish now that the game owns the assets.
     client_reload::apply_client_reload(client_applies);
+    game.refresh_loop_context();
     // After the mods: their templates are among the ids it lists.
     game.preload_registries();
     game.start_agent_control()?;

@@ -76,6 +76,7 @@ pub(super) fn context_param(
     let expected = match kind {
         PhaseContext::Registration => "RegistrationContext",
         PhaseContext::DataLoad => "LoadContext",
+        PhaseContext::Loop => "LoopContext",
     };
     let valid = args.first().is_some_and(|(name, ty)| {
         name == "context"
@@ -93,6 +94,7 @@ pub(super) fn context_param(
         ty: match kind {
             PhaseContext::Registration => "&RegistrationContext<'_>",
             PhaseContext::DataLoad => "&DataLoadContext<'_>",
+            PhaseContext::Loop => "&LoopContext<'_>",
         }
         .into(),
         call: "context",
@@ -167,6 +169,7 @@ mod tests {
                 "&LoadContext<'_>",
                 "&DataLoadContext<'_>",
             ),
+            (PhaseContext::Loop, "&LoopContext<'_>", "&LoopContext<'_>"),
         ] {
             let hook = Hook {
                 context: Some(kind),
