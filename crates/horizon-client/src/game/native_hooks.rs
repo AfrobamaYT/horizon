@@ -12702,7 +12702,7 @@ mod tests {
     }
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn a_trait_mod_measures_text_and_sprites_through_its_draw_context() {
+    fn a_trait_mod_measures_text_through_its_draw_context() {
         use super::super::mod_api_host::generated::GameDrawContext;
         use super::super::native_entity_refs::tests::with_game;
         use mod_api::DrawContext;
@@ -12713,9 +12713,10 @@ mod tests {
                 game,
                 surface: &mut batch,
             };
-            // A server's HUD atlas holds the fonts: vanilla's ascii sheet is 128 by 128, and an
-            // upper-case A advances 6 GUI pixels.
-            assert_eq!(draw.sprite_size("font/ascii"), Some([128.0, 128.0]));
+            // A server's HUD atlas is metrics-only (upstream 2e5a2629a): no sprite sheets,
+            // so sprite sizes answer None there, while an upper-case A still advances
+            // 6 GUI pixels.
+            assert_eq!(draw.sprite_size("font/ascii"), None);
             assert_eq!(draw.sprite_size("mymod:no_such_sprite"), None);
             assert_eq!(draw.text_width("AA"), 12.0);
             assert_eq!(draw.text_width(""), 0.0);

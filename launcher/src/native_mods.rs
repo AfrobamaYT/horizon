@@ -1532,13 +1532,11 @@ fn pipeline(
         .map_err(|error| error.to_string())?;
     }
     // Said with a failure: a mod made for another revision may not apply or compile on this one.
-    let blame = |e: String| {
-        match &other {
+    let blame = |e: String| match &other {
         Some(list) => format!(
             "{e}\n\nSome mods were made for other Horizon versions ({list}), which may be why. Install versions made for the same Nightly."
         ),
         None => e,
-    }
     };
     let mixins = newest(
         &mods,
@@ -1727,8 +1725,8 @@ fn pipeline(
 /// whose game files the build reuses: a native build's own revision when it is one, [`base_for`])
 /// and points `instance` at the build, the default one included. Returns the build's version; a
 /// build already made is used again. Mods pinning different revisions cannot build together:
-/// the error starts with [`MISMATCH`] and names them; `cargo horizon-mod update` rebuilds them
-/// for the installed version.
+/// the error starts with [`MISMATCH`] and names them; `cargo horizon-mod update --horizon
+/// <commit>` in each mod's folder pins it to the installed game, then build again.
 pub fn build(
     base: &str,
     folder: &Path,
@@ -2475,15 +2473,18 @@ mod tests {
         assert_eq!(injections.len(), 1);
         assert!(!input.join("plain").exists());
         assert!(input.join("ordinary").join(MANIFEST).is_file());
-        assert!(input
-            .join("trait_injection/horizon-trait-injection-0.rs")
-            .is_file());
+        assert!(
+            input
+                .join("trait_injection/horizon-trait-injection-0.rs")
+                .is_file()
+        );
         let manifest = fs::read_to_string(input.join("trait_injection").join(MANIFEST)).unwrap();
         assert!(manifest.contains("horizon-trait-injection-0.rs"));
         assert!(!manifest.contains("trait_method"));
-        assert!(mods
-            .iter()
-            .all(|bundle| !bundle.dir.join(MANIFEST).exists()));
+        assert!(
+            mods.iter()
+                .all(|bundle| !bundle.dir.join(MANIFEST).exists())
+        );
         for bundle in &mods {
             let id = &bundle.manifest.id;
             let copied = root.join("packages").join(id);

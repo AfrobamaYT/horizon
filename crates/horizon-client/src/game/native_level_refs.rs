@@ -259,8 +259,7 @@ impl Game<'_> {
     ) -> Option<BlockStateId> {
         let world = self.native_level_read_world(level)?;
         let [x, y, z] = pos;
-        let inside = (world.bottom_y()..world.top_y()).contains(&y);
-        (inside && world.chunks.contains_key(&(x >> 4, z >> 4))).then(|| world.block(x, y, z))
+        world.is_loaded_at(x, y, z).then(|| world.block(x, y, z))
     }
     /// `FluidState.getFlow` at `pos`: the current that pushes an entity there, after the
     /// `fluid_flow` hook, as entities feel it. Zero where no fluid flows. None as for

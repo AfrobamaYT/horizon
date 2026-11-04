@@ -1175,5 +1175,5 @@
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (edo .mcp.json proiektu batean)",
   "← All servers": "← Zerbitzari guztiak",
   "← Newer": "← Berriagoa",
-  "{error} Run `cargo horizon-mod update` to rebuild them for this game.": "{error} Run `cargo horizon-mod update` to rebuild them for this game."
+  "{error} Run `cargo horizon-mod update --horizon {commit}` in each mod's folder to pin it to this game, then build again.": "{error} Run `cargo horizon-mod update --horizon {commit}` in each mod's folder to pin it to this game, then build again."
 }

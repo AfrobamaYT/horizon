@@ -1,6 +1,6 @@
 //! Validated flat packages and launcher-owned horizon-mixins input.
 use super::{Bundle, Injection, InjectionSite, MANIFEST};
-use horizon_mods::{manifest, Package};
+use horizon_mods::{Package, manifest};
 use std::{fs, path::Path};
 
 pub(super) fn read(dir: &Path) -> Result<Option<Bundle>, String> {

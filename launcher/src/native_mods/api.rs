@@ -447,31 +447,37 @@ mod tests {
             "fn main() { /* MOD_ENTRIES */ }",
         )
         .unwrap();
-        assert!(stage(
-            &stage_dir,
-            std::slice::from_ref(&project),
-            &[vec![]],
-            &resolution
-        )
-        .is_err());
+        assert!(
+            stage(
+                &stage_dir,
+                std::slice::from_ref(&project),
+                &[vec![]],
+                &resolution
+            )
+            .is_err()
+        );
         assert!(!stage_dir.join("native-api").exists());
         fs::write(
             stage_dir.join(MAIN_TEMPLATE),
             include_str!("../../../crates/horizon-client/src/native_main.rs.template"),
         )
         .unwrap();
-        assert!(stage(
-            &stage_dir,
-            std::slice::from_ref(&project),
-            &[vec![]],
-            &resolution
-        )
-        .unwrap());
+        assert!(
+            stage(
+                &stage_dir,
+                std::slice::from_ref(&project),
+                &[vec![]],
+                &resolution
+            )
+            .unwrap()
+        );
         let root = read(&stage_dir.join("Cargo.toml")).unwrap();
         let members = root["workspace"]["members"].as_array().unwrap();
-        assert!(members
-            .iter()
-            .any(|v| v.as_str() == Some("native-api/example")));
+        assert!(
+            members
+                .iter()
+                .any(|v| v.as_str() == Some("native-api/example"))
+        );
         assert!(members.iter().any(|v| v.as_str() == Some(GAME)));
         let engine = read(&stage_dir.join("native-api/example/Cargo.toml")).unwrap();
         assert_eq!(
@@ -498,14 +504,16 @@ mod tests {
             game["package"]["build"].as_str(),
             Some("../horizon-client/build.rs")
         );
-        assert!(stage_dir
-            .join(GAME)
-            .join(
-                game["dependencies"]["horizon-client"]["path"]
-                    .as_str()
-                    .unwrap()
-            )
-            .ends_with("crates/native-game/../horizon-client"));
+        assert!(
+            stage_dir
+                .join(GAME)
+                .join(
+                    game["dependencies"]["horizon-client"]["path"]
+                        .as_str()
+                        .unwrap()
+                )
+                .ends_with("crates/native-game/../horizon-client")
+        );
         // The game's default features are the generated package's alone, so a server build's
         // `--no-default-features` reaches horizon-client.
         assert_eq!(
@@ -548,13 +556,15 @@ mod tests {
             assert!(!stage_dir.join(GAME).exists());
             assert!(!stage_dir.join("native-api").exists());
         }
-        assert!(!stage(
-            &stage_dir,
-            &[],
-            &[],
-            &super::super::dependencies::Resolution { order: vec![] },
-        )
-        .unwrap());
+        assert!(
+            !stage(
+                &stage_dir,
+                &[],
+                &[],
+                &super::super::dependencies::Resolution { order: vec![] },
+            )
+            .unwrap()
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 
