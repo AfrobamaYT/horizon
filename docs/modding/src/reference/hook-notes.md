@@ -1158,6 +1158,7 @@ registration path.
 
 - A mob became tamed after its owner and persistence were set: `native_entity_tame(entity, kind, owner)` reports the entity type and owner UUID when known.
 
+- A server entity is about to be teleported by `/tp` or `/teleport`: `native_teleport_command(dimension, entity, from, to, cancel)` (NeoForge's `EntityTeleportEvent.TeleportCommand`) names the level it arrives in, its network id, its feet now and where the command sends it. A mod may move `to` (a value that is not a number is ignored); `cancel` leaves the entity where it is. It fires once per teleported entity, before `native_entity_teleport` and `native_player_teleported`, which hear the move after.
 - A server entity completed a same-level teleport command: `native_entity_teleport(dimension, entity, from, to)` reports its network id and the coordinates before and after the move.
 
 - A guest player's fall flying state changed after the server accepted or ended a glide: `native_entity_toggle_glide(player, name, gliding)`.
@@ -1716,6 +1717,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_firework_explode(entity, pos, bursts)`**: a firework rocket completed its damage and explosion effects.
 - **`native_potion_splash(item, pos)`**: a thrown splash or lingering potion finished applying its hit effects at `pos`. Experience bottles are excluded.
 - **`native_entity_enter_love_mode(entity, kind, player)`**: a mob entered love mode after a player interaction; `player` is the feeder UUID when known.
+- **`native_teleport_command(dimension, entity, from, to, cancel)`**: a server entity is about to be teleported by `/tp` or `/teleport`. `dimension` is the level it arrives in, `entity` its network id, `from` its feet now and `to` where the command sends it; move `to` to redirect it, or set `cancel` to keep it where it is (the command still reports success).
 - **`native_entity_teleport(dimension, entity, from, to)`**: a server entity completed a same-level teleport command. `entity` is its network id; `from` and `to` are coordinates in `dimension`. This reports the move after it happens.
 - **`native_entity_breed(parent, partner, child)`**: two mobs completed a breeding action. `child` is absent when the vanilla action lays an egg instead of creating a baby.
 - **`native_entity_tame(entity, kind, owner)`**: a mob became tamed after its owner and persistent state were set. `owner` is the server player's UUID when known.
