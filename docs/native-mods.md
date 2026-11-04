@@ -3608,8 +3608,22 @@ entity energy and fluid handlers (NeoForge 26.3's `Capabilities.Energy.ENTITY` a
 `side` is the `Option<Direction>` of the entity the lookup reaches it from, `None` for no particular side. Vanilla
 answers neither; register a provider with `r.entity_capability(&ENTITY_ENERGY, "mymod:robot", |host, robot, side| …)`,
 which is given that side and may answer differently for each. An entity capability's context is its key's second type:
-`()` for `ENTITY_ITEMS`, `Option<Direction>` for these two. The existing `move_energy` and `move_resources` transfer
+`()` for `ENTITY_ITEMS`, `Option<Direction>` for these two and for `ENTITY_AUTOMATION`. The existing `move_energy` and `move_resources` transfer
 between these and block or item handlers inside a transaction.
+
+#### Entity automation
+
+`entity.capability(host, &ENTITY_AUTOMATION, side)` (NeoForge 26.3's `Capabilities.Item.ENTITY_AUTOMATION`, "automation-accessible
+inventory of an entity (boats, minecarts, etc)") is the items of an entity as a hopper reaches them, with the same
+`Option<Direction>` context as the energy and fluid keys. The game answers it for the container entities
+`EntitySelector.CONTAINER_ENTITY_SELECTOR` picks (chest and hopper minecarts, chest boats) with the slots their
+[`ENTITY_ITEMS`](#an-entitys-items) handler has; a player and a chested donkey, mule or llama answer none. A hopper
+pushing into the entity in front of it asks for the side it faces the entity from (`Up` for a hopper over it), a hopper
+pulling from the entity above it for `Down`, and a dropper for the side it drops onto. Beside the game's container
+entities, those entities at the target whose mod provider answers it join the candidates, and the hopper picks one at
+random with the draw `getEntityContainer` makes; a mod handler takes the container's place and moves one item at a time
+in a transaction, as a mod block's `ITEMS` does. `r.entity_capability(&ENTITY_AUTOMATION, "mymod:robot", |host, robot, side| …)`
+registers one, and `r.entity_capability_before_game` answers ahead of the game's own for a minecart or a boat.
 
 #### A menu's slots
 
