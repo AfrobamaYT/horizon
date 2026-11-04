@@ -5,6 +5,7 @@ use horizon_items::items::Items;
 /// An `ItemCost`: item and count (component predicates are not used by the
 /// 26.3 trade data except for one exact match, kept as the stack's data).
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct ItemCost {
     pub stack: ItemStack,
 }
@@ -14,6 +15,7 @@ impl ItemCost {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct MerchantOffer {
     pub base_cost_a: ItemCost,
     pub cost_b: Option<ItemCost>,

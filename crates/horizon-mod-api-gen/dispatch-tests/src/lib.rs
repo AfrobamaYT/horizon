@@ -483,7 +483,7 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Gated {
             #[cfg(any())]
-            fn loot_table_load(&self, _: &mut LootTableLoadEvent<'_>) {
+            fn loot_table_load(&self, _: &DataLoadContext<'_>, _: &mut LootTableLoadEvent<'_>) {
                 unreachable!()
             }
             #[cfg(not(any()))]
@@ -530,7 +530,7 @@ mod tests {
         struct Listener(Arc<std::sync::atomic::AtomicUsize>);
         #[mod_api::__subscriptions]
         impl Hooks for Listener {
-            fn loot_table_load(&self, _: &mut LootTableLoadEvent<'_>) {
+            fn loot_table_load(&self, _: &DataLoadContext<'_>, _: &mut LootTableLoadEvent<'_>) {
                 self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
@@ -547,8 +547,8 @@ mod tests {
         install(mods.into());
         ENTERED.with(|entered| entered.borrow_mut().clear());
         let mut table = serde_json::json!([]);
-        dispatch_loot_table_load("test", &mut table);
-        dispatch_loot_table_load("test", &mut table);
+        dispatch_loot_table_load(&DataLoadContext("defaults"), "test", &mut table);
+        dispatch_loot_table_load(&DataLoadContext("defaults"), "test", &mut table);
         assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 2);
         ENTERED.with(|entered| {
             let entered = entered.borrow();
@@ -567,20 +567,20 @@ mod tests {
         struct Active;
         #[mod_api::__subscriptions]
         impl Hooks for Active {
-            fn loot_table_load(&self, event: &mut LootTableLoadEvent<'_>) {
+            fn loot_table_load(&self, _: &DataLoadContext<'_>, event: &mut LootTableLoadEvent<'_>) {
                 dispatch_modify_default_components(
                     &DataLoadContext("defaults"),
                     "test",
                     &mut Map::new(),
                 );
-                Other.loot_table_load(event);
+                Other.loot_table_load(&DataLoadContext("defaults"), event);
             }
         }
         install(vec![ModEntry::new("active", Box::new(Active))].into());
         ENTERED.with(|entered| entered.borrow_mut().clear());
         let mut table = serde_json::json!([]);
-        dispatch_loot_table_load("test", &mut table);
-        dispatch_loot_table_load("test", &mut table);
+        dispatch_loot_table_load(&DataLoadContext("defaults"), "test", &mut table);
+        dispatch_loot_table_load(&DataLoadContext("defaults"), "test", &mut table);
         ENTERED.with(|entered| {
             assert_eq!(
                 entered
@@ -730,7 +730,7 @@ mod tests {
                 Flow::Continue
             }
         }
-        fn loot_table_load(&self, event: &mut LootTableLoadEvent<'_>) {
+        fn loot_table_load(&self, _: &DataLoadContext<'_>, event: &mut LootTableLoadEvent<'_>) {
             event.table.as_array_mut().unwrap().push(self.id.into());
         }
         fn modify_default_components(
@@ -1162,7 +1162,7 @@ mod tests {
         let mods: Arc<[ModEntry]> = mods.into();
         install(mods.clone());
         let mut table = serde_json::json!([]);
-        dispatch_loot_table_load("table", &mut table);
+        dispatch_loot_table_load(&DataLoadContext("defaults"), "table", &mut table);
         assert_eq!(table, serde_json::json!([1, 2]));
         let mut components = Map::new();
         dispatch_modify_default_components(&DataLoadContext("defaults"), "item", &mut components);

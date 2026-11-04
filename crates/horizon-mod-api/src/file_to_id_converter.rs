@@ -23,6 +23,7 @@ impl std::error::Error for FileToIdConverterError {}
 /// Maps `data/<namespace>/<directory>/<path><extension>` to `namespace:path`,
 /// preserving subdirectories. Any namespace may add entries for a listener.
 /// The same converter can be used for client assets.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct FileToIdConverter {
     directory: String,
     prefix: String,

@@ -31,6 +31,19 @@ impl Game<'_> {
             prototype.get(component)?,
         ))
     }
+    /// Item `item`'s cooking-fuel burn time in ticks (`FuelValues.burnDuration` of its `cooking_fuel`
+    /// component, the data pack's context int provider resolved), None where it is no fuel. API
+    /// @API:item_components@.
+    pub(super) fn native_item_burn_time(&self, item: &str) -> Option<i32> {
+        let (time, _) = self.items().get(item)?.fuel.as_ref()?;
+        Some(self.res.providers().int_value(time))
+    }
+    /// Item `item`'s chance to raise a composter's level (its `compostable` component's layers provider
+    /// resolved), None where it is not compostable. API @API:item_components@.
+    pub(super) fn native_item_compost_chance(&self, item: &str) -> Option<f32> {
+        let layers = self.items().get(item)?.compostable.as_ref()?;
+        Some(self.res.providers().layer_chance(layers))
+    }
     /// Whether an enchantment on `stack` has effect component `effect`, by the world's
     /// enchantment definitions (`EnchantmentHelper.has`), behind
     /// `ItemResource::has_enchantment_effect`, through the opaque backend. API

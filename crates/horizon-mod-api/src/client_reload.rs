@@ -18,6 +18,7 @@ use std::sync::{Arc, LazyLock};
 /// the model manager, equipment assets, paletted textures, then the entity and
 /// block-entity render dispatchers, particles, the game renderer, the level
 /// extractor, clouds, the GPU warnlist, regional compliance and the GUI.
+#[non_exhaustive]
 pub struct VanillaClientListeners;
 impl VanillaClientListeners {
     /// Boundary before every reload listener.
@@ -44,6 +45,7 @@ impl VanillaClientListeners {
 /// Selected client asset files for one converter, with resource-pack overrides
 /// resolved. Keys have their directory and extension removed. This cannot read
 /// data files or filesystem paths. Its fields are private so the view can grow.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ClientReloadContext {
     files: ReloadFiles,
 }
@@ -87,6 +89,7 @@ impl ClientReloadListener for Boundary {
 
 /// A read-only registry/graph view with registration methods, rebuilt on each
 /// client reload. Listener names need not belong to the registering mod.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ClientReloadListeners {
     core: ReloadCore<dyn ClientReloadListener>,
 }

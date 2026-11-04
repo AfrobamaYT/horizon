@@ -1044,7 +1044,6 @@
     "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml में पैकेज नाम नहीं है।",
     "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod}: Cargo.toml में horizon-mod-api निर्भरता नहीं है।",
     "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod}: Cargo.toml गेम पर निर्भर है ({key})। मॉड केवल horizon-mod-api पर निर्भर होता है।",
-    "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client को {fields} चाहिए। सर्वर बिल्ड बिना इंटरफ़ेस के हैं; horizon-client की सुविधाएँ लॉन्चर तय करता है। features हटाएँ और default-features = false का उपयोग करें या इसे हटा दें।",
     "{mod}: {error}": "{mod}: {error}",
     "{mode} · stopped": "{mode} · बंद",
     "{online} of {max}": "{max} में से {online}",
