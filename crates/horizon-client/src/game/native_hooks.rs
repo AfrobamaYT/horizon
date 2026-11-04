@@ -24,7 +24,7 @@ use horizon_client::mod_api::{
     self, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef,
     NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
     NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
-    NativeServerPlayer, RecipeBookCategory, ServerReloadListeners, ServerTickPhase,
+    NativeServerPlayer, RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase,
     TicketController, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
@@ -88,6 +88,10 @@ use winit::{event::MouseButton, keyboard::KeyCode};
 
 pub(super) struct ObservedScreen {
     id: &'static str,
+    /// Not a `Screen` value: the title's own screen or an overlay drawn over
+    /// gameplay (sign editor, book, dialog, prompt). `set_screen` never sees
+    /// it open or close.
+    overlay: bool,
     menu: Option<String>,
     title: Option<Text>,
     rect: [f32; 4],
@@ -150,13 +154,122 @@ impl Game<'_> {
         })
     }
 
+    /// Opens `screen` (`Gui.setScreen`; `Screen::Playing` is vanilla's null):
+    /// the one place the game's screen changes. A different screen runs
+    /// `screen_opening` first (`ScreenEvent.Opening`: a mod may keep the
+    /// current screen or open its own), then `screen_closing` for the screen
+    /// it replaces, as NeoForge's `Minecraft.setScreen` does. The same screen
+    /// again, a game with no native mod, and a server's or a guest's `Game`
+    /// are a plain assignment.
+    pub(super) fn set_screen(&mut self, screen: Screen) {
+        if self.screen == screen {
+            return;
+        }
+        if mod_api::mods().is_empty()
+            || !self.options.execution_role.is_client()
+            || self.lan_acting.is_some()
+        {
+            self.screen = screen;
+            return;
+        }
+        let outcome = {
+            let current = self.screen_change_view(self.screen);
+            let new = self.screen_change_view(screen);
+            self.screen_change(&current, &new, true, self.screen != Screen::Playing)
+        };
+        let mut screen = screen;
+        let mut owner = None;
+        match outcome {
+            Some(ScreenOpening::Cancel) => return,
+            Some(ScreenOpening::ModScreen(mod_id)) if !self.mod_screen_blocked() => {
+                screen = Screen::Mod;
+                owner = Some(mod_id);
+            }
+            _ => {}
+        }
+        if self.screen == screen && owner.is_none() {
+            return;
+        }
+        self.screen = screen;
+        if let Some(owner) = owner {
+            self.native_mod_screen = Some(owner);
+        }
+        if screen == Screen::Mod {
+            self.keys.clear();
+            self.left = false;
+            self.right = false;
+            self.mining = None;
+            self.capture(false);
+        }
+    }
+    /// The events of one change of screen, in NeoForge's order, for
+    /// `set_screen` and for the overlays `observe_screen` announces: `opens`
+    /// fires `screen_opening` (`ScreenEvent.Opening`) from `current` to `new`
+    /// (a screen of `playing` is vanilla's null) and returns a mod's answer;
+    /// then, unless it cancelled, `closes` fires `screen_closing` for
+    /// `current`.
+    fn screen_change(
+        &self,
+        current: &NativeScreenView<'_>,
+        new: &NativeScreenView<'_>,
+        opens: bool,
+        closes: bool,
+    ) -> Option<ScreenOpening> {
+        let mut outcome = None;
+        if opens {
+            self.native_screen_opening(current, new, &mut outcome);
+        }
+        if closes && outcome != Some(ScreenOpening::Cancel) {
+            self.native_screen_closing(current);
+        }
+        outcome
+    }
+    /// `screen` as the screen hooks see it while it opens or closes: no
+    /// renderer (a test, a window not yet up) leaves its rectangle empty.
+    fn screen_change_view(&self, screen: Screen) -> NativeScreenView<'_> {
+        let rect = match &self.renderer {
+            Some(renderer) => self.screen_rect(
+                &HudBatch::new([renderer.config.width, renderer.config.height]),
+                screen,
+            ),
+            None => [0.0; 4],
+        };
+        let none = screen == Screen::Playing;
+        NativeScreenView {
+            id: screen.id(),
+            menu: self.remote_menu_type().filter(|m| !none && !m.is_empty()),
+            title: self
+                .remote
+                .as_ref()
+                .and_then(|r| r.menu_title.as_ref())
+                .filter(|_| !none),
+            rect,
+            slots: if none { 0 } else { self.slot_count() },
+            mouse: self.native_cursor(),
+            partial_tick: self.clock.fraction() as f32,
+        }
+    }
+    /// A mod's own screen cannot open now: over the title screen, a book, a
+    /// sign editor, a dialog or a prompt, with no player or a
+    /// world loading, or on a guest's behalf.
+    fn mod_screen_blocked(&self) -> bool {
+        self.title.is_some()
+            || self.lan_acting.is_some()
+            || self.player.is_none()
+            || self.screen_over_playing()
+            || self.remote_loading()
+    }
+
     pub(super) fn observe_screen(&mut self) {
         // Free with no native mod: the snapshot clones the title and menu.
         if mod_api::mods().is_empty() {
             return;
         }
+        // Only the title's screens and the overlays show over `Screen::Playing`.
+        let overlay = self.screen == Screen::Playing;
         let current = self.observed_screen_view().map(|view| ObservedScreen {
             id: view.id,
+            overlay,
             menu: view.menu.map(str::to_owned),
             title: view.title.cloned(),
             rect: view.rect,
@@ -164,17 +277,37 @@ impl Game<'_> {
             mouse: view.mouse,
             partial_tick: view.partial_tick,
         });
+        self.observe_change(current);
+    }
+    /// What the frame's screen changed since the last one. The `Screen` list
+    /// announces its own changes in `set_screen`; the title's screens and the
+    /// overlays have no single place they open or close, so they are
+    /// announced here, through the same `screen_change` and in the same order,
+    /// but after the change: a mod's answer to `screen_opening` cannot keep
+    /// them shut. `screen_init_post` follows for every kind, on opening and on
+    /// a resize.
+    fn observe_change(&mut self, current: Option<ObservedScreen>) {
         let changed = match (&self.observed_screen, &current) {
             (Some(old), Some(new)) => old.id != new.id || old.menu != new.menu,
             (None, None) => false,
             _ => true,
         };
         if changed {
-            if let Some(old) = &self.observed_screen {
-                self.native_screen_closing(&old.view());
+            let old = self.observed_screen.as_ref().filter(|old| old.overlay);
+            let opens = current.as_ref().is_some_and(|new| new.overlay)
+                || (current.is_none() && old.is_some());
+            if old.is_some() || opens {
+                let none = self.screen_change_view(Screen::Playing);
+                let from = old.map(ObservedScreen::view);
+                let to = current.as_ref().map(ObservedScreen::view);
+                self.screen_change(
+                    from.as_ref().unwrap_or(&none),
+                    to.as_ref().unwrap_or(&none),
+                    opens,
+                    from.is_some(),
+                );
             }
             if let Some(new) = &current {
-                self.native_screen_opening(&new.view());
                 self.native_screen_init_post(&new.view());
             }
         } else if let (Some(old), Some(new)) = (&self.observed_screen, &current)
@@ -2342,17 +2475,26 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_screen_draw(self, block, data, batch, origin);
     }
-    /// A screen was observed opening, at most once per frame.
-    pub(super) fn native_screen_opening(&self, screen: &NativeScreenView<'_>) {
-        mod_api::dispatch_screen_opening(self, screen);
+    /// `Gui.setScreen` is about to replace the `current` screen with `new`
+    /// (`ScreenEvent.Opening`; the screen `playing` is none: vanilla's null).
+    /// Answer `ScreenOpening::Cancel` to keep the current one, or
+    /// `ScreenOpening::ModScreen` to open a mod's own screen instead.
+    pub(super) fn native_screen_opening(
+        &self,
+        current: &NativeScreenView<'_>,
+        new: &NativeScreenView<'_>,
+        outcome: &mut Option<ScreenOpening>,
+    ) {
+        mod_api::dispatch_screen_opening(self, current, new, outcome);
     }
 
-    /// A screen was observed opening or changing rectangle, at most once per frame.
+    /// A screen was observed opening or changing rectangle, at most once per frame
+    /// (`ScreenEvent.Init.Post`).
     pub(super) fn native_screen_init_post(&self, screen: &NativeScreenView<'_>) {
         mod_api::dispatch_screen_init_post(self, screen);
     }
 
-    /// A screen was observed closing, at most once per frame.
+    /// The `screen` that was open is being replaced (`ScreenEvent.Closing`), after `native_screen_opening` let it.
     pub(super) fn native_screen_closing(&self, screen: &NativeScreenView<'_>) {
         mod_api::dispatch_screen_closing(self, screen);
     }
@@ -8259,24 +8401,19 @@ impl Game<'_> {
     pub(super) fn native_mod_screen_open(&mut self, mod_id: &str) -> bool {
         // What `screen_hooks_open` would refuse over the world: the mod's
         // screen would be up with no hook to draw or click it.
-        let blocked = self.title.is_some()
-            || self.renderer.is_none()
-            || self.lan_acting.is_some()
-            || self.player.is_none()
-            || self.screen_over_playing()
-            || self.remote_loading();
+        let blocked = self.renderer.is_none() || self.mod_screen_blocked();
         let owner = self.native_mod_screen();
         if let Some(open) = mod_screen_opens(self.screen, blocked, owner, mod_id) {
             return open;
         }
         self.native_mod_screen = Some(mod_id.to_owned());
-        self.screen = Screen::Mod;
-        self.keys.clear();
-        self.left = false;
-        self.right = false;
-        self.mining = None;
-        self.capture(false);
-        true
+        self.set_screen(Screen::Mod);
+        if self.screen != Screen::Mod {
+            // `screen_opening` kept the world.
+            self.native_mod_screen = None;
+            return false;
+        }
+        self.native_mod_screen() == Some(mod_id)
     }
     /// Closes mod `mod_id`'s own screen, if it is open.
     pub(super) fn native_mod_screen_close(&mut self, mod_id: &str) {
@@ -8293,11 +8430,15 @@ impl Game<'_> {
     }
     /// A mod's own screen closes (Escape, or `native_mod_screen_close`).
     pub(super) fn close_mod_screen(&mut self) {
-        self.native_mod_screen = None;
         if self.screen == Screen::Mod {
-            self.screen = Screen::Playing;
+            self.set_screen(Screen::Playing);
+            if self.screen == Screen::Mod {
+                // `screen_opening` kept it open.
+                return;
+            }
             self.capture(true);
         }
+        self.native_mod_screen = None;
     }
     /// The open menu's title (the block's name, or the one it was given),
     /// as plain text.
@@ -10944,5 +11085,187 @@ mod tests {
         assert!(!mod_image_fits(4, 2, 31, 1024, 1024));
         assert!(!mod_image_fits(4, 2, 33, 1024, 1024));
         assert!(!mod_image_fits(2048, 1, 2048 * 4, 1024, 1024));
+    }
+}
+
+#[cfg(test)]
+mod screen_open_tests {
+    use super::*;
+    use crate::mod_api::{
+        ClientHost, Hooks, ModEntry, ScreenClosingEvent, ScreenOpeningEvent, testing::with_mods,
+    };
+    use std::sync::{Arc, Mutex};
+
+    struct Probe {
+        log: Arc<Mutex<Vec<String>>>,
+        answer: Arc<Mutex<Option<ScreenOpening>>>,
+    }
+    #[mod_api::__subscriptions]
+    impl Hooks for Probe {
+        fn screen_opening(
+            &self,
+            _host: &dyn ClientHost,
+            event: &mut ScreenOpeningEvent<'_>,
+        ) -> Option<ScreenOpening> {
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("opening {}->{}", event.current.id, event.new.id));
+            self.answer.lock().unwrap().clone()
+        }
+        fn screen_closing(&self, _host: &dyn ClientHost, event: &mut ScreenClosingEvent<'_>) {
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("closing {}", event.screen.id));
+        }
+    }
+
+    /// Runs `test` on a client game with one probe mod; the probe's log and answer.
+    fn run(
+        test: impl FnOnce(&mut Game<'_>, &Arc<Mutex<Vec<String>>>, &Arc<Mutex<Option<ScreenOpening>>>),
+    ) {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let answer = Arc::new(Mutex::new(None));
+        let mods = vec![ModEntry::new(
+            "screens",
+            Box::new(Probe {
+                log: log.clone(),
+                answer: answer.clone(),
+            }),
+        )]
+        .into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.execution_role = ExecutionRole::Client;
+                game.player = Some(
+                    horizon_client::motion::PlayerMotion::new(
+                        game.motion,
+                        horizon_core::geometry::Vec3::ZERO,
+                    )
+                    .unwrap(),
+                );
+                test(game, &log, &answer);
+            });
+        });
+    }
+    fn take(log: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
+        std::mem::take(&mut *log.lock().unwrap())
+    }
+
+    /// Opening fires once, before the change, and the old screen's closing
+    /// follows it (`ScreenEvent.Opening`, then `.Closing`): none for the null
+    /// screen the game plays on, one for each screen it leaves.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_new_screen_fires_opening_then_closing_of_the_old_one() {
+        run(|game, log, _| {
+            game.set_screen(Screen::Inventory);
+            assert_eq!(game.screen, Screen::Inventory);
+            assert_eq!(take(log), ["opening playing->inventory"]);
+            game.set_screen(Screen::Playing);
+            assert_eq!(game.screen, Screen::Playing);
+            assert_eq!(
+                take(log),
+                ["opening inventory->playing", "closing inventory"]
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn cancelling_opening_keeps_the_current_screen() {
+        run(|game, log, answer| {
+            game.set_screen(Screen::Paused);
+            take(log);
+            *answer.lock().unwrap() = Some(ScreenOpening::Cancel);
+            game.set_screen(Screen::Options);
+            assert_eq!(game.screen, Screen::Paused);
+            assert_eq!(take(log), ["opening paused->options"]);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn replacing_opening_opens_the_mods_screen_instead() {
+        run(|game, log, answer| {
+            game.set_screen(Screen::Paused);
+            take(log);
+            *answer.lock().unwrap() = Some(ScreenOpening::ModScreen("screens".into()));
+            game.set_screen(Screen::Options);
+            assert_eq!(game.screen, Screen::Mod);
+            assert_eq!(game.native_mod_screen(), Some("screens"));
+            // One Opening, for the screen asked for: the replacement does not fire it again.
+            assert_eq!(take(log), ["opening paused->options", "closing paused"]);
+            *answer.lock().unwrap() = None;
+            game.close_mod_screen();
+            assert_eq!(game.screen, Screen::Playing);
+            assert_eq!(game.native_mod_screen(), None);
+            assert_eq!(take(log), ["opening mod->playing", "closing mod"]);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn the_same_screen_again_fires_nothing() {
+        run(|game, log, _| {
+            game.set_screen(Screen::Playing);
+            assert!(take(log).is_empty());
+            game.set_screen(Screen::Inventory);
+            take(log);
+            game.set_screen(Screen::Inventory);
+            assert!(take(log).is_empty());
+        });
+    }
+
+    fn observed(id: &'static str, overlay: bool) -> Option<ObservedScreen> {
+        Some(ObservedScreen {
+            id,
+            overlay,
+            menu: None,
+            title: None,
+            rect: [0.0; 4],
+            slots: 0,
+            mouse: [0.0; 2],
+            partial_tick: 0.0,
+        })
+    }
+
+    /// An overlay (here a sign editor) is announced as a screen is: Opening
+    /// when it shows, Opening back to `playing` and Closing when it goes. A
+    /// `Screen` the observer sees change was announced by `set_screen`, so it
+    /// is not announced twice.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn an_overlay_fires_opening_then_closing_through_the_observer() {
+        run(|game, log, _| {
+            game.observe_change(observed("sign_editor", true));
+            assert_eq!(take(log), ["opening playing->sign_editor"]);
+            game.observe_change(observed("sign_editor", true));
+            assert!(take(log).is_empty());
+            game.observe_change(None);
+            assert_eq!(
+                take(log),
+                ["opening sign_editor->playing", "closing sign_editor"]
+            );
+            game.observe_change(observed("inventory", false));
+            game.observe_change(None);
+            assert!(take(log).is_empty());
+            game.observe_change(observed("inventory", false));
+            game.observe_change(observed("sign_editor", true));
+            assert_eq!(take(log), ["opening playing->sign_editor"]);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn no_mods_is_a_plain_assignment() {
+        with_mods(Vec::new().into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.execution_role = ExecutionRole::Client;
+                game.set_screen(Screen::Inventory);
+                assert_eq!(game.screen, Screen::Inventory);
+            });
+        });
     }
 }

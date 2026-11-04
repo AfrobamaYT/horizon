@@ -151,7 +151,7 @@ impl Game<'_> {
         self.station = None;
         self.container = None;
         self.craft_size = 2;
-        self.screen = Screen::Inventory;
+        self.set_screen(Screen::Inventory);
         self.capture(false);
     }
     /// E while riding a tamed mount opens its inventory instead of the player's.
@@ -210,7 +210,7 @@ impl Game<'_> {
         });
         if !valid {
             self.close_container();
-            self.screen = Screen::Playing;
+            self.set_screen(Screen::Playing);
             self.capture(true);
         }
     }

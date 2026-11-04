@@ -50,6 +50,10 @@ mod tests {
         pub(super) struct NativeExplosionStart<'a>(pub &'a ());
         pub(super) struct NativeItemFished<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
+        pub(super) enum ScreenOpening {
+            Cancel,
+            ModScreen(String),
+        }
         pub(super) struct StackedOnOther<'a> {
             pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
         }

@@ -2129,7 +2129,7 @@ impl Game<'_> {
             .block_entities
             .insert(key, BlockEntity::Chest(c.items.clone()));
         self.container = Some(key);
-        self.screen = super::Screen::Inventory;
+        self.set_screen(super::Screen::Inventory);
         self.capture(false);
         self.right = false;
         if c.kind == CartKind::Chest {

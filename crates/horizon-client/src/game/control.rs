@@ -865,7 +865,7 @@ impl Game<'_> {
             }
             "resume" => {
                 if self.screen == Screen::Paused {
-                    self.screen = Screen::Playing;
+                    self.set_screen(Screen::Playing);
                 }
                 ok()
             }

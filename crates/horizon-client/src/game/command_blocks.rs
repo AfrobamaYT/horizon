@@ -612,12 +612,12 @@ impl Game<'_> {
         };
         screen.show_previous(&block);
         self.command_block_screen = Some(screen);
-        self.screen = Screen::CommandBlock;
+        self.set_screen(Screen::CommandBlock);
         self.capture(false);
     }
     pub(super) fn close_command_block(&mut self) {
         self.command_block_screen = None;
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         self.capture(true);
     }
     pub(super) fn draw_command_block(&mut self, batch: &mut HudBatch) {

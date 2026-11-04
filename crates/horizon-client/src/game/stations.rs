@@ -962,7 +962,7 @@ impl Game<'_> {
         self.give_levels(menu.level_change);
         if self.anvil_used(pos, self.creative) {
             self.close_station();
-            self.screen = Screen::Playing;
+            self.set_screen(Screen::Playing);
             self.capture(true);
         }
     }
@@ -3296,7 +3296,7 @@ mod tests {
                 );
                 // The creative screen's inventory and hotbar slots aren't creative
                 // tab slots: still hidden there.
-                game.screen = super::Screen::Creative;
+                game.set_screen(super::Screen::Creative);
                 let inventory: Vec<String> = game
                     .stack_tooltip_lines(&hidden, false, false)
                     .iter()

@@ -173,7 +173,7 @@ impl Game<'_> {
             .map(|e| e.value.clone())
             .collect();
         self.block_editor = Some(screen);
-        self.screen = Screen::BlockEditor;
+        self.set_screen(Screen::BlockEditor);
         self.capture(false);
         for packet in opening {
             self.send(packet);
@@ -198,7 +198,7 @@ impl Game<'_> {
 
     pub(super) fn close_block_editor(&mut self) {
         self.block_editor = None;
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         self.capture(true);
     }
 
@@ -217,7 +217,7 @@ impl Game<'_> {
         if result.is_some() {
             self.block_editor = Some(screen);
         } else {
-            self.screen = Screen::Playing;
+            self.set_screen(Screen::Playing);
             self.capture(true);
         }
         result

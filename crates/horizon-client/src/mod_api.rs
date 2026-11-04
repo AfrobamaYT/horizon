@@ -454,6 +454,19 @@ pub struct NativeItemFished<'a> {
     pub drops: &'a [ItemStack],
 }
 
+/// What a mod answers to `screen_opening` (`ScreenEvent.Opening`): the screen
+/// that was about to open does not. The first mod to answer wins.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScreenOpening {
+    /// `Opening.setCanceled(true)`: the current screen stays open.
+    Cancel,
+    /// `Opening.setNewScreen(..)`: the mod's own screen
+    /// (`Host::mod_screen_open`) opens instead, if it can open there (not over
+    /// the title screen, a book, a prompt or while a world loads; the
+    /// screen that was about to open does then).
+    ModScreen(String),
+}
+
 /// The open screen, for the screen hooks (`native_screen_render_post`, the
 /// mouse ones `native_screen_mouse_button_pressed_pre`, `..._released_pre` and
 /// `native_screen_mouse_scrolled_pre`, and the key ones

@@ -229,7 +229,7 @@ impl Game<'_> {
             }
             "close" => {
                 self.close_container();
-                self.screen = Screen::Playing;
+                self.set_screen(Screen::Playing);
                 self.capture(true);
                 ok()
             }

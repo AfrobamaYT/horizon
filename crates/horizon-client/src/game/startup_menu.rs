@@ -129,7 +129,7 @@ impl StartupMenu {
             game.ui.options = std::mem::take(&mut self.options);
             game.ui.options.resource_error =
                 game.ui.options.resource_error.take().or(resource_error);
-            game.screen = Screen::Options;
+            game.set_screen(Screen::Options);
             game.options_from_title = true;
             game.dragging = self.dragging;
         }

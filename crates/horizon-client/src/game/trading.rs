@@ -387,7 +387,7 @@ impl Game<'_> {
         let mut s = Station::new_kind(Kind::Merchant, [0, 0, 0]);
         s.merchant = Some(Box::new(state));
         self.station = Some(s);
-        self.screen = super::Screen::Inventory;
+        self.set_screen(super::Screen::Inventory);
         self.capture(false);
         self.right = false;
     }

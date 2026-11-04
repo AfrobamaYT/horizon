@@ -714,7 +714,7 @@ impl Game<'_> {
         screen.auto_suggestions = self.settings.auto_suggestions;
         self.ui.chat_screen = Some(screen);
         self.ui.chat_opened = Some(std::time::Instant::now());
-        self.screen = Screen::Chat;
+        self.set_screen(Screen::Chat);
         self.keys.clear();
         self.left = false;
         self.right = false;
@@ -737,7 +737,7 @@ impl Game<'_> {
         self.ui.chat_screen = None;
         self.ui.chat.reset_scroll();
         if self.screen == Screen::Chat {
-            self.screen = Screen::Playing;
+            self.set_screen(Screen::Playing);
             self.capture(true);
         }
     }
