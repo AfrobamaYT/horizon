@@ -9438,23 +9438,27 @@ impl Game<'_> {
     pub(super) fn list_native_mods(&mut self) {
         let mut mods = Vec::new();
         self.native_mods(&mut mods);
-        // A WebAssembly mod of the same id: the native row stands for it,
-        // and alone toggles its `mod.<id>` line.
+        let native = self.mods.native.clone();
         self.settings
             .mods
             .installed
-            .retain(|row| row.native.is_none() && !mods.iter().any(|m| m.id == row.id));
-        for m in mods {
+            .retain(|row| row.native.is_none() && !native.built().iter().any(|m| m.id == row.id));
+        for package in native.packages() {
+            let m = &package.manifest;
             let mut buttons = Vec::new();
             self.native_settings(&m.id, &mut buttons);
             let page = NativePage {
-                keys: m.keys,
+                keys: mods
+                    .iter_mut()
+                    .find(|page| page.id == m.id)
+                    .map(|page| std::mem::take(&mut page.keys))
+                    .unwrap_or_default(),
                 buttons,
             };
             self.settings.mods.installed.push(Installed {
-                id: m.id,
-                title: m.title,
-                description: m.description,
+                id: m.id.clone(),
+                title: [m.name.as_str(), " ", m.version.as_str()].concat(),
+                description: m.description.clone(),
                 problem: None,
                 dev: false,
                 native: Some(page),
@@ -9857,7 +9861,8 @@ mod tests {
         horizon_client::mod_api::install(mods.clone());
         horizon_client::mod_api::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root = super::super::mods::content_root(&base, &Default::default(), &[]);
+        let root =
+            super::super::mods::content_root(&base, &Default::default(), &Default::default());
         if invalid {
             let error = root.unwrap_err().to_string();
             assert!(error.contains("be_test:shared"), "{error}");
