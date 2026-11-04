@@ -1,0 +1,20 @@
+{
+  "hooks": [
+    {
+      "name": "entity_place",
+      "doc": "`BlockEvent.EntityPlaceEvent` (and `EntityMultiPlaceEvent`, which extends it): `placer` set the block `state` at `pos` against `placed_against`, before it is written. `placer` is the player for `BlockItem.place` (before the stack shrinks), or the mob for an enderman putting its carried block down and a snow golem's trail; `None` is reserved for a placement with no entity. `placement` is `Single`, or `Multi` with every block the placement writes (a bed's foot and head, a door's halves, a tall plant), where `state` and `pos` stay the primary block (the foot, the lower half). Cancel stops the whole placement: no block is written, the stack is kept and an enderman keeps carrying its block. Server-side. Diverges from upstream: replaces the listen-only `place_block`; a mod that stopped placements by claiming `native_use_on` cancels here.",
+      "side": "server",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_place",
+      "neoforge": [
+        "BlockEvent.EntityPlaceEvent",
+        "BlockEvent.EntityMultiPlaceEvent"
+      ],
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
+    }
+  ]
+}

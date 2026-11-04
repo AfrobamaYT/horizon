@@ -757,14 +757,6 @@
       }
     },
     {
-      "name": "place_block", "doc": "A player placed `stack` as the block `state` at `pos`: where\n`BlockItem.place` set it, before the stack shrinks. It only hears; a\nmod stops a placement by claiming `native_use_on`, which runs\nbefore it. Server-side, for every player of the world.", "side": "server",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_place_block",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "right_click_block", "doc": "A player right clicks a block (NeoForge's\n`PlayerInteractEvent.RightClickBlock`): once per hand, where\n`useItemOn` starts, on the clicking client and on the server (`click`\nsays which, with the block, the hit, the hand and its stack, and the\nplayer). Before the block's own use (a chest, a door, a lever) and the\nitem's (`Item.useOn`, `native_use_on`).\n\n`use_block` forces the block's use off (`False`) or on even while\nsneaking with something in hand (`True`); `use_item` forces the\nitem's `useOn` off, or on even while the item cools down. Cancelling\nskips both and answers `cancellation_result` in their place:\n`Pass` (the default) goes on to the item's own use (`Item.use`) and\nthen the other hand, `Fail` ends the click, and `Success`,\n`SuccessServer` or `Consume` end it as used, with the swing they name.\nA mod that keeps players out of land cancels with `Fail`.", "side": "server",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_right_click_block",

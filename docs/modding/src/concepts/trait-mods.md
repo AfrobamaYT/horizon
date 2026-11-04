@@ -248,6 +248,8 @@ block hooks) by block. The factory is a `BlockEntityPart` method, not a global `
 The final registry checks these requests at load and refuses unknown IDs, naming the requesting mod
 and type. Use a canonical type ID, not a block ID (`minecraft:shulker_box`, not
 `minecraft:red_shulker_box`). `BlockEntityRef::kind(host)` returns `Option<BlockEntityTypeKey>`.
+`living.hurt_and_break(host, slot, amount)` changes equipped durability on the server; negative amounts repair. It returns the pre-shrink stack only on break, and `None` when nothing breaks or the entity or slot is unavailable. Creative players' equipment is exempt. The operation does not fire equip effects.
+
 `block_entity.replace_data(host, data)` replaces its saved payload, clearing omitted fields while retaining
 identity and position. Like `merge_data`, it loads transactionally and synchronizes the change; it returns
 false for a missing or stale block entity, data the entity cannot load, or an unchanged result.

@@ -47,6 +47,9 @@ mod tests {
         pub(super) trait LevelRandomHost: LevelHost {}
         pub(super) trait LevelWriteHost: LevelTicksHost + LevelRandomHost {}
         pub(super) struct Compound;
+        pub(super) enum Placement {
+            Single,
+        }
         pub(super) struct LandingWrite;
         pub(super) struct Tag;
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);

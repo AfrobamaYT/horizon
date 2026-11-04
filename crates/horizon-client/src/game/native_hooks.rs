@@ -54,6 +54,7 @@ use horizon_core::{
     position::BlockPos,
     ticks::{ScheduleResult, TickPriority},
 };
+use horizon_world::level::PlaceContext;
 use horizon_world::{
     consumable::UseAnimation,
     fluid::{FluidKind, FluidState},
@@ -64,12 +65,12 @@ use horizon_world::{
 use mod_api::NativePermissionLevel;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, ClientReloadListeners, EffectTickChange, EntityRef, EquipmentSlot,
-    GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
-    NativeHandRender, NativeItemDrop, NativeLifecycleContext, NativeNoteBlockChange,
-    NativePlayerFood, NativeProgressType, NativeServerPlayer, PathComputationType,
-    RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase, TicketController,
-    ToolUse, WorldPhase,
+    self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EntityRef,
+    EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand,
+    NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
+    NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
+    PathComputationType, Placement, RecipeBookCategory, ScreenOpening, ServerReloadListeners,
+    ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
@@ -158,7 +159,7 @@ fn observed_overlay_id(overlays: &[(bool, &'static str)]) -> Option<&'static str
 }
 
 impl Game<'_> {
-    fn observed_screen_view(&self) -> Option<NativeScreenView<'_>> {
+    pub(super) fn observed_screen_view(&self) -> Option<NativeScreenView<'_>> {
         let book = self.book.as_ref().map(super::books::BookScreen::id);
         let overlay = observed_overlay_id(&[
             (self.command_prompt.is_some(), "command_prompt"),
@@ -2857,6 +2858,80 @@ impl Game<'_> {
                 surface: draw,
             },
             screen,
+        );
+    }
+    /// Ahead of the effect panels beside the survival and creative
+    /// inventories (`ScreenEvent.RenderInventoryMobEffects`, vanilla's
+    /// `EffectsInInventory.extractRenderState`): `available_space` is the
+    /// width in GUI pixels right of the container, at least 32 (with no effect
+    /// to show, or less room, vanilla draws nothing and this does not fire).
+    /// `compact` picks icons over full panels (vanilla's choice is compact
+    /// under 120) and `horizontal_offset` shifts the stack right (negative
+    /// left). Set `canceled` and the panels are not drawn: draw your own with
+    /// `native_screen_render_post`. Once a frame while the screen draws them,
+    /// on the window only. The exclusion areas follow this choice a frame late.
+    pub(super) fn native_screen_render_inventory_mob_effects(
+        &self,
+        screen: &NativeScreenView<'_>,
+        available_space: i32,
+        compact: &mut bool,
+        horizontal_offset: &mut i32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_screen_render_inventory_mob_effects(
+            self,
+            screen,
+            available_space,
+            compact,
+            horizontal_offset,
+            canceled,
+        );
+    }
+    /// Before a screen's preedit handler (`ScreenEvent.Preedit.Pre`, vanilla's
+    /// `GuiEventListener.preeditUpdated`): the input method is composing
+    /// `full_text` (empty when the composition ended), with the caret at
+    /// byte `caret_position`, split into `blocks` of which `focused_block` is
+    /// the one being converted. Set `canceled` and no text field sees it, and
+    /// `native_screen_preedit_post` does not fire. Fires on the window while a
+    /// screen is open, even when no text field is focused.
+    pub(super) fn native_screen_preedit_pre(
+        &self,
+        screen: &NativeScreenView<'_>,
+        full_text: &str,
+        caret_position: usize,
+        blocks: &[String],
+        focused_block: usize,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_screen_preedit_pre(
+            self,
+            screen,
+            full_text,
+            caret_position,
+            blocks,
+            focused_block,
+            canceled,
+        );
+    }
+    /// After a screen's preedit handler (`ScreenEvent.Preedit.Post`) and only
+    /// when no text field took the composition (the handler returned false:
+    /// vanilla's focused field takes it, so this is a preedit no field
+    /// wanted) and `native_screen_preedit_pre` did not cancel. Same arguments.
+    pub(super) fn native_screen_preedit_post(
+        &self,
+        screen: &NativeScreenView<'_>,
+        full_text: &str,
+        caret_position: usize,
+        blocks: &[String],
+        focused_block: usize,
+    ) {
+        mod_api::dispatch_screen_preedit_post(
+            self,
+            screen,
+            full_text,
+            caret_position,
+            blocks,
+            focused_block,
         );
     }
     /// Before the open screen draws itself (`ScreenEvent.Render.Pre`): draw
@@ -6600,17 +6675,31 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_destroy_block(self, pos, state, canceled);
     }
-    /// A player placed `stack` as the block `state` at `pos`: where
-    /// `BlockItem.place` set it, before the stack shrinks. It only hears; a
-    /// mod stops a placement by claiming `native_use_on`, which runs
-    /// before it. Server-side, for every player of the world.
-    pub(super) fn native_place_block(
+    /// `BlockEvent.EntityPlaceEvent` (and `EntityMultiPlaceEvent`, which
+    /// extends it): `placer` is about to set the block `state` at `pos`
+    /// against `placed_against`, as a player placing an item
+    /// (`BlockItem.place`, before the stack shrinks), an enderman putting its
+    /// block down or a snow golem's trail. `placement` is `Multi` when the
+    /// placement writes more blocks (bed, door, tall plant). Cancel stops
+    /// the whole placement. Server-side.
+    pub(super) fn native_entity_place(
         &mut self,
-        stack: &ItemStack,
-        pos: [i32; 3],
+        placer: Option<EntityRef>,
+        pos: BlockPos,
         state: BlockStateId,
+        placed_against: BlockStateId,
+        placement: Placement,
+        canceled: &mut bool,
     ) {
-        mod_api::dispatch_place_block(self, stack, pos, state);
+        mod_api::dispatch_entity_place(
+            self,
+            placer,
+            pos,
+            state,
+            placed_against,
+            placement,
+            canceled,
+        );
     }
     /// A player right clicks a block (NeoForge's
     /// `PlayerInteractEvent.RightClickBlock`): once per hand, where
@@ -9228,6 +9317,37 @@ impl Game<'_> {
         let r = self.gui.atlas.sprites.get(name)?;
         Some([r.w as f32, r.h as f32])
     }
+    /// Fluid `fluid` (`minecraft:water`, `mymod:oil`) drawn as a square with its top left at `at`, `size`
+    /// GUI pixels wide (16 in a slot): the sprite its look names (`data/<mod>/horizon/fluid/<name>.json`)
+    /// tinted with its colour, else a flat square of the colour, which vanilla water and lava have. What a
+    /// recipe viewer draws for a fluid stack; the slot and the amount are the mod's.
+    pub(super) fn native_fluid(&self, batch: &mut HudBatch, fluid: &str, at: [f32; 2], size: f32) {
+        let look = horizon_client::mod_content::fluid_look(fluid);
+        let tint =
+            super::native_panel_recipes::fluid_tint(fluid, look.as_ref().and_then(|l| l.tint));
+        let dst = [at[0], at[1], size, size];
+        let sprite = look
+            .and_then(|l| l.sprite)
+            .and_then(|s| self.native_sprite_size(&s).map(|size| (s, size)));
+        if let Some((name, px)) = sprite {
+            self.native_sprite(batch, &name, [0.0, 0.0, px[0], px[1]], dst, Some(tint));
+        } else {
+            let [a, r, g, b] = tint.to_be_bytes();
+            batch.fill(
+                &self.gui.atlas,
+                dst[0],
+                dst[1],
+                dst[2],
+                dst[3],
+                rgba(r, g, b, a),
+            );
+        }
+    }
+    /// Fluid `fluid`'s name as the lang names it (`fluid_type.<mod>.<name>`, vanilla's by its block),
+    /// else its path in words.
+    pub(super) fn native_fluid_name(&self, fluid: &str) -> String {
+        super::native_panel_recipes::fluid_name(fluid)
+    }
     /// A line of text at `(x, y)` in GUI pixels, opaque `rgb`.
     pub(super) fn native_text(
         &self,
@@ -9575,6 +9695,90 @@ impl Game<'_> {
             &mut canceled,
         );
         canceled.then_some(successful)
+    }
+    /// Whether a mod canceled `placer` writing `state` at `pos` (`entity_place`):
+    /// `placer` is an entity id, `placed_against` the block it goes against and
+    /// `companion` the second half of a bed, door or tall plant.
+    pub(super) fn place_canceled(
+        &mut self,
+        placer: u32,
+        pos: BlockPos,
+        state: BlockStateId,
+        placed_against: BlockStateId,
+        companion: Option<(BlockPos, BlockStateId)>,
+    ) -> bool {
+        if !mod_api::__private::listened(mod_api::HookId::EntityPlace) {
+            return false;
+        }
+        let placement = match companion {
+            None => Placement::Single,
+            Some((at, extra)) => Placement::Multi(Vec::from([
+                BlockPlacement::new(pos, state),
+                BlockPlacement::new(at, extra),
+            ])),
+        };
+        let placer = self.native_entity(placer);
+        let mut canceled = false;
+        self.native_entity_place(placer, pos, state, placed_against, placement, &mut canceled);
+        canceled
+    }
+    /// Whether a mod canceled the block the player's `ctx` would place
+    /// (`entity_place`): nothing is previewed unless a mod listens.
+    pub(super) fn player_place_canceled(&mut self, ctx: &PlaceContext) -> bool {
+        if !mod_api::__private::listened(mod_api::HookId::EntityPlace) {
+            return false;
+        }
+        let Some(preview) =
+            self.with_level(|b, level, ticks| b.placement_preview(level, ticks, ctx))
+        else {
+            return false;
+        };
+        let against = self
+            .world
+            .block(ctx.clicked_pos.x, ctx.clicked_pos.y, ctx.clicked_pos.z);
+        let (_, entity) = self.native_clicker();
+        self.place_canceled(
+            entity.cast_unsigned(),
+            preview.pos,
+            preview.state,
+            against,
+            preview.companion,
+        )
+    }
+    /// `MobEvent::PlaceBlock`: a mob sets `state` at `pos` unless a mod
+    /// cancels `entity_place`; a refused enderman keeps carrying it.
+    pub(super) fn mob_place_block(
+        &mut self,
+        mob: u32,
+        pos: [i32; 3],
+        state: BlockStateId,
+    ) -> crate::Result<()> {
+        let at = BlockPos::new(pos[0], pos[1], pos[2]);
+        let against = self.world.block(pos[0], pos[1] - 1, pos[2]);
+        let kind = self
+            .mobs
+            .iter()
+            .find(|m| m.id == mob)
+            .map(|m| m.kind.id.clone());
+        if self.place_canceled(mob, at, state, against, None) {
+            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob)
+                && &*m.kind.id == "minecraft:enderman"
+            {
+                m.extra.carried = Some(state);
+            }
+            return Ok(());
+        }
+        let facts = self.res.facts();
+        let from = facts
+            .get(self.world.block(pos[0], pos[1], pos[2]))
+            .name
+            .clone();
+        let to = facts.get(state).name.clone();
+        self.level_set(pos, state)?;
+        if let Some(kind) = kind {
+            self.native_entity_change_block(mob, &kind, pos, &from, &to);
+        }
+        Ok(())
     }
     /// The player clicking, as the block-use hooks name them: the acting
     /// player's UUID and entity id on a server, this client's own player on
@@ -12405,6 +12609,66 @@ mod entity_inside_tests {
                     2,
                     "a drain empties the queue"
                 );
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod entity_place_tests {
+    use super::*;
+    use mod_api::{EntityPlaceEvent, Flow, Hooks, ModEntry, ServerHost, testing::with_mods};
+    use std::sync::{Arc, Mutex};
+
+    /// Records what `entity_place` is told and answers with `cancel`.
+    struct Placer {
+        seen: Arc<Mutex<Vec<(BlockPos, Placement)>>>,
+        cancel: bool,
+    }
+    #[mod_api::__subscriptions]
+    impl Hooks for Placer {
+        fn entity_place(&self, _host: &mut dyn ServerHost, event: &mut EntityPlaceEvent) -> Flow {
+            self.seen
+                .lock()
+                .unwrap()
+                .push((event.pos, event.placement.clone()));
+            if self.cancel {
+                Flow::Cancel
+            } else {
+                Flow::Continue
+            }
+        }
+    }
+
+    /// A bed placement reaches the hook as one `Multi` of both halves, a
+    /// cancel is reported, and with no listener nothing is asked.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_multi_placement_reaches_the_hook_once_and_cancels() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new(
+            "place_probe",
+            Box::new(Placer {
+                seen: seen.clone(),
+                cancel: true,
+            }),
+        )];
+        with_mods(mods.into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let (foot, head) = (BlockPos::new(1, 64, 1), BlockPos::new(1, 64, 2));
+                let state = game.world.block(0, 0, 0);
+                assert!(game.place_canceled(1, foot, state, state, Some((head, state))));
+            });
+        });
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, BlockPos::new(1, 64, 1));
+        assert!(matches!(&seen[0].1, Placement::Multi(blocks) if blocks.len() == 2));
+        with_mods(Vec::new().into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let at = BlockPos::new(1, 64, 1);
+                let state = game.world.block(0, 0, 0);
+                assert!(!game.place_canceled(1, at, state, state, None));
             });
         });
     }

@@ -60,6 +60,20 @@ fn slot_name(slot: EquipmentSlot) -> &'static str {
     }
 }
 
+fn world_equipment_slot(slot: EquipmentSlot) -> horizon_world::player_inventory::EquipmentSlot {
+    use horizon_world::player_inventory::EquipmentSlot as WorldSlot;
+    match slot {
+        EquipmentSlot::MainHand => WorldSlot::MainHand,
+        EquipmentSlot::OffHand => WorldSlot::OffHand,
+        EquipmentSlot::Head => WorldSlot::Head,
+        EquipmentSlot::Chest => WorldSlot::Chest,
+        EquipmentSlot::Legs => WorldSlot::Legs,
+        EquipmentSlot::Feet => WorldSlot::Feet,
+        EquipmentSlot::Body => WorldSlot::Body,
+        EquipmentSlot::Saddle => WorldSlot::Saddle,
+    }
+}
+
 /// `LivingEntity.isAlive`'s health test: above 0, so a NaN health loaded from
 /// a save is not alive either.
 fn alive_at(health: f32) -> bool {
@@ -513,6 +527,101 @@ impl Game<'_> {
             _ => None,
         }
     }
+    /// Damage an equipped stack without an equip/unequip notification.
+    pub(super) fn native_living_hurt_and_break(
+        &mut self,
+        living: LivingRef,
+        slot: EquipmentSlot,
+        amount: i32,
+    ) -> Option<ItemStack> {
+        let target = self.native_living_target(living)?;
+        if matches!(target, Target::Player | Target::Guest(_)) {
+            return self
+                .for_player(target, |game| game.damage_player_equipment(slot, amount))
+                .flatten();
+        }
+        let stack = self.native_living_equipment(living, slot)?;
+        let (updated, broken) = self.damage_equipment_stack(&stack, amount, false);
+        if updated.as_ref() == Some(&stack) {
+            return None;
+        }
+        if self.native_living_equipment(living, slot).as_ref() != Some(&stack) {
+            return None;
+        }
+        match target {
+            Target::Mob(id) => {
+                self.mobs
+                    .iter_mut()
+                    .find(|mob| mob.id == id)?
+                    .set_equipment_stack(slot as usize, updated);
+            }
+            Target::Stand(id) => {
+                self.armor_stands
+                    .iter_mut()
+                    .find(|stand| stand.id == id)?
+                    .equipment
+                    .set(slot as usize, updated);
+            }
+            Target::Dragon(id) => {
+                self.dragon
+                    .as_mut()
+                    .filter(|dragon| dragon.id == id)?
+                    .equipment
+                    .set(slot as usize, updated);
+            }
+            _ => return None,
+        }
+        if broken.is_some() {
+            let event =
+                horizon_client::mobs::item_break::equipment_break_event(world_equipment_slot(slot));
+            self.native_entity_broadcast_event(living.entity(), event as u8);
+        }
+        broken
+    }
+
+    fn damage_player_equipment(&mut self, slot: EquipmentSlot, amount: i32) -> Option<ItemStack> {
+        let stack = player_slot(
+            &self.inventory,
+            self.selected,
+            &self.armor,
+            &self.offhand,
+            &self.equipment,
+            slot,
+        )?;
+        let (updated, broken) = self.damage_equipment_stack(&stack, amount, true);
+        if updated.as_ref() == Some(&stack) {
+            return None;
+        }
+        let cell = match slot {
+            EquipmentSlot::MainHand => &mut self.inventory[self.selected],
+            EquipmentSlot::OffHand => &mut self.offhand,
+            EquipmentSlot::Body | EquipmentSlot::Saddle => {
+                if self.equipment.get(slot as usize) != Some(&stack) {
+                    return None;
+                }
+                self.equipment.set(slot as usize, updated);
+                if let Some(ref broken) = broken {
+                    self.award_stat("broken", &broken.item, 1);
+                    self.player_equipment_broke(world_equipment_slot(slot), broken);
+                }
+                return broken;
+            }
+            _ => &mut self.armor[armor_index(slot)?],
+        };
+        if cell.as_ref() != Some(&stack) {
+            return None;
+        }
+        *cell = updated;
+        if let Some(ref broken) = broken {
+            self.award_stat("broken", &broken.item, 1);
+            self.player_equipment_broke(world_equipment_slot(slot), broken);
+            if armor_index(slot).is_some() {
+                self.apply_equipment();
+            }
+        }
+        broken
+    }
+
     /// The stack in hand `hand` (`LivingEntity.getItemInHand`).
     pub(super) fn native_living_hand_item(
         &self,
@@ -775,6 +884,100 @@ impl Game<'_> {
 mod tests {
     use super::*;
     use horizon_core::geometry::Vec3;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn durability_handle_and_held_path_share_rng_and_damage() {
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::random::RandomSource;
+        use mod_api::ServerHost;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let living = game.native_living(game.native_entity(20).unwrap()).unwrap();
+            let mut stack = ItemStack::new("minecraft:diamond_sword", 1);
+            stack.data_mut().enchantments = vec![("minecraft:unbreaking".into(), 3)];
+            game.inventory[game.selected] = Some(stack.clone());
+            let random = game.world.random.clone();
+            // Before the migration, damage_held called wear and added its result.
+            let old_loss = game.wear(&stack, 20);
+            let old_next_random = game.world.random.next_float();
+            game.world.random = random.clone();
+            game.damage_held(20);
+            let held_result = game.inventory[game.selected].clone();
+            let next_random = game.world.random.next_float();
+            assert_eq!(held_result.as_ref().unwrap().damage, old_loss);
+            assert_eq!(next_random, old_next_random);
+            game.world.random = random;
+            game.inventory[game.selected] = Some(stack);
+            let host: &mut dyn ServerHost = game;
+            assert!(
+                living
+                    .hurt_and_break(host, EquipmentSlot::MainHand, 20)
+                    .is_none()
+            );
+            assert_eq!(game.inventory[game.selected], held_result);
+            assert_eq!(game.world.random.next_float(), next_random);
+
+            let mut stack = ItemStack::new("minecraft:diamond_sword", 1);
+            stack.damage = 10;
+            game.inventory[game.selected] = Some(stack.clone());
+            let mut repair_random = game.world.random.clone();
+            assert!(
+                living
+                    .hurt_and_break(game, EquipmentSlot::MainHand, -4)
+                    .is_none()
+            );
+            assert_eq!(game.world.random.next_float(), repair_random.next_float());
+            assert_eq!(game.inventory[game.selected].as_ref().unwrap().damage, 6);
+            game.creative = true;
+            assert!(
+                living
+                    .hurt_and_break(game, EquipmentSlot::MainHand, 100)
+                    .is_none()
+            );
+            assert_eq!(game.inventory[game.selected].as_ref().unwrap().damage, 6);
+            game.creative = false;
+            let mut unbreakable = stack.clone();
+            unbreakable.data_mut().set_other(
+                "minecraft:unbreakable",
+                Some(horizon_world::nbt::Tag::Byte(1)),
+            );
+            game.inventory[game.selected] = Some(unbreakable.clone());
+            assert!(
+                living
+                    .hurt_and_break(game, EquipmentSlot::MainHand, 100)
+                    .is_none()
+            );
+            assert_eq!(game.inventory[game.selected], Some(unbreakable));
+            let max = game.items().get(&stack.item).unwrap().max_damage;
+            stack.damage = max - 1;
+            game.inventory[game.selected] = Some(stack);
+            let broken = living
+                .hurt_and_break(game, EquipmentSlot::MainHand, 1)
+                .unwrap();
+            assert_eq!(broken.damage, max);
+            assert!(game.inventory[game.selected].is_none());
+
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(21, kind, Vec3::ZERO, 0.0));
+            let mob = game.native_living(game.native_entity(21).unwrap()).unwrap();
+            let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+            sword.damage = max - 1;
+            assert!(mob.set_equipment(game, EquipmentSlot::MainHand, Some(sword)));
+            let broken = mob
+                .hurt_and_break(game, EquipmentSlot::MainHand, 1)
+                .unwrap();
+            assert_eq!(broken.damage, max);
+            assert!(mob.equipment(game, EquipmentSlot::MainHand).is_none());
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

@@ -1001,6 +1001,10 @@ pub(super) mod tests {
                         fire_ticks: 0,
                         air: 300,
                         fall_distance: 0.0,
+                        velocity: [0.0; 3],
+                        food_exhaustion: 0.0,
+                        food_tick_timer: 0,
+                        ticks_frozen: 0,
                     });
                 }
                 guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));

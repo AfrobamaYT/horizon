@@ -62,11 +62,53 @@ impl Game<'_> {
     /// `WindowEvent::Ime(Preedit)`: `KeyboardHandler.textEditing`. The text
     /// still being composed is shown under the focused field's caret.
     pub(super) fn ime_preedit(&mut self, text: &str, cursor: Option<(usize, usize)>) {
-        preedit::set_preedit(
-            self.text_field_focused()
-                .then(|| PreeditEvent::from_winit(text, cursor))
-                .flatten(),
-        );
+        let taken = self.text_field_focused();
+        let event = PreeditEvent::from_winit(text, cursor);
+        // ScreenEvent.Preedit.Pre, then the screen's handler (the focused
+        // field takes it), then Preedit.Post when no field did.
+        let shown = event.clone().unwrap_or_default();
+        if self.fire_preedit_pre(&shown) {
+            return;
+        }
+        preedit::set_preedit(event.filter(|_| taken));
+        if !taken {
+            self.fire_preedit_post(&shown);
+        }
+    }
+
+    /// `native_screen_preedit_pre` for the open screen: whether it cancelled.
+    /// An empty `event` is a composition that ended. Nothing fires with no
+    /// mod listening or no screen open.
+    fn fire_preedit_pre(&self, event: &PreeditEvent) -> bool {
+        let mut canceled = false;
+        if mod_api::__private::listened(mod_api::HookId::ScreenPreeditPre)
+            && let Some(view) = self.observed_screen_view()
+        {
+            self.native_screen_preedit_pre(
+                &view,
+                &event.full_text,
+                event.caret_position,
+                &event.blocks,
+                event.focused_block,
+                &mut canceled,
+            );
+        }
+        canceled
+    }
+
+    /// `native_screen_preedit_post` for the open screen, as the Pre.
+    fn fire_preedit_post(&self, event: &PreeditEvent) {
+        if mod_api::__private::listened(mod_api::HookId::ScreenPreeditPost)
+            && let Some(view) = self.observed_screen_view()
+        {
+            self.native_screen_preedit_post(
+                &view,
+                &event.full_text,
+                event.caret_position,
+                &event.blocks,
+                event.focused_block,
+            );
+        }
     }
 
     /// With the frame's GUI built: draw the composition over it and move the

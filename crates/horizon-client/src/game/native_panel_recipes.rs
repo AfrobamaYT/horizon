@@ -302,25 +302,9 @@ struct Well {
 impl Well {
     fn new(fluid: &mod_api::FluidStack) -> Self {
         let look = horizon_client::mod_content::fluid_look(&fluid.fluid);
-        let tint = look
-            .as_ref()
-            .and_then(|l| l.tint)
-            .unwrap_or(match &*fluid.fluid {
-                "minecraft:water" => 0xFF3F76E4,
-                "minecraft:lava" => 0xFFFF6A00,
-                _ => 0xFF9A9A9A,
-            });
+        let tint = fluid_tint(&fluid.fluid, look.as_ref().and_then(|l| l.tint));
         let amount = format!("{} mB", fluid.amount);
-        // NeoForge's `FluidType` description id is `fluid_type.<namespace>.<path>`; vanilla's own
-        // fluids are named by their block, `block.<namespace>.<path>`.
-        let (ns, path) = fluid
-            .fluid
-            .split_once(':')
-            .unwrap_or(("minecraft", &fluid.fluid));
-        let name = horizon_client::lang::get_or(
-            &format!("fluid_type.{ns}.{path}"),
-            &horizon_client::lang::get_or(&format!("block.{ns}.{path}"), &prettified(path)),
-        );
+        let name = fluid_name(&fluid.fluid);
         Self {
             sprite: look.and_then(|l| l.sprite),
             tint,
@@ -328,6 +312,25 @@ impl Well {
             amount,
         }
     }
+}
+
+/// A fluid's colour: its look's tint, else vanilla water's and lava's, else grey.
+pub(super) fn fluid_tint(fluid: &str, look: Option<u32>) -> u32 {
+    look.unwrap_or(match fluid {
+        "minecraft:water" => 0xFF3F76E4,
+        "minecraft:lava" => 0xFFFF6A00,
+        _ => 0xFF9A9A9A,
+    })
+}
+
+/// NeoForge's `FluidType` description id is `fluid_type.<namespace>.<path>`; vanilla's own
+/// fluids are named by their block, `block.<namespace>.<path>`.
+pub(super) fn fluid_name(fluid: &str) -> String {
+    let (ns, path) = fluid.split_once(':').unwrap_or(("minecraft", fluid));
+    horizon_client::lang::get_or(
+        &format!("fluid_type.{ns}.{path}"),
+        &horizon_client::lang::get_or(&format!("block.{ns}.{path}"), &prettified(path)),
+    )
 }
 
 /// A chance as the panel writes it: a whole percent as "25%", else "12.5%".
@@ -798,6 +801,16 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Water and lava keep vanilla's colours, a look's tint wins, anything else is grey, and a
+    /// fluid the lang doesn't name is its path in words.
+    #[test]
+    fn a_fluid_has_a_colour_and_a_name() {
+        assert_eq!(fluid_tint("minecraft:water", None), 0xFF3F76E4);
+        assert_eq!(fluid_tint("minecraft:water", Some(0xFF112233)), 0xFF112233);
+        assert_eq!(fluid_tint("mymod:oil", None), 0xFF9A9A9A);
+        assert_eq!(fluid_name("mymod:formic_acid"), "Formic Acid");
+    }
 
     /// The results sit in a row after the arrow, numbered after the inputs.
     #[test]
