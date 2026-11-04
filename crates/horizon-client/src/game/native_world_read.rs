@@ -1,6 +1,6 @@
 //! Read-only block, tag and fluid queries for native mods.
 use super::{Dim, Game};
-use horizon_client::mod_api::{LevelRef, NativeLifecycleContext};
+use horizon_client::mod_api::{LevelRef, NativeLifecycleContext, TagRegistry};
 use horizon_client::{
     items::{ItemStack, Items},
     world::World,
@@ -81,6 +81,20 @@ impl Game<'_> {
     pub(super) fn native_block_state_in_tag(&self, state: BlockStateId, tag: &str) -> Option<bool> {
         let items = self.native_tag_items()?;
         Some(state_in_tag(items, self.pack.assets.registry, state, tag))
+    }
+
+    /// The members of a tag in vanilla's order (`HolderSet.Named` iteration: file order, nested
+    /// tags in place, first occurrence kept), over the merged tags. Empty for an unknown tag.
+    /// None as for `native_block_state_in_tag`.
+    pub(super) fn native_tag_members(
+        &self,
+        registry: TagRegistry,
+        tag: &str,
+    ) -> Option<Vec<String>> {
+        let members = self
+            .native_tag_items()?
+            .tag_members(registry, &horizon_client::command::args::normalized(tag));
+        Some(members.map(<[String]>::to_vec).unwrap_or_default())
     }
 
     /// The fluid state `state` holds (`BlockState.getFluidState`): water for a waterlogged state,
@@ -221,6 +235,31 @@ mod tests {
                 .unwrap();
             let dry_slab = game.native_block_state_id("minecraft:oak_slab").unwrap();
             let lava = registry.default_state("minecraft:lava").unwrap();
+
+            // Members come in the tag file's order, in each registry, with or without the
+            // namespace; an unknown tag lists nothing.
+            let oak = [
+                "oak_log",
+                "oak_wood",
+                "stripped_oak_log",
+                "stripped_oak_wood",
+            ]
+            .map(|name| format!("minecraft:{name}"));
+            for registry in [TagRegistry::Block, TagRegistry::Item] {
+                assert_eq!(
+                    game.native_tag_members(registry, "oak_logs").as_deref(),
+                    Some(&oak[..])
+                );
+            }
+            assert_eq!(
+                game.native_tag_members(TagRegistry::Fluid, "minecraft:water")
+                    .unwrap(),
+                ["minecraft:water", "minecraft:flowing_water"]
+            );
+            assert_eq!(
+                game.native_tag_members(TagRegistry::Item, "nope:missing"),
+                Some(Vec::new())
+            );
 
             assert_eq!(
                 game.native_block_state_in_tag(stone, "minecraft:base_stone_overworld"),

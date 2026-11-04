@@ -380,6 +380,10 @@ pub struct Items {
     /// Item tags in vanilla's order (`TagLoader`: file order, nested tags in
     /// place, first occurrence kept), the order `TagSlotDisplay` resolves.
     pub item_tag_order: HashMap<String, Vec<String>>,
+    /// Block tags in the same order.
+    pub block_tag_order: HashMap<String, Vec<String>>,
+    /// Fluid tags in the same order.
+    pub fluid_tag_order: HashMap<String, Vec<String>>,
     loot: Arc<horizon_world::loot::LootTables>,
     /// The `jukebox_song` registry.
     pub songs: HashMap<String, Song>,
@@ -514,6 +518,13 @@ pub fn load_tags(
         .into_iter()
         .map(|(k, v)| (k, v.into_iter().collect()))
         .collect())
+}
+/// The registries whose tags a mod can list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TagRegistry {
+    Block,
+    Item,
+    Fluid,
 }
 /// Every tag's contents in `TagLoader.tryBuildTag` order (a `LinkedHashSet`).
 /// `overlay` adds a world's data packs over the game's own tag files.
@@ -953,6 +964,8 @@ impl Items {
             item_tags: load_tags(root, "item", overlay)?,
             fluid_tags: load_tags(root, "fluid", overlay)?,
             item_tag_order: load_tag_lists(root, "item", overlay)?,
+            block_tag_order: load_tag_lists(root, "block", overlay)?,
+            fluid_tag_order: load_tag_lists(root, "fluid", overlay)?,
             loot,
             songs: load_songs(root),
             instruments: load_instruments(root),
@@ -989,6 +1002,8 @@ impl Items {
             item_tags: load_tags(root, "item", overlay)?,
             fluid_tags: load_tags(root, "fluid", overlay)?,
             item_tag_order: load_tag_lists(root, "item", overlay)?,
+            block_tag_order: load_tag_lists(root, "block", overlay)?,
+            fluid_tag_order: load_tag_lists(root, "fluid", overlay)?,
             loot: Default::default(),
             songs: HashMap::new(),
             instruments: HashMap::new(),
@@ -1009,6 +1024,8 @@ impl Items {
                 .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
                 .collect(),
             item_tags,
+            block_tag_order: HashMap::new(),
+            fluid_tag_order: HashMap::new(),
             loot: Default::default(),
             songs: HashMap::new(),
             instruments: HashMap::new(),
@@ -1022,6 +1039,15 @@ impl Items {
     /// Whether `fluid` is in the fluid tag `tag` (`minecraft:water`, no `#`): `FluidState.is(TagKey)`.
     pub fn fluid_in_tag(&self, tag: &str, fluid: &str) -> bool {
         self.fluid_tags.get(tag).is_some_and(|s| s.contains(fluid))
+    }
+    /// A loaded tag's members in `TagLoader` order, or `None` for a tag that isn't loaded.
+    pub fn tag_members(&self, registry: TagRegistry, tag: &str) -> Option<&[String]> {
+        let order = match registry {
+            TagRegistry::Block => &self.block_tag_order,
+            TagRegistry::Item => &self.item_tag_order,
+            TagRegistry::Fluid => &self.fluid_tag_order,
+        };
+        order.get(tag).map(Vec::as_slice)
     }
     /// Whether an item belongs to a loaded item tag.
     pub fn item_in_tag(&self, tag: &str, item: &str) -> bool {
