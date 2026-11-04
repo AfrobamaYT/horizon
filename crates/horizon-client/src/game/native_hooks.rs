@@ -539,9 +539,7 @@ impl Game<'_> {
 
 /// `Level.setBlock`'s flags, for the `native_set_block_property` helpers:
 /// `flags::UPDATE_CLIENTS` as a vanilla crop grows, `flags::UPDATE_ALL` as a
-/// furnace sets its `lit`. Horizon sends every write to players, so
-/// `UPDATE_CLIENTS`, `UPDATE_INVISIBLE` and `UPDATE_IMMEDIATE` change nothing
-/// yet.
+/// furnace sets its `lit`.
 pub(super) use horizon_world::level::flags;
 
 impl GameLevel<'_> {
@@ -8520,9 +8518,9 @@ impl GameLevel<'_> {
     /// `ticks` (`native_random_tick`, `native_tick_block`). A crop's random
     /// tick grows it with `flags::UPDATE_CLIENTS`: neighbours' shapes update,
     /// but no neighbour gets `neighborChanged` and comparators aren't told;
-    /// `flags::UPDATE_ALL` does both. Horizon sends every write to players
-    /// whatever the flags: `UPDATE_CLIENTS`, `UPDATE_INVISIBLE` and
-    /// `UPDATE_IMMEDIATE` change nothing yet. Any loaded position, not only
+    /// `flags::UPDATE_ALL` does both. `UPDATE_CLIENTS` sends a block update;
+    /// `UPDATE_INVISIBLE` suppresses its notification only on clients, as in
+    /// `Level.setBlock`. Any loaded position, not only
     /// the hook's; true when the block changed, false off an authoritative
     /// server, when the block has no such property or value, `pos` is not
     /// loaded, or the property already has `value` (no write, as
@@ -8590,6 +8588,19 @@ impl GameLevel<'_> {
             put_block_entity(self.world, pos, entity);
         }
         changed
+    }
+    /// `Level.removeBlock`: replace a block with its fluid's legacy block.
+    pub(super) fn native_remove_block(
+        &mut self,
+        ticks: &mut Ticks,
+        pos: [i32; 3],
+        moved: bool,
+    ) -> bool {
+        if !self.native_authoritative || !self.world.is_loaded_at(pos[0], pos[1], pos[2]) {
+            return false;
+        }
+        self.behaviours
+            .remove_block(self, ticks, BlockPos::new(pos[0], pos[1], pos[2]), moved)
     }
     /// Schedules a tick of `block` (a block name) at `pos` in `delay` game
     /// ticks, as a falling block's shape update schedules its fall
@@ -8809,9 +8820,8 @@ impl Game<'_> {
     }
     /// Sets a block in the current authoritative level through `Level.setBlock`.
     /// Returns false for another dimension, an invalid state, or no change.
-    /// `flags` selects vanilla's neighbour and shape updates; Horizon sends
-    /// every write to players whatever the flags. A block entity block gets
-    /// its block entity.
+    /// `flags` selects vanilla's neighbour, shape and client updates. A block
+    /// entity block gets its block entity.
     pub(super) fn native_set_block(
         &mut self,
         dimension: &str,
@@ -8961,7 +8971,7 @@ impl Game<'_> {
     }
     /// `native_set_block_property` with `Level.setBlock`'s `flags`, as a
     /// brewing stand's tick sets its bottles with `flags::UPDATE_CLIENTS`.
-    /// Players get the write whatever the flags (`flags`); false when this
+    /// Players get the write when `UPDATE_CLIENTS` is set; false when this
     /// window isn't a server, and in each case `native_set_block_property`
     /// returns false.
     pub(super) fn native_set_block_property_with(

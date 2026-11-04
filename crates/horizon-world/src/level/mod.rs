@@ -647,6 +647,8 @@ pub trait LevelAccess {
     /// Storage write (`LevelChunkSection.setBlockState`). Returns the previous
     /// state, or None when nothing could be stored (unloaded chunk).
     fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId>;
+    /// Notify clients of a completed block write, when `UPDATE_CLIENTS` is set.
+    fn send_block_updated(&mut self, _pos: BlockPos) {}
     fn is_loaded(&self, pos: BlockPos) -> bool;
     /// Inclusive minimum and exclusive maximum build height.
     fn min_y(&self) -> i32 {
