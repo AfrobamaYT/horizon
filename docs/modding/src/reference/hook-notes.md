@@ -2582,13 +2582,17 @@ Look blocks up once and keep what you need (a few words a block for your own sha
 
 ### Menu slot rules
 
-`crates/horizon-client/src/menu.rs`: `native_menu_slot_rules(menu, slot, stack, may_place, max_stack)`, a free function
+`crates/horizon-client/src/menu.rs`: `native_menu_slot_rules(context, menu, slot, stack, may_place, max_stack)`, a free function
 a bundle targets as `horizon_client::menu::native_menu_slot_rules`. A content mod menu type's container slot `slot`
 (from 0) is asked whether it takes `stack` (`Slot.mayPlace`) and how many it holds (`Slot.getMaxStackSize`), as a
 NeoForge mod's own `Slot` overrides them. `may_place` and `max_stack` come in with the type's own answer (false on one
 of its `results` ([making a content mod](../how-to/content-mods.md#menu-types)), true elsewhere, and 99): change them for your own menu types.
 `max_stack` is kept to 1 to 99, and the item's own stack size still caps it. It runs inside a click, a drag or a
-shift-click (several times for one), with no level or player at hand: answer from the stack, and fast. It is asked
+shift-click (several times for one), with no level or player at hand: answer from the stack and the `LoopContext` it
+is given, and fast. The context's `side()` is `LoopSide::Server`, and a mod's setting read through it is the one captured
+when the server last loaded its data: a `/reload` builds the next context, which the next call sees. The hook's contract
+version is `2`: a mod written for `1` takes the context as a new first argument of `Hooks::menu_slot_rules` and
+`MenuPart::menu_slot_rules`. It is asked
 only for a server's players (single player's server thread, LAN guests, a dedicated server), and vanilla's menus
 never ask it. As in vanilla (`AbstractContainerMenu.moveItemStackTo`), a
 shift-click tops up a slot (not a `results` one) that already holds the same item without asking `may_place`, only `max_stack`: to keep a
@@ -2621,14 +2625,14 @@ clicks already.
 
 `LoopContext<'_>` is the read-only view for a hook fired inside a menu, recipe or
 player-list loop, where no game is at hand (a catalog entry names it with
-`"context": "loop"`; no hook uses it yet). `side()` is `LoopSide::Server` or
+`"context": "loop"`; `menu_slot_rules` is the first hook to take it). `side()` is `LoopSide::Server` or
 `LoopSide::Client`, `registry(name)` borrows names in registry ID order,
 `setting(mod_id, key)` returns a loaded mod's setting captured when the context was
 built, and `mods()` is the `LoadedMods` view of registration. It has no game Host,
 handle construction or transaction, and its answers never change while it is held.
 The side that owns the loop builds it, never a hook: the client builds one at window
-start and again after each resource reload, so a reload captures fresh settings; a
-server side comes with the first server hook that takes it.
+start and again after each resource reload, and a server builds one when it starts its
+mods and again on each `/reload`, so a reload captures fresh settings.
 
 ### Items' default components
 

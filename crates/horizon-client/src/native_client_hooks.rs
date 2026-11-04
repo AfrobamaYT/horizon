@@ -1,10 +1,11 @@
 //! Callbacks into the executable for native trait mods' client-library hooks.
 use crate::items::ItemStack;
+use horizon_world::native_load_context::LoopContext;
 use std::sync::OnceLock;
 
 /// Client-library hooks, installed before any menu, entity or recipe is used.
 pub struct NativeClientHooks {
-    pub menu_slot_rules: fn(&str, usize, &ItemStack, &mut bool, &mut u32),
+    pub menu_slot_rules: fn(&LoopContext, &str, usize, &ItemStack, &mut bool, &mut u32),
     pub item_stacked_on_other: fn(&mut crate::menu::StackedOnOther<'_>, &mut bool),
     pub living_heal: fn(u32, &mut f32, &mut bool),
     pub living_breathe: fn(u32, &str, &mut bool, &mut i32, &mut i32),
@@ -26,6 +27,7 @@ pub fn install(hooks: NativeClientHooks) -> Result<(), NativeClientHooks> {
 }
 
 pub(crate) fn menu_slot_rules(
+    context: &LoopContext,
     menu: &str,
     slot: usize,
     stack: &ItemStack,
@@ -33,7 +35,7 @@ pub(crate) fn menu_slot_rules(
     max_stack: &mut u32,
 ) {
     if let Some(hooks) = HOOKS.get() {
-        (hooks.menu_slot_rules)(menu, slot, stack, may_place, max_stack);
+        (hooks.menu_slot_rules)(context, menu, slot, stack, may_place, max_stack);
     }
 }
 

@@ -1757,10 +1757,11 @@
     },
     {
       "name": "menu_slot_rules",
-      "doc": "Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`\nwith the game's): container slot `slot` of the content mod menu type `menu`\n(`data/<id>/horizon/menu/`) is asked whether it takes `stack`\n(`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).\n`may_place` and `max_stack` hold the type's own answer (false on one of its\n`results`, true elsewhere, and 99): change them for your own menu types.\n`max_stack` is kept to 1 to 99,\nand the item's own stack size still caps it. Asked on the server, for each\nclick, drag and shift-click that puts an item in a slot, several times for\none shift-click: answer from `stack` alone, and fast.",
-      "version": 1,
+      "doc": "Hook point for native mods (docs/modding/src/how-to/native-mods.md, listed in `native-hooks.json`\nwith the game's): container slot `slot` of the content mod menu type `menu`\n(`data/<id>/horizon/menu/`) is asked whether it takes `stack`\n(`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).\n`may_place` and `max_stack` hold the type's own answer (false on one of its\n`results`, true elsewhere, and 99): change them for your own menu types.\n`max_stack` is kept to 1 to 99,\nand the item's own stack size still caps it. Asked on the server, for each\nclick, drag and shift-click that puts an item in a slot, several times for\none shift-click: answer from `stack` and `context` alone, and fast. `context`\nholds the side, the registries and the settings of the resource generation;\na `/reload` builds the next one.",
+      "version": 2,
       "target": "horizon_client_lib::menu::native_menu_slot_rules",
       "side": "server",
+      "context": "loop",
       "cancellable": false,
       "mod_api": {
         "contract": "listen",
