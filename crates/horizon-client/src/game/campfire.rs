@@ -32,7 +32,11 @@ impl Game<'_> {
         let Some(held) = self.held().cloned() else {
             return Ok(None);
         };
-        let Some(time) = self.recipes().cook(KIND, &held).map(|r| r.time as i32) else {
+        let Some(time) = self
+            .recipes()
+            .cook(&self.loop_context, KIND, &held)
+            .map(|r| r.time as i32)
+        else {
             return Ok(None);
         };
         // A client of a server predicts the placing; the server decides.
@@ -101,7 +105,7 @@ impl Game<'_> {
             let result = self
                 .res
                 .recipes()
-                .cook(KIND, &item)
+                .cook(&self.loop_context, KIND, &item)
                 .map_or_else(|| item.clone(), |r| r.result.clone());
             self.native_block_cook([pos.0, pos.1, pos.2], &item.item, &result.item);
             self.campfire_drop(pos, result);

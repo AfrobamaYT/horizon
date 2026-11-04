@@ -404,13 +404,16 @@ impl Menu {
                     env.recipes.cooking.iter().find(|c| c.id == name),
                     self.containers[MAIN][0].as_ref(),
                 ) {
-                    (Some(c), Some(input)) => c.ingredient.test(input),
+                    (Some(c), Some(input)) => c.ingredient.test(env.loop_context, input),
                     _ => false,
                 }
             }
-            _ => env
-                .recipes
-                .recipe_matches(id, &self.containers[GRID], self.grid_size),
+            _ => env.recipes.recipe_matches(
+                env.loop_context,
+                id,
+                &self.containers[GRID],
+                self.grid_size,
+            ),
         }
     }
 

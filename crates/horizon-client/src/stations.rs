@@ -10,6 +10,7 @@ use crate::{
 };
 use horizon_core::random::{LegacyRandom, RandomSource};
 use horizon_world::loot::PackOverlay;
+use horizon_world::native_load_context::LoopContext;
 pub use mod_api::stations::{AnvilResult, EnchantmentRow};
 use serde_json::Value;
 use std::{collections::HashSet, fs, path::Path, sync::Arc};
@@ -629,13 +630,13 @@ impl StationRecipes {
         }
     }
     /// Recipes whose input accepts `stack`, in display order.
-    pub fn stonecutter(&self, stack: &ItemStack) -> Vec<&Stonecutting> {
+    pub fn stonecutter(&self, context: &LoopContext, stack: &ItemStack) -> Vec<&Stonecutting> {
         self.stonecutting
             .iter()
-            .filter(|r| r.input.test(stack))
+            .filter(|r| r.input.test(context, stack))
             .collect()
     }
-    fn slot_ok(&self, slot: usize, stack: &ItemStack) -> bool {
+    fn slot_ok(&self, context: &LoopContext, slot: usize, stack: &ItemStack) -> bool {
         self.smithing_additions[slot].contains(&*stack.item)
             || self.smithing.iter().any(|r| {
                 let (t, b, a) = match r {
@@ -652,27 +653,29 @@ impl StationRecipes {
                         ..
                     } => (template, base, addition),
                 };
-                [t, b, a][slot].test(stack)
+                [t, b, a][slot].test(context, stack)
             })
     }
     /// `RecipePropertySet` SMITHING_TEMPLATE / BASE / ADDITION.
-    pub fn smithing_accepts(&self, slot: usize, stack: &ItemStack) -> bool {
-        slot < 3 && self.slot_ok(slot, stack)
+    pub fn smithing_accepts(&self, context: &LoopContext, slot: usize, stack: &ItemStack) -> bool {
+        slot < 3 && self.slot_ok(context, slot, stack)
     }
     /// `SmithingMenu.createResult`.
     pub fn smithing_result(
         &self,
+        context: &LoopContext,
         e: &Enchantments,
         template: Option<&ItemStack>,
         base: Option<&ItemStack>,
         addition: Option<&ItemStack>,
     ) -> Option<ItemStack> {
-        self.smithing_recipe(e, template, base, addition)
+        self.smithing_recipe(context, e, template, base, addition)
             .map(|(_, result)| result)
     }
     /// `SmithingMenu.createResult` with the id of the recipe that made the result.
     pub fn smithing_recipe(
         &self,
+        context: &LoopContext,
         e: &Enchantments,
         template: Option<&ItemStack>,
         base: Option<&ItemStack>,
@@ -688,7 +691,10 @@ impl StationRecipes {
                     addition: a,
                     result,
                 } => {
-                    if t.test(template) && b.test(base) && a.test(addition) {
+                    if t.test(context, template)
+                        && b.test(context, base)
+                        && a.test(context, addition)
+                    {
                         // SmithingTransformRecipe: transmute the base keeping its components.
                         return Some((id.as_str(), base.transmute(result, 1)));
                     }
@@ -701,7 +707,10 @@ impl StationRecipes {
                     pattern,
                     ..
                 } => {
-                    if t.test(template) && b.test(base) && a.test(addition) {
+                    if t.test(context, template)
+                        && b.test(context, base)
+                        && a.test(context, addition)
+                    {
                         return apply_trim(e, base, addition, pattern).map(|r| (id.as_str(), r));
                     }
                 }
@@ -1025,6 +1034,7 @@ mod tests {
         let out = data
             .recipes
             .smithing_result(
+                crate::test_resources::server_loop_context(),
                 e,
                 Some(&ItemStack::new(
                     "minecraft:netherite_upgrade_smithing_template",
@@ -1040,7 +1050,10 @@ mod tests {
         );
         assert!(
             data.recipes
-                .stonecutter(&ItemStack::new("minecraft:stone", 1))
+                .stonecutter(
+                    crate::test_resources::server_loop_context(),
+                    &ItemStack::new("minecraft:stone", 1)
+                )
                 .len()
                 >= 10
         );

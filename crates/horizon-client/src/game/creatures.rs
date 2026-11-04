@@ -3686,6 +3686,7 @@ impl Game<'_> {
                     child.extra.tame = true;
                     child.extra.owner = p.extra.owner;
                     let mixed = dye_mix(
+                        &self.loop_context,
                         self.res.recipes(),
                         &mut self.world.random,
                         p.extra.color,
@@ -3708,6 +3709,7 @@ impl Game<'_> {
                     horizon_client::mobs::tame::set_tame(child, true);
                     child.extra.owner = p.extra.owner;
                     let mixed = dye_mix(
+                        &self.loop_context,
                         self.res.recipes(),
                         &mut self.world.random,
                         p.extra.color,
@@ -3750,6 +3752,7 @@ impl Game<'_> {
             if p.species() == Species::Sheep {
                 let other = q.as_ref().unwrap_or(&p);
                 let mixed = dye_mix(
+                    &self.loop_context,
                     self.res.recipes(),
                     &mut self.world.random,
                     p.extra.color,
@@ -8156,8 +8159,14 @@ fn killed_by_mob(m: &Mob) -> bool {
 /// is the host, `Some(Some(conn))` a guest. Both animals are spent.
 /// `DyeColor.getMixedColor`: the colour of the crafting recipe that mixes
 /// the two dyes, else one of the two picked at random.
-fn dye_mix(recipes: &Recipes, random: &mut impl RandomSource, a: u8, b: u8) -> u8 {
-    if let Some(mixed) = dye_color_mix_in_recipes(recipes, a, b) {
+fn dye_mix(
+    context: &horizon_world::native_load_context::LoopContext,
+    recipes: &Recipes,
+    random: &mut impl RandomSource,
+    a: u8,
+    b: u8,
+) -> u8 {
+    if let Some(mixed) = dye_color_mix_in_recipes(context, recipes, a, b) {
         return mixed;
     }
     if random.next_boolean() { a } else { b }
@@ -8167,13 +8176,18 @@ fn dye_mix(recipes: &Recipes, random: &mut impl RandomSource, a: u8, b: u8) -> u
 /// makes, when its result is a dye. The two dyes are the grid's first row
 /// (`CraftingInput.of(2, 1, ...)`) and the recipe manager answers for it; the
 /// result's `_dye` item names the colour.
-fn dye_color_mix_in_recipes(recipes: &Recipes, a: u8, b: u8) -> Option<u8> {
+fn dye_color_mix_in_recipes(
+    context: &horizon_world::native_load_context::LoopContext,
+    recipes: &Recipes,
+    a: u8,
+    b: u8,
+) -> Option<u8> {
     let dye = |c: u8| {
         let name = horizon_client::mobs::render::DYE_NAMES[usize::from(c) & 15];
         Some(ItemStack::new(&format!("minecraft:{name}_dye"), 1))
     };
     let grid = [dye(a), dye(b), None, None];
-    let (_, result) = recipes.find(&grid, 2)?;
+    let (_, result) = recipes.find(context, &grid, 2)?;
     let name = result
         .item
         .strip_prefix("minecraft:")?
@@ -8838,6 +8852,8 @@ mod dye_mix_tests {
             )
             .unwrap()
         };
+        let lc = crate::game::test_server_load()
+            .loop_context(horizon_world::native_load_context::LoopSide::Server, []);
         let mut random = horizon_core::random::LegacyRandom::new(1);
         for (first, second, mixed) in [
             ("red", "yellow", "orange"),
@@ -8847,17 +8863,17 @@ mod dye_mix_tests {
         ] {
             let (a, b, made) = (dye(first), dye(second), dye(mixed));
             assert_eq!(
-                dye_color_mix_in_recipes(&recipes, a, b),
+                dye_color_mix_in_recipes(&lc, &recipes, a, b),
                 Some(made),
                 "{first} + {second} makes {mixed}"
             );
             // The recipe answers, so the coin never has to.
-            assert_eq!(dye_mix(&recipes, &mut random, a, b), made);
+            assert_eq!(dye_mix(&lc, &recipes, &mut random, a, b), made);
         }
         // Two dyes that no recipe mixes keep one of the two colours.
         let (orange, cyan) = (dye("orange"), dye("cyan"));
-        assert_eq!(dye_color_mix_in_recipes(&recipes, orange, cyan), None);
-        let kept = dye_mix(&recipes, &mut random, orange, cyan);
+        assert_eq!(dye_color_mix_in_recipes(&lc, &recipes, orange, cyan), None);
+        let kept = dye_mix(&lc, &recipes, &mut random, orange, cyan);
         assert!(kept == orange || kept == cyan, "kept {kept}");
     }
 }
