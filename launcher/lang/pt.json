@@ -1045,15 +1045,8 @@
     "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml não tem dependência de horizon-client.",
     "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client solicita {fields}. As compilações de servidor são sem interface; o lançador controla as funcionalidades de horizon-client. Remova features e use default-features = false ou omita.",
     "{mod}: {error}": "{mod}: {error}",
-    "Building {name}'s post-build step": "A construir o passo de pós-construção de {name}",
-    "These mods were made for different Horizon versions": "Estes mods foram feitos para versões diferentes do Horizon",
-    "They often still work together. If the build fails, install versions made for the same Nightly.": "Muitas vezes ainda funcionam juntos. Se a build falhar, instala versões feitas para a mesma Nightly.",
     "{mode} · stopped": "{mode} · parado",
     "{online} of {max}": "{online} de {max}",
-    "Running {name}'s post-build step": "A executar o passo de pós-construção de {name}",
-    "The source of {source}. Its release ships {file}, a content mod: installing those from GitHub is not supported yet.": "A origem de {source}. O seu lançamento inclui {file}, um mod de conteúdo: instalar estes a partir do GitHub ainda não é suportado.",
-    "Build anyway": "Construir na mesma",
-    "{error} They often still build: pass --allow-version-mismatch to try.": "{error} Muitas vezes ainda constroem: passa --allow-version-mismatch para tentar.",
     "Accent colour, glass, blur, language and the options above go back to how Horizon ships.": "A cor de destaque, o vidro, o desfoque, o idioma e as opções acima voltam ao que o Horizon traz de origem.",
     "Reset the launcher's look": "Repor o aspeto do launcher",
     "Reset to defaults": "Repor predefinições",
@@ -1108,6 +1101,5 @@
     "Save changes switches it. Nothing in its folder is deleted.": "Guardar alterações faz a troca. Nada na pasta dela é apagado.",
     "Its mods made for {loader} stay in its folder but won't load.": "Os mods dela feitos para {loader} ficam na pasta dela, mas não serão carregados.",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Os mods dela feitos para Minecraft {from} ficam na pasta dela; alguns podem não carregar no {to}.",
-    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Os mundos dela foram guardados pelo Minecraft {from}: o {to} atualiza-os para sempre e não os consegue abrir se for mais antigo.",
-    "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "Este código-fonte do jogo não tem um modelo de entrada nativa legível. Atualize o Horizon e recompile os mods para este jogo."
+    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Os mundos dela foram guardados pelo Minecraft {from}: o {to} atualiza-os para sempre e não os consegue abrir se for mais antigo."
 }

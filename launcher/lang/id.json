@@ -1045,15 +1045,8 @@
     "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml tidak memiliki dependensi horizon-client.",
     "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client meminta {fields}. Build server tanpa antarmuka; peluncur yang mengatur fitur horizon-client. Hapus features dan gunakan default-features = false atau hilangkan.",
     "{mod}: {error}": "{mod}: {error}",
-    "Building {name}'s post-build step": "Membangun langkah pasca-bangun {name}",
-    "These mods were made for different Horizon versions": "Mod ini dibuat untuk versi Horizon yang berbeda",
-    "They often still work together. If the build fails, install versions made for the same Nightly.": "Keduanya sering kali masih bisa bekerja sama. Jika build gagal, instal versi yang dibuat untuk Nightly yang sama.",
     "{mode} · stopped": "{mode} · berhenti",
     "{online} of {max}": "{online} dari {max}",
-    "Running {name}'s post-build step": "Menjalankan langkah pasca-bangun {name}",
-    "The source of {source}. Its release ships {file}, a content mod: installing those from GitHub is not supported yet.": "Sumber dari {source}. Rilisnya menyertakan {file}, sebuah mod konten: menginstal mod tersebut dari GitHub belum didukung.",
-    "Build anyway": "Tetap bangun",
-    "{error} They often still build: pass --allow-version-mismatch to try.": "{error} Sering kali masih bisa dibangun: teruskan --allow-version-mismatch untuk mencoba.",
     "Accent colour, glass, blur, language and the options above go back to how Horizon ships.": "Warna aksen, kaca, buram, bahasa, dan opsi di atas kembali seperti bawaan Horizon.",
     "Reset the launcher's look": "Atur ulang tampilan launcher",
     "Reset to defaults": "Atur ulang ke bawaan",
@@ -1108,6 +1101,5 @@
     "Save changes switches it. Nothing in its folder is deleted.": "Simpan perubahan akan menggantinya. Tidak ada yang dihapus dari foldernya.",
     "Its mods made for {loader} stay in its folder but won't load.": "Mod-nya untuk {loader} tetap ada di foldernya, tetapi tidak akan dimuat.",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Mod-nya untuk Minecraft {from} tetap ada di foldernya; beberapa mungkin tidak dimuat di {to}.",
-    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Dunianya disimpan oleh Minecraft {from}: {to} meningkatkannya secara permanen, dan tidak bisa membukanya jika versinya lebih lama.",
-    "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "Sumber game ini tidak memiliki templat entri native yang dapat dibaca. Perbarui Horizon dan bangun ulang mod untuk game ini."
+    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Dunianya disimpan oleh Minecraft {from}: {to} meningkatkannya secara permanen, dan tidak bisa membukanya jika versinya lebih lama."
 }

@@ -1045,15 +1045,8 @@
     "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml nema ovisnost horizon-client.",
     "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client traži {fields}. Izgradnje poslužitelja su bez sučelja; značajkama horizon-clienta upravlja pokretač. Uklonite features i koristite default-features = false ili ga izostavite.",
     "{mod}: {error}": "{mod}: {error}",
-    "Building {name}'s post-build step": "Izvođenje koraka nakon gradnje za {name}",
-    "These mods were made for different Horizon versions": "Ovi su modovi napravljeni za različite verzije Horizona",
-    "They often still work together. If the build fails, install versions made for the same Nightly.": "Često i dalje rade zajedno. Ako gradnja ne uspije, instalirajte verzije napravljene za isti Nightly.",
     "{mode} · stopped": "{mode} · zaustavljen",
     "{online} of {max}": "{online} od {max}",
-    "Running {name}'s post-build step": "Izvođenje koraka nakon gradnje za {name}",
-    "The source of {source}. Its release ships {file}, a content mod: installing those from GitHub is not supported yet.": "Izvor za {source}. Izdanje isporučuje {file}, sadržajni mod: instaliranje takvih s GitHuba još nije podržano.",
-    "Build anyway": "Svejedno izgradi",
-    "{error} They often still build: pass --allow-version-mismatch to try.": "{error} Često se ipak grade: proslijedite --allow-version-mismatch za pokušaj.",
     "Accent colour, glass, blur, language and the options above go back to how Horizon ships.": "Boja naglaska, staklo, zamućenje, jezik i gornje opcije vraćaju se na Horizonove zadane.",
     "Reset the launcher's look": "Vrati izgled pokretača",
     "Reset to defaults": "Vrati na zadano",
@@ -1108,6 +1101,5 @@
     "Save changes switches it. Nothing in its folder is deleted.": "Spremi promjene je prebacuje. Ništa se u njezinoj mapi ne briše.",
     "Its mods made for {loader} stay in its folder but won't load.": "Njezini modovi za {loader} ostaju u njezinoj mapi, ali se neće učitati.",
     "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Njezini modovi za Minecraft {from} ostaju u njezinoj mapi; neki se možda neće učitati u {to}.",
-    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Njezini svjetovi spremljeni su u Minecraftu {from}: {to} ih trajno nadograđuje i ne može ih otvoriti ako je stariji.",
-    "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "Ovaj izvorni kod igre nema čitljiv predložak izvorne ulazne točke. Ažurirajte Horizon i ponovno izgradite modove za ovu igru."
+    "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Njezini svjetovi spremljeni su u Minecraftu {from}: {to} ih trajno nadograđuje i ne može ih otvoriti ako je stariji."
 }
