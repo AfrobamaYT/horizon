@@ -2211,18 +2211,19 @@ impl Game<'_> {
                     );
                     return;
                 }
-                let (uuid, name, old_slot) = {
+                let (uuid, entity_id, old_slot) = {
                     let Some(host) = self.lan.as_ref() else {
                         return;
                     };
                     let g = &host.hub.guests[gi];
-                    (g.uuid, g.name.clone(), g.selected)
+                    (g.uuid, g.entity_id, g.selected)
                 };
-                if old_slot != p.slot as usize {
+                let changed = old_slot != p.slot as usize;
+                if changed {
                     let mut cancel = false;
-                    self.native_player_item_held(
+                    self.native_player_switch_hotbar_slot_pre(
                         uuid,
-                        &name,
+                        entity_id,
                         old_slot as i32,
                         i32::from(p.slot),
                         &mut cancel,
@@ -2243,9 +2244,7 @@ impl Game<'_> {
                 let Some(host) = self.lan.as_mut() else {
                     return;
                 };
-                let g = &mut host.hub.guests[gi];
-                let changed = g.selected != p.slot as usize;
-                g.selected = p.slot as usize;
+                host.hub.guests[gi].selected = p.slot as usize;
                 if let Some(play) = host.play.get_mut(&conn)
                     && changed
                     && play
@@ -2253,6 +2252,14 @@ impl Game<'_> {
                         .is_some_and(|(slot, _)| slot != super::shield::OFFHAND_SLOT)
                 {
                     play.using = None;
+                }
+                if changed {
+                    self.native_player_switch_hotbar_slot_post(
+                        uuid,
+                        entity_id,
+                        old_slot as i32,
+                        i32::from(p.slot),
+                    );
                 }
             }
             // ServerGamePacketListenerImpl.handlePunch: the main hand swings
@@ -7319,5 +7326,81 @@ mod spin_target_tests {
             first_spin_target(swept, None, targets[..2].iter().copied()),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod hotbar_tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use super::super::native_item_places::tests::{guest, open_to_lan};
+    use horizon_protocol::packets::play;
+    use mod_api::{
+        Flow, Hooks, ModEntry, PlayerSwitchHotbarSlotPostEvent, PlayerSwitchHotbarSlotPreEvent,
+        ServerHost,
+    };
+    use std::sync::{Arc, Mutex};
+
+    /// What the hooks heard, as (pre or post, uuid, entity id, old, new).
+    type Heard = Arc<Mutex<Vec<(&'static str, u128, i32, i32, i32)>>>;
+
+    /// Hears both hooks and refuses a switch to slot 8.
+    struct Hotbar(Heard);
+    #[mod_api::__subscriptions]
+    impl Hooks for Hotbar {
+        fn player_switch_hotbar_slot_pre(
+            &self,
+            _: &mut dyn ServerHost,
+            e: &mut PlayerSwitchHotbarSlotPreEvent,
+        ) -> Flow {
+            let row = ("pre", e.player, e.player_entity_id, e.old_slot, e.new_slot);
+            self.0.lock().unwrap().push(row);
+            if e.new_slot == 8 {
+                Flow::Cancel
+            } else {
+                Flow::Continue
+            }
+        }
+        fn player_switch_hotbar_slot_post(
+            &self,
+            _: &mut dyn ServerHost,
+            e: &mut PlayerSwitchHotbarSlotPostEvent,
+        ) {
+            let row = ("post", e.player, e.player_entity_id, e.old_slot, e.new_slot);
+            self.0.lock().unwrap().push(row);
+        }
+    }
+
+    /// `PlayerSwitchHotbarSlotEvent`: pre, then post once the slot changed, both naming the
+    /// player by UUID and entity id; the same slot again fires neither, and a cancelled pre
+    /// keeps the old slot with no post.
+    #[test]
+    #[ignore = "requires prepared game resources"]
+    fn a_hotbar_switch_fires_pre_then_post_and_pre_can_keep_the_slot() {
+        let heard = Heard::default();
+        let mods = vec![ModEntry::new("hotbar", Box::new(Hotbar(heard.clone())))].into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                open_to_lan(game);
+                game.lan.as_mut().unwrap().hub.guests.push(guest(1));
+                let switch = |game: &mut super::Game<'_>, slot| {
+                    game.lan_guest_packet(
+                        1,
+                        play::Serverbound::SetCarriedItem(play::SetCarriedItem { slot }),
+                    );
+                    game.lan.as_ref().unwrap().hub.guests[0].selected
+                };
+                assert_eq!(switch(game, 3), 3);
+                assert_eq!(switch(game, 3), 3);
+                assert_eq!(switch(game, 8), 3);
+                assert_eq!(
+                    *heard.lock().unwrap(),
+                    [
+                        ("pre", 123, 20, 0, 3),
+                        ("post", 123, 20, 0, 3),
+                        ("pre", 123, 20, 3, 8),
+                    ]
+                );
+            });
+        });
     }
 }

@@ -4183,17 +4183,44 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_tnt_primed(self, player, pos, cancel);
     }
-    /// A server player selected a new hotbar slot. The player's state is not swapped in. Set `cancel`
-    /// to keep the old slot; the client is sent that slot again.
-    pub(super) fn native_player_item_held(
+    /// `PlayerSwitchHotbarSlotEvent.Pre`: a server player is switching from hotbar slot `old_slot`
+    /// to `new_slot` (0 to 8), after the slot range check and before the selected slot changes.
+    /// Fired only when the slot differs. The player's state is not swapped in. Set `cancel` to keep
+    /// the old slot; the client is sent that slot again, and the post hook doesn't fire.
+    pub(super) fn native_player_switch_hotbar_slot_pre(
         &mut self,
         player: u128,
-        name: &str,
-        from_slot: i32,
-        to_slot: i32,
+        player_entity_id: i32,
+        old_slot: i32,
+        new_slot: i32,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_player_item_held(self, player, name, from_slot, to_slot, cancel);
+        mod_api::dispatch_player_switch_hotbar_slot_pre(
+            self,
+            player,
+            player_entity_id,
+            old_slot,
+            new_slot,
+            cancel,
+        );
+    }
+    /// `PlayerSwitchHotbarSlotEvent.Post`: a server player switched from hotbar slot `old_slot`
+    /// to `new_slot`, after the selected slot changed and a main-hand item use stopped. The
+    /// player's state is not swapped in.
+    pub(super) fn native_player_switch_hotbar_slot_post(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        old_slot: i32,
+        new_slot: i32,
+    ) {
+        mod_api::dispatch_player_switch_hotbar_slot_post(
+            self,
+            player,
+            player_entity_id,
+            old_slot,
+            new_slot,
+        );
     }
     /// A server player picked an item from a block or entity, before it enters the hotbar. `pos` is
     /// zero for an entity; `entity_id` is zero for a block. The player's state is swapped in. Set

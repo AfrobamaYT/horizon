@@ -1234,7 +1234,7 @@ registration path.
 
 - An item cooldown about to start for a server player: `native_player_item_cooldown(player, name, item, ticks, cancel)` is called for use cooldowns and for a shield disabled by a hit. `item` is the item id and `ticks` its duration. Set `cancel` to skip the cooldown; shield disable still stops the use and plays its configured sound. The player's state is not swapped in.
 
-- A server player selected a different hotbar slot: `native_player_item_held(player, name, from_slot, to_slot, cancel)` is called after the slot range check and before the selected slot changes. Set `cancel` to keep the old slot; the client is sent that slot again. The player's state is not swapped in.
+- A server player switches hotbar slot (`PlayerSwitchHotbarSlotEvent`), only when the slot differs: `native_player_switch_hotbar_slot_pre(player, player_entity_id, old_slot, new_slot, cancel)` is called after the slot range check and before the selected slot changes. Set `cancel` to keep the old slot; the client is sent that slot again (NeoForge leaves the client on the new one). Otherwise `native_player_switch_hotbar_slot_post(player, player_entity_id, old_slot, new_slot)` follows once the slot changed and a main-hand item use stopped. The player's state is not swapped in.
 
 
 - A server player selected loom pattern button `pattern`, after the menu accepted it: `native_player_loom_pattern_select(player, name, pattern)`.
@@ -1506,9 +1506,11 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   in, so `native_tell` and the other helpers reach them. Set `cancel` to refuse it: the player keeps the state they
   had and gets their abilities back, so the client lands or flies again. Only what a client asks for is heard: not the
   flight a game-mode change starts or ends, and not a LAN host's own player.
-- **`native_player_item_held(player, name, from_slot, to_slot, cancel)`**: a server player selected a different
-  hotbar slot, after the slot range check and before it changes. The player's state is not swapped in. Set `cancel` to
-  keep the old slot; the client is sent that slot again.
+- **`native_player_switch_hotbar_slot_pre(player, player_entity_id, old_slot, new_slot, cancel)`** and
+  **`native_player_switch_hotbar_slot_post(player, player_entity_id, old_slot, new_slot)`**
+  (`PlayerSwitchHotbarSlotEvent.Pre`/`.Post`): a server player switches to a different hotbar slot. Pre runs after
+  the slot range check and before it changes; set `cancel` to keep the old slot, and the client is sent that slot
+  again. Post runs after the change. The player's state is not swapped in.
 - **`native_furnace_burn(pos, fuel)`**: a furnace consumed `fuel` and started burning at `pos`.
 - **`native_furnace_smelt(pos, item, result)`**: a furnace finished smelting `item` into `result` at `pos`.
 - **`native_player_item_cooldown(player, name, item, ticks, cancel)`**: an item cooldown is about to start for a
