@@ -91,6 +91,12 @@ use std::sync::{Arc, OnceLock};
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod __private;
+pub mod points {
+    //! The records of the game's injection points (#589): each `#[point]` function's listeners
+    //! get one, with the arguments the API carries, and `cancel` or `result` where the function's
+    //! return allows. A mod reaches a point through `[[native.injection]]` naming its function.
+    include!(concat!(env!("OUT_DIR"), "/points_api_generated.rs"));
+}
 mod phase;
 pub use horizon_mods::Side;
 pub use phase::{
