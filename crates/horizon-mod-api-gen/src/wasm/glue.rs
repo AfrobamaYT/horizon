@@ -162,6 +162,9 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         }
         Ty::Handler(name, false) => keep_handler(types, name, &format!("{e}.clone()")),
         Ty::Handler(_, true) => unreachable!("a boxed handler is lowered owned (`lower_owned`)"),
+        // A name the game keeps crosses as its group's index for it.
+        Ty::Str(Str::Static) if types.guest.get() => format!("super::name_id(*{e})"),
+        Ty::Str(Str::Static) => format!("super::name_id(*{e})?"),
         Ty::Str(_) => format!("{e}.to_string()"),
         Ty::List(item, _) | Ty::Array(item, _) => {
             format!(
@@ -276,9 +279,8 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
             }
         }
         Ty::Str(Str::Owned) => e.into(),
-        // The game charges a mod's new names to its group; the guest keeps its own.
-        Ty::Str(Str::Static) if types.guest.get() => format!("super::intern({e})"),
-        Ty::Str(Str::Static) => format!("super::intern({e})?"),
+        Ty::Str(Str::Static) if types.guest.get() => format!("super::name_of({e})"),
+        Ty::Str(Str::Static) => format!("super::name_of({e})?"),
         Ty::Str(_) => format!("{e}.into()"),
         Ty::List(item, kind) => {
             let vec = format!(

@@ -175,6 +175,9 @@ fn cargo_member(
             &format!("profile.{PROFILE}.inherits=\"release\""),
         ])
         .args(["--config", &format!("profile.{PROFILE}.panic=\"abort\"")])
+        // One unit per crate: about 14% faster mod logic for a slower mod build. LTO isn't
+        // possible, as each crate's symbols must stay visible to the group's linker.
+        .args(["--config", &format!("profile.{PROFILE}.codegen-units=1")])
         .current_dir(root)
         .env("CARGO_TARGET_DIR", target_dir)
         .env("RUSTC_BOOTSTRAP", "1")
