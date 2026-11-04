@@ -651,10 +651,10 @@ fn warn_conflicts(mods: &[Bundle]) -> Vec<String> {
         ));
     }
     // A cancelling `HEAD` on a hook point: a `Break` skips the later
-    // injections at the place and the function's body. A raw `target` is
-    // only known to be a hook point through the catalog, which the launcher
-    // does not read; a `hook` name is one by definition. Only `HEAD` is
-    // said: the interior kinds' cancellation skips less than the body.
+    // injections at the place and the function's body. A `hook` name is one
+    // by definition; a raw `target` is one only through the catalog, so
+    // `hook_hints` says it once the source is at hand. Only `HEAD` is said:
+    // the interior kinds' cancellation skips less than the body.
     for b in mods {
         for i in &b.injections {
             if i.cancellable
@@ -691,6 +691,12 @@ fn hook_hints(mods: &[Bundle], points: &[horizon_mod_api_gen::HookPoint]) -> Vec
             } else {
                 format!("`Hooks::{}`", point.name)
             };
+            if i.cancellable && i.kind.as_deref() == Some("HEAD") {
+                out.push(format!(
+                    "{}'s `{}` can cancel at hook `{}` HEAD: a Break skips the later injections and the function's body.",
+                    b.manifest.id, i.id, point.name
+                ));
+            }
             out.push(format!(
                 "{}'s `{}` targets hook point `{}`: use `hook = \"{}\"`, `hook_version = {}`, or implement {instead} with no injection.",
                 b.manifest.id, i.id, point.name, point.name, point.version
@@ -1561,8 +1567,12 @@ fn pipeline(
         let needs_mixins = mods.iter().any(Bundle::needs_mixins);
         progress(Step::Source(revision.clone()));
         let source = source(&revision)?;
-        for hint in hook_hints(&mods, &horizon_mod_api_gen::hook_points(&source)?) {
-            log_warning(&hint);
+        // The hints are advice: a catalog the launcher can't read never fails the build.
+        match horizon_mod_api_gen::hook_points(&source) {
+            Ok(points) => hook_hints(&mods, &points)
+                .iter()
+                .for_each(|h| log_warning(h)),
+            Err(e) => log_warning(&format!("hook hints skipped: {e}")),
         }
         // `root()` is already the form horizon-mixins and MinGW take: resolved (no link, which
         // it refuses) and, on Windows, ASCII (which they can't read past), both by build_dir.
@@ -2303,6 +2313,26 @@ mod tests {
                 "alpha's `part` targets hook point `pre_remove_side_effects`: use `hook = \"pre_remove_side_effects\"`, `hook_version = 1`, or implement the `pre_remove_side_effects` Part method with no injection."
             ]
         );
+    }
+
+    #[test]
+    fn a_cancelling_head_on_a_raw_hook_point_target_warns() {
+        let points =
+            horizon_mod_api_gen::hook_points(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".."))
+                .unwrap();
+        let frame = "horizon_client::game::native_hooks::Game<'_>::native_frame";
+        let mods = [bundle_of(
+            "alpha",
+            &format!(
+                "[[injection]]\nid = \"stop\"\ntarget = \"{frame}\"\nkind = \"HEAD\"\ncancellable = true\n"
+            ),
+        )];
+        let hints = hook_hints(&mods, &points);
+        assert_eq!(
+            hints[0],
+            "alpha's `stop` can cancel at hook `frame` HEAD: a Break skips the later injections and the function's body."
+        );
+        assert_eq!(hints.len(), 2);
     }
 
     #[test]
