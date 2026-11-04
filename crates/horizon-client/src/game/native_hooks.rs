@@ -8089,6 +8089,17 @@ fn put_block_entity(world: &mut horizon_client::world::World, pos: [i32; 3], ent
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
 impl Game<'_> {
+    /// The id of the item in the slot under the pointer on the open container screen
+    /// (`AbstractContainerScreen.getHoveredSlot().getItem()`), None over no slot or an empty one.
+    pub(super) fn native_screen_hovered_item(&self) -> Option<String> {
+        let size = self
+            .renderer
+            .as_ref()
+            .map(|r| [r.config.width, r.config.height])?;
+        let batch = HudBatch::new(size);
+        let slot = self.slot_at(&batch, self.cursor.0, self.cursor.1)?;
+        Some(self.slot_view(slot)?.item.to_string())
+    }
     /// Access a server-owned holder's attachment map. On a client it is the
     /// copy of what the server synced: `set` and `remove` change only the copy.
     pub(super) fn native_attachments(
@@ -10716,6 +10727,41 @@ mod tests {
             Some(super::BlockEntity::Banner(_))
         ));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// With no window to lay a screen out in there is no slot under the pointer.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn no_item_is_hovered_without_a_window() {
+        use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            super::super::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!("no menu handoff"),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        let game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        assert_eq!(game.native_screen_hovered_item(), None);
     }
 
     /// A mod's own screen opens only over the world, never over another
