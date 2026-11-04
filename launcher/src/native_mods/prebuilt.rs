@@ -19,6 +19,9 @@ const REPO: &str = "arismoko/horizon";
 const IDENTITY: &str = "horizon-prebuilt.json";
 const TEMPLATE: &str = "native_main.rs.template";
 const SUMS: &str = "SHA256SUMS";
+/// The archive layout this launcher reads, in the archive's name (`prebuilt-game.yml`): a release
+/// made before this layout has no archive by that name, so its revision builds from source.
+const FORMAT: u32 = 1;
 /// The `fast` profile the prebuilt game is built with: the mods' code matches the game's.
 const OPT_LEVEL: &str = "opt-level=3";
 /// The archive's largest plausible unpacked size: a corrupt or hostile archive stops there.
@@ -131,7 +134,7 @@ fn archive(host: &str, target: Target) -> String {
         Target::Client => "",
         Target::Server => "-server",
     };
-    format!("horizon-prebuilt-{host}{side}.tar.gz")
+    format!("horizon-prebuilt-v{FORMAT}-{host}{side}.tar.gz")
 }
 
 /// The prebuilt game for `revision` and `target`, downloaded and checked once, then kept in the
@@ -497,8 +500,9 @@ mod tests {
             name,
             "horizon-prebuilt-x86_64-unknown-linux-gnu-server.tar.gz"
         );
-        let listing =
-            format!("AB12  horizon-prebuilt-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n");
+        let listing = format!(
+            "AB12  horizon-prebuilt-v1-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n"
+        );
         assert_eq!(expected_sum(&listing, &name).as_deref(), Some("cd34"));
         assert_eq!(expected_sum(&listing, "horizon-prebuilt-x.tar.gz"), None);
     }
