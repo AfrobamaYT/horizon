@@ -1537,7 +1537,8 @@ mod tests {
             ));
             pig(game, 700, 63.0);
             for (before, after, refused) in [(0, 4, 0), (62, 64, 2), (64, 64, 4)] {
-                *bin.held.lock().unwrap() = (before > 0).then(|| ("minecraft:stick".into(), before));
+                *bin.held.lock().unwrap() =
+                    (before > 0).then(|| ("minecraft:stick".into(), before));
                 let Some(BlockEntity::Crafter(c)) = game.world.block_entities.get_mut(&(0, 64, 0))
                 else {
                     panic!("the placed crafter is missing");
