@@ -2318,6 +2318,15 @@ pub(crate) mod tests {
     /// State 1 is a `test:gauge`, state 2 a `test:other`.
     struct Level;
     impl LevelHost for Level {
+        fn state_string(&self, _: BlockStateId) -> Option<String> {
+            None
+        }
+        fn min_y(&self) -> i32 {
+            0
+        }
+        fn height(&self) -> i32 {
+            0
+        }
         fn block_state(&self, _: [i32; 3]) -> BlockStateId {
             unimplemented!()
         }

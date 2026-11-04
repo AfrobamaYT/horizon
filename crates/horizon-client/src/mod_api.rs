@@ -2703,6 +2703,12 @@ pub trait LevelHost {
     fn state_block(&self, _state: BlockStateId) -> Option<&str> {
         unimplemented!("LevelHost::state_block")
     }
+    /// The full block state name and properties, as `BlockStateParser.serialize`; None for an unknown id.
+    fn state_string(&self, state: BlockStateId) -> Option<String>;
+    /// Lowest build Y (`LevelHeightAccessor.getMinY`).
+    fn min_y(&self) -> i32;
+    /// Build height (`LevelHeightAccessor.getHeight`).
+    fn height(&self) -> i32;
     /// `BlockState.is(TagKey)`: the block of `state` is in the block tag `tag` (`minecraft:logs`
     /// or `logs`, no `#`), over the world's merged tags, its data packs and content mods
     /// included. False for an unknown tag or state. None on a client level, whose tags are not
@@ -2953,7 +2959,17 @@ mod tests {
     #[test]
     fn level_family_accepts_empty_doubles() {
         struct Empty;
-        impl LevelHost for Empty {}
+        impl LevelHost for Empty {
+            fn state_string(&self, _: BlockStateId) -> Option<String> {
+                None
+            }
+            fn min_y(&self) -> i32 {
+                0
+            }
+            fn height(&self) -> i32 {
+                0
+            }
+        }
         impl LevelRandomHost for Empty {}
         impl LevelTicksHost for Empty {}
         impl LevelWriteHost for Empty {}

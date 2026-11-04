@@ -79,6 +79,7 @@ pub static DAMAGE_POST: OnceLock<fn(DamageLevel<'_>, Hurting<'_>, &DamageContain
 /// Built from the level's world, or, in the mob tick, which reads the world while mobs
 /// draw, from a [`LentLevel`] taken out of it for the tick.
 pub struct DamageLevel<'a> {
+    shape: crate::chunk::LevelShape,
     chunks: &'a crate::chunk_map::ChunkMap,
     air: horizon_world::registry::BlockStateId,
     registry: &'a horizon_world::registry::BlockRegistry,
@@ -96,6 +97,7 @@ impl<'a> DamageLevel<'a> {
     ) -> Self {
         let crate::world::World {
             chunks,
+            shape,
             air,
             random,
             attachments,
@@ -103,6 +105,7 @@ impl<'a> DamageLevel<'a> {
             ..
         } = world;
         Self {
+            shape: *shape,
             chunks,
             air: *air,
             registry,
@@ -119,6 +122,7 @@ impl<'a> DamageLevel<'a> {
         lent: &'a mut LentLevel,
     ) -> Self {
         Self {
+            shape: world.shape,
             chunks: &world.chunks,
             air: world.air,
             registry,
@@ -138,6 +142,7 @@ impl<'a> DamageLevel<'a> {
     /// The same level, for a shorter borrow.
     pub fn reborrow(&mut self) -> DamageLevel<'_> {
         DamageLevel {
+            shape: self.shape,
             chunks: self.chunks,
             air: self.air,
             registry: self.registry,
@@ -146,6 +151,10 @@ impl<'a> DamageLevel<'a> {
             attachment_syncs: self.attachment_syncs,
             hooks: self.hooks,
         }
+    }
+    /// The build range of the level whose damage hook is running.
+    pub fn shape(&self) -> crate::chunk::LevelShape {
+        self.shape
     }
     /// The level's random (`level.getRandom()`).
     pub fn random(&mut self) -> &mut horizon_core::random::LegacyRandom {

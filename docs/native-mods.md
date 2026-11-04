@@ -3355,7 +3355,8 @@ hooks can run on any loading thread; item default changes must be identical on e
 The trait has every hook in `native-hooks.json` and the pending fragments ([Adding a hook](#adding-a-hook)).
 Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `block_state` through `LevelAccess::block_state`, client-side detection and
-`state_with_property`. It also reads light and loaded state, through the game's own queries:
+`state_with_property`. `state_string(state)` serializes the full name and properties, or returns `None`
+for an unknown state; `min_y()` and `height()` read the level's build range. It also reads light and loaded state, through the game's own queries:
 `brightness(LightLayer::Block | Sky, pos)` (`getBrightness`, the stored 0 to 15),
 `raw_brightness(pos, sky_darken)` (`getRawBrightness`, which `CropBlock.randomTick` asks with 0)
 and `is_loaded(pos)` (`Level.isLoaded`: inside the build height and in a loaded chunk),
