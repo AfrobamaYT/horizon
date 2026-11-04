@@ -7946,52 +7946,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_mob_effect_added(self, effect, entity, amplifier);
     }
-    /// NeoForge's `LivingShieldBlockEvent`: entity `entity` of type `kind`
-    /// (`minecraft:player`, `minecraft:zombie`) is hit for `damage` from `source` (its
-    /// type and entities, as `native_living_incoming_damage` names them), and
-    /// `LivingEntity.applyItemBlocking` is
-    /// about to resolve what a raised `blocks_attacks` item stops. Every hit with damage
-    /// asks, raised item or not: `original_blocked` is whether vanilla blocks (only a
-    /// player raises one). Change `block`: `blocked` makes the entity block or not (a block
-    /// forced on a hit vanilla lets through stops all of it), `blocked_damage` what is
-    /// stopped (kept within 0 and `damage`) and `shield_damage` the durability a raised
-    /// item loses (below 0: vanilla's `itemDamage` of what is stopped). Set `blocked` to false and nothing is blocked; the event has no cancel. No `self`, as
-    /// `native_living_incoming_damage`: the game is in the middle of the hit.
-    pub(super) fn native_living_shield_block(
-        entity: i32,
-        kind: &str,
-        source: &HurtSource<'_>,
-        damage: f32,
-        original_blocked: bool,
-        block: &mut ShieldBlock,
-    ) {
-        mod_api::dispatch_living_shield_block(
-            entity,
-            kind,
-            source,
-            damage,
-            original_blocked,
-            block,
-        );
-    }
-    /// NeoForge's `LivingUseTotemEvent`: a killing blow on entity `entity` of type `kind`
-    /// from `source` (named as `native_living_incoming_damage` names it) would be taken by the
-    /// `death_protection` item `item` in its `hand` (main or off;
-    /// `LivingEntity.checkTotemDeathProtection`). Set `cancel` and the entity gets no
-    /// protection: it dies and the item is kept. A player or a mob holding a totem fires it; a
-    /// source that bypasses invulnerability never reaches it. `native_player_totem` still
-    /// hears a server player's totem that did save them, after this. No `self`, as
-    /// `native_living_shield_block`: the game is in the middle of the hit.
-    pub(super) fn native_living_use_totem(
-        entity: i32,
-        kind: &str,
-        source: &HurtSource<'_>,
-        hand: Hand,
-        item: &str,
-        cancel: &mut bool,
-    ) {
-        mod_api::dispatch_living_use_totem(entity, kind, source, hand, item, cancel);
-    }
     /// Whether a mod hears projectiles' impacts (`native_projectile_impact`):
     /// set `hears`. Asked once a server tick before the projectiles fly; only
     /// then does the tick keep the copy of each flying projectile that a
@@ -8147,14 +8101,14 @@ impl Game<'_> {
 
 /// `native_living_use_totem` for the damage code: whether it
 /// canceled the totem. The entity and the source are named as the damage hook names them.
-pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
+pub(super) fn use_totem(level: DamageLevel<'_>, hurting: Hurting<'_>, off_hand: bool) -> bool {
     if !mod_api::__private::listened(mod_api::HookId::LivingUseTotem) {
         return false;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
     let hand = if off_hand { Hand::Off } else { Hand::Main };
     let mut cancel = false;
-    Game::native_living_use_totem(
+    HitLevel(level).native_living_use_totem(
         entity,
         kind,
         &source,
@@ -8172,6 +8126,55 @@ pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
 pub(super) struct HitLevel<'a>(pub(super) DamageLevel<'a>);
 
 impl HitLevel<'_> {
+    /// NeoForge's `LivingShieldBlockEvent`: entity `entity` of type `kind`
+    /// (`minecraft:player`, `minecraft:zombie`) is hit for `damage` from `source` (its
+    /// type and entities, as `native_living_incoming_damage` names them), and
+    /// `LivingEntity.applyItemBlocking` is
+    /// about to resolve what a raised `blocks_attacks` item stops. Every hit with damage
+    /// asks, raised item or not: `original_blocked` is whether vanilla blocks (only a
+    /// player raises one). Change `block`: `blocked` makes the entity block or not (a block
+    /// forced on a hit vanilla lets through stops all of it), `blocked_damage` what is
+    /// stopped (kept within 0 and `damage`) and `shield_damage` the durability a raised
+    /// item loses (below 0: vanilla's `itemDamage` of what is stopped). Set `blocked` to false and nothing is blocked; the event has no cancel. The level is the hit's: its blocks, random and own
+    /// attachments.
+    pub(super) fn native_living_shield_block(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        damage: f32,
+        original_blocked: bool,
+        block: &mut ShieldBlock,
+    ) {
+        mod_api::dispatch_living_shield_block(
+            self,
+            entity,
+            kind,
+            source,
+            damage,
+            original_blocked,
+            block,
+        );
+    }
+    /// NeoForge's `LivingUseTotemEvent`: a killing blow on entity `entity` of type `kind`
+    /// from `source` (named as `native_living_incoming_damage` names it) would be taken by the
+    /// `death_protection` item `item` in its `hand` (main or off;
+    /// `LivingEntity.checkTotemDeathProtection`). Set `cancel` and the entity gets no
+    /// protection: it dies and the item is kept. A player or a mob holding a totem fires it; a
+    /// source that bypasses invulnerability never reaches it. `native_player_totem` still
+    /// hears a server player's totem that did save them, after this. The level is the hit's: its blocks, random and own
+    /// attachments.
+    pub(super) fn native_living_use_totem(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        hand: Hand,
+        item: &str,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_living_use_totem(self, entity, kind, source, hand, item, cancel);
+    }
     /// `Block.fallOn`: entity `entity` of type `kind` landed on `state` at `pos` after falling
     /// `distance` blocks. `damage` is the fall damage `causeFallDamage` calculated, before hurt
     /// handling and the fall sounds: change it, and zero prevents both. A creative or
@@ -8384,13 +8387,21 @@ pub(super) fn damage_post(
 /// `native_living_shield_block` for the damage code. Its one
 /// caller. The hurt entity and the source are named as the damage hook names them.
 pub(super) fn shield_block(
+    level: DamageLevel<'_>,
     hurting: Hurting<'_>,
     damage: f32,
     original_blocked: bool,
     block: &mut ShieldBlock,
 ) {
     let (entity, kind, source) = hurt_server_args(hurting);
-    Game::native_living_shield_block(entity, kind, &source, damage, original_blocked, block);
+    HitLevel(level).native_living_shield_block(
+        entity,
+        kind,
+        &source,
+        damage,
+        original_blocked,
+        block,
+    );
 }
 
 impl Game<'_> {

@@ -63,11 +63,11 @@ pub struct DamageHooks {
     /// `native_living_use_totem`: a `death_protection` item in the hand (true: the off hand)
     /// is about to save the entity from a killing blow (`LivingUseTotemEvent`). True cancels
     /// it: the entity dies.
-    pub totem: Option<fn(Hurting<'_>, bool) -> bool>,
+    pub totem: Option<fn(DamageLevel<'_>, Hurting<'_>, bool) -> bool>,
     /// `native_living_shield_block`: `LivingEntity.applyItemBlocking` of a hit with damage,
     /// for what it hurts, the damage and whether vanilla blocks. It may change the
     /// [`ShieldBlock`].
-    pub shield: Option<fn(Hurting<'_>, f32, bool, &mut ShieldBlock)>,
+    pub shield: Option<fn(DamageLevel<'_>, Hurting<'_>, f32, bool, &mut ShieldBlock)>,
 }
 impl DamageHooks {
     /// No hooks: what tests of the vanilla behaviour hit through.
@@ -308,14 +308,20 @@ impl DamageLevel<'_> {
     /// What `applyItemBlocking` stops of `damage` (above 0) once [`DamageHooks::shield`] had
     /// its say on `vanilla`, the block vanilla resolved: none when the hook unblocks it.
     pub fn shield_block(
-        &self,
+        &mut self,
         hurting: Hurting<'_>,
         damage: f32,
         vanilla: ShieldBlock,
     ) -> Option<ShieldBlock> {
         let mut block = vanilla;
         if let Some(hook) = self.hooks.and_then(|hooks| hooks.shield) {
-            hook(hurting, damage, vanilla.blocked, &mut block);
+            hook(
+                self.reborrow(),
+                hurting,
+                damage,
+                vanilla.blocked,
+                &mut block,
+            );
         }
         if !block.blocked {
             return None;
@@ -329,10 +335,11 @@ impl DamageLevel<'_> {
         Some(block)
     }
     /// Whether [`DamageHooks::totem`] canceled the totem of `hurting` (never without it).
-    pub fn totem_canceled(&self, hurting: Hurting<'_>, off_hand: bool) -> bool {
-        self.hooks
-            .and_then(|hooks| hooks.totem)
-            .is_some_and(|hook| hook(hurting, off_hand))
+    pub fn totem_canceled(&mut self, hurting: Hurting<'_>, off_hand: bool) -> bool {
+        let Some(hook) = self.hooks.and_then(|hooks| hooks.totem) else {
+            return false;
+        };
+        hook(self.reborrow(), hurting, off_hand)
     }
 }
 /// The block an entity with no raised item is asked about: none, and one a mod forces
