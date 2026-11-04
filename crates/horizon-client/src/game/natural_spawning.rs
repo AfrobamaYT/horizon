@@ -475,18 +475,13 @@ impl horizon_client::mobs::finalize::FinalizeLevel for PassLevel<'_, '_, '_> {
         mob: &mut horizon_client::mobs::Mob,
         reason: horizon_client::mobs::finalize::Reason,
     ) -> horizon_client::mobs::finalize::SpawnEvent {
-        let (outcome, _) = self.l.game.finalize_spawn_event(mob, reason.into(), None);
-        match outcome {
-            Finalized::Cancelled => horizon_client::mobs::finalize::SpawnEvent::Cancelled,
-            Finalized::Skipped => horizon_client::mobs::finalize::SpawnEvent::Skip,
-            Finalized::Done => horizon_client::mobs::finalize::SpawnEvent::Finalize,
-        }
+        self.l.game.finalize_spawn_event_result(mob, reason)
     }
     fn biome(&self, pos: [i32; 3]) -> String {
-        self.l
-            .biome(pos[0], pos[1], pos[2])
-            .map(|b| b.name.clone())
-            .unwrap_or_else(|| "minecraft:plains".to_owned())
+        // A spawn site without its chunk (a loaded marker mob) is neutral.
+        super::finalize_spawn::biome_or_plains(
+            self.l.biome(pos[0], pos[1], pos[2]).map(|b| b.name.clone()),
+        )
     }
     fn biome_tag(&self, tag: &str, pos: [i32; 3]) -> bool {
         let Some(b) = self.l.biome(pos[0], pos[1], pos[2]) else {
@@ -498,11 +493,10 @@ impl horizon_client::mobs::finalize::FinalizeLevel for PassLevel<'_, '_, '_> {
         self.l.game.structures_at(pos)
     }
     fn moon_phase(&self, _: [i32; 3]) -> usize {
-        (self.l.game.world.day_time.div_euclid(24000).rem_euclid(8)) as usize
+        self.l.game.finalize_moon_phase()
     }
     fn spawning_monsters(&self) -> bool {
-        use horizon_world::food::Difficulty;
-        self.l.game.world.health_rules.difficulty != Difficulty::Peaceful
+        self.l.game.spawning_monsters()
     }
     fn no_collision(&self, bounds: Aabb) -> bool {
         // The same answer the pass's `GameLevel` gives: block collisions with
@@ -526,30 +520,22 @@ impl horizon_client::mobs::finalize::FinalizeLevel for PassLevel<'_, '_, '_> {
                 .any(|(id, b)| id == "minecraft:shulker" && b.intersects(grown))
     }
     fn free_chicken(&self, bounds: Aabb) -> Option<u32> {
-        self.l
-            .game
-            .mobs
-            .iter()
-            .find(|c| {
-                c.species() == Species::Chicken
-                    && c.alive()
-                    && c.extra.rider.is_none()
-                    && c.extra.mount.is_none()
-                    && c.bounds().intersects(bounds)
-            })
-            .map(|c| c.id)
+        self.l.game.finalize_free_chicken(bounds)
     }
     fn ride_chicken(&mut self, chicken: u32, rider: u32) {
         self.l.rides.borrow_mut().push((chicken, rider));
     }
     fn game_time(&self) -> i64 {
-        self.l.game.world.day_time
+        self.l.game.finalize_game_time()
     }
     fn halloween(&self) -> bool {
-        horizon_client::mobs::finalize::is_halloween()
+        self.l.game.finalize_halloween()
     }
     fn create(&mut self, kind: &str, _: horizon_client::mobs::finalize::Reason) -> Option<Mob> {
-        if !self.spawning_monsters() && !horizon_client::mobs::finalize::allowed_in_peaceful(kind) {
+        use horizon_world::food::Difficulty;
+        if self.l.game.world.health_rules.difficulty == Difficulty::Peaceful
+            && !horizon_client::mobs::finalize::allowed_in_peaceful(kind)
+        {
             return None;
         }
         let t = self.l.game.res.mob_types().get(kind)?.clone();
@@ -561,25 +547,7 @@ impl horizon_client::mobs::finalize::FinalizeLevel for PassLevel<'_, '_, '_> {
         ))
     }
     fn spawn_data(&self) -> horizon_client::mobs::finalize::SpawnData<'_> {
-        horizon_client::mobs::finalize::SpawnData {
-            registries: self.l.game.res.spawn_registries(),
-            enchantments: {
-                let game = self.l.game;
-                &world_stations!(game).enchantments
-            },
-            items: {
-                let game = self.l.game;
-                world_items!(game)
-            },
-            camel_husk_size: self
-                .l
-                .game
-                .res
-                .mob_types()
-                .get("minecraft:camel_husk")
-                .map(|t| (t.width as f32, t.height as f32))
-                .unwrap_or((1.7, 2.375)),
-        }
+        self.l.game.finalize_spawn_data()
     }
 }
 impl SpawnLevel for GameLevel<'_, '_> {

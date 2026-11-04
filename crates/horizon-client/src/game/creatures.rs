@@ -471,7 +471,8 @@ impl Game<'_> {
         persistent: bool,
         site: SpawnSite,
     ) -> Option<u32> {
-        self.spawn_mob_for(kind, at, persistent, false, site)
+        let mob = self.create_mob_reason(kind, at, persistent, site)?;
+        self.insert_spawned_mob(mob)
     }
     /// `SummonCommand` and `SpawnEggItem`: vanilla spawns the mob, but it
     /// never calls `Mob.setPersistenceRequired` for it, so the mob is not
@@ -485,32 +486,17 @@ impl Game<'_> {
     ) -> Option<u32> {
         // The spawn is not a natural one (no jockeys, the patrol leader roll
         // stays), but the mob is not persistent.
-        let id = self.spawn_mob_for(kind, at, true, false, site)?;
+        let id = self.spawn_mob(kind, at, true, site)?;
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
             m.persistent = false;
         }
         Some(id)
     }
-    /// `spawn_mob` for a patrol or raid (`EntitySpawnReason.PATROL` / `EVENT`),
-    /// which never rolls a patrol leader.
-    pub(super) fn spawn_mob_for(
-        &mut self,
-        kind: &str,
-        at: [f64; 3],
-        persistent: bool,
-        scripted: bool,
-        site: SpawnSite,
-    ) -> Option<u32> {
-        let mob = self.create_mob_reason(kind, at, persistent, scripted, site)?;
-        self.insert_spawned_mob(mob, persistent, scripted, site)
-    }
-
     fn create_mob_reason(
         &mut self,
         kind: &str,
         at: [f64; 3],
         persistent: bool,
-        _scripted: bool,
         site: SpawnSite,
     ) -> Option<Mob> {
         let kind = if kind.contains(':') {
@@ -544,13 +530,7 @@ impl Game<'_> {
         Some(mob)
     }
 
-    fn insert_spawned_mob(
-        &mut self,
-        mob: Mob,
-        _persistent: bool,
-        _scripted: bool,
-        _site: SpawnSite,
-    ) -> Option<u32> {
+    fn insert_spawned_mob(&mut self, mob: Mob) -> Option<u32> {
         let id = mob.id;
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
@@ -3716,7 +3696,6 @@ impl Game<'_> {
             &kind,
             [p.position.x, p.position.y, p.position.z],
             true,
-            false,
             SpawnSite::Plain,
         )?;
         'offspring: {
@@ -3894,14 +3873,14 @@ impl Game<'_> {
         let at = [p.position.x, p.position.y, p.position.z];
         match order {
             OrbOrder::AfterChild => {
-                let joined = self.insert_spawned_mob(child, true, false, SpawnSite::Plain);
+                let joined = self.insert_spawned_mob(child);
                 self.mob_event_particles(parent, 18);
                 self.breeding_orb(parent, at, experience);
                 joined
             }
             OrbOrder::BeforeChild => {
                 self.breeding_orb(parent, at, experience);
-                self.insert_spawned_mob(child, true, false, SpawnSite::Plain)
+                self.insert_spawned_mob(child)
             }
         }
     }
