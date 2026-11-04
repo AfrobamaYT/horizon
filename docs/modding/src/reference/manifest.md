@@ -61,7 +61,7 @@ Content-only mods cannot declare nonempty dependencies yet
 ## Original Java jar layers
 
 Content and code mods can list ordered `[[jar]]` references. Use
-[`cargo horizon-mod use-jar`](../how-to/content-mods.md#original-java-mod-jars) to record the
+[`cargo horizon-mod use-jar`](../how-to/content-mods.md#java-jars-as-external-assets) to record the
 original `id`, `version` and exact file's `sha512`, without copying it into the mod.
 
 **Pack order.** From bottom to top, assets use vanilla, then each mod's jars in

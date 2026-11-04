@@ -20,7 +20,7 @@ use horizon_mods::content::{
     Block, BlockEntityType, BlockShapes, Content, CreativeTab, EntityType, FluidLook, MenuType,
     MobEffect, Rarity, StateProperty,
 };
-use horizon_mods::manifest::{JarRef, collect_jar_requirements, missing_jars};
+use horizon_mods::manifest::{JarInputsError, JarRef, collect_jar_requirements, missing_jars};
 use horizon_world::nbt::{self, Compound, JavaString, Limits, Tag};
 use serde::{Deserialize, Serialize, de};
 use std::{
@@ -32,7 +32,7 @@ use std::{
 
 /// A content mod to put in the root: its id, its content, and the Java jars
 /// it lists in manifest order — each an asset/data layer under the mod's own
-/// files, its file found by hash in `jar_store` (`docs/native-mods.md`).
+/// files, its file found by hash in `jar_store` (modding book's manifest reference).
 pub struct ContentMod {
     pub id: String,
     pub content: Content,
@@ -3004,14 +3004,27 @@ const JAR_INPUTS: &str = "horizon-mod-jar-inputs.json";
 
 /// Check the accepted inputs of a composed resource root before server reload.
 /// This reads no candidate packages and never reopens or rehashes an archive.
-pub fn check_jars(root: &Path, jar_store: &Path) -> Result<()> {
-    if !root.join(MARKER).exists() {
+pub fn check_jars(root: &Path, jar_store: &Path) -> std::result::Result<(), JarInputsError> {
+    let marker = root.join(MARKER);
+    if !marker.try_exists().map_err(|source| JarInputsError::Io {
+        path: marker,
+        source,
+    })? {
         return Ok(());
     }
-    let requirements: Vec<horizon_mods::manifest::JarRequirement> =
-        serde_json::from_slice(&fs::read(root.join(JAR_INPUTS))?)?;
-    if let Some(missing) = missing_jars(jar_store, &requirements)?.into_iter().next() {
-        return Err(missing.into());
+    let path = root.join(JAR_INPUTS);
+    let bytes = fs::read(&path).map_err(|source| JarInputsError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    let requirements: Vec<horizon_mods::manifest::JarRequirement> = serde_json::from_slice(&bytes)
+        .map_err(|source| JarInputsError::Invalid { path, source })?;
+    let missing = missing_jars(jar_store, &requirements).map_err(|source| JarInputsError::Io {
+        path: jar_store.to_owned(),
+        source,
+    })?;
+    if let Some(missing) = missing.into_iter().next() {
+        return Err(JarInputsError::Missing(Box::new(missing)));
     }
     Ok(())
 }

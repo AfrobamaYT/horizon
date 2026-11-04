@@ -85,6 +85,46 @@ impl fmt::Display for MissingJar {
 }
 impl std::error::Error for MissingJar {}
 
+/// An accepted resource root's original-jar inputs could not be checked.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum JarInputsError {
+    /// An exact original is unavailable, with every requiring mod retained.
+    Missing(Box<MissingJar>),
+    /// The accepted inputs or cache metadata could not be read.
+    Io {
+        /// The input file or cache directory being checked.
+        path: PathBuf,
+        /// The filesystem failure.
+        source: std::io::Error,
+    },
+    /// The accepted input record failed schema validation.
+    Invalid {
+        /// The accepted input record.
+        path: PathBuf,
+        /// The decoding or validation failure.
+        source: serde_json::Error,
+    },
+}
+impl fmt::Display for JarInputsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Missing(missing) => missing.fmt(f),
+            Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
+            Self::Invalid { path, source } => write!(f, "{}: {source}", path.display()),
+        }
+    }
+}
+impl std::error::Error for JarInputsError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(match self {
+            Self::Missing(missing) => missing.as_ref(),
+            Self::Io { source, .. } => source,
+            Self::Invalid { source, .. } => source,
+        })
+    }
+}
+
 /// A hash cannot name two different original Java mod identities.
 #[derive(Debug)]
 pub struct JarConflict {

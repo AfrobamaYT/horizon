@@ -182,9 +182,12 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
             .reload_datapacks(true, &game.level.enabled_features.clone())
             .err()
             .unwrap();
-        let missing = error
-            .downcast_ref::<horizon_mods::manifest::MissingJar>()
-            .unwrap();
+        let ReloadStageError::OriginalJars(horizon_mods::manifest::JarInputsError::Missing(
+            missing,
+        )) = error
+        else {
+            panic!("expected typed missing original, got {error:?}");
+        };
         assert_eq!(missing.owners, ["reload_test"]);
         assert_eq!(missing.jar, jar);
         assert_eq!(missing.path, jar_file);

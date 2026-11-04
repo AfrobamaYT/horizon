@@ -49,11 +49,12 @@ impl Game<'_> {
     pub(super) fn prepare_server_reload(
         &self,
         stack: &PackStack,
-    ) -> horizon_client::Result<PreparedServerReload> {
+    ) -> Result<PreparedServerReload, ReloadStageError> {
         horizon_client::mod_content::check_jars(
             &self.options.resources,
             &horizon_client::logging::game_home().join("jars"),
-        )?;
+        )
+        .map_err(ReloadStageError::OriginalJars)?;
         // Nobody listens: no registration graph, only the vanilla function library.
         if !mod_api::__private::listened(mod_api::HookId::AddServerReloadListeners) {
             return Ok(PreparedServerReload {

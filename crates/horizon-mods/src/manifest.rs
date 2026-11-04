@@ -4,7 +4,8 @@
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
 mod jar;
 pub use jar::{
-    JarConflict, JarRef, JarRequirement, MissingJar, collect_jar_requirements, missing_jars,
+    JarConflict, JarInputsError, JarRef, JarRequirement, MissingJar, collect_jar_requirements,
+    missing_jars,
 };
 
 use serde::{Deserialize, Serialize};

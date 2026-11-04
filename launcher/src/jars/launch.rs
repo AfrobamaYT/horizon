@@ -1,11 +1,11 @@
 //! Prepare data for the final game command, before shell or graphics wrappers obscure it.
-use super::{Permission, PrepareError, prepare};
+use super::{prepare, Permission, PrepareError};
 use crate::{
     i18n::trf,
     launch::{self, Launch},
 };
 use horizon_mods::{
-    manifest::{JarConflict, collect_jar_requirements},
+    manifest::{collect_jar_requirements, JarConflict},
     mod_list::ModList,
     packages,
     selection::{self, LaunchArguments},

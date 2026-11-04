@@ -3,7 +3,7 @@ mod launch;
 use crate::i18n::{tr, trf};
 use horizon_mods::manifest::{JarRef, JarRequirement, MissingJar};
 use horizon_port_pack::{fetch, modrinth};
-pub use launch::{LaunchError, prepare_launch};
+pub use launch::{prepare_launch, LaunchError};
 use std::{
     collections::BTreeMap,
     fmt, fs, io,

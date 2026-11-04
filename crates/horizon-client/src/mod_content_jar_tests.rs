@@ -253,8 +253,48 @@ fn changing_jar_list_or_order_rebuilds_and_missing_after_compose_keeps_the_old_r
     assert_eq!(fs::read_dir(&cache).unwrap().count(), before);
     assert_eq!(fs::read(shortened.join(path)).unwrap(), b"b");
     let error = check_jars(&shortened, &store).unwrap_err();
-    assert_eq!(error.downcast_ref::<MissingJar>().unwrap(), missing);
+    let JarInputsError::Missing(accepted_missing) = error else {
+        panic!("expected typed missing accepted input, got {error:?}");
+    };
+    assert_eq!(accepted_missing.as_ref(), missing);
     // Neither failed preparation mutates any previously published snapshot.
     assert_eq!(fs::read(first.join(path)).unwrap(), b"b");
     assert_eq!(fs::read(reversed.join(path)).unwrap(), b"a");
+}
+
+#[test]
+fn accepted_jar_inputs_distinguish_unreadable_invalid_and_non_file_cache_entries() {
+    let fixture = Fixture::new("accepted-input-errors");
+    let root = fixture.0.join("accepted");
+    let store = fixture.0.join("jars");
+    fixture.write(&format!("accepted/{MARKER}"), "{}");
+    let path = root.join(JAR_INPUTS);
+    let error = check_jars(&root, &store).unwrap_err();
+    assert!(matches!(
+        error,
+        JarInputsError::Io { path: failed, source }
+            if failed == path && source.kind() == std::io::ErrorKind::NotFound
+    ));
+
+    fixture.write(&format!("accepted/{JAR_INPUTS}"), "[");
+    assert!(matches!(
+        check_jars(&root, &store).unwrap_err(),
+        JarInputsError::Invalid { path: failed, .. } if failed == path
+    ));
+
+    let jar = JarRef::new("original".into(), "1".into(), "d".repeat(128)).unwrap();
+    let requirements = [horizon_mods::manifest::JarRequirement {
+        owners: vec!["alpha".into(), "beta".into()],
+        jar: jar.clone(),
+    }];
+    fixture.write(
+        &format!("accepted/{JAR_INPUTS}"),
+        serde_json::to_vec(&requirements).unwrap(),
+    );
+    fs::create_dir_all(jar.cache_path(&store)).unwrap();
+    assert!(matches!(
+        check_jars(&root, &store).unwrap_err(),
+        JarInputsError::Io { path: failed, source }
+            if failed == store && source.kind() == std::io::ErrorKind::InvalidInput
+    ));
 }
