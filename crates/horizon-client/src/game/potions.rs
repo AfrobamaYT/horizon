@@ -1891,6 +1891,28 @@ impl Game<'_> {
             [self.cursor.0 as i32, self.cursor.1 as i32],
         )
     }
+    /// The rectangle `draw_inventory_effects` covers, none with no effects
+    /// or too little room right of the window.
+    pub(super) fn inventory_effects_rect(
+        &self,
+        batch: &HudBatch,
+        origin: [f32; 2],
+        image_width: f32,
+    ) -> Option<[f32; 4]> {
+        let panels = inventory_effects::panels(
+            batch.width as i32,
+            [origin[0] as i32, origin[1] as i32],
+            image_width as i32,
+            &self.potions.effects.list,
+            self.clock.rate(),
+            &|key| self.pack.names.display_get(key),
+            &|text| self.gui.atlas.font.width(text).ceil() as i32,
+        );
+        let first = panels.first()?;
+        let width = panels.iter().map(|p| p.width).max()?;
+        let height = (panels.len() as i32 - 1) * first.spacing + 32;
+        Some([first.x as f32, first.y as f32, width as f32, height as f32])
+    }
     /// Effects saved in level.dat (`Player.active_effects`).
     pub(super) fn restore_effects(&mut self) {
         self.potions = PotionState::default();

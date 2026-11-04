@@ -2577,6 +2577,66 @@ impl Game<'_> {
             image.height as f32,
         ]
     }
+    /// Where the open screen draws outside its `rect`, and where mods draw
+    /// over it: the recipe book's panel, the creative tab rows, the active
+    /// effects beside the inventory, then whatever `native_screen_exclusion_areas`
+    /// adds. Each is `[x, y, width, height]` in GUI pixels; an empty or
+    /// non-finite one is dropped. A mod that lays out its own panels
+    /// (a recipe viewer) keeps them clear of these. Client-side; empty with
+    /// no screen up.
+    pub(super) fn native_screen_exclusion(&self) -> Vec<[f32; 4]> {
+        let Some(view) = self.observed_screen_view() else {
+            return Vec::new();
+        };
+        let Some(renderer) = self.renderer.as_ref() else {
+            return Vec::new();
+        };
+        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+        let mut areas = self.screen_own_exclusion(&batch);
+        self.native_screen_exclusion_areas(&view, &mut areas);
+        areas.retain(|a| a.iter().all(|v| v.is_finite()) && a[2] > 0.0 && a[3] > 0.0);
+        areas
+    }
+    /// The areas the game itself draws beside the open screen's window.
+    fn screen_own_exclusion(&self, batch: &HudBatch) -> Vec<[f32; 4]> {
+        let mut areas = Vec::new();
+        match self.screen {
+            Screen::Creative => {
+                let image = self.container_image(batch);
+                let (x, y, w, h) = (
+                    image.left as f32,
+                    image.top as f32,
+                    image.width as f32,
+                    image.height as f32,
+                );
+                areas.push([x, y - 28.0, w, 28.0]);
+                areas.push([x, y + h, w, 28.0]);
+                areas.extend(self.inventory_effects_rect(batch, [x, y], w));
+            }
+            Screen::Inventory if self.title.is_none() => {
+                areas.extend(self.recipe_book_rect(batch));
+                if self.container.is_none() && self.craft_size == 2 && !self.mount_active() {
+                    let (x, y) = self.inventory_origin(batch);
+                    areas.extend(self.inventory_effects_rect(batch, [x, y], 176.0));
+                }
+            }
+            _ => {}
+        }
+        areas
+    }
+    /// The hook `native_screen_exclusion` asks: a mod adds the rectangles it
+    /// draws over `screen` (a side panel, a button column) to `areas`, in GUI
+    /// pixels, `[x, y, width, height]`. NeoForge has no counterpart in the
+    /// game; recipe viewers ask for it through their own API
+    /// (`EmiExclusionArea`, JEI's `IGuiContainerHandler.getGuiExtraAreas`).
+    /// Client-side.
+    pub(super) fn native_screen_exclusion_areas(
+        &self,
+        screen: &NativeScreenView<'_>,
+        areas: &mut Vec<[f32; 4]>,
+    ) {
+        mod_api::dispatch_screen_exclusion_areas(&*self, screen, areas);
+    }
     pub(super) fn track_drag_button(&mut self, button: MouseButton, pressed: bool) {
         // Any release ends the drag, as vanilla's `MouseHandler.onButton` clears `activeButton`:
         // left down, right down, left up sends no drag while right is still held.
