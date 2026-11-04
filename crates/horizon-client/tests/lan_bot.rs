@@ -264,6 +264,9 @@ fn server_sync(sync: Arc<SyncData>, net: NetConfig) -> Server {
             max_players: 8,
             levels: Default::default(),
         },
+        Arc::new(
+            server_load().loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+        ),
     );
     Server {
         hub,
