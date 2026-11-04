@@ -955,7 +955,6 @@
 //! that would break such a bundle is not made.
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
-include!(concat!(env!("OUT_DIR"), "/mod_api_fire_generated.rs"));
 
 use super::native_data_maps::NativeDataMapType;
 use super::{
