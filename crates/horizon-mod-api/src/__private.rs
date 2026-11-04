@@ -86,6 +86,20 @@ pub mod game {
     pub fn player_ref(entity: EntityRef, uuid: u128) -> PlayerRef {
         PlayerRef { entity, uuid }
     }
+    /// A stack's modifiers for `item_attribute_modifier`, as its component
+    /// gives them.
+    pub fn item_attribute_modifiers(entries: Vec<ItemAttributeModifier>) -> ItemAttributeModifiers {
+        ItemAttributeModifiers {
+            entries,
+            changed: false,
+        }
+    }
+    /// The modifiers the hook left, or `None` when no mod changed them.
+    pub fn changed_item_attribute_modifiers(
+        modifiers: ItemAttributeModifiers,
+    ) -> Option<Vec<ItemAttributeModifier>> {
+        modifiers.changed.then_some(modifiers.entries)
+    }
 
     pub struct BlockEntityRefFields {
         pub level: LevelRef,

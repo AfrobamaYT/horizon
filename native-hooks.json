@@ -757,14 +757,6 @@
       }
     },
     {
-      "name": "place_block", "doc": "A player placed `stack` as the block `state` at `pos`: where\n`BlockItem.place` set it, before the stack shrinks. It only hears; a\nmod stops a placement by claiming `native_use_on`, which runs\nbefore it. Server-side, for every player of the world.", "side": "server",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_place_block",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "right_click_block", "doc": "A player right clicks a block (NeoForge's\n`PlayerInteractEvent.RightClickBlock`): once per hand, where\n`useItemOn` starts, on the clicking client and on the server (`click`\nsays which, with the block, the hit, the hand and its stack, and the\nplayer). Before the block's own use (a chest, a door, a lever) and the\nitem's (`Item.useOn`, `native_use_on`).\n\n`use_block` forces the block's use off (`False`) or on even while\nsneaking with something in hand (`True`); `use_item` forces the\nitem's `useOn` off, or on even while the item cools down. Cancelling\nskips both and answers `cancellation_result` in their place:\n`Pass` (the default) goes on to the item's own use (`Item.use`) and\nthen the other hand, `Fail` ends the click, and `Success`,\n`SuccessServer` or `Consume` end it as used, with the swing they name.\nA mod that keeps players out of land cancels with `Fail`.", "side": "server",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_right_click_block",
@@ -2771,10 +2763,10 @@
       }
     },
     {
-      "name": "experience_orb_pickup_listened",
-      "doc": "Whether a mod hears `native_experience_orb_pickup`: set `listened`\n(a HEAD injection), or the server skips swapping the player in for it,\nand with this empty the pickup costs nothing more without mods.\nServer-side.",
+      "name": "pickup_xp_listened",
+      "doc": "Whether a mod hears `native_pickup_xp`: set `listened`\n(a HEAD injection), or the server skips swapping the player in for it,\nand with this empty the pickup costs nothing more without mods.\nServer-side.",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_experience_orb_pickup_listened",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_pickup_xp_listened",
       "side": "server",
       "mod_api": {
         "contract": "collect",
@@ -2782,10 +2774,11 @@
       }
     },
     {
-      "name": "experience_orb_pickup",
-      "doc": "Before `player` picks up orb `orb` in `dimension`. Mutations to `value`\nand `count` take effect only when not canceled; value is clamped to\n1..=i32::MAX and count to at least one.\nCanceling leaves the orb and pickup delay unchanged. Server-side.",
+      "name": "pickup_xp",
+      "doc": "Before `player` picks up orb `orb` in `dimension`. Mutations to `value`\nand `count` take effect only when not canceled; value is clamped to\n1..=i32::MAX and count to at least one.\nCanceling leaves the orb and pickup delay unchanged. Server-side. Diverges from upstream: renamed from `experience_orb_pickup`, to NeoForge's `PlayerXpEvent.PickupXp`.",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_experience_orb_pickup",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_pickup_xp",
+      "neoforge": "PlayerXpEvent.PickupXp",
       "side": "server",
       "cancellable": true,
       "mod_api": {

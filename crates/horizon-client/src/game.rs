@@ -117,6 +117,7 @@ mod discord;
 mod dispense_fixture;
 mod dispenser;
 mod dragon;
+mod durability;
 mod dynamic_lights;
 mod enchant_effects;
 mod end;
@@ -2737,6 +2738,8 @@ struct Game<'a> {
     gpu_passes: bool,
     screen: Screen,
     observed_screen: Option<native_hooks::ObservedScreen>,
+    /// The layout the last frame drew the inventory's effect panels with.
+    effects_layout: std::cell::Cell<Option<horizon_client::inventory_effects::EffectsLayout>>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     /// Avoid an endless rebuild loop if the new device is lost as well.
@@ -7285,7 +7288,11 @@ impl Game<'_> {
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
         };
-        let outcome = self.with_level(|b, level, ticks| b.place_block(level, ticks, &ctx));
+        let outcome = if self.player_place_canceled(&ctx) {
+            PlaceOutcome::Failed
+        } else {
+            self.with_level(|b, level, ticks| b.place_block(level, ticks, &ctx))
+        };
         let PlaceOutcome::Placed { pos, state } = outcome else {
             self.process_level_events()?;
             // BlockItem.useOn: a consumable that could not be placed is used,
@@ -7340,7 +7347,6 @@ impl Game<'_> {
         // BlockItem.place: the used statistic and the placed_block trigger.
         self.award_stat("used", &stack.item, 1);
         self.trigger_block("minecraft:placed_block", target, &stack);
-        self.native_place_block(&stack, target, state);
         self.check_wither_spawn(target)?;
         self.check_golem_spawn(target)?;
         self.consume_held();
@@ -12082,6 +12088,10 @@ impl Game<'_> {
                     - camera;
                 d.length_squared() <= 1024.0
             })
+            .filter(|(pos, _)| {
+                let state = self.world.block(pos[0], pos[1], pos[2]);
+                self.res.facts().get(state).destroy_overlay
+            })
             .filter_map(|(pos, stage)| {
                 let name = DESTROY_STAGES.get(stage as usize)?;
                 let r = self.gui.atlas.sprites.get(*name)?;
@@ -13307,7 +13317,8 @@ impl Game<'_> {
                 amount,
                 operation: op,
                 slot: group,
-            } in stack.attribute_modifiers(world_items!(self)).iter()
+            } in horizon_client::item_attributes::attribute_modifiers(stack, world_items!(self))
+                .iter()
             {
                 // The attack code still reads the held item's attack damage and
                 // speed directly; the map copy is what `/attribute` reports.
@@ -13879,33 +13890,21 @@ impl Game<'_> {
         }
     }
     pub(super) fn damage_held(&mut self, amount: u32) {
-        if self.creative {
+        let Some(stack) = self.held().cloned() else {
+            return;
+        };
+        let (updated, broken) =
+            self.damage_equipment_stack(&stack, amount.min(i32::MAX as u32) as i32, true);
+        if self.held() != Some(&stack) {
             return;
         }
-        let amount = match self.held().cloned() {
-            Some(held) => self.wear(&held, amount),
-            None => amount,
-        };
-        let max = self
-            .held()
-            .and_then(|s| self.items().get(&s.item))
-            .map_or(0, |i| i.max_damage);
-        let cell = self.held_mut();
-        if let Some(stack) = cell.as_mut()
-            && max > 0
-        {
-            stack.damage += amount;
-            if stack.damage >= max {
-                let broken = stack.item.clone();
-                let gone = stack.clone();
-                *cell = None;
-                self.award_stat("broken", &broken, 1);
-                // LivingEntity.onEquippedItemBroken: the sound and the crumbs.
-                self.player_equipment_broke(
-                    horizon_world::player_inventory::EquipmentSlot::MainHand,
-                    &gone,
-                );
-            }
+        *self.held_mut() = updated;
+        if let Some(broken) = broken {
+            self.award_stat("broken", &broken.item, 1);
+            self.player_equipment_broke(
+                horizon_world::player_inventory::EquipmentSlot::MainHand,
+                &broken,
+            );
         }
     }
     /// `ItemStack.hurtWithoutBreaking`: Unbreaking applies, but the stack stops at
@@ -19730,6 +19729,7 @@ impl<'a> Game<'a> {
             gpu_passes: false,
             screen: Screen::Playing,
             observed_screen: None,
+            effects_layout: std::cell::Cell::new(None),
             window: None,
             renderer: None,
             last_device_recovery: None,

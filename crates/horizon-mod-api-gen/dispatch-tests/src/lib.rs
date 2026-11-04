@@ -37,6 +37,10 @@ mod tests {
         pub(super) enum AttributeOperation {}
         #[derive(Clone, Copy)]
         pub(super) enum ModifierLifetime {}
+        #[derive(Clone, Copy)]
+        pub(super) enum EquipmentSlotGroup {}
+        pub(super) struct ItemAttributeModifier;
+        pub(super) struct ItemAttributeModifiers;
         pub(super) struct Ticks;
         pub(super) trait LevelHost {
             fn state_block(&self, _: BlockStateId) -> Option<&str> {
@@ -47,6 +51,9 @@ mod tests {
         pub(super) trait LevelRandomHost: LevelHost {}
         pub(super) trait LevelWriteHost: LevelTicksHost + LevelRandomHost {}
         pub(super) struct Compound;
+        pub(super) enum Placement {
+            Single,
+        }
         pub(super) struct LandingWrite;
         pub(super) struct Tag;
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);

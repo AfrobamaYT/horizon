@@ -55,7 +55,7 @@ fn gear_knockback(items: &Items, worn: &[Option<&ItemStack>; 6]) -> Vec<(f64, Op
         let Some(stack) = stack else {
             continue;
         };
-        for row in stack.attribute_modifiers(items).iter() {
+        for row in horizon_client::item_attributes::attribute_modifiers(stack, items).iter() {
             if row.attribute == "minecraft:knockback_resistance" && slot_in_group(&row.slot, slot) {
                 let op = match operation_named(&row.operation) {
                     1 => Op::AddMultipliedBase,
@@ -150,7 +150,8 @@ impl Game<'_> {
                 amount,
                 operation: op,
                 slot: group,
-            } in stack.attribute_modifiers(self.items()).iter()
+            } in
+                horizon_client::item_attributes::attribute_modifiers(stack, self.items()).iter()
             {
                 if !slot_in_group(group, slot) {
                     continue;
