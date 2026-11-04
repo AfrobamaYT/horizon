@@ -1276,9 +1276,14 @@ impl Game<'_> {
                 // `MobDespawnEvent`, before `checkDespawn`'s own draws; one branch
                 // with no listener. Cleared below: the tick may not reach the check.
                 // The wither overrides `checkDespawn` without `super`, so the
-                // event, patched into `Mob.checkDespawn`, never fires for it.
+                // event, patched into `Mob.checkDespawn`, never fires for it;
+                // a mannequin is no `Mob` and never checks despawning.
                 if mod_api::__private::listened(mod_api::HookId::MobDespawn)
-                    && m.species() != horizon_client::mobs::Species::Wither
+                    && !matches!(
+                        m.species(),
+                        horizon_client::mobs::Species::Wither
+                            | horizon_client::mobs::Species::Mannequin
+                    )
                     && let Some(epoch) = self.native_lifecycle.epoch()
                 {
                     self.native_mob_despawn(
