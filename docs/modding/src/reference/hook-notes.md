@@ -2177,8 +2177,9 @@ handle, an entity the client doesn't track and a level it doesn't show:
   defaults, the saved `attributes` list (bases and permanent modifiers, with their ids), and the attribute modifiers
   of the items they hold and wear, put on and taken off slot by slot in `EquipmentSlot` order as
   `LivingEntity.collectEquipmentChanges` does (transient: never saved). The map is built when first needed. Mob
-  behavior still reads the type's defaults, so a modifier does not yet change how a mob moves or hits, and an item's
-  own `attribute_modifiers` component is not read yet, only the item type's.
+  behavior still reads the type's defaults, so a modifier does not yet change how a mob moves or hits. An item's
+  modifiers are the stack's own `attribute_modifiers` component or its item type's, as `item_attribute_modifier`
+  leaves them.
 - The writes take players, guests (in their own turn), mobs and armor stands, and answer false for an attribute the
   type lacks, the dragon (`/attribute` refuses it, and nothing reads its attributes yet), a stale handle, or on a
   client. `living.add_attribute_modifier(host, id, modifier, lifetime)` is `AttributeInstance.addTransientModifier`
@@ -2197,6 +2198,19 @@ handle, an entity the client doesn't track and a level it doesn't show:
 
   The live map behind `attribute_value` takes the same write, so the reads agree with `/attribute`, and the entity's
   save keeps it. A lower max health cuts a mob's health (`LivingEntity.onAttributeUpdated`).
+- `item_attribute_modifier` (`ItemAttributeModifierEvent`) edits what one stack grants: `ItemAttributeModifiers`
+  holds `ItemAttributeModifier` entries (the attribute's id, an `AttributeModifier`, an `EquipmentSlotGroup`) and
+  edits them as NeoForge's event does: `add` (`addModifier`, refused when the attribute has that id already),
+  `replace`, `remove`, `retain` (`removeIf`), `remove_all_for` and `clear`. Every reader of a stack's modifiers asks
+  through one place (`horizon_client::item_attributes`):
+  - the equipment of a player, a mob, an armor stand and the dragon, when it changes;
+  - mobs' gear knockback resistance and their pickup choices;
+  - the attribute sync;
+  - both tooltips.
+
+  A worn stack is asked again only when it changes (`ItemStack.matches`), so the answer must be the same for the
+  same stack. With no mod listening, or none changing a stack's list, nothing is copied. A player's attack speed
+  still reads its held item type's `attack_speed`, not the stack's (see #549).
 - `living.set_health(host, health)` is `LivingEntity.setHealth` (Paper's `Damageable#setHealth`), cut to the
   range from zero to the maximum, with no hook; a non-finite value is refused. This raw write can set zero
   or change a dead entity's health without running the death pipeline.

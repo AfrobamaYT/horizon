@@ -866,7 +866,8 @@ pub fn detail_lines(
         ));
     }
     lines.extend(dyed_line(stack, &display, false, translate).map(|l| l.0));
-    let modifiers = stack.attribute_modifiers_or(info.map_or(&[], |i| &i.modifiers));
+    let modifiers =
+        crate::item_attributes::attribute_modifiers_or(stack, info.map_or(&[], |i| &i.modifiers));
     lines.extend(
         attribute_lines(&modifiers, None, translate)
             .into_iter()

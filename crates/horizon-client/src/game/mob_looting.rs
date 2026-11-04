@@ -168,7 +168,7 @@ impl Game<'_> {
     /// `Mob.getApproximateAttributeWith` for `stack` in `slot`: each
     /// attribute starts from the mob's own value. (armour, toughness, damage)
     fn attributes(&self, m: &Mob, stack: &ItemStack, slot: Slot) -> (f64, f64, f64) {
-        let modifiers = stack.attribute_modifiers(self.items());
+        let modifiers = horizon_client::item_attributes::attribute_modifiers(stack, self.items());
         let modifiers = &*modifiers;
         (
             equip::attribute_with(modifiers, "minecraft:armor", f64::from(m.kind.armor), slot),

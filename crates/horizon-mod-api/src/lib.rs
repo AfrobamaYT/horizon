@@ -46,6 +46,9 @@ pub mod health;
 pub mod hud_layout;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
+pub mod item_attributes;
+// hidden: a module of game-side types; mods use their re-exports
+#[doc(hidden)]
 pub mod item_tooltip;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
@@ -1086,6 +1089,154 @@ pub enum ModifierLifetime {
     Transient,
     /// Saved with the entity.
     Permanent,
+}
+
+/// The slots an item's attribute modifier applies in (vanilla's
+/// `EquipmentSlotGroup`).
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EquipmentSlotGroup {
+    /// `any`: every slot.
+    Any,
+    /// `mainhand`.
+    MainHand,
+    /// `offhand`.
+    OffHand,
+    /// `hand`: either hand.
+    Hand,
+    /// `feet`.
+    Feet,
+    /// `legs`.
+    Legs,
+    /// `chest`.
+    Chest,
+    /// `head`.
+    Head,
+    /// `armor`: feet, legs, chest, head and body.
+    Armor,
+    /// `body`: an animal's armor slot.
+    Body,
+    /// `saddle`.
+    Saddle,
+}
+
+/// One attribute modifier an item stack grants (vanilla's
+/// `ItemAttributeModifiers.Entry`): the attribute (`minecraft:armor`), the
+/// modifier, and the slots it applies in.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ItemAttributeModifier {
+    /// The attribute's id.
+    pub attribute: Identifier,
+    /// The modifier.
+    pub modifier: AttributeModifier,
+    /// The slots it applies in.
+    pub slot: EquipmentSlotGroup,
+}
+
+impl ItemAttributeModifier {
+    /// `modifier` on `attribute`, in the slots of `slot`.
+    pub fn new(
+        attribute: Identifier,
+        modifier: AttributeModifier,
+        slot: EquipmentSlotGroup,
+    ) -> Self {
+        Self {
+            attribute,
+            modifier,
+            slot,
+        }
+    }
+}
+
+/// The attribute modifiers of one item stack, as `item_attribute_modifier`
+/// edits them (`ItemAttributeModifierEvent`'s list). It starts as the
+/// stack's own `minecraft:attribute_modifiers`, or its item's, in order.
+// exhaustive: its fields are private, so mods only edit it through its methods
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ItemAttributeModifiers {
+    entries: Vec<ItemAttributeModifier>,
+    changed: bool,
+}
+
+impl ItemAttributeModifiers {
+    /// The modifiers, in order.
+    pub fn iter(&self) -> std::slice::Iter<'_, ItemAttributeModifier> {
+        self.entries.iter()
+    }
+    /// How many modifiers there are.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+    /// Whether there are none.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+    /// `addModifier`: adds `modifier` on `attribute` in the slots of `slot`,
+    /// unless `attribute` already has a modifier with its id. Whether it
+    /// was added.
+    pub fn add(
+        &mut self,
+        attribute: Identifier,
+        modifier: AttributeModifier,
+        slot: EquipmentSlotGroup,
+    ) -> bool {
+        if self.find(&attribute, &modifier.id).is_some() {
+            return false;
+        }
+        self.entries
+            .push(ItemAttributeModifier::new(attribute, modifier, slot));
+        self.changed = true;
+        true
+    }
+    /// `replaceModifier`: puts `modifier` on `attribute` in the slots of
+    /// `slot`, in place of the one with its id, or at the end.
+    pub fn replace(
+        &mut self,
+        attribute: Identifier,
+        modifier: AttributeModifier,
+        slot: EquipmentSlotGroup,
+    ) {
+        let entry = ItemAttributeModifier::new(attribute, modifier, slot);
+        match self.find(&entry.attribute, &entry.modifier.id) {
+            Some(i) => self.entries[i] = entry,
+            None => self.entries.push(entry),
+        }
+        self.changed = true;
+    }
+    /// `removeModifier`: removes the modifier `id` of `attribute`. Whether
+    /// there was one.
+    pub fn remove(&mut self, attribute: &Identifier, id: &Identifier) -> bool {
+        let Some(i) = self.find(attribute, id) else {
+            return false;
+        };
+        self.entries.remove(i);
+        self.changed = true;
+        true
+    }
+    /// `removeIf`: keeps only the modifiers `keep` accepts. Whether any went.
+    pub fn retain(&mut self, mut keep: impl FnMut(&ItemAttributeModifier) -> bool) -> bool {
+        let len = self.entries.len();
+        self.entries.retain(|entry| keep(entry));
+        let removed = self.entries.len() != len;
+        self.changed |= removed;
+        removed
+    }
+    /// `removeAllModifiersFor`: removes every modifier of `attribute`.
+    /// Whether any went.
+    pub fn remove_all_for(&mut self, attribute: &Identifier) -> bool {
+        self.retain(|entry| entry.attribute != *attribute)
+    }
+    /// `clearModifiers`: removes every modifier.
+    pub fn clear(&mut self) {
+        self.changed |= !self.entries.is_empty();
+        self.entries.clear();
+    }
+    fn find(&self, attribute: &Identifier, id: &Identifier) -> Option<usize> {
+        self.entries
+            .iter()
+            .position(|e| e.attribute == *attribute && e.modifier.id == *id)
+    }
 }
 
 /// A living entity's active effect (vanilla's `MobEffectInstance`), as

@@ -463,14 +463,14 @@ impl ItemStack {
     /// `attribute_modifiers` component when it has one (none at all when it
     /// removed the component), else its item type's. Borrowed unless the stack
     /// has its own list.
-    pub fn attribute_modifiers<'a>(
+    pub fn default_attribute_modifiers<'a>(
         &self,
         items: &'a crate::items::Items,
     ) -> std::borrow::Cow<'a, [ModifierRow]> {
-        self.attribute_modifiers_or(items.get(&self.item).map_or(&[], |i| &i.modifiers))
+        self.default_attribute_modifiers_or(items.get(&self.item).map_or(&[], |i| &i.modifiers))
     }
-    /// `attribute_modifiers` with the item type's list given: `default`.
-    pub fn attribute_modifiers_or<'a>(
+    /// `default_attribute_modifiers` with the item type's list given: `default`.
+    pub fn default_attribute_modifiers_or<'a>(
         &self,
         default: &'a [ModifierRow],
     ) -> std::borrow::Cow<'a, [ModifierRow]> {
@@ -1209,7 +1209,7 @@ mod tests {
             "mainhand",
         )];
         let mut stack = ItemStack::new("minecraft:diamond_sword", 1);
-        assert_eq!(&*stack.attribute_modifiers_or(&types), &types[..]);
+        assert_eq!(&*stack.default_attribute_modifiers_or(&types), &types[..]);
         stack.data_mut().set_other(
             "minecraft:attribute_modifiers",
             Some(Tag::List(vec![
@@ -1219,7 +1219,7 @@ mod tests {
                 Tag::compound([("type", Tag::String("minecraft:luck".into()))]),
             ])),
         );
-        let own = stack.attribute_modifiers_or(&types);
+        let own = stack.default_attribute_modifiers_or(&types);
         assert_eq!(
             &*own,
             &[
@@ -1232,7 +1232,7 @@ mod tests {
             "!minecraft:attribute_modifiers",
             Some(Tag::compound(Vec::<(&str, Tag)>::new())),
         );
-        assert!(removed.attribute_modifiers_or(&types).is_empty());
+        assert!(removed.default_attribute_modifiers_or(&types).is_empty());
         // `matches` also compares the count.
         let one = ItemStack::new("minecraft:diamond_sword", 1);
         assert!(one.matches(&ItemStack::new("minecraft:diamond_sword", 1)));
