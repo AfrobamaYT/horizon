@@ -1,0 +1,69 @@
+//! Facts about block states that need no world (`host.block_states()`): a `BlockStateId` is a
+//! registry value, not a live object, so these are a read-only service reached from the host
+//! rather than handle methods. Both sides; each reads the game's own tables and allocates nothing.
+use super::{Backend, BackendRef, BlockSoundType, BlockStateId, BlockStateRange, Host};
+
+/// The block-state facts service: `host.block_states()`.
+pub struct BlockStates<'a> {
+    backend: Option<&'a dyn Backend>,
+}
+
+/// Reaches [`BlockStates`] from any host.
+pub trait HostBlockStates {
+    /// Facts about block states, as the game's tables hold them.
+    fn block_states(&self) -> BlockStates<'_>;
+}
+
+impl<H: Host + ?Sized> HostBlockStates for H {
+    fn block_states(&self) -> BlockStates<'_> {
+        BlockStates {
+            backend: self.backend().map(BackendRef::open),
+        }
+    }
+}
+
+impl BlockStates<'_> {
+    /// `BlockState.canBeReplaced()`: whether placing a block where `state` stands replaces it
+    /// (air, grass, water, snow layers). None for an unknown state, or a host without a game.
+    pub fn replaceable(&self, state: BlockStateId) -> Option<bool> {
+        self.backend?.block_state_replaceable(state)
+    }
+    /// How hard `state` is to break (`BlockBehaviour.Properties.destroyTime`, as
+    /// `BlockState.getDestroySpeed` reads it): stone 1.5, obsidian 50, -1 for a block that
+    /// can't be broken. None as for `replaceable`.
+    pub fn destroy_speed(&self, state: BlockStateId) -> Option<f32> {
+        self.backend?.block_state_destroy_speed(state)
+    }
+    /// `state`'s sounds (`BlockState.getSoundType()`). None as for `replaceable`.
+    pub fn sound(&self, state: BlockStateId) -> Option<BlockSoundType> {
+        self.backend?.block_state_sound(state)
+    }
+    /// `BlockState.hasBlockEntity()`. None as for `replaceable`.
+    pub fn has_block_entity(&self, state: BlockStateId) -> Option<bool> {
+        self.backend?.block_state_has_block_entity(state)
+    }
+    /// The states of `block` (`minecraft:oak_stairs`), `StateDefinition.getPossibleStates`.
+    /// None for an unknown block, or a host without a game.
+    pub fn states_of(&self, block: &str) -> Option<BlockStateRange> {
+        self.backend?.block_states_of(block)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A mod's test double: a host with no game behind it.
+    struct Double;
+    impl Host for Double {}
+
+    #[test]
+    fn a_host_without_a_game_answers_none() {
+        let facts = Double.block_states();
+        assert_eq!(facts.replaceable(BlockStateId(1)), None);
+        assert_eq!(facts.destroy_speed(BlockStateId(1)), None);
+        assert_eq!(facts.sound(BlockStateId(1)), None);
+        assert_eq!(facts.has_block_entity(BlockStateId(1)), None);
+        assert_eq!(facts.states_of("minecraft:stone"), None);
+    }
+}
