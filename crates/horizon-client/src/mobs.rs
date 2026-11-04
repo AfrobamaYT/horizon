@@ -2849,6 +2849,9 @@ pub struct MobWorld<'a> {
     pub lid_openers: &'a HashMap<(i32, i32, i32), i32>,
     /// What a content mod's effects do, on a server (None on a client).
     pub mod_effects: Option<&'a dyn ModEffectTicks>,
+    /// The mod hooks the AI asks mid-tick, on a server where a mod listens
+    /// (None otherwise: the AI asks nothing).
+    pub mob_hooks: Option<&'a dyn MobHooks>,
     /// Whether a listener can cancel animal taming.
     pub asks_animal_tame: bool,
     /// Whether a listener can cancel a mob's block destruction.
@@ -2871,6 +2874,12 @@ pub trait ModEffectTicks {
         tick_count: i32,
         amplifier: i32,
     ) -> bool;
+}
+/// Native mod hooks the mob AI asks while it decides.
+pub trait MobHooks {
+    /// `EnderManAngerEvent`: whether a mod keeps enderman `enderman` calm
+    /// though `player` stares at it.
+    fn enderman_anger_suppressed(&self, enderman: u32, player: &PlayerView) -> bool;
 }
 /// `Entity.getTeam` of the player and of the mobs on a team.
 #[derive(Clone, Debug, Default)]

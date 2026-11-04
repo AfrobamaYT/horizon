@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "enderman_anger",
+      "doc": "`player` stares at `enderman` (NeoForge's `EnderManAngerEvent`, at\nthe end of `Enderman.isBeingStaredBy`): the look is within the\nenderman's cone, in line of sight, and no carved pumpkin hides the\nface. Asked each time the enderman's goals check the stare: to get\nangry, to freeze while looked at and to teleport away up close. Set\n`cancel` and that stare doesn't count. Server-side.",
+      "host": "read",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_enderman_anger",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "EnderManAngerEvent",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

@@ -1722,6 +1722,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_entity_change_block(entity, kind, pos, from, to)`**: a mob changed a block, after the new state was applied.
 - **`native_entity_break_door(entity, kind, pos)`**: a mob finished breaking a door at `pos`, after the block was removed.
 - **`native_creeper_power(entity, lightning)`**: a lightning strike charged the creeper.
+- **`native_enderman_anger(enderman, player, cancel)`**: `player` stares at `enderman` (NeoForge's `EnderManAngerEvent`, last in `Enderman.isBeingStaredBy`, once the look cone, line of sight and carved pumpkin checks passed). It is asked each time the enderman's goals check the stare: to get angry, to freeze while looked at, and to teleport away up close. Set `cancel` and that stare doesn't count. The mob AI asks through `MobWorld::mob_hooks`, which is set only on the server while a mod listens: with no listener the stare check costs nothing more.
 - **`native_creeper_ignite(entity, player, item)`**: a player used a creeper igniter on the creeper, after it entered its ignited state.
 - **`native_exp_bottle(pos, experience)`**: an experience bottle broke and its orbs were created.
 - **`native_firework_explode(entity, pos, bursts)`**: a firework rocket completed its damage and explosion effects.

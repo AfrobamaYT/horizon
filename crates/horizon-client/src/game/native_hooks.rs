@@ -7827,6 +7827,17 @@ impl Game<'_> {
     pub(super) fn native_on_equip(&mut self, slot: &str, new: Option<&ItemStack>) {
         mod_api::dispatch_on_equip(self, slot, new);
     }
+    /// `EnderManAngerEvent`: `player` stares at enderman `enderman`
+    /// (`Enderman.isBeingStaredBy` passed). Set `cancel` and the stare
+    /// doesn't count: no anger, no freezing in place, no teleport closer.
+    pub(super) fn native_enderman_anger(
+        &self,
+        enderman: EntityRef,
+        player: PlayerRef,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_enderman_anger(self, enderman, player, cancel);
+    }
     /// `MobEffect.shouldApplyEffectTickThisTick` for a content mod's effect
     /// `effect` (`ruby:bleeding`), each tick a player or a mob has it, in
     /// `MobEffectInstance.tickServer` before it counts down: `tick_count` is
