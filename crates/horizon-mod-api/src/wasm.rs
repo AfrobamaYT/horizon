@@ -85,6 +85,49 @@ fn intern(value: String) -> &'static str {
     }
 }
 
+/// The game's names by the index each crosses as, and back: the game gives each index once
+/// (`names.name`), and an index for a name the mod gives (`names.intern`).
+#[derive(Default)]
+struct Names {
+    names: Vec<Option<&'static str>>,
+    index: std::collections::HashMap<&'static str, u32>,
+}
+
+static NAMES: Mutex<Option<Names>> = Mutex::new(None);
+
+/// The name the game's index `id` stands for.
+fn name_of(id: u32) -> &'static str {
+    let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+    let names = names.get_or_insert_with(Names::default);
+    if let Some(Some(name)) = names.names.get(id as usize) {
+        return name;
+    }
+    let name = intern(glue::horizon::mod_api::names::name(id));
+    if names.names.len() <= id as usize {
+        names.names.resize(id as usize + 1, None);
+    }
+    names.names[id as usize] = Some(name);
+    names.index.insert(name, id);
+    name
+}
+
+/// The game's index for `name`.
+fn name_id(name: &str) -> u32 {
+    let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+    let names = names.get_or_insert_with(Names::default);
+    if let Some(id) = names.index.get(name) {
+        return *id;
+    }
+    let id = glue::horizon::mod_api::names::intern(name);
+    let name = intern(name.to_string());
+    if names.names.len() <= id as usize {
+        names.names.resize(id as usize + 1, None);
+    }
+    names.names[id as usize] = Some(name);
+    names.index.insert(name, id);
+    id
+}
+
 unsafe extern "Rust" {
     /// The mod's hooks, defined by `#[mod_api::horizon_mod]` in the mod's crate.
     safe fn __horizon_mod_hooks() -> Box<dyn Hooks>;
