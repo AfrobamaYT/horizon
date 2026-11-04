@@ -498,11 +498,10 @@ mod tests {
         let name = archive("x86_64-unknown-linux-gnu", Target::Server);
         assert_eq!(
             name,
-            "horizon-prebuilt-x86_64-unknown-linux-gnu-server.tar.gz"
+            "horizon-prebuilt-v1-x86_64-unknown-linux-gnu-server.tar.gz"
         );
-        let listing = format!(
-            "AB12  horizon-prebuilt-v1-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n"
-        );
+        let listing =
+            format!("AB12  horizon-prebuilt-v1-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n");
         assert_eq!(expected_sum(&listing, &name).as_deref(), Some("cd34"));
         assert_eq!(expected_sum(&listing, "horizon-prebuilt-x.tar.gz"), None);
     }
