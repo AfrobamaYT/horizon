@@ -166,6 +166,11 @@ pub fn get_bytes(url: &str) -> Result<Vec<u8>, String> {
 }
 
 pub(crate) fn get(url: &str) -> Result<ureq::Response, String> {
+    get_unless_missing(url)?.ok_or_else(|| format!("{url} answered 404"))
+}
+
+/// [`get`], with `None` when the server answers 404: a file that may not exist (a prebuilt game).
+pub(crate) fn get_unless_missing(url: &str) -> Result<Option<ureq::Response>, String> {
     let mut request = agent(url).get(url);
     // CI runners share addresses and hit GitHub's anonymous rate limit; they pass their own token.
     if let Some(token) = std::env::var("HORIZON_GITHUB_TOKEN")
@@ -176,16 +181,20 @@ pub(crate) fn get(url: &str) -> Result<ureq::Response, String> {
             request = request.set("Authorization", &format!("Bearer {token}"));
         }
     }
-    request.call().map_err(|e| match e {
-        ureq::Error::Status(code, r)
-            if url.starts_with("https://api.github.com/")
-                && crate::github::rate_limited(code, |h| r.header(h).map(str::to_owned)) =>
-        {
-            "GitHub's rate limit was reached. Try again in a few minutes.".into()
-        }
-        ureq::Error::Status(code, _) => format!("{url} answered {code}"),
-        ureq::Error::Transport(t) => format!("No connection: {t}"),
-    })
+    match request.call() {
+        Ok(response) => Ok(Some(response)),
+        Err(ureq::Error::Status(404, _)) => Ok(None),
+        Err(e) => Err(match e {
+            ureq::Error::Status(code, r)
+                if url.starts_with("https://api.github.com/")
+                    && crate::github::rate_limited(code, |h| r.header(h).map(str::to_owned)) =>
+            {
+                "GitHub's rate limit was reached. Try again in a few minutes.".into()
+            }
+            ureq::Error::Status(code, _) => format!("{url} answered {code}"),
+            ureq::Error::Transport(t) => format!("No connection: {t}"),
+        }),
+    }
 }
 
 /// A Horizon game tag: `v` then a digit (`v2026.10.13`). Launcher tags never match.
@@ -3346,6 +3355,10 @@ pub struct Settings {
     /// the mockup's 24.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blur: Option<f32>,
+    /// The launcher theme (`themes::theme`): its sky behind the light appearance. Unset is
+    /// Horizon's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
     /// Home's background: a picture the player picked, kept in the data folder under this name
     /// (`themes::keep_background`). Unset shows Horizon's landscape.
     #[serde(default, skip_serializing_if = "Option::is_none")]

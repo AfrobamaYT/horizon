@@ -1,5 +1,20 @@
 # Hook notes
 
+## Decoded client packets
+
+`Hooks::client_packet` receives `&mut dyn ClientHost` and a read-only
+`ClientPacketEvent` before the window handles a decoded server play packet.
+The read-only `event.packet` is a `mod_api::ClientPacket`: `id` identifies the
+packet type (for example, `minecraft:custom_payload`); `custom_payload` contains
+the channel and raw bytes for a custom payload, or `None` otherwise. An id
+outside the protocol's packet table is reported as `horizon:unknown`.
+Other decoded fields are not exposed. This one plain-data contract works
+for native and wasm mods, with a generated codec.
+
+The hook cannot cancel or replace a packet. It also observes chunk packets
+handled by the batching path, once each. Configuration packets and the network
+thread's own handling (including keep-alives and resource pack messages) do not fire it.
+
 ## Conditional item model properties
 
 A client mod supplies its own namespaced `minecraft:condition` property by implementing
@@ -63,8 +78,11 @@ requires a farmer at work and `mob_griefing` enabled.
   vibration particles are not supported by the current dispatch. Count zero sends one directional
   particle. The return value says whether the call was accepted, not whether any player received it.
 
-- Authoritative world lifecycle events through `native_world_lifecycle`: open ready, open failed,
-  and final close.
+- Authoritative world lifecycle events through `native_world_lifecycle`: open failed, final close and
+  close failed (contract version 2). **Migration (`WorldPhase::WorldOpenReady` → `server_started`):** a mod that matched
+  `WorldOpenReady` in `world_lifecycle` implements `server_started` instead, fired at the same moment (after the worlds
+  open, before the tick loop; one call per successful open, with the same `dedicated` flag as `server_about_to_start`);
+  delete the match arm. Nothing else about the phases changed. Diverges from upstream: upstream still has the phase.
 
 - Authoritative server tick events through `native_server_tick`: start (before any level ticks, like NeoForge's `ServerTickEvent.Pre`) and end of each non-paused
   server tick, with `world_running`. A frozen world reports false except during a requested step.
@@ -308,8 +326,9 @@ requires a farmer at work and `mob_griefing` enabled.
 - The server starting and stopping, on the single player server thread and on a dedicated server:
   `native_server_about_to_start(dedicated)` before the worlds load (NeoForge's `ServerAboutToStartEvent`), and
   `native_server_stopping(dedicated)` when an orderly stop begins, with the players still connected and not yet saved
-  (`ServerStoppingEvent`). Each start is followed by `native_world_lifecycle`'s `WorldOpenReady` or `WorldOpenFailed`,
-  and each stop by `WorldCloseFinal`; a server whose loop fails reports `WorldCloseFailed` instead of stopping.
+  (`ServerStoppingEvent`). Each start is followed by `native_server_started` (NeoForge's `ServerStartedEvent`: every
+  level loaded, no player joined, the first tick not yet run, fired where `WorldOpenReady` used to be; diverges from upstream: new hook) or by
+  `native_world_lifecycle`'s `WorldOpenFailed`, and each stop by `WorldCloseFinal`; a server whose loop fails reports `WorldCloseFailed` instead of stopping.
 
 - Mod block entities are sent to clients. Only declared types receive wire IDs after vanilla's, and several valid
   blocks can share a type. Server and client use its declared identity; `native_block_entity` supplies only initial data.
@@ -550,7 +569,8 @@ or transactions. Declarations still go on each event or registrar.
   block: keep them short.
 
 - Drawing mod block entities on the client. `native_block_entity_submit(pos, block, state, entity, draw)` runs once a frame
-  for each mod block entity in view, as vanilla's `BlockEntityRenderer.submit` does (within 64 blocks, in the frustum,
+  for each mod block entity in view, as vanilla's `BlockEntityRenderer.submit` does (within its view distance, 64 blocks
+  unless `native_block_entity_view_distance` answers otherwise, asked once per mod block and kept, again after a resource reload or a world change; Diverges from upstream: new hook; in the frustum,
   its chunk faded in), with the copy the server sent (`native_block_entity_update_tag`). It draws into the entity batch
   under `draw`'s pose stack (`push`, `pop`, `translate`, `rotate_about`, `scale`, in blocks from the block's corner, as
   vanilla's `PoseStack`): `native_draw_quad` (four corners and a sprite's UVs), `native_draw_cube` (a model element's box,
@@ -646,6 +666,8 @@ or transactions. Declarations still go on each event or registrar.
 `native_screen_opening(current, new, outcome)` (`ScreenEvent.Opening`), `native_screen_closing(screen)` (`ScreenEvent.Closing`) and `native_screen_init_post(screen)` (`ScreenEvent.Init.Post`) take a `NativeScreenView`. Every change of the game's screen (all of the game's screen assignments) goes through `Game::set_screen`, which mirrors `Gui.setScreen`: when a different screen would open, `screen_opening` fires first with the screen that is open (`current`) and the one about to open (`new`; the id `playing` is vanilla's null, no screen), and answers `ScreenOpening::Cancel` (the current screen stays) or `ScreenOpening::ModScreen` (the answering mod's own screen opens instead, if it can open there; the replacement fires nothing again); the first mod to answer wins, and the dispatch records its id, so a mod can open only its own screen. Then `screen_closing` fires for the screen being left (never for `playing`), and the new screen opens. The same screen again fires nothing, and a game where no mod listens to `screen_opening` or `screen_closing` assigns the screen with no event. `screen_init_post` is still observed once per frame (an open or a resize). The screens of the game's `Screen` list (inventory, containers, pause, options, chat, creative, stats, advancements, mod screens, dead, win…) announce themselves in `set_screen`, before they change, and honour `Cancel` and `ModScreen`. The overlays drawn over gameplay (sign editors, book edit/sign/view and lectern screens, dialogs, and the command, link, code-of-conduct and server-pack prompts) open through `Game::open_screen_overlay`, which fires `screen_opening` before the overlay is set and honours `Cancel` and `ModScreen` in the same way (a canceled server-pack prompt leaves its packs unanswered, a canceled code of conduct leaves the server waiting, as in NeoForge), then `screen_closing` for an overlay it replaces. The title's own screens (`world_select`, `world_create`, `world_edit`, `multiplayer`, `onboarding`…) open in the same way: `Title::set_mode` asks for the screen while a mod listens to `screen_opening` or `screen_closing`, and the game fires `screen_opening` (from the title screen shown) and `screen_closing` for the one left before it applies it, after the window event or control command that asked; `Cancel` keeps the screen shown, and `ModScreen` opens the screen asked for, since a mod's own screen can't open over the title. The multiplayer list's own steps (`add_server`, `edit_server`, `direct_connect`, `server_delete`, `friends_join`, and back to `multiplayer`) are title screens too and go the same way. The title appearing as a whole (at startup, when a world closes, after a disconnect or a failed join) and going (when a world opens) goes through `Game::show_title` and `Game::hide_title`: `screen_opening` (from no screen to the title's screen, or back) and `screen_closing` for what it leaves fire before the change, and `screen_init_post` follows an appearance; a `Cancel` doesn't keep the title shut when there is no world to show instead, nor keep it open over a world that opens. Still announced by the per-frame observer, through the same function and in the same order but after the change, so a mod's answer can't keep it shut: an overlay's closing. Overlay views use the full window as their rectangle and have no menu or title; anvil rename remains part of its inventory screen. Dialog states share the `dialog` id. A menu swapped inside the open inventory screen is not a change of screen.
 
 - `native_client_resources_reloaded()` fires on the render thread after successful client resource-pack application: the atlas, models, renderer and client caches already use the new resources. It covers selection/F3+T and server-pack reloads. Failed staging or application and initial startup do not fire it. This is a completion notification, not a reload-listener registration or staging API.
+
+- `native_client_stopping()` (Fabric's `ClientLifecycleEvents.CLIENT_STOPPING`; NeoForge has no event for it) fires once per game process, on the render thread, when the game shuts down: after the world the player was in is left and saved, with the settings and resources still held, so a listener can read them through the `ClientHost` and save its own client state. Closing the window, a quit shortcut and the stop signals reach it; a crash does not. A dedicated server and a splitscreen guest never fire it, as they never fire `client_setup`. Listeners are pure functions of the `ClientHost` reads and the mod's own state. Tick-time effect: none, it fires once at exit. Diverges from upstream: new hook.
 
 - `native_client_setup()` (NeoForge's `FMLClientSetupEvent`) fires once per game process on the render thread, after the first client load has applied and before the title screen's first frame, with the `ClientHost`. It is the moment `client_resources_reloaded` skips: that one never runs at initial startup and runs after every later reload, while this one runs once and never again. Returning to the title screen and opening another world, or adding a splitscreen player, is not a new start. NeoForge's `DeferredWorkQueue` has no counterpart (the listener already runs on the thread that would drain it; work a mod wants in parallel is its own). A dedicated server has no client and never fires it; `FMLDedicatedServerSetupEvent` is `server_about_to_start`. A failing listener is handled like any other listener of a hook. Listeners are pure functions of the `ClientHost` reads and the mod's own state.
 
@@ -2206,7 +2228,8 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
   `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
-  slot as `LivingEntity.setItemSlot` does (None or air empties it). Mobs store all eight slots (`Mob::equipment_stacks` reads them as a `horizon_items::equipment::Equipment`); players (the host and guests) hold an `Equipment` for body and saddle beside their own hand and armor fields, and save through its `read` / `write`. A player's
+  slot as `LivingEntity.setItemSlot` does (None or air empties it), and `set_hand_item(host, hand, stack)` puts one in
+  a hand as `LivingEntity.setItemInHand` does (the main hand's or the off hand's slot, written as `set_equipment` writes it). Mobs store all eight slots (`Mob::equipment_stacks` reads them as a `horizon_items::equipment::Equipment`); players (the host and guests) hold an `Equipment` for body and saddle beside their own hand and armor fields, and save through its `read` / `write`. A player's
   `body` and `saddle` are kept and saved in the `equipment` compound as vanilla does, and dropped on death, but nothing
   renders or sends them. Armor stands and the dragon hold all eight slots in the same `Equipment`, saved in `equipment`
   (omitted when empty). A stand keeps a body or saddle a mod writes (`setItemSlot` stores it; `ArmorStand.canUseSlot`

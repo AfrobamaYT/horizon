@@ -31,7 +31,9 @@ impl Launcher {
     pub(super) fn glass_servers_page(&mut self, cx: &mut Context<Self>) -> Div {
         let head = glass_ui::page_head(
             tr("Servers"),
-            tr("Host a world for your friends with buttons and no commands. The same program runs on a VPS."),
+            tr(
+                "Host a world for your friends with buttons and no commands. The same program runs on a VPS.",
+            ),
         );
         // The mockup always shows a server: the open one, else the first.
         if self.servers.open.is_none() {

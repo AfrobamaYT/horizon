@@ -280,6 +280,8 @@ fn item_default(component: &str) -> Option<Tag> {
     })
 }
 
+const SIGN_TEXT: [&str; 2] = ["minecraft:sign_text_front", "minecraft:sign_text_back"];
+
 const METADATA: [&str; 6] = ["id", "x", "y", "z", "keepPacked", "components"];
 
 /// `saveCustomOnly`: the saved NBT without its id, position and components.
@@ -401,7 +403,15 @@ pub fn place(saved: &Tag, components: &Compound, game_master: bool) -> Tag {
         match *part {
             Part::Same(key, component) => {
                 read.push(component);
-                set(key, get(component));
+                // A sign item that carries no text leaves the block's own: a content
+                // sign's declared colour and glow (`createDefaultSignText`).
+                let keeps_text = SIGN_TEXT.contains(&component)
+                    && !components.contains_key(&JavaString::from(component))
+                    && !components
+                        .contains_key(&JavaString::from(format!("!{component}").as_str()));
+                if !keeps_text {
+                    set(key, get(component));
+                }
             }
             Part::Items(size) => {
                 read.push(CONTAINER);
@@ -728,5 +738,26 @@ mod tests {
         assert_eq!(keys, ["minecraft:sign_text_front", "minecraft:waxed"]);
         let fresh = saved("{id:\"minecraft:sign\",x:0,y:0,z:0}");
         assert_eq!(place(&fresh, &patch, false), sign);
+    }
+
+    /// A content sign's block entity starts with its declared colour and glow. An item with
+    /// no sign text leaves them; an item with sign text replaces them.
+    #[test]
+    fn a_placed_sign_keeps_the_declared_text_unless_the_item_carries_text() {
+        let declared = saved(
+            "{id:\"minecraft:sign\",x:0,y:0,z:0,\
+             front_text:{messages:[\"\",\"\",\"\",\"\"],color:\"light_blue\",has_glowing_text:1b}}",
+        );
+        let bare = place(&declared, &Compound::new(), false);
+        let color = |tag: &Tag| tag.get("front_text").and_then(|t| t.get("color")).cloned();
+        assert_eq!(color(&bare), color(&declared));
+        assert_eq!(color(&bare), Some(Tag::String("light_blue".into())));
+
+        let written = saved(
+            "{id:\"minecraft:sign\",x:0,y:0,z:0,\
+             front_text:{messages:[\"a\",\"\",\"\",\"\"],color:\"red\"}}",
+        );
+        let placed = place(&declared, &pick(&written), false);
+        assert_eq!(color(&placed), Some(Tag::String("red".into())));
     }
 }

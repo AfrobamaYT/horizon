@@ -179,6 +179,8 @@ pub struct ItemInfo {
     pub modifiers: Vec<crate::item_data::ModifierRow>,
     /// `blocks_attacks` (shields).
     pub blocks_attacks: Option<BlocksAttacks>,
+    /// The arm pose a mod item declares for a humanoid holding it (`arm_pose`).
+    pub arm_pose: Option<horizon_core::arm_pose::ArmPose>,
     /// `weapon.disable_blocking_for_seconds` (axes).
     pub disable_blocking_seconds: f32,
     /// `weapon.item_damage_per_attack`, when the item is a weapon.
@@ -233,6 +235,8 @@ pub const CRAFT_REMAINDERS: [(&str, &str); 5] = [
 /// In a root built by `mod_content::build`: the content mods' items' crafting
 /// remainders, by item. Other roots have none.
 pub const MOD_CRAFT_REMAINDERS: &str = "horizon-mod-craft-remainders.json";
+/// The mod items' declared arm poses (`arm_pose`): item id to the pose's name.
+pub const MOD_ITEM_ARM_POSES: &str = "horizon-mod-item-arm-poses.json";
 /// Explicit item-to-block mappings from content mods (not block drops).
 pub const MOD_ITEM_BLOCKS: &str = "horizon-mod-item-blocks.json";
 /// A reduction of `blocks_attacks.damage_reductions`.
@@ -747,6 +751,14 @@ impl Items {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
             Err(e) => return Err(format!("{}: {e}", path.display()).into()),
         };
+        let path = root.join(MOD_ITEM_ARM_POSES);
+        let mod_arm_poses: HashMap<String, horizon_core::arm_pose::ArmPose> =
+            match fs::read(&path) {
+                Ok(bytes) => serde_json::from_slice(&bytes)
+                    .map_err(|e| format!("{}: {e}", path.display()))?,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+                Err(e) => return Err(format!("{}: {e}", path.display()).into()),
+            };
         let mut items = HashMap::new();
         let mut order = Vec::new();
         for (name, c) in defaults.entries() {
@@ -910,6 +922,7 @@ impl Items {
                         .as_bool()
                         .unwrap_or(true),
                     blocks_attacks: BlocksAttacks::parse(&c["minecraft:blocks_attacks"]),
+                    arm_pose: mod_arm_poses.get(name).copied(),
                     disable_blocking_seconds: c["minecraft:weapon"]["disable_blocking_for_seconds"]
                         .as_f64()
                         .unwrap_or(0.0) as f32,

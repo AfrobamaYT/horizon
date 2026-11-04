@@ -415,7 +415,13 @@ pub(super) fn emit(
         if in_game {
             let passed = host
                 .as_ref()
-                .map(|(_, param)| param.call.to_owned())
+                .map(|(_, param)| {
+                    if param.call == "&*self" && receiver_mut == Some(false) {
+                        "self".to_owned()
+                    } else {
+                        param.call.to_owned()
+                    }
+                })
                 .into_iter()
                 .chain(if declared.is_empty() {
                     args.iter()

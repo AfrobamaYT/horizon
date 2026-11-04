@@ -9,10 +9,17 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     track(root)?;
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
-        Target::Client => vec![
-            ("mod_api_host_generated.rs", generated.implementation),
-            ("mod_api_fire_generated.rs", generated.fire),
-        ],
+        Target::Client => {
+            let points = super::points::game_points(root)?;
+            let list = serde_json::to_string_pretty(&points).map_err(|e| e.to_string())?;
+            // The list the launcher routes injections by: the prebuilt game carries it.
+            fs::write(out_dir.join("points.json"), list + "\n").map_err(|e| e.to_string())?;
+            vec![
+                ("mod_api_host_generated.rs", generated.implementation),
+                ("mod_api_fire_generated.rs", generated.fire),
+                ("points_generated.rs", super::points::slots(&points)),
+            ]
+        }
         Target::Api => {
             println!("cargo:rerun-if-env-changed=HORIZON_MOD_API_INJECTIONS");
             let hooks = if let Some(path) = std::env::var_os("HORIZON_MOD_API_INJECTIONS") {
@@ -42,7 +49,9 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                 println!("cargo:rerun-if-changed={}", path.display());
             }
             fs::write(out_dir.join("mod-api.wit"), &wasm.wit).map_err(|e| e.to_string())?;
+            let points = super::points::records(&super::points::game_points(root)?);
             vec![
+                ("points_api_generated.rs", points),
                 ("mod_api_generated.rs", hooks),
                 ("mod_api_generated_host.rs", generated.host),
                 ("native_render_generated.rs", generated.render),
@@ -83,6 +92,10 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
     }
     directory(&root.join(super::catalog::DECLARATIONS), "rs", false)?;
     directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
+    println!(
+        "cargo:rerun-if-changed={}",
+        root.join("crates/horizon-client/src/game.rs").display()
+    );
     for hook in Catalog::load(root)?.hooks {
         if let Some((krate, path)) = free_function_source(&hook.target) {
             let (module, _) = path.rsplit_once("::").ok_or("target missing module")?;

@@ -91,6 +91,12 @@ use std::sync::{Arc, OnceLock};
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod __private;
+pub mod points {
+    //! The records of the game's injection points (#589): each `#[point]` function's listeners
+    //! get one, with the arguments the API carries, and `cancel` or `result` where the function's
+    //! return allows. A mod reaches a point through `[[native.injection]]` naming its function.
+    include!(concat!(env!("OUT_DIR"), "/points_api_generated.rs"));
+}
 mod phase;
 pub use horizon_mods::Side;
 pub use phase::{
@@ -308,6 +314,44 @@ pub struct NativeKeyMapping {
     pub down: bool,
     /// The name of the key it is bound to, as Controls shows it (`KeyMapping.getTranslatedKeyMessage`).
     pub label: Text,
+}
+
+/// The metadata of a server play packet observed by `Hooks::client_packet`.
+///
+/// Fields beyond the type id are exposed only for custom payloads. This is
+/// plain mod API data, not the game's decoded protocol enum.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct ClientPacket {
+    /// The protocol type, such as `minecraft:ping` or `minecraft:custom_payload`.
+    /// An id outside the protocol's packet table is reported as `horizon:unknown`.
+    pub id: Identifier,
+    /// The channel and bytes of a custom payload; `None` for other packet types.
+    pub custom_payload: Option<ClientPayload>,
+}
+
+impl ClientPacket {
+    /// Construct packet metadata with an optional custom payload.
+    pub fn new(id: Identifier, custom_payload: Option<ClientPayload>) -> Self {
+        Self { id, custom_payload }
+    }
+}
+
+/// The channel and uninterpreted bytes of a server custom payload.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct ClientPayload {
+    /// The namespaced plugin channel, exactly as received.
+    pub channel: String,
+    /// The payload bytes, without the packet id or channel prefix.
+    pub data: Vec<u8>,
+}
+
+impl ClientPayload {
+    /// Construct a custom payload without interpreting its bytes.
+    pub fn new(channel: String, data: Vec<u8>) -> Self {
+        Self { channel, data }
+    }
 }
 
 /// Camera values from the most recently extracted world frame.
@@ -1020,6 +1064,10 @@ pub struct NativeServerPlayer {
     /// (`living_incoming_damage`, `living_knockback`) give for the player; 0 when not known.
     /// API @API:server_player_entity_id@.
     pub entity_id: i32,
+    /// The IP address the player connects from, without the port (behind
+    /// a Velocity proxy, the address the proxy forwards; empty when not
+    /// known).
+    pub address: String,
 }
 
 /// A command a native mod adds, as one usage: words, then arguments
@@ -3017,8 +3065,6 @@ impl NativeTickId {
 #[allow(clippy::enum_variant_names)]
 #[non_exhaustive]
 pub enum WorldPhase {
-    /// World open ready.
-    WorldOpenReady,
     /// The open failed; `error_text` is the engine's own error text.
     WorldOpenFailed,
     /// World close final.
@@ -4412,6 +4458,7 @@ mod tests {
                 yaw: 0.0,
                 pitch: 0.0,
                 entity_id: 0,
+                address: String::new(),
             })
         }
         fn action_bar(&mut self, _uuid: u128, line: Text) -> bool {
@@ -5504,6 +5551,7 @@ pub(crate) mod built {
         pub yaw: f32,
         pub pitch: f32,
         pub entity_id: i32,
+        pub address: String,
     }
     impl From<NativeServerPlayer> for super::NativeServerPlayer {
         fn from(v: NativeServerPlayer) -> Self {
@@ -5518,6 +5566,7 @@ pub(crate) mod built {
                 yaw,
                 pitch,
                 entity_id,
+                address,
             } = v;
             Self {
                 uuid,
@@ -5530,6 +5579,7 @@ pub(crate) mod built {
                 yaw,
                 pitch,
                 entity_id,
+                address,
             }
         }
     }

@@ -909,6 +909,7 @@ impl Game<'_> {
                     yaw: g.yaw,
                     pitch: g.pitch,
                     entity_id: g.entity_id,
+                    address: g.address.ip().to_string(),
                 })
             })
             .collect()
@@ -1143,6 +1144,17 @@ impl Game<'_> {
                 yaw: p.yaw,
                 pitch: p.pitch,
                 entity_id: self.native_acting_entity() as i32,
+                address: self
+                    .lan
+                    .as_ref()
+                    .and_then(|host| {
+                        host.hub
+                            .guests
+                            .iter()
+                            .find(|g| Some(g.uuid) == self.lan_acting_uuid)
+                    })
+                    .map(|g| g.address.ip().to_string())
+                    .unwrap_or_default(),
             },
         ))
     }
@@ -1453,6 +1465,7 @@ impl Game<'_> {
             yaw: g.yaw,
             pitch: g.pitch,
             entity_id: g.entity_id,
+            address: g.address.ip().to_string(),
         });
         if !self.native_command_valid(line, permission) {
             return true;

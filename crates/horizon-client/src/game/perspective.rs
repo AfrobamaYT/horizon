@@ -208,6 +208,7 @@ fn load_player_type(root: &Path) -> Option<Arc<MobType>> {
             knockback_resistance: 0.0,
             jump_strength: 0.42,
             attributes: Default::default(),
+            item_stack_limits: Default::default(),
             gravity: 0.08,
             safe_fall_distance: 3.0,
             fall_damage_multiplier: 1.0,
@@ -255,6 +256,7 @@ fn wrap(d: f32) -> f32 {
 }
 impl Game<'_> {
     /// `key.togglePerspective`.
+    #[horizon_mod_api_macros::point(side = "client")]
     pub(super) fn cycle_camera(&mut self) {
         let previous = self.camera_type;
         self.camera_type = self.camera_type.cycle();
@@ -456,6 +458,11 @@ impl Game<'_> {
                 Default::default,
                 horizon_client::first_person::item_use_animation,
             );
+        let held_arm_pose = [self.selected, super::shield::OFFHAND_SLOT].map(|slot| {
+            self.stack_in(slot)
+                .and_then(|stack| self.items().get(&stack.item))
+                .and_then(|info| info.arm_pose)
+        });
         let charged = self.inventory[self.selected]
             .as_ref()
             .is_some_and(|s| s.data().is_some_and(|d| !d.charged.is_empty()));
@@ -567,6 +574,7 @@ impl Game<'_> {
         m.extra.using_item = using;
         m.extra.using_off_hand = using_off_hand;
         m.extra.use_animation = use_animation;
+        m.extra.held_arm_pose = held_arm_pose;
         m.extra.charged = charged;
         m.extra.ints[5] = charge_duration;
         m.extra.elytra.tick(fall_flying, crouching, velocity);
@@ -586,6 +594,7 @@ impl Game<'_> {
     /// agent's `turn`.
     /// The model's old pitch is the player's `xRotO`, which the turn moves
     /// with `xRot` (`turn_rotation`).
+    #[horizon_mod_api_macros::point(side = "client", hot)]
     pub(super) fn turn_player(&mut self, xo: f64, yo: f64) {
         let pitch_o = self.player_model.as_ref().map(|m| m.previous_head_pitch);
         let rotation = turn_rotation(self.yaw, self.pitch, pitch_o, xo, yo);

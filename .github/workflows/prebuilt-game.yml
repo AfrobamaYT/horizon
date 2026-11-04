@@ -5,7 +5,8 @@ name: prebuilt game
 # the launcher's pinned Rust (launcher/src/rust_toolchain.rs), because rustc reads only metadata from its own
 # version. Built once a day from main's head (a run whose commit already has a release stops early) and published as
 # a prerelease tagged prebuilt-<sha>, never marked latest, keeping the newest KEEP. Only compiler outputs go in:
-# tools/prebuilt_game.py refuses anything else, and nothing here reads vanilla data.
+# tools/prebuilt_game.py refuses anything else, and nothing here reads vanilla data. A dispatch on another branch
+# builds and smokes every OS and publishes nothing.
 on:
   schedule:
     - cron: '0 5 * * *'
@@ -34,7 +35,7 @@ jobs:
 
   build:
     needs: fresh
-    if: needs.fresh.outputs.needed == 'true' && github.ref == 'refs/heads/main'
+    if: needs.fresh.outputs.needed == 'true'
     name: build ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -60,7 +61,9 @@ jobs:
       run:
         shell: bash
     env:
-      ARCHIVE: horizon-prebuilt-${{ matrix.target }}${{ matrix.server && '-server' || '' }}.tar.gz
+      # v<layout>: the launcher asks only for the archive layout it reads (prebuilt_archive in
+      # crates/horizon-mods/src/index/native.rs); bump both when the folder's layout changes.
+      ARCHIVE: horizon-prebuilt-v1-${{ matrix.target }}${{ matrix.server && '-server' || '' }}.tar.gz
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,6 +101,8 @@ jobs:
 
   publish:
     needs: build
+    # A dispatch on any other branch builds and smokes every OS but releases nothing.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write

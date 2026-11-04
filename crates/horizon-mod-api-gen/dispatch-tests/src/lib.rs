@@ -96,6 +96,7 @@ mod tests {
         pub(super) struct StackedOnOther<'a> {
             pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
         }
+        pub(super) struct ClientPacket;
         pub(super) struct Corners;
         pub(super) struct Suggestion;
         pub(super) struct HudBatch;
@@ -192,6 +193,7 @@ mod tests {
         pub(super) struct NativeDataMapType;
         pub(super) struct NativeConfig;
         pub(super) struct NativeConfigFile;
+        pub(super) struct NativeReloadListener;
         pub(super) struct RecipeBookCategory;
         pub(super) struct RecipePropertyAddition;
         pub(super) struct NativeMapDecoration;
