@@ -128,6 +128,14 @@ This is the fork's compatibility policy, not NeoForge channel negotiation. **Div
 contains ids and versions only, with no side/hash fields or legacy format fallback; the old six-name display cap
 is removed. Upstream syncs must keep this contract and the configuration-phase check on both endpoints.
 
+A payload that breaks the format (an oversized list, a duplicate id, trailing bytes) is refused the same way a
+mismatch is: the join ends in a translated disconnect naming the decode error, never in play, and never as a
+silently empty list.
+
+Every Horizon join pays one mod-list exchange: the server's list, the client's answer and the ping that orders
+them are one request/response round trip in the configuration phase. A server with no both-side mods asks too;
+a vanilla or other non-Horizon client skips the branch. Nothing here repeats per tick.
+
 A block names its template and what differs from it:
 
 ```json

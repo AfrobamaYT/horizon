@@ -78,6 +78,7 @@
   "horizon.mods.missing": "Install these mods to join:\n%s",
   "horizon.mods.extra": "These mods are not on this server:\n%s",
   "horizon.mods.version": "%s (server %s, yours %s)",
+  "horizon.mods.unreadable": "Your mod list couldn't be read:\n%s",
   "horizon.mods.empty": "No mods: put .hmod files in the horizon-mods folder",
   "horizon.mods.stopped": " (Stopped)",
   "horizon.mods.not_built": " (Not built)",
