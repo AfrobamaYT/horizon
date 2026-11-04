@@ -483,9 +483,6 @@ fn not_built(
 }
 
 impl Game<'_> {
-    /// Lists the installed mods on the Mods page. Content mods load with the resources
-    /// (`content_root`); native ones are built into the game (`native_hooks.rs`). Unsupported
-    /// files get the same unreadable-file row as any other invalid package.
     /// Build this client's loop context over the loaded registries and the mods'
     /// current settings, and hand it to its audio. Called where a resource
     /// generation starts or reloads; a server has no sound and builds none.
@@ -500,6 +497,9 @@ impl Game<'_> {
         self.audio.set_loop_context(context);
     }
 
+    /// Lists the installed mods on the Mods page. Content mods load with the resources
+    /// (`content_root`); native ones are built into the game (`native_hooks.rs`). Unsupported
+    /// files get the same unreadable-file row as any other invalid package.
     pub(super) fn start_mods(&mut self) {
         let dir = Self::game_dir().join(mod_list::DIR);
         let mut paths = horizon_mods::find(&dir);
