@@ -3347,7 +3347,8 @@ mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `set_block(pos, state, flags)` is `Level.setBlock` on a whole state, as `LevelRef::set_block` takes it: it
 removes the old block's block entity and creates the new block's in the write (`LevelChunk.setBlockState`), runs
 the neighbour and shape updates `flags` ask for, and queues the write's level events in order. A mod block entity
-it creates starts with empty data, because `native_block_entity` needs a `Host`. It returns true when the block
+it creates starts with the data the `block_entity` hook gives, which is fired in the write and receives the level
+(`LevelSide`, read-only: vanilla's `newBlockEntity` gets no level), as the `Host`'s `native_set_block` fires it. It returns true when the block
 changed, and false off an authoritative server, for a position that is not loaded or outside the build height,
 an invalid state, or the state the block already has. It never loads a chunk. The game owns
 the tick queue; mods do not pass it back to these helpers.
@@ -3476,7 +3477,9 @@ r.block_entity_part(&press, Press).expect("native block entity type");
 ```
 
 The builder qualifies the type ID with the registering mod's namespace. It owns the save ID, wire type
-and valid blocks; `block_entity` returns only initial `Compound` data (or none for an empty compound).
+and valid blocks; `block_entity` returns only initial `Compound` data (or none for an empty compound). It is fired
+inside the write that creates the entity (`LevelChunk.setBlockState`) and receives the read-only level, a `LevelSide`,
+on a server and on a client of one.
 Unknown blocks, duplicate types, overlapping membership and attempts to own a `minecraft:` block are
 refused at load. Refused native block, item or block entity declarations stop startup, as does unreadable
 known-components input; the game does not fall back to vanilla content. An explicitly declared mod
@@ -3604,8 +3607,22 @@ entity energy and fluid handlers (NeoForge 26.3's `Capabilities.Energy.ENTITY` a
 `side` is the `Option<Direction>` of the entity the lookup reaches it from, `None` for no particular side. Vanilla
 answers neither; register a provider with `r.entity_capability(&ENTITY_ENERGY, "mymod:robot", |host, robot, side| …)`,
 which is given that side and may answer differently for each. An entity capability's context is its key's second type:
-`()` for `ENTITY_ITEMS`, `Option<Direction>` for these two. The existing `move_energy` and `move_resources` transfer
+`()` for `ENTITY_ITEMS`, `Option<Direction>` for these two and for `ENTITY_AUTOMATION`. The existing `move_energy` and `move_resources` transfer
 between these and block or item handlers inside a transaction.
+
+#### Entity automation
+
+`entity.capability(host, &ENTITY_AUTOMATION, side)` (NeoForge 26.3's `Capabilities.Item.ENTITY_AUTOMATION`, "automation-accessible
+inventory of an entity (boats, minecarts, etc)") is the items of an entity as a hopper reaches them, with the same
+`Option<Direction>` context as the energy and fluid keys. The game answers it for the container entities
+`EntitySelector.CONTAINER_ENTITY_SELECTOR` picks (chest and hopper minecarts, chest boats) with the slots their
+[`ENTITY_ITEMS`](#an-entitys-items) handler has; a player and a chested donkey, mule or llama answer none. A hopper
+pushing into the entity in front of it asks for the side it faces the entity from (`Up` for a hopper over it), a hopper
+pulling from the entity above it for `Down`, and a dropper for the side it drops onto. Beside the game's container
+entities, those entities at the target whose mod provider answers it join the candidates, and the hopper picks one at
+random with the draw `getEntityContainer` makes; a mod handler takes the container's place and moves one item at a time
+in a transaction, as a mod block's `ITEMS` does. `r.entity_capability(&ENTITY_AUTOMATION, "mymod:robot", |host, robot, side| …)`
+registers one, and `r.entity_capability_before_game` answers ahead of the game's own for a minecart or a boat.
 
 #### A menu's slots
 

@@ -429,7 +429,7 @@ mod tests {
         impl BlockEntityPart for Crate {
             fn block_entity(
                 &self,
-                _: HostSide<'_>,
+                _: LevelSide<'_>,
                 _: &mut BlockEntityEvent<'_>,
             ) -> Option<Compound> {
                 Some(Compound::from([("Amount".into(), Tag::Int(0))]))
@@ -464,7 +464,9 @@ mod tests {
         horizon_client::mod_api::install(mods.clone());
         horizon_client::mod_api::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root = super::super::mods::content_root(&base, &Default::default(), &[]).unwrap();
+        let root =
+            super::super::mods::content_root(&base, &Default::default(), &Default::default())
+                .unwrap();
         with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
