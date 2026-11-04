@@ -23,56 +23,56 @@ pub enum ItemPlace {
     /// the hotbar), the armour 100..=103 (feet to head), the off hand -106
     /// (`ItemAccess.forPlayerSlot`).
     PlayerSlot {
-        /// The player.
+        /// The player's UUID.
         player: u128,
-        /// The slot.
+        /// The slot number, as listed above.
         slot: i32,
     },
     /// What a player holds in `hand` (`forPlayerInteraction`).
     PlayerHand {
-        /// The player.
+        /// The player's UUID.
         player: u128,
-        /// The hand.
+        /// Which hand.
         hand: Hand,
     },
     /// The stack on the cursor of a player's open menu, `menu` (`forPlayerCursor`): nothing
     /// once the menu is closed, replaced or its player gone.
     PlayerCursor {
-        /// The menu.
+        /// The player's open menu.
         menu: MenuRef,
     },
     /// Slot `slot` of the block entity at `pos` as `side` reaches it, through its [`ITEMS`]
     /// handler (`forHandlerIndex`).
     BlockEntity {
-        /// The level.
+        /// The level the block entity is in.
         level: LevelRef,
-        /// The pos.
+        /// The block entity's position.
         pos: [i32; 3],
-        /// The side.
+        /// The face the handler is reached from; `None` for no particular side.
         side: Option<Direction>,
-        /// The slot.
+        /// The slot's index in the handler.
         slot: usize,
     },
     /// The stack of item entity `id` in the level in place.
     ItemEntity {
-        /// The id.
+        /// The item entity's network id.
         id: u32,
     },
     /// Slot `slot` of the inventory of entity `entity` in the level in place: a chest or hopper
     /// minecart's, a chest boat's, or a chested donkey's, mule's or llama's
     /// (`Capabilities.Item.ENTITY` through `forHandlerIndex`).
     EntitySlot {
-        /// The entity.
+        /// The entity's network id.
         entity: u32,
-        /// The slot.
+        /// The slot's index in the entity's inventory.
         slot: usize,
     },
     /// Slot `slot` of the item at `parent`, through its [`ITEM_ITEMS`] handler: a backpack in a
     /// backpack.
     Nested {
-        /// The parent.
+        /// The place of the stack that holds the container.
         parent: Box<ItemPlace>,
-        /// The slot.
+        /// The slot's index inside that stack's container.
         slot: usize,
     },
     /// Slot `slot` of a player's open menu, `menu`, a fork addition (NeoForge 26.3 has no
@@ -81,17 +81,17 @@ pub enum ItemPlace {
     /// [`MenuRef::slot_gives`]). Nothing where the menu is closed, replaced or its player gone;
     /// nothing goes into or out of the crafting result.
     MenuSlot {
-        /// The menu.
+        /// The open menu.
         menu: MenuRef,
-        /// The slot.
+        /// The slot's index in that menu.
         slot: usize,
     },
     /// A place a mod keeps, such as an accessory slot: read and written by the [`PlaceProvider`]
     /// it registered as `provider`, which alone knows what `key` means.
     Mod {
-        /// The provider.
+        /// The provider's registered name.
         provider: &'static str,
-        /// The key.
+        /// The provider's own key for the place.
         key: u64,
     },
 }
@@ -128,7 +128,7 @@ pub trait PlaceProvider: Send + Sync + 'static {
 /// An item capability: its name, the handler trait `T` it answers with, and the game's own
 /// provider, if the game has one.
 pub struct ItemCapabilityKey<T: ?Sized + 'static> {
-    /// The name.
+    /// The capability's name.
     pub name: &'static str,
     pub(super) default: Option<fn(&mut dyn ServerHost, &ItemPlace, &ItemStack) -> Option<Box<T>>>,
     pub(super) handler: PhantomData<fn() -> Box<T>>,

@@ -11,24 +11,24 @@ use std::{
 pub enum ReloadOrderError {
     /// A listener name has already been registered.
     DuplicateListener {
-        /// The id.
+        /// The listener's name.
         id: Identifier,
     },
     /// The same listener object has already been registered under another name.
     DuplicateObject {
-        /// The id.
+        /// The listener's name.
         id: Identifier,
-        /// The registered as.
+        /// The name the object was first registered under.
         registered_as: Identifier,
     },
     /// A dependency named a listener that has not been registered.
     UnknownListener {
-        /// The id.
+        /// The listener's name.
         id: Identifier,
     },
     /// The listed listeners belong to a dependency cycle.
     Cycle {
-        /// The listeners.
+        /// The names of the listeners in the cycle.
         listeners: Vec<Identifier>,
     },
 }
