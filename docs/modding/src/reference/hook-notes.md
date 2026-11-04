@@ -1870,6 +1870,15 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   to leave the position unchanged. Direct player flint-and-steel/fire-charge placement is not covered.
 - **`native_block_burn(dimension, pos, cancel)`** (on `GameLevel`): fire's burnout check is about to remove the block at
   `pos`. Set `cancel` to keep it.
+- **`native_crop_grow_pre(dimension, pos, state, result)`** and **`native_crop_grow_post(dimension, pos,
+  original_state, state)`** (on `GameLevel`): NeoForge's `CropGrowEvent.Pre` and `.Post`, at the random-tick growth of
+  crops (beetroot and torchflowers after their own 1 in 3 skip), stems, nether wart, cocoa, sweet berries, bamboo,
+  cactus, chorus flowers, sugar cane, kelp and the vines. `result` is a `NativeTriState`: `Default` keeps vanilla's
+  chance, `True` grows, `False` doesn't. Pre fires at NeoForge's positions (the block above for cactus and chorus,
+  the block grown into for kelp and vines). Vanilla's random roll is drawn first, in vanilla's order, and passed as
+  the default. Diverges from NeoForge, which draws bamboo's and sweet berries' roll later (only after the
+  other checks), so a NeoForge server's crops drift from vanilla's random sequence. Pitcher crops, bamboo
+  saplings and mangrove propagules don't fire, as in NeoForge.
 - **`native_dragon_egg_form(dimension, pos, cancel)`** (on `GameLevel`): the first Ender Dragon fight is about to place
   its egg at `pos`. Set `cancel` to leave the block unchanged.
 - **`native_fluid_level_change(dimension, pos, fluid, from, to, cancel)`** (on `GameLevel`): flowing `water` or `lava`
