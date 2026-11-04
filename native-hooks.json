@@ -1214,15 +1214,6 @@
       }
     },
     {
-      "name": "block_entity_inside",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_entity_inside",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "block_fall_on",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_fall_on",

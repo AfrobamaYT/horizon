@@ -553,14 +553,10 @@ impl ItemEntity {
             }
             crate::block_contact::swept_inside(
                 self.id as i32,
-                "minecraft:item",
                 self.previous,
                 self.position,
                 self.bounds(),
-                |p| {
-                    let state = world.block(p.x, p.y, p.z);
-                    (state, &facts.get(state).name)
-                },
+                |p| world.block(p.x, p.y, p.z),
             );
         }
         if self.velocity.subtract(step.old_velocity).length_squared() > 0.01 {

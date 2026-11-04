@@ -4458,6 +4458,7 @@ impl Game<'_> {
             }
         }
         self.tick_dropped_items(&mut round);
+        self.native_drain_entity_inside();
         self.native_tick_post_batch(round);
     }
     fn tick_dropped_items(&mut self, round: &mut native_ticks::TickRound) {
@@ -20744,12 +20745,6 @@ fn gameplay_tables(
     let (facts, gameplay_projection) =
         BlockFacts::load_with_projection(root, assets.registry, &behaviour_json, parallel)
             .map_err(|e| e.to_string())?;
-    horizon_client::block_contact::set_mod_blocks(
-        facts
-            .states
-            .iter()
-            .any(|s| !s.name.starts_with("minecraft:")),
-    );
     drop(facts_step);
     progress.set(2);
     let (light, motion) = std::thread::scope(|scope| {
@@ -22208,6 +22203,10 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     }
     let _ = horizon_client::health::HURT_SERVER.set(native_hooks::incoming_damage);
     let _ = horizon_client::block_contact::HOOK.set(native_hooks::block_contact);
+    let _ =
+        horizon_client::block_contact::ANY_INSIDE.set(horizon_client::mod_api::any_entity_inside);
+    let _ = horizon_client::block_contact::INSIDE_LISTENS
+        .set(horizon_client::mod_api::entity_inside_listens);
     let _ = horizon_client::health::KNOCKBACK.set(native_hooks::knockback);
     let _ = horizon_client::health::SHIELD_BLOCK.set(native_hooks::shield_block);
     let _ = horizon_client::health::DAMAGE_PRE.set(native_hooks::damage_pre);

@@ -1,0 +1,10 @@
+{
+  "hooks": [
+    {
+      "name": "entity_inside",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_inside",
+      "side": "server",
+      "mod_api": {"contract": "listen", "scope": "block", "key": "state"}
+    }
+  ]
+}
