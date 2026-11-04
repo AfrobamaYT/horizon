@@ -8,15 +8,32 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// A value from the game that the mod API can't hold (a stack that doesn't decode, a list
-/// of the wrong length): the game broke the interface, so the call traps.
+/// A value that can't cross between the game and the mod (a stack that doesn't decode, a list
+/// of the wrong length), and why: the call traps with it.
 #[derive(Debug)]
-pub(crate) struct Refused;
+pub(crate) struct Refused(std::borrow::Cow<'static, str>);
+
+impl Refused {
+    /// A value of the wrong shape: a list of the wrong length, a case or handler that doesn't
+    /// exist.
+    pub(crate) const SHAPE: Self = Self(std::borrow::Cow::Borrowed("a value of the wrong shape"));
+
+    /// A value its conversion refused, for the reason it gives.
+    pub(crate) fn because(why: impl std::fmt::Display) -> Self {
+        Self(why.to_string().into())
+    }
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 fn expect<T>(value: Result<T, Refused>) -> T {
     match value {
         Ok(value) => value,
-        Err(Refused) => panic!("the game sent a value the mod API can't hold"),
+        Err(why) => panic!("a value can't cross between the game and this mod: {why}"),
     }
 }
 
@@ -70,7 +87,7 @@ impl Drop for Keep {
 }
 
 fn array<T, const N: usize>(items: Vec<T>) -> Result<[T; N], Refused> {
-    items.try_into().map_err(|_| Refused)
+    items.try_into().map_err(|_| Refused::SHAPE)
 }
 
 /// The one `&'static str` for each distinct string: ids and dimensions the game names.

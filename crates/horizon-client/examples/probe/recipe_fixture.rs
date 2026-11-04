@@ -46,7 +46,7 @@ pub fn main() -> horizon_client::Result<()> {
                 for i in 0..n * n {
                     grid.push(stack(2 + i)?);
                 }
-                match recipes.find(&grid, n) {
+                match recipes.find(crate::test_resources::server_loop_context(), &grid, n) {
                     None => "none".to_owned(),
                     Some((id, result)) => {
                         let rest = recipes.remainders(id, &grid, n);
@@ -63,7 +63,11 @@ pub fn main() -> horizon_client::Result<()> {
             }
             "cook" => match stack(2)?.and_then(|s| {
                 recipes
-                    .cook(&format!("minecraft:{}", f[1]), &s)
+                    .cook(
+                        crate::test_resources::server_loop_context(),
+                        &format!("minecraft:{}", f[1]),
+                        &s,
+                    )
                     .map(|c| (c.id.clone(), c.result.clone(), c.experience, c.time))
             }) {
                 None => "none".to_owned(),
@@ -74,7 +78,7 @@ pub fn main() -> horizon_client::Result<()> {
             "stonecut" => match stack(1)? {
                 None => String::new(),
                 Some(s) => stations
-                    .stonecutter(&s)
+                    .stonecutter(crate::test_resources::server_loop_context(), &s)
                     .iter()
                     .map(|r| {
                         format!(
@@ -88,7 +92,13 @@ pub fn main() -> horizon_client::Result<()> {
             },
             "smith" => {
                 let (t, b, a) = (stack(1)?, stack(2)?, stack(3)?);
-                match stations.smithing_result(&enchantments, t.as_ref(), b.as_ref(), a.as_ref()) {
+                match stations.smithing_result(
+                    crate::test_resources::server_loop_context(),
+                    &enchantments,
+                    t.as_ref(),
+                    b.as_ref(),
+                    a.as_ref(),
+                ) {
                     None => "none".to_owned(),
                     Some(r) => canon_stack(Some(&r)),
                 }

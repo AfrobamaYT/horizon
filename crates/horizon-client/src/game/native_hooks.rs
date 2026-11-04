@@ -36,7 +36,9 @@ use horizon_client::{
     extras_hud::Corners,
     fast_hash::FxHashMap,
     first_person::Hand,
-    health::{DamageContainer, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock, Victim},
+    health::{
+        DamageContainer, DamageHooks, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock, Victim,
+    },
     hud::{HudBatch, rgba},
     item_tooltip::TooltipDisplay,
     items::ItemStack,
@@ -62,6 +64,7 @@ use horizon_world::{
     nbt::{Compound, Tag},
     registry::{BlockRegistry, BlockStateId},
 };
+use mod_api::__private::game::IngredientTest;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EnchantmentInfo,
@@ -8180,7 +8183,7 @@ impl Game<'_> {
     }
 }
 
-/// `native_living_use_totem` for the damage code (`health::USE_TOTEM`): whether it
+/// `native_living_use_totem` for the damage code: whether it
 /// canceled the totem. The entity and the source are named as the damage hook names them.
 pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
     if !mod_api::__private::listened(mod_api::HookId::LivingUseTotem) {
@@ -8363,7 +8366,7 @@ impl HitLevel<'_> {
     }
 }
 
-/// `native_living_incoming_damage` for the damage code (`health::HURT_SERVER`): whether it
+/// `native_living_incoming_damage` for the damage code: whether it
 /// canceled the hit.
 pub(super) fn incoming_damage(
     level: DamageLevel<'_>,
@@ -8390,7 +8393,7 @@ pub(super) fn incoming_damage(
     canceled
 }
 
-/// `native_living_damage_pre` for the damage code (`health::DAMAGE_PRE`).
+/// `native_living_damage_pre` for the damage code.
 pub(super) fn damage_pre(
     level: DamageLevel<'_>,
     hurting: Hurting<'_>,
@@ -8403,7 +8406,7 @@ pub(super) fn damage_pre(
     HitLevel(level).native_living_damage_pre(entity, kind, &source, container);
 }
 
-/// `native_living_damage_post` for the damage code (`health::DAMAGE_POST`).
+/// `native_living_damage_post` for the damage code.
 pub(super) fn damage_post(
     level: DamageLevel<'_>,
     hurting: Hurting<'_>,
@@ -8416,7 +8419,7 @@ pub(super) fn damage_post(
     HitLevel(level).native_living_damage_post(entity, kind, &source, container);
 }
 
-/// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`). Its one
+/// `native_living_shield_block` for the damage code. Its one
 /// caller. The hurt entity and the source are named as the damage hook names them.
 pub(super) fn shield_block(
     hurting: Hurting<'_>,
@@ -8463,7 +8466,7 @@ impl Game<'_> {
     }
 }
 
-/// `native_living_knockback` for the knockback code (`health::KNOCKBACK`): whether it
+/// `native_living_knockback` for the knockback code: whether it
 /// canceled the push. Its one caller. The pushed entity and the source are named as the
 /// damage hook names them.
 pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
@@ -8504,6 +8507,15 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
     canceled
 }
 
+/// The damage hooks every level of the game lends to its hits (`Game.damage_hooks`).
+pub(super) const DAMAGE_HOOKS: DamageHooks = DamageHooks {
+    incoming: Some(incoming_damage),
+    pre: Some(damage_pre),
+    post: Some(damage_post),
+    knockback: Some(knockback),
+    totem: Some(use_totem),
+    shield: Some(shield_block),
+};
 /// The contacts of a simulating entity with a block, as the simulation's own code (client-lib)
 /// reports them.
 pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
@@ -9974,6 +9986,15 @@ impl Game<'_> {
             .filter(|item| items.get(item).is_some())
             .collect();
         (!known.is_empty()).then(|| Ingredient::of(known))
+    }
+    /// Whether `stack` fits `ingredient` (`Ingredient.test`), matched with this
+    /// game's loop context.
+    pub(super) fn native_recipe_ingredient_test(
+        &self,
+        ingredient: &Ingredient,
+        stack: &ItemStack,
+    ) -> bool {
+        ingredient.test_in(&self.loop_context, stack)
     }
     /// A stack as a recipe's `result` names it: `id` (a bare one as
     /// `minecraft:`), `count` (1 by default, up to 99) and `components`. None

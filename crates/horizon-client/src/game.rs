@@ -2914,6 +2914,8 @@ struct Game<'a> {
     /// The side, registries and mod settings of this game's resource generation, which
     /// its menus lend to the hooks they fire inside a loop; rebuilt by `refresh_loop_context`.
     loop_context: Arc<horizon_world::native_load_context::LoopContext>,
+    /// The native damage hooks every level of this game lends to its hits.
+    damage_hooks: horizon_client::health::DamageHooks,
     music: horizon_client::music::MusicManager,
     /// The tracks native mods play over the music (`native_music_layers`).
     music_layers: horizon_client::music::MusicLayers,
@@ -9954,7 +9956,7 @@ impl Game<'_> {
         let scale = |id: i32| self.maps.data.get(&id).map(|m| m.scale);
         self.res
             .recipes()
-            .find_with(&grid, n, &scale)
+            .find_with(&self.loop_context, &grid, n, &scale)
             .map(|(name, result)| (name.to_owned(), result))
     }
     fn draw_inventory_slots(&mut self, batch: &mut HudBatch, ox: f32, oy: f32) {
@@ -10889,7 +10891,7 @@ impl Game<'_> {
                 .and_then(|k| self.world.block_entities.get_mut(&k))
         {
             // AbstractFurnaceBlockEntity.setItem: only a new input restarts cooking.
-            f.input_clicked(world_recipes!(self), before[0].clone());
+            f.input_clicked(&self.loop_context, world_recipes!(self), before[0].clone());
         }
         match equipment_before {
             Some(before) => self.player_equipment_changed(&before),
@@ -11597,7 +11599,7 @@ impl Game<'_> {
                 .container
                 .and_then(|k| self.world.block_entities.get_mut(&k))
         {
-            f.input_clicked(world_recipes!(self), before);
+            f.input_clicked(&self.loop_context, world_recipes!(self), before);
         }
     }
     /// `Camera.setRotation`: the camera's orientation, turned round in
@@ -19962,6 +19964,7 @@ impl<'a> Game<'a> {
             session_lock: None,
             audio,
             loop_context: Arc::new(res.core.item_data.context().loop_context(loop_side, [])),
+            damage_hooks: native_hooks::DAMAGE_HOOKS,
             music: {
                 // The manager starts with the saved option (MusicManager's constructor).
                 let mut music = horizon_client::music::MusicManager::default();
@@ -22651,13 +22654,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     {
         return Ok(());
     }
-    let _ = horizon_client::health::HURT_SERVER.set(native_hooks::incoming_damage);
     let _ = horizon_client::block_contact::HOOKS.set(native_hooks::BLOCK_CONTACT_HOOKS);
-    let _ = horizon_client::health::KNOCKBACK.set(native_hooks::knockback);
-    let _ = horizon_client::health::SHIELD_BLOCK.set(native_hooks::shield_block);
-    let _ = horizon_client::health::DAMAGE_PRE.set(native_hooks::damage_pre);
-    let _ = horizon_client::health::DAMAGE_POST.set(native_hooks::damage_post);
-    let _ = horizon_client::health::USE_TOTEM.set(native_hooks::use_totem);
     // Before any worker starts: on Linux they go behind the server thread
     // and the render thread.
     horizon_threads::put_helpers_behind();
