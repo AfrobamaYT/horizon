@@ -208,9 +208,15 @@ mod tests {
                 self.0
             }
         }
-        pub(super) trait LoopContext {}
+        pub(super) trait LoopContext {
+            fn side(&self) -> &'static str;
+        }
         pub(super) struct Loop(pub &'static str);
-        impl LoopContext for Loop {}
+        impl LoopContext for Loop {
+            fn side(&self) -> &'static str {
+                self.0
+            }
+        }
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
         #[derive(Clone, Copy)]
@@ -710,7 +716,7 @@ mod tests {
             &[]
         }
         fn menu_slot_rules(&self, context: &dyn LoopContext, event: &mut MenuSlotRulesEvent<'_>) {
-            assert_eq!(context.0, "loop");
+            assert_eq!(context.side(), "loop");
             event.may_place = false;
             event.max_stack = self.id;
         }
