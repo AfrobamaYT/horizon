@@ -13205,10 +13205,12 @@ impl Game<'_> {
         equipped.push((self.inventory[self.selected].as_ref(), "mainhand"));
         equipped.push((self.offhand.as_ref(), "offhand"));
         for (stack, slot) in equipped {
-            let Some(info) = stack.and_then(|s| world_items!(self).get(&s.item)) else {
+            let Some(stack) = stack else {
                 continue;
             };
-            for (attribute, id, amount, op, group) in &info.modifiers {
+            for (attribute, id, amount, op, group) in
+                stack.attribute_modifiers(world_items!(self)).iter()
+            {
                 // The attack code still reads the held item's attack damage and
                 // speed directly; the map copy is what `/attribute` reports.
                 if !horizon_client::living_attributes::modifier_applies(group, slot) {

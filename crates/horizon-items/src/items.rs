@@ -176,7 +176,7 @@ pub struct ItemInfo {
     /// `equippable.asset_id`: the equipment asset drawn when worn.
     pub equip_asset: Option<String>,
     /// All `attribute_modifiers`: (attribute, id, amount, operation, slot group).
-    pub modifiers: Vec<(String, String, f64, String, String)>,
+    pub modifiers: Vec<crate::item_data::ModifierRow>,
     /// `blocks_attacks` (shields).
     pub blocks_attacks: Option<BlocksAttacks>,
     /// `weapon.disable_blocking_for_seconds` (axes).

@@ -3,6 +3,32 @@
 //! `trim`, with their NBT form in vanilla's `components` compound.
 use crate::items::ItemStack;
 use horizon_world::nbt::{JavaString, Tag};
+
+/// One item attribute modifier, as `ItemAttributeModifiers.Entry` holds it:
+/// the attribute, the modifier's id, amount and operation, and the slot group.
+pub type ModifierRow = (String, String, f64, String, String);
+
+/// `ItemAttributeModifiers.CODEC`: the entries of an `attribute_modifiers`
+/// list (`type`, `id`, `amount`, `operation`, `slot` defaulting to `any`).
+/// An entry missing a field is skipped.
+pub fn modifier_rows(tag: &Tag) -> Vec<ModifierRow> {
+    use horizon_client_core::nbt_value::{float, text};
+    let Tag::List(entries) = tag else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|e| {
+            Some((
+                text(e.get("type"))?,
+                text(e.get("id"))?,
+                float(e.get("amount"))?,
+                text(e.get("operation"))?,
+                text(e.get("slot")).unwrap_or_else(|| "any".to_owned()),
+            ))
+        })
+        .collect()
+}
 use std::sync::Arc;
 
 /// Enchantment id and level, in insertion order.
@@ -407,6 +433,36 @@ impl ItemStack {
     /// `ItemStack.isSameItemSameComponents`.
     pub fn same_item_same_components(&self, other: &Self) -> bool {
         self.item == other.item && self.damage == other.damage && self.data() == other.data()
+    }
+    /// `ItemStack.matches`: the same item, count and components.
+    pub fn matches(&self, other: &Self) -> bool {
+        self.count == other.count && self.same_item_same_components(other)
+    }
+    /// `getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS)`: the stack's own
+    /// `attribute_modifiers` component when it has one (none at all when it
+    /// removed the component), else its item type's. Borrowed unless the stack
+    /// has its own list.
+    pub fn attribute_modifiers<'a>(
+        &self,
+        items: &'a crate::items::Items,
+    ) -> std::borrow::Cow<'a, [ModifierRow]> {
+        self.attribute_modifiers_or(items.get(&self.item).map_or(&[], |i| &i.modifiers))
+    }
+    /// `attribute_modifiers` with the item type's list given: `default`.
+    pub fn attribute_modifiers_or<'a>(
+        &self,
+        default: &'a [ModifierRow],
+    ) -> std::borrow::Cow<'a, [ModifierRow]> {
+        use std::borrow::Cow;
+        if let Some(data) = self.data() {
+            if data.other("!minecraft:attribute_modifiers").is_some() {
+                return Cow::Borrowed(&[]);
+            }
+            if let Some(tag) = data.other("minecraft:attribute_modifiers") {
+                return Cow::Owned(modifier_rows(tag));
+            }
+        }
+        Cow::Borrowed(default)
     }
     /// `ItemStack.transmuteCopy`: another item keeping every component.
     pub fn transmute(&self, item: &str, count: u32) -> Self {
@@ -1107,6 +1163,73 @@ pub fn command_components(text: &str) -> Result<Tag, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stack's own `attribute_modifiers` replace its type's whole; a removed
+    /// component leaves none (`getOrDefault`).
+    #[test]
+    fn a_stacks_own_attribute_modifiers_replace_the_types() {
+        let entry = |attribute: &str, id: &str, amount: f64, slot: Option<&str>| {
+            let mut e = vec![
+                ("type", Tag::String(attribute.into())),
+                ("id", Tag::String(id.into())),
+                ("amount", Tag::Double(amount.to_bits())),
+                ("operation", Tag::String("add_value".into())),
+            ];
+            if let Some(slot) = slot {
+                e.push(("slot", Tag::String(slot.into())));
+            }
+            Tag::compound(e)
+        };
+        let types: Vec<ModifierRow> = vec![(
+            "minecraft:attack_damage".into(),
+            "minecraft:base_attack_damage".into(),
+            6.0,
+            "add_value".into(),
+            "mainhand".into(),
+        )];
+        let mut stack = ItemStack::new("minecraft:diamond_sword", 1);
+        assert_eq!(&*stack.attribute_modifiers_or(&types), &types[..]);
+        stack.data_mut().set_other(
+            "minecraft:attribute_modifiers",
+            Some(Tag::List(vec![
+                entry("minecraft:armor", "test:plate", 2.0, Some("chest")),
+                entry("minecraft:luck", "test:charm", 1.0, None),
+                // No amount: not an entry.
+                Tag::compound([("type", Tag::String("minecraft:luck".into()))]),
+            ])),
+        );
+        let own = stack.attribute_modifiers_or(&types);
+        assert_eq!(
+            &*own,
+            &[
+                (
+                    "minecraft:armor".to_owned(),
+                    "test:plate".to_owned(),
+                    2.0,
+                    "add_value".to_owned(),
+                    "chest".to_owned()
+                ),
+                (
+                    "minecraft:luck".to_owned(),
+                    "test:charm".to_owned(),
+                    1.0,
+                    "add_value".to_owned(),
+                    "any".to_owned()
+                ),
+            ][..]
+        );
+        let mut removed = ItemStack::new("minecraft:diamond_sword", 1);
+        removed.data_mut().set_other(
+            "!minecraft:attribute_modifiers",
+            Some(Tag::compound(Vec::<(&str, Tag)>::new())),
+        );
+        assert!(removed.attribute_modifiers_or(&types).is_empty());
+        // `matches` also compares the count.
+        let one = ItemStack::new("minecraft:diamond_sword", 1);
+        assert!(one.matches(&ItemStack::new("minecraft:diamond_sword", 1)));
+        assert!(!one.matches(&ItemStack::new("minecraft:diamond_sword", 2)));
+        assert!(!one.matches(&stack));
+    }
 
     #[test]
     fn components_round_trip() {

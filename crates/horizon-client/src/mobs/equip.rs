@@ -65,7 +65,7 @@ fn group_matches(group: &str, slot: Slot) -> bool {
 /// own attribute value) plus the item's modifiers for `attribute` that apply
 /// in `slot`, in the order the item lists them.
 pub fn attribute_with(
-    modifiers: &[(String, String, f64, String, String)],
+    modifiers: &[horizon_items::item_data::ModifierRow],
     attribute: &str,
     base: f64,
     slot: Slot,

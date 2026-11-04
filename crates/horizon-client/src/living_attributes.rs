@@ -8,7 +8,10 @@
 //! because most mobs never need one and a map costs a few KiB.
 use crate::Result;
 use horizon_client_core::nbt_value::{float, string, text};
-use horizon_items::{equipment::Equipment, items::Items};
+use horizon_items::{
+    equipment::Equipment,
+    items::{ItemStack, Items},
+};
 use horizon_world::{
     attribute_map::ValueKind,
     attributes::{
@@ -180,7 +183,7 @@ pub struct LivingAttributes {
     map: OnceCell<Box<Live>>,
     /// The items whose modifiers the map holds, by `EquipmentSlot` ordinal
     /// (`LivingEntity.lastEquipmentItems`).
-    worn: Option<Box<[Option<Arc<str>>; 8]>>,
+    worn: Option<Box<[Option<ItemStack>; 8]>>,
     /// The loaded `attributes` entries, applied when the map is built.
     saved: Option<Box<[Tag]>>,
 }
@@ -291,11 +294,16 @@ impl LivingAttributes {
         items: &Items,
         seed: impl FnOnce() -> Vec<Tag>,
     ) -> Result<()> {
-        let item = |slot: usize| equipment.get(slot).map(|s| &*s.item);
+        let item = |slot: usize| equipment.get(slot);
         let mut changed = 0u8;
         for slot in 0..8 {
-            let was = self.worn.as_ref().and_then(|w| w[slot].as_deref());
-            if item(slot) != was {
+            let was = self.worn.as_ref().and_then(|w| w[slot].as_ref());
+            // `LivingEntity.equipmentHasChanged`: `!ItemStack.matches`.
+            let same = match (item(slot), was) {
+                (Some(now), Some(was)) => now.matches(was),
+                (now, was) => now.is_none() && was.is_none(),
+            };
+            if !same {
                 changed |= 1 << slot;
             }
         }
@@ -319,11 +327,11 @@ impl LivingAttributes {
             if changed & (1 << slot) == 0 {
                 continue;
             }
-            worn[slot] = item(slot).map(Arc::from);
+            worn[slot] = item(slot).cloned();
             let Some(new) = &worn[slot] else {
                 continue;
             };
-            if items.get(new).is_none_or(|i| i.modifiers.is_empty()) {
+            if new.attribute_modifiers(items).is_empty() {
                 continue;
             }
             if self.map.get().is_none() {
@@ -361,12 +369,15 @@ impl LivingAttributes {
     }
 }
 
-fn apply_item(map: &mut Live, item: &str, slot: usize, items: &Items, present: bool) -> Result<()> {
-    let Some(info) = items.get(item) else {
-        return Ok(());
-    };
+fn apply_item(
+    map: &mut Live,
+    stack: &ItemStack,
+    slot: usize,
+    items: &Items,
+    present: bool,
+) -> Result<()> {
     let slot_name = horizon_items::equipment::SLOT_NAMES[slot];
-    for (attribute, id, amount, operation, group) in &info.modifiers {
+    for (attribute, id, amount, operation, group) in stack.attribute_modifiers(items).iter() {
         if modifier_applies(group, slot_name) {
             set_modifier(map, attribute, id, *amount, operation, present)?;
         }

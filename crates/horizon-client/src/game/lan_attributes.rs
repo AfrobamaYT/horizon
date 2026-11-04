@@ -4,6 +4,7 @@
 //! sent, never the type's other defaults.
 use super::Game;
 use super::commands::Target;
+use horizon_client::items::ItemStack;
 use horizon_client::{
     effects,
     lan::attributes::{add_modifier, generic_syncable, instance, operation_named},
@@ -13,7 +14,6 @@ use horizon_client::{
     },
 };
 use horizon_protocol::packets::play::{AttributeModifier, AttributeSnapshot};
-use std::sync::Arc;
 
 /// `EquipmentSlotGroup.test`: whether a modifier's slot group covers a slot.
 fn slot_in_group(group: &str, slot: &str) -> bool {
@@ -40,19 +40,20 @@ impl Game<'_> {
         let e = &m.extra;
         use horizon_items::equipment::{CHEST, FEET, HEAD, LEGS, MAINHAND, OFFHAND};
         let slots = [
-            ("mainhand", e.slot_id(MAINHAND)),
-            ("offhand", e.slot_id(OFFHAND)),
-            ("feet", e.slot_id(FEET)),
-            ("legs", e.slot_id(LEGS)),
-            ("chest", e.slot_id(CHEST)),
-            ("head", e.slot_id(HEAD)),
+            ("mainhand", e.slot_stack(MAINHAND)),
+            ("offhand", e.slot_stack(OFFHAND)),
+            ("feet", e.slot_stack(FEET)),
+            ("legs", e.slot_stack(LEGS)),
+            ("chest", e.slot_stack(CHEST)),
+            ("head", e.slot_stack(HEAD)),
         ];
         let mut extra = Vec::new();
-        for (slot, item) in slots {
-            let Some(info) = item.and_then(|i| self.items().get(i)) else {
+        for (slot, stack) in slots {
+            let Some(stack) = stack else {
                 continue;
             };
-            for (attribute, _, amount, op, group) in &info.modifiers {
+            for (attribute, _, amount, op, group) in stack.attribute_modifiers(self.items()).iter()
+            {
                 if attribute == "minecraft:knockback_resistance" && slot_in_group(group, slot) {
                     let op = match operation_named(op) {
                         1 => Op::AddMultipliedBase,
@@ -110,14 +111,15 @@ impl Game<'_> {
         &self,
         entity: &str,
         base: impl Fn(&str) -> Option<f64>,
-        slots: impl IntoIterator<Item = (&'static str, Option<&'a Arc<str>>)>,
+        slots: impl IntoIterator<Item = (&'static str, Option<&'a ItemStack>)>,
         out: &mut Vec<AttributeSnapshot>,
     ) {
-        for (slot, item) in slots {
-            let Some(info) = item.and_then(|i| self.items().get(i)) else {
+        for (slot, stack) in slots {
+            let Some(stack) = stack else {
                 continue;
             };
-            for (attribute, id, amount, op, group) in &info.modifiers {
+            for (attribute, id, amount, op, group) in stack.attribute_modifiers(self.items()).iter()
+            {
                 if !slot_in_group(group, slot) {
                     continue;
                 }
@@ -255,7 +257,7 @@ impl Game<'_> {
         }
         use horizon_items::equipment::{CHEST, FEET, HEAD, LEGS, MAINHAND, OFFHAND};
         let e = &m.extra;
-        let item = |slot| e.slot_stack(slot).map(|s| &s.item);
+        let item = |slot| e.slot_stack(slot);
         self.equipment_attributes(
             kind,
             base,
@@ -293,7 +295,7 @@ impl Game<'_> {
         }
         let slots = horizon_client::entities::ArmorStand::SLOTS
             .into_iter()
-            .zip(equipment.iter().map(|s| s.as_ref().map(|s| &s.item)));
+            .zip(equipment.iter().map(Option::as_ref));
         self.equipment_attributes(KIND, |_| None, slots, &mut out);
         self.generic_attributes_of(Target::Stand(id), &mut out);
         out

@@ -244,4 +244,34 @@ mod tests {
             assert_eq!(Tag::List(list), saved);
         });
     }
+
+    /// The live map takes a held stack's own `attribute_modifiers`, and
+    /// another stack of the same item with other components is a change.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_stacks_own_modifiers_replace_its_items() {
+        use horizon_world::nbt::Tag;
+        with_game(|game| {
+            spawn(game);
+            let damage = "minecraft:attack_damage";
+            let mut own = ItemStack::new("minecraft:diamond_sword", 1);
+            own.data_mut().set_other(
+                "minecraft:attribute_modifiers",
+                Some(Tag::List(vec![Tag::compound([
+                    ("type", Tag::String(damage.into())),
+                    ("id", Tag::String("test:dull".into())),
+                    ("amount", Tag::Double(1.0f64.to_bits())),
+                    ("operation", Tag::String("add_value".into())),
+                    ("slot", Tag::String("mainhand".into())),
+                ])])),
+            );
+            game.mobs[0].set_equipment_stack(MAINHAND, Some(own));
+            game.tick_equipment_attributes();
+            // +1 from its own list, not the sword's +6.
+            assert_eq!(read(game, 12, damage), (Some(4.0), Some(3.0)));
+            game.mobs[0].set_equipment_stack(MAINHAND, stack("minecraft:diamond_sword"));
+            game.tick_equipment_attributes();
+            assert_eq!(read(game, 12, damage), (Some(9.0), Some(3.0)));
+        });
+    }
 }

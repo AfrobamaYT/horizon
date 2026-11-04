@@ -859,13 +859,12 @@ pub fn detail_lines(
         ));
     }
     lines.extend(dyed_line(stack, &display, false, translate).map(|l| l.0));
-    if let Some(info) = info {
-        lines.extend(
-            attribute_lines(&info.modifiers, None, translate)
-                .into_iter()
-                .map(|(line, _)| line),
-        );
-    }
+    let modifiers = stack.attribute_modifiers_or(info.map_or(&[], |i| &i.modifiers));
+    lines.extend(
+        attribute_lines(&modifiers, None, translate)
+            .into_iter()
+            .map(|(line, _)| line),
+    );
     lines.extend(ominous_bottle_line(stack, &display, translate).map(|l| l.0));
     lines
 }
