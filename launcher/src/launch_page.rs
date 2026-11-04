@@ -267,8 +267,12 @@ impl Launcher {
             .then(|| text(theme::LABEL).text_color(t.ink_soft).child("MB"));
         let input = self.field(Field::MemoryLimit, tr("No limit"), 120., cx);
         let about = match java {
-            Some(_) => "How much memory Java may use (-Xmx). Set it too low and the game can crash.",
-            None => "The game stays under this. Very low values make it slower, and it crashes only if it can't run at all. Change it while playing with /ramlimit.",
+            Some(_) => {
+                "How much memory Java may use (-Xmx). Set it too low and the game can crash."
+            }
+            None => {
+                "The game stays under this. Very low values make it slower, and it crashes only if it can't run at all. Change it while playing with /ramlimit."
+            }
         };
         let track = div()
             .id("launch-memory")
@@ -389,8 +393,12 @@ impl Launcher {
         };
         let f = launch::memory_fraction(memory, total).clamp(0., 1.);
         let about = match instance.java {
-            Some(_) => "How much memory Java may use (-Xmx). Set it too low and the game can crash.",
-            None => "The game stays under this. Very low values make it slower, and it crashes only if it can't run at all. Change it while playing with /ramlimit.",
+            Some(_) => {
+                "How much memory Java may use (-Xmx). Set it too low and the game can crash."
+            }
+            None => {
+                "The game stays under this. Very low values make it slower, and it crashes only if it can't run at all. Change it while playing with /ramlimit."
+            }
         };
         let track = div()
             .id("instance-memory")

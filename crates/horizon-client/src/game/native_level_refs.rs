@@ -278,14 +278,14 @@ impl Game<'_> {
         })
     }
     /// The block at `pos` without its properties: `minecraft:oak_stairs`.
-    /// None as for `block_state`.
+    /// None as for `block_state`. API 381.
     pub(super) fn native_level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
         self.native_level_state(level, pos)
             .map(|state| self.res.facts().get(state).name.to_string())
     }
     /// Property `key` of the block state at `pos` (`BlockState.getValue`):
     /// `east` for `facing`. None for a block without it, or as for
-    /// `block_state`.
+    /// `block_state`. API 381.
     pub(super) fn native_level_block_property(
         &self,
         level: LevelRef,
@@ -381,7 +381,7 @@ impl Game<'_> {
     /// (`Level.isLoaded`, which is false outside `isInValidBounds`): a block
     /// read or write there finds the world. False on a client or for a stale
     /// handle: the position is not loaded here. On a client, a chunk it holds is loaded
-    /// (`ClientLevel.hasChunkAt`).
+    /// (`ClientLevel.hasChunkAt`). API 381.
     pub(super) fn native_level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         self.native_level_read_world(level)
             .is_some_and(|w| w.is_loaded_at(pos[0], pos[1], pos[2]))
@@ -400,19 +400,19 @@ impl Game<'_> {
             .then(|| world_brightness(world, layer, pos))
     }
     /// The lowest block `y` and the height of the level
-    /// (`LevelHeightAccessor.getMinY`, `getHeight`).
+    /// (`LevelHeightAccessor.getMinY`, `getHeight`). API 381.
     pub(super) fn native_level_height(&self, level: LevelRef) -> Option<(i32, i32)> {
         self.native_level_world(level)
             .map(|w| (w.shape.min_y, w.shape.height))
     }
     /// The ticks the server has run (`Level.getGameTime`), shared by every
-    /// level as in vanilla.
+    /// level as in vanilla. API 381.
     pub(super) fn native_level_game_time(&self, level: LevelRef) -> Option<i64> {
         self.native_level_world(level)?;
         Some(self.world.game_time)
     }
     /// The time of day in ticks (`Level.getOverworldClockTime`), shared by
-    /// every level; it keeps counting past 24000.
+    /// every level; it keeps counting past 24000. API 381.
     pub(super) fn native_level_day_time(&self, level: LevelRef) -> Option<i64> {
         self.native_level_world(level)?;
         Some(self.world.day_time)

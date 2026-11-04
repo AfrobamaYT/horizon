@@ -152,6 +152,13 @@ impl Game<'_> {
     fn datapack_settings_path(&self) -> std::path::PathBuf {
         self.world_root.join("datapacks.json")
     }
+    /// Discover and load the data packs of the world (once, or on `/reload`).
+    pub(super) fn ensure_datapacks(&mut self) {
+        if self.fns.loaded || self.world_root.as_os_str().is_empty() {
+            return;
+        }
+        let _ = self.reload_datapacks(false, &self.level.enabled_features.clone());
+    }
     pub(super) fn reload_datapacks(
         &mut self,
         run_load: bool,
@@ -470,6 +477,7 @@ impl Game<'_> {
 
     // ---- commands ------------------------------------------------------------------
 
+    /// `FunctionCommand.decorateOutputIfNeeded`: report returned values even for failure.
     pub(super) fn cmd_function(&mut self, ctx: &Context) -> R<i32> {
         let Some(Arg::Resource(name)) = ctx.get("name").cloned() else {
             return Ok(0);
@@ -542,6 +550,10 @@ impl Game<'_> {
                 Outcome::Fail => {
                     any = true;
                     failed = true;
+                    self.feedback(Text::translate(
+                        "commands.function.result",
+                        &[Text::literal(f.id.clone()), Text::literal("0")],
+                    ));
                 }
             }
         }
@@ -945,10 +957,23 @@ impl Game<'_> {
 
     // ---- predicates -------------------------------------------------------------------
 
-    /// `if predicate`: a datapack predicate tested for the source entity.
+    /// `ResourceOrIdArgument.getLootPredicate`: accept the inline or named
+    /// predicate, then test it with the existing source entity and origin.
     pub(in crate::game) fn check_predicate(&mut self, id: &str) -> R<bool> {
-        let Some(json) = self.fns.store.predicates.get(id).cloned() else {
-            return Err(err("argument.predicate.unknown", &[&id]));
+        self.ensure_datapacks();
+        // ResourceOrIdArgument retains either an inline value or a named id.
+        // Both use the same evaluator and command-source context below.
+        let json = if id.starts_with('{') {
+            let (tag, _) = horizon_world::nbt::parse_snbt(id)
+                .map_err(|e| err("argument.nbt.invalid", &[&e]))?;
+            horizon_client::scoreboard::tag_to_json(&tag)
+        } else {
+            self.fns
+                .store
+                .predicates
+                .get(id)
+                .cloned()
+                .ok_or_else(|| err("argument.predicate.unknown", &[&id]))?
         };
         let source = self.command_source.unwrap_or_else(|| self.player_source());
         let view = source.entity.map(|t| self.entity_view_of(t));

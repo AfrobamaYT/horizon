@@ -60,7 +60,7 @@ impl Launcher {
                             }),
                         ),
                     ),
-                )
+                );
             }
             Load::Ready(r) => r,
         };

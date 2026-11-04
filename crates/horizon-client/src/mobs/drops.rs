@@ -623,6 +623,19 @@ pub fn finish_death(
     }
     // Allay.dropEquipment: its inventory, then the main-hand item unless it
     // prevents equipment drops.
+    if s == Species::Allay {
+        if let Some(stack) = m.extra.allay.as_mut().and_then(|st| st.inventory.take()) {
+            out.push(Drop::Stack(stack));
+        }
+        if let Some(stack) = slot_item(m, "mainhand")
+            && !d.loot.prevents_equipment_drop(&stack)
+        {
+            out.push(slot_drop(m, "mainhand", stack));
+            clear_slot(m, "mainhand");
+        }
+    }
+    // Allay.dropEquipment: its inventory, then the main-hand item unless it
+    // prevents equipment drops.
     if let Some((item, carried)) = allay_load {
         if carried > 0 {
             out.push(Drop::Item(loot_stack(&item, carried)));
