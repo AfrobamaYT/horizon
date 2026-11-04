@@ -2817,8 +2817,12 @@ impl Game<'_> {
                     data,
                     source,
                 } => {
-                    self.lan_events
-                        .push((*id, [pos.x, pos.y, pos.z], *data, *source));
+                    self.lan_events.push(super::QueuedLevelEvent {
+                        kind: *id,
+                        pos: [pos.x, pos.y, pos.z],
+                        data: *data,
+                        source: *source,
+                    });
                 }
                 // `ServerLevel.runBlockEvents` broadcasts a handled block
                 // event (`ClientboundBlockEventPacket`): the guest re-runs
@@ -2974,7 +2978,13 @@ impl Game<'_> {
                 );
             }
         }
-        for (kind, pos, data, source) in std::mem::take(&mut self.lan_events) {
+        for super::QueuedLevelEvent {
+            kind,
+            pos,
+            data,
+            source,
+        } in std::mem::take(&mut self.lan_events)
+        {
             if kind == 2001 {
                 host.broken
                     .push([f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2])]);

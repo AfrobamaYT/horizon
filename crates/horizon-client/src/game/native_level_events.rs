@@ -218,8 +218,24 @@ mod tests {
                     });
                     let events = game.level_events.clone();
                     game.lan_record_events(&events);
-                    assert_eq!(game.lan_events[1], (1500, [1, 64, 1], 0, None));
-                    assert_eq!(game.lan_events[2], (2005, [2, 64, 2], 7, None));
+                    assert_eq!(
+                        game.lan_events[1],
+                        super::super::QueuedLevelEvent {
+                            kind: 1500,
+                            pos: [1, 64, 1],
+                            data: 0,
+                            source: None,
+                        }
+                    );
+                    assert_eq!(
+                        game.lan_events[2],
+                        super::super::QueuedLevelEvent {
+                            kind: 2005,
+                            pos: [2, 64, 2],
+                            data: 7,
+                            source: None,
+                        }
+                    );
                 })
                 .unwrap();
                 let at = |id, x, z, data| LevelEvent::LevelEvent {

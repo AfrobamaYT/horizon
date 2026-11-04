@@ -2547,6 +2547,14 @@ struct WorldIcon {
     last_attempt: Option<Instant>,
 }
 
+#[derive(Debug, PartialEq)]
+struct QueuedLevelEvent {
+    kind: i32,
+    pos: [i32; 3],
+    data: i32,
+    source: Option<horizon_world::level::LevelEventPlayer>,
+}
+
 struct Game<'a> {
     /// Shared with an integrated server; `collision` and `motion` borrow from it.
     res: Arc<Resources>,
@@ -3317,13 +3325,8 @@ struct Game<'a> {
     /// The last `use_hand` that ended the click did so with `FAIL`, which
     /// does not consume the action (handleUseItemOn's ANY_BLOCK_USE).
     use_failed: bool,
-    /// Level events of this tick for the guests, and the guest acting now.
-    lan_events: Vec<(
-        i32,
-        [i32; 3],
-        i32,
-        Option<horizon_world::level::LevelEventPlayer>,
-    )>,
+    /// Level events of this tick for the guests, with their excluded source.
+    lan_events: Vec<QueuedLevelEvent>,
     /// Jukebox level events 1010 (song name) and 1011 (`None`) for the guests;
     /// the song's network id is only known once the hub is in hand.
     lan_songs: Vec<([i32; 3], Option<String>)>,
