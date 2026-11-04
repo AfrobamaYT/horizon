@@ -5061,6 +5061,21 @@ mod magic_absorb_tests {
     }
 
     #[test]
+    fn an_effect_counted_down_leaves_when_no_mod_holds_it() {
+        let mut m = witch();
+        m.add_effect_with("speed", 3, 0, false, true);
+        for _ in 0..4 {
+            ai::tick_effects(
+                &mut m,
+                crate::test_resources::server_loop_context(),
+                &mut crate::health::TestLevel::new(0).level(),
+                None,
+            );
+        }
+        assert!(m.extra.effects.is_empty(), "{:?}", m.extra.effects);
+    }
+
+    #[test]
     fn stronger_effect_restores_its_hidden_predecessor_after_expiry() {
         let mut m = witch();
         m.add_effect_with("speed", 200, 0, false, true);

@@ -8022,10 +8022,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_on_effect_added(self, effect, entity, amplifier);
     }
-    /// NeoForge's `MobEffectEvent.Added`, vanilla's `MobEffect.onEffectStarted`:
-    /// every `LivingEntity.addEffect` of the content mod's effect `effect`,
-    /// new or not, changed or not, after `native_on_effect_added`.
-    /// Server-side.
     /// The living entity an effect decision names: `Some(id)` a mob's
     /// `Entity.getId`, `None` the acting player. `None` when no native
     /// world runs, and the decision falls back to vanilla's.
@@ -8037,6 +8033,10 @@ impl Game<'_> {
         };
         Some(LivingRef::new(EntityRef::new(epoch, id)))
     }
+    /// NeoForge's `MobEffectEvent.Added`, vanilla's `MobEffect.onEffectStarted`:
+    /// every `LivingEntity.addEffect` of the content mod's effect `effect`,
+    /// new or not, changed or not, after `native_on_effect_added`.
+    /// Server-side.
     pub(super) fn native_mob_effect_added(
         &mut self,
         effect: &str,

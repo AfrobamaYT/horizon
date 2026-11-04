@@ -2875,7 +2875,7 @@ pub(crate) fn tick_effects(
         if let Some(mods) = mods {
             mods.effect_expired(mob_id, e.0, e.2, &mut cancel);
         }
-        !cancel
+        cancel
     });
     if m.effects_dirty {
         let invisible = m.has_effect("minecraft:invisibility");
