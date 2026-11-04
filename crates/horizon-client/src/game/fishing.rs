@@ -351,13 +351,14 @@ impl Game<'_> {
             // rod's damage, or cancel the catch.
             let mut rod_damage = if hook.on_ground { 2 } else { 1 };
             if let Some(player) = self.lan_acting_uuid
-                && crate::mod_api::listened(crate::mod_api::HookId::ItemFished)
+                && mod_api::__private::listened(mod_api::HookId::ItemFished)
             {
-                let fished = horizon_client::mod_api::NativeItemFished {
-                    hook: hook.id,
-                    position: [hook.position.x, hook.position.y, hook.position.z],
-                    drops: &caught,
-                };
+                let fished =
+                    mod_api::NativeItemFished::from(mod_api::__private::built::NativeItemFished {
+                        hook: hook.id,
+                        position: [hook.position.x, hook.position.y, hook.position.z],
+                        drops: &caught,
+                    });
                 let mut cancel = false;
                 let entity_id = self.own_entity_id();
                 self.native_item_fished(player, entity_id, &fished, &mut rod_damage, &mut cancel);
@@ -1043,8 +1044,7 @@ impl Game<'_> {
             Some(eye + point)
         } else {
             let model = self.player_model.as_ref()?;
-            let body =
-                horizon_client::camera::lerp(alpha as f32, model.previous_body_yaw, model.body_yaw);
+            let body = mod_api::camera::lerp(alpha as f32, model.previous_body_yaw, model.body_yaw);
             let angle = f64::from(body * (std::f64::consts::PI / 180.0) as f32);
             let (sin, cos) = (f64::from(trig::sin(angle)), f64::from(trig::cos(angle)));
             let right = f64::from(invert) * 0.35;
@@ -1456,11 +1456,8 @@ impl Game<'_> {
             .filter_map(|h| {
                 let owner = self.mobs.iter().find(|m| m.id == h.owner)?;
                 let feet = lerp(owner.previous, owner.position);
-                let body = horizon_client::camera::lerp(
-                    alpha as f32,
-                    owner.previous_body_yaw,
-                    owner.body_yaw,
-                );
+                let body =
+                    mod_api::camera::lerp(alpha as f32, owner.previous_body_yaw, owner.body_yaw);
                 let angle = f64::from(body * (std::f64::consts::PI / 180.0) as f32);
                 let (sin, cos) = (f64::from(trig::sin(angle)), f64::from(trig::cos(angle)));
                 // The right arm; a crouching owner's eyes are lower.

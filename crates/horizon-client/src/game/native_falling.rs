@@ -6,6 +6,7 @@
 use super::{FallingBlock, Game};
 use horizon_core::{geometry::Vec3, position::BlockPos};
 use horizon_world::registry::BlockStateId;
+pub use mod_api::game::NativeFalling;
 
 /// The most falling blocks a level holds before `native_spawn_falling_block`
 /// refuses more: a mod's debris shouldn't take the server's tick with it.
@@ -13,26 +14,6 @@ pub(super) const NATIVE_FALLING_MAX: usize = 1024;
 /// The largest speed a thrown block starts with, in blocks a tick on each
 /// axis (`Entity.setDeltaMovement` takes any; a packet's speed is cut to 3.9).
 const NATIVE_FALLING_MAX_SPEED: f64 = 3.9;
-
-/// What a mod's falling block does when it lands and when it hits.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NativeFalling {
-    /// `FallingBlockEntity.dropItem`: whether it drops as an item where it
-    /// can't be placed.
-    pub drop_item: bool,
-    /// `FallingBlockEntity.hurtEntities`, at 2 a block fallen and at most 40,
-    /// an anvil's.
-    pub hurts: bool,
-}
-
-impl Default for NativeFalling {
-    fn default() -> Self {
-        Self {
-            drop_item: true,
-            hurts: false,
-        }
-    }
-}
 
 /// `velocity` with each axis cut to the largest start speed; none for a
 /// value that isn't finite.

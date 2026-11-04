@@ -1,22 +1,22 @@
 //! Prepare server listeners against the new packs before publishing any data.
+use mod_api::__private::game::*;
 
 #[cfg(test)]
 #[path = "server_reload_tests.rs"]
 mod tests;
+use super::packs::reload_files;
 use super::{Game, functions::PackStack};
-pub(super) use horizon_client::mod_api::reload::ReloadStageError;
-use horizon_client::{
-    datapack::DataStore,
-    mod_api::{
-        FileToIdConverter, Identifier, ServerReloadContext, ServerReloadListener,
-        ServerReloadListeners, ServerReloadResources, VanillaServerListeners,
-        reload::{apply_listeners, prepare_listeners, reload_files},
-    },
+use horizon_client::datapack::DataStore;
+pub(super) use mod_api::__private::reload::ReloadStageError;
+use mod_api::{
+    __private::reload::{apply_listeners, prepare_listeners},
+    FileToIdConverter, Identifier, ServerReloadContext, ServerReloadListener,
+    ServerReloadListeners, ServerReloadResources, VanillaServerListeners,
 };
 
 pub(super) type PreparedReload = PreparedStep<Box<DataStore>>;
 
-use horizon_client::mod_api::reload::PreparedStep;
+use mod_api::__private::reload::PreparedStep;
 
 /// Everything one successful reload publishes: its apply steps, then the
 /// retained listeners' store.
@@ -52,7 +52,7 @@ impl Game<'_> {
         stack: &PackStack,
     ) -> Result<PreparedServerReload, ReloadStageError> {
         // Nobody listens: no registration graph, only the vanilla function library.
-        if !crate::mod_api::listened(crate::mod_api::HookId::AddServerReloadListeners) {
+        if !mod_api::__private::listened(mod_api::HookId::AddServerReloadListeners) {
             return Ok(PreparedServerReload {
                 steps: vec![PreparedStep::Vanilla(Box::new(functions_store(stack)))],
                 resources: ServerReloadResources::default(),

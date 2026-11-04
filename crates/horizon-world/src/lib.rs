@@ -96,6 +96,7 @@ pub mod movement_properties;
 pub mod movement_restitution;
 pub mod movement_statistics;
 pub mod movement_support;
+pub mod native_load_context;
 pub mod native_load_hooks;
 pub mod nbt;
 pub mod object_open_map;

@@ -24,6 +24,7 @@ pub mod scoreboard;
 pub mod snbt;
 pub mod sound_source;
 pub mod subscribers;
+pub mod suggestion;
 pub mod text;
 pub mod uuid;
 pub mod who;

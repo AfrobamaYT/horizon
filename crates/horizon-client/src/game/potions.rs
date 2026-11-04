@@ -20,7 +20,6 @@ use horizon_client::{
     items::ItemStack,
     mesher::Vertex,
     mobs::{Damage, DamageKind, Mob, Who},
-    mod_api::{EffectTickChange, EntityRef, LivingRef, NativePlayerFood},
     particles::{ParticleOptions, ParticleType},
     projectiles::{Projectile, ProjectileKind},
     text::Text,
@@ -29,6 +28,7 @@ use horizon_core::{
     geometry::{Aabb, Axis, Direction, Vec3},
     random::{LegacyRandom, RandomSource},
 };
+use mod_api::{EffectTickChange, EntityRef, LivingRef, NativePlayerFood};
 
 /// A thrown splash or lingering potion in flight.
 #[derive(Clone, Debug)]
@@ -983,11 +983,13 @@ impl Game<'_> {
                     let max_health =
                         player.attribute("minecraft:max_health").unwrap_or(20.0) as f32;
                     let food = &player.health.food;
-                    let food = Some(NativePlayerFood {
-                        level: food.food,
-                        saturation: food.saturation,
-                        exhaustion: food.exhaustion,
-                    });
+                    let food = Some(NativePlayerFood::from(
+                        mod_api::__private::built::NativePlayerFood {
+                            level: food.food,
+                            saturation: food.saturation,
+                            exhaustion: food.exhaustion,
+                        },
+                    ));
                     let (keep, changes) = self.mod_effect_tick(
                         e.id,
                         None,
@@ -1001,13 +1003,14 @@ impl Game<'_> {
                     actions.extend(changes.into_iter().map(|change| match change {
                         EffectTickChange::Heal(amount) => EffectAction::Heal(amount),
                         EffectTickChange::Hurt(source, amount) => EffectAction::Hurt(
-                            super::creatures::damage_type(source.mob_kind(), false),
+                            super::creatures::damage_type(source.into(), false),
                             amount,
                         ),
                         EffectTickChange::AddExhaustion(amount) => EffectAction::Exhaust(amount),
                         EffectTickChange::Eat(nutrition, saturation) => {
                             EffectAction::Eat(nutrition, saturation)
                         }
+                        _ => unreachable!("EffectTickChange: unhandled variant"),
                     }));
                     if keep {
                         OmenTick::Continue
@@ -2026,7 +2029,7 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
             match change {
                 EffectTickChange::Heal(amount) => mob.heal(amount),
                 EffectTickChange::Hurt(source, amount) => {
-                    mob.damage(level, amount, Damage::of(source.mob_kind()));
+                    mob.damage(level, amount, Damage::of(source.into()));
                 }
                 _ => {}
             }
@@ -2053,7 +2056,7 @@ mod tests {
     use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};
 
     fn effect_test_mod() {
-        use horizon_client::mod_api::{self, *};
+        use mod_api::{self, *};
         struct TestMod;
         #[mod_api::__subscriptions]
         impl Hooks for TestMod {
@@ -2078,7 +2081,7 @@ mod tests {
                 }
             }
         }
-        crate::mod_api::install(std::sync::Arc::from([crate::mod_api::ModEntry::new(
+        mod_api::__private::install(std::sync::Arc::from([mod_api::ModEntry::new(
             "test-potions",
             Box::new(TestMod),
         )]));
@@ -2187,13 +2190,13 @@ mod tests {
 
     #[test]
     fn effect_damage_sources_retain_their_ids() {
-        use horizon_client::mod_api::NativeEffectDamage;
+        use mod_api::NativeEffectDamage;
         for (source, expected) in [
             (NativeEffectDamage::Magic, "minecraft:magic"),
             (NativeEffectDamage::Wither, "minecraft:wither"),
         ] {
             assert_eq!(
-                super::super::creatures::source_damage_type(Damage::of(source.mob_kind())),
+                super::super::creatures::source_damage_type(Damage::of(source.into())),
                 expected
             );
         }

@@ -215,7 +215,7 @@ impl Game<'_> {
             return;
         }
         // No mod, no name copied: the per-tick counters come through here.
-        let acting = if !crate::mod_api::listened(crate::mod_api::HookId::PlayerStatAward) {
+        let acting = if !mod_api::__private::listened(mod_api::HookId::PlayerStatAward) {
             None
         } else {
             self.lan_acting_uuid.zip(self.lan_acting_name.clone())
@@ -412,8 +412,7 @@ impl Game<'_> {
                 players.push(PhantomTarget {
                     position: Vec3::new(g.position[0], g.position[1], g.position[2]),
                     since_rest: since,
-                    identity: (!horizon_client::mod_api::mods().is_empty())
-                        .then(|| (g.uuid, g.name.clone())),
+                    identity: (!mod_api::mods().is_empty()).then(|| (g.uuid, g.name.clone())),
                 });
             }
         }
@@ -444,6 +443,7 @@ impl Game<'_> {
             PhantomSpawnResult::Allow => true,
             PhantomSpawnResult::Default => pos[1] >= 63 && self.can_see_sky(pos),
             PhantomSpawnResult::Deny => false,
+            _ => unreachable!("PhantomSpawnResult: unhandled variant"),
         };
         if !attempt {
             return;

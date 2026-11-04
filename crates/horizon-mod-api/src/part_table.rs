@@ -103,7 +103,7 @@ pub struct Parts {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct HookParts {
+pub struct HookParts {
     blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
     block_states: Vec<Option<NonZeroU32>>,
     block_slices: Vec<Arc<[Attached<dyn BlockPart>]>>,
@@ -177,7 +177,7 @@ struct Installed {
     hook_bits: Vec<bool>,
 }
 
-pub(crate) fn block_entity_types() -> &'static [BlockEntityType] {
+pub fn block_entity_types() -> &'static [BlockEntityType] {
     installed().map_or(&[], |installed| &installed.block_entity_types)
 }
 
@@ -193,7 +193,7 @@ pub(super) fn installed_controllers() -> &'static [ControllerInfo] {
 }
 
 static INSTALLED: OnceLock<Installed> = OnceLock::new();
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 thread_local! {
     /// Tests install their own parts per thread, as they do their mods (`TEST_MODS`).
     static TEST_PARTS: Cell<Option<&'static Installed>> = const { Cell::new(None) };
@@ -210,7 +210,7 @@ thread_local! {
 }
 
 fn installed() -> Option<&'static Installed> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     if let Some(installed) = TEST_PARTS.get() {
         return Some(installed);
     }
@@ -218,18 +218,18 @@ fn installed() -> Option<&'static Installed> {
 }
 
 /// Whether any installed part subscribes to a scoped hook.
-pub(crate) fn has_part_hook(hook: HookId) -> bool {
+pub fn has_part_hook(hook: HookId) -> bool {
     installed().is_some_and(|installed| installed.hook_bits[hook as usize])
 }
 
 /// Whether any part listens to `entity_inside`.
-pub(crate) fn any_entity_inside() -> bool {
+pub fn any_entity_inside() -> bool {
     has_scoped_hook(HookId::EntityInside)
 }
 
 /// Whether a part listens to `entity_inside` for `state`: one table lookup, and
 /// only once some part listens at all.
-pub(crate) fn entity_inside_listens(state: BlockStateId) -> bool {
+pub fn entity_inside_listens(state: BlockStateId) -> bool {
     any_entity_inside()
         && parts("entity_inside")
             .for_hook(HookId::EntityInside)
@@ -237,12 +237,12 @@ pub(crate) fn entity_inside_listens(state: BlockStateId) -> bool {
 }
 
 /// Preserve the no-mod fast path for level hooks.
-pub(crate) fn has_scoped_hook(hook: HookId) -> bool {
+pub fn has_scoped_hook(hook: HookId) -> bool {
     !super::mods().is_empty() && has_part_hook(hook)
 }
 
 /// The parts table a dispatch reads: the process-wide one, or this game thread's.
-pub(crate) enum PartsRef {
+pub enum PartsRef {
     Shared(&'static Parts),
     Game(Rc<Parts>),
 }
@@ -259,8 +259,8 @@ impl std::ops::Deref for PartsRef {
 
 /// The parts hook `hook` asks: this game thread's resolved table, then the shared key parts
 /// when there are no tag parts, then the off-thread path.
-pub(crate) fn parts(hook: &'static str) -> PartsRef {
-    #[cfg(test)]
+pub fn parts(hook: &'static str) -> PartsRef {
+    #[cfg(any(test, feature = "testing"))]
     TEST_PART_LOOKUPS.set(TEST_PART_LOOKUPS.get() + 1);
     let Some(installed) = installed() else {
         return PartsRef::Shared(&NO_PARTS);
@@ -285,12 +285,12 @@ pub(crate) fn parts(hook: &'static str) -> PartsRef {
 }
 
 /// Mark this thread as running a `Game`, whose dispatches read its own resolved parts.
-pub(crate) fn mark_game_thread() {
+pub fn mark_game_thread() {
     GAME_THREAD.set(true);
 }
 
 /// The ids a game knows, which a part's key must name.
-pub(crate) struct KnownIds<'a> {
+pub struct KnownIds<'a> {
     pub block: &'a dyn Fn(&str) -> bool,
     pub item: &'a dyn Fn(&str) -> bool,
     pub state_count: usize,
@@ -301,7 +301,7 @@ pub(crate) struct KnownIds<'a> {
 /// tag name without `#` to members). Each run starts again from the key parts, so `/reload` drops
 /// what left a tag. A key naming a block or item the game doesn't know is an error, naming the
 /// mod; a missing tag or a part a tag gives twice is a warning, and the earlier mod's part stays.
-pub(crate) fn resolve_parts(
+pub fn resolve_parts(
     block_tags: &HashMap<String, HashSet<String>>,
     item_tags: &HashMap<String, HashSet<String>>,
     known: KnownIds<'_>,
@@ -408,7 +408,7 @@ fn add_tagged<P: ?Sized>(
 }
 
 impl HookParts {
-    pub(crate) fn block_state(&self, state: BlockStateId) -> &[Attached<dyn BlockPart>] {
+    pub fn block_state(&self, state: BlockStateId) -> &[Attached<dyn BlockPart>] {
         self.block_states
             .get(state.0 as usize)
             .and_then(|index| *index)
@@ -1123,7 +1123,7 @@ pub(super) fn registered_controllers(mods: &[ModEntry]) -> Vec<ControllerInfo> {
 
 /// Builds the parts from every mod's [`Hooks::register`](super::Hooks::register), in dispatch order. Once, at startup;
 /// the error lists every part refused, naming its mods.
-pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
+pub fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
     let mut installed = if mods.is_empty() {
         Installed::default()
     } else {
@@ -1152,24 +1152,28 @@ pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
             installed.hook_bits[*hook as usize] = true;
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     TEST_PARTS.set(Some(Box::leak(Box::new(installed))));
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "testing")))]
     if INSTALLED.set(installed).is_err() {
         log::warn!("Mod parts already installed; keeping the first table");
     }
     Ok(())
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "testing"))]
+pub mod tests {
     use super::super::*;
-    use super::{Attached, KnownIds, mark_game_thread, resolve_parts};
-    use crate::mod_api;
+    use super::mark_game_thread;
+    #[cfg(test)]
+    use super::{Attached, KnownIds, resolve_parts};
+    #[cfg(test)]
     use std::any::{TypeId, type_name};
+    #[cfg(test)]
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
 
+    #[cfg(test)]
     fn type_key(id: &str) -> BlockEntityTypeKey {
         BlockEntityTypeKey(id.into())
     }
@@ -1205,7 +1209,7 @@ pub(crate) mod tests {
         struct Invalid;
         #[mod_api::__subscriptions]
         impl super::super::Hooks for Invalid {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
                 for path in ["", "other:press", "Uppercase", "has space"] {
                     r.block_entity_type(path).build();
                 }
@@ -1272,7 +1276,7 @@ pub(crate) mod tests {
         }
     }
     /// The gold a `doubler:hoard` block entity holds, kept beside it.
-    pub(crate) const HOARD: AttachmentType<u32> = AttachmentType {
+    pub const HOARD: AttachmentType<u32> = AttachmentType {
         namespace: "test",
         name: "hoard",
         default: || 0,
@@ -1281,8 +1285,7 @@ pub(crate) mod tests {
         sync: false,
     };
     /// How many times a `doubler:hoard` was asked about its removal.
-    pub(crate) static HOARD_ASKED: std::sync::atomic::AtomicU32 =
-        std::sync::atomic::AtomicU32::new(0);
+    pub static HOARD_ASKED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     /// The block entity of type `doubler:hoard`, held by block `test:hoard`: when it is
     /// removed it gives back the gold its `HOARD` counts.
     struct Hoard;
@@ -1322,8 +1325,11 @@ pub(crate) mod tests {
             }
         }
     }
+    #[cfg(test)]
     struct NoHost;
+    #[cfg(test)]
     impl Host for NoHost {}
+    #[cfg(test)]
     impl ServerHost for NoHost {}
 
     #[test]
@@ -1352,7 +1358,7 @@ pub(crate) mod tests {
     struct Doubler;
     #[mod_api::__subscriptions]
     impl Hooks for Doubler {
-        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
             r.block_part("test:gauge", Gauge);
             r.block_part("test:connector", Connector);
             r.block_part_tag("test:gauged", TagGauge);
@@ -1454,16 +1460,19 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(test)]
     /// A test host's whole state, kept on each transaction it opens and put back on an abort, as
     /// the game's journal keeps its storages.
     trait Journal: Clone {
         fn kept(&mut self) -> &mut Vec<Self>;
     }
+    #[cfg(test)]
     fn open<J: Journal>(host: &mut J) {
         let mut now = host.clone();
         now.kept().clear();
         host.kept().push(now);
     }
+    #[cfg(test)]
     fn close<J: Journal>(host: &mut J, commit: bool) {
         let Some(was) = host.kept().pop() else {
             return;
@@ -1560,19 +1569,24 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(test)]
     /// A pipe at (0, 64, 0), and a one-slot vanilla chest east of it, answered by the game.
     #[derive(Clone, Default)]
     struct PipeWorld {
         chest: Option<ItemStack>,
         kept: Vec<Self>,
     }
+    #[cfg(test)]
     const PIPE: [i32; 3] = [0, 64, 0];
+    #[cfg(test)]
     const CHEST: [i32; 3] = [1, 64, 0];
+    #[cfg(test)]
     impl Journal for PipeWorld {
         fn kept(&mut self) -> &mut Vec<Self> {
             &mut self.kept
         }
     }
+    #[cfg(test)]
     impl Backend for PipeWorld {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -1594,6 +1608,7 @@ pub(crate) mod tests {
             self.chest.clone().filter(|_| pos == CHEST && slot == 0)
         }
     }
+    #[cfg(test)]
     impl BackendMut for PipeWorld {
         fn container_insert(
             &mut self,
@@ -1609,6 +1624,7 @@ pub(crate) mod tests {
             None
         }
     }
+    #[cfg(test)]
     impl Host for PipeWorld {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
@@ -1617,6 +1633,7 @@ pub(crate) mod tests {
             Some(BlockEntityRef { level, position })
         }
     }
+    #[cfg(test)]
     impl ServerHost for PipeWorld {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -1853,6 +1870,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(test)]
     /// Player 1's hands and slots, and what was given to them: an item split off their hand.
     #[derive(Clone, Default)]
     struct Player {
@@ -1865,11 +1883,13 @@ pub(crate) mod tests {
         player: 1,
         hand: Hand::Main,
     };
+    #[cfg(test)]
     impl Journal for Player {
         fn kept(&mut self) -> &mut Vec<Self> {
             &mut self.kept
         }
     }
+    #[cfg(test)]
     impl Backend for Player {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -1905,6 +1925,7 @@ pub(crate) mod tests {
             None
         }
     }
+    #[cfg(test)]
     impl BackendMut for Player {
         fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
             Some(u128::from(entity.id()))
@@ -1950,6 +1971,7 @@ pub(crate) mod tests {
             took
         }
     }
+    #[cfg(test)]
     impl Host for Player {
         fn player(&self, uuid: u128) -> Option<PlayerRef> {
             let entity = EntityRef::new(NativeWorldEpoch::new(1), u32::try_from(uuid).ok()?);
@@ -1971,6 +1993,7 @@ pub(crate) mod tests {
             Some(BackendRef::of(self))
         }
     }
+    #[cfg(test)]
     impl ServerHost for Player {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -1982,13 +2005,16 @@ pub(crate) mod tests {
             Some(BackendMutRef::of(self))
         }
     }
+    #[cfg(test)]
     impl Player {
+        #[cfg(test)]
         fn is_place(&self, place: &ItemPlace) -> bool {
             matches!(
                 place,
                 ItemPlace::PlayerHand { player: 1, .. } | ItemPlace::PlayerSlot { player: 1, .. }
             )
         }
+        #[cfg(test)]
         fn put(&mut self, place: &ItemPlace, stack: Option<ItemStack>) {
             match place {
                 ItemPlace::PlayerHand { .. } => self.main_hand = stack,
@@ -2111,6 +2137,7 @@ pub(crate) mod tests {
         assert!(entity(4).capability(host, &ENTITY_ITEMS, ()).is_none());
     }
 
+    #[cfg(test)]
     /// Items counted with what they hold: a pouch's sticks, a bag's pouch and its sticks.
     fn items(stacks: impl IntoIterator<Item = ItemStack>) -> u32 {
         stacks
@@ -2121,13 +2148,16 @@ pub(crate) mod tests {
             })
             .sum()
     }
+    #[cfg(test)]
     impl Player {
+        #[cfg(test)]
         fn items(&self) -> u32 {
             let held = self.main_hand.iter().chain(self.slots.values());
             items(held.chain(&self.given).cloned())
         }
     }
 
+    #[cfg(test)]
     /// Three shelf slots at (2, 64, 0), answered by the game's handler, else by
     /// `ItemOverstates`. A slot takes up to `limit` of one item, the `output` slot none, and
     /// gives at most one item per extract, unless `whole_extract`; with `one_per_insert`, it
@@ -2142,6 +2172,7 @@ pub(crate) mod tests {
         overstates: bool,
         kept: Vec<Self>,
     }
+    #[cfg(test)]
     fn shelf(slots: [Option<ItemStack>; 3]) -> Shelf {
         Shelf {
             slots,
@@ -2154,6 +2185,7 @@ pub(crate) mod tests {
         }
     }
     const SHELF: [i32; 3] = [2, 64, 0];
+    #[cfg(test)]
     fn shelf_slot(slot: usize) -> ItemPlace {
         ItemPlace::BlockEntity {
             level: here(),
@@ -2162,11 +2194,13 @@ pub(crate) mod tests {
             slot,
         }
     }
+    #[cfg(test)]
     impl Journal for Shelf {
         fn kept(&mut self) -> &mut Vec<Self> {
             &mut self.kept
         }
     }
+    #[cfg(test)]
     impl Backend for Shelf {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -2188,6 +2222,7 @@ pub(crate) mod tests {
             self.slots.get(slot)?.clone()
         }
     }
+    #[cfg(test)]
     impl BackendMut for Shelf {
         fn container_insert(
             &mut self,
@@ -2236,6 +2271,7 @@ pub(crate) mod tests {
             Some(out)
         }
     }
+    #[cfg(test)]
     impl Host for Shelf {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
@@ -2256,6 +2292,7 @@ pub(crate) mod tests {
             Some(BlockEntityRef { level, position })
         }
     }
+    #[cfg(test)]
     impl ServerHost for Shelf {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -2267,7 +2304,9 @@ pub(crate) mod tests {
             Some(BackendMutRef::of(self))
         }
     }
+    #[cfg(test)]
     impl Shelf {
+        #[cfg(test)]
         fn items(&self) -> u32 {
             items(self.slots.iter().flatten().cloned())
         }
@@ -2329,8 +2368,10 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(test)]
     /// State 1 is a `test:gauge`, state 2 a `test:other`.
     struct Level;
+    #[cfg(test)]
     impl LevelHost for Level {
         fn block_state(&self, _: [i32; 3]) -> BlockStateId {
             unimplemented!()
@@ -2347,16 +2388,16 @@ pub(crate) mod tests {
 
     /// A chemical, as Mekanism's: the test mods' own resource, which the game knows nothing of.
     #[derive(Clone, Debug, PartialEq)]
-    pub(crate) struct Chemical(pub(crate) String);
+    pub struct Chemical(pub String);
 
     /// The test mods' own capability, as Mekanism's `Capabilities.CHEMICAL`: the game has no
     /// answer for it, so only their providers do.
-    pub(crate) const CHEMICALS: CapabilityKey<dyn ResourceHandler<Chemical>> =
+    pub const CHEMICALS: CapabilityKey<dyn ResourceHandler<Chemical>> =
         CapabilityKey::new("test:chemical");
 
     /// A mod block entity's one tank of 1000 of a chemical, kept in its saved data (`chemical`
     /// and `amount`), whose writes the game's journal keeps for a transaction.
-    pub(crate) struct ChemTank(pub(crate) BlockSide);
+    pub struct ChemTank(pub BlockSide);
     impl ChemTank {
         fn entity(&self, host: &dyn Host) -> Option<BlockEntityRef> {
             host.block_entity(self.0.level, self.0.pos)
@@ -2439,7 +2480,7 @@ pub(crate) mod tests {
         copy_on_death: false,
         sync: false,
     };
-    pub(crate) const ROBOT_FLUID: AttachmentType<u32> = AttachmentType {
+    pub const ROBOT_FLUID: AttachmentType<u32> = AttachmentType {
         namespace: "test",
         name: "fluid",
         default: || 0,
@@ -2541,7 +2582,7 @@ pub(crate) mod tests {
     struct Chemist;
     #[mod_api::__subscriptions]
     impl Hooks for Chemist {
-        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
             let chem_vat = r.block_entity_type_key("test:chem_vat");
             r.block_entity_capability(&CHEMICALS, &chem_vat, |_, at| Some(Box::new(ChemTank(at))));
         }
@@ -2564,7 +2605,7 @@ pub(crate) mod tests {
     struct FixtureContent;
     #[mod_api::__subscriptions]
     impl Hooks for FixtureContent {
-        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
             for id in CAPABILITY_TYPES {
                 r.block_entity_type(id)
                     .blocks(&[&format!("test:{id}")])
@@ -2586,7 +2627,7 @@ pub(crate) mod tests {
     }
 
     /// The test mods, their parts installed, on a thread that runs a game.
-    pub(crate) fn game_thread() -> super::super::Mods {
+    pub fn game_thread() -> super::super::Mods {
         let mods: super::super::Mods = vec![
             ModEntry::new("doubler", Box::new(Doubler)),
             ModEntry::new("chemist", Box::new(Chemist)),
@@ -2600,7 +2641,7 @@ pub(crate) mod tests {
     }
 
     /// Install a weak-power part on glass for a real-game query.
-    pub(crate) fn weak_power_game_thread() {
+    pub fn weak_power_game_thread() {
         struct WeakPower;
         #[mod_api::horizon_part]
         impl BlockPart for WeakPower {
@@ -2615,7 +2656,7 @@ pub(crate) mod tests {
         struct WeakPowerMod;
         #[mod_api::__subscriptions]
         impl Hooks for WeakPowerMod {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
                 r.block_part("minecraft:glass", WeakPower);
             }
         }
@@ -2628,7 +2669,7 @@ pub(crate) mod tests {
 
     /// Install parts that change what a path may cross: glass becomes land and air, air
     /// stops being land and becomes water.
-    pub(crate) fn pathfindable_game_thread() {
+    pub fn pathfindable_game_thread() {
         struct Answers(&'static [(PathComputationType, bool)]);
         #[mod_api::horizon_part]
         impl BlockPart for Answers {
@@ -2641,7 +2682,7 @@ pub(crate) mod tests {
         struct PathMod;
         #[mod_api::__subscriptions]
         impl Hooks for PathMod {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
                 r.block_part(
                     "minecraft:glass",
                     Answers(&[
@@ -2666,7 +2707,7 @@ pub(crate) mod tests {
 
     /// Install a part on glass that asks, when a glass block is removed, for every neighbour to
     /// be told, as an override of `affectNeighborsAfterRemoval` calling `updateNeighborsAt`.
-    pub(crate) fn removal_game_thread() {
+    pub fn removal_game_thread() {
         struct Leaver;
         #[mod_api::horizon_part]
         impl BlockPart for Leaver {
@@ -2681,7 +2722,7 @@ pub(crate) mod tests {
         struct LeaverMod;
         #[mod_api::__subscriptions]
         impl Hooks for LeaverMod {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
                 r.block_part("minecraft:glass", Leaver);
             }
         }
@@ -2693,11 +2734,11 @@ pub(crate) mod tests {
     }
 
     /// Install a redstone connector on glass for real-game tests.
-    pub(crate) fn redstone_game_thread() {
+    pub fn redstone_game_thread() {
         struct RedstoneMod;
         #[mod_api::__subscriptions]
         impl Hooks for RedstoneMod {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
                 r.block_part("minecraft:glass", Connector);
             }
         }
@@ -2708,6 +2749,7 @@ pub(crate) mod tests {
         mark_game_thread();
     }
 
+    #[cfg(test)]
     /// The comparator reading of state `state`, from 1.
     fn read(state: u32) -> i32 {
         let mut output = 1;
@@ -2722,6 +2764,7 @@ pub(crate) mod tests {
         output
     }
 
+    #[cfg(test)]
     /// Resolve this thread's parts with tag `test:gauged` holding `members`.
     fn resolve(members: &[&str]) -> Result<(), Vec<String>> {
         let tags = HashMap::from([(
@@ -2970,6 +3013,7 @@ pub(crate) mod tests {
         assert!(here().capability(host, &CHEMICALS, CHEST, None).is_none());
     }
 
+    #[cfg(test)]
     /// Puts `amount` of `item` into slot 0 of [`ITEM_ITEMS`]' handler for the item at `place`, in a
     /// transaction committed when all went in: how much did.
     fn fill(host: &mut dyn ServerHost, place: &ItemPlace, item: ItemStack, amount: u32) -> u32 {
@@ -3123,6 +3167,7 @@ pub(crate) mod tests {
         assert_eq!(insert(host, &unknown, stick()), 0);
     }
 
+    #[cfg(test)]
     /// `place.insert` of `stack` in a transaction of its own: how much went.
     fn insert(host: &mut dyn ServerHost, place: &ItemPlace, stack: ItemStack) -> u32 {
         let resource = ItemResource::of(&stack);
@@ -3131,6 +3176,7 @@ pub(crate) mod tests {
         went.unwrap_or(0)
     }
 
+    #[cfg(test)]
     /// `place.exchange` of `stack.count` of what is there for `stack`, in a transaction of its
     /// own: how many.
     fn exchange(host: &mut dyn ServerHost, place: &ItemPlace, stack: ItemStack) -> u32 {
@@ -3140,6 +3186,7 @@ pub(crate) mod tests {
         swapped.unwrap_or(0)
     }
 
+    #[cfg(test)]
     /// Two three-slot game chests, `FROM` and `INTO`; `INTO`'s slots hold up to `limit` each.
     #[derive(Clone)]
     struct TwoChests {
@@ -3148,9 +3195,13 @@ pub(crate) mod tests {
         limit: u32,
         kept: Vec<Self>,
     }
+    #[cfg(test)]
     const FROM: [i32; 3] = [3, 64, 0];
+    #[cfg(test)]
     const INTO: [i32; 3] = [4, 64, 0];
+    #[cfg(test)]
     impl TwoChests {
+        #[cfg(test)]
         fn slots(&mut self, pos: [i32; 3]) -> Option<(&mut [Option<ItemStack>; 3], u32)> {
             match pos {
                 FROM => Some((&mut self.from, 64)),
@@ -3158,6 +3209,7 @@ pub(crate) mod tests {
                 _ => None,
             }
         }
+        #[cfg(test)]
         fn count(slots: &[Option<ItemStack>; 3], item: &str) -> u32 {
             slots
                 .iter()
@@ -3167,11 +3219,13 @@ pub(crate) mod tests {
                 .sum()
         }
     }
+    #[cfg(test)]
     impl Journal for TwoChests {
         fn kept(&mut self) -> &mut Vec<Self> {
             &mut self.kept
         }
     }
+    #[cfg(test)]
     impl Backend for TwoChests {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -3194,6 +3248,7 @@ pub(crate) mod tests {
             self.limit
         }
     }
+    #[cfg(test)]
     impl BackendMut for TwoChests {
         fn container_insert(
             &mut self,
@@ -3243,6 +3298,7 @@ pub(crate) mod tests {
             Some(out)
         }
     }
+    #[cfg(test)]
     impl Host for TwoChests {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
@@ -3251,6 +3307,7 @@ pub(crate) mod tests {
             None
         }
     }
+    #[cfg(test)]
     impl ServerHost for TwoChests {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -3263,8 +3320,10 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(test)]
     /// A target that answers one more than it was given, and keeps nothing.
     struct TakesMore;
+    #[cfg(test)]
     impl ResourceHandler<ItemResource> for TakesMore {
         fn size(&self, _: &mut dyn ServerHost) -> usize {
             1
@@ -3391,7 +3450,7 @@ pub(crate) mod tests {
         let sword = ItemResource::of(&stack("minecraft:iron_sword", 1, 0));
         let patch = |resource: &ItemResource| {
             let Some(Tag::Compound(patch)) =
-                crate::item_data::encode_components(&resource.to_stack(1))
+                horizon_items::item_data::encode_components(&resource.to_stack(1))
             else {
                 return Vec::new();
             };
@@ -3999,9 +4058,12 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(test)]
     /// `test:ordered` block entities, where the game has slots of its own from x = 8 on.
     struct Ordered;
+    #[cfg(test)]
     impl ServerHost for Ordered {}
+    #[cfg(test)]
     impl Backend for Ordered {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -4013,6 +4075,7 @@ pub(crate) mod tests {
             (pos[0] >= 8).then_some(27)
         }
     }
+    #[cfg(test)]
     impl Host for Ordered {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
@@ -4082,13 +4145,16 @@ pub(crate) mod tests {
         assert_eq!(item(1, 2), (true, 3));
     }
 
+    #[cfg(test)]
     /// Block entities of one type, or vanilla ones (none).
     struct TypeOf(Option<&'static str>);
+    #[cfg(test)]
     impl Backend for TypeOf {
         fn block_entity_kind(&self, _: BlockEntityRef) -> Option<BlockEntityTypeKey> {
             self.0.map(type_key)
         }
     }
+    #[cfg(test)]
     impl Host for TypeOf {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
@@ -4098,24 +4164,29 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(test)]
     /// Player 1 holding one stack in their hand, which has game slots (`item_container`) when
     /// its damage is 1.
     struct HeldItem(ItemStack);
+    #[cfg(test)]
     impl Backend for HeldItem {
         fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
             (stack.damage == 1).then(|| vec![None; 27])
         }
     }
+    #[cfg(test)]
     impl BackendMut for HeldItem {
         fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
             (*place == HAND).then(|| self.0.clone())
         }
     }
+    #[cfg(test)]
     impl Host for HeldItem {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
     }
+    #[cfg(test)]
     impl ServerHost for HeldItem {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
@@ -4140,18 +4211,17 @@ pub(crate) mod tests {
             if self.at.side == Some(Direction::Up) {
                 return 0;
             }
-            crate::mod_api::backend_of(host)
+            crate::backend_of(host)
                 .and_then(|backend| backend.fluid_tank_count(self.at))
                 .unwrap_or(0)
         }
         fn resource(&self, host: &mut dyn ServerHost, index: usize) -> Option<FluidResource> {
             Some(FluidResource::of(
-                &crate::mod_api::backend_of(host)
-                    .and_then(|backend| backend.fluid_tank(self.at, index))?,
+                &crate::backend_of(host).and_then(|backend| backend.fluid_tank(self.at, index))?,
             ))
         }
         fn amount(&self, host: &mut dyn ServerHost, index: usize) -> u32 {
-            crate::mod_api::backend_of(host)
+            crate::backend_of(host)
                 .and_then(|backend| backend.fluid_tank(self.at, index))
                 .map_or(0, |held| held.amount)
         }
@@ -4161,7 +4231,7 @@ pub(crate) mod tests {
             index: usize,
             resource: &FluidResource,
         ) -> u32 {
-            crate::mod_api::backend_of(host).map_or(0, |backend| {
+            crate::backend_of(host).map_or(0, |backend| {
                 backend.fluid_tank_capacity(self.at, index, &resource.to_stack(1))
             })
         }
@@ -4173,7 +4243,7 @@ pub(crate) mod tests {
             resource: &FluidResource,
             amount: u32,
         ) -> u32 {
-            let Some(backend) = crate::mod_api::backend_mut_of(host) else {
+            let Some(backend) = crate::backend_mut_of(host) else {
                 return 0;
             };
             let rest = backend.fluid_tank_insert(self.at, index, resource.to_stack(amount), tx);
@@ -4191,8 +4261,8 @@ pub(crate) mod tests {
             resource: &FluidResource,
             amount: u32,
         ) -> u32 {
-            let held = crate::mod_api::backend_of(host)
-                .and_then(|backend| backend.fluid_tank(self.at, index));
+            let held =
+                crate::backend_of(host).and_then(|backend| backend.fluid_tank(self.at, index));
             if !held.is_some_and(|held| resource.matches(&held)) {
                 return 0;
             }
@@ -4201,12 +4271,13 @@ pub(crate) mod tests {
             } else {
                 0
             };
-            crate::mod_api::backend_mut_of(host)
+            crate::backend_mut_of(host)
                 .and_then(|backend| backend.fluid_tank_extract(self.at, index, amount + more, tx))
                 .map_or(0, |out| out.amount)
         }
     }
 
+    #[cfg(test)]
     /// One tank, as the game answers it: what it holds, its capacity, and whether it fills and
     /// drains. Truthfully: a `halving` tank takes half of each offer, a `half_room` one at most
     /// half its room, a `short` one gives one less than asked, and a `quarters` one gives and
@@ -4222,6 +4293,7 @@ pub(crate) mod tests {
         short: bool,
         quarters: bool,
     }
+    #[cfg(test)]
     /// Game tanks by position, and the mod block entity types standing at some.
     #[derive(Clone, Default)]
     struct TankWorld {
@@ -4229,10 +4301,15 @@ pub(crate) mod tests {
         types: HashMap<[i32; 3], &'static str>,
         kept: Vec<Self>,
     }
+    #[cfg(test)]
     const SOURCE: [i32; 3] = [0, 64, 0];
+    #[cfg(test)]
     const TANK: [i32; 3] = [1, 64, 0];
+    #[cfg(test)]
     const OTHER: [i32; 3] = [2, 64, 0];
+    #[cfg(test)]
     impl TankWorld {
+        #[cfg(test)]
         fn tank(&mut self, pos: [i32; 3], held: Option<FluidStack>, fills: bool) -> &mut Self {
             let tank = GameTank {
                 held,
@@ -4247,12 +4324,15 @@ pub(crate) mod tests {
             self.tanks.insert(pos, tank);
             self
         }
+        #[cfg(test)]
         fn held(&self, pos: [i32; 3]) -> Option<FluidStack> {
             self.tanks[&pos].held.clone()
         }
+        #[cfg(test)]
         fn amount(&self, pos: [i32; 3]) -> u32 {
             self.tanks[&pos].held.as_ref().map_or(0, |held| held.amount)
         }
+        #[cfg(test)]
         /// Moves up to `max` from `from`'s handler through `from_side` into `to`'s through
         /// `to_side`, in a transaction of its own.
         fn moved(
@@ -4267,11 +4347,13 @@ pub(crate) mod tests {
             host.transaction(|host, tx| move_resources(host, &source, &target, |_| true, max, tx))
         }
     }
+    #[cfg(test)]
     impl Journal for TankWorld {
         fn kept(&mut self) -> &mut Vec<Self> {
             &mut self.kept
         }
     }
+    #[cfg(test)]
     impl Backend for TankWorld {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -4300,6 +4382,7 @@ pub(crate) mod tests {
                 .map_or(0, |tank| tank.capacity)
         }
     }
+    #[cfg(test)]
     impl BackendMut for TankWorld {
         fn fluid_tank_insert(
             &mut self,
@@ -4363,6 +4446,7 @@ pub(crate) mod tests {
             Some(held.with_amount(take))
         }
     }
+    #[cfg(test)]
     impl Host for TankWorld {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
@@ -4371,6 +4455,7 @@ pub(crate) mod tests {
             Some(BackendRef::of(self))
         }
     }
+    #[cfg(test)]
     impl ServerHost for TankWorld {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -4383,8 +4468,9 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(test)]
     fn potion(amount: u32, potion: &str) -> FluidStack {
-        let components = crate::item_data::StackData {
+        let components = horizon_items::item_data::StackData {
             potion: Some(Arc::from(potion)),
             ..Default::default()
         };
@@ -4516,15 +4602,15 @@ pub(crate) mod tests {
     }
     impl EnergyHandler for ModBattery {
         fn amount(&self, host: &mut dyn ServerHost) -> u32 {
-            crate::mod_api::backend_of(host)
+            crate::backend_of(host)
                 .and_then(|backend| backend.energy_amount(self.at))
                 .unwrap_or(0)
         }
         fn capacity(&self, host: &mut dyn ServerHost) -> u32 {
-            crate::mod_api::backend_of(host).map_or(0, |backend| backend.energy_capacity(self.at))
+            crate::backend_of(host).map_or(0, |backend| backend.energy_capacity(self.at))
         }
         fn insert(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
-            let went = crate::mod_api::backend_mut_of(host)
+            let went = crate::backend_mut_of(host)
                 .map_or(0, |backend| backend.energy_insert(self.at, amount, tx));
             match self.lie {
                 Lie::TakesMore => went + 100,
@@ -4536,12 +4622,13 @@ pub(crate) mod tests {
                 Lie::GivesMore => 100,
                 Lie::TakesMore => 0,
             };
-            crate::mod_api::backend_mut_of(host).map_or(0, |backend| {
+            crate::backend_mut_of(host).map_or(0, |backend| {
                 backend.energy_extract(self.at, amount + more, tx)
             })
         }
     }
 
+    #[cfg(test)]
     /// Batteries as the game answers them, by position: what each holds, and the most one
     /// insert moves, of a capacity of 1000; and the mod block entity types standing at some.
     #[derive(Clone, Default)]
@@ -4550,16 +4637,20 @@ pub(crate) mod tests {
         types: HashMap<[i32; 3], &'static str>,
         kept: Vec<Self>,
     }
+    #[cfg(test)]
     impl EnergyWorld {
+        #[cfg(test)]
         fn amounts(&self, at: &[[i32; 3]]) -> Vec<u32> {
             at.iter().map(|pos| self.batteries[pos].0).collect()
         }
     }
+    #[cfg(test)]
     impl Journal for EnergyWorld {
         fn kept(&mut self) -> &mut Vec<Self> {
             &mut self.kept
         }
     }
+    #[cfg(test)]
     impl Host for EnergyWorld {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
@@ -4568,6 +4659,7 @@ pub(crate) mod tests {
             Some(BackendRef::of(self))
         }
     }
+    #[cfg(test)]
     impl ServerHost for EnergyWorld {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -4579,6 +4671,7 @@ pub(crate) mod tests {
             Some(BackendMutRef::of(self))
         }
     }
+    #[cfg(test)]
     impl Backend for EnergyWorld {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -4596,6 +4689,7 @@ pub(crate) mod tests {
             1000
         }
     }
+    #[cfg(test)]
     impl BackendMut for EnergyWorld {
         fn energy_insert(&mut self, at: BlockSide, amount: u32, _: &Transaction) -> u32 {
             let Some((held, limit)) = self.batteries.get_mut(&at.pos) else {

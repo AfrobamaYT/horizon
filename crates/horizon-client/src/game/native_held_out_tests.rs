@@ -4,9 +4,9 @@ use horizon_client::{
     chunk::Chunk,
     items::ItemStack,
     mobs::{Mob, leash::Holder, transport_items},
-    mod_api::{self, EntityMountEvent, EntityRef, Flow, Hooks, ItemSpawnEvent, ServerHost},
 };
 use horizon_core::geometry::Vec3;
+use mod_api::{self, EntityMountEvent, EntityRef, Flow, Hooks, ItemSpawnEvent, ServerHost};
 
 use super::{
     boats::Boat,

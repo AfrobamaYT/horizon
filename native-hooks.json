@@ -1,5 +1,26 @@
 {
+  "draw_contexts": [
+    {
+      "surface": "crate::hud::HudBatch", "trait": "DrawContext", "prefix": "",
+      "doc": "What the HUD, screen and tooltip hooks draw with, in GUI pixels: one per hook call."
+    },
+    {
+      "surface": "crate::game::native_block_entity_draw::BlockEntityDraw", "trait": "BlockEntityDrawContext", "prefix": "draw_",
+      "doc": "What a block entity, mob or player submit hook draws with, in blocks under a pose stack (`PoseStack`): one per hook call."
+    }
+  ],
   "helpers": [
+    {"name": "size", "target": "horizon_client::game::native_hooks::Game<'_>::native_size", "side": "client"},
+    {"name": "draw_push", "target": "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_push", "side": "client"},
+    {"name": "draw_pop", "target": "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_pop", "side": "client"},
+    {"name": "draw_translate", "target": "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_translate", "side": "client"},
+    {"name": "draw_rotate_about", "target": "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_rotate_about", "side": "client"},
+    {"name": "draw_scale", "target": "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_scale", "side": "client"},
+    {"name": "draw_keep", "target": "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_keep", "side": "client"},
+    {"name": "draw_partial", "target": "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_partial", "side": "client"},
+    {"name": "draw_game_time", "target": "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_game_time", "side": "client"},
+    {"name": "draw_light", "target": "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_light", "side": "client"},
+    {"name": "draw_set_light", "target": "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_set_light", "side": "client"},
     {
       "name": "draw_quad",
       "target": "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_quad", "side": "client"
@@ -1039,7 +1060,7 @@
     {
       "name": "world_drawn", "side": "client",
       "version": 1,
-      "target": "horizon_client_render::gfx::native_render::native_world_drawn",
+      "target": "mod_api::render::native_world_drawn",
       "mod_api": {
         "contract": "listen"
       }
@@ -1047,7 +1068,7 @@
     {
       "name": "render_needs", "side": "client",
       "version": 1,
-      "target": "horizon_client_render::gfx::native_render::native_render_needs",
+      "target": "mod_api::render::native_render_needs",
       "mod_api": {
         "contract": "collect",
         "out": "needs"
@@ -1279,6 +1300,7 @@
     },
     {
       "name": "modify_default_components", "side": "both",
+      "context": "data_load",
       "version": 1,
       "target": "horizon_world::item_defaults::native_modify_default_components",
       "mod_api": {
@@ -2795,7 +2817,7 @@
     {
       "name": "ingredient", "side": "both",
       "version": 1,
-      "target": "horizon_client_lib::crafting::native_ingredient",
+      "target": "mod_api::crafting::native_ingredient",
       "mod_api": {
         "contract": "collect",
         "out": "items"

@@ -15,7 +15,9 @@ use horizon_client::{
     streaming::{ChunkGenerator, Proto, Streaming, WorkerContext},
     world::World,
 };
-use horizon_world::registry::BlockStateId;
+use horizon_world::{native_load_context::DataLoadOrigin, registry::BlockStateId};
+#[path = "../src/test_resources.rs"]
+mod test_resources;
 use std::{
     collections::HashMap,
     path::Path,
@@ -346,10 +348,14 @@ fn saved_proto_chunks_restore_exactly() {
     };
     let assets = Arc::new(Assets::load(&root).unwrap());
     let biomes = Arc::new(Biomes::load(&root).unwrap());
+    let item_data = test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain = VanillaTerrain::for_dimension(
-        &root.join("worldgen"),
-        assets.registry,
-        &biomes,
+        horizon_client::vanillagen::TerrainResources {
+            dir: &root.join("worldgen"),
+            registry: assets.registry,
+            biomes: &biomes,
+            item_data: &item_data,
+        },
         -1860902098141295193,
         "minecraft:the_nether",
     )
@@ -476,10 +482,14 @@ fn saved_proto_block_entities_keep_their_id() {
     };
     let assets = Arc::new(Assets::load(&root).unwrap());
     let biomes = Arc::new(Biomes::load(&root).unwrap());
+    let item_data = test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain = VanillaTerrain::for_dimension(
-        &root.join("worldgen"),
-        assets.registry,
-        &biomes,
+        horizon_client::vanillagen::TerrainResources {
+            dir: &root.join("worldgen"),
+            registry: assets.registry,
+            biomes: &biomes,
+            item_data: &item_data,
+        },
         12345,
         "minecraft:overworld",
     )

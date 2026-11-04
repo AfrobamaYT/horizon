@@ -8,8 +8,8 @@ use super::{
     Game,
     commands::{Target, entity_pitch},
 };
-use horizon_client::mod_api::EntityRef;
 use horizon_core::geometry::Vec3;
+use mod_api::EntityRef;
 
 /// `Level.isInSpawnableBounds` and `/tp`'s limits: 30,000,000 blocks out,
 /// 20,000,000 up or down.
