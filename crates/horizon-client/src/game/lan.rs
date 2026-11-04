@@ -2809,44 +2809,20 @@ impl Game<'_> {
         if self.audio.capture.is_none() {
             return;
         }
-        // The acting guest's own break: `Block.playerWillDestroy` excludes the
-        // player from the destroy events up to the broken block's. What a
-        // break sets off after that (a torch popping off, a stalk falling) is
-        // `destroyBlock` with no player, which the breaker hears and sees too.
-        let mut own_break = self.lan_break_pos.is_some();
         for e in events {
             match e {
-                horizon_world::level::LevelEvent::LevelEvent { id, pos, data } => {
-                    let own = *id == 2001 && own_break;
-                    if own && self.lan_break_pos == Some([pos.x, pos.y, pos.z]) {
-                        own_break = false;
-                    }
-                    // The acting guest does not predict the egg's teleport
-                    // particles, bone meal's growth, anvil result sounds, or a
-                    // finished brushing or an eye inserted in a portal frame (these calls name no
-                    // excluded player), nor the digger's own crack and hit
-                    // sound (2019, 2020).
-                    let except = if matches!(
-                        *id,
-                        2015 | 1501
-                            | 1503
-                            | 1505
-                            | 1029
-                            | 1030
-                            | 1045
-                            | 1052
-                            | 2019
-                            | 2020
-                            | 3000
-                            | 3008
-                    ) || (*id == 2001 && self.lan_break_pos.is_some() && !own)
-                    {
-                        None
-                    } else {
-                        self.lan_acting
-                    };
-                    self.lan_events
-                        .push((*id, [pos.x, pos.y, pos.z], *data, except));
+                horizon_world::level::LevelEvent::LevelEvent {
+                    id,
+                    pos,
+                    data,
+                    source,
+                } => {
+                    self.lan_events.push(super::QueuedLevelEvent {
+                        kind: *id,
+                        pos: [pos.x, pos.y, pos.z],
+                        data: *data,
+                        source: *source,
+                    });
                 }
                 // `ServerLevel.runBlockEvents` broadcasts a handled block
                 // event (`ClientboundBlockEventPacket`): the guest re-runs
@@ -3002,12 +2978,25 @@ impl Game<'_> {
                 );
             }
         }
-        for (kind, pos, data, acting) in std::mem::take(&mut self.lan_events) {
+        for super::QueuedLevelEvent {
+            kind,
+            pos,
+            data,
+            source,
+        } in std::mem::take(&mut self.lan_events)
+        {
             if kind == 2001 {
                 host.broken
                     .push([f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2])]);
             }
-            host.hub.level_event(kind, pos, data, acting);
+            let except = source.and_then(|player| {
+                host.hub
+                    .guests
+                    .iter()
+                    .find(|guest| guest.uuid == player.0)
+                    .map(|guest| guest.conn)
+            });
+            host.hub.level_event(kind, pos, data, except);
         }
         // Level events 1010 and 1011: the guests' parrots dance or stop.
         for (pos, song) in std::mem::take(&mut self.lan_songs) {

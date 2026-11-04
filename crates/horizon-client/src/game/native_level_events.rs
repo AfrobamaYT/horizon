@@ -40,6 +40,7 @@ impl GameLevel<'_> {
             id,
             pos: horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]),
             data,
+            source: None,
         });
         true
     }
@@ -65,14 +66,7 @@ impl Game<'_> {
         if !level_event_data_ok(id, data, self.res.facts().states.len()) {
             return false;
         }
-        let sent = self.lan_events.len();
         self.level_event_at(id, pos, data);
-        // `levelEvent(null, ...)`: the guests' copies name no excluded
-        // player, though `lan_record_events` leaves out the acting one for
-        // the events a player's own action plays.
-        for event in &mut self.lan_events[sent..] {
-            event.3 = None;
-        }
         true
     }
     /// Sends game event `event` (`minecraft:block_change`...) from `at`, as
@@ -189,7 +183,7 @@ mod tests {
             vec![mod_api::ModEntry::new("level-events", Box::new(EventsMod))].into();
         mod_api::__private::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
-            super::super::native_entity_refs::tests::with_game(|game| {
+            super::super::native_guest_turn_tests::with_guests(|game| {
                 game.options.dedicated = Some(Vec::new());
                 game.world.chunks.insert(
                     (0, 0),
@@ -206,23 +200,49 @@ mod tests {
                     id: 1000,
                     pos: horizon_core::position::BlockPos::new(0, 64, 0),
                     data: 0,
+                    source: None,
                 };
                 game.level_events.push(before.clone());
                 let state = game.world.block(0, 64, 0);
                 let mut handled = false;
-                game.with_level(|_, level, ticks| {
-                    level.native_random_tick(
-                        ticks,
-                        LevelDimension::Overworld,
-                        horizon_core::position::BlockPos::new(0, 64, 0),
-                        state,
-                        &mut handled,
+                game.as_guest(12, |game| {
+                    game.audio.capture = Some(Vec::new());
+                    game.with_level(|_, level, ticks| {
+                        level.native_random_tick(
+                            ticks,
+                            LevelDimension::Overworld,
+                            horizon_core::position::BlockPos::new(0, 64, 0),
+                            state,
+                            &mut handled,
+                        );
+                    });
+                    let events = game.level_events.clone();
+                    game.lan_record_events(&events);
+                    assert_eq!(
+                        game.lan_events[1],
+                        super::super::QueuedLevelEvent {
+                            kind: 1500,
+                            pos: [1, 64, 1],
+                            data: 0,
+                            source: None,
+                        }
                     );
-                });
+                    assert_eq!(
+                        game.lan_events[2],
+                        super::super::QueuedLevelEvent {
+                            kind: 2005,
+                            pos: [2, 64, 2],
+                            data: 7,
+                            source: None,
+                        }
+                    );
+                })
+                .unwrap();
                 let at = |id, x, z, data| LevelEvent::LevelEvent {
                     id,
                     pos: horizon_core::position::BlockPos::new(x, 64, z),
                     data,
+                    source: None,
                 };
                 assert_eq!(
                     game.level_events,
