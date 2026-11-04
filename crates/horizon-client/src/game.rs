@@ -22707,6 +22707,15 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     if let Err(refused) = mod_api::__private::install_parts(mod_api::mods()) {
         panic!("Mod parts refused:\n{}", refused.join("\n"));
     }
+    // The structure types those mods registered, handed to the engine before
+    // any world opens, as its StructureRegistry reads them.
+    if horizon_world::worldgen::structure::mod_types::install_mod_structure_types(
+        mod_api::__private::installed_structure_types(),
+    )
+    .is_err()
+    {
+        log::warn!("Mod structure types already installed; keeping the first table");
+    }
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models(options.execution_role);
     // Minecraft.<init>: read the last start's flag, then mark this one as not

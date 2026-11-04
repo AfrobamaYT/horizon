@@ -3675,6 +3675,13 @@ mod block_entity_type;
 pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
+mod structure_type;
+/// The structure box a piece's `bounding_box` answers, in world blocks.
+pub use horizon_world::worldgen::structure::BoundingBox;
+pub use structure_type::{
+    BiomeId, ChunkPos, FoundStructure, GenerationContext, HeightmapType, NoiseBlock, NoiseColumn,
+    PieceContext, PieceRandom, StructureError, StructurePiece, StructureType, WorldgenRandom,
+};
 mod part_table;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use part_table::install_parts;
