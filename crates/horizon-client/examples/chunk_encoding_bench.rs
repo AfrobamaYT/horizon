@@ -70,6 +70,11 @@ fn main() -> horizon_client::Result<()> {
         root,
         &horizon_world::loot::PackOverlay::NONE,
         &defaults,
+        &horizon_client::crafting::ResolvedSources::load_or_empty(
+            root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &server_load(),
+        ),
     )?;
     let biome_registry: Vec<String> = sync
         .dynamic
@@ -176,4 +181,13 @@ fn main() -> horizon_client::Result<()> {
         }
     }
     Ok(())
+}
+
+fn server_load() -> horizon_world::native_load_context::LoadContext {
+    use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
+    LoadContext::new(
+        DataLoadOrigin::ServerDataLoad,
+        std::sync::Arc::new(LoadInputs::new(Default::default(), Default::default())),
+        [],
+    )
 }

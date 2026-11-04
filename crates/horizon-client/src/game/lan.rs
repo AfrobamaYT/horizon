@@ -3,6 +3,7 @@
 //! tick and turns what the guests do into gameplay. A world that is not open
 //! costs one `Option` check per tick.
 use super::{Game, shield::OFFHAND_SLOT};
+use horizon_client::crafting::ResolvedSources;
 use horizon_client::{
     Result,
     lan::{
@@ -27,6 +28,81 @@ use std::{
     sync::{Arc, Mutex},
     time::Instant,
 };
+
+/// The recipes one server load resolved (the `ingredient` hook asked once per
+/// occurrence), shared by every table and the network copy that reads them.
+struct ServerSources {
+    generation: u64,
+    overlay: u64,
+    sources: Arc<ResolvedSources>,
+}
+
+/// One slot, held while it is built: the builder of a generation and pack set
+/// is the only one that asks the hook, and the others wait for its answer.
+static SOURCES: Mutex<Option<ServerSources>> = Mutex::new(None);
+
+/// Every byte of the packs' files, what a pack set is keyed by.
+fn overlay_key(overlay: &horizon_world::loot::PackOverlay) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    overlay.files.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// This server's recipes for `overlay`, resolved once per generation and pack
+/// set: the first caller builds them and later ones adopt them (`/reload`
+/// forgets them first, so it asks again).
+pub(super) fn server_sources(
+    item_data: &ItemData,
+    overlay: &horizon_world::loot::PackOverlay,
+) -> Arc<ResolvedSources> {
+    let generation = item_data.defaults().generation();
+    let key = overlay_key(overlay);
+    let mut slot = SOURCES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(held) = slot
+        .as_ref()
+        .filter(|held| held.generation == generation && held.overlay == key)
+    {
+        return held.sources.clone();
+    }
+    let sources = Arc::new(ResolvedSources::load_or_empty(
+        item_data.root(),
+        overlay,
+        &server_data_load(item_data),
+    ));
+    *slot = Some(ServerSources {
+        generation,
+        overlay: key,
+        sources: sources.clone(),
+    });
+    sources
+}
+
+/// The recipes of a load of `origin`: a server's are shared, a client's own.
+pub(super) fn load_sources(
+    item_data: &ItemData,
+    origin: horizon_world::native_load_context::DataLoadOrigin,
+    overlay: &horizon_world::loot::PackOverlay,
+) -> Arc<ResolvedSources> {
+    use horizon_world::native_load_context::DataLoadOrigin;
+    match origin {
+        DataLoadOrigin::ServerDataLoad => server_sources(item_data, overlay),
+        DataLoadOrigin::ClientPreload | _ => Arc::new(ResolvedSources::load_or_empty(
+            item_data.root(),
+            overlay,
+            &item_data.context().for_load(
+                DataLoadOrigin::ClientPreload,
+                mod_api::__private::loaded_mods().ids(),
+            ),
+        )),
+    }
+}
+
+/// Let go of the resolved recipes: a `/reload`, a world closed or a preload no
+/// world used. Not a world opening, which adopts what its preload resolved.
+pub(super) fn forget_server_sources() {
+    *SOURCES.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
 
 /// What `sync_data` loaded from this resource generation.
 struct Synced {
@@ -60,7 +136,13 @@ pub(super) fn sync_data(
     sync.get_or_insert_with(|| Synced {
         with_packs: packs,
         generation,
-        result: SyncData::load(item_data.root(), overlay, item_data.defaults()).map(Arc::new),
+        result: SyncData::load(
+            item_data.root(),
+            overlay,
+            item_data.defaults(),
+            &server_sources(item_data, overlay),
+        )
+        .map(Arc::new),
     })
     .result
     .clone()
@@ -86,7 +168,13 @@ pub(super) fn reload_sync_data(
     // Kept pack dialogs count as packs: a world opened without packs after
     // a `/reload` that dropped them must read its own registries again.
     let packs = !overlay.files.is_empty() || kept.has_pack_entries();
-    let sync = SyncData::load(root, overlay, item_data.defaults()).map(|mut sync| {
+    let sync = SyncData::load(
+        root,
+        overlay,
+        item_data.defaults(),
+        &server_sources(item_data, overlay),
+    )
+    .map(|mut sync| {
         sync.keep_registries(root, kept);
         sync.features.clone_from(&kept.features);
         Arc::new(sync)
@@ -117,6 +205,17 @@ impl Game<'_> {
     }
 }
 
+/// A server's own data load over `item_data`'s registry inputs: the owner of
+/// the data a server reads and sends, whichever window shares the `ItemData`.
+pub(super) fn server_data_load(
+    item_data: &ItemData,
+) -> horizon_world::native_load_context::LoadContext {
+    item_data.context().for_load(
+        horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
+        mod_api::__private::loaded_mods().ids(),
+    )
+}
+
 /// The registries and tags a server sends without data packs over them, read
 /// on a helper thread while a server's world prepares: most worlds have no
 /// packs, so it is what `sync_data` would load once the world is open.
@@ -139,10 +238,12 @@ pub(super) fn preload_sync_data(item_data: &Arc<ItemData>) -> Option<SyncPreload
     std::thread::Builder::new()
         .name("Server data preload".into())
         .spawn(move || {
+            let none = horizon_world::loot::PackOverlay::NONE;
             SyncData::load(
                 item_data.root(),
-                &horizon_world::loot::PackOverlay::NONE,
+                &none,
                 item_data.defaults(),
+                &server_sources(&item_data, &none),
             )
         })
         .map(|worker| SyncPreload { generation, worker })
@@ -1306,6 +1407,7 @@ impl Game<'_> {
                 &self.pack_files(),
                 packed.as_deref(),
                 self.res.item_defaults(),
+                &server_sources(&self.res.core.item_data, &self.pack_files()),
             )?;
             world_sync.features = features;
             sync = Arc::new(world_sync);
@@ -3557,5 +3659,23 @@ mod tests {
                 assert_eq!(received(&other), ["player"]);
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod sources_tests {
+    use super::overlay_key;
+    use horizon_world::loot::PackOverlay;
+
+    /// A pack set is told apart by its bytes, so a preload read without
+    /// packs is not adopted by a world that has them.
+    #[test]
+    fn the_server_sources_key_follows_the_packs_bytes() {
+        let files = vec![("recipe/a:b".to_owned(), vec![b"{}".to_vec()])];
+        let changed = vec![("recipe/a:b".to_owned(), vec![b"{ }".to_vec()])];
+        let key = |files: &[(String, Vec<Vec<u8>>)]| overlay_key(&PackOverlay { files });
+        assert_eq!(key(&files), key(&files.clone()));
+        assert_ne!(key(&files), key(&changed));
+        assert_ne!(key(&files), key(&[]));
     }
 }

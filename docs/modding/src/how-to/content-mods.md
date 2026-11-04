@@ -139,6 +139,12 @@ doesn't leave a hole in the floor under it. It is no longer a solid render eithe
 leaves: dampened by 1, or not at all if its template lets skylight down. Unset or `true`, it occludes as its template
 does.
 
+`destroy_overlay: false` hides the breaking crack (`destroy_stage_0` to `9`) on the block, for one broken by use
+(a feast or a cake taken apart bite by bite). It is read once at load into the block's facts, and only the overlay
+is skipped: the mining progress, the server's progress and the destroy-progress packets other players see stay
+vanilla's. Unset or `true`, the crack is drawn. It stands where a mod once had a mixin on
+`LevelRenderer.renderBlockDestroyAnimation`, which has no NeoForge event.
+
 A block copies its template's states. It can also declare state properties of
 its own, which its template does not have — how a pipe says which sides it
 connects to, or a machine whether it is running. Its states then become its
@@ -191,6 +197,12 @@ signs `template_hanging_sign_rot_0` to `_rot_3`, `template_attached_hanging_sign
 `minecraft:standing_signs`, `minecraft:wall_signs`, `minecraft:ceiling_hanging_signs` and
 `minecraft:wall_hanging_signs`, which vanilla's other sign tags and `minecraft:mineable/axe` include. Give the
 wall form a loot table of its own, or name it `<x>_wall_sign` so that it drops what `<x>_sign`'s table does.
+
+`sign_text_color` (a `DyeColor` name such as `"white"` or `"light_blue"`, black when unset) and `sign_text_glow`
+(`true` or `false`) are the text a new sign starts with, as `SignBlockEntity.createDefaultSignText` gives it, for a
+dark board whose black text would not read. They apply to the front and back text of a sign when it is placed, and
+dye and glow ink work on it as usual; a saved sign loads as vanilla's does. A sign and its `wall_block` declare the
+same values, so a sign does not change colour when it is hung on a wall.
 
 A block can override its targeting outline with `shapes` and independently override movement
 collision with `collision_shapes`. Both take the same table format. Boxes are

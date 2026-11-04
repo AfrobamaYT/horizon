@@ -687,8 +687,13 @@ mod tests {
     /// the client's `RecipeBookEntry::read` reads it.
     fn entry(root: &std::path::Path, id: &str) -> (SyncData, RecipeBookEntry) {
         let defaults = horizon_world::item_defaults::read(root).unwrap();
-        let sync =
-            SyncData::load(root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
+        let sync = SyncData::load(
+            root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
+            &crate::test_resources::server_sources(root, &horizon_world::loot::PackOverlay::NONE),
+        )
+        .unwrap();
         let entries = sync
             .advancements
             .book_entries(id, &sync, NOTIFY_AND_HIGHLIGHT);
@@ -779,11 +784,23 @@ mod tests {
             None => horizon_world::loot::PackOverlay::NONE,
         };
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let sync = SyncData::load(&root, &overlay, &defaults).unwrap();
+        let sync = SyncData::load(
+            &root,
+            &overlay,
+            &defaults,
+            &crate::test_resources::server_sources(&root, &overlay),
+        )
+        .unwrap();
         // What the craft hands the book: find_with over the crafting
         // copy, the way award_crafted calls it.
         let items = crate::items::Items::catalog(&root, &overlay, &defaults).unwrap();
-        let recipes = crate::crafting::Recipes::load(&root, &items, &overlay).unwrap();
+        let recipes = crate::crafting::Recipes::load(
+            &root,
+            &items,
+            &overlay,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let grid = vec![Some(horizon_items::items::ItemStack {
             item: "minecraft:raw_copper".into(),
             count: 1,
@@ -842,8 +859,13 @@ mod tests {
             )],
         );
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let sync =
-            SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
+        let sync = SyncData::load(
+            &root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
+            &crate::test_resources::server_sources(&root, &horizon_world::loot::PackOverlay::NONE),
+        )
+        .unwrap();
         assert!(
             !sync
                 .advancements
@@ -881,8 +903,13 @@ mod tests {
             ],
         );
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let sync =
-            SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
+        let sync = SyncData::load(
+            &root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
+            &crate::test_resources::server_sources(&root, &horizon_world::loot::PackOverlay::NONE),
+        )
+        .unwrap();
         let item = |n: &str| sync.id("minecraft:item", n).unwrap();
         let raw = item("minecraft:raw_copper");
         let redstone = item("minecraft:redstone");
@@ -937,8 +964,13 @@ mod tests {
             ],
         );
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let sync =
-            SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
+        let sync = SyncData::load(
+            &root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
+            &crate::test_resources::server_sources(&root, &horizon_world::loot::PackOverlay::NONE),
+        )
+        .unwrap();
         assert_eq!(
             sync.advancements.recipe_of_display(0),
             Some("minecraft:aaa_shaped")
@@ -1032,7 +1064,13 @@ mod tests {
         )];
         let overlay = horizon_world::loot::PackOverlay { files: &packs };
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let sync = SyncData::load(&root, &overlay, &defaults).unwrap();
+        let sync = SyncData::load(
+            &root,
+            &overlay,
+            &defaults,
+            &crate::test_resources::server_sources(&root, &overlay),
+        )
+        .unwrap();
         let entries = sync.advancements.book_entries(
             "minecraft:copper_ingot_from_smelting_raw_copper",
             &sync,

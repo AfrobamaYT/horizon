@@ -373,7 +373,7 @@ pub trait ProjectileWorld {
     fn in_water(&self, bounds: Aabb) -> bool;
     fn targets(&self) -> &[(Who, Aabb)];
     /// Server-only mod-block contacts along the completed movement.
-    fn block_contacts(&self, _entity: i32, _kind: &str, _from: Vec3, _to: Vec3, _bounds: Aabb) {}
+    fn block_contacts(&self, _entity: i32, _from: Vec3, _to: Vec3, _bounds: Aabb) {}
     /// `Level.isEmptyBlock`.
     fn empty(&self, _p: [i32; 3]) -> bool {
         true
@@ -1177,13 +1177,7 @@ impl Projectile {
         }
         let from = self.position;
         let result = self.tick_inner(w, impact);
-        w.block_contacts(
-            self.id as i32,
-            self.kind.id(),
-            from,
-            self.position,
-            self.bounds(),
-        );
+        w.block_contacts(self.id as i32, from, self.position, self.bounds());
         self.fire_tick(w);
         if !base_first {
             self.tick_shoot_event();

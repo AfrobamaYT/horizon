@@ -6,11 +6,13 @@ use super::ServerHost;
 /// What the game's raw transaction helpers take, and only `host.transaction`
 /// makes: a mod opens and closes transactions through it alone, so its drop guard closes every
 /// one a mod opens.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TransactionSeal(());
 
 /// An open transaction, as NeoForge's `TransactionContext`: what every write of a handler or a
 /// place takes, so none happens outside one. Only `host.transaction` makes one, and lends it to
 /// its closure alone.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct Transaction(());
 
 /// Transactions are available only on the logical server and preserve the receiver type.

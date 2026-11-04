@@ -12,6 +12,7 @@ use std::{fmt::Debug, marker::PhantomData, ops::Deref};
 
 /// A capability: its name (`horizon:items`, `mymod:chemicals`), the handler trait `T` it answers
 /// with, and the game's own provider, if the game has one.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct CapabilityKey<T: ?Sized + 'static> {
     /// The name.
     pub name: &'static str,
@@ -22,6 +23,7 @@ pub struct CapabilityKey<T: ?Sized + 'static> {
 /// A block entity a capability is asked of, by its level and position, and the side it is
 /// reached through (none: from no particular side): NeoForge's block capability context.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct BlockSide {
     /// The level.
     pub level: LevelRef,
@@ -32,6 +34,7 @@ pub struct BlockSide {
 }
 
 /// A capability's handler, with who answered: a mod's provider or the game's own.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct Capability<T: ?Sized> {
     pub(super) handler: Box<T>,
     /// The mod whose provider answered; none for the game.

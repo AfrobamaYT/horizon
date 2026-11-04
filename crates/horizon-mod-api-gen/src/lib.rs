@@ -1,5 +1,7 @@
 //! Generate the typed mod interface from native hook signatures and catalog contracts.
+mod catalog;
 mod host;
+use catalog::{Catalog, Contract, DrawContext, Hook, HostAccess, PartKind, PhaseContext, Side};
 use heck::ToSnakeCase;
 use quote::ToTokens;
 use std::{
@@ -157,32 +159,6 @@ fn api_types(source: &str, generated: &str) -> Result<ApiTypes, String> {
         exports: names,
         handles,
     })
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum HelperSide {
-    Server,
-    Client,
-    Both,
-}
-
-impl HelperSide {
-    fn parse(value: &serde_json::Value) -> Result<Option<Self>, String> {
-        let side = match value.get("side") {
-            None => Ok(None),
-            Some(serde_json::Value::String(side)) => match side.as_str() {
-                "server" => Ok(Some(Self::Server)),
-                "client" => Ok(Some(Self::Client)),
-                "both" => Ok(Some(Self::Both)),
-                _ => Err(format!("unknown helper side {side}")),
-            },
-            Some(_) => Err("helper side must be a string".into()),
-        }?;
-        if value.get("client_target").is_some() && side != Some(Self::Both) {
-            return Err("client_target requires side both".into());
-        }
-        Ok(side)
-    }
 }
 
 fn helper_target<'a>(
@@ -404,7 +380,7 @@ fn handle_method<'a>(
     method: &syn::ItemFn,
     name: &str,
     receiver: &str,
-    side: HelperSide,
+    side: Side,
     handles: &'a BTreeMap<String, String>,
 ) -> Result<(&'a str, String), String> {
     let handle = handles
@@ -422,11 +398,11 @@ fn handle_method<'a>(
     let mutable = matches!(inputs.next(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
     if mutable {
         match side {
-            HelperSide::Server => {}
-            HelperSide::Both => {
+            Side::Server => {}
+            Side::Both => {
                 return Err(format!("{name}: a both-side handle write is not allowed"));
             }
-            HelperSide::Client => {
+            Side::Client => {
                 return Err(format!(
                     "{name}: client handle writes need a client backend accessor; add it with the first one"
                 ));
@@ -439,8 +415,8 @@ fn handle_method<'a>(
             syn::parse_quote!(host: &mut dyn ServerHost)
         }
         Some(FnArg::Receiver(r)) if r.reference.is_some() => match side {
-            HelperSide::Client => syn::parse_quote!(host: &dyn ClientHost),
-            HelperSide::Server | HelperSide::Both => syn::parse_quote!(host: &dyn Host),
+            Side::Client => syn::parse_quote!(host: &dyn ClientHost),
+            Side::Server | Side::Both => syn::parse_quote!(host: &dyn Host),
         },
         _ => return Err(format!("{name}: a {receiver} helper borrows Game")),
     };
@@ -613,23 +589,6 @@ impl VisitMut for EventLifetimes {
     }
 }
 
-/// A drawing surface of the game's that drawing hooks get as a trait object (the catalog's
-/// `draw_contexts`): every helper taking the surface is a method of the trait, forwarded by a
-/// game struct pairing `Game` with the surface, and a hook argument of the surface's type is
-/// the trait object in the hook's event.
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DrawContext {
-    /// The game's type, as the host implementation names it (`crate::hud::HudBatch`).
-    surface: String,
-    /// The trait mods draw through.
-    #[serde(rename = "trait")]
-    trait_name: String,
-    /// What its helpers' names start with, left off the trait's method names.
-    prefix: String,
-    doc: String,
-}
-
 impl DrawContext {
     /// The context whose surface `ty` borrows, and whether it borrows it mutably.
     fn of<'a>(contexts: &'a [DrawContext], ty: &Type) -> Option<(&'a DrawContext, bool)> {
@@ -648,32 +607,6 @@ impl DrawContext {
     /// The game struct implementing the trait.
     fn game_struct(&self) -> String {
         format!("Game{}", self.trait_name)
-    }
-}
-
-fn draw_contexts(catalog: &serde_json::Value) -> Result<Vec<DrawContext>, String> {
-    serde_json::from_value(catalog["draw_contexts"].clone())
-        .map_err(|e| format!("catalog draw_contexts: {e}"))
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum HookContext {
-    Registration,
-    DataLoad,
-}
-
-#[derive(Debug)]
-struct CatalogHook {
-    entry: serde_json::Value,
-    side: HelperSide,
-    context: Option<HookContext>,
-}
-
-impl std::ops::Deref for CatalogHook {
-    type Target = serde_json::Value;
-
-    fn deref(&self) -> &Self::Target {
-        &self.entry
     }
 }
 
@@ -745,95 +678,16 @@ pub struct HookPoint {
 /// The catalog's hook points, `native-hooks.json` and the fragments beside it, as the
 /// generator reads them.
 pub fn hook_points(root: &Path) -> Result<Vec<HookPoint>, String> {
-    let catalog = serde_json::from_str(
-        &fs::read_to_string(root.join("native-hooks.json")).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    catalog_hooks(root, &catalog)?
+    Ok(Catalog::load(root)?
+        .hooks
         .into_iter()
-        .map(|hook| {
-            let name = hook["name"].as_str().ok_or("hook name missing")?;
-            Ok(HookPoint {
-                name: name.to_owned(),
-                version: hook["version"].as_u64().unwrap_or(1),
-                target: hook["target"]
-                    .as_str()
-                    .ok_or_else(|| format!("hook {name}: target missing"))?
-                    .to_owned(),
-                scoped: hook["mod_api"].get("scope").is_some(),
-            })
+        .map(|hook| HookPoint {
+            scoped: hook.scope.is_some(),
+            name: hook.name,
+            version: hook.version,
+            target: hook.target,
         })
-        .collect()
-}
-
-fn catalog_hooks(root: &Path, catalog: &serde_json::Value) -> Result<Vec<CatalogHook>, String> {
-    let mut hooks = catalog["hooks"]
-        .as_array()
-        .ok_or("catalog hooks must be an array")?
-        .clone();
-    let mut paths = fs::read_dir(root.join("tools/native-hook-fragments"))
-        .map_err(|e| e.to_string())?
-        .map(|entry| entry.map(|entry| entry.path()).map_err(|e| e.to_string()))
-        .collect::<Result<Vec<_>, _>>()?;
-    paths.sort();
-    for path in paths
-        .into_iter()
-        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
-    {
-        let fragment: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&path).map_err(|e| e.to_string())?)
-                .map_err(|e| format!("{}: {e}", path.display()))?;
-        hooks.extend(
-            fragment["hooks"]
-                .as_array()
-                .ok_or("fragment hooks must be an array")?
-                .iter()
-                .cloned(),
-        );
-    }
-    let mut seen = HashSet::new();
-    let mut validated = Vec::with_capacity(hooks.len());
-    for hook in hooks {
-        let name = hook["name"].as_str().ok_or("hook name missing")?;
-        if !seen.insert(name.to_owned()) {
-            return Err(format!("duplicate hook {name}"));
-        }
-        let side = HelperSide::parse(&hook)
-            .map_err(|e| format!("hook {name}: {e}"))?
-            .ok_or_else(|| format!("hook {name}: side missing"))?;
-        for key in ["neoforge", "fabric", "paper"] {
-            if let Some(value) = hook.get(key) {
-                let valid = value.is_string()
-                    || value
-                        .as_array()
-                        .is_some_and(|values| values.iter().all(serde_json::Value::is_string));
-                if !valid {
-                    return Err(format!(
-                        "hook {name}: {key} must be a string or list of strings"
-                    ));
-                }
-            }
-        }
-        if hook["doc"].as_str().is_none_or(|doc| doc.trim().is_empty()) {
-            return Err(format!(
-                "hook {name}: doc missing: add a `doc` field, the rustdoc of its trait method"
-            ));
-        }
-        let context = match hook.get("context") {
-            None => None,
-            Some(value) => Some(match value.as_str() {
-                Some("registration") => HookContext::Registration,
-                Some("data_load") => HookContext::DataLoad,
-                _ => return Err(format!("hook {name}: invalid phase context")),
-            }),
-        };
-        validated.push(CatalogHook {
-            entry: hook,
-            side,
-            context,
-        });
-    }
-    Ok(validated)
+        .collect())
 }
 
 /// The crate folder and module path of a hook target that is a free function
@@ -981,10 +835,7 @@ struct Sources {
 
 /// Parse and validate the catalog and hook/helper signatures.
 fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
-    let catalog: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(root.join("native-hooks.json")).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
+    let catalog = Catalog::load(root)?;
     let source = fs::read_to_string(root.join("crates/horizon-client/src/game/native_hooks.rs"))
         .map_err(|e| e.to_string())?;
     let file = syn::parse_file(&source).map_err(|e| e.to_string())?;
@@ -994,8 +845,6 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
             methods.extend(impl_functions(item));
         }
     }
-    let hooks = catalog_hooks(root, &catalog)?;
-    let contexts = draw_contexts(&catalog)?;
     let dispatch::HookSources {
         traits,
         dispatch,
@@ -1009,9 +858,9 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
         render_hook_ids,
         render_hook_constants,
         render_hook_count,
-    } = dispatch::emit(root, &hooks, &methods, &contexts)?;
-    if hooks.is_empty() {
-        return Err("no native hooks".into());
+    } = dispatch::emit(root, &catalog.hooks, &methods, &catalog.draw_contexts)?;
+    if catalog.hooks.is_empty() {
+        return Err(catalog::CatalogError::NoHooks.into());
     }
     let part = |name: &str| part_traits.get(name).map_or("", String::as_str);
     let code = format!(
@@ -1022,7 +871,7 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
         part("MenuPart"),
     );
     let code = complete_hook_constants(code, "Hooks", "hook_ids", "HookId")?;
-    let (host, implementation) = host::generate(root, &catalog, &contexts, &code)?;
+    let (host, implementation) = host::generate(root, &catalog, &code)?;
     let render_code = format!(
         "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse super::*;\n#[doc(hidden)]\n#[repr(usize)]\n#[derive(Clone, Copy)]\npub enum RenderHookId {{ {render_hook_ids} }}\n#[doc(hidden)]\n#[allow(non_upper_case_globals)]\npub mod render_hook_ids {{ {render_hook_constants} }}\npub(crate) const RENDER_HOOK_COUNT: usize = {render_hook_count};\n/// The client's render hooks a mod implements, each documented from its `doc` field.\npub trait RenderHooks: std::any::Any + Send + Sync {{\n#[doc(hidden)] fn subscribed(&self) -> &'static [Option<RenderHookId>];\n{render_traits}}}\n{render_dispatch}"
     );
@@ -1095,32 +944,6 @@ pub fn generate_test_hooks(root: &Path, out_dir: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn helper_side_is_optional_and_typed() {
-        use super::HelperSide;
-        use serde_json::json;
-        assert_eq!(HelperSide::parse(&json!({})), Ok(None));
-        assert_eq!(
-            HelperSide::parse(&json!({"side":"server"})),
-            Ok(Some(HelperSide::Server))
-        );
-        assert_eq!(
-            HelperSide::parse(&json!({"side":"client"})),
-            Ok(Some(HelperSide::Client))
-        );
-        assert_eq!(
-            HelperSide::parse(&json!({"side":"both"})),
-            Ok(Some(HelperSide::Both))
-        );
-        assert!(HelperSide::parse(&json!({"side":null})).is_err());
-        assert!(HelperSide::parse(&json!({"side":"unknown"})).is_err());
-        assert!(HelperSide::parse(&json!({"client_target":"somewhere"})).is_err());
-        assert!(HelperSide::parse(&json!({"side":"server", "client_target":"somewhere"})).is_err());
-        assert_eq!(
-            HelperSide::parse(&json!({"side":"both", "client_target":"somewhere"})),
-            Ok(Some(HelperSide::Both))
-        );
-    }
-    #[test]
     fn helper_targets_must_name_the_real_game_method() {
         let game = vec![(
             "horizon_client::game::sample".to_owned(),
@@ -1185,89 +1008,20 @@ mod tests {
     }
 
     #[test]
-    fn fragment_hooks_generate_and_duplicates_fail() {
+    fn fragment_hooks_generate() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let catalog: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(root.join("native-hooks.json")).unwrap())
-                .unwrap();
-        let hooks = super::catalog_hooks(&root, &catalog).unwrap();
-        let hook = hooks
+        let catalog = super::Catalog::load(&root).unwrap();
+        let hook = catalog
+            .hooks
             .iter()
-            .find(|h| h["name"] == "recipes_received")
+            .find(|h| h.name == "recipes_received")
             .unwrap();
-        assert_eq!(hook["mod_api"]["contract"], "listen");
+        assert_eq!(hook.contract, super::Contract::Listen);
         let generated = super::sources(&root, super::FillMode::Require)
             .unwrap()
             .hooks;
         assert!(generated.contains("fn recipes_received("));
         assert!(generated.contains("/// Side: client."));
-
-        let dir = root
-            .join("target")
-            .join(format!("mod-api-fragments-{}", std::process::id()));
-        let fragments = dir.join("tools/native-hook-fragments");
-        std::fs::create_dir_all(&fragments).unwrap();
-        std::fs::write(fragments.join("empty.json"), r#"{"hooks":[]}"#).unwrap();
-        std::fs::write(
-            fragments.join("duplicate.json"),
-            r#"{"hooks":[{"name":"same","side":"server"}]}"#,
-        )
-        .unwrap();
-        let catalog = serde_json::json!({"hooks":[{"name":"same","doc":"Same.","side":"server"}]});
-        assert_eq!(
-            super::catalog_hooks(&dir, &catalog).unwrap_err(),
-            "duplicate hook same"
-        );
-        std::fs::remove_file(fragments.join("duplicate.json")).unwrap();
-        assert_eq!(super::catalog_hooks(&dir, &catalog).unwrap().len(), 1);
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn a_hook_without_a_doc_is_refused() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for doc in [serde_json::json!(null), serde_json::json!("  ")] {
-            let catalog =
-                serde_json::json!({"hooks": [{"name": "bare", "side": "server", "doc": doc}]});
-            assert_eq!(
-                super::catalog_hooks(&root, &catalog).unwrap_err(),
-                "hook bare: doc missing: add a `doc` field, the rustdoc of its trait method"
-            );
-        }
-    }
-
-    #[test]
-    fn counterpart_metadata_accepts_strings_lists_and_absence() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target")
-            .join(format!("mod-api-counterparts-{}", std::process::id()));
-        std::fs::create_dir_all(root.join("tools/native-hook-fragments")).unwrap();
-        let catalog = serde_json::json!({"hooks": [
-            {"name": "one", "doc": "One.", "side": "server", "fabric": "Event.ONE", "neoforge": "OneEvent"},
-            {"name": "two", "doc": "Two.", "side": "both", "fabric": ["Event.TWO", "Event.THREE"], "paper": "SomeEvent"},
-            {"name": "none", "doc": "None.", "side": "client"}
-        ]});
-        assert_eq!(super::catalog_hooks(&root, &catalog).unwrap().len(), 3);
-        for side in [serde_json::json!(null), serde_json::json!("invalid")] {
-            let invalid = serde_json::json!({"hooks": [{"name": "bad", "side": side}]});
-            assert!(super::catalog_hooks(&root, &invalid).is_err());
-        }
-        let missing = serde_json::json!({"hooks": [{"name": "bad"}]});
-        assert!(
-            super::catalog_hooks(&root, &missing)
-                .unwrap_err()
-                .contains("side missing")
-        );
-        for key in ["fabric", "neoforge", "paper"] {
-            let invalid =
-                serde_json::json!({"hooks": [{"name": "bad", "side": "server", key: ["ok", 4]}]});
-            assert!(
-                super::catalog_hooks(&root, &invalid)
-                    .unwrap_err()
-                    .contains(key)
-            );
-        }
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1292,7 +1046,7 @@ mod tests {
                 &method,
                 &name,
                 receiver,
-                super::HelperSide::Server,
+                super::Side::Server,
                 &types.handles,
             )
             .unwrap();
@@ -1314,7 +1068,7 @@ mod tests {
                     &method,
                     "hidden_kind",
                     receiver,
-                    super::HelperSide::Server,
+                    super::Side::Server,
                     &types.handles
                 )
                 .unwrap_err()
@@ -1340,7 +1094,7 @@ mod tests {
             &read,
             "entity_position",
             "entity",
-            super::HelperSide::Server,
+            super::Side::Server,
             &types.handles,
         )
         .unwrap();
@@ -1352,7 +1106,7 @@ mod tests {
             &read,
             "entity_position",
             "entity",
-            super::HelperSide::Client,
+            super::Side::Client,
             &types.handles,
         )
         .unwrap();
@@ -1364,18 +1118,18 @@ mod tests {
             &write,
             "level_set",
             "level",
-            super::HelperSide::Server,
+            super::Side::Server,
             &types.handles,
         )
         .unwrap();
         assert_eq!(handle, "LevelRef");
         for (side, error) in [
             (
-                super::HelperSide::Both,
+                super::Side::Both,
                 "level_set: a both-side handle write is not allowed",
             ),
             (
-                super::HelperSide::Client,
+                super::Side::Client,
                 "level_set: client handle writes need a client backend accessor; add it with the first one",
             ),
         ] {
@@ -1429,15 +1183,9 @@ mod tests {
         ] {
             let method: syn::ItemFn = method;
             assert!(
-                super::handle_method(
-                    &method,
-                    name,
-                    receiver,
-                    super::HelperSide::Server,
-                    &types.handles
-                )
-                .unwrap_err()
-                .contains(error),
+                super::handle_method(&method, name, receiver, super::Side::Server, &types.handles)
+                    .unwrap_err()
+                    .contains(error),
                 "{name}"
             );
         }
@@ -1548,16 +1296,12 @@ mod tests {
 
     #[test]
     fn level_hosts_match_receiver_mutability() {
-        let level = super::CatalogHook {
-            entry: serde_json::json!({"target": "horizon_client::game::GameLevel<'_>::native_test"}),
-            side: super::HelperSide::Server,
-            context: None,
-        };
-        let game = super::CatalogHook {
-            entry: serde_json::json!({"target": "horizon_client::game::Game<'_>::native_test"}),
-            side: super::HelperSide::Both,
-            context: None,
-        };
+        use super::{Hook, HostAccess, Side};
+        let level = Hook::sample(
+            "horizon_client::game::GameLevel<'_>::native_test",
+            Side::Server,
+        );
+        let game = Hook::sample("horizon_client::game::Game<'_>::native_test", Side::Both);
         use super::host_param::{HostParam, host_param};
         let param = |ty: &str, call| {
             Some(HostParam {
@@ -1583,10 +1327,9 @@ mod tests {
             param("&mut dyn LevelWriteHost", ticks)
         );
         assert_eq!(host_param(&level, None, false), None);
-        let level_both = super::CatalogHook {
-            entry: level.entry.clone(),
-            side: super::HelperSide::Both,
-            context: None,
+        let level_both = Hook {
+            side: Side::Both,
+            ..level.clone()
         };
         assert_eq!(
             host_param(&level_both, Some(false), false),
@@ -1606,19 +1349,17 @@ mod tests {
             super::host_param::validate(&game, "test", false, Some(false), false).unwrap_err(),
             "test: a both-side hook with a &self target takes host \"read\""
         );
-        let read = super::CatalogHook {
-            entry: serde_json::json!({"target": "horizon_client::game::Game<'_>::native_test", "host": "read"}),
-            side: super::HelperSide::Both,
-            context: None,
+        let read = Hook {
+            host: Some(HostAccess::Read),
+            ..game.clone()
         };
         assert_eq!(
             host_param(&read, Some(false), false),
             param("&dyn Host", "&*self")
         );
-        let client = super::CatalogHook {
-            entry: game.entry.clone(),
-            side: super::HelperSide::Client,
-            context: None,
+        let client = Hook {
+            side: Side::Client,
+            ..game.clone()
         };
         assert_eq!(
             host_param(&client, Some(false), false),
@@ -1628,10 +1369,9 @@ mod tests {
             host_param(&client, Some(true), false),
             param("&mut dyn ClientHost", "self")
         );
-        let client_read = super::CatalogHook {
-            entry: read.entry.clone(),
-            side: super::HelperSide::Client,
-            context: None,
+        let client_read = Hook {
+            side: Side::Client,
+            ..read.clone()
         };
         assert_eq!(
             super::host_param::validate(&client_read, "test", false, Some(false), false)
@@ -1643,10 +1383,12 @@ mod tests {
             "test: this entry takes no host marker"
         );
         // A hit's level: another receiver than `GameLevel`, marked as a level host.
-        let hit = super::CatalogHook {
-            entry: serde_json::json!({"target": "horizon_client::game::native_hooks::HitLevel<'_>::native_test", "host": "level"}),
-            side: super::HelperSide::Server,
-            context: None,
+        let hit = Hook {
+            host: Some(HostAccess::Level),
+            ..Hook::sample(
+                "horizon_client::game::native_hooks::HitLevel<'_>::native_test",
+                Side::Server,
+            )
         };
         assert!(super::host_param::is_level(&hit));
         assert_eq!(
@@ -1654,20 +1396,23 @@ mod tests {
             param("&mut dyn LevelRandomHost", "self")
         );
         super::host_param::validate(&hit, "test", true, Some(true), false).unwrap();
-        for (entry, side, mutable) in [
-            (hit.entry.clone(), super::HelperSide::Server, Some(false)),
-            (hit.entry.clone(), super::HelperSide::Both, Some(true)),
+        for (hook, mutable) in [
+            (hit.clone(), Some(false)),
             (
-                serde_json::json!({"target": "horizon_client::game::GameLevel<'_>::native_test", "host": "level"}),
-                super::HelperSide::Server,
+                Hook {
+                    side: Side::Both,
+                    ..hit.clone()
+                },
+                Some(true),
+            ),
+            (
+                Hook {
+                    host: Some(HostAccess::Level),
+                    ..level.clone()
+                },
                 Some(true),
             ),
         ] {
-            let hook = super::CatalogHook {
-                entry,
-                side,
-                context: None,
-            };
             assert_eq!(
                 super::host_param::validate(&hook, "test", true, mutable, false).unwrap_err(),
                 "test: this entry takes no host marker"
@@ -1743,9 +1488,6 @@ mod tests {
         let root = real
             .join("target")
             .join(format!("mod-api-fill-{}", std::process::id()));
-        let catalog: Value =
-            serde_json::from_str(&std::fs::read_to_string(real.join("native-hooks.json")).unwrap())
-                .unwrap();
         let mut inputs: Vec<String> = [
             "native-hooks.json",
             "tools/native-hook-fragments",
@@ -1754,10 +1496,8 @@ mod tests {
         ]
         .map(str::to_owned)
         .into();
-        for hook in super::catalog_hooks(&real, &catalog).unwrap() {
-            if let Some((krate, path)) =
-                super::free_function_source(hook["target"].as_str().unwrap())
-            {
+        for hook in super::Catalog::load(&real).unwrap().hooks {
+            if let Some((krate, path)) = super::free_function_source(&hook.target) {
                 let (module, _) = path.rsplit_once("::").unwrap();
                 inputs.push(format!(
                     "crates/{krate}/src/{}.rs",
@@ -1779,7 +1519,7 @@ mod tests {
             let kind = if group == "hooks" { "hook" } else { "helper" };
             assert_eq!(
                 super::sources(&root, super::FillMode::Require).unwrap_err(),
-                format!("{kind} {name}: side missing")
+                format!("{kind} {name}: missing field `side`")
             );
         }
         std::fs::write(&catalog_path, &original_catalog).unwrap();
@@ -1831,7 +1571,7 @@ mod tests {
         std::fs::write(&catalog_path, json.to_string()).unwrap();
         assert_eq!(
             super::fill_hooks(&root).unwrap_err(),
-            "hook item_damaged has no mod_api entry: add one"
+            "hook item_damaged: missing field `mod_api`"
         );
         std::fs::write(&catalog_path, shipped_catalog).unwrap();
         super::fill_hooks(&root).unwrap();

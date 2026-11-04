@@ -219,6 +219,11 @@ fn server_with(resources: &Path, net: NetConfig) -> Server {
                 resources,
                 &horizon_world::loot::PackOverlay::NONE,
                 &defaults,
+                &horizon_client::crafting::ResolvedSources::load_or_empty(
+                    resources,
+                    &horizon_world::loot::PackOverlay::NONE,
+                    &server_load(),
+                ),
             )
             .expect("sync data"),
         ),
@@ -485,6 +490,11 @@ fn neoforge_shapes_items_reach_two_guests() {
             &resources,
             &horizon_world::loot::PackOverlay { files: &packs },
             &defaults,
+            &horizon_client::crafting::ResolvedSources::load_or_empty(
+                &resources,
+                &horizon_world::loot::PackOverlay { files: &packs },
+                &server_load(),
+            ),
         )
         .expect("sync data"),
     );
@@ -749,6 +759,11 @@ fn a_signed_in_hosts_lan_authenticates_guests_but_not_its_own_player() {
             &resources,
             &horizon_world::loot::PackOverlay::NONE,
             &defaults,
+            &horizon_client::crafting::ResolvedSources::load_or_empty(
+                &resources,
+                &horizon_world::loot::PackOverlay::NONE,
+                &server_load(),
+            ),
         )
         .expect("sync data"),
     );
@@ -1705,4 +1720,13 @@ fn a_boat_floating_too_long_kicks_its_driver() {
         !s.hub.guests[0].left_reason.is_empty(),
         "the 161st floating tick kicks the driver"
     );
+}
+
+fn server_load() -> horizon_world::native_load_context::LoadContext {
+    use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
+    LoadContext::new(
+        DataLoadOrigin::ServerDataLoad,
+        std::sync::Arc::new(LoadInputs::new(Default::default(), Default::default())),
+        [],
+    )
 }

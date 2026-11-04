@@ -119,7 +119,12 @@ fn main() -> Result<()> {
         item_data.defaults(),
     )?;
     step("items");
-    let recipes = Recipes::load(&root, &items, &PackOverlay::NONE)?;
+    let recipes = Recipes::load(
+        &root,
+        &items,
+        &PackOverlay::NONE,
+        &crate::test_resources::server_load(),
+    )?;
     step("recipes");
     let biomes = Biomes::load(&root)?;
     step("biomes");

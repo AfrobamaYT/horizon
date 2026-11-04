@@ -655,6 +655,9 @@ mod tests {
     use super::*;
     use mod_api::__private::game::*;
 
+    /// The panic hook is process-wide: tests that swap it hold this so they never overlap.
+    static PANIC_HOOK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn a_release_reports_its_built_in_version() {
         // release.yml builds with HORIZON_VERSION (docs/versioning.md): `v0.2.3`, wherever it is installed.
@@ -814,6 +817,7 @@ mod tests {
         // A real panic through a hook, as the game's would be.
         let caught = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = caught.clone();
+        let _hook = PANIC_HOOK.lock().unwrap_or_else(|e| e.into_inner());
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
             if panic_message(info).contains("the test crash") {
@@ -893,6 +897,7 @@ mod tests {
         ];
         let caught = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = caught.clone();
+        let _hook = PANIC_HOOK.lock().unwrap_or_else(|e| e.into_inner());
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
             let error = panic_report(info, "client").error;

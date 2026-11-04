@@ -1044,7 +1044,6 @@
     "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml tidak memiliki nama paket.",
     "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod}: Cargo.toml tidak memiliki dependensi horizon-mod-api.",
     "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod}: Cargo.toml bergantung pada game ({key}). Mod hanya bergantung pada horizon-mod-api.",
-    "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client meminta {fields}. Build server tanpa antarmuka; peluncur yang mengatur fitur horizon-client. Hapus features dan gunakan default-features = false atau hilangkan.",
     "{mod}: {error}": "{mod}: {error}",
     "{mode} · stopped": "{mode} · berhenti",
     "{online} of {max}": "{online} dari {max}",

@@ -64,21 +64,27 @@ pub(super) fn network_recipes(
     resources: &Path,
     overlay: &horizon_world::loot::PackOverlay,
     defaults: &horizon_world::item_defaults::ItemDefaults,
+    sources: &horizon_client::crafting::ResolvedSources,
 ) -> (BTreeMap<String, Box<str>>, HashMap<String, i32>) {
-    let mut all: BTreeMap<_, _> = match horizon_items::recipe_sources::sources(resources, overlay) {
-        Ok(sources) => sources
-            .into_iter()
-            .map(|(id, value)| (horizon_client::crafting::qualified(&id), value))
-            .collect(),
-        Err(e) => {
-            log::warn!("recipes: could not load recipe sources: {e}");
-            BTreeMap::new()
-        }
-    };
+    // The resolved copy: the load's `ingredient` answers are in place, and
+    // none of them leaves it (`forget_answers` below).
+    let mut all: BTreeMap<_, _> = sources
+        .recipes
+        .iter()
+        .map(|r| {
+            (
+                horizon_client::crafting::qualified(&r.name),
+                (*r.resolved).clone(),
+            )
+        })
+        .collect();
     match horizon_client::items::Items::catalog(resources, overlay, defaults) {
         Ok(items) => all.retain(|_, r| normalize_ingredients(r, &items)),
         Err(e) => log::warn!("recipes: NeoForge's ingredient shapes stay unresolved: {e}"),
     }
+    all.values_mut().for_each(|r| {
+        horizon_client::crafting::Ingredient::forget_answers(r);
+    });
     // RecipeManager.unpackRecipeInfo's group numbers, while the files are
     // still parsed.
     let mut groups = HashMap::new();
@@ -375,7 +381,169 @@ pub fn content() -> Arc<Vec<Vec<u8>>> {
 #[cfg(test)]
 mod content_tests {
     use super::*;
+    use horizon_client::crafting::ResolvedSources;
     use serde_json::json;
+
+    use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
+
+    struct AspectListener(std::sync::Arc<std::sync::Mutex<Vec<(DataLoadOrigin, String)>>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for AspectListener {
+        fn ingredient(
+            &self,
+            context: &mod_api::DataLoadContext<'_>,
+            event: &mut mod_api::IngredientEvent<'_>,
+        ) {
+            self.0
+                .lock()
+                .unwrap()
+                .push((context.origin(), event.data["aspect"].to_string()));
+            event.items.push("minecraft:emerald".into());
+        }
+    }
+
+    fn load(origin: DataLoadOrigin) -> LoadContext {
+        LoadContext::new(
+            origin,
+            std::sync::Arc::new(LoadInputs::new(Default::default(), Default::default())),
+            [],
+        )
+    }
+
+    /// The `ingredient` hook hears each custom-ingredient occurrence once per
+    /// load, in the load's own pass (`ResolvedSources::resolve`), whatever
+    /// reads the recipes afterwards: every parse and the guests' copy read the
+    /// answer the pass left. The occurrence under a slot other than
+    /// `ingredients` (a banner recipe's `banner`) and the nested one are
+    /// answered too, and an answer a data file carries is dropped. Measured
+    /// in the game before the pass existed, per occurrence: an integrated
+    /// open heard it twice with `ServerDataLoad` and once with `ClientPreload`,
+    /// and a dedicated server three times.
+    #[test]
+    fn ingredient_hook_hears_each_occurrence_once_per_load_with_its_origin() {
+        let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "aspects",
+            Box::new(AspectListener(heard.clone())),
+        )];
+        let items = horizon_client::items::Items::for_tests(Default::default());
+        let recipe = json!({
+            "type": "minecraft:crafting_shapeless",
+            "ingredients": [
+                {"type": "neoforge:compound", "children": [
+                    {"type": "mymod:aspect", "aspect": "nested"}, "minecraft:stone"]},
+                {"type": "mymod:aspect", "aspect": "plain"}
+            ],
+            "banner": {"type": "mymod:aspect", "aspect": "banner",
+                "horizon:resolved_items": ["minecraft:diamond"]},
+            "result": {"id": "minecraft:stick", "count": 1}
+        });
+        let sources = || vec![("aspects_test".to_owned(), recipe.clone())];
+        mod_api::testing::with_mods(mods.into(), || {
+            let server_origin = DataLoadOrigin::ServerDataLoad;
+            let resolved = ResolvedSources::resolve(sources(), &load(server_origin));
+            let once = heard.lock().unwrap().clone();
+            assert_eq!(
+                once,
+                [
+                    (server_origin, "\"nested\"".to_owned()),
+                    (server_origin, "\"plain\"".to_owned()),
+                    (server_origin, "\"banner\"".to_owned()),
+                ]
+            );
+
+            // Parsing again, and the guests' copy, hear nothing more, and the
+            // forged answer on the banner slot was replaced by the hook's.
+            let file = &resolved.recipes[0].resolved;
+            let banner =
+                horizon_client::crafting::Ingredient::parse(&file["banner"], &items).unwrap();
+            assert_eq!(banner.order, ["minecraft:emerald"]);
+            for ingredient in file["ingredients"].as_array().unwrap() {
+                horizon_client::crafting::Ingredient::parse(ingredient, &items).unwrap();
+            }
+            let mut copy = (**file).clone();
+            assert!(normalize_ingredients(&mut copy, &items));
+            assert_eq!(heard.lock().unwrap().len(), 3);
+            // What the pass left is not the file the mods and clients see.
+            assert_eq!(*resolved.recipes[0].file, recipe);
+            horizon_client::crafting::Ingredient::forget_answers(&mut copy);
+            assert!(!copy.to_string().contains("resolved_items"));
+
+            heard.lock().unwrap().clear();
+            let client = ResolvedSources::resolve(sources(), &load(DataLoadOrigin::ClientPreload));
+            assert!(
+                heard
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .all(|(origin, _)| *origin == DataLoadOrigin::ClientPreload)
+            );
+            assert_eq!(heard.lock().unwrap().len(), 3);
+            drop(client);
+        });
+    }
+
+    /// Every slot `Recipes`, `StationRecipes` and the guests' copy read an
+    /// ingredient from (the keys their readers name, listed here from them),
+    /// the shaped `key` and the firework star's `shapes` maps among them,
+    /// carries a mod ingredient that parses after the pass: none fails where
+    /// it worked before the pass.
+    #[test]
+    fn every_slot_the_readers_use_is_answered_by_the_pass() {
+        let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "aspects",
+            Box::new(AspectListener(heard.clone())),
+        )];
+        let items = horizon_client::items::Items::for_tests(Default::default());
+        let slots = [
+            "ingredient",
+            "ingredients",
+            "base",
+            "addition",
+            "template",
+            "input",
+            "reagent",
+            "banner",
+            "target",
+            "material",
+            "dye",
+            "source",
+            "shell",
+            "fuel",
+            "star",
+            "trail",
+            "twinkle",
+            "map",
+            "back",
+            "left",
+            "right",
+            "front",
+        ];
+        let mut recipe = json!({"type": "minecraft:crafting_special_firework_star"});
+        for slot in slots {
+            recipe[slot] = json!({"type": "mymod:aspect", "aspect": slot});
+        }
+        recipe["key"] = json!({"a": {"type": "mymod:aspect", "aspect": "key"}});
+        recipe["shapes"] = json!({"star": {"type": "mymod:aspect", "aspect": "shapes"}});
+        mod_api::testing::with_mods(mods.into(), || {
+            let resolved = ResolvedSources::resolve(
+                vec![("slots".to_owned(), recipe.clone())],
+                &load(DataLoadOrigin::ServerDataLoad),
+            );
+            assert_eq!(heard.lock().unwrap().len(), slots.len() + 2);
+            let file = &resolved.recipes[0].resolved;
+            let parse = |ingredient: &Value| {
+                horizon_client::crafting::Ingredient::parse(ingredient, &items)
+                    .unwrap_or_else(|| panic!("{ingredient} fails to parse"))
+            };
+            for slot in slots {
+                parse(&file[slot]);
+            }
+            parse(&file["key"]["a"]);
+            parse(&file["shapes"]["star"]);
+        });
+    }
 
     #[test]
     fn content_keeps_the_asked_types_and_ends_with_them() {

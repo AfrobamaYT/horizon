@@ -21,7 +21,12 @@ pub fn main() -> horizon_client::Result<()> {
     let cases = fs::read_to_string(args.get(2).ok_or(usage)?)?;
     let defaults = horizon_world::item_defaults::read(root)?;
     let items = Items::catalog(root, &PackOverlay::NONE, &defaults)?;
-    let recipes = Recipes::load(root, &items, &PackOverlay::NONE)?;
+    let recipes = Recipes::load(
+        root,
+        &items,
+        &PackOverlay::NONE,
+        &crate::test_resources::server_load(),
+    )?;
     let index = RecipeIndex::load(root, &PackOverlay::NONE);
     let mut book = Book::build(&recipes, &items);
     book.set_display_ids(&index);
