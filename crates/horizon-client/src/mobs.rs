@@ -2897,8 +2897,19 @@ pub trait MobHooks {
     /// `EntityMobGriefingEvent`: whether mob `mob` may grief, `rule` (the
     /// `mob_griefing` game rule) unless a mod says otherwise.
     fn can_grief(&self, mob: u32, rule: bool) -> bool;
+    /// Whether `can_grief` may differ from the rule (a mod listens), so a
+    /// scan that griefing off would skip still has to run.
+    fn grief_hooked(&self) -> bool;
+    /// `LivingVisibilityEvent`: `visibility`, the player's visibility
+    /// percent as mob `looking` targets it, as mods scale it.
+    fn living_visibility(&self, player: &PlayerView, looking: u32, visibility: f64) -> f64;
 }
 impl MobWorld<'_> {
+    /// Whether a mob may grief here at all: the rule, or a mod that may say
+    /// yes against it.
+    pub fn griefing_possible(&self) -> bool {
+        self.mob_griefing || self.mob_hooks.is_some_and(|hooks| hooks.grief_hooked())
+    }
     /// `EventHooks.canEntityGrief(level, mob)`: the `mob_griefing` rule, or
     /// what a mod answers for this mob. Asked where NeoForge asks it; the
     /// places vanilla reads the rule with no entity still read `mob_griefing`.
@@ -2907,6 +2918,16 @@ impl MobWorld<'_> {
             Some(hooks) => hooks.can_grief(mob, self.mob_griefing),
             None => self.mob_griefing,
         }
+    }
+    /// `LivingEntity.getVisibilityPercent(level, looking)` of the player `p`:
+    /// `visibility` holds vanilla's factors; NeoForge's `LivingVisibilityEvent`
+    /// scales it last, before the clamp to 0..=10.
+    pub fn player_visibility(&self, p: &PlayerView, looking: u32, visibility: f64) -> f64 {
+        let visibility = match self.mob_hooks {
+            Some(hooks) => hooks.living_visibility(p, looking, visibility),
+            None => visibility,
+        };
+        visibility.clamp(0.0, 10.0)
     }
 }
 /// `Entity.getTeam` of the player and of the mobs on a team.
@@ -3813,7 +3834,7 @@ impl Mob {
     /// `LivingEntity.checkTotemDeathProtection`: the first hand with a
     /// `death_protection` item uses it up, the mob survives at 1 health with
     /// the totem's effects, and entity event 35 tells the clients.
-    fn use_death_protection(&mut self, level: &DamageLevel<'_>, source: &Damage) -> bool {
+    fn use_death_protection(&mut self, level: &mut DamageLevel<'_>, source: &Damage) -> bool {
         // `DamageTypeTags.BYPASSES_INVULNERABILITY`: the void and /kill take it.
         if source.kind.bypasses_invulnerability() {
             return false;

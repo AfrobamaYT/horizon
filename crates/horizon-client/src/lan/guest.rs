@@ -276,6 +276,9 @@ pub struct Guest {
     pub sent_chunks: crate::fast_hash::FxHashSet<(i32, i32)>,
     /// Sent as far-ring columns and needing a near snapshot on promotion.
     pub far_sent_chunks: crate::fast_hash::FxHashSet<(i32, i32)>,
+    /// The near chunks the mods were told this player watches
+    /// (`lan::chunk_watch`); empty while no mod listens.
+    pub watched: crate::fast_hash::FxHashSet<(i32, i32)>,
     pub chunk_queue: Vec<(i32, i32)>,
     /// The far ring's chunks still to send, past the view distance (`lan::far`), closest first.
     pub far_queue: Vec<(i32, i32)>,
@@ -591,6 +594,7 @@ impl Guest {
             center: None,
             sent_chunks: Default::default(),
             far_sent_chunks: Default::default(),
+            watched: Default::default(),
             chunk_queue: Vec::new(),
             far_queue: Vec::new(),
             unacknowledged: 0,

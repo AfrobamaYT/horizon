@@ -20,6 +20,7 @@ use horizon_core::{
     geometry::{Aabb, Vec3},
     random::RandomSource,
 };
+use mod_api::NativeSpawnCheck;
 use serde_json::Value;
 use std::{borrow::Cow, collections::HashMap, fs, path::Path};
 
@@ -301,6 +302,11 @@ fn spawns_far_from_player(s: Species, category: Category) -> bool {
 pub type MobType = (Species, f32, f32, Category);
 
 pub trait NaturalLevel: SpawnLevel {
+    /// `MobSpawnEvent.PositionCheck`: what server mods answer for the new mob
+    /// of type `entity` at `at`; `Default` leaves the checks to vanilla.
+    fn position_check(&self, _entity: &str, _reason: Reason, _at: [f64; 3]) -> NativeSpawnCheck {
+        NativeSpawnCheck::Default
+    }
     /// Whether server mods hear `potential_spawns`.
     fn spawn_hooks(&self) -> bool {
         false
@@ -551,6 +557,22 @@ pub fn spawn_aabb(s: Species, x: f64, y: f64, z: f64, width: f32, height: f32) -
         Vec3::new(x - half, y, z - half),
         Vec3::new(x + half, y + f64::from(scale * height), z + half),
     )
+}
+/// `Mob.checkSpawnRules` and `checkSpawnObstruction` of a freshly created
+/// mob, unless a mod forces the answer (`MobSpawnEvent.PositionCheck`); then
+/// `vanilla` does not run.
+pub fn position_ok<L: NaturalLevel>(
+    l: &L,
+    entity: &str,
+    reason: Reason,
+    at: [f64; 3],
+    vanilla: impl FnOnce() -> bool,
+) -> bool {
+    match l.position_check(entity, reason, at) {
+        NativeSpawnCheck::Succeed => true,
+        NativeSpawnCheck::Fail => false,
+        _ => vanilla(),
+    }
 }
 /// `checkSpawnObstruction` of a freshly created mob with the given box, with
 /// the mobs already `spawned` in the way; None in a generation region, which
@@ -1161,8 +1183,16 @@ pub fn spawn_category_for_position<L: NaturalLevel, R: RandomSource>(
             let despawn = f64::from(type_category.despawn_distance().pow(2));
             let far = distance > despawn && removed_when_far(species);
             if far
-                || !mob_spawn_rules(species, l, x, y, z)
-                || !spawn_obstruction(species, l, bounds, Some(&spawned), x, y, z)
+                || !position_ok(
+                    l,
+                    &entry.entity,
+                    Reason::Natural,
+                    [xx, f64::from(y), zz],
+                    || {
+                        mob_spawn_rules(species, l, x, y, z)
+                            && spawn_obstruction(species, l, bounds, Some(&spawned), x, y, z)
+                    },
+                )
             {
                 continue;
             }
@@ -1304,7 +1334,7 @@ fn valid_position_for_type<L: NaturalLevel, R: RandomSource>(
     if !hooked && !listed && !in_list() {
         return false;
     }
-    if !spawn_rules::check_spawn_rules(species, l, Reason::Natural, random, x, y, z) {
+    if !spawn_rules::check_spawn_rules(&entry.entity, species, l, Reason::Natural, random, pos) {
         return false;
     }
     l.no_collision(spawn_aabb(
@@ -1384,22 +1414,28 @@ pub fn spawn_mobs_for_chunk_generation<L: NaturalLevel, R: RandomSource, Q: Rand
                     let (bx, bz) = (fx.floor() as i32, fz.floor() as i32);
                     if !l.no_collision(spawn_aabb(species, fx, fy, fz, width, height))
                         || !spawn_rules::check_spawn_rules(
+                            &entry.entity,
                             species,
                             l,
                             Reason::ChunkGeneration,
                             rules,
-                            bx,
-                            pos[1],
-                            bz,
+                            [bx, pos[1], bz],
                         )
                     {
                         continue;
                     }
                     let yaw = random.next_float() * 360.0;
                     let bounds = spawn_box(fx, fy, fz, width, height);
-                    if mob_spawn_rules(species, l, bx, pos[1], bz)
-                        && spawn_obstruction(species, l, bounds, None, bx, pos[1], bz)
-                    {
+                    if position_ok(
+                        l,
+                        &entry.entity,
+                        Reason::ChunkGeneration,
+                        [fx, fy, fz],
+                        || {
+                            mob_spawn_rules(species, l, bx, pos[1], bz)
+                                && spawn_obstruction(species, l, bounds, None, bx, pos[1], bz)
+                        },
+                    ) {
                         let request = SpawnRequest {
                             entity: &entry.entity,
                             species,

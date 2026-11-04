@@ -1,19 +1,22 @@
 //! One chat hook doing the work its message names, for `tests/bench.rs`. The test runs this
 //! same source natively and as `mod.wasm` and compares the two.
 //!
-//! - `empty`: nothing; the cost of the call itself.
+//! - `tick` (the server tick hook, with its small event): nothing; the cost of a call.
+//! - `empty`: nothing, from the chat hook, whose event carries strings and messages.
 //! - `text`: writes a new message, which is lowered back to the game.
 //! - `imports N`: N calls into the game (`host.level`).
 //! - `compute N`: plain mod logic on N values: fill, sort, hash-map counts, a checksum.
 use std::collections::HashMap;
 
-use mod_api::{Flow, Hooks, ServerChatEvent, ServerHost, Text};
+use mod_api::{Flow, Hooks, ServerChatEvent, ServerHost, ServerTickEvent, Text};
 
 #[derive(Default)]
 pub struct Mod;
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
+    fn server_tick(&self, _host: &mut dyn ServerHost, _event: &mut ServerTickEvent<'_>) {}
+
     fn server_chat(&self, host: &mut dyn ServerHost, event: &mut ServerChatEvent<'_>) -> Flow {
         let (work, n) = event
             .raw_text
