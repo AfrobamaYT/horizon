@@ -3148,7 +3148,7 @@ struct Game<'a> {
     /// The open `host.transaction`s, innermost last (`transactions.rs`).
     transactions: Vec<transactions::Level>,
     /// Backing blocks whose contents notice is on the call stack, innermost last.
-    contents_changing: Vec<(horizon_client::mod_api::LevelRef, BlockPos)>,
+    contents_changing: Vec<(mod_api::LevelRef, BlockPos)>,
     /// The screen of a mod block's menu open on this client (`native_screen`).
     mod_screen: Option<native_hooks::OpenNativeScreen>,
     /// The players with each mod container open, by level (`tick_mod_container_viewers`).

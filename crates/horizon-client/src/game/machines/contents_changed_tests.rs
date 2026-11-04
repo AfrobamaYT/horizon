@@ -1,10 +1,7 @@
 use super::{BlockEntity, Game};
 use crate::game::native_entity_refs::tests::{run_fresh_cases, with_game_at};
-use horizon_client::{
-    chunk::Chunk,
-    items::ItemStack,
-    mod_api::{self, *},
-};
+use horizon_client::{chunk::Chunk, items::ItemStack};
+use mod_api::*;
 use horizon_core::{geometry::Vec3, position::BlockPos, random::RandomSource};
 use std::sync::{Arc, Mutex};
 
@@ -143,8 +140,8 @@ fn with_changes(
         }),
     )]
     .into();
-    mod_api::install(mods.clone());
-    mod_api::install_parts(&mods).unwrap();
+    mod_api::__private::install(mods.clone());
+    mod_api::__private::install_parts(&mods).unwrap();
     let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let root = crate::game::mods::content_root(&base, &Default::default()).unwrap();
     with_game_at(root, |game| {

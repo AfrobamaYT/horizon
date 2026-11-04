@@ -625,7 +625,7 @@ impl Game<'_> {
         if pos.1 == super::minecarts::CART_KEY_Y {
             return;
         }
-        if mod_api::has_scoped_hook(mod_api::HookId::ContentsChanged)
+        if mod_api::__private::has_scoped_hook(mod_api::HookId::ContentsChanged)
             && let Some(level) = self.native_level_here()
         {
             let at = BlockPos::new(pos.0, pos.1, pos.2);
