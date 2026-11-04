@@ -1345,9 +1345,10 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 native_mods::build(&base, &folder, &target, profile, steps).map_err(|e| match e
                     .starts_with(native_mods::MISMATCH)
                 {
-                    true => {
-                        format!("{e} Run `cargo horizon-mod update` to rebuild them for this game.")
-                    }
+                    true => trf(
+                        "{error} Run `cargo horizon-mod update` to rebuild them for this game.",
+                        &[("error", &e)],
+                    ),
                     false => e,
                 })?;
             println!(

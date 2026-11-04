@@ -2050,13 +2050,11 @@ impl Game<'_> {
                 note_event(host, previous.take());
             }
             if timed {
-                if timed {
-                    let detail = self
-                        .lan
-                        .as_ref()
-                        .and_then(|host| self.event_detail(host, &event));
-                    previous = Some((Instant::now(), event_kind(&event), detail));
-                }
+                let detail = self
+                    .lan
+                    .as_ref()
+                    .and_then(|host| self.event_detail(host, &event));
+                previous = Some((Instant::now(), event_kind(&event), detail));
             }
             match event {
                 event @ (HostEvent::Chat { .. } | HostEvent::Warn(_) | HostEvent::Error(_)) => {

@@ -2929,18 +2929,11 @@ mod tests {
             fs::write(d.join("native-mods.json"), json).unwrap();
             about_in(&d)
         };
-        assert_eq!(
-            record(None).unwrap().target,
-            Target::Client,
-            "a build from before targets"
-        );
+        assert_eq!(record(None), None);
         assert_eq!(record(Some("client")).unwrap().target, Target::Client);
         assert_eq!(record(Some("server")).unwrap().target, Target::Server);
-        assert_eq!(
-            record(Some("anything-else")).unwrap().target,
-            Target::Client
-        );
-        assert_eq!(record(None).unwrap().horizon, A);
+        assert_eq!(record(Some("anything-else")), None);
+        assert_eq!(record(Some("client")).unwrap().horizon, A);
     }
 
     /// The export ([`build_server`]): a standalone runtime folder with the engine, resources
