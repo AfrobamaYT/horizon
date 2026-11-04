@@ -2259,6 +2259,26 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_enchant_effect(self, enchantment, kind, data, level, victim);
     }
+    /// The block's storage calls `setChanged` (`Container.setChanged` and
+    /// `BlockEntity.setChanged`), after its contents were written and before
+    /// dirty/comparator updates. A native transaction tells it once per backing
+    /// block at the root commit, never for an abort or a simulation. Explicit
+    /// `set_changed` also tells it, even if the contents compare equal.
+    ///
+    /// A server-only, non-cancellable BlockPart notice, not a global bus event.
+    /// `level` and `pos` name the backing block, not an automation entity or its
+    /// menu's placeholder coordinates. A double container tells each component;
+    /// the comparator refresh of its other half is not another notice. Replaces
+    /// Create's positional `contents_changed` injection for depots, packages and
+    /// schematic inventories; NeoForge has no corresponding bus event.
+    pub(super) fn native_contents_changed(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockStateId,
+    ) {
+        mod_api::dispatch_contents_changed(self, level, pos, state);
+    }
     /// Block `block`'s block entity has item slots (a `WorldlyContainer`):
     /// set `container` when the block is yours. Asked once for each mod
     /// block when the ticking table is built; at most 256 slots, and slot

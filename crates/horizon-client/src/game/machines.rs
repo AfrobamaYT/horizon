@@ -4,6 +4,8 @@
 //! comparator signals (`AbstractContainerMenu.getRedstoneSignalFromContainer`).
 use super::{Game, storage::is_shulker_box};
 
+#[cfg(test)]
+mod contents_changed_tests;
 mod crafter;
 pub(in crate::game) mod native_energy;
 pub(in crate::game) mod native_fluids;
@@ -621,6 +623,12 @@ impl Game<'_> {
     pub(super) fn container_changed(&mut self, pos: Pos) {
         if pos.1 == super::minecarts::CART_KEY_Y {
             return;
+        }
+        if mod_api::has_scoped_hook(mod_api::HookId::ContentsChanged)
+            && let Some(level) = self.native_level_here()
+        {
+            let at = [pos.0, pos.1, pos.2];
+            self.native_contents_changed(level, at, self.world.block(pos.0, pos.1, pos.2));
         }
         self.chiseled_bookshelf_synced(pos);
         if matches!(

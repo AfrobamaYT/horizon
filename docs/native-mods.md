@@ -3506,6 +3506,17 @@ adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `S
 level, position, block state and `include_data`, true when a creative player picks with Ctrl. Return
 `None` to keep the game's item.
 
+`BlockPart::contents_changed(host, event)` observes a world block's storage at `setChanged`,
+with a `ServerHost`, typed `event.level`, `event.pos` and `event.state`. Attach it to the specific
+blocks you observe, including vanilla containers; it has no global `Hooks` counterpart. The backing
+contents are already written, before dirty/comparator updates. Native transactions notify once per
+backing block at root commit, never on abort or simulation. An explicit `BlockEntityRef::set_changed`
+notifies even if contents are unchanged. A double container notifies each component, not once again
+for the other half's comparator refresh. Entity/menu placeholder coordinates are not block notices.
+The [compiled listener and Game cases](../crates/horizon-client/src/game/machines/contents_changed_tests.rs)
+show how to read committed items or saved data through the typed level. This replaces Create's
+positional `contents_changed` mixin for depot/package/schematic storage; there is no NeoForge bus event.
+
 Declare a block entity type and its valid blocks during `Hooks::register`, then attach its part:
 
 ```rust,ignore

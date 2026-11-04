@@ -1,0 +1,12 @@
+{
+  "hooks": [
+    {
+      "name": "contents_changed",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_contents_changed",
+      "side": "server",
+      "neoforge": "none (Container.setChanged has no bus event)",
+      "cancellable": false,
+      "mod_api": {"contract": "listen", "scope": "block", "key": "state"}
+    }
+  ]
+}
