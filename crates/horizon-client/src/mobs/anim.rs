@@ -330,7 +330,7 @@ fn bob(p: &mut Poses, n: &str, age: f32, scale: f32) {
     q[5] += scale * ((age * 0.09).mcos() * 0.05 + 0.05);
     q[3] += scale * ((age * 0.067).msin() * 0.05);
 }
-pub use horizon_world::arm_pose::ArmPose;
+pub use horizon_core::arm_pose::ArmPose;
 /// HumanoidModel.setupAnim with empty hands (endermen).
 /// Passes `isPassenger` so a seated enderman keeps the humanoid riding pose
 /// (vanilla EndermanModel.setupAnim calls super first, then halves/clamps xRot).

@@ -2944,10 +2944,10 @@ pub fn build(
             &serde_json::to_vec(&placed_blocks)?,
         )?;
     }
-    let arm_poses: BTreeMap<&str, &str> = plan
+    let arm_poses: BTreeMap<&str, horizon_mods::content::ArmPose> = plan
         .items
         .iter()
-        .filter_map(|i| Some((i.rename.to.as_str(), i.arm_pose?.name())))
+        .filter_map(|i| Some((i.rename.to.as_str(), i.arm_pose?)))
         .collect();
     if !arm_poses.is_empty() {
         overlay.write(

@@ -1102,7 +1102,7 @@ pub struct Extra {
     pub use_animation: horizon_world::consumable::UseAnimation,
     /// The `arm_pose` the items in the main and off hand declare, if any: the pose
     /// a player model's arm takes holding it, in place of vanilla's.
-    pub held_arm_pose: [Option<horizon_world::arm_pose::ArmPose>; 2],
+    pub held_arm_pose: [Option<horizon_core::arm_pose::ArmPose>; 2],
     pub fall_flying: bool,
     pub fall_fly_ticks: i32,
     /// `Entity.deltaMovementOnPreviousTick`: the velocity before this tick's

@@ -1,11 +1,13 @@
-//! `HumanoidModel.ArmPose`: how a humanoid model poses an arm.
+//! `HumanoidModel.ArmPose`: how a humanoid model poses an arm, and the names an item declaration gives them.
 
 /// `HumanoidModel.ArmPose`'s constants, the arm poses a humanoid model has.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ArmPose {
     Empty,
     Item,
     Block,
+    #[serde(rename = "bow_and_arrow")]
     Bow,
     CrossbowHold,
     CrossbowCharge,
@@ -22,28 +24,6 @@ pub enum ArmPose {
 }
 
 impl ArmPose {
-    /// Every pose with the name an item declaration gives it.
-    pub const ALL: [(&'static str, ArmPose); 11] = [
-        ("empty", Self::Empty),
-        ("item", Self::Item),
-        ("block", Self::Block),
-        ("bow_and_arrow", Self::Bow),
-        ("crossbow_hold", Self::CrossbowHold),
-        ("crossbow_charge", Self::CrossbowCharge),
-        ("throw_trident", Self::ThrowTrident),
-        ("toot_horn", Self::TootHorn),
-        ("spyglass", Self::Spyglass),
-        ("spear", Self::Spear),
-        ("brush", Self::Brush),
-    ];
-
-    /// The pose an item declaration names, `None` for a name that is no pose.
-    pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .iter()
-            .find_map(|&(n, pose)| (n == name).then_some(pose))
-    }
-
     /// Both hands hold the item (`BOW_AND_ARROW`'s and the crossbow's two).
     pub fn two_handed(self) -> bool {
         matches!(self, Self::Bow | Self::CrossbowHold | Self::CrossbowCharge)

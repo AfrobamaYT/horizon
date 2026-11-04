@@ -10,6 +10,7 @@
 //! and totals are capped, vanilla ids cannot be redefined, and no two mods
 //! share a namespace ([`clash`]).
 use crate::manifest::Manifest;
+pub use horizon_core::arm_pose::ArmPose;
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -425,42 +426,6 @@ struct ItemFile {
     crafting_remainder: Option<String>,
     block: Option<String>,
     arm_pose: Option<ArmPose>,
-}
-
-/// The arm poses of `HumanoidModel.ArmPose` an item may name in `arm_pose`.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ArmPose {
-    Empty,
-    Item,
-    Block,
-    BowAndArrow,
-    CrossbowHold,
-    CrossbowCharge,
-    ThrowTrident,
-    TootHorn,
-    Spyglass,
-    Spear,
-    Brush,
-}
-
-impl ArmPose {
-    /// The name the declaration gives it, which the game reads back.
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Empty => "empty",
-            Self::Item => "item",
-            Self::Block => "block",
-            Self::BowAndArrow => "bow_and_arrow",
-            Self::CrossbowHold => "crossbow_hold",
-            Self::CrossbowCharge => "crossbow_charge",
-            Self::ThrowTrident => "throw_trident",
-            Self::TootHorn => "toot_horn",
-            Self::Spyglass => "spyglass",
-            Self::Spear => "spear",
-            Self::Brush => "brush",
-        }
-    }
 }
 
 /// An item the mod adds: a vanilla template item's components under a new

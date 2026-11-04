@@ -5153,18 +5153,3 @@ fn sign_text_colors_are_the_signs_dye_ids() {
         .collect();
     assert_eq!(names, horizon_mods::content::DYE_COLORS);
 }
-
-/// The mods crate names the arm poses an item declares and the game reads them back by the same
-/// names, so a pose added to one and not the other shows here.
-#[test]
-fn the_declared_arm_pose_names_are_the_games() {
-    for (name, pose) in horizon_world::arm_pose::ArmPose::ALL {
-        let declared: horizon_mods::content::ArmPose =
-            serde_json::from_value(serde_json::json!(name)).expect(name);
-        assert_eq!(declared.name(), name);
-        assert_eq!(
-            horizon_world::arm_pose::ArmPose::from_name(name),
-            Some(pose)
-        );
-    }
-}
