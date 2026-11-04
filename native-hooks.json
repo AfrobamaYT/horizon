@@ -2950,8 +2950,9 @@
       }
     },
     {
-      "name": "ingredient", "doc": "A recipe ingredient of a mod's own kind: the entry named a type in a\nnamespace outside `minecraft:`, and the loader kept it for this call.\nThe kind and the JSON the file wrote are here; fill `items` with the\nitem ids the ingredient matches (item ids only: components are not\nchecked here; a match-time hook follows separately). Duplicates are\nremoved keeping first-seen order. The hook may be called more than\nonce per recipe; the answer must be the same. An unclaimed kind\nleaves the list empty and the recipe fails, as an unknown kind does.", "side": "both",
-      "version": 1,
+      "name": "ingredient", "doc": "A recipe ingredient of a mod's own kind: the entry named a type in a\nnamespace outside `minecraft:`, and the loader kept it for this call.\nThe kind and the JSON the file wrote are here; fill `items` with the\nitem ids the ingredient matches (item ids only: components are not\nchecked here; a match-time hook follows separately). Duplicates are\nremoved keeping first-seen order. The hook is called once per\noccurrence of the kind in each load that parses recipes, with the\n`DataLoadContext` of that owning load: the client's own recipe load has\n`origin()` `ClientPreload`, the server's has `ServerDataLoad`. A server\nopen currently loads the recipes twice with `ServerDataLoad` (the\nrecipe tables, then the copy synchronised to guests), so filter on the\norigin and expect two calls per occurrence there until the guest copy\nreuses the server's parse; the answer must be the same every time. An\nunclaimed kind leaves the list empty and the recipe fails, as an unknown\nkind does.", "side": "both",
+      "context": "data_load",
+      "version": 2,
       "target": "mod_api::crafting::native_ingredient",
       "mod_api": {
         "contract": "collect",

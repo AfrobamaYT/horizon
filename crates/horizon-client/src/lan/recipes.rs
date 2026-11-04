@@ -64,6 +64,7 @@ pub(super) fn network_recipes(
     resources: &Path,
     overlay: &horizon_world::loot::PackOverlay,
     defaults: &horizon_world::item_defaults::ItemDefaults,
+    context: &horizon_world::native_load_context::LoadContext,
 ) -> (BTreeMap<String, Box<str>>, HashMap<String, i32>) {
     let mut all: BTreeMap<_, _> = match horizon_items::recipe_sources::sources(resources, overlay) {
         Ok(sources) => sources
@@ -76,7 +77,7 @@ pub(super) fn network_recipes(
         }
     };
     match horizon_client::items::Items::catalog(resources, overlay, defaults) {
-        Ok(items) => all.retain(|_, r| normalize_ingredients(r, &items)),
+        Ok(items) => all.retain(|_, r| normalize_ingredients(r, &items, context)),
         Err(e) => log::warn!("recipes: NeoForge's ingredient shapes stay unresolved: {e}"),
     }
     // RecipeManager.unpackRecipeInfo's group numbers, while the files are
@@ -101,15 +102,19 @@ pub(super) fn network_recipes(
 /// An ingredient object's flat item list: the shape NeoForge's standard
 /// kinds resolve to, or a brewing predicate's `item`. `None`: the object is
 /// a kind the loader does not know, a mod's own.
-fn flat(ing: &Value, items: &horizon_client::items::Items) -> Option<Value> {
+fn flat(
+    ing: &Value,
+    items: &horizon_client::items::Items,
+    context: &horizon_world::native_load_context::LoadContext,
+) -> Option<Value> {
     if !ing.is_object() {
         return None;
     }
-    let parsed = horizon_client::crafting::Ingredient::parse(ing, items).or_else(|| {
+    let parsed = horizon_client::crafting::Ingredient::parse(ing, items, context).or_else(|| {
         // A brewing slot's item predicate: its `ingredient`, as the
         // property sets have always read it.
         ing.get("item")
-            .and_then(|v| horizon_client::crafting::Ingredient::parse(v, items))
+            .and_then(|v| horizon_client::crafting::Ingredient::parse(v, items, context))
     })?;
     Some(Value::Array(
         parsed
@@ -123,7 +128,11 @@ fn flat(ing: &Value, items: &horizon_client::items::Items) -> Option<Value> {
 /// Replace each of a recipe's ingredient objects with its flat item list,
 /// so `holder_set` writes the items instead of an empty list. `false`: the
 /// recipe keeps an object the loader cannot parse.
-fn normalize_ingredients(r: &mut Value, items: &horizon_client::items::Items) -> bool {
+fn normalize_ingredients(
+    r: &mut Value,
+    items: &horizon_client::items::Items,
+    context: &horizon_world::native_load_context::LoadContext,
+) -> bool {
     let known = r["type"]
         .as_str()
         .is_some_and(|t| t.starts_with("minecraft:"));
@@ -134,7 +143,7 @@ fn normalize_ingredients(r: &mut Value, items: &horizon_client::items::Items) ->
     // The shaped recipe's key: a map of symbols to ingredients.
     if let Some(map) = r.get_mut("key").and_then(|k| k.as_object_mut()) {
         for ing in map.values_mut() {
-            if let Some(replacement) = flat(ing, items) {
+            if let Some(replacement) = flat(ing, items, context) {
                 *ing = replacement;
             } else if ing.is_object() {
                 parsed = false;
@@ -153,13 +162,13 @@ fn normalize_ingredients(r: &mut Value, items: &horizon_client::items::Items) ->
         "reagent",
     ] {
         let Some(ing) = r.get_mut(key) else { continue };
-        if let Some(replacement) = flat(ing, items) {
+        if let Some(replacement) = flat(ing, items, context) {
             *ing = replacement;
             continue;
         }
         if let Value::Array(a) = ing {
             for entry in a.iter_mut() {
-                if let Some(replacement) = flat(entry, items) {
+                if let Some(replacement) = flat(entry, items, context) {
                     *entry = replacement;
                 } else if entry.is_object() {
                     parsed = false;

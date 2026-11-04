@@ -1222,9 +1222,14 @@ impl Recipes {
             .map(|(_, r)| r)
     }
 
-    pub fn load(root: &Path, items: &Items, overlay: &PackOverlay) -> Result<Self> {
+    pub fn load(
+        root: &Path,
+        items: &Items,
+        overlay: &PackOverlay,
+        context: &horizon_world::native_load_context::LoadContext,
+    ) -> Result<Self> {
         let sources = horizon_items::recipe_sources::sources(root, overlay)?;
-        Self::from_sources(root, items, overlay, sources)
+        Self::from_sources(root, items, overlay, sources, context)
     }
     /// The tables from `sources` (`recipe_sources::sources`' shape); `root` and
     /// `overlay` give the enchantment tags the tables keep.
@@ -1233,6 +1238,7 @@ impl Recipes {
         items: &Items,
         overlay: &PackOverlay,
         sources: Vec<(String, Value)>,
+        context: &horizon_world::native_load_context::LoadContext,
     ) -> Result<Self> {
         let mut crafting = Vec::new();
         let mut cooking = Vec::new();
@@ -1263,7 +1269,7 @@ impl Recipes {
             let v = &*json;
             let text = |k: &str| v[k].as_str().unwrap_or("").to_owned();
             meta.insert(name.clone(), (text("category"), text("group")));
-            let ing = |k: &str| Ingredient::parse(&v[k], items);
+            let ing = |k: &str| Ingredient::parse(&v[k], items, context);
             let result = || Template::parse(&v["result"]);
             let special = |recipe: Option<Special>| recipe.map(Recipe::Special);
             let parsed: Option<Recipe> = match v["type"].as_str().unwrap_or("") {
@@ -1284,7 +1290,7 @@ impl Recipes {
                             if *c == ' ' {
                                 cells.push(None);
                             } else {
-                                match Ingredient::parse(&v["key"][c.to_string()], items) {
+                                match Ingredient::parse(&v["key"][c.to_string()], items, context) {
                                     Some(i) => cells.push(Some(i)),
                                     None => ok = false,
                                 }
@@ -1306,7 +1312,7 @@ impl Recipes {
                         .as_array()
                         .into_iter()
                         .flatten()
-                        .map(|i| Ingredient::parse(i, items))
+                        .map(|i| Ingredient::parse(i, items, context))
                         .collect();
                     match (ingredients, result()) {
                         (Some(ingredients), Some(result)) => Some(Recipe::Shapeless {
@@ -1382,7 +1388,7 @@ impl Recipes {
                     for (shape, value) in v["shapes"].as_object()? {
                         shapes.push((
                             FireworkShape::from_name(shape),
-                            Ingredient::parse(value, items)?,
+                            Ingredient::parse(value, items, context)?,
                         ));
                     }
                     Some(Special::FireworkStar {
