@@ -55,7 +55,7 @@ pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client
     let context = LoadContext::new(
         role.data_load_origin(),
         Arc::new(inputs),
-        crate::mod_api::LoadedMods::new().ids(),
+        mod_api::__private::loaded_mods().ids(),
     );
     Ok(ItemData::load(root, context)?)
 }
