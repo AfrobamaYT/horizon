@@ -483,3 +483,91 @@ fn only_the_first_local_client_is_the_client_start() {
         assert!(!game.options.is_client_start());
     });
 }
+
+/// A world's moments reach a listener once each and in order: the server's start
+/// (`server_about_to_start`, then `server_started` where `WorldOpenReady` was, only once
+/// per open and not for a failed one), its stop (`server_stopping`, then the final close),
+/// and the client's own close (`client_stopping`).
+#[test]
+#[ignore = "needs prepared resources"]
+fn the_lifecycle_moments_fire_once_each_in_order() {
+    use crate::game::native_entity_refs::tests::with_game;
+    use mod_api::testing::with_mods;
+    use mod_api::{ClientHost, Hooks, ModEntry, ServerHost};
+    use std::sync::Mutex;
+
+    struct Log(Arc<Mutex<Vec<String>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Log {
+        fn server_about_to_start(
+            &self,
+            _host: &mut dyn ServerHost,
+            e: &mut mod_api::ServerAboutToStartEvent,
+        ) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("about_to_start dedicated={}", e.dedicated));
+        }
+        fn server_started(&self, _host: &mut dyn ServerHost, e: &mut mod_api::ServerStartedEvent) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("started dedicated={}", e.dedicated));
+        }
+        fn server_stopping(
+            &self,
+            _host: &mut dyn ServerHost,
+            e: &mut mod_api::ServerStoppingEvent,
+        ) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("stopping dedicated={}", e.dedicated));
+        }
+        fn world_lifecycle(
+            &self,
+            _host: &mut dyn ServerHost,
+            event: &mut mod_api::WorldLifecycleEvent<'_>,
+        ) {
+            self.0.lock().unwrap().push(format!("{:?}", event.phase));
+        }
+        fn client_stopping(
+            &self,
+            _host: &mut dyn ClientHost,
+            _event: &mut mod_api::ClientStoppingEvent,
+        ) {
+            self.0.lock().unwrap().push("client_stopping".into());
+        }
+    }
+
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![ModEntry::new("log", Box::new(Log(log.clone())))].into();
+    with_mods(mods, || {
+        with_game(|game| {
+            game.options.execution_role =
+                crate::game::execution_role::ExecutionRole::DedicatedServer;
+            game.native_lifecycle_world_closed();
+            log.lock().unwrap().clear();
+            game.native_server_about_to_start(true);
+            game.native_lifecycle_open_started();
+            game.native_lifecycle_world_ready();
+            game.native_lifecycle_world_ready();
+            game.native_lifecycle.begin_close();
+            game.native_server_stopping(true);
+            game.native_lifecycle_world_closed();
+            game.native_lifecycle_world_closed();
+            game.native_client_stopping();
+        });
+    });
+    assert_eq!(
+        *log.lock().unwrap(),
+        [
+            "about_to_start dedicated=true",
+            "started dedicated=true",
+            "stopping dedicated=true",
+            "WorldCloseFinal",
+            "client_stopping",
+        ]
+    );
+}

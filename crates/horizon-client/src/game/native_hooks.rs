@@ -2771,6 +2771,11 @@ impl Game<'_> {
     pub(super) fn native_client_setup(&mut self) {
         mod_api::dispatch_client_setup(self);
     }
+    /// The client is closing: once per process, at the start of the game's shutdown,
+    /// after its world is left, while settings and resources are still held.
+    pub(super) fn native_client_stopping(&mut self) {
+        mod_api::dispatch_client_stopping(self);
+    }
     /// The client made a new level for `dimension` (NeoForge's
     /// `LevelEvent.Load` from the `ClientLevel` constructor): on joining a
     /// server, single player's own included, and on changing dimension.
@@ -3054,11 +3059,17 @@ impl Game<'_> {
     /// server begins loading anything"). Vanilla's `MinecraftServer.loadLevel`
     /// start. Server-side: the single player server thread once Play is
     /// pressed, a dedicated server once its settings are read. Each is
-    /// followed by `native_world_lifecycle`'s `WorldOpenReady` or
-    /// `WorldOpenFailed`. `dedicated` tells a dedicated server from the single
+    /// followed by `native_server_started` or
+    /// `native_world_lifecycle`'s `WorldOpenFailed`. `dedicated` tells a dedicated server from the single
     /// player one.
     pub(super) fn native_server_about_to_start(&mut self, dedicated: bool) {
         mod_api::dispatch_server_about_to_start(self, dedicated);
+    }
+    /// The server opened its worlds and is about to tick (NeoForge's
+    /// `ServerStartedEvent`): every level loaded, no player joined. Where
+    /// `WorldOpenReady` fired: the end of the open, before the tick loop.
+    pub(super) fn native_server_started(&mut self, dedicated: bool) {
+        mod_api::dispatch_server_started(self, dedicated);
     }
     /// The server begins an orderly stop (NeoForge's `ServerStoppingEvent`):
     /// the start of vanilla's `MinecraftServer.stopServer`, with the worlds
