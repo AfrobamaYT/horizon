@@ -64,10 +64,10 @@ use horizon_world::{
 use mod_api::NativePermissionLevel;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor,
-    LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
-    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
-    NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening,
+    self, Answered, ClientReloadListeners, EffectTickChange, EntityRef, EquipmentSlot,
+    GameRuleActor, LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender,
+    NativeItemDrop, NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood,
+    NativeProgressType, NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening,
     ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
@@ -7315,7 +7315,7 @@ impl Game<'_> {
         &mut self,
         state: BlockStateId,
         pos: BlockPos,
-        entity: mod_api::EntityRef,
+        entity: EntityRef,
         precise: bool,
     ) {
         mod_api::dispatch_entity_inside(self, state, pos, entity, precise);
