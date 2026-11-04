@@ -19,11 +19,11 @@ class ItemModelPropertyTests(unittest.TestCase):
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
 static LOADED: AtomicBool = AtomicBool::new(false);
-mod horizon_client {
-    pub mod mod_api {
-        pub enum HookId { ItemModelProperty }
-        pub fn listened(hook: HookId) -> bool {
-            matches!(hook, HookId::ItemModelProperty) && crate::LOADED.load(crate::Ordering::Relaxed)
+mod mod_api {
+    pub enum HookId { ItemModelProperty }
+    pub mod __private {
+        pub fn listened(hook: super::HookId) -> bool {
+            matches!(hook, super::HookId::ItemModelProperty) && crate::LOADED.load(crate::Ordering::Relaxed)
         }
     }
 }
