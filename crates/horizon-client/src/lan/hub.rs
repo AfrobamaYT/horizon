@@ -4210,7 +4210,9 @@ impl Hub {
     /// PlayerList.respawn: back to `at` with a fresh start. The vanilla client waits on its
     /// level loading screen from the Respawn packet until the level info's "level chunks load
     /// start" event and the chunk under the player, so the packets follow vanilla's order.
-    pub fn respawn(&mut self, i: usize, at: [f64; 3], ctx: &TickCtx) {
+    /// `rotation` is the facing a mod's `player_respawn_position` chose; none
+    /// is the level's respawn direction.
+    pub fn respawn(&mut self, i: usize, at: [f64; 3], rotation: Option<[f32; 2]>, ctx: &TickCtx) {
         let info = self.spawn_info(i, 0);
         self.close_container_for(i);
         let g = &mut self.guests[i];
@@ -4241,9 +4243,9 @@ impl Hub {
         let g = &mut self.guests[i];
         // ServerPlayer.restoreFrom: the game mode again (onUpdateAbilities).
         g.send(&g.abilities_packet());
-        // The new player faces the level's respawn direction (snapTo).
-        g.yaw = 0.0;
-        g.pitch = 0.0;
+        // The new player faces the level's respawn direction (snapTo), or
+        // the one its TeleportTransition carries.
+        [g.yaw, g.pitch] = rotation.unwrap_or([0.0, 0.0]);
         g.position = at;
         g.previous_position = at;
         g.send(&C::Respawn(play::Respawn {

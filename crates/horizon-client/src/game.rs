@@ -337,6 +337,7 @@ mod render_control;
 mod render_tick;
 mod repro;
 mod respawn_anchor;
+mod respawn_position;
 mod saves_control;
 mod saving;
 mod scoreboard;
