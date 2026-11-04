@@ -2298,17 +2298,6 @@
       }
     },
     {
-      "name": "block_exp",
-      "doc": "A broken block is about to drop `experience` points at `pos`. The\nvanilla block drop rule has been checked; change the amount before its\norbs are awarded. Server-side.",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_exp",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "block_fade",
       "doc": "A block at `pos` is about to fade from `from` to `to` because of\nmelting or coral death. Set `cancel` to keep it. Server-side.",
       "version": 1,

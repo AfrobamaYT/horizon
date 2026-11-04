@@ -564,18 +564,27 @@ impl GameLevel<'_> {
     ) {
         mod_api::dispatch_hopper_pickup_item(self, dimension, pos, item, count, cancel);
     }
-    /// A broken block is about to drop `experience` points at `pos`. The
-    /// vanilla block drop rule has been checked; change the amount before its
-    /// orbs are awarded. Server-side.
+    /// `Block.dropResources` built the item entities `drops` for the block
+    /// `state` broken at `pos` by `breaker` (a player's UUID, none for a
+    /// level-side break) with `tool`, and `spawnAfterBreak` would award
+    /// `experience` points: NeoForge's `BlockDropsEvent`. Edit the list or the
+    /// amount, or set `cancel` for no drops, no experience and no
+    /// `spawnAfterBreak` effects. Server-side, authoritative levels only.
     #[inline(always)]
-    pub(super) fn native_block_exp(
+    pub(super) fn native_block_drops(
         &self,
         dimension: LevelDimension,
         pos: BlockPos,
-        block: &str,
+        state: BlockStateId,
+        breaker: Option<u128>,
+        tool: Option<&ItemStack>,
+        drops: &mut Vec<NativeItemDrop>,
         experience: &mut u32,
+        cancel: &mut bool,
     ) {
-        mod_api::dispatch_block_exp(self, dimension, pos, block, experience);
+        mod_api::dispatch_block_drops(
+            self, dimension, pos, state, breaker, tool, drops, experience, cancel,
+        );
     }
 
     /// An authoritative server committed a changed state through `Level.setBlock`.
@@ -10311,7 +10320,7 @@ impl Game<'_> {
         horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid())
     }
     /// The mods' say on a broken block's drops (`native_loot_drops`).
-    pub(super) fn native_block_drops(
+    pub(super) fn native_block_loot(
         &mut self,
         pos: [i32; 3],
         state: BlockStateId,

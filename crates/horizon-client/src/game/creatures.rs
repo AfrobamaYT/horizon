@@ -3018,7 +3018,7 @@ impl Game<'_> {
                             &mut self.world.random,
                             Some((&mut self.rand_sequences, self.level.seed)),
                         );
-                        self.native_block_drops(pos, old, None, None, None, &mut drops);
+                        self.native_block_loot(pos, old, None, None, None, &mut drops);
                         for d in drops {
                             self.pop_resource(pos, d);
                         }
