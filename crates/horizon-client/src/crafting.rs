@@ -1,7 +1,7 @@
 //! Crafting and cooking recipes from the pinned data pack: shaped patterns
 //! (`ShapedRecipePattern.matches`), shapeless recipes (a bipartite match of
 //! ingredients to stacks, as `StackedContents.canCraft`), the special and
-//! transmuting crafting recipes (`CustomRecipe` and friends), and
+//! transmuting crafting recipes (`RecipeFile` and friends), and
 //! furnace-type cooking lookups.
 use crate::{
     Result,
@@ -1284,9 +1284,9 @@ pub struct Cooking {
     pub experience: f32,
     pub time: u32,
 }
-/// A recipe of a type of a mod's own, kept as its file says: the mod reads it.
+/// A recipe as its file says, whatever its type (vanilla's or a mod's own): the mod reads it.
 #[derive(Clone, Debug, PartialEq)]
-pub struct CustomRecipe {
+pub struct RecipeFile {
     /// `<namespace>:<path>`, its place under `data/<namespace>/recipe/`.
     pub id: String,
     pub json: Arc<Value>,
@@ -1306,8 +1306,9 @@ fn custom_type(v: &Value) -> Option<&str> {
 pub struct Recipes {
     pub crafting: Vec<(String, Recipe)>,
     pub cooking: Vec<Cooking>,
-    /// The recipes of types of mods' own, by type, in file order.
-    pub custom: HashMap<String, Vec<CustomRecipe>>,
+    /// Every effective recipe's file, by recipe type (`minecraft:smelting`,
+    /// `mymod:crusher`), in file order: data packs merged, load conditions held.
+    pub by_type: HashMap<String, Vec<RecipeFile>>,
     /// `category` and `group` of each crafting recipe, by file name.
     pub meta: HashMap<String, (String, String)>,
     facts: HashMap<Arc<str>, Facts>,
@@ -1393,7 +1394,7 @@ impl Recipes {
         Self {
             crafting: Vec::new(),
             cooking: Vec::new(),
-            custom: HashMap::new(),
+            by_type: HashMap::new(),
             meta: HashMap::new(),
             facts: HashMap::new(),
             curses: HashSet::new(),
@@ -1424,23 +1425,28 @@ impl Recipes {
     ) -> Result<Self> {
         let mut crafting = Vec::new();
         let mut cooking = Vec::new();
-        let mut custom: HashMap<String, Vec<CustomRecipe>> = HashMap::new();
+        let mut by_type: HashMap<String, Vec<RecipeFile>> = HashMap::new();
         let mut meta = HashMap::new();
         for (name, v) in sources {
-            if let Some(kind) = custom_type(&v) {
+            let json = Arc::new(v);
+            if let Some(kind) = json["type"].as_str() {
                 let id = if name.contains(':') {
-                    name
+                    name.clone()
                 } else {
                     format!("minecraft:{name}")
                 };
-                let kind = kind.to_owned();
-                let json = Arc::new(v);
-                custom
-                    .entry(kind)
+                by_type
+                    .entry(kind.to_owned())
                     .or_default()
-                    .push(CustomRecipe { id, json });
+                    .push(RecipeFile {
+                        id,
+                        json: json.clone(),
+                    });
+            }
+            if custom_type(&json).is_some() {
                 continue;
             }
+            let v = &*json;
             let text = |k: &str| v[k].as_str().unwrap_or("").to_owned();
             meta.insert(name.clone(), (text("category"), text("group")));
             let ing = |k: &str| Ingredient::parse(&v[k], items);
@@ -1647,7 +1653,7 @@ impl Recipes {
         Ok(Self {
             crafting,
             cooking,
-            custom,
+            by_type,
             meta,
             facts,
             curses,
@@ -1780,7 +1786,7 @@ impl Recipes {
                     .collect(),
                 None,
             ),
-            // CustomRecipe.placementInfo: NOT_PLACEABLE.
+            // RecipeFile.placementInfo: NOT_PLACEABLE.
             Recipe::Special(_) => Placement::default(),
         })
     }
@@ -2081,7 +2087,7 @@ mod tests {
         Recipes {
             crafting: Vec::new(),
             cooking,
-            custom: HashMap::new(),
+            by_type: HashMap::new(),
             meta: HashMap::new(),
             facts: HashMap::new(),
             curses: HashSet::new(),
@@ -2104,9 +2110,9 @@ mod tests {
         assert_eq!(kind(r#"{"type":7}"#), None);
         assert_eq!(kind("{}"), None);
     }
-    /// Recipes of a mod's own types land in `custom` by type, in file order,
-    /// with the id the file has; a data pack overrides by id and adds more; a
-    /// `minecraft` type the game doesn't know is dropped.
+    /// Recipes of every type land in `by_type`, in file order, with the id the
+    /// file has; a data pack overrides by id and adds more; a recipe of a mod's
+    /// own type is kept as its file says and isn't crafted.
     #[test]
     fn custom_recipes_load_by_type_with_pack_override() {
         let root =
@@ -2147,14 +2153,20 @@ mod tests {
             file("minecraft:from_a_later_version", "x"),
         )
         .unwrap();
+        fs::write(
+            root.join("data/minecraft/recipe/iron_ingot.json"),
+            file("minecraft:smelting", "vanilla-iron"),
+        )
+        .unwrap();
         let items = Items::for_tests(HashMap::new());
         let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
         let ids = |kind: &str| -> Vec<String> {
-            recipes.custom[kind].iter().map(|r| r.id.clone()).collect()
+            recipes.by_type[kind].iter().map(|r| r.id.clone()).collect()
         };
         assert_eq!(ids("mymod:crusher"), ["mymod:a", "mymod:b"]);
         assert_eq!(ids("mymod:mixer"), ["mymod:c", "mymod:deep/er/d"]);
-        assert_eq!(recipes.custom.len(), 2);
+        // Vanilla's types answer through the same table.
+        assert_eq!(ids("minecraft:smelting"), ["minecraft:iron_ingot"]);
         // Not crafted, and no recipe-book meta of their own.
         assert!(recipes.crafting.is_empty() && recipes.cooking.is_empty());
         assert!(!recipes.meta.keys().any(|k| k.starts_with("mymod:")));
@@ -2166,18 +2178,26 @@ mod tests {
             ),
             ("recipe/pack:d".to_owned(), vec![file("mymod:crusher", "d")]),
             (
+                "recipe/minecraft:iron_ingot".to_owned(),
+                vec![file("minecraft:smelting", "pack-iron")],
+            ),
+            (
                 "recipe/minecraft:p".to_owned(),
                 vec![file("pack:press", "p")],
             ),
         ];
         let recipes = Recipes::load(&root, &items, &PackOverlay { files: &packs }).unwrap();
-        let crusher = &recipes.custom["mymod:crusher"];
+        let crusher = &recipes.by_type["mymod:crusher"];
         assert_eq!(
             crusher.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
             ["mymod:a", "mymod:b", "pack:d"]
         );
         assert_eq!(crusher[1].json["tag"], "pack-b");
-        assert_eq!(recipes.custom["pack:press"][0].id, "minecraft:p");
+        assert_eq!(recipes.by_type["pack:press"][0].id, "minecraft:p");
+        assert_eq!(
+            recipes.by_type["minecraft:smelting"][0].json["tag"],
+            "pack-iron"
+        );
         let _ = fs::remove_dir_all(&root);
     }
     #[test]
@@ -2261,7 +2281,7 @@ mod tests {
         .unwrap();
         let items = Items::for_tests(HashMap::new());
         let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
-        let ids = &recipes.custom["mymod:crusher"];
+        let ids = &recipes.by_type["mymod:crusher"];
         assert_eq!(
             ids.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
             ["minecraft:inverted", "minecraft:yes"]
@@ -2272,7 +2292,7 @@ mod tests {
             vec![file(r#"[{"type":"neoforge:true"}]"#, "pack_yes")],
         )];
         let recipes = Recipes::load(&root, &items, &PackOverlay { files: &packs }).unwrap();
-        let ids = &recipes.custom["mymod:crusher"];
+        let ids = &recipes.by_type["mymod:crusher"];
         assert!(ids.iter().any(|r| r.id == "minecraft:pack_yes"));
         let _ = fs::remove_dir_all(&root);
     }
@@ -2306,7 +2326,7 @@ mod tests {
         let packs = [("recipe_filter/pack:f".to_owned(), vec![filter.to_vec()])];
         let items = Items::for_tests(HashMap::new());
         let recipes = Recipes::load(&root, &items, &PackOverlay { files: &packs }).unwrap();
-        let crushed = &recipes.custom["mymod:crusher"];
+        let crushed = &recipes.by_type["mymod:crusher"];
         assert_eq!(
             crushed.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
             ["minecraft:iron"]
@@ -2360,7 +2380,7 @@ mod tests {
         let recipes = Recipes {
             crafting: Vec::new(),
             cooking: Vec::new(),
-            custom: HashMap::new(),
+            by_type: HashMap::new(),
             meta: HashMap::new(),
             facts: HashMap::new(),
             curses: HashSet::new(),

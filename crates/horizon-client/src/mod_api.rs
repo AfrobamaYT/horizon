@@ -40,7 +40,7 @@ pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::command::Suggestion;
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
-pub use crate::crafting::{CustomRecipe, Ingredient};
+pub use crate::crafting::{Ingredient, RecipeFile};
 pub use crate::extras::Corner;
 pub use crate::extras_hud::Corners;
 pub use crate::first_person::Hand;
