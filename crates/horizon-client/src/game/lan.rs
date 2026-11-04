@@ -1912,9 +1912,7 @@ impl Game<'_> {
                     bound,
                     name,
                 } => {
-                    let Some(host) = self.lan.as_ref() else {
-                        return None;
-                    };
+                    let host = self.lan.as_ref()?;
                     let Some(id) = host
                         .hub
                         .guests
@@ -1945,9 +1943,7 @@ impl Game<'_> {
                         line = format!("<{name}> {}", text.plain());
                     }
                     let mut chat = Vec::new();
-                    let Some(host) = self.lan.as_mut() else {
-                        return None;
-                    };
+                    let host = self.lan.as_mut()?;
                     host.hub.broadcast_chat(&message, &bound, line, &mut chat);
                     for event in chat {
                         self.lan_log_event(event);
@@ -1955,9 +1951,7 @@ impl Game<'_> {
                     self.lan_player_chatted(sender, &raw);
                 }
                 HostEvent::ChatSessionStarted(update) => {
-                    let Some(host) = self.lan.as_mut() else {
-                        return None;
-                    };
+                    let host = self.lan.as_mut()?;
                     host.hub.broadcast(&C::PlayerInfoUpdate(*update));
                 }
                 HostEvent::Joined(conn) => {
@@ -1981,17 +1975,13 @@ impl Game<'_> {
                                     &[],
                                 ),
                             };
-                            let Some(host) = self.lan.as_mut() else {
-                                return None;
-                            };
+                            let host = self.lan.as_mut()?;
                             host.hub.kick(conn, reason);
                             continue;
                         }
                     }
                     self.lan_guest_joined(conn, entities, spawn);
-                    let Some(host) = self.lan.as_ref() else {
-                        return None;
-                    };
+                    let host = self.lan.as_ref()?;
                     if self.options.dedicated.is_some()
                         && let Some(g) = host.hub.guest(conn)
                     {
@@ -2044,9 +2034,7 @@ impl Game<'_> {
                 }
                 HostEvent::Left(mut guest) => {
                     if !guest.participates_online() {
-                        let Some(mut host) = self.lan.take() else {
-                            return None;
-                        };
+                        let mut host = self.lan.take()?;
                         self.cleanup_fake_player(&mut host, &guest);
                         self.lan = Some(host);
                         continue;
@@ -2058,9 +2046,7 @@ impl Game<'_> {
                         let theirs = super::Dim::from_id(&guest.dimension);
                         if self.enter_level(theirs).is_ok() {
                             let conn = guest.conn;
-                            let Some(host) = self.lan.as_mut() else {
-                                return None;
-                            };
+                            let host = self.lan.as_mut()?;
                             let at = host.hub.guests.len();
                             host.hub.guests.push(*guest);
                             self.guest_close_all(conn);
@@ -2082,9 +2068,7 @@ impl Game<'_> {
                     self.take_parent_vehicle(&mut guest);
                     self.save_guest(&mut guest);
                     self.guest_attachments.remove(&guest.conn);
-                    let Some(host) = self.lan.as_mut() else {
-                        return None;
-                    };
+                    let host = self.lan.as_mut()?;
                     host.play.remove(&guest.conn);
                     self.guest_combat.remove(&guest.conn);
                     if self.options.dedicated.is_some() && guest.placed {

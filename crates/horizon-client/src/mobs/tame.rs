@@ -1875,6 +1875,8 @@ mod tests {
 
     #[test]
     fn a_hit_stands_a_sitting_wolf_or_parrot_up() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         // Wolf.hurtServer and Parrot.hurtServer call setOrderedToSit(false)
         // before LivingEntity.hurtServer.
         for (species, name) in [
@@ -1882,21 +1884,23 @@ mod tests {
             (Species::Parrot, "minecraft:parrot"),
         ] {
             let mut m = sitting(species, name);
-            assert!(m.damage(1.0, Damage::player([0.0, 64.0, 1.0])));
+            assert!(m.damage(level, 1.0, Damage::player([0.0, 64.0, 1.0])));
             assert!(!m.extra.sitting, "{name} still sits after a hit");
             // A weaker hit inside the hurt frames deals nothing, but it
             // reached hurtServer, so it still stands the mob up.
             m.extra.sitting = true;
-            assert!(!m.damage(0.5, Damage::player([0.0, 64.0, 1.0])));
+            assert!(!m.damage(level, 0.5, Damage::player([0.0, 64.0, 1.0])));
             assert!(!m.extra.sitting, "{name} still sits after a blocked hit");
         }
     }
 
     #[test]
     fn a_hit_leaves_a_sitting_cat_sitting() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         // Cat has no hurtServer override: a hit does not stand it up.
         let mut m = sitting(Species::Cat, "minecraft:cat");
-        assert!(m.damage(1.0, Damage::player([0.0, 64.0, 1.0])));
+        assert!(m.damage(level, 1.0, Damage::player([0.0, 64.0, 1.0])));
         assert!(m.extra.sitting);
     }
 
@@ -1929,10 +1933,11 @@ mod tests {
             let seen = [partner.seen(None)];
             with_test_world(&seen, |w, _| {
                 let mut events = Vec::new();
-                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
+                let level = &mut test_level.level();
                 let mut cx = Cx {
                     w,
-                    lr: &mut lr,
+                    level,
                     events: &mut events,
                 };
                 let mut goal = Breed::new(1.0);
@@ -1979,10 +1984,11 @@ mod universal_anger_tests {
                 m.extra.angry_at = None;
                 let mut goals = std::mem::take(&mut m.ai.targets);
                 let mut events = Vec::new();
-                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
+                let level = &mut test_level.level();
                 let mut cx = Cx {
                     w: &w,
-                    lr: &mut lr,
+                    level,
                     events: &mut events,
                 };
                 for _ in 0..200 {

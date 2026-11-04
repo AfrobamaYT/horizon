@@ -103,11 +103,12 @@ fn mod_farmland_is_a_secondary_site_and_farming_target() {
                 mem(&mut m).secondary_job_site.value(),
                 Some(vec![[0, 0, 0]])
             );
-            let mut lr = LegacyRandom::new(11);
+            let mut test_level = crate::health::TestLevel::new(11);
+            let level = &mut test_level.level();
             let mut events = Vec::new();
             let mut cx = Bx {
                 w,
-                lr: &mut lr,
+                level,
                 events: &mut events,
                 now: 1000,
                 refresh: false,
@@ -154,7 +155,8 @@ fn mod_crops_are_harvested_only_at_their_vanilla_templates_max_age() {
         },
         |w, types| {
             let mut m = farmer(types);
-            let mut lr = LegacyRandom::new(12);
+            let mut test_level = crate::health::TestLevel::new(12);
+            let level = &mut test_level.level();
             let mut events = Vec::new();
             for (x, ripe) in [
                 (0, false),
@@ -169,7 +171,7 @@ fn mod_crops_are_harvested_only_at_their_vanilla_templates_max_age() {
                     &mut m,
                     &mut Bx {
                         w,
-                        lr: &mut lr,
+                        level,
                         events: &mut events,
                         now: 1000,
                         refresh: false,
@@ -196,13 +198,14 @@ fn farmer_plants_a_declared_items_block() {
             let mut m = farmer(types);
             super::super::villager::ext_mut(&mut m).inventory =
                 vec![ItemStack::new("fieldtest:seeds", 2)];
-            let mut lr = LegacyRandom::new(13);
+            let mut test_level = crate::health::TestLevel::new(13);
+            let level = &mut test_level.level();
             let mut events = Vec::new();
             harvest_tick(
                 &mut m,
                 &mut Bx {
                     w,
-                    lr: &mut lr,
+                    level,
                     events: &mut events,
                     now: 1000,
                     refresh: false,
@@ -245,13 +248,14 @@ fn farming_uses_the_first_tagged_block_item_and_consumes_one_seed() {
                 ItemStack::new("fieldtest:roots", 1),
                 ItemStack::new("fieldtest:grain", 2),
             ];
-            let mut lr = LegacyRandom::new(13);
+            let mut test_level = crate::health::TestLevel::new(13);
+            let level = &mut test_level.level();
             let mut events = Vec::new();
             harvest_tick(
                 &mut m,
                 &mut Bx {
                     w,
-                    lr: &mut lr,
+                    level,
                     events: &mut events,
                     now: 1000,
                     refresh: false,
@@ -286,7 +290,7 @@ fn farming_uses_the_first_tagged_block_item_and_consumes_one_seed() {
                 &mut m,
                 &mut Bx {
                     w,
-                    lr: &mut lr,
+                    level,
                     events: &mut events,
                     now: 1001,
                     refresh: false,

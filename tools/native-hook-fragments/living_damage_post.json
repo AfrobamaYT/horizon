@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "living_damage_post",
+      "target": "horizon_client::game::native_hooks::HitLevel<'_>::native_living_damage_post",
+      "neoforge": "LivingDamageEvent.Post",
+      "side": "server",
+      "host": "level",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "health just lost to a hit, with the hit's final damage container (`native_living_damage_post`).",
+  "doc_summary": "a hit that took health, as NeoForge's `LivingDamageEvent.Post`: `native_living_damage_post(level, entity, kind, source, container)` runs on the server in `LivingEntity.actuallyHurt` right after the health lost the container's health damage (more than 0), where `native_living_damage_pre` fired. `container` holds the final values. It only listens: the level host gives the hit's random and level attachments, and it can't write the entity or the world's blocks."
+}

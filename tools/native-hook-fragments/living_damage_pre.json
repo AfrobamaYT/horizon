@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "living_damage_pre",
+      "target": "horizon_client::game::native_hooks::HitLevel<'_>::native_living_damage_pre",
+      "neoforge": "LivingDamageEvent.Pre",
+      "side": "server",
+      "host": "level",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a hit's damage after armor and magic, before the absorption hearts and the health take it, that a mod can change (`native_living_damage_pre`).",
+  "doc_summary": "the damage of a hit after armor and magic, as NeoForge's `LivingDamageEvent.Pre`: `native_living_damage_pre(level, entity, kind, source, container)` runs on the server in `LivingEntity.actuallyHurt` for a player, a mob or the ender dragon, after armor, enchantments and mob effects and before the absorption hearts take their share, even when nothing is left. `container` (`DamageContainer`) holds the original damage, the armor, enchantment and mob-effect reductions, the blocked and shield damage, and the new damage; change `new_damage` (0 takes no health) or the post-attack invulnerability ticks. `level` is the hit's level host: its blocks, random and own attachments. A wolf whose armor takes the hit and armor stands do not fire it."
+}

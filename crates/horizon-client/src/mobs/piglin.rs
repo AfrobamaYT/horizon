@@ -472,11 +472,11 @@ fn copy_to_avoid(m: &mut Mob, cx: &mut Cx) {
         && let Some(who) = m.extra.piglin.nemesis
         && let Some(p) = cx.w.target_info(who)
     {
-        let ticks = avoid_duration(cx.lr);
+        let ticks = avoid_duration(cx.level.random());
         remember_avoid(m, who, p.position, ticks);
     }
     if let Some((who, at)) = near_zombified(m, cx.w) {
-        let ticks = avoid_duration(cx.lr);
+        let ticks = avoid_duration(cx.level.random());
         remember_avoid(m, who, at, ticks);
     }
 }
@@ -507,10 +507,14 @@ fn baby_sometimes_ride_baby_hoglin(m: &mut Mob, cx: &mut Cx) {
     if b.ride.is_some() || !m.is_baby() {
         return;
     }
-    if !tick_down_and_check(&mut m.extra.piglin.ride_wait, cx.lr, (200, 800)) {
+    if !tick_down_and_check(&mut m.extra.piglin.ride_wait, cx.level.random(), (200, 800)) {
         return;
     }
-    let ticks = cx.lr.next_int_between_inclusive(200, 600).unwrap_or(200);
+    let ticks = cx
+        .level
+        .random()
+        .next_int_between_inclusive(200, 600)
+        .unwrap_or(200);
     let mut ttl = Ttl::default();
     ttl.set(ticks);
     m.extra.piglin.ride = Some(RideTarget {
@@ -1897,7 +1901,7 @@ fn on_hit_target(m: &mut Mob, who: Who, cx: &mut Cx) {
         return;
     };
     if species_of(cx.w, who) == Some(Species::Piglin) && piglins_outnumber_hoglins(m) {
-        set_avoid_target(m, cx.lr, who, at);
+        set_avoid_target(m, cx.level.random(), who, at);
         broadcast_retreat(m, cx.w, who, at, cx.events);
     }
 }
@@ -2416,7 +2420,7 @@ mod brute_home_tests {
     #[test]
     fn a_brute_that_wanders_off_walks_back_home() {
         with_built_test_world(&[], build, |w, _| {
-            let mut lr = LegacyRandom::new(3);
+            let mut test_level = crate::health::TestLevel::new(3);
             let mut events = Vec::new();
             for (label, home, walks) in [
                 ("far enough to walk back", Some([24, 0, 0]), true),
@@ -2428,7 +2432,7 @@ mod brute_home_tests {
                 register_brute(&mut m);
                 let mut cx = Cx {
                     w,
-                    lr: &mut lr,
+                    level: &mut test_level.level(),
                     events: &mut events,
                 };
                 let (running, target) = tick_goals(&mut m, &mut cx);
@@ -2447,11 +2451,11 @@ mod brute_home_tests {
     #[test]
     fn a_brute_tries_the_way_home_once_every_80_ticks() {
         with_built_test_world(&[], build, |w, _| {
-            let mut lr = LegacyRandom::new(3);
+            let mut test_level = crate::health::TestLevel::new(3);
             let mut events = Vec::new();
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level: &mut test_level.level(),
                 events: &mut events,
             };
             let mut m = brute(Vec3::new(0.5, 0.0, 0.5), Some([24, 0, 0]));

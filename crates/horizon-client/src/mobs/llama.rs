@@ -374,10 +374,11 @@ mod tests {
                 m.random = LegacyRandom::new(0);
                 let mut events = Vec::new();
                 let mut goals = std::mem::take(&mut m.ai.goals);
-                let mut lr = LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
+                let level = &mut test_level.level();
                 let mut cx = Cx {
                     w: &w,
-                    lr: &mut lr,
+                    level,
                     events: &mut events,
                 };
                 for _ in 0..80 {

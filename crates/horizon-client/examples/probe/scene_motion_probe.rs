@@ -390,9 +390,11 @@ pub fn main() -> Result<()> {
                     op["nutrition"].as_i64().unwrap() as i32,
                     single(&op["value"]),
                 ),
-                "food_tick" => world
-                    .player
-                    .food_tick(&resources.health, world.scene.health_rules)?,
+                "food_tick" => world.player.food_tick(
+                    &mut horizon_client::health::TestLevel::new(0).level(),
+                    &resources.health,
+                    world.scene.health_rules,
+                )?,
                 "peaceful" => world
                     .player
                     .peaceful_regeneration(world.scene.health_rules)?,
@@ -428,6 +430,7 @@ pub fn main() -> Result<()> {
                         },
                     ));
                     world.player.hurt(
+                        &mut horizon_client::health::TestLevel::new(0).level(),
                         &resources.health,
                         world.scene.health_rules,
                         source,

@@ -51,7 +51,7 @@ use horizon_client::{
     extras_hud::Corners,
     fast_hash::FxHashMap,
     first_person::Hand,
-    health::{HurtSource, Hurting, Knock, ShieldBlock},
+    health::{DamageContainer, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock},
     hud::{HudBatch, rgba},
     item_tooltip::TooltipDisplay,
     items::ItemStack,
@@ -1384,6 +1384,30 @@ impl Game<'_> {
             original_message,
             message,
             cancel,
+        );
+    }
+    /// NeoForge's `ClientChatReceivedEvent`: a chat line from the server is
+    /// about to show, once Chat Delay lets it through. `system` is a system
+    /// message (`ClientChatReceivedEvent.System`), shown in the action bar
+    /// when `overlay` is set; otherwise a player or disguised message in its
+    /// chat type `chat_type` (`getBoundChatType`, its registry name; `None`
+    /// for a system message or an inline chat type). `sender` is the player's
+    /// UUID, 0 (`Util.NIL_UUID`) for system and disguised messages. `message`
+    /// starts as the decorated line; replace it and the chat shows the new
+    /// one, while the narrator still says the original. Set `cancel` and it
+    /// doesn't show: a delayed message lets the next one through. Lines the
+    /// client adds itself and validation errors are not told. Client-side.
+    pub(super) fn native_client_chat_received(
+        &mut self,
+        system: bool,
+        overlay: bool,
+        sender: u128,
+        chat_type: Option<&str>,
+        message: &mut Text,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_client_chat_received(
+            self, system, overlay, sender, chat_type, message, cancel,
         );
     }
     /// NeoForge's `ClientPauseChangeEvent.Pre`: cancel a proposed pause change.
@@ -7028,6 +7052,75 @@ pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
     cancel
 }
 
+/// The level a hit lands in, as its damage hooks' level host: its blocks, its random and its
+/// own attachments. Not `GameLevel`, which a hit can't build: a mob's hit lands in the mob
+/// tick, where the world is read by every mob and its random is lent out, and building one
+/// per hit would allocate its entity boxes.
+pub(super) struct HitLevel<'a>(pub(super) DamageLevel<'a>);
+
+impl HitLevel<'_> {
+    /// NeoForge's `LivingDamageEvent.Pre`: `LivingEntity.actuallyHurt` of entity `entity` of
+    /// type `kind` (`minecraft:player`, `minecraft:zombie`) by `source` (named as
+    /// `native_living_incoming_damage` names it) has taken armor and magic, and the absorption
+    /// hearts are next: `container` holds the damage it started with, what it is now
+    /// (`new_damage`, which may be 0) and each reduction so far (armor, enchantments, mob
+    /// effects). Change its
+    /// `new_damage` and the health takes that; set its post-attack invulnerability ticks and the
+    /// entity keeps them instead of vanilla's. A value that is not a number is put back as it
+    /// was. It fires for players, mobs and the ender dragon; a wolf whose armor takes the hit and
+    /// armor stands do not fire it. The level is the hit's: its blocks, random and own
+    /// attachments; the hurt entity is in the middle of its hit.
+    pub(super) fn native_living_damage_pre(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        container: &mut DamageContainer,
+    ) {
+        mod_api::dispatch_living_damage_pre(self, entity, kind, source, container);
+    }
+    /// NeoForge's `LivingDamageEvent.Post`: the health of entity `entity` of type `kind` has
+    /// just lost the hit `container` describes, with its final values (health damage, the
+    /// reductions, the post-attack invulnerability ticks). It only listens, and fires where
+    /// `native_living_damage_pre` does once the health took more than 0. It can't write the
+    /// entity or the world's blocks: the level host gives the hit's random and level attachments.
+    pub(super) fn native_living_damage_post(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        container: &DamageContainer,
+    ) {
+        mod_api::dispatch_living_damage_post(self, entity, kind, source, container);
+    }
+}
+
+/// `native_living_damage_pre` for the damage code (`health::DAMAGE_PRE`).
+pub(super) fn damage_pre(
+    level: DamageLevel<'_>,
+    hurting: Hurting<'_>,
+    container: &mut DamageContainer,
+) {
+    if !mod_api::listened(mod_api::HookId::LivingDamagePre) {
+        return;
+    }
+    let (entity, kind, source) = hurt_server_args(hurting);
+    HitLevel(level).native_living_damage_pre(entity, kind, &source, container);
+}
+
+/// `native_living_damage_post` for the damage code (`health::DAMAGE_POST`).
+pub(super) fn damage_post(
+    level: DamageLevel<'_>,
+    hurting: Hurting<'_>,
+    container: &DamageContainer,
+) {
+    if !mod_api::listened(mod_api::HookId::LivingDamagePost) {
+        return;
+    }
+    let (entity, kind, source) = hurt_server_args(hurting);
+    HitLevel(level).native_living_damage_post(entity, kind, &source, container);
+}
+
 /// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`): whether it
 /// canceled the block. Its one caller. The hurt entity and the source are named as the
 /// damage hook names them.
@@ -9636,7 +9729,7 @@ fn mod_menu(name: &str) -> Option<(&'static str, usize)> {
 
 /// `state` with its property `key` set to `value`; none when the block has
 /// no such property or value.
-fn with_property(
+pub(super) fn with_property(
     registry: &BlockRegistry,
     state: BlockStateId,
     key: &str,
@@ -10615,22 +10708,26 @@ mod tests {
             .split("/// Server-level helpers for native mods.")
             .next()
             .unwrap();
-        let level_section = source
-            .split("impl GameLevel<'_> {")
-            .nth(1)
-            .unwrap()
-            .split("\n}")
-            .next()
-            .unwrap();
-        let level_hooks: BTreeSet<_> = level_section
-            .lines()
-            .filter_map(|line| {
-                line.trim()
-                    .strip_prefix("pub(super) fn native_")?
-                    .split('(')
-                    .next()
-            })
-            .collect();
+        // The hook points of one `impl` block of this file.
+        let impl_hooks = |head: &str| -> BTreeSet<&'static str> {
+            source
+                .split(head)
+                .nth(1)
+                .unwrap()
+                .split("\n}")
+                .next()
+                .unwrap()
+                .lines()
+                .filter_map(|line| {
+                    line.trim()
+                        .strip_prefix("pub(super) fn native_")?
+                        .split('(')
+                        .next()
+                })
+                .collect()
+        };
+        let level_hooks = impl_hooks("impl GameLevel<'_> {");
+        let hit_hooks = impl_hooks("impl HitLevel<'_> {");
         // Hook points that are free functions in other crates.
         let free_hooks = |source: &'static str| -> BTreeSet<&'static str> {
             source
@@ -10660,13 +10757,14 @@ mod tests {
         let ender_hooks = free_hooks(include_str!("../mobs/enderman.rs"));
         let declared: BTreeSet<_> = section
             .lines()
-            .chain(level_section.lines())
             .filter_map(|line| {
                 line.trim()
                     .strip_prefix("pub(super) fn native_")?
                     .split('(')
                     .next()
             })
+            .chain(level_hooks.iter().copied())
+            .chain(hit_hooks.iter().copied())
             .chain(render_hooks.iter().copied())
             .chain(item_hooks.iter().copied())
             .chain(loot_hooks.iter().copied())
@@ -10718,6 +10816,8 @@ mod tests {
                 format!("horizon_client_lib::breathing::native_{name}")
             } else if level_hooks.contains(name) {
                 format!("horizon_client::game::native_hooks::GameLevel<'_>::native_{name}")
+            } else if hit_hooks.contains(name) {
+                format!("horizon_client::game::native_hooks::HitLevel<'_>::native_{name}")
             } else {
                 format!("horizon_client::game::native_hooks::Game<'_>::native_{name}")
             };

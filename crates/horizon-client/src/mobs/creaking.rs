@@ -469,11 +469,13 @@ mod tests {
 
     #[test]
     fn a_creaking_with_no_heart_hurts_like_a_monster() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         // Creaking.hurtServer: without a home the blow goes to
         // Monster.hurtServer, whose getHurtSound is the hostile hurt — not
         // the generic one.
         let mut m = creaking();
-        assert!(m.damage(1.0, Damage::player([0.0, 0.0, 1.0])));
+        assert!(m.damage(level, 1.0, Damage::player([0.0, 0.0, 1.0])));
         assert_eq!(
             hurt_sounds(&m),
             ["entity.hostile.hurt"],
@@ -483,12 +485,14 @@ mod tests {
 
     #[test]
     fn a_heart_bound_creaking_sways_when_a_blow_gets_through() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         // Only #bypasses_invulnerability reaches a bound creaking
         // (Creaking.hurtServer hands those straight to Monster), and that is
         // the blow whose hurt sound Creaking.getHurtSound answers with the sway.
         let mut m = creaking();
         m.extra.home = Some([0, 64, 0]);
-        assert!(m.damage(1.0, Damage::of(DamageKind::OutOfWorld)));
+        assert!(m.damage(level, 1.0, Damage::of(DamageKind::OutOfWorld)));
         assert_eq!(
             hurt_sounds(&m),
             ["entity.creaking.sway"],
@@ -498,6 +502,8 @@ mod tests {
 
     #[test]
     fn a_giant_hurts_and_dies_like_a_monster() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         // Giant overrides none of Monster's sounds, so its hurt and death are
         // the hostile pair.
         let mut m = creaking();
@@ -506,12 +512,12 @@ mod tests {
         k.species = Species::Giant;
         k.sounds = ["", "entity.generic.hurt", "entity.generic.death"];
         m.health = 100.0;
-        assert!(m.damage(1.0, Damage::player([0.0, 0.0, 1.0])));
+        assert!(m.damage(level, 1.0, Damage::player([0.0, 0.0, 1.0])));
         assert_eq!(hurt_sounds(&m), ["entity.hostile.hurt"], "a giant's hurt");
         m.outbox.clear();
         // The invulnerability frames are over: the next blow is a full one.
         m.invulnerable = 0;
-        assert!(m.damage(200.0, Damage::player([0.0, 0.0, 1.0])));
+        assert!(m.damage(level, 200.0, Damage::player([0.0, 0.0, 1.0])));
         assert!(!m.alive());
         assert_eq!(hurt_sounds(&m), ["entity.hostile.death"], "a giant's death");
     }

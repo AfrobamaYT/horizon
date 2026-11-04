@@ -344,7 +344,7 @@ fn open_or_close(cx: &mut Bx, p: [i32; 3], open: bool) {
             (true, _, true) => "block.copper_chest.open",
             (true, _, false) => "block.copper_chest.close",
         };
-        let pitch = cx.lr.next_float() * 0.1 + 0.9;
+        let pitch = cx.level.random().next_float() * 0.1 + 0.9;
         cx.events.push(MobEvent::Sound(sound, at, 0.5, pitch));
     }
     cx.events.push(MobEvent::ChestOpen { chest: p, open });
@@ -362,7 +362,7 @@ impl Transport {
             return false;
         }
         self.running = true;
-        self.end = cx.now + i64::from(cx.lr.next_int_bound(1).unwrap_or(0)) + 60;
+        self.end = cx.now + i64::from(cx.level.random().next_int_bound(1).unwrap_or(0)) + 60;
         m.ai.nav.below_surface = true;
         true
     }

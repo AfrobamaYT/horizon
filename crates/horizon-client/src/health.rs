@@ -56,6 +56,185 @@ pub static HURT_SERVER: OnceLock<fn(Hurting<'_>, &mut f32) -> bool> = OnceLock::
 pub fn hurt_server_canceled(hurting: Hurting<'_>, amount: &mut f32) -> bool {
     HURT_SERVER.get().is_some_and(|hook| hook(hurting, amount))
 }
+pub use horizon_world::living_damage::{DamageContainer, Reduction};
+/// The game's native damage-pre hook (`native_living_damage_pre`), set once by the game:
+/// `LivingEntity.actuallyHurt` once armor and magic took their share of a hit, before the
+/// absorption hearts (`LivingDamageEvent.Pre`). It may change the new damage.
+pub static DAMAGE_PRE: OnceLock<fn(DamageLevel<'_>, Hurting<'_>, &mut DamageContainer)> =
+    OnceLock::new();
+/// The game's native damage-post hook (`native_living_damage_post`), set once by the game:
+/// the health has just lost the hit's health damage (`LivingDamageEvent.Post`).
+pub static DAMAGE_POST: OnceLock<fn(DamageLevel<'_>, Hurting<'_>, &DamageContainer)> =
+    OnceLock::new();
+/// The level a hit lands in, as damage code sees it: its blocks, its random
+/// (`Level.random`) and its own attachments, lent to the damage hooks as their level host.
+/// Built from the level's world, or, in the mob tick, which reads the world while mobs
+/// draw, from a [`LentLevel`] taken out of it for the tick.
+pub struct DamageLevel<'a> {
+    chunks: &'a crate::chunk_map::ChunkMap,
+    air: horizon_world::registry::BlockStateId,
+    registry: &'a horizon_world::registry::BlockRegistry,
+    random: &'a mut horizon_core::random::LegacyRandom,
+    attachments: &'a mut horizon_world::attachments::Attachments,
+    attachment_syncs: &'a mut crate::fast_hash::FxHashSet<horizon_world::attachments::Holder>,
+    /// False on a client predicting its own mount: the hooks are the server's.
+    hooks: bool,
+}
+impl<'a> DamageLevel<'a> {
+    /// The level of `world`, whose blocks `registry` names.
+    pub fn of(
+        world: &'a mut crate::world::World,
+        registry: &'a horizon_world::registry::BlockRegistry,
+    ) -> Self {
+        let crate::world::World {
+            chunks,
+            air,
+            random,
+            attachments,
+            attachment_syncs,
+            ..
+        } = world;
+        Self {
+            chunks,
+            air: *air,
+            registry,
+            random,
+            attachments,
+            attachment_syncs,
+            hooks: true,
+        }
+    }
+    /// The level of `world`, with the random and attachments `lent` took out of it.
+    pub fn lent(
+        world: &'a crate::world::World,
+        registry: &'a horizon_world::registry::BlockRegistry,
+        lent: &'a mut LentLevel,
+    ) -> Self {
+        Self {
+            chunks: &world.chunks,
+            air: world.air,
+            registry,
+            random: &mut lent.random,
+            attachments: &mut lent.attachments,
+            attachment_syncs: &mut lent.attachment_syncs,
+            hooks: true,
+        }
+    }
+    /// The same level on a client predicting a mob it rides: no damage hooks fire.
+    pub fn predicted(self) -> Self {
+        Self {
+            hooks: false,
+            ..self
+        }
+    }
+    /// The same level, for a shorter borrow.
+    pub fn reborrow(&mut self) -> DamageLevel<'_> {
+        DamageLevel {
+            chunks: self.chunks,
+            air: self.air,
+            registry: self.registry,
+            random: self.random,
+            attachments: self.attachments,
+            attachment_syncs: self.attachment_syncs,
+            hooks: self.hooks,
+        }
+    }
+    /// The level's random (`level.getRandom()`).
+    pub fn random(&mut self) -> &mut horizon_core::random::LegacyRandom {
+        self.random
+    }
+    /// The block state at `pos`: air where no chunk is loaded, as `World::block`.
+    pub fn block(&self, pos: [i32; 3]) -> horizon_world::registry::BlockStateId {
+        self.chunks
+            .get(&(pos[0] >> 4, pos[2] >> 4))
+            .map_or(self.air, |chunk| {
+                chunk.block(pos[0] & 15, pos[1], pos[2] & 15)
+            })
+    }
+    /// The registry naming the level's block states.
+    pub fn registry(&self) -> &'a horizon_world::registry::BlockRegistry {
+        self.registry
+    }
+    /// The level's own attachments (`Holder::Level`), marked for the next sync. A chunk,
+    /// block entity or entity's are not reachable from a hit: `MissingHolder`.
+    pub fn attachments(
+        &mut self,
+        holder: horizon_world::attachments::Holder,
+    ) -> std::result::Result<
+        &mut horizon_world::attachments::Attachments,
+        horizon_world::attachments::AttachmentError,
+    > {
+        if holder != horizon_world::attachments::Holder::Level {
+            return Err(horizon_world::attachments::AttachmentError::MissingHolder);
+        }
+        self.attachment_syncs.insert(holder);
+        Ok(self.attachments)
+    }
+    /// `LivingDamageEvent.Pre` of the hit on `hurting` ([`DAMAGE_PRE`]; nothing while it is
+    /// unset).
+    pub fn damage_pre(&mut self, hurting: Hurting<'_>, container: &mut DamageContainer) {
+        if let Some(hook) = DAMAGE_PRE.get().filter(|_| self.hooks) {
+            hook(self.reborrow(), hurting, container);
+        }
+    }
+    /// `LivingDamageEvent.Post` of the hit on `hurting` ([`DAMAGE_POST`]; nothing while it
+    /// is unset).
+    pub fn damage_post(&mut self, hurting: Hurting<'_>, container: &DamageContainer) {
+        if let Some(hook) = DAMAGE_POST.get().filter(|_| self.hooks) {
+            hook(self.reborrow(), hurting, container);
+        }
+    }
+}
+/// A level's random and attachments, taken out of its world while the world is read
+/// elsewhere (the mob tick), and put back after.
+pub struct LentLevel {
+    random: horizon_core::random::LegacyRandom,
+    attachments: horizon_world::attachments::Attachments,
+    attachment_syncs: crate::fast_hash::FxHashSet<horizon_world::attachments::Holder>,
+}
+impl LentLevel {
+    /// Take `world`'s random and attachments: until [`Self::give_back`] the world has a
+    /// placeholder random and none.
+    pub fn take(world: &mut crate::world::World) -> Self {
+        Self {
+            random: std::mem::replace(
+                &mut world.random,
+                horizon_core::random::LegacyRandom::new(0),
+            ),
+            attachments: std::mem::take(&mut world.attachments),
+            attachment_syncs: std::mem::take(&mut world.attachment_syncs),
+        }
+    }
+    /// Put them back into `world`.
+    pub fn give_back(self, world: &mut crate::world::World) {
+        world.random = self.random;
+        world.attachments = self.attachments;
+        world.attachment_syncs = self.attachment_syncs;
+    }
+}
+/// An empty level for tests and probes of hits: an air-only world whose random is seeded
+/// with `seed`.
+pub struct TestLevel {
+    world: crate::world::World,
+    registry: horizon_world::registry::BlockRegistry,
+}
+impl TestLevel {
+    pub fn new(seed: i64) -> Self {
+        let facts =
+            br#"{"defaults":{"minecraft:air":0},"states":[["air",true,false,"","minecraft:air"]]}"#;
+        Self {
+            world: crate::world::World::new(horizon_world::registry::BlockStateId(0), seed),
+            registry: horizon_world::registry::BlockRegistry::from_facts_json(&facts[..]).unwrap(),
+        }
+    }
+    pub fn level(&mut self) -> DamageLevel<'_> {
+        DamageLevel::of(&mut self.world, &self.registry)
+    }
+    /// The level's random, for a probe that draws from it outside a hit.
+    pub fn random(&mut self) -> &mut horizon_core::random::LegacyRandom {
+        &mut self.world.random
+    }
+}
 /// A knockback's strength and direction, as `LivingEntity.knockback` has them
 /// before knockback resistance is applied. The entity is pushed away from
 /// the direction (`x`, `z`), which vanilla points at the source of the hit.
@@ -453,26 +632,29 @@ impl PlayerHealth {
     }
 }
 impl PlayerMotion {
+    /// `hurtServer` of `amount` from `source` in `level`.
     pub fn hurt(
         &mut self,
+        level: &mut DamageLevel<'_>,
         resources: &HealthResources,
         rules: HealthRules,
         source: DamageTypeId,
         amount: f32,
     ) -> Result<bool> {
         Ok(self
-            .hurt_blocking(resources, rules, source, amount, None)?
+            .hurt_blocking(level, resources, rules, source, amount, None)?
             .hurt)
     }
     pub fn hurt_blocking(
         &mut self,
+        level: &mut DamageLevel<'_>,
         resources: &HealthResources,
         rules: HealthRules,
         source: DamageTypeId,
         amount: f32,
         blocking: Option<Blocking>,
     ) -> Result<BlockOutcome> {
-        self.hurt_caused_by(resources, rules, source, amount, blocking, false, 0)
+        self.hurt_caused_by(level, resources, rules, source, amount, blocking, false, 0)
     }
     /// `hurt_blocking` from a source whose causing entity is a living
     /// non-player (`living_cause`), which the `when_caused_by_living_non_player`
@@ -480,6 +662,7 @@ impl PlayerMotion {
     /// when it is known (0 otherwise), for the native damage hook.
     pub fn hurt_caused_by(
         &mut self,
+        level: &mut DamageLevel<'_>,
         resources: &HealthResources,
         rules: HealthRules,
         source: DamageTypeId,
@@ -503,6 +686,7 @@ impl PlayerMotion {
         let invulnerable = self.invulnerable;
         let h = &mut self.health;
         let mut environment = Environment {
+            level: level.reborrow(),
             entity: self.entity_id,
             causing,
             invulnerable,
@@ -611,6 +795,8 @@ impl PlayerMotion {
     }
 }
 pub(crate) struct Environment<'a> {
+    /// The level the hit lands in, for the damage hooks.
+    pub(crate) level: DamageLevel<'a>,
     /// The player's entity id, and the causing entity's (0: none or not known).
     pub(crate) entity: i32,
     pub(crate) causing: i32,
@@ -829,6 +1015,27 @@ impl ServerDamageEnvironment<Attributes> for Environment<'_> {
     fn damage_event(&mut self) -> io::Result<()> {
         self.phase("entity-damage")
     }
+    fn damage_pre(&mut self, container: &mut DamageContainer) -> io::Result<()> {
+        container.record_shield_damage(self.shield_damage as f32);
+        let source = HurtSource {
+            damage_type: &self.source.definition().name,
+            causing: self.causing,
+            direct: 0,
+        };
+        self.level
+            .damage_pre(Hurting::Player(self.entity, source), container);
+        Ok(())
+    }
+    fn damage_post(&mut self, container: &DamageContainer) -> io::Result<()> {
+        let source = HurtSource {
+            damage_type: &self.source.definition().name,
+            causing: self.causing,
+            direct: 0,
+        };
+        self.level
+            .damage_post(Hurting::Player(self.entity, source), container);
+        Ok(())
+    }
 }
 impl CombatEnvironment<Attributes> for Environment<'_> {
     fn dead_flag(&self) -> bool {
@@ -982,7 +1189,7 @@ impl HurtWorld for Environment<'_> {
     fn hurt_helmet(&mut self, _: &mut State, _: f32) -> io::Result<()> {
         Ok(())
     }
-    fn actually_hurt(&mut self, _: &mut State, _: f32) -> io::Result<()> {
+    fn actually_hurt(&mut self, _: &mut State, _: &mut DamageContainer, _: f32) -> io::Result<()> {
         Err(io::Error::other("combat binding supplies inner damage"))
     }
     fn resolve_mob(&mut self, _: &mut State) -> io::Result<()> {
@@ -1149,6 +1356,8 @@ mod tests {
     }
     #[test]
     fn a_hit_in_the_hurt_cooldown_knocks_nobody_back() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -1164,7 +1373,7 @@ mod tests {
         let id = health.damage.id("minecraft:mob_attack").unwrap();
         let mut hit = |amount| {
             player
-                .hurt_blocking(health, rules, id, amount, None)
+                .hurt_blocking(level, health, rules, id, amount, None)
                 .unwrap()
         };
         let first = hit(1.0);
@@ -1183,6 +1392,8 @@ mod tests {
     /// and `blockedByItem` must not pull the player toward the mob.
     #[test]
     fn a_shield_fully_blocks_a_hit_scaled_down_by_easy() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         use horizon_world::blocking_rules::{BlockingRules, DamageReduction, ItemDamageFunction};
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
@@ -1222,7 +1433,7 @@ mod tests {
         };
         let id = health.damage.id("minecraft:mob_attack").unwrap();
         let o = player
-            .hurt_caused_by(health, rules, id, 4.0, Some(shield), true, 0)
+            .hurt_caused_by(level, health, rules, id, 4.0, Some(shield), true, 0)
             .unwrap();
         assert_eq!(o.blocked, 3.0, "Easy scales 4 to 3 before the shield");
         assert!(o.fully_blocked && !o.knockback);
@@ -1253,7 +1464,16 @@ mod tests {
             };
             let before = player.health.health();
             player
-                .hurt_caused_by(health, rules, id, 4.0, None, living, 0)
+                .hurt_caused_by(
+                    &mut super::TestLevel::new(0).level(),
+                    health,
+                    rules,
+                    id,
+                    4.0,
+                    None,
+                    living,
+                    0,
+                )
                 .unwrap();
             before - player.health.health()
         };
@@ -1268,6 +1488,8 @@ mod tests {
     /// follows.
     #[test]
     fn an_arrow_kills_a_player_at_one_health() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -1282,7 +1504,7 @@ mod tests {
         player.set_health(1.0, false).unwrap();
         let (health, rules) = (&resources.health, super::HealthRules::default());
         let id = health.damage.id("minecraft:arrow").unwrap();
-        let hurt = player.hurt(health, rules, id, 5.0).unwrap();
+        let hurt = player.hurt(level, health, rules, id, 5.0).unwrap();
         assert!(hurt, "the arrow must hurt");
         assert_eq!(player.health.health(), 0.0, "the health must be spent");
         assert!(player.health.dead_or_dying(), "the player must be dead");
@@ -1329,6 +1551,8 @@ mod tests {
 
     #[test]
     fn the_native_damage_hook_changes_or_cancels_a_mobs_hit() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         use crate::mobs::{Damage, DamageKind, Mob};
         let seen = set_hook();
         let mob = |id| {
@@ -1346,7 +1570,7 @@ mod tests {
         };
         // Canceled: no damage, cooldown, sound or knockback.
         let mut kept = mob(9001);
-        assert!(!kept.damage(2.0, hit));
+        assert!(!kept.damage(level, 2.0, hit));
         assert_eq!(
             (kept.health, kept.invulnerable, kept.hurt_time),
             (10.0, 0, 0)
@@ -1354,12 +1578,12 @@ mod tests {
         assert!(kept.outbox.is_empty() && kept.velocity == Default::default());
         assert_eq!(seen(9001), [("PlayerAttack".to_owned(), 2.0)]);
         let mut doubled = mob(9002);
-        assert!(doubled.damage(2.0, hit));
+        assert!(doubled.damage(level, 2.0, hit));
         assert_eq!(doubled.health, 6.0);
         // LivingEntity.hurtServer: a negative amount hurts by 0, a NaN by
         // Float.MAX_VALUE.
         let (mut negative, mut nan) = (mob(9003), mob(9004));
-        assert!(negative.damage(2.0, hit) && nan.damage(2.0, hit));
+        assert!(negative.damage(level, 2.0, hit) && nan.damage(level, 2.0, hit));
         assert!(negative.health == 10.0 && nan.health <= 0.0);
     }
 
@@ -1367,6 +1591,8 @@ mod tests {
     /// without it.
     #[test]
     fn the_native_damage_hook_changes_or_cancels_a_players_hit() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -1384,13 +1610,13 @@ mod tests {
             p
         };
         let mut kept = player(9011);
-        assert!(!kept.hurt(health, rules, id, 5.0).unwrap());
+        assert!(!kept.hurt(level, health, rules, id, 5.0).unwrap());
         assert_eq!((kept.health.health(), kept.health.hurt.cooldown), (20.0, 0));
         let mut doubled = player(9012);
-        assert!(doubled.hurt(health, rules, id, 5.0).unwrap());
+        assert!(doubled.hurt(level, health, rules, id, 5.0).unwrap());
         assert_eq!(doubled.health.health(), 10.0);
         // The causing mob when it is known, else 0.
-        let hurt = player(9013).hurt_caused_by(health, rules, id, 5.0, None, false, 44);
+        let hurt = player(9013).hurt_caused_by(level, health, rules, id, 5.0, None, false, 44);
         assert!(hurt.unwrap().hurt);
         assert_eq!(seen(9011), [("minecraft:arrow 0".to_owned(), 5.0)]);
         assert_eq!(seen(9013), [("minecraft:arrow 44".to_owned(), 5.0)]);
@@ -1479,6 +1705,8 @@ mod tests {
     /// speed becomes `min(0.4, vy / 2 + strength)`.
     #[test]
     fn the_native_knockback_hook_changes_or_cancels_a_mobs_push() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         use super::Knock;
         use crate::mobs::{Damage, Mob};
         let seen = set_knockback_hook();
@@ -1531,7 +1759,7 @@ mod tests {
         assert_eq!(velocity(&stopped), (0.0, 0.0, 0.0));
         // The game's own hit on a mob reaches the hook with its damage.
         let mut hurt = mob(9106, 0.0);
-        assert!(hurt.damage(2.0, hit));
+        assert!(hurt.damage(level, 2.0, hit));
         // dealDefaultKnockback pushes with the float 0.4F.
         let strength = f64::from(0.4_f32);
         assert_eq!(velocity(&hurt), (-strength, 0.4, 0.0));
@@ -1544,6 +1772,8 @@ mod tests {
     /// world; once it has, the void hurts again.
     #[test]
     fn the_void_spares_a_player_whose_client_has_not_loaded() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -1559,13 +1789,13 @@ mod tests {
         let id = health.damage.id("minecraft:out_of_world").unwrap();
         player.client_loaded = false;
         assert!(
-            !player.hurt(health, rules, id, 4.0).unwrap(),
+            !player.hurt(level, health, rules, id, 4.0).unwrap(),
             "an unloaded client must not take void damage"
         );
         assert_eq!(player.health.health(), 20.0);
         player.client_loaded = true;
         assert!(
-            player.hurt(health, rules, id, 4.0).unwrap(),
+            player.hurt(level, health, rules, id, 4.0).unwrap(),
             "a loaded client takes the void's 4.0"
         );
         assert_eq!(player.health.health(), 16.0);
@@ -1594,6 +1824,8 @@ mod tests {
     /// and recompute them when it does not.
     #[test]
     fn a_bypassing_hit_leaves_the_armor_instances_dirty() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -1639,7 +1871,7 @@ mod tests {
         // `minecraft:fall` is in the tag: neither instance is read.
         let (mut bypassing, bypassing_handles) = armoured(&resources);
         let fall = health.damage.id("minecraft:fall").unwrap();
-        assert!(bypassing.hurt(health, rules, fall, 5.0).unwrap());
+        assert!(bypassing.hurt(level, health, rules, fall, 5.0).unwrap());
         assert_eq!(
             states(&bypassing, &bypassing_handles),
             [(7.0, true, 0.0), (7.0, true, 0.0)],
@@ -1655,7 +1887,7 @@ mod tests {
         // values, so the hit recomputes them and the record reads them back.
         let (mut meeting, meeting_handles) = armoured(&resources);
         let attack = health.damage.id("minecraft:mob_attack").unwrap();
-        assert!(meeting.hurt(health, rules, attack, 5.0).unwrap());
+        assert!(meeting.hurt(level, health, rules, attack, 5.0).unwrap());
         assert_eq!(
             states(&meeting, &meeting_handles),
             [(7.0, false, 7.0), (7.0, false, 7.0)],

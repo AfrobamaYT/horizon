@@ -550,7 +550,11 @@ impl Game<'_> {
         });
         for &(id, amount) in hits {
             if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                let hurt = m.damage(amount, Damage::fireworks(attacker, at));
+                let hurt = m.damage(
+                    crate::game::entity::damage_level_of!(self),
+                    amount,
+                    Damage::fireworks(attacker, at),
+                );
                 // LivingEntity.hurtServer: a player's rocket makes them the
                 // last player to hurt it (`setLastHurtByPlayer`), so its death
                 // message names them and their item.

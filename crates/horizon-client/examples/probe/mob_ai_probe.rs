@@ -1150,7 +1150,8 @@ pub fn main() -> horizon_client::Result<()> {
                 vehicle: None,
             }
         });
-        let mut scratch = LegacyRandom::new(0);
+        // The level's random (`Level.random`), which mobs and their hits draw from.
+        let mut test_level = horizon_client::health::TestLevel::new(0);
         // The level random for eating sounds: only goats and sniffers draw
         // from it, and the scenarios feed neither.
         let mut level_random = LegacyRandom::new(0);
@@ -1275,7 +1276,7 @@ pub fn main() -> horizon_client::Result<()> {
                 let at = player
                     .as_ref()
                     .map_or([0.0; 3], |p| [p.position.x, p.position.y, p.position.z]);
-                mobs[i].damage(1.0, Damage::player(at));
+                mobs[i].damage(&mut test_level.level(), 1.0, Damage::player(at));
                 // Creaking.hurtServer: the heart's reaction, then the sway.
                 if let Some((home, by_player)) = creaking::take_hurt(&mut mobs[i], &w) {
                     if by_player && let Some((_, h)) = hearts.iter_mut().find(|(at, _)| *at == home)
@@ -1291,7 +1292,7 @@ pub fn main() -> horizon_client::Result<()> {
                             h,
                             home,
                             &w,
-                            &mut scratch,
+                            test_level.random(),
                             &mut host,
                             &mut heart_events,
                         );
@@ -1347,7 +1348,7 @@ pub fn main() -> horizon_client::Result<()> {
                 let from = events.len();
                 #[cfg(feature = "rng-trace")]
                 horizon_core::random::trace::set(true);
-                let alive = m.tick(&w, &mut scratch, &mut events);
+                let alive = m.tick(&w, &mut test_level.level(), &mut events);
                 #[cfg(feature = "rng-trace")]
                 {
                     horizon_core::random::trace::set(false);
@@ -1379,7 +1380,7 @@ pub fn main() -> horizon_client::Result<()> {
                     &items,
                     &mut born,
                     s.time,
-                    &mut scratch,
+                    test_level.random(),
                 );
                 horizon_client::mobs::warden::hear_mob_events(&mut mobs, &events, from, &w);
                 // Melee hits on other mobs land during the attacker's tick
@@ -1392,7 +1393,7 @@ pub fn main() -> horizon_client::Result<()> {
                         source,
                     } = events[k]
                         && let Some(t) = mobs.iter_mut().find(|m| m.id == target)
-                        && t.damage(amount, source)
+                        && t.damage(&mut test_level.level(), amount, source)
                     {
                         let raised = std::mem::take(&mut t.outbox);
                         let n = raised.len();
@@ -1452,7 +1453,7 @@ pub fn main() -> horizon_client::Result<()> {
                         let w = mob_world!(&snapshot);
                         let mut host = ProbeHive {
                             w: &w,
-                            random: &mut scratch,
+                            random: test_level.random(),
                             types: &arc_types,
                             first: 0,
                             added: &mut Vec::new(),
@@ -1495,7 +1496,14 @@ pub fn main() -> horizon_client::Result<()> {
                     created: &mut created,
                     spawning: s.spawning,
                 };
-                creaking_heart::server_tick(h, *at, &w, &mut scratch, &mut host, &mut heart_events);
+                creaking_heart::server_tick(
+                    h,
+                    *at,
+                    &w,
+                    test_level.random(),
+                    &mut host,
+                    &mut heart_events,
+                );
                 added.append(&mut host.added);
             }
             drop(w);
@@ -1518,7 +1526,7 @@ pub fn main() -> horizon_client::Result<()> {
                     let w = mob_world!(&snapshot);
                     let mut host = ProbeHive {
                         w: &w,
-                        random: &mut scratch,
+                        random: test_level.random(),
                         types: &arc_types,
                         first: mobs.len() + born.len(),
                         added: &mut added,
@@ -1551,7 +1559,7 @@ pub fn main() -> horizon_client::Result<()> {
                     .state(world.block(at[0], at[1], at[2]))
                     .is_some_and(|s| s.properties.get("open").map(String::as_str) == Some("true"));
                 if was != open {
-                    let pitch = scratch.next_float() * 0.1 + 0.9;
+                    let pitch = test_level.random().next_float() * 0.1 + 0.9;
                     events.push(MobEvent::Sound(
                         if open {
                             "block.wooden_door.open"
@@ -1634,7 +1642,7 @@ pub fn main() -> horizon_client::Result<()> {
                 }
             }
             for (at, h) in &hearts {
-                print_heart(&mut out, t, registry, &world, *at, h, &scratch);
+                print_heart(&mut out, t, registry, &world, *at, h, test_level.random());
             }
             for b in s.blocks.iter().filter(|b| b[0] == "chest") {
                 let n = |i: usize| b[i].parse::<i32>().unwrap();

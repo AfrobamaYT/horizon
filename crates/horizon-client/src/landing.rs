@@ -705,9 +705,11 @@ impl LivingFallWorld for FallCall<'_, '_, '_, '_> {
             amount,
         });
         let resources = &self.world.resources.health;
+        let rules = self.world.scene.health_rules;
         self.world.player.hurt(
+            &mut crate::health::DamageLevel::of(self.world.scene, self.world.assets.registry),
             resources,
-            self.world.scene.health_rules,
+            rules,
             resources.landing_source(self.source),
             amount,
         )?;
