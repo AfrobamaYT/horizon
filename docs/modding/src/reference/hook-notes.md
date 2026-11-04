@@ -2667,3 +2667,7 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
   Horizon without the mod) fills in vanilla's defaults for the same stacks: a stone stack the server caps at 16 still
   looks like it stacks to 64 there.
 - The creative search tab matches vanilla's exported tooltip text, so a changed `item_name` is not searchable yet.
+
+## Living motion values
+
+- **`native_living_jump_power(entity, kind, power)`, `native_living_speed(entity, kind, speed)` and `native_living_flying_speed(entity, kind, speed)`**: edit a living entity's jump power (`LivingEntity.getJumpPower`), movement speed (`getSpeed`) and airborne acceleration (`getFlyingSpeed`) where its travel and jump read them. They cover the player and the mobs' ground, fluid and jump paths (the rabbit's hop included); a mob that ships its own flying travel (an allay, a guardian) still reads its own speed. They fire on both sides and on the client's replayed ticks, so a mod registers on both and keeps each listener a pure function of its inputs. With no listener the cost is one `listened` branch per call. Beyond NeoForge (no counterpart); Diverges from upstream: new hooks. For per-block jump and speed factors (`block_jump_factor`, `block_speed_factor`) a Block Part method is planned.
