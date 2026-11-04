@@ -1101,5 +1101,6 @@
   "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: în Cargo.toml lipsește dependența de horizon-client.",
   "{mod}: Cargo.toml has no package name.": "{mod}: în Cargo.toml lipsește numele pachetului.",
   "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client solicită {fields}. Versiunile pentru server nu au interfață grafică; lansatorul gestionează funcționalitățile horizon-client. Elimină features și folosește default-features = false sau omite setarea.",
-  "{mod}: {error}": "{mod}: {error}"
+  "{mod}: {error}": "{mod}: {error}",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "Căutarea metadatelor JAR a eșuat: {reason}. Pune fișierele originale exact la aceste căi din memoria cache, apoi încearcă din nou:\n"
 }

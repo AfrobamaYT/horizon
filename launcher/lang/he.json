@@ -1101,5 +1101,6 @@
   "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: בקובץ Cargo.toml אין תלות ב־horizon-client.",
   "{mod}: Cargo.toml has no package name.": "{mod}: בקובץ Cargo.toml אין שם חבילה.",
   "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: ‏horizon-client מבקש {fields}. בניות שרת פועלות ללא ממשק גרפי; המשגר מנהל את תכונות horizon-client. יש להסיר את features ולהשתמש ב־default-features = false או להשמיט הגדרה זו.",
-  "{mod}: {error}": "{mod}: {error}"
+  "{mod}: {error}": "{mod}: {error}",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "חיפוש המטא־נתונים של קובצי JAR נכשל: {reason}. יש לשים את הקבצים המקוריים בדיוק בנתיבי המטמון הבאים, ולנסות שוב:\n"
 }

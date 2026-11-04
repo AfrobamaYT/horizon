@@ -1101,5 +1101,6 @@
   "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: Cargo.toml mangler en avhengighet til horizon-client.",
   "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml mangler et pakkenavn.",
   "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client ber om {fields}. Serverbygg har ikke grafisk grensesnitt; launcheren styrer funksjonene til horizon-client. Fjern features og bruk default-features = false, eller utelat innstillingen.",
-  "{mod}: {error}": "{mod}: {error}"
+  "{mod}: {error}": "{mod}: {error}",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "Oppslag av JAR-metadata mislyktes: {reason}. Legg originalfilene på nøyaktig disse stiene i mellomlageret, og prøv igjen:\n"
 }

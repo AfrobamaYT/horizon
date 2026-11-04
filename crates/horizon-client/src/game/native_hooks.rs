@@ -20,6 +20,7 @@ use super::{
     native_panel_recipes::RecipePage,
 };
 use horizon_assets::item_model::StackView;
+use horizon_client::creative::Creative;
 use horizon_client::mod_api::{
     self, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef,
     NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
@@ -8515,8 +8516,8 @@ impl Game<'_> {
                     image.width as f32,
                     image.height as f32,
                 );
-                areas.push([x, y - 28.0, w, 28.0]);
-                areas.push([x, y + h, w, 28.0]);
+                areas.push([x, y - Creative::TAB_ROW_DEPTH, w, Creative::TAB_ROW_DEPTH]);
+                areas.push([x, y + h, w, Creative::TAB_ROW_DEPTH]);
                 areas.extend(self.inventory_effects_rect(batch, [x, y], w));
             }
             Screen::Inventory if self.title.is_none() => {
@@ -11136,6 +11137,25 @@ mod screen_open_tests {
         ClientHost, Hooks, ModEntry, ScreenClosingEvent, ScreenOpeningEvent, testing::with_mods,
     };
     use std::sync::{Arc, Mutex};
+
+    /// The creative screen keeps its two tab rows clear: one strip above the window
+    /// and one below it, each as wide as the window and a tab row deep (vanilla's
+    /// `CreativeModeInventoryScreen` tab buttons, 28 px outside the 195x136 window).
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn the_creative_screen_excludes_its_two_tab_rows() {
+        with_mods(Vec::new().into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.screen = Screen::Creative;
+                let batch = HudBatch::new([854, 480]);
+                let image = game.container_image(&batch);
+                let (x, y) = (image.left as f32, image.top as f32);
+                let areas = game.screen_own_exclusion(&batch);
+                assert_eq!(areas[0], [x, y - 28.0, 195.0, 28.0]);
+                assert_eq!(areas[1], [x, y + 136.0, 195.0, 28.0]);
+            });
+        });
+    }
 
     struct Probe {
         log: Arc<Mutex<Vec<String>>>,
