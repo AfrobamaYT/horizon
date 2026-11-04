@@ -8,7 +8,8 @@ use crate::{
     items::Items,
     mobs::{
         Mob, MobType, MobTypes,
-        finalize::{self, Ctx, FinalizeLevel, Group, Reason, SpawnRegistries},
+        finalize::{self, Ctx, FinalizeLevel, Group, SpawnRegistries},
+        spawn_rules::Reason,
         spawning::{LocalDifficulty, MOON_BRIGHTNESS},
     },
 };

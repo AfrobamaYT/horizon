@@ -13,9 +13,10 @@ use horizon_client::{
     mobs::{
         Mob, MobTypes, Species,
         data::MobData,
-        finalize::{self, Attr, Ctx, FinalizeLevel, Reason, SpawnData, SpawnRegistries},
+        finalize::{self, Attr, Ctx, FinalizeLevel, SpawnData, SpawnRegistries},
         gear,
         render::{DYE_NAMES, PROFESSIONS, VILLAGER_TYPES},
+        spawn_rules::Reason,
         spawning::LocalDifficulty,
     },
 };
@@ -503,7 +504,7 @@ pub fn main() -> horizon_client::Result<()> {
             }
         }
         let kind = get("type", "minecraft:pig");
-        let reason = Reason::parse(&get("reason", "NATURAL")).unwrap_or(Reason::Natural);
+        let reason = reason_named(&get("reason", "NATURAL"));
         let pack: usize = get("pack", "1").parse().unwrap_or(1);
         let mut random = LegacyRandom::new(get("seed", "0").parse().unwrap_or(0));
         let mut group = None;
@@ -541,4 +542,29 @@ pub fn main() -> horizon_client::Result<()> {
     }
     fs::write(args.get(3).ok_or("missing OUTPUT")?, out)?;
     Ok(())
+}
+
+/// `EntitySpawnReason` by its vanilla constant name; an unknown name is `NATURAL`.
+fn reason_named(name: &str) -> Reason {
+    match name {
+        "CHUNK_GENERATION" => Reason::ChunkGeneration,
+        "SPAWNER" => Reason::Spawner,
+        "STRUCTURE" => Reason::Structure,
+        "BREEDING" => Reason::Breeding,
+        "MOB_SUMMONED" => Reason::MobSummoned,
+        "JOCKEY" => Reason::Jockey,
+        "EVENT" => Reason::Event,
+        "CONVERSION" => Reason::Conversion,
+        "REINFORCEMENT" => Reason::Reinforcement,
+        "TRIGGERED" => Reason::Triggered,
+        "BUCKET" => Reason::Bucket,
+        "SPAWN_ITEM_USE" => Reason::SpawnItemUse,
+        "COMMAND" => Reason::Command,
+        "DISPENSER" => Reason::Dispenser,
+        "PATROL" => Reason::Patrol,
+        "TRIAL_SPAWNER" => Reason::TrialSpawner,
+        "LOAD" => Reason::Load,
+        "DIMENSION_TRAVEL" => Reason::DimensionTravel,
+        _ => Reason::Natural,
+    }
 }

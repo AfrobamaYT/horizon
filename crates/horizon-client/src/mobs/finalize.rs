@@ -19,7 +19,7 @@
 //! second part (horse markings, llama strength, panda hidden gene, tropical
 //! fish base colour), `variant3` the tropical fish pattern colour, and
 //! `sound_variant` the index in the species' sound variant registry.
-use super::{Mob, Species, farm::Climate, gear, spawning::LocalDifficulty};
+use super::{Mob, Species, farm::Climate, gear, spawn_rules::Reason, spawning::LocalDifficulty};
 use crate::{enchant::Enchantments, items::Items};
 use horizon_core::{
     geometry::Aabb,
@@ -27,130 +27,6 @@ use horizon_core::{
 };
 use serde_json::Value;
 use std::{fs, path::Path, sync::Arc};
-
-/// `EntitySpawnReason`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Reason {
-    Natural,
-    ChunkGeneration,
-    Spawner,
-    Structure,
-    Breeding,
-    MobSummoned,
-    Jockey,
-    Event,
-    Conversion,
-    Reinforcement,
-    Triggered,
-    Bucket,
-    SpawnItemUse,
-    Command,
-    Dispenser,
-    Patrol,
-    TrialSpawner,
-    Load,
-    DimensionTravel,
-}
-impl From<Reason> for super::spawn_rules::Reason {
-    fn from(reason: Reason) -> Self {
-        match reason {
-            Reason::Natural => Self::Natural,
-            Reason::ChunkGeneration => Self::ChunkGeneration,
-            Reason::Spawner => Self::Spawner,
-            Reason::TrialSpawner => Self::TrialSpawner,
-            Reason::Reinforcement => Self::Reinforcement,
-            Reason::Patrol => Self::Patrol,
-            Reason::Structure => Self::Structure,
-            Reason::Event => Self::Event,
-            Reason::Command => Self::Command,
-            Reason::SpawnItemUse => Self::SpawnItemUse,
-            Reason::MobSummoned => Self::MobSummoned,
-            Reason::Conversion => Self::Conversion,
-            Reason::Breeding => Self::Breeding,
-            Reason::Triggered => Self::Triggered,
-            Reason::Jockey => Self::Jockey,
-            Reason::Dispenser => Self::Dispenser,
-            Reason::Bucket => Self::Bucket,
-            Reason::Load => Self::Load,
-            Reason::DimensionTravel => Self::DimensionTravel,
-        }
-    }
-}
-impl From<super::spawn_rules::Reason> for Reason {
-    fn from(reason: super::spawn_rules::Reason) -> Self {
-        use super::spawn_rules::Reason as R;
-        match reason {
-            R::Natural => Self::Natural,
-            R::ChunkGeneration => Self::ChunkGeneration,
-            R::Spawner => Self::Spawner,
-            R::TrialSpawner => Self::TrialSpawner,
-            R::Reinforcement => Self::Reinforcement,
-            R::Patrol => Self::Patrol,
-            R::Structure => Self::Structure,
-            R::Event => Self::Event,
-            R::Command => Self::Command,
-            R::SpawnItemUse => Self::SpawnItemUse,
-            R::MobSummoned => Self::MobSummoned,
-            R::Conversion => Self::Conversion,
-            R::Breeding => Self::Breeding,
-            R::Triggered => Self::Triggered,
-            R::Jockey => Self::Jockey,
-            R::Dispenser => Self::Dispenser,
-            R::Bucket => Self::Bucket,
-            R::Load => Self::Load,
-            R::DimensionTravel => Self::DimensionTravel,
-        }
-    }
-}
-impl Reason {
-    pub const ALL: [Self; 19] = [
-        Self::Natural,
-        Self::ChunkGeneration,
-        Self::Spawner,
-        Self::Structure,
-        Self::Breeding,
-        Self::MobSummoned,
-        Self::Jockey,
-        Self::Event,
-        Self::Conversion,
-        Self::Reinforcement,
-        Self::Triggered,
-        Self::Bucket,
-        Self::SpawnItemUse,
-        Self::Command,
-        Self::Dispenser,
-        Self::Patrol,
-        Self::TrialSpawner,
-        Self::Load,
-        Self::DimensionTravel,
-    ];
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Natural => "NATURAL",
-            Self::ChunkGeneration => "CHUNK_GENERATION",
-            Self::Spawner => "SPAWNER",
-            Self::Structure => "STRUCTURE",
-            Self::Breeding => "BREEDING",
-            Self::MobSummoned => "MOB_SUMMONED",
-            Self::Jockey => "JOCKEY",
-            Self::Event => "EVENT",
-            Self::Conversion => "CONVERSION",
-            Self::Reinforcement => "REINFORCEMENT",
-            Self::Triggered => "TRIGGERED",
-            Self::Bucket => "BUCKET",
-            Self::SpawnItemUse => "SPAWN_ITEM_USE",
-            Self::Command => "COMMAND",
-            Self::Dispenser => "DISPENSER",
-            Self::Patrol => "PATROL",
-            Self::TrialSpawner => "TRIAL_SPAWNER",
-            Self::Load => "LOAD",
-            Self::DimensionTravel => "DIMENSION_TRAVEL",
-        }
-    }
-    pub fn parse(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|r| r.name() == name)
-    }
-}
 
 /// What a level's finalizeSpawn event decided for a mob another mob's
 /// finalizeSpawn created: the rider is dropped, added without its own rolls,
@@ -2764,12 +2640,6 @@ mod tests {
         // An effect does not touch attributes it does not modify.
         assert!(effect_modifier("weakness", 0, Attr::MovementSpeed).is_none());
         assert!(effect_modifier("poison", 0, Attr::AttackDamage).is_none());
-    }
-    #[test]
-    fn reasons_round_trip() {
-        for r in Reason::ALL {
-            assert_eq!(Reason::parse(r.name()), Some(r));
-        }
     }
     #[test]
     fn villager_types_by_biome() {
