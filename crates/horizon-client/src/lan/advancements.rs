@@ -808,7 +808,12 @@ mod tests {
             extra: None,
         })];
         let (found, _) = recipes
-            .find_with(&grid, 1, &|_| None)
+            .find_with(
+                crate::test_resources::server_loop_context(),
+                &grid,
+                1,
+                &|_| None,
+            )
             .unwrap_or_else(|| panic!("{name}: the recipe matches a grid"));
         assert_eq!(
             found, name,

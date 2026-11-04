@@ -249,7 +249,11 @@ pub fn main() -> horizon_client::Result<()> {
             if let Some(f) = furnace.as_mut() {
                 let before = f.items[0].clone();
                 f.items = [0, 1, 2].map(|i| menu.slot(i).cloned());
-                f.input_clicked(&recipes, before);
+                f.input_clicked(
+                    crate::test_resources::server_loop_context(),
+                    &recipes,
+                    before,
+                );
                 menu.data[2] = f.cooking_timer;
                 menu.data[3] = f.cooking_total;
             }

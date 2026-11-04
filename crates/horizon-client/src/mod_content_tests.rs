@@ -1086,7 +1086,9 @@ fn content_root_loads_with_every_table() {
         None,
         None,
     ];
-    let (id, result) = recipes.find(&grid, 2).unwrap();
+    let (id, result) = recipes
+        .find(crate::test_resources::server_loop_context(), &grid, 2)
+        .unwrap();
     assert_eq!(&*result.item, "ruby:ruby");
     let rest = recipes.remainders(id, &grid, 2);
     assert_eq!(rest[0].as_ref().map(|s| &*s.item), Some("minecraft:bowl"));
@@ -3013,7 +3015,7 @@ fn mod_recipe_results_are_an_item_stack_or_a_bare_item_id() {
             None,
         ];
         let (_, made) = recipes
-            .find(&grid, 2)
+            .find(crate::test_resources::server_loop_context(), &grid, 2)
             .unwrap_or_else(|| panic!("{name}: no recipe"));
         assert_eq!((&*made.item, made.count), (item, count), "{name}");
     }

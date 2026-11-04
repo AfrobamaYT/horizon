@@ -787,6 +787,7 @@ impl Game<'_> {
             }
             Kind::Smithing => {
                 s.result = data.recipes.smithing_result(
+                    &self.loop_context,
                     &data.enchantments,
                     s.inputs[0].as_ref(),
                     s.inputs[1].as_ref(),
