@@ -5525,9 +5525,16 @@ mod tests {
             sync: false,
         };
         let mut map = Attachments::default();
-        map.set(&key, 7).unwrap();
+        key.set(&mut map, horizon_world::attachments::Holder::Level, 7)
+            .unwrap();
         save.save_attachments(&map).unwrap();
-        assert_eq!(save.load_attachments().get(&key), Ok(7));
+        assert_eq!(
+            key.get(
+                &mut save.load_attachments(),
+                horizon_world::attachments::Holder::Level
+            ),
+            Ok(7)
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -5556,9 +5563,19 @@ mod tests {
         };
         let mut chunk = Chunk::empty(2, 3);
         let mut extras = ChunkExtras::default();
-        extras.attachments.set(&key, 42).unwrap();
+        key.set(
+            &mut extras.attachments,
+            horizon_world::attachments::Holder::Level,
+            42,
+        )
+        .unwrap();
         let mut block_data = horizon_world::attachments::Attachments::default();
-        block_data.set(&key, 21).unwrap();
+        key.set(
+            &mut block_data,
+            horizon_world::attachments::Holder::Level,
+            21,
+        )
+        .unwrap();
         let pos = (33, 64, 50);
         let chest = assets.registry.default_state("minecraft:chest").unwrap();
         chunk.set(1, 64, 2, chest.0);
@@ -5570,14 +5587,21 @@ mod tests {
         let saved = encode(&chunk, assets.registry, &biomes);
         let mut loaded = decode(&saved, assets.registry, &biomes).expect("chunk");
         assert_eq!(
-            Arc::make_mut(loaded.saved.as_mut().unwrap())
-                .attachments
-                .get(&key),
+            key.get(
+                &mut Arc::make_mut(loaded.saved.as_mut().unwrap()).attachments,
+                horizon_world::attachments::Holder::Level
+            ),
             Ok(42)
         );
         let extras = Arc::make_mut(loaded.saved.as_mut().unwrap());
         assert_eq!(extras.block_entity_attachments[0].0, pos);
-        assert_eq!(extras.block_entity_attachments[0].1.get(&key), Ok(21));
+        assert_eq!(
+            key.get(
+                &mut extras.block_entity_attachments[0].1,
+                horizon_world::attachments::Holder::Level
+            ),
+            Ok(21)
+        );
     }
 
     #[test]
@@ -7277,10 +7301,11 @@ mod tests {
         let dir = gen_world("enabled-features");
         let mut level = Level {
             name: "Features".into(),
-            enabled_features: vec![
+            enabled_features: [
                 "minecraft:vanilla".into(),
                 "minecraft:minecart_improvements".into(),
-            ],
+            ]
+            .into(),
             ..Level::default()
         };
         level.write(&dir).unwrap();
@@ -7296,7 +7321,7 @@ mod tests {
         // same vanilla-only list. A fresh folder: write_internal keeps an
         // older file's fields.
         let dir2 = gen_world("enabled-features-vanilla");
-        level.enabled_features = vec!["minecraft:vanilla".into()];
+        level.enabled_features = ["minecraft:vanilla".into()].into();
         level.write(&dir2).unwrap();
         let raw = crate::save::read_level_dat(&dir2).unwrap();
         if let Tag::Compound(data) = &raw {
