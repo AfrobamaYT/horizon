@@ -1246,18 +1246,18 @@ impl Game<'_> {
         let mut keep = true;
         let mut changes = Vec::new();
         if apply {
-            self.native_apply_effect_tick(
+            self.native_apply_effect_tick(mod_api::__private::ApplyEffectTickCall {
                 effect,
-                self.dim.id(),
+                dimension: self.dim.id(),
                 entity,
                 amplifier,
                 holder,
                 health,
                 max_health,
                 food,
-                &mut changes,
-                &mut keep,
-            );
+                changes: &mut changes,
+                keep: &mut keep,
+            });
         }
         (keep, changes)
     }
