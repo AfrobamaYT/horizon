@@ -411,6 +411,11 @@ dependencies = [
  "serde_json",
  "sha2",
  "toml",
+ "toml_edit",
+ "wasm-encoder 0.261.0",
+ "wasmparser 0.261.0",
+ "wit-component 0.261.0",
+ "wit-parser 0.261.0",
  "zip",
 ]
 

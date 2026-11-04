@@ -62,6 +62,19 @@ pub(crate) fn sha512_hex(value: &str) -> Result<(), &'static str> {
 }
 
 /// The SHA-512 of `bytes`, as `[wasm]` writes it.
+/// The plain name prefix of a wasm mod's exports in its group, `<prefix>-<interface>`: the id
+/// in the component model's kebab case. Ids are `[a-z0-9_]`, so the mapping is one to one.
+pub fn export_prefix(id: &str) -> String {
+    id.replace('_', "-")
+}
+
+/// Whether `id` can name a wasm mod's exports: each `_`-separated word starts with a letter,
+/// as the component model's names need.
+pub(crate) fn exportable(id: &str) -> bool {
+    id.split('_')
+        .all(|word| word.starts_with(|c: char| c.is_ascii_lowercase()))
+}
+
 pub fn sha512_of(bytes: &[u8]) -> String {
     Sha512::digest(bytes)
         .iter()

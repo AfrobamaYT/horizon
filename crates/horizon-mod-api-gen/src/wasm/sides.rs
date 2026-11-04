@@ -671,12 +671,12 @@ pub(super) fn host(
         code.push_str("}\n");
         writeln!(
             code,
-            "impl {ty} {{\nfn find(store: &mut wasmtime::Store<super::State>, instance: &wasmtime::component::Instance, mod_id: &str) -> Result<Self, super::LoadError> {{ let name = format!(\"{{mod_id}}-{kebab}\"); let interface = instance.get_export_index(&mut *store, None, &name).ok_or_else(|| super::LoadError::MissingExport(name.clone()))?; {finds} Ok(Self {{ {} }}) }}\n{calls}}}",
+            "impl {ty} {{\nfn find(store: &mut wasmtime::Store<super::State>, instance: &wasmtime::component::Instance, prefix: &str) -> Result<Self, super::LoadError> {{ let name = format!(\"{{prefix}}-{kebab}\"); let interface = instance.get_export_index(&mut *store, None, &name).ok_or_else(|| super::LoadError::MissingExport(name.clone()))?; {finds} Ok(Self {{ {} }}) }}\n{calls}}}",
             names.join(", ")
         )
         .unwrap();
         writeln!(fields, "{iface}: {ty},").unwrap();
-        writeln!(inits, "{iface}: {ty}::find(store, instance, mod_id)?,").unwrap();
+        writeln!(inits, "{iface}: {ty}::find(store, instance, prefix)?,").unwrap();
         writeln!(
             getters,
             "pub(super) fn horizon_mod_api_{iface}(&self) -> &{ty} {{ &self.{iface} }}"
@@ -685,7 +685,7 @@ pub(super) fn host(
     }
     writeln!(
         code,
-        "/// One mod's exports, typed once at load.\npub(super) struct ModExports {{ {fields} }}\nimpl ModExports {{\npub(super) fn find(store: &mut wasmtime::Store<super::State>, instance: &wasmtime::component::Instance, mod_id: &str) -> Result<Self, super::LoadError> {{ Ok(Self {{ {inits} }}) }}\n{getters}}}"
+        "/// One mod's exports, typed once at load.\npub(super) struct ModExports {{ {fields} }}\nimpl ModExports {{\npub(super) fn find(store: &mut wasmtime::Store<super::State>, instance: &wasmtime::component::Instance, prefix: &str) -> Result<Self, super::LoadError> {{ Ok(Self {{ {inits} }}) }}\n{getters}}}"
     )
     .unwrap();
     Ok(code)

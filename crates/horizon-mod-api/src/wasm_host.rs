@@ -532,12 +532,17 @@ impl WasmHandler {
     }
 }
 
-/// Instantiates a linked group and makes each member a mod entry. `members` are the mods'
-/// ids in dependency order; their exports are `<id>-<interface>` in the group.
+/// A member of a group: its mod id, and the prefix of its exports, `<prefix>-<interface>`.
+pub struct Member {
+    pub id: &'static str,
+    pub exports: String,
+}
+
+/// Instantiates a linked group and makes each member, in dependency order, a mod entry.
 pub fn instantiate(
     engine: &wasmtime::Engine,
     component: &Component,
-    members: &[&'static str],
+    members: &[Member],
     budgets: Budgets,
 ) -> Result<Vec<crate::ModEntry>, LoadError> {
     let mut linker = Linker::<State>::new(engine);
@@ -553,8 +558,9 @@ pub fn instantiate(
         .instantiate(&mut store, component)
         .map_err(|e| LoadError::Import(format!("{e:#}")))?;
     let mut found = Vec::new();
-    for id in members {
-        found.push((*id, glue::ModExports::find(&mut store, &instance, id)?));
+    for member in members {
+        let exports = glue::ModExports::find(&mut store, &instance, &member.exports)?;
+        found.push((member.id, exports));
     }
     let group = Arc::new(Group::new(store, budgets, GROUP_WAIT));
     let mut entries = Vec::new();

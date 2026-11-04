@@ -5,7 +5,7 @@
 mod jar;
 mod wasm;
 pub use jar::JarRef;
-pub use wasm::{MAX_WASM, Wasm, WasmError, sha512_of};
+pub use wasm::{MAX_WASM, Wasm, WasmError, export_prefix, sha512_of};
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -238,6 +238,12 @@ impl Manifest {
         }
         if m.native.is_some() && m.wasm.is_some() {
             return Err(format!("{MANIFEST}: a mod is [native] or [wasm], not both"));
+        }
+        if m.wasm.is_some() && !wasm::exportable(&m.id) {
+            return Err(format!(
+                "{MANIFEST}: a wasm mod's id is words that each start with a letter (`{}`)",
+                m.id
+            ));
         }
         if m.native.is_none() && m.wasm.is_none() && !m.dependencies.is_empty() {
             return Err(format!(

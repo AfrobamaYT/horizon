@@ -163,7 +163,9 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Wasm, String> 
 fn api_version(root: &Path) -> Result<String, String> {
     let path = root.join("crates/horizon-mod-api/Cargo.toml");
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let manifest: toml::Table = text.parse().map_err(|e| format!("{}: {e}", path.display()))?;
+    let manifest: toml::Table = text
+        .parse()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
     manifest
         .get("package")
         .and_then(|p| p.get("version"))

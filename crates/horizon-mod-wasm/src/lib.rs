@@ -6,7 +6,7 @@
 //! mod API as its only imports. A group runs sandboxed from the others and from the game; a
 //! trap stops its group. Every refusal names its reason for the Mods page.
 use horizon_mods::manifest::{Dependency, Manifest};
-use mod_api::wasm_host::{Budgets, LoadError};
+use mod_api::wasm_host::{Budgets, LoadError, Member};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -340,9 +340,16 @@ pub fn load(config: &RuntimeConfig, std_member: &[u8], packages: Vec<WasmPackage
             .iter()
             .map(|&i| &*Box::leak(packages[i].manifest.id.clone().into_boxed_str()))
             .collect();
+        let group: Vec<Member> = ids
+            .iter()
+            .map(|&id| Member {
+                id,
+                exports: horizon_mods::manifest::export_prefix(id),
+            })
+            .collect();
         let loaded =
             component(&engine, config, std_member, &packages, &members).and_then(|component| {
-                mod_api::wasm_host::instantiate(&engine, &component, &ids, config.budgets)
+                mod_api::wasm_host::instantiate(&engine, &component, &group, config.budgets)
                     .map_err(Refusal::Load)
             });
         match loaded {
