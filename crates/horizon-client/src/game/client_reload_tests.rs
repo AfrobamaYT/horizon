@@ -463,3 +463,23 @@ fn client_setup_reaches_each_listener_once_per_firing() {
         (1, 1)
     );
 }
+
+/// The process's client start is a client that is not a splitscreen guest: a dedicated
+/// server has no client, and a guest's `run` is another local player of the same process.
+#[test]
+#[ignore = "needs prepared resources"]
+fn only_the_first_local_client_is_the_client_start() {
+    use crate::game::execution_role::ExecutionRole;
+    use crate::game::native_entity_refs::tests::with_game;
+
+    with_game(|game| {
+        game.options.execution_role = ExecutionRole::Client;
+        game.options.split_guest = false;
+        assert!(game.options.is_client_start());
+        game.options.split_guest = true;
+        assert!(!game.options.is_client_start());
+        game.options.split_guest = false;
+        game.options.execution_role = ExecutionRole::DedicatedServer;
+        assert!(!game.options.is_client_start());
+    });
+}
