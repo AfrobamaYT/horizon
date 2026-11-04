@@ -4301,6 +4301,7 @@ pub(crate) mod tests {
                     }
                 },
                 item_stacked_on_other: |_, _| {},
+                player_chat: |_, _, _, _, _| {},
                 living_heal: |_, _, _| {},
                 living_breathe: |_, _, _, _, _| {},
                 farmland_trample: |_, _, _, _, _| {},

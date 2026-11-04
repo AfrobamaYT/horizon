@@ -8,6 +8,7 @@ pub struct NativeClientHooks {
     pub menu_slot_rules: fn(&str, usize, &ItemStack, &mut bool, &mut u32),
     pub item_stacked_on_other: fn(&mut crate::menu::StackedOnOther<'_>, &mut bool),
     pub living_heal: fn(u32, &mut f32, &mut bool),
+    pub player_chat: fn(u128, &str, &str, &mut Vec<horizon_client_core::text::Text>, &mut bool),
     pub living_breathe: fn(u32, &str, &mut bool, &mut i32, &mut i32),
     pub farmland_trample: fn(u32, [i32; 3], u32, f64, &mut bool),
     pub has_mods: fn() -> bool,
@@ -46,6 +47,18 @@ pub(crate) fn item_stacked_on_other(
 ) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.item_stacked_on_other)(event, canceled);
+    }
+}
+
+pub(crate) fn player_chat(
+    player: u128,
+    name: &str,
+    message: &str,
+    replies: &mut Vec<horizon_client_core::text::Text>,
+    cancel: &mut bool,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.player_chat)(player, name, message, replies, cancel);
     }
 }
 
