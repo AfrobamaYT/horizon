@@ -58,10 +58,9 @@ impl Game<'_> {
         let Some(spot) = spot else {
             return;
         };
-        let Some(id) = self.spawn_mob_for(
+        let Some(id) = self.spawn_mob(
             &kind.id,
             spot.map(f64::from),
-            false,
             false,
             super::creatures::SpawnSite::Finalizing(
                 horizon_client::mobs::spawn_rules::Reason::Reinforcement,

@@ -313,6 +313,14 @@ pub(super) struct GameLevel<'g, 'a> {
     pub(super) pending: std::cell::RefCell<Vec<Aabb>>,
     /// The types and boxes of what a spawner created this tick.
     pub(super) pending_ids: std::cell::RefCell<Vec<(String, Aabb)>>,
+    /// The mobs this pass's finalizeSpawn calls made (jockeys and mounts),
+    /// and the chicken-jockey links on mobs already in the game's list, both
+    /// applied by [`Game::add_spawned`].
+    pub(super) spawned: std::cell::RefCell<Vec<Mob>>,
+    pub(super) rides: std::cell::RefCell<Vec<(u32, u32)>>,
+    /// How many provisional ids the pass has handed out (`u32::MAX - n`),
+    /// mapped to real ones by [`Game::add_spawned`].
+    pub(super) provisional: std::cell::Cell<u32>,
     /// The game's mobs by box, built once a pass has asked more than
     /// [`SCANNED_QUERIES`] box queries (the mobs do not change while it
     /// holds the game); the first ones scan, as the build costs a few scans.
@@ -396,6 +404,150 @@ impl GameLevel<'_, '_> {
     fn zoomed_biome(&self, x: i32, y: i32, z: i32) -> Option<&BiomeInfo> {
         let [x, y, z] = self.zoomed(x, y, z);
         self.biome(x, y, z)
+    }
+    /// A provisional id, distinct within the pass and mapped to a real one
+    /// by [`Game::add_spawned`].
+    pub(super) fn provisional_id(&self) -> u32 {
+        let n = self.provisional.get();
+        self.provisional.set(n + 1);
+        u32::MAX - n
+    }
+    /// Creates a mob the spawner accepted, finalized the game's way
+    /// (`finalizeSpawn` on this pass's level, its draws on the spawner's own
+    /// random, between its position draws, as vanilla interleaves them); the
+    /// caller adds it with [`Game::add_spawned`].
+    fn finalize_spawned<R: RandomSource>(
+        &self,
+        r: &SpawnRequest,
+        pending: &mut Vec<Mob>,
+        random: &mut R,
+    ) -> Option<Spawned> {
+        let kind = self.game.res.mob_types().get(r.entity)?.clone();
+        let [x, y, z] = r.position;
+        let mut mob = Mob::new(self.provisional_id(), kind, Vec3::new(x, y, z), r.yaw);
+        let (outcome, difficulty) = self.game.finalize_spawn_event(&mob, r.reason, None);
+        match outcome {
+            Finalized::Cancelled => return None,
+            Finalized::Skipped => {}
+            Finalized::Done => {
+                let mut level = PassLevel::new(self);
+                let mut cx = horizon_client::mobs::finalize::Ctx {
+                    level: &mut level,
+                    random,
+                    difficulty,
+                    created: Vec::new(),
+                    jockey_rider: None,
+                };
+                horizon_client::mobs::finalize::finalize(&mut cx, &mut mob, r.reason.into(), None);
+                for m in cx.created {
+                    let bounds = m.bounds();
+                    self.pending.borrow_mut().push(bounds);
+                    self.pending_ids
+                        .borrow_mut()
+                        .push((m.kind.id.clone(), bounds));
+                    self.spawned.borrow_mut().push(m);
+                }
+            }
+        }
+        let bounds = mob.bounds();
+        pending.push(mob);
+        Some(Spawned {
+            bounds,
+            school: true,
+        })
+    }
+}
+
+/// A spawning pass's [`finalize::FinalizeLevel`]: the game's mobs and
+/// conditions read-only, what finalizeSpawn makes (jockeys, mounts) recorded
+/// for [`Game::add_spawned`], as the pass holds the game immutably.
+pub(super) struct PassLevel<'a, 'g, 'h> {
+    l: &'a GameLevel<'g, 'h>,
+}
+impl<'a, 'g, 'h> PassLevel<'a, 'g, 'h> {
+    pub(super) fn new(l: &'a GameLevel<'g, 'h>) -> Self {
+        Self { l }
+    }
+}
+impl horizon_client::mobs::finalize::FinalizeLevel for PassLevel<'_, '_, '_> {
+    fn spawn_event(
+        &mut self,
+        mob: &mut horizon_client::mobs::Mob,
+        reason: horizon_client::mobs::finalize::Reason,
+    ) -> horizon_client::mobs::finalize::SpawnEvent {
+        self.l.game.finalize_spawn_event_result(mob, reason)
+    }
+    fn biome(&self, pos: [i32; 3]) -> String {
+        // A spawn site without its chunk (a loaded marker mob) is neutral.
+        super::finalize_spawn::biome_or_plains(
+            self.l.biome(pos[0], pos[1], pos[2]).map(|b| b.name.clone()),
+        )
+    }
+    fn biome_tag(&self, tag: &str, pos: [i32; 3]) -> bool {
+        let Some(b) = self.l.biome(pos[0], pos[1], pos[2]) else {
+            return false;
+        };
+        self.l.game.res.mob_data().biome_has(tag, &b.name)
+    }
+    fn structures_with_piece_at(&self, pos: [i32; 3]) -> Vec<String> {
+        self.l.game.structures_at(pos)
+    }
+    fn moon_phase(&self, _: [i32; 3]) -> usize {
+        self.l.game.finalize_moon_phase()
+    }
+    fn spawning_monsters(&self) -> bool {
+        self.l.game.spawning_monsters()
+    }
+    fn no_collision(&self, bounds: Aabb) -> bool {
+        // The same answer the pass's `GameLevel` gives: block collisions with
+        // the shulkers in the level and the pass's own adds.
+        let mut scene = SceneCollisions {
+            world: &self.l.game.world,
+            binding: self.l.w.collision,
+            subject: None,
+        };
+        let grown = bounds.inflate(Vec3::new(1e-7, 1e-7, 1e-7));
+        no_collision_empty(&mut scene, bounds)
+            && !self
+                .l
+                .mobs_near(grown)
+                .any(|(_, b, _, shulker)| shulker && b.intersects(grown))
+            && !self
+                .l
+                .pending_ids
+                .borrow()
+                .iter()
+                .any(|(id, b)| id == "minecraft:shulker" && b.intersects(grown))
+    }
+    fn free_chicken(&self, bounds: Aabb) -> Option<u32> {
+        self.l.game.finalize_free_chicken(bounds)
+    }
+    fn ride_chicken(&mut self, chicken: u32, rider: u32) {
+        self.l.rides.borrow_mut().push((chicken, rider));
+    }
+    fn game_time(&self) -> i64 {
+        self.l.game.finalize_game_time()
+    }
+    fn halloween(&self) -> bool {
+        self.l.game.finalize_halloween()
+    }
+    fn create(&mut self, kind: &str, _: horizon_client::mobs::finalize::Reason) -> Option<Mob> {
+        use horizon_world::food::Difficulty;
+        if self.l.game.world.health_rules.difficulty == Difficulty::Peaceful
+            && !horizon_client::mobs::finalize::allowed_in_peaceful(kind)
+        {
+            return None;
+        }
+        let t = self.l.game.res.mob_types().get(kind)?.clone();
+        Some(Mob::new(
+            self.l.provisional_id(),
+            t,
+            horizon_core::geometry::Vec3::ZERO,
+            0.0,
+        ))
+    }
+    fn spawn_data(&self) -> horizon_client::mobs::finalize::SpawnData<'_> {
+        self.l.game.finalize_spawn_data()
     }
 }
 impl SpawnLevel for GameLevel<'_, '_> {
@@ -686,51 +838,79 @@ impl<'a> Game<'a> {
             nearest,
             pending: Default::default(),
             pending_ids: Default::default(),
+            spawned: Default::default(),
+            rides: Default::default(),
+            provisional: Default::default(),
             boxes: Default::default(),
             box_queries: Default::default(),
             costed: spawn_cost_types(world_biomes!(self)),
         }
     }
-    /// Creates a mob the spawner accepted, finalized the game's way; the
-    /// caller adds it with [`Game::add_spawned`].
-    fn finalize_spawned(&self, r: &SpawnRequest, pending: &mut Vec<Mob>) -> Option<Spawned> {
-        let kind = self.res.mob_types().get(r.entity)?.clone();
-        let [x, y, z] = r.position;
-        let mut mob = Mob::new(0, kind, Vec3::new(x, y, z), r.yaw);
-        match self.finalize_with(&mut mob, r.reason, None) {
-            Finalized::Cancelled => return None,
-            Finalized::Skipped => {}
-            Finalized::Done => horizon_client::mobs::raider::finalize(
-                &mut mob,
-                horizon_client::mobs::raider::Reason::Natural,
-            ),
+    /// Gives a spawn pass's provisional mobs (the `u32::MAX - n` ids
+    /// [`GameLevel`] hands out) their real ids in order, rewrites the mount
+    /// and rider links that reference them, and seats chicken jockeys on the
+    /// chickens already in the level. The old→new map comes back for the
+    /// pass's events.
+    pub(super) fn resolve_spawn_ids(
+        &mut self,
+        mut groups: [&mut [Mob]; 2],
+        rides: &[(u32, u32)],
+    ) -> HashMap<u32, u32> {
+        let mut links: HashMap<u32, u32> = HashMap::new();
+        for group in groups.iter_mut() {
+            for mob in group.iter_mut() {
+                self.next_entity += 1;
+                links.insert(mob.id, self.next_entity);
+                mob.id = self.next_entity;
+            }
         }
-        let bounds = mob.bounds();
-        pending.push(mob);
-        Some(Spawned {
-            bounds,
-            school: true,
-        })
+        for group in groups.iter_mut() {
+            for mob in group.iter_mut() {
+                if let Some(m) = mob.extra.mount.as_mut()
+                    && let Some(&id) = links.get(m)
+                {
+                    *m = id;
+                }
+                if let Some(m) = mob.extra.rider.as_mut()
+                    && let Some(&id) = links.get(m)
+                {
+                    *m = id;
+                }
+            }
+        }
+        for (chicken, rider) in rides {
+            let rider = links.get(rider).copied().unwrap_or(*rider);
+            if let Some(c) = self.mobs.iter_mut().find(|m| m.id == *chicken) {
+                c.extra.jockey = true;
+                c.extra.rider = Some(rider);
+            }
+        }
+        links
     }
-    /// Adds the mobs a spawn pass created: ids, enchanted gear and jockeys.
-    fn add_spawned(&mut self, pending: Vec<Mob>, persistent: bool) {
-        for mut mob in pending {
-            self.next_entity += 1;
-            mob.id = self.next_entity;
-            mob.persistent = persistent;
-            let id = mob.id;
+    /// Adds the mobs a spawn pass created: ids and the links that need them
+    /// (finalizeSpawn's mounts ride by id, and its chickens carry their
+    /// zombie). Every mob arrives with a provisional id; real ones are
+    /// assigned in spawn order and the links rewritten.
+    pub(super) fn add_spawned(
+        &mut self,
+        pending: Vec<Mob>,
+        created: Vec<Mob>,
+        rides: Vec<(u32, u32)>,
+        persistent: bool,
+    ) {
+        let mut pending = pending;
+        let mut created = created;
+        for m in pending.iter_mut() {
+            m.persistent = persistent;
+        }
+        self.resolve_spawn_ids([&mut pending, &mut created], &rides);
+        for mob in pending {
             self.mobs.push(mob);
             self.native_mobs_joined(self.mobs.len() - 1, true);
-            self.enchant_spawn_equipment(id);
-            self.halloween_spawn_head(id);
-            if !persistent {
-                self.spawn_jockeys(
-                    id,
-                    super::creatures::SpawnSite::Finalizing(
-                        horizon_client::mobs::spawn_rules::Reason::Natural,
-                    ),
-                );
-            }
+        }
+        for mob in created {
+            self.mobs.push(mob);
+            self.native_mobs_joined(self.mobs.len() - 1, true);
         }
     }
     /// Every player in the level in place: the local player, and the LAN
@@ -815,7 +995,7 @@ impl<'a> Game<'a> {
         let mut random = std::mem::replace(&mut self.world.random, LegacyRandom::new(0));
         let mut pending = Vec::new();
         let last_state;
-        {
+        let extras = {
             let level = self.natural_level();
             let counted: Vec<Counted> = self
                 .mobs
@@ -856,8 +1036,8 @@ impl<'a> Game<'a> {
             }
             if !categories.is_empty() {
                 for chunk in scratch.candidates.drain(..) {
-                    let mut spawn = |l: &GameLevel, r: &SpawnRequest| {
-                        let spawned = l.game.finalize_spawned(r, &mut pending);
+                    let mut spawn = |l: &GameLevel, r: &SpawnRequest, rng: &mut LegacyRandom| {
+                        let spawned = l.finalize_spawned(r, &mut pending, rng);
                         if let Some(s) = &spawned {
                             l.pending.borrow_mut().push(s.bounds);
                         }
@@ -874,11 +1054,15 @@ impl<'a> Game<'a> {
                     );
                 }
             }
-        }
+            let created = std::mem::take(&mut *level.spawned.borrow_mut());
+            let rides = std::mem::take(&mut *level.rides.borrow_mut());
+            (created, rides)
+        };
         self.world.random = random;
         // ServerChunkCache.lastSpawnState, for the debug overlay.
         self.spawn_counts.insert(self.dim, last_state);
-        self.add_spawned(pending, false);
+        let (created, rides) = extras;
+        self.add_spawned(pending, created, rides, false);
         self.spawn_scratch = scratch;
     }
     /// `NoiseBasedChunkGenerator.spawnOriginalMobs`: creature packs for a
@@ -1301,8 +1485,9 @@ mod tests {
             let run = |game: &mut Game<'_>, answer: Option<FinalizeAnswer>| {
                 game.world.random = LegacyRandom::new(5);
                 let mut mob = Mob::new(1, kind.clone(), Vec3::new(8.5, 64.0, 8.5), 0.0);
-                let go =
-                    |game: &Game<'_>, mob: &mut Mob| game.finalize_with(mob, Reason::Natural, None);
+                let go = |game: &mut Game<'_>, mob: &mut Mob| {
+                    game.finalize_with(mob, Reason::Natural, None)
+                };
                 let outcome = match answer {
                     None => go(game, &mut mob),
                     Some(a) => mod_api::testing::with_mods(

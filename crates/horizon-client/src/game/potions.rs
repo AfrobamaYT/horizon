@@ -243,11 +243,10 @@ impl Game<'_> {
             }
             for _ in 0..count {
                 // spawnSlimeOffspring: a size 2 slime half a block up.
-                if let Some(id) = self.spawn_mob_for(
+                if let Some(id) = self.spawn_mob(
                     "minecraft:slime",
                     [feet.x, feet.y + 0.5, feet.z],
                     false,
-                    true,
                     super::creatures::SpawnSite::Plain,
                 ) && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
@@ -357,11 +356,10 @@ impl Game<'_> {
                 look[1] * 0.3 * 1.5,
                 f64::from(-x as f32 * sin + z as f32 * cos),
             );
-            if let Some(id) = self.spawn_mob_for(
+            if let Some(id) = self.spawn_mob(
                 "minecraft:silverfish",
                 at,
                 false,
-                true,
                 super::creatures::SpawnSite::Plain,
             ) && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
             {
