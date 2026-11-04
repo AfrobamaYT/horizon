@@ -1054,6 +1054,8 @@ registration path.
 - A recipe ingredient of a mod's own kind. The ingredient entry that names a type in a namespace outside minecraft: reaches native_ingredient(context, kind, data, items) at load time. Fill items with the item ids the ingredient matches (item ids only: components are not checked; a match-time hook follows separately). Duplicates are removed keeping first-seen order. The hook gets the `DataLoadContext` of the load that parses the recipes and hears each occurrence of the kind once per load, nested ones and ones under any slot a recipe reads an ingredient from included, before the load's tables parse the recipes: the client's own recipe load has `origin()` `ClientPreload`, the server's `ServerDataLoad`. A server loads its recipes once however many tables and copies read them (its recipe tables, the stations and the copy synchronised to guests, on a dedicated server too), and a `/reload` asks again once; a client that only joins a remote server is never told `ServerDataLoad`. The answer must be the same every time. An unclaimed kind leaves the list empty and the recipe fails.
 
 - A frame's two moments, as NeoForge's `RenderFrameEvent.Pre` and `.Post`: `render_frame_pre(host, event)` runs once a frame (in a world or not) after Horizon's extras and just before the frame is rendered, and `render_frame_post` right after it was rendered; both carry the frame's time as `event.elapsed`. They replace the single `frame` hook, which fired at the pre moment: a mod that implemented `frame` implements `render_frame_pre`. Client side; a frame with no listener costs one branch.
+- Items a mod's own recipe type takes in a station slot. `native_recipe_property_sets(context, additions)` is asked once per load, after the recipes are resolved, with the `DataLoadContext` of the load that owns them (`origin()` `ServerDataLoad` on a server, `ClientPreload` on a client's own load), and again after `/reload`. Push one `RecipePropertyAddition::new(set, items)` per set to add to (`minecraft:furnace_input`, `blast_furnace_input`, `smoker_input`, `campfire_input`, `smithing_template`, `smithing_base`, `smithing_addition`, `brewing_input`, `brewing_reagent`); the vanilla recipes' items stay in. The furnace shift-click, the smithing and brewing slots and the set a client is sent read the one answer, so the client predicts what the server accepts. An unknown set key or an item that is air is logged and skipped; an item the registry does not know is ignored. The answer must be the same every time.
+
 - Lowering the frame rate limit: `native_framerate_limit(focused, minimized, in_world, limit)` is asked each frame with the limit Horizon is about to use (Max Framerate after the inactivity throttle and Battery Mode, 260 for unlimited), whether the window has focus, whether it is minimised and whether a world is open. A mod may lower `limit`, for example to throttle a window in the background as Dynamic FPS does; Horizon keeps the lower of its own limit and the mod's and ignores values below 1.
 
 - A player swapping their main and off hand items: `native_player_swap_hands(player, name, cancel)` is heard before the swap (Bukkit's `PlayerSwapHandItemsEvent`; a swap from an open inventory is not heard), for a player of a server who is not a spectator, with their state swapped in. A mod sets `cancel` to keep the items where they are; the player's client gets its slots back.
@@ -2644,14 +2646,22 @@ clicks already.
 
 `LoopContext<'_>` is the read-only view for a hook fired inside a menu, recipe or
 player-list loop, where no game is at hand (a catalog entry names it with
-`"context": "loop"`; `menu_slot_rules` is the first hook to take it). `side()` is `LoopSide::Server` or
+`"context": "loop"`; `menu_slot_rules`, `item_stacked_on_other`, `player_name_format` and
+`player_tab_list_name_format` take it). `side()` is `LoopSide::Server` or
 `LoopSide::Client`, `registry(name)` borrows names in registry ID order,
 `setting(mod_id, key)` returns a loaded mod's setting captured when the context was
 built, and `mods()` is the `LoadedMods` view of registration. It has no game Host,
 handle construction or transaction, and its answers never change while it is held.
 The side that owns the loop builds it, never a hook: the client builds one at window
 start and again after each resource reload, and a server builds one when it starts its
-mods and again on each `/reload`, so a reload captures fresh settings.
+mods and again on each `/reload`, so a reload captures fresh settings. A LAN or dedicated server's hub holds the server's
+current one, so its Tab list and chat names, and the clicks of its players, see it too.
+
+`item_stacked_on_other(context, event, canceled)` is NeoForge's `ItemStackedOnOtherEvent`, fired inside a pickup click on
+either side. The event no longer carries a side: `context.side()` says it. `player_name_format(context, username,
+displayname)` and `player_tab_list_name_format(context, player, name, display_name)` format a player's name for chat and
+commands (both sides) and for the Tab list (server). All three are contract version `2`: a mod written for `1` takes the
+context as a new first argument of the `Hooks` method, and reads the side from it instead of `event.side`.
 
 ### Items' default components
 

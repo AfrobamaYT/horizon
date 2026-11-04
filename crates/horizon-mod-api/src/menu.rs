@@ -45,7 +45,6 @@ pub struct StackedOnOther<'a> {
     pub container: usize,
     pub container_slot: usize,
     pub primary: bool,
-    pub side: LogicalSide,
     pub carried: CarriedAccess<'a>,
     pub clicked: &'a mut dyn SlotView,
     pub cancellation_result: bool,
