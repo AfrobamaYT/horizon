@@ -6160,6 +6160,7 @@ impl Game<'_> {
                 assets: &self.pack.assets,
                 collision_binding: self.collision,
                 resources: self.motion,
+                tag_items: None,
             }
             .controlled_simulation_tick_with_sprint_window(keys, sprint_window)?;
         } else {
@@ -6175,6 +6176,7 @@ impl Game<'_> {
                     assets: &self.pack.assets,
                     collision_binding: self.collision,
                     resources: self.motion,
+                    tag_items: None,
                 }
                 .passenger_pose_tick()?;
             }
@@ -11595,12 +11597,24 @@ mod tests {
             assert_eq!((xp.level, xp.progress, xp.total), (3, 0.25, 30));
             assert_eq!(player.xp_needed_for_next_level(game), Some(13));
 
+            // The main inventory retains typed stacks and their damage, in slot order.
+            let mut stack = mod_api::ItemStack::new("minecraft:diamond_pickaxe", 1);
+            stack.damage = 7;
+            game.inventory.fill(None);
+            game.inventory[3] = Some(stack.clone());
+            game.inventory[8] = Some(mod_api::ItemStack::new("minecraft:stone", 12));
+            assert_eq!(
+                player.inventory(game),
+                Some(vec![stack, mod_api::ItemStack::new("minecraft:stone", 12)])
+            );
+
             // Another player: the client isn't sent their state.
             let epoch = player.entity().epoch();
             let other = mod_api::__private::game::player_ref(EntityRef::new(epoch, 8), 43);
             assert_eq!(other.game_mode(game), None);
             assert_eq!(other.food(game), None);
             assert_eq!(other.selected_slot(game), None);
+            assert_eq!(other.inventory(game), None);
         });
     }
 

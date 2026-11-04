@@ -200,6 +200,7 @@ impl Game<'_> {
                 &self.world,
                 self.pack.assets.registry,
                 &mut lent,
+                Some(world_items!(self)),
             );
             let m = &mut mobs[index];
             let mut selector = if targets {
