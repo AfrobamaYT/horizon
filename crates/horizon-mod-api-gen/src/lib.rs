@@ -460,7 +460,9 @@ fn handle_method<'a>(
     } else if returns("bool") {
         format!("{backend}(host).map(|backend| backend.{call}).unwrap_or(false)")
     } else if returns("Result") {
-        format!("{backend}(host).map_or_else(|| Err(crate::NoBackend::no_backend()), |backend| backend.{call})")
+        format!(
+            "{backend}(host).map_or_else(|| Err(crate::NoBackend::no_backend()), |backend| backend.{call})"
+        )
     } else {
         return Err(format!(
             "{name}: a {receiver} helper returns Option, bool or Result, the value a host without a backend refuses"
