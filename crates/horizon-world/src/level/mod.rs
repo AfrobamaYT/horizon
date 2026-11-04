@@ -82,7 +82,7 @@
 //! let state = level.block_state(pos);
 //! let block_hit = horizon_core::geometry::BlockHit { block: pos, direction: face, location: hit, inside: false };
 //! behaviours.use_without_item(&mut level, &mut ticks, state, block_hit, player_context);
-//! behaviours.player_destroy_block(&mut level, &mut ticks, pos, creative, correct_tool);
+//! behaviours.player_destroy_block(&mut level, &mut ticks, pos, creative, correct_tool, None);
 //! // Falling-block entity landed:
 //! behaviours.falling_block_landed(&mut level, &mut ticks, landing_pos, carried_state, false);
 //! ```
@@ -250,6 +250,10 @@ pub enum EntityQuery {
     Arrows,
 }
 
+/// The UUID of a player excluded from a level event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LevelEventPlayer(pub u128);
+
 /// Side effects reported to the caller, in vanilla call order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum LevelEvent {
@@ -257,7 +261,12 @@ pub enum LevelEvent {
     /// (e.g. 2001 block destroyed with `data` = state ID, 1501 lava
     /// extinguished, 1009 fire extinguished, 1502 redstone torch burnout,
     /// 2009 dripping water/sponge, 1033/1034 ... per `LevelEvent.java`).
-    LevelEvent { id: i32, pos: BlockPos, data: i32 },
+    LevelEvent {
+        id: i32,
+        pos: BlockPos,
+        data: i32,
+        source: Option<LevelEventPlayer>,
+    },
     /// `Level.playSound(null, pos, sound, BLOCKS, volume, pitch)`.
     Sound {
         pos: BlockPos,
@@ -1065,9 +1074,10 @@ impl Behaviours {
         pos: BlockPos,
         creative: bool,
         correct_tool: bool,
+        source: Option<LevelEventPlayer>,
     ) -> bool {
         self.sim(level, ticks)
-            .player_destroy(pos, creative, correct_tool)
+            .player_destroy(pos, creative, correct_tool, source)
     }
     /// `IceBlock.playerDestroy` after the drops: mined ice melts into water
     /// unless the tool prevents ice melting (silk touch). `destroyed` is the

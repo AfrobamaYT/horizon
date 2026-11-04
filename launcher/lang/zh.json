@@ -1044,7 +1044,6 @@
     "{mod}: Cargo.toml has no package name.": "{mod}：Cargo.toml 没有包名称。",
     "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod}：Cargo.toml 没有 horizon-mod-api 依赖。",
     "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod}：Cargo.toml 依赖于游戏（{key}）。模组只依赖 horizon-mod-api。",
-    "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}：horizon-client 请求 {fields}。服务器构建是无界面的；horizon-client 的特性由启动器管理。请移除 features 并使用 default-features = false，或将其省略。",
     "{mod}: {error}": "{mod}：{error}",
     "{mode} · stopped": "{mode} · 已停止",
     "{online} of {max}": "{online}/{max}",

@@ -53,7 +53,6 @@ thread_local! {
     static TEST_PACKAGES: std::cell::Cell<Option<&'static [PackageInfo]>> = const { std::cell::Cell::new(None) };
 }
 /// Runs `f` with only the packages `ids` installed, for tests.
-
 #[cfg(any(test, feature = "testing"))]
 pub fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
     let packages: Vec<_> = ids
@@ -108,6 +107,7 @@ pub fn install_packages(
 }
 
 /// Read-only view of the startup package inventory.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct LoadedMods<'a> {
     entries: &'a [PackageInfo],
 }
@@ -159,6 +159,7 @@ impl LoadedMods<'_> {
 ///     let _: Result<(), ()> = context.transaction(|_, _| Ok(()));
 /// }
 /// ```
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct RegistrationContext<'a> {
     mods: LoadedMods<'a>,
 }
@@ -196,6 +197,7 @@ impl RegistrationContext<'_> {
 ///     let _: Result<(), ()> = context.transaction(|_, _| Ok(()));
 /// }
 /// ```
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct DataLoadContext<'a> {
     source: &'a horizon_world::native_load_context::LoadContext,
     mods: LoadedMods<'a>,
@@ -219,7 +221,7 @@ impl<'a> DataLoadContext<'a> {
         self.source.registry(name)
     }
 
-    /// Read a mod's setting without creating or writing any files.
+    /// A loaded mod's setting captured at the owning load boundary, without file I/O.
     pub fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
         self.source.setting(mod_id, key)
     }

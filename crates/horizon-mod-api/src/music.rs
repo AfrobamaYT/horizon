@@ -3,6 +3,7 @@
 use crate::*;
 /// `Music`: a sound event and the delay range (ticks) before it starts.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct Music {
     pub sound: String,
     pub min_delay: i32,
@@ -60,6 +61,7 @@ impl Music {
         ]
     }
     /// `Music.CODEC`.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn parse(v: &Value) -> Option<Self> {
         let sound = v["sound"].as_str()?;
@@ -75,6 +77,7 @@ impl Music {
 /// A track a native mod plays over or instead of the music
 /// (`native_music_layers`): a sound event and its volume, 0 to 1.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct MusicLayer {
     pub sound: String,
     pub volume: f32,

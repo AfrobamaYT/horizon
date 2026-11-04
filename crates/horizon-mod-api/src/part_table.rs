@@ -25,6 +25,7 @@ use std::{
 };
 
 /// A part, with the mod that attached it.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct Attached<P: ?Sized> {
     /// The mod's bundle id, retained for diagnostics after registration.
     pub(super) mod_id: &'static str,
@@ -78,6 +79,7 @@ fn insert_part<P: ?Sized>(
 
 /// Every mod's parts, by the id of the thing they are attached to, in dispatch order.
 #[derive(Clone, Default)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct Parts {
     /// Block parts, and block entity parts as the block parts they also are.
     blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
@@ -104,6 +106,7 @@ pub struct Parts {
 
 #[derive(Clone, Default)]
 /// The Parts attached to blocks for one hook, with which hooks have a subscriber.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct HookParts {
     blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
     block_states: Vec<Option<NonZeroU32>>,
@@ -239,6 +242,7 @@ pub fn has_scoped_hook(hook: HookId) -> bool {
 }
 
 /// The parts table a dispatch reads: the process-wide one, or this game thread's.
+#[non_exhaustive]
 pub enum PartsRef {
     /// The process-wide table.
     Shared(&'static Parts),
@@ -289,6 +293,7 @@ pub fn mark_game_thread() {
 }
 
 /// The ids a game knows, which a part's key must name.
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct KnownIds<'a> {
     /// Whether a block id is known.
     pub block: &'a dyn Fn(&str) -> bool,
@@ -589,6 +594,7 @@ pub fn block_entity_providers<T: ?Sized + 'static>(
 }
 
 /// A block entity's providers of one capability ([`block_entity_providers`]).
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityProviders<T: ?Sized + 'static> {
     parts: &'static [CapabilityPart],
     at: BlockSide,
@@ -633,6 +639,7 @@ pub fn entity_providers<T: ?Sized + 'static, C: Copy + 'static>(
 }
 
 /// An entity's providers of one capability ([`entity_providers`]).
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct EntityProviders<T: ?Sized + 'static, C: 'static> {
     parts: &'static [CapabilityPart],
     entity: EntityRef,
@@ -675,6 +682,7 @@ fn attached<'a, 'k, P: ?Sized>(
 
 /// What a mod's [`Hooks::register`](super::Hooks::register) attaches its parts with. A thing takes one part of each
 /// kind: the same kind twice on one thing refuses the mods at startup, naming both.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct Registrar {
     mod_id: &'static str,
     mod_index: usize,
@@ -2393,6 +2401,7 @@ pub mod tests {
 
     /// A chemical, as Mekanism's: the test mods' own resource, which the game knows nothing of.
     #[derive(Clone, Debug, PartialEq)]
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct Chemical(pub String);
 
     /// The test mods' own capability, as Mekanism's `Capabilities.CHEMICAL`: the game has no
@@ -2402,6 +2411,7 @@ pub mod tests {
 
     /// A mod block entity's one tank of 1000 of a chemical, kept in its saved data (`chemical`
     /// and `amount`), whose writes the game's journal keeps for a transaction.
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct ChemTank(pub BlockSide);
     impl ChemTank {
         fn entity(&self, host: &dyn Host) -> Option<BlockEntityRef> {
