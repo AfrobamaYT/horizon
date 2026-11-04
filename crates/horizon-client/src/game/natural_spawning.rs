@@ -425,7 +425,7 @@ impl GameLevel<'_, '_> {
         let kind = self.game.res.mob_types().get(r.entity)?.clone();
         let [x, y, z] = r.position;
         let mut mob = Mob::new(self.provisional_id(), kind, Vec3::new(x, y, z), r.yaw);
-        let (outcome, difficulty) = self.game.finalize_spawn_event(&mut mob, r.reason, None);
+        let (outcome, difficulty) = self.game.finalize_spawn_event(&mob, r.reason, None);
         match outcome {
             Finalized::Cancelled => return None,
             Finalized::Skipped => {}
