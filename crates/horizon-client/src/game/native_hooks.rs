@@ -2770,9 +2770,16 @@ impl Game<'_> {
     }
     /// Render-thread notification after a resource-pack reload has applied successfully.
     /// Atlas, models, renderer and client caches already refer to the new resources.
-    /// Selection/F3+T and server-pack reloads share this point; initial startup does not.
+    /// Selection/F3+T and server-pack reloads share this point; initial startup does not
+    /// (`client_setup` is the once-only moment after the initial load).
     pub(super) fn native_client_resources_reloaded(&mut self) {
         mod_api::dispatch_client_resources_reloaded(self);
+    }
+    /// NeoForge's `FMLClientSetupEvent`: the client started. Fires once per game process,
+    /// after the first client load has applied and before the title screen's first frame;
+    /// never again on a reload (`client_resources_reloaded`) or a new world.
+    pub(super) fn native_client_setup(&mut self) {
+        mod_api::dispatch_client_setup(self);
     }
     /// The client made a new level for `dimension` (NeoForge's
     /// `LevelEvent.Load` from the `ClientLevel` constructor): on joining a

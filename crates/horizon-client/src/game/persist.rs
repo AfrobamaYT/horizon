@@ -835,35 +835,17 @@ impl Game<'_> {
         m.extra.mount = mount;
         m.extra.passenger = mount.is_some();
         if finalize {
-            let facts = self.biome_facts(
-                m.position.x.floor() as i32,
-                m.position.y.floor() as i32,
-                m.position.z.floor() as i32,
-            );
             let at = [m.position.x, m.position.y, m.position.z];
             let difficulty = self.local_difficulty(at);
-            horizon_client::mobs::spawning::finalize(&mut m, &facts, &difficulty);
-            // Cat.finalizeSpawn: black in #cats_spawn_as_black.
-            if m.species() == horizon_client::mobs::Species::Cat {
-                let p = [
-                    m.position.x.floor() as i32,
-                    m.position.y.floor() as i32,
-                    m.position.z.floor() as i32,
-                ];
-                let black = self.structure_tag("minecraft:cats_spawn_as_black");
-                if self.structures_at(p).iter().any(|s| black.contains(s)) {
-                    m.extra.variant = 10;
-                    m.persistent = true;
-                }
-            }
+            self.finalize_plain(
+                &mut m,
+                &difficulty,
+                horizon_client::mobs::spawn_rules::Reason::Structure,
+            );
         }
         let id = m.id;
         self.remember(id, uuid, tag);
         self.mobs.push(m);
-        if finalize {
-            self.enchant_spawn_equipment(id);
-            self.halloween_spawn_head(id);
-        }
         for rider in riders {
             if let Some(r) = self.load_mob(rider, Some(id))
                 && let Some(v) = self.mobs.iter_mut().find(|m| m.id == id)
