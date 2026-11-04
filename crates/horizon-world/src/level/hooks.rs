@@ -454,6 +454,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         pos: BlockPos,
         creative: bool,
         correct_tool: bool,
+        source: Option<super::LevelEventPlayer>,
     ) -> bool {
         let b = self.b;
         let p = b.props;
@@ -478,7 +479,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     b.air()
                 };
                 self.set_block(bottom, replacement, 35);
-                self.level_event(2001, bottom, bottom_state.0 as i32);
+                self.level_event_from(source, 2001, bottom, bottom_state.0 as i32);
             }
         }
         if creative && data.is(Class::AbstractBed) && b.table.text(state, p.part) == "foot" {
@@ -486,7 +487,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             let head = self.state(head_pos);
             if b.is_block(head, b.block(state)) && b.table.text(head, p.part) == "head" {
                 self.set_block(head_pos, b.air(), 35);
-                self.level_event(2001, head_pos, head.0 as i32);
+                self.level_event_from(source, 2001, head_pos, head.0 as i32);
             }
         }
         // PistonHeadBlock.playerWillDestroy: in creative, destroy the base piston
@@ -504,9 +505,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
         // BaseFireBlock emits extinguish and suppresses generic destroy particles/sound.
         if data.is(Class::BaseFire) {
-            self.level_event(1009, pos, 0);
+            self.level_event_from(source, 1009, pos, 0);
         } else {
-            self.level_event(2001, pos, state.0 as i32);
+            self.level_event_from(source, 2001, pos, state.0 as i32);
         }
         self.game_event(pos, "minecraft:block_destroy");
         let removed = self.remove_block(pos, false);

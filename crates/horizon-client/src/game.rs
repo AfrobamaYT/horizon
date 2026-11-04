@@ -6431,6 +6431,9 @@ impl Game<'_> {
                 &mut correct_tool,
             );
         }
+        let source = self
+            .lan_acting_uuid
+            .map(horizon_world::level::LevelEventPlayer);
         let removed = self.with_level(|b, level, ticks| {
             b.player_destroy_block(
                 level,
@@ -6438,6 +6441,7 @@ impl Game<'_> {
                 BlockPos::new(pos[0], pos[1], pos[2]),
                 creative,
                 correct_tool,
+                source,
             )
         });
         if !creative {

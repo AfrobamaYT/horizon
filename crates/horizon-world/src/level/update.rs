@@ -223,11 +223,21 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.game_event(pos, "minecraft:prime_fuse");
     }
     pub fn level_event(&mut self, id: i32, pos: BlockPos, data: i32) {
+        self.level_event_from(None, id, pos, data);
+    }
+
+    pub fn level_event_from(
+        &mut self,
+        source: Option<super::LevelEventPlayer>,
+        id: i32,
+        pos: BlockPos,
+        data: i32,
+    ) {
         self.level.emit(LevelEvent::LevelEvent {
             id,
             pos,
             data,
-            source: None,
+            source,
         });
     }
     pub fn sound(&mut self, pos: BlockPos, sound: &std::sync::Arc<str>, volume: f32, pitch: f32) {
