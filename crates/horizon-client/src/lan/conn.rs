@@ -1821,9 +1821,11 @@ mod tests {
         loop {
             let (id, payload) = c.recv().unwrap();
             match cfg::Clientbound::decode(id, &payload).unwrap() {
-                cfg::Clientbound::SelectKnownPacks(p) => c
-                    .send(&cfg::Serverbound::SelectKnownPacks(p).encode())
-                    .unwrap(),
+                // The server may refuse the list and close before these replies land, so a
+                // failed reply send is not the test's concern: the Disconnect below is.
+                cfg::Clientbound::SelectKnownPacks(p) => {
+                    let _ = c.send(&cfg::Serverbound::SelectKnownPacks(p).encode());
+                }
                 cfg::Clientbound::CustomPayload(p) if p.channel == mod_list::CHANNEL => {
                     c.send(
                         &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
@@ -1835,7 +1837,7 @@ mod tests {
                     .unwrap();
                 }
                 cfg::Clientbound::Ping(p) => {
-                    c.send(&cfg::Serverbound::Pong(p).encode()).unwrap();
+                    let _ = c.send(&cfg::Serverbound::Pong(p).encode());
                 }
                 cfg::Clientbound::Disconnect(d) => {
                     let text = horizon_protocol::text::plain(&d.reason, &Default::default());

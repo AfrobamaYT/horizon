@@ -9,18 +9,8 @@ use crate::{
 };
 use horizon_world::loot::PackOverlay;
 use horizon_world::nbt::Tag;
+pub use mod_api::recipe_book::RecipeBookCategory;
 use std::collections::{BTreeSet, HashMap};
-
-/// A native mod's book category for one custom recipe type.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RecipeBookCategory {
-    /// A namespaced category id outside `minecraft:`.
-    pub id: String,
-    /// A custom type present in the current recipe table.
-    pub recipe_type: String,
-    /// A registered item id used as the category's icon.
-    pub icon: String,
-}
 
 /// Validate declarations once per recipe table. The first valid declaration
 /// owns its category id and recipe type; vanilla categories are never replaced.

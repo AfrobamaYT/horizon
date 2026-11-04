@@ -3,12 +3,6 @@ use super::super::{
     Game, Hit, execution_role::ExecutionRole, lan::LanSettings,
     native_entity_refs::tests::with_game,
 };
-use crate::mod_api::{
-    self, BlockPart, ENTITY_ITEMS, Flow, Hooks, HostSide, HostTransaction, ItemPart, ItemResource,
-    LogicalSide, NativeInteractionResult as Answer, NativeTriState, Registrar,
-    RightClickBlockEvent, RightClickItemEvent, ServerHost, UseItemEvent, UseItemOnBlockEvent,
-    UseItemOnEvent, UseOnEvent, UsePhase,
-};
 use horizon_client::{
     chunk::Chunk,
     first_person::Hand,
@@ -19,6 +13,12 @@ use horizon_client::{
 use horizon_core::geometry::Vec3;
 use horizon_protocol::{connection::Pipe, packets::configuration::ClientInformation};
 use horizon_world::nbt::Tag;
+use mod_api::{
+    self, BlockPart, ENTITY_ITEMS, Flow, Hooks, HostSide, HostTransaction, ItemPart, ItemResource,
+    LogicalSide, NativeInteractionResult as Answer, NativeTriState, Registrar,
+    RightClickBlockEvent, RightClickItemEvent, ServerHost, UseItemEvent, UseItemOnBlockEvent,
+    UseItemOnEvent, UseOnEvent, UsePhase,
+};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicI32, AtomicUsize},
@@ -87,6 +87,7 @@ impl Hooks for Observer {
             UsePhase::Block => state.block_answer,
             UsePhase::ItemAfterBlock => state.item_on_answer,
             UsePhase::ItemBeforeBlock => panic!("onItemUseFirst has no firing point yet"),
+            _ => unreachable!("UsePhase: unhandled variant"),
         };
         if let Some(answer) = answer {
             if state.consume_item
@@ -255,7 +256,7 @@ fn phase_events_replace_the_behaviour_before_its_part_on_both_sides() {
         Box::new(observer.clone()),
     )]
     .into();
-    mod_api::install_parts(&mods).unwrap();
+    mod_api::__private::install_parts(&mods).unwrap();
     mod_api::testing::with_mods(mods, || {
         for client in [false, true] {
             with_interaction_game(client, |game| {
@@ -478,7 +479,7 @@ fn canceled_item_results_keep_the_stack_wrappers_side_effects() {
         Box::new(observer.clone()),
     )]
     .into();
-    mod_api::install_parts(&mods).unwrap();
+    mod_api::__private::install_parts(&mods).unwrap();
     mod_api::testing::with_mods(mods, || {
         let cooling_stack = |item: &str| {
             let mut stack = ItemStack::new(item, 1);
@@ -587,7 +588,7 @@ fn air_event_skips_the_item_and_non_success_client_answers_try_the_other_hand() 
         Box::new(observer.clone()),
     )]
     .into();
-    mod_api::install_parts(&mods).unwrap();
+    mod_api::__private::install_parts(&mods).unwrap();
     mod_api::testing::with_mods(mods, || {
         for client in [false, true] {
             with_interaction_game(client, |game| {

@@ -7,6 +7,7 @@ use super::keyframes::Animation;
 use super::path::PathType;
 use crate::blocks::{BlockFacts, Fluid};
 use horizon_world::registry::BlockStateId;
+pub use mod_api::mobs::PathComputationType;
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -34,21 +35,12 @@ pub const STURDY_TOP: u16 = 256;
 pub const SOLID: u16 = 512;
 pub const SOLID_RENDER: u16 = 1024;
 
-/// `PathComputationType`: what a path is computed for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PathComputationType {
-    Land,
-    Water,
-    Air,
-}
-impl PathComputationType {
-    pub const ALL: [Self; 3] = [Self::Land, Self::Water, Self::Air];
-    fn bit(self) -> u16 {
-        match self {
-            Self::Land => LAND,
-            Self::Water => WATER,
-            Self::Air => AIR,
-        }
+/// The path flag bit of `kind`.
+fn path_bit(kind: PathComputationType) -> u16 {
+    match kind {
+        PathComputationType::Land => LAND,
+        PathComputationType::Water => WATER,
+        PathComputationType::Air => AIR,
     }
 }
 
@@ -146,9 +138,9 @@ impl MobData {
             .and_then(|table| table.get(state.0 as usize))
             .map_or(0, |slot| slot.load(Ordering::Relaxed));
         if given & OVERRIDDEN != 0 {
-            u16::from(given) & kind.bit() != 0
+            u16::from(given) & path_bit(kind) != 0
         } else {
-            self.state(state).flags & kind.bit() != 0
+            self.state(state).flags & path_bit(kind) != 0
         }
     }
     /// Replace the answers mod parts gave. With `asked`, `answer` is called once per state and
@@ -167,8 +159,10 @@ impl MobData {
             let given = if asked {
                 PathComputationType::ALL
                     .into_iter()
-                    .filter(|&kind| answer(state, kind, self.state(state).flags & kind.bit() != 0))
-                    .fold(OVERRIDDEN, |bits, kind| bits | kind.bit() as u8)
+                    .filter(|&kind| {
+                        answer(state, kind, self.state(state).flags & path_bit(kind) != 0)
+                    })
+                    .fold(OVERRIDDEN, |bits, kind| bits | path_bit(kind) as u8)
             } else {
                 0
             };

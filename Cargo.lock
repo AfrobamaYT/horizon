@@ -1338,6 +1338,7 @@ dependencies = [
  "horizon-friends",
  "horizon-hdr",
  "horizon-items",
+ "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mods",
@@ -1418,6 +1419,7 @@ dependencies = [
  "horizon-hdr",
  "horizon-items",
  "horizon-mcp",
+ "horizon-mod-api",
  "horizon-mods",
  "horizon-narrator",
  "horizon-optifine",
@@ -1473,7 +1475,7 @@ dependencies = [
  "horizon-cosmetics",
  "horizon-hdr",
  "horizon-items",
- "horizon-mod-api-gen",
+ "horizon-mod-api",
  "horizon-mod-api-macros",
  "horizon-mods",
  "horizon-narrator",
@@ -1588,6 +1590,26 @@ name = "horizon-mcp"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+]
+
+[[package]]
+name = "horizon-mod-api"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam",
+ "horizon-assets",
+ "horizon-client-core",
+ "horizon-core",
+ "horizon-items",
+ "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
+ "horizon-mods",
+ "horizon-world",
+ "log",
+ "serde",
+ "serde_json",
+ "wgpu",
 ]
 
 [[package]]

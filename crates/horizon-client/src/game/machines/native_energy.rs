@@ -5,8 +5,8 @@
 //! only on the level in place; their writes are kept by the transaction they are given.
 use super::Game;
 use horizon_client::containers::{BlockEntity, ModEnergyBuffer};
-use horizon_client::mod_api::{BlockSide, Transaction};
 use horizon_world::nbt::{Compound, JavaString, Tag};
+use mod_api::{BlockSide, Transaction};
 use std::sync::Arc;
 
 /// The amount in `nbt`: the int `energy`, as `SimpleEnergyHandler` saves it;
@@ -133,8 +133,8 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mod_api::HostTransaction;
-    use crate::mod_api::ServerHost;
+    use mod_api::HostTransaction;
+    use mod_api::ServerHost;
 
     fn buffer(capacity: i32, max_insert: i32, max_extract: i32) -> ModEnergyBuffer {
         ModEnergyBuffer {
@@ -155,12 +155,12 @@ mod tests {
         use horizon_client::entities::ArmorStand;
         use horizon_client::fast_hash::FxHashMap;
         use horizon_client::mobs::Mob;
-        use horizon_client::mod_api::part_tests::{ROBOT_FLUID, game_thread};
-        use horizon_client::mod_api::{
+        use horizon_core::geometry::{Direction, Vec3};
+        use mod_api::__private::part_tests::{ROBOT_FLUID, game_thread};
+        use mod_api::{
             ENERGY, ENTITY_ENERGY, ENTITY_FLUIDS, Holder, NativeBlockUpdateFlags, move_energy,
             move_resources,
         };
-        use horizon_core::geometry::{Direction, Vec3};
         with_game(|game| {
             let _mods = game_thread();
             game.options.dedicated = Some(Vec::new());
@@ -298,8 +298,8 @@ mod tests {
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
         use horizon_client::fast_hash::FxHashMap;
-        use horizon_client::mod_api::{ENERGY, NativeBlockUpdateFlags, move_energy};
         use horizon_core::geometry::Direction;
+        use mod_api::{ENERGY, NativeBlockUpdateFlags, move_energy};
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world

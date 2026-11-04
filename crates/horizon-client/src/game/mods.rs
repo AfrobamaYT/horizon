@@ -2,12 +2,13 @@
 //! assets (`content_root`), and the Mods page's rows. Code mods are native
 //! (`native_hooks.rs`); executable components in content packages are refused.
 use super::{Game, execution_role::ExecutionRole};
-use crate::mod_api::RegistrationContext;
 use horizon_client::mod_list::{self, Installed};
 use horizon_world::{
     item_defaults::ItemData,
     native_load_context::{LoadContext, LoadInputs},
 };
+use mod_api::__private::game::*;
+use mod_api::RegistrationContext;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -98,7 +99,7 @@ fn native_declared() -> &'static NativeDeclared {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
         Game::native_blocks(&RegistrationContext::new(), &mut blocks);
         Game::native_items(&RegistrationContext::new(), &mut items);
-        let types = crate::mod_api::block_entity_types().to_vec();
+        let types = mod_api::__private::block_entity_types().to_vec();
         NativeDeclared {
             blocks,
             items,
@@ -299,7 +300,7 @@ fn register_block_entity_types(
         })
         .collect();
     let types = BlockEntityTypes::new(membership, names.clone());
-    crate::mod_api::validate_block_entity_type_keys(&types)?;
+    mod_api::__private::validate_block_entity_type_keys(&types)?;
     block_entity_types::install(types)?;
     Ok(())
 }
@@ -478,7 +479,7 @@ impl Game<'_> {
         let built = self.mods.native.built();
         let built_mods = native_mods_detail(built);
         if let Some(list) = built_mods {
-            horizon_client::crash::set_detail("Native Mods", list);
+            mod_api::crash::set_detail("Native Mods", list);
         }
 
         let native_dir = Self::game_dir().join(mod_list::NATIVE_DIR);
@@ -525,14 +526,14 @@ mod tests {
 
     #[test]
     fn standalone_models_collect_only_on_the_client() {
-        use crate::mod_api::{self, Hooks, ModEntry, StandaloneModelsEvent, testing::with_mods};
+        use mod_api::{self, Hooks, ModEntry, StandaloneModelsEvent, testing::with_mods};
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
         };
         #[derive(Default)]
         struct Models(Arc<AtomicUsize>);
-        #[crate::mod_api::horizon_mod]
+        #[mod_api::horizon_mod]
         impl Hooks for Models {
             fn standalone_models(
                 &self,
@@ -555,7 +556,7 @@ mod tests {
             )]
             .into(),
             || {
-                crate::mod_api::with_test_packages(&["registration_test"], || {
+                mod_api::__private::with_test_packages(&["registration_test"], || {
                     assert_eq!(
                         collect_standalone_models(ExecutionRole::IntegratedServer),
                         None

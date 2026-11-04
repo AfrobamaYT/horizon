@@ -853,7 +853,7 @@ impl Game<'_> {
         // client draws them from these (`tick_remote_clouds`).
         let breath = Self::hub_particle(
             hub,
-            &horizon_client::particles::ParticleOptions::simple(
+            &mod_api::particles::ParticleOptions::simple(
                 horizon_client::particles::ParticleType::DragonBreath,
             ),
             None,
