@@ -5,8 +5,6 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 #![deny(missing_docs)]
 extern crate self as mod_api;
-/// The server's play packets `client_packet` hands over, decoded.
-pub use horizon_protocol::packets::play::Clientbound as ClientboundPlayPacket;
 // Never compiled: the generator reads these declarations to build the `Hooks` trait and its dispatch.
 #[cfg(any())]
 mod hooks;
@@ -310,6 +308,44 @@ pub struct NativeKeyMapping {
     pub down: bool,
     /// The name of the key it is bound to, as Controls shows it (`KeyMapping.getTranslatedKeyMessage`).
     pub label: Text,
+}
+
+/// The metadata of a server play packet observed by `Hooks::client_packet`.
+///
+/// Fields beyond the type id are exposed only for custom payloads. This is
+/// plain mod API data, not the game's decoded protocol enum.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct ClientPacket {
+    /// The protocol type, such as `minecraft:ping` or `minecraft:custom_payload`.
+    /// An id outside the protocol's packet table is reported as `horizon:unknown`.
+    pub id: Identifier,
+    /// The channel and bytes of a custom payload; `None` for other packet types.
+    pub custom_payload: Option<ClientPayload>,
+}
+
+impl ClientPacket {
+    /// Construct packet metadata with an optional custom payload.
+    pub fn new(id: Identifier, custom_payload: Option<ClientPayload>) -> Self {
+        Self { id, custom_payload }
+    }
+}
+
+/// The channel and uninterpreted bytes of a server custom payload.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct ClientPayload {
+    /// The namespaced plugin channel, exactly as received.
+    pub channel: String,
+    /// The payload bytes, without the packet id or channel prefix.
+    pub data: Vec<u8>,
+}
+
+impl ClientPayload {
+    /// Construct a custom payload without interpreting its bytes.
+    pub fn new(channel: String, data: Vec<u8>) -> Self {
+        Self { channel, data }
+    }
 }
 
 /// Camera values from the most recently extracted world frame.

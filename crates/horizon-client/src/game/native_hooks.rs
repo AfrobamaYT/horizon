@@ -1028,7 +1028,7 @@ use mod_api::{
     TooltipElement, UsePhase,
 };
 pub(crate) use mod_api::{
-    ClientboundPlayPacket, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
+    ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
     NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativeNoteInstrument,
     NativePanelEvent, NativePortalShape, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
@@ -8273,6 +8273,17 @@ impl Game<'_> {
     pub(super) fn native_net_from_server(&mut self, channel: &str, data: &[u8]) {
         mod_api::dispatch_net_from_server(self, channel, data);
     }
+    pub(super) fn observe_client_packet(
+        &mut self,
+        packet: &horizon_protocol::packets::play::Clientbound,
+    ) {
+        if !mod_api::__private::listened(mod_api::HookId::ClientPacket) {
+            return;
+        }
+        let view = client_packet_view(packet);
+        self.native_client_packet(&view);
+    }
+
     /// A play packet from the server reached the window's game, decoded,
     /// just before the game handles it (`Connection.genericsFtw` handing it
     /// to `ClientPacketListener`): every packet of the play phase, custom
@@ -8283,8 +8294,9 @@ impl Game<'_> {
     /// and far terrain tiles; neither is the configuration phase.
     /// Read-only: the game handles the packet as it would without the mod.
     /// Client-side, on any server, single player's own included.
-    /// Not on wasm: the full decoded protocol packet enum has no generated API codec.
-    pub(super) fn native_client_packet(&mut self, packet: &ClientboundPlayPacket) {
+    /// Every packet exposes its protocol type id. Custom payloads also expose
+    /// their channel and raw bytes; no other decoded fields cross the API.
+    pub(super) fn native_client_packet(&mut self, packet: &ClientPacket) {
         mod_api::dispatch_client_packet(self, packet);
     }
     /// `dimension`'s level opened on the server (NeoForge's `LevelEvent.Load`,
@@ -12682,9 +12694,64 @@ fn mod_screen_opens(
     None
 }
 
+fn client_packet_view(packet: &horizon_protocol::packets::play::Clientbound) -> ClientPacket {
+    use horizon_protocol::packets::play::Clientbound;
+    use mod_api::Identifier;
+    use std::sync::LazyLock;
+
+    static TYPES: LazyLock<Vec<Identifier>> = LazyLock::new(|| {
+        horizon_protocol::ids::play::clientbound::NAMES
+            .iter()
+            .map(|name| Identifier::parse(name).expect("protocol packet type identifier"))
+            .collect()
+    });
+    static UNKNOWN: LazyLock<Identifier> =
+        LazyLock::new(|| Identifier::parse("horizon:unknown").unwrap());
+
+    let id = usize::try_from(packet.id())
+        .ok()
+        .and_then(|id| TYPES.get(id))
+        .unwrap_or(&UNKNOWN)
+        .clone();
+    let payload = match packet {
+        Clientbound::CustomPayload(payload) => Some(ClientPayload::new(
+            payload.channel.clone(),
+            payload.data.clone(),
+        )),
+        _ => None,
+    };
+    ClientPacket::new(id, payload)
+}
+
 #[cfg(test)]
 mod tests {
     use mod_api::__private::game::*;
+
+    #[test]
+    fn client_packet_view_exposes_the_type_and_custom_payload_only() {
+        use horizon_protocol::packets::{
+            configuration::{CustomPayload, Ping},
+            play::Clientbound,
+        };
+        let ping = super::client_packet_view(&Clientbound::Ping(Ping { id: 7 }));
+        assert_eq!(ping.id.to_string(), "minecraft:ping");
+        assert_eq!(ping.custom_payload, None);
+
+        let payload = super::client_packet_view(&Clientbound::CustomPayload(CustomPayload {
+            channel: "example:message".into(),
+            data: vec![0, 127, 255],
+        }));
+        assert_eq!(payload.id.to_string(), "minecraft:custom_payload");
+        let payload = payload.custom_payload.unwrap();
+        assert_eq!(payload.channel, "example:message");
+        assert_eq!(payload.data, [0, 127, 255]);
+
+        for id in [-1, i32::MAX] {
+            let unknown = super::client_packet_view(&Clientbound::Unknown(id, vec![9]));
+            assert_eq!(unknown.id.to_string(), "horizon:unknown");
+            assert_eq!(unknown.custom_payload, None);
+        }
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

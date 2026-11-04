@@ -96,7 +96,7 @@ mod tests {
         pub(super) struct StackedOnOther<'a> {
             pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
         }
-        pub(super) struct ClientboundPlayPacket;
+        pub(super) struct ClientPacket;
         pub(super) struct Corners;
         pub(super) struct Suggestion;
         pub(super) struct HudBatch;

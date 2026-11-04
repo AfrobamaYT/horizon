@@ -53,21 +53,22 @@ mod sidebar {
 }
 
 #[test]
-fn client_packet_hands_a_mod_the_decoded_packet() {
-    use horizon_protocol::packets::configuration::{CustomPayload, Ping};
-    use mod_api::{ClientPacketEvent, ClientboundPlayPacket, Host, dispatch_client_packet};
+fn client_packet_hands_a_mod_the_type_and_custom_payload() {
+    use mod_api::{
+        ClientPacket, ClientPacketEvent, ClientPayload, Host, Identifier, dispatch_client_packet,
+    };
     use std::sync::Mutex;
     static HEARD: Mutex<Vec<(String, Vec<u8>)>> = Mutex::new(Vec::new());
     struct TestHost;
     impl Host for TestHost {}
     impl ClientHost for TestHost {}
-    // A plugin-channel listener, matching the packet by the name `mod_api` exports.
+    // A plugin-channel listener using only the mod API's plain data.
     #[derive(Default)]
     struct Channels;
     #[mod_api::horizon_mod]
     impl Hooks for Channels {
         fn client_packet(&self, _host: &mut dyn ClientHost, event: &mut ClientPacketEvent<'_>) {
-            if let ClientboundPlayPacket::CustomPayload(p) = event.packet {
+            if let Some(p) = &event.packet.custom_payload {
                 HEARD
                     .lock()
                     .unwrap()
@@ -76,14 +77,17 @@ fn client_packet_hands_a_mod_the_decoded_packet() {
         }
     }
     mod_api::testing::with_mods(vec![ModEntry::new("channels", hooks())].into(), || {
-        dispatch_client_packet(&mut TestHost, &ClientboundPlayPacket::Ping(Ping { id: 7 }));
-        let payload = CustomPayload {
-            channel: "voicechat:secret".into(),
-            data: vec![1, 2, 3],
-        };
         dispatch_client_packet(
             &mut TestHost,
-            &ClientboundPlayPacket::CustomPayload(payload),
+            &ClientPacket::new(Identifier::parse("minecraft:ping").unwrap(), None),
+        );
+        let payload = ClientPayload::new("voicechat:secret".into(), vec![1, 2, 3]);
+        dispatch_client_packet(
+            &mut TestHost,
+            &ClientPacket::new(
+                Identifier::parse("minecraft:custom_payload").unwrap(),
+                Some(payload),
+            ),
         );
     });
     assert_eq!(

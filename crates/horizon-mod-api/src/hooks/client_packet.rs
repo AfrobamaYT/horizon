@@ -11,7 +11,8 @@ pub trait Hooks {
     /// and far terrain tiles; neither is the configuration phase.
     /// Read-only: the game handles the packet as it would without the mod.
     /// Client-side, on any server, single player's own included.
-    /// Not on wasm: the full decoded protocol packet enum has no generated API codec.
+    /// Every packet exposes its protocol type id. Custom payloads also expose
+    /// their channel and raw bytes; no other decoded fields cross the API.
     #[hook(side = "client", contract = "listen", cancellable = false)]
     fn client_packet();
 }

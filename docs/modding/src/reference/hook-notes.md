@@ -4,13 +4,16 @@
 
 `Hooks::client_packet` receives `&mut dyn ClientHost` and a read-only
 `ClientPacketEvent` before the window handles a decoded server play packet.
-Match `event.packet` using `mod_api::ClientboundPlayPacket`; the hook cannot
-cancel or replace a packet. It also observes chunk packets handled by the
-batching path, once each. Configuration packets and the network thread's
-own handling (including keep-alives and resource pack messages) do not fire it.
+The read-only `event.packet` is a `mod_api::ClientPacket`: `id` identifies the
+packet type (for example, `minecraft:custom_payload`); `custom_payload` contains
+the channel and raw bytes for a custom payload, or `None` otherwise. An id
+outside the protocol's packet table is reported as `horizon:unknown`.
+Other decoded fields are not exposed. This one plain-data contract works
+for native and wasm mods, with a generated codec.
 
-This hook is native-only until the decoded protocol enum has a generated
-mod API codec. Its catalog documentation records that wasm exclusion.
+The hook cannot cancel or replace a packet. It also observes chunk packets
+handled by the batching path, once each. Configuration packets and the network
+thread's own handling (including keep-alives and resource pack messages) do not fire it.
 
 ## Conditional item model properties
 
