@@ -5056,6 +5056,7 @@ impl Game<'_> {
                 collision_binding: game.collision,
                 resources: game.motion,
                 tag_items: Some(world_items!(game)),
+                block_registries: Some(&game.pack.block_registries),
             };
             w.player.health.advance_clock();
             let _ = w.fluid_base_tick();
@@ -5193,6 +5194,7 @@ impl Game<'_> {
                 collision_binding: game.collision,
                 resources: game.motion,
                 tag_items: Some(world_items!(game)),
+                block_registries: Some(&game.pack.block_registries),
             }
             .server_travel();
             // Landing damage from this travel reaches the tracker too.

@@ -6161,6 +6161,7 @@ impl Game<'_> {
                 collision_binding: self.collision,
                 resources: self.motion,
                 tag_items: None,
+                block_registries: None,
             }
             .controlled_simulation_tick_with_sprint_window(keys, sprint_window)?;
         } else {
@@ -6177,6 +6178,7 @@ impl Game<'_> {
                     collision_binding: self.collision,
                     resources: self.motion,
                     tag_items: None,
+                    block_registries: None,
                 }
                 .passenger_pose_tick()?;
             }

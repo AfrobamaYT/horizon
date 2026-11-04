@@ -170,6 +170,12 @@ pub(super) fn level_side<'a>(level: &'a super::GameLevel<'_>) -> mod_api::LevelS
 }
 
 impl mod_api::LevelHost for super::GameLevel<'_> {
+    fn block_state_id(&self, name: &str) -> Option<BlockStateId> {
+        super::native_block_states::parse(self.block_registries, self.registry, name)
+    }
+    fn block_state_default(&self, block: &str) -> Option<BlockStateId> {
+        super::native_block_states::default_state(self.registry, block)
+    }
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
         horizon_world::level::LevelAccess::block_state(self, BlockPos::new(pos[0], pos[1], pos[2]))
     }
@@ -258,6 +264,13 @@ impl mod_api::LevelRandomHost for super::GameLevel<'_> {
 }
 
 impl mod_api::LevelHost for super::native_hooks::HitLevel<'_> {
+    fn block_state_id(&self, name: &str) -> Option<BlockStateId> {
+        super::native_block_states::parse(self.0.block_registries()?, self.0.registry(), name)
+    }
+    fn block_state_default(&self, block: &str) -> Option<BlockStateId> {
+        self.0.block_registries()?;
+        super::native_block_states::default_state(self.0.registry(), block)
+    }
     fn block_in_tag(&self, block: &str, tag: &str) -> Option<bool> {
         Some(super::native_world_read::block_in_tag(
             self.0.tags()?,
@@ -320,6 +333,12 @@ pub(super) struct LevelTicks<'a, L> {
 impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::LevelHost
     for LevelTicks<'b, L>
 {
+    fn block_state_id(&self, name: &str) -> Option<BlockStateId> {
+        mod_api::LevelHost::block_state_id(&*self.level, name)
+    }
+    fn block_state_default(&self, block: &str) -> Option<BlockStateId> {
+        mod_api::LevelHost::block_state_default(&*self.level, block)
+    }
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
         mod_api::LevelHost::block_state(&*self.level, pos)
     }

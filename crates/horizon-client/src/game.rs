@@ -1049,6 +1049,7 @@ struct GameLevel<'w> {
     /// Container loot tables (`unpackLootTable`).
     loot: Option<std::sync::Arc<horizon_world::loot::LootData>>,
     registry: &'static horizon_world::registry::BlockRegistry,
+    block_registries: &'w horizon_client::command::args::Registries,
     rules: horizon_world::level::GameRules,
     /// `Difficulty.getId()` (peaceful 0 .. hard 3).
     difficulty: i32,
@@ -2399,6 +2400,7 @@ impl UiResources {
 #[derive(Clone)]
 pub struct PackResources {
     assets: Arc<Assets>,
+    block_registries: Arc<horizon_client::command::args::Registries>,
     render: Arc<RenderAssets>,
     context: Arc<WorkerContext>,
     layer_names: Arc<HashMap<u32, String>>,
@@ -2482,6 +2484,7 @@ impl PackResources {
                 light,
                 hidden_states: Arc::from([]),
             }),
+            block_registries: native_block_states::block_registries(assets.registry),
             assets,
             render,
             item_renderer: Arc::new(item_renderer),
@@ -4987,6 +4990,7 @@ impl Game<'_> {
                 self.server_loot.get()
             },
             registry: self.pack.assets.registry,
+            block_registries: &self.pack.block_registries,
             rules,
             difficulty: i32::from(self.ui.difficulty),
             fire_players,
