@@ -3324,7 +3324,12 @@ struct Game<'a> {
     /// does not consume the action (handleUseItemOn's ANY_BLOCK_USE).
     use_failed: bool,
     /// Level events of this tick for the guests, and the guest acting now.
-    lan_events: Vec<(i32, [i32; 3], i32, Option<u32>)>,
+    lan_events: Vec<(
+        i32,
+        [i32; 3],
+        i32,
+        Option<horizon_world::level::LevelEventPlayer>,
+    )>,
     /// Jukebox level events 1010 (song name) and 1011 (`None`) for the guests;
     /// the song's network id is only known once the hub is in hand.
     lan_songs: Vec<([i32; 3], Option<String>)>,

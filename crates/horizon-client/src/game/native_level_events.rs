@@ -66,14 +66,7 @@ impl Game<'_> {
         if !level_event_data_ok(id, data, self.res.facts().states.len()) {
             return false;
         }
-        let sent = self.lan_events.len();
         self.level_event_at(id, pos, data);
-        // `levelEvent(null, ...)`: the guests' copies name no excluded
-        // player, though `lan_record_events` leaves out the acting one for
-        // the events a player's own action plays.
-        for event in &mut self.lan_events[sent..] {
-            event.3 = None;
-        }
         true
     }
     /// Sends game event `event` (`minecraft:block_change`...) from `at`, as
