@@ -15,7 +15,7 @@ The book follows [Diátaxis](https://diataxis.fr): a page is one of four kinds, 
 - **A hook whose game target has many parameters:** a `native_*` target takes at most 7 parameters (receiver included;
   `MAX_TARGET_PARAMETERS` in `crates/horizon-mod-api-gen/src/dispatch.rs`). A hook with more declares its parameters
   on the hook (`fn update_shape(dimension: LevelDimension, ...);`, as written in `hooks/*.rs`) and the target takes them
-  as one generated `mod_api::__private::<Name>Call` (`native_update_shape(&self, ticks, call: UpdateShapeCall<'_>)`),
+  as one generated `<Name>Call` (`native_update_shape(&self, ticks, call: UpdateShapeCall<'_>)`),
   handed to `dispatch_<name>(host, call)`. The generator refuses a flat target over the limit, and a target never carries
   `#[allow(clippy::too_many_arguments)]`. The hooks that were already over the limit are listed in
   `FLAT_TARGETS_OVER_THE_LIMIT` in the same file; that list only shrinks (convert a hook, delete its line) and a new hook
