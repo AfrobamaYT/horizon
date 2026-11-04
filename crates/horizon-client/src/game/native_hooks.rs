@@ -31,7 +31,7 @@ use horizon_client::{
         BlockEntity, MOD_MENUS, ModBlockEntity, ModBlockEntityFields, ModContainer,
         ModEnergyBuffer, ModFluidTanks,
     },
-    crafting::{Ingredient, RecipeFile, recipe_result},
+    crafting::{Ingredient, recipe_result},
     extras::Corner,
     extras_hud::Corners,
     fast_hash::FxHashMap,
@@ -62,7 +62,6 @@ use horizon_world::{
     nbt::{Compound, Tag},
     registry::{BlockRegistry, BlockStateId},
 };
-use mod_api::NativePermissionLevel;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EnchantmentInfo,
@@ -83,6 +82,7 @@ pub(crate) use mod_api::{
     NativeMinimap, NativeMod, NativeNoteInstrument, NativePanelEvent, NativePortalShape,
     NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
+use mod_api::{NativePermissionLevel, Recipe};
 use std::{
     collections::HashMap,
     fs,
@@ -9752,7 +9752,7 @@ impl Game<'_> {
     /// The recipes of type `kind` (`minecraft:smelting`, `mymod:crusher`), vanilla's
     /// types and mods' own alike, from `data/<namespace>/recipe/*.json` of vanilla,
     /// the content mods (`.hmod`) and the world's data packs, in file order: each
-    /// one's id and its file as JSON, for the mod to read as it likes. These are the
+    /// one typed (`Recipe`: its ingredients, results, group and cooking time and experience) with its file as JSON for a mod's own type. These are the
     /// recipes in force (`RecipeManager.getAllRecipesFor`): data packs merged and
     /// load conditions held, so a pack's override or removal shows. A data pack
     /// changes them on `/reload`, so look them up again when you need them. Empty
@@ -9761,7 +9761,7 @@ impl Game<'_> {
     /// single-player window included, sees vanilla's and the content mods' recipes,
     /// not the world's data packs', unless a mod had the server send it the type
     /// (`native_datapack_sync`).
-    pub(super) fn native_recipes_of_type(&self, kind: &str) -> &[RecipeFile] {
+    pub(super) fn native_recipes_of_type(&self, kind: &str) -> &[Recipe] {
         if self.outside_world() {
             return &[];
         }

@@ -11,9 +11,7 @@ use crate::{
 };
 use horizon_world::loot::PackOverlay;
 use horizon_world::nbt::Tag;
-pub use mod_api::crafting::{
-    Ingredient, RecipeFile, Shape, native_ingredient, native_ingredient_test,
-};
+pub use mod_api::crafting::{Ingredient, Shape, native_ingredient, native_ingredient_test};
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
@@ -1108,6 +1106,75 @@ const VANILLA_RECIPE_TYPES: [&str; 22] = [
     "minecraft:stonecutting",
 ];
 
+/// The ingredient fields of the vanilla recipe types with a fixed layout, in
+/// the order `Recipe::ingredients` lists them.
+fn ingredient_fields(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "minecraft:smelting"
+        | "minecraft:blasting"
+        | "minecraft:smoking"
+        | "minecraft:campfire_cooking"
+        | "minecraft:stonecutting" => &["ingredient"],
+        "minecraft:smithing_transform" | "minecraft:smithing_trim" => {
+            &["template", "base", "addition"]
+        }
+        "minecraft:crafting_transmute" => &["input", "material"],
+        "minecraft:crafting_dye" => &["target", "dye"],
+        "minecraft:crafting_imbue" | "minecraft:crafting_special_bookcloning" => {
+            &["source", "material"]
+        }
+        "minecraft:crafting_special_mapextending" => &["map", "material"],
+        "minecraft:crafting_special_bannerduplicate" => &["banner"],
+        "minecraft:crafting_special_shielddecoration" => &["banner", "target"],
+        _ => &[],
+    }
+}
+/// `RecipeManager.getAllRecipesFor`'s recipe: `file` is what the pack wrote,
+/// `resolved` the same with mods' ingredient kinds answered.
+fn typed_recipe(
+    id: String,
+    kind: &str,
+    file: &Arc<Value>,
+    resolved: &Value,
+    items: &Items,
+) -> mod_api::Recipe {
+    let mut recipe = mod_api::Recipe::new(id, kind, file.clone());
+    recipe.group = resolved["group"].as_str().unwrap_or("").to_owned();
+    let ingredient = |v: &Value| Ingredient::parse(v, items);
+    recipe.ingredients = match kind {
+        "minecraft:crafting_shaped" => {
+            let rows = resolved["pattern"].as_array().into_iter().flatten();
+            rows.filter_map(Value::as_str)
+                .flat_map(str::chars)
+                .filter(|c| *c != ' ')
+                .filter_map(|c| ingredient(&resolved["key"][c.to_string()]))
+                .collect()
+        }
+        "minecraft:crafting_shapeless" => resolved["ingredients"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(ingredient)
+            .collect(),
+        _ => ingredient_fields(kind)
+            .iter()
+            .filter_map(|field| ingredient(&resolved[*field]))
+            .collect(),
+    };
+    recipe.results = recipe_result(&resolved["result"]).into_iter().collect();
+    if matches!(
+        kind,
+        "minecraft:smelting"
+            | "minecraft:blasting"
+            | "minecraft:smoking"
+            | "minecraft:campfire_cooking"
+    ) {
+        // The cooking table's own reading of a file (`Cooking`), so the two agree.
+        recipe.cooking_time = Some(resolved["cookingtime"].as_u64().unwrap_or(200) as u32);
+        recipe.experience = Some(resolved["experience"].as_f64().unwrap_or(0.0) as f32);
+    }
+    recipe
+}
 /// The type of a recipe the game doesn't craft itself: one outside `minecraft`.
 fn custom_type(v: &Value) -> Option<&str> {
     v["type"]
@@ -1119,7 +1186,7 @@ pub struct Recipes {
     pub cooking: Vec<Cooking>,
     /// Every effective recipe's file, by recipe type (`minecraft:smelting`,
     /// `mymod:crusher`), in file order: data packs merged, load conditions held.
-    pub by_type: HashMap<String, Vec<RecipeFile>>,
+    pub by_type: HashMap<String, Vec<mod_api::Recipe>>,
     /// `category` and `group` of each crafting recipe, by file name.
     pub meta: HashMap<String, (String, String)>,
     facts: HashMap<Arc<str>, Facts>,
@@ -1434,7 +1501,7 @@ impl Recipes {
     ) -> Result<Self> {
         let mut crafting = Vec::new();
         let mut cooking = Vec::new();
-        let mut by_type: HashMap<String, Vec<RecipeFile>> = HashMap::new();
+        let mut by_type: HashMap<String, Vec<mod_api::Recipe>> = HashMap::new();
         let mut meta = HashMap::new();
         for ResolvedRecipe {
             name,
@@ -1454,10 +1521,7 @@ impl Recipes {
                 by_type
                     .entry(kind.to_owned())
                     .or_default()
-                    .push(RecipeFile {
-                        id,
-                        json: json.clone(),
-                    });
+                    .push(typed_recipe(id, kind, json, resolved, items));
             }
             if custom_type(json).is_some() {
                 continue;
