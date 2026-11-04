@@ -53,6 +53,12 @@ class SyncTests(unittest.TestCase):
         self.assertTrue(fragment.exists())
         self.assertFalse((self.hooks / 'invalid.rs').exists())
 
+    def test_finish_checks_patched_root_for_duplicates(self):
+        for name in ('a', 'b'):
+            (self.hooks / f'{name}.rs').write_text('pub fn native_example() {}\n')
+        with self.assertRaisesRegex(ValueError, 'native_example'):
+            sync.finish()
+
     def test_duplicate_names_are_reported(self):
         for name in ('a', 'b'):
             (self.hooks / f'{name}.rs').write_text('pub fn native_example() {}\n')
