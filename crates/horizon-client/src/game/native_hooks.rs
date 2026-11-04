@@ -8532,8 +8532,8 @@ impl Game<'_> {
     /// changes them on `/reload`, so look them up again when you need them. Empty
     /// for a type nobody uses and outside a world. These are the server's table on
     /// the server thread, a dedicated server or a LAN host; a client, the
-    /// single-player window included, sees only the content mods' recipes, not the
-    /// world's data packs', unless a mod had the server send it the type
+    /// single-player window included, sees vanilla's and the content mods' recipes,
+    /// not the world's data packs', unless a mod had the server send it the type
     /// (`native_datapack_sync`).
     pub(super) fn native_recipes_of_type(&self, kind: &str) -> &[RecipeFile] {
         if self.outside_world() {

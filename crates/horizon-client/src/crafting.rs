@@ -1,7 +1,7 @@
 //! Crafting and cooking recipes from the pinned data pack: shaped patterns
 //! (`ShapedRecipePattern.matches`), shapeless recipes (a bipartite match of
 //! ingredients to stacks, as `StackedContents.canCraft`), the special and
-//! transmuting crafting recipes (`RecipeFile` and friends), and
+//! transmuting crafting recipes (`CustomRecipe` and friends), and
 //! furnace-type cooking lookups.
 use crate::{
     Result,
@@ -1786,7 +1786,7 @@ impl Recipes {
                     .collect(),
                 None,
             ),
-            // RecipeFile.placementInfo: NOT_PLACEABLE.
+            // CustomRecipe.placementInfo: NOT_PLACEABLE.
             Recipe::Special(_) => Placement::default(),
         })
     }
@@ -2165,6 +2165,8 @@ mod tests {
         };
         assert_eq!(ids("mymod:crusher"), ["mymod:a", "mymod:b"]);
         assert_eq!(ids("mymod:mixer"), ["mymod:c", "mymod:deep/er/d"]);
+        // A `minecraft` type the game doesn't know is kept as a file but never crafted.
+        assert_eq!(ids("minecraft:from_a_later_version"), ["minecraft:later"]);
         // Vanilla's types answer through the same table.
         assert_eq!(ids("minecraft:smelting"), ["minecraft:iron_ingot"]);
         // Not crafted, and no recipe-book meta of their own.
