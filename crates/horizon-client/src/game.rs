@@ -289,6 +289,8 @@ mod native_world_edit;
 mod native_world_read;
 mod natural_spawning;
 mod nautili;
+#[cfg(test)]
+mod neighbor_notify_tests;
 mod net_harness;
 mod nether_portal;
 mod no_resources;
@@ -1242,6 +1244,17 @@ impl LevelAccess for GameLevel<'_> {
         if self.native_authoritative {
             self.native_block_changed(self.dimension, pos, old, new);
         }
+    }
+    fn neighbor_notify(&self, pos: BlockPos, skipped: Option<Direction>) -> bool {
+        if !self.native_authoritative
+            || !mod_api::__private::listened(mod_api::HookId::NeighborNotify)
+        {
+            return false;
+        }
+        let mut cancel = false;
+        let state = self.block_state(pos);
+        self.native_neighbor_notify(self.dimension, pos, state, skipped, &mut cancel);
+        cancel
     }
     fn observe_neighbor_changed(
         &self,

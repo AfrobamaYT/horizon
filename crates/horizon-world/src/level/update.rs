@@ -522,6 +522,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 
     // ---- neighbour updater ----
     pub fn update_neighbors_at(&mut self, pos: BlockPos, block: BlockId) {
+        // NeoForge asks here and in the skipping variant, but not in the
+        // oriented one, which `ServerLevel` doesn't patch.
+        if self.level.neighbor_notify(pos, None) {
+            return;
+        }
         let orientation = self.initial_orientation(None, None);
         self.update_neighbors_at_oriented(pos, block, orientation);
     }
@@ -550,6 +555,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         skip: Direction,
         orientation: Option<Orientation>,
     ) {
+        if self.level.neighbor_notify(pos, Some(skip)) {
+            return;
+        }
         let index = usize::from(UPDATE_ORDER[0] == skip);
         self.add_and_run(Update::Multi {
             source: pos,
