@@ -145,17 +145,6 @@ pub fn __subscriptions(_attribute: TokenStream, input: TokenStream) -> TokenStre
     expand(parse_macro_input!(input as ItemImpl), false)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn verbatim_items_are_uninspectable() {
-        let item = ImplItem::Verbatim(quote!(future syntax));
-        assert!(uninspectable(&item));
-    }
-}
-
 /// `#[wasm(via = Form)]` on a `mod_api` type, or on the `pub use` that exports another crate's:
 /// the type crosses to wasm mods as `Form`, through `From<&Type> for Form` and
 /// `TryFrom<Form> for Type`, which live with the type. The bindings generator reads the
@@ -223,5 +212,16 @@ fn last_use_name(tree: &syn::UseTree) -> Option<syn::Ident> {
         syn::UseTree::Name(name) => Some(name.ident.clone()),
         syn::UseTree::Rename(rename) => Some(rename.rename.clone()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verbatim_items_are_uninspectable() {
+        let item = ImplItem::Verbatim(quote!(future syntax));
+        assert!(uninspectable(&item));
     }
 }
