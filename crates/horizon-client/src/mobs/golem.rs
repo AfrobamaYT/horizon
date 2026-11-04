@@ -551,13 +551,13 @@ pub fn snow_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
             "minecraft:ice" | "minecraft:packed_ice" | "minecraft:barrier"
         );
         if here.name.as_ref() == "minecraft:air" && below.full_collision && !ice {
-            events.push(MobEvent::SetBlockName {
-                mob: Some(m.id),
-                pos: [xx, y, zz],
-                name: "minecraft:snow",
-                effect: false,
-                flags: horizon_world::level::flags::UPDATE_ALL,
-            });
+            if let Some(state) = w.registry.default_state("minecraft:snow") {
+                events.push(MobEvent::PlaceBlock {
+                    mob: m.id,
+                    pos: [xx, y, zz],
+                    state,
+                });
+            }
         }
     }
     let _ = z;

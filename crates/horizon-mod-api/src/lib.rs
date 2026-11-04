@@ -2877,6 +2877,36 @@ pub enum BonemealSource {
     Mob,
 }
 
+/// One block a placement writes (`entity_place`'s `Placement::Multi`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BlockPlacement {
+    /// Where the block goes.
+    pub pos: BlockPos,
+    /// The state it is placed in.
+    pub state: BlockStateId,
+}
+
+impl BlockPlacement {
+    /// Create a placement for the game.
+    #[doc(hidden)]
+    pub fn new(pos: BlockPos, state: BlockStateId) -> Self {
+        Self { pos, state }
+    }
+}
+
+/// What an `entity_place` writes: one block, or the blocks of a multi-block
+/// placement (`EntityMultiPlaceEvent`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Placement {
+    /// The placed block alone.
+    Single,
+    /// Every block the placement writes, the primary block first: a bed's
+    /// foot and head, a door's halves, a tall plant's two halves.
+    Multi(Vec<BlockPlacement>),
+}
+
 /// A player's right click on a block, shared by the block's use behaviours
 /// and `right_click_block` (`PlayerInteractEvent.RightClickBlock`). The
 /// event hears it once per hand on the clicking client and on the server.

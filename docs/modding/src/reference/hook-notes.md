@@ -122,8 +122,10 @@ requires a farmer at work and `mob_griefing` enabled.
 
 - Breaking and placing a block, on the server for every player: `native_destroy_block` hears a player break a
   block once the game allowed it (`ServerPlayerGameMode.destroyBlock`) and may cancel it, which keeps the block and its
-  drops; `native_place_block` hears a block placed from an item (`BlockItem.place`). To stop a placement, a mod claims
-  `native_use_on`, which runs before it.
+  drops; `native_entity_place` (`EntityPlaceEvent`, `EntityMultiPlaceEvent`) hears a block placed from an item
+  (`BlockItem.place`), an enderman putting its block down or a snow golem's trail, before it is written, and may cancel it:
+  nothing is placed and the stack is kept. A bed, door or tall plant arrives as one `Placement::Multi`. Silverfish
+  infesting, turtle eggs and falling blocks are not placements yet.
 
 - Block entities for a mod's blocks (`native_block_entity`, `native_block_entity_ticks`,
   `native_block_entity_tick`): made when the block is placed, ticked on the server and saved with the chunk.

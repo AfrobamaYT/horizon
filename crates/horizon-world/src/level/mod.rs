@@ -156,7 +156,7 @@ pub enum NeighbourUpdate {
 }
 pub use interact::{InteractionResult, PlayerContext, PlayerEffect, UseBranch, hit_slot};
 pub use pistons::{BlockEventData, MovingPiston};
-pub use place::{PlaceContext, PlaceOutcome, PlacementContext};
+pub use place::{PlaceContext, PlaceOutcome, PlacementContext, PlacementPreview};
 pub use portal::PortalShape;
 pub use states::{BlockId, PropKey, StateTable};
 pub use tick::{Precipitation, PrecipitationKind, RandomTickMask};
