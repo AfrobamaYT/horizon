@@ -400,7 +400,7 @@ pub enum Action {
 pub struct Title {
     /// The screen shown. Code here changes it through `set_mode`.
     pub mode: Mode,
-    /// Set by the game while a native mod is loaded: `set_mode` then leaves
+    /// Set by the game while a mod listens to the screen hooks: `set_mode` then leaves
     /// a new screen in `requested` for the game to announce
     /// (`screen_opening`) and apply, so a mod's answer can keep it shut.
     pub gated: bool,
