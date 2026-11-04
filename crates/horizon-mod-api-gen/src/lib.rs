@@ -1070,9 +1070,11 @@ enum FillMode {
 }
 
 mod build;
+mod wasm;
 mod dispatch;
 mod host_param;
 pub use build::{generate, inject};
+pub use wasm::{Wasm, generate as generate_wasm};
 mod injection;
 pub use injection::{TraitContract, TraitInjection};
 
