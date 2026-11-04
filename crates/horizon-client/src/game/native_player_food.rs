@@ -8,7 +8,7 @@
 //! change to their food or experience does.
 use super::Game;
 use horizon_client::entities::Experience;
-use horizon_client::mod_api::{NativePlayerExperience, PlayerRef};
+use mod_api::{NativePlayerExperience, PlayerRef};
 
 impl Game<'_> {
     /// Whether `player` still names the same player on this server.
@@ -193,12 +193,9 @@ impl Game<'_> {
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use super::*;
-    use horizon_client::{
-        items::ItemStack,
-        mod_api::{EntityRef, NativeWorldEpoch},
-        motion::PlayerMotion,
-    };
+    use horizon_client::{items::ItemStack, motion::PlayerMotion};
     use horizon_core::geometry::Vec3;
+    use mod_api::{EntityRef, NativeWorldEpoch};
 
     /// The acting player with a body, as a hook's turn finds them.
     fn acting_player(game: &mut super::Game<'_>) -> PlayerRef {

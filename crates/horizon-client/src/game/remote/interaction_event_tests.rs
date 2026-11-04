@@ -3,12 +3,6 @@ use super::super::{
     Game, Hit, execution_role::ExecutionRole, lan::LanSettings,
     native_entity_refs::tests::with_game,
 };
-use crate::mod_api::{
-    self, BlockPart, ENTITY_ITEMS, Flow, Hooks, HostSide, HostTransaction, ItemPart, ItemResource,
-    LogicalSide, NativeInteractionResult as Answer, NativeTriState, Registrar,
-    RightClickBlockEvent, RightClickItemEvent, ServerHost, UseItemEvent, UseItemOnBlockEvent,
-    UseItemOnEvent, UseOnEvent, UsePhase,
-};
 use horizon_client::{
     chunk::Chunk,
     first_person::Hand,
@@ -19,6 +13,12 @@ use horizon_client::{
 use horizon_core::geometry::Vec3;
 use horizon_protocol::{connection::Pipe, packets::configuration::ClientInformation};
 use horizon_world::nbt::Tag;
+use mod_api::{
+    self, BlockPart, ENTITY_ITEMS, Flow, Hooks, HostSide, HostTransaction, ItemPart, ItemResource,
+    LogicalSide, NativeInteractionResult as Answer, NativeTriState, Registrar,
+    RightClickBlockEvent, RightClickItemEvent, ServerHost, UseItemEvent, UseItemOnBlockEvent,
+    UseItemOnEvent, UseOnEvent, UsePhase,
+};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicI32, AtomicUsize},

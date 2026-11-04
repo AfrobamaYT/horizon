@@ -3,16 +3,7 @@
 use super::Game;
 use super::block_edits::MAX_COLUMNS;
 use super::native_world_edit::NativeHeightmap;
-
-/// What `native_read_columns` read: the blocks round each column's height (`bases`, none where it isn't loaded),
-/// as indexes into `palette`, a column after another, and three biome tints a column (grass, foliage, water).
-#[derive(Clone, Debug, PartialEq, Default)]
-pub struct NativeColumnBlocks {
-    pub palette: Vec<String>,
-    pub bases: Vec<Option<i32>>,
-    pub blocks: Vec<u16>,
-    pub tints: Vec<u32>,
-}
+pub use mod_api::game::NativeColumnBlocks;
 
 #[allow(dead_code)]
 impl Game<'_> {

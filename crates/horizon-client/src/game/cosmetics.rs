@@ -259,7 +259,7 @@ impl Game<'_> {
         alpha: f32,
         light: u32,
         gpu: bool,
-        out: &mut Vec<horizon_client::mesher::Vertex>,
+        out: &mut Vec<mod_api::render::Vertex>,
     ) -> Option<(glam::Vec3, glam::Vec3)> {
         use horizon_client::mobs::{anim, render};
         let worn = self.worn(m, own)?;

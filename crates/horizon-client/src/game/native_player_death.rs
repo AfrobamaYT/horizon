@@ -11,8 +11,8 @@
 //! player (`native_as_player`), so it is refused inside `player_died`, where
 //! the read still works.
 use super::Game;
-use horizon_client::mod_api::{GlobalPos, Identifier, PlayerRef};
 use horizon_core::position::BlockPos;
+use mod_api::{GlobalPos, Identifier, PlayerRef};
 
 impl Game<'_> {
     /// The dimension and block of the player's last death
@@ -51,8 +51,8 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
 
     use super::super::Game;
-    use horizon_client::mod_api::{GlobalPos, Identifier, PlayerRef};
     use horizon_core::position::BlockPos;
+    use mod_api::{GlobalPos, Identifier, PlayerRef};
 
     /// A block of the overworld.
     fn at([x, y, z]: [i32; 3]) -> GlobalPos {
@@ -148,10 +148,7 @@ mod tests {
             // A player who is not online here, and a handle of another
             // player's id, read nothing.
             let mut stale = player;
-            stale.entity = horizon_client::mod_api::EntityRef::new(
-                player.entity.epoch(),
-                player.entity.id() + 1,
-            );
+            stale.entity = mod_api::EntityRef::new(player.entity.epoch(), player.entity.id() + 1);
             game.lan.as_mut().unwrap().hub.guests[0].last_death =
                 Some(("minecraft:overworld".into(), [1, 2, 3]));
             assert_eq!(stale.last_death_location(&*game), None);

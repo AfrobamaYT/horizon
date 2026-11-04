@@ -867,10 +867,7 @@ impl Game<'_> {
             .settings
             .client_information(client_view_distance(self.render_distance_in_use()));
         if local.is_none() && !self.options.split_guest {
-            horizon_client::crash::set_detail(
-                "Server",
-                horizon_client::net::shown_address(address),
-            );
+            mod_api::crash::set_detail("Server", horizon_client::net::shown_address(address));
         }
         // A signed-in account always plays under its own name; a splitscreen player signs in
         // with its own account when it picked one.
@@ -1206,7 +1203,7 @@ impl Game<'_> {
         };
         // A splitscreen player leaving says nothing of where P1 plays.
         if !self.options.split_guest {
-            horizon_client::crash::clear_detail("Server");
+            mod_api::crash::clear_detail("Server");
         }
         self.clock = Default::default();
         self.adv = Default::default();
@@ -1644,7 +1641,7 @@ impl Game<'_> {
         chat_type: Option<i32>,
         line: &mut horizon_client::text::Text,
     ) -> bool {
-        if !crate::mod_api::listened(crate::mod_api::HookId::ClientChatReceived) {
+        if !mod_api::listened(mod_api::HookId::ClientChatReceived) {
             return true;
         }
         let registries = self.remote.as_ref().map(|r| Arc::clone(&r.registries));
@@ -4813,7 +4810,7 @@ impl Game<'_> {
                     }
                 }
                 for e in p.entries {
-                    if crate::mod_api::listened(crate::mod_api::HookId::ClientPlayerChangeGameType)
+                    if mod_api::listened(mod_api::HookId::ClientPlayerChangeGameType)
                         && self.player.is_some()
                         && let Some(mode) = e.game_mode
                         && let Some(r) = self.remote.as_ref()
@@ -7579,7 +7576,7 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|stack| &*stack.item == "minecraft:debug_stick");
         if let Some(hit) = self.pick() {
-            use horizon_client::mod_api::{NativeInteractionResult as Answer, NativeTriState};
+            use mod_api::{NativeInteractionResult as Answer, NativeTriState};
             let spectator = self.spectator();
             // RightClickBlock on this client, where performUseItemOn starts
             // (a spectator's use only opens menus on the server): it may force
@@ -7622,12 +7619,7 @@ impl Game<'_> {
                     })
                 });
             let block_answer = if !spectator && block_used {
-                self.use_item_on_block(
-                    &hit,
-                    hand,
-                    held.as_ref(),
-                    horizon_client::mod_api::UsePhase::Block,
-                )
+                self.use_item_on_block(&hit, hand, held.as_ref(), mod_api::UsePhase::Block)
             } else {
                 None
             };
@@ -7704,12 +7696,7 @@ impl Game<'_> {
                 result
             };
             let item_answer = if !spectator && !result.consumes_action() && item_used {
-                self.use_item_on_block(
-                    &hit,
-                    hand,
-                    held.as_ref(),
-                    horizon_client::mod_api::UsePhase::ItemAfterBlock,
-                )
+                self.use_item_on_block(&hit, hand, held.as_ref(), mod_api::UsePhase::ItemAfterBlock)
             } else {
                 None
             };
@@ -8307,7 +8294,7 @@ impl Game<'_> {
             return false;
         }
         if let Some(answer) = self.right_click_item(hand, &held) {
-            let success = answer == horizon_client::mod_api::NativeInteractionResult::Success;
+            let success = answer == mod_api::NativeInteractionResult::Success;
             if success {
                 self.with_hand(hand, Game::swing_arm);
             }
@@ -8574,7 +8561,7 @@ impl Game<'_> {
     /// The server does each packet's part with that packet's hand only.
     fn remote_use_hands(&mut self) {
         // Nothing in the crosshair: an empty hand's click is heard, by mods only.
-        let miss = crate::mod_api::listened(crate::mod_api::HookId::RightClickEmpty)
+        let miss = mod_api::listened(mod_api::HookId::RightClickEmpty)
             && !self.entity_targeted()
             && self.pick().is_none();
         if miss && self.held().is_none() {
@@ -8970,7 +8957,7 @@ impl Game<'_> {
         {
             // A block hit on air falls through to MISS. `instant` below reads the
             // block again after the dig, which may have broken it.
-            if crate::mod_api::listened(crate::mod_api::HookId::LeftClickEmpty)
+            if mod_api::listened(mod_api::HookId::LeftClickEmpty)
                 && self
                     .res
                     .facts()
@@ -8984,9 +8971,7 @@ impl Game<'_> {
                 .facts()
                 .is_air(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]));
         } else {
-            if crate::mod_api::listened(crate::mod_api::HookId::LeftClickEmpty)
-                && !self.entity_targeted()
-            {
+            if mod_api::listened(mod_api::HookId::LeftClickEmpty) && !self.entity_targeted() {
                 self.native_left_click_empty();
             }
             if !self.creative {
@@ -9004,7 +8989,7 @@ impl Game<'_> {
     /// `LivingEntity`, which may be hit critically), heard by native mods on
     /// both sides. Only the server sweeps.
     fn remote_sweep_event(&mut self, target: &str, living: bool) {
-        if horizon_client::mod_api::mods().is_empty() {
+        if mod_api::mods().is_empty() {
             return;
         }
         let speed = self
@@ -9290,8 +9275,7 @@ impl Game<'_> {
     }
     /// ChatScreen.handleChatInput fires the client event for chat, not commands.
     pub(super) fn send_chat_from_screen(&mut self, message: &str) {
-        if message.starts_with('/') || !crate::mod_api::listened(crate::mod_api::HookId::ClientChat)
-        {
+        if message.starts_with('/') || !mod_api::listened(mod_api::HookId::ClientChat) {
             self.send_chat(message);
         } else if let Some(uuid) = self.remote.as_ref().map(|r| r.profile) {
             let id = self.own_entity_id();
@@ -9647,13 +9631,13 @@ impl Game<'_> {
         }
         let cost = |g: &Self, c: &play::NetCost| {
             g.to_stack(&Some(c.clone().into()))
-                .map(|stack| horizon_client::merchant::ItemCost { stack })
+                .map(|stack| mod_api::merchant::ItemCost { stack })
         };
         let offers: Vec<_> = p
             .offers
             .iter()
             .filter_map(|o| {
-                let mut offer = horizon_client::merchant::MerchantOffer {
+                let mut offer = mod_api::merchant::MerchantOffer {
                     base_cost_a: cost(self, &o.cost_a)?,
                     cost_b: match &o.cost_b {
                         Some(b) => Some(cost(self, b)?),
@@ -10870,7 +10854,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mods_replace_and_cancel_received_chat() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
-        use horizon_client::{mod_api, text::Text};
+        use horizon_client::text::Text;
         use horizon_protocol::{
             connection::Pipe,
             packets::play::{self, Clientbound as C},
@@ -10946,8 +10930,8 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mod_chat_needs_a_joined_player_and_what_the_chat_option_allows() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
-        use horizon_client::mod_api::ClientHost;
         use horizon_protocol::connection::Pipe;
+        use mod_api::ClientHost;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -11284,17 +11268,14 @@ mod tests {
     fn client_handle_reads_answer_from_the_clients_copy() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
         use horizon_client::{
-            chunk::Chunk,
-            first_person::Hand,
-            level_loading::Reason,
-            mod_api::{EntityRef, EquipmentSlot, GlobalPos},
-            motion::PlayerMotion,
+            chunk::Chunk, first_person::Hand, level_loading::Reason, motion::PlayerMotion,
         };
         use horizon_core::geometry::Vec3;
         use horizon_protocol::{
             connection::Pipe,
             packets::play::{self, Clientbound as C, SpawnInfo},
         };
+        use mod_api::{EntityRef, EquipmentSlot, GlobalPos};
         use std::sync::Arc;
 
         with_game(|game| {
@@ -11459,17 +11440,13 @@ mod tests {
             execution_role::ExecutionRole, native_entity_refs::tests::with_game,
             native_lifecycle::NativeLifecycle,
         };
-        use horizon_client::{
-            level_loading::Reason,
-            mobs::Mob,
-            mod_api::{EntityRef, NativeCrosshairTarget},
-            motion::PlayerMotion,
-        };
+        use horizon_client::{level_loading::Reason, mobs::Mob, motion::PlayerMotion};
         use horizon_core::geometry::Vec3;
         use horizon_protocol::{
             connection::Pipe,
             packets::play::{Clientbound, Respawn, SpawnInfo},
         };
+        use mod_api::{EntityRef, NativeCrosshairTarget};
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -12205,7 +12182,7 @@ mod tests {
         let env = Env {
             player: None,
             player_entity_id: None,
-            side: horizon_client::menu::LogicalSide::Client,
+            side: mod_api::menu::LogicalSide::Client,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,

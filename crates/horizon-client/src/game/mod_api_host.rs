@@ -1,15 +1,15 @@
 use super::{BlockStateId, Game};
-use horizon_client::mod_api::BlockPos;
 use horizon_world::{
     attachments::{ATTACHMENTS_KEY, attachment_compound},
     level::Ticks,
 };
+use mod_api::BlockPos;
 
 fn world_attachments(
     world: &mut horizon_client::world::World,
-    holder: horizon_client::mod_api::Holder,
-) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError> {
-    use horizon_client::mod_api::{AttachmentError, Holder};
+    holder: mod_api::Holder,
+) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
+    use mod_api::{AttachmentError, Holder};
     if holder == Holder::Level {
         return Ok(&mut world.attachments);
     }
@@ -96,16 +96,15 @@ impl Game<'_> {
     /// its server synced.
     pub(super) fn attachment_map(
         &mut self,
-        holder: horizon_client::mod_api::Holder,
-    ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
-    {
+        holder: mod_api::Holder,
+    ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         if self.native_authoritative() {
             self.world.attachment_syncs.insert(holder);
             return self.attachment_map_quiet(holder);
         }
         match self.remote.as_mut() {
             Some(remote) => Ok(remote.attachments.entry(holder).or_default()),
-            None => Err(horizon_client::mod_api::AttachmentError::MissingHolder),
+            None => Err(mod_api::AttachmentError::MissingHolder),
         }
     }
 
@@ -113,11 +112,10 @@ impl Game<'_> {
     /// map is kept as it was on its first access, so an abort puts it back.
     pub(super) fn attachment_map_quiet(
         &mut self,
-        holder: horizon_client::mod_api::Holder,
-    ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
-    {
+        holder: mod_api::Holder,
+    ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         if !self.native_authoritative() {
-            return Err(horizon_client::mod_api::AttachmentError::MissingHolder);
+            return Err(mod_api::AttachmentError::MissingHolder);
         }
         self.journal_attachments(holder);
         self.attachment_slot(holder)
@@ -127,11 +125,10 @@ impl Game<'_> {
     /// their state is (swapped in for a guest's turn, or kept beside), the world's others.
     pub(super) fn attachment_slot(
         &mut self,
-        holder: horizon_client::mod_api::Holder,
-    ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
-    {
-        use horizon_client::mod_api::AttachmentError;
-        if let horizon_client::mod_api::Holder::Entity(id) = holder {
+        holder: mod_api::Holder,
+    ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
+        use mod_api::AttachmentError;
+        if let mod_api::Holder::Entity(id) = holder {
             if !self.attachment_entity_exists(id) {
                 return Err(AttachmentError::MissingHolder);
             }
@@ -144,7 +141,7 @@ impl Game<'_> {
             let uuid = self.uuid_for(id);
             return Ok(self.entity_attachments.entry(uuid).or_default());
         }
-        if let horizon_client::mod_api::Holder::Player(uuid) = holder {
+        if let mod_api::Holder::Player(uuid) = holder {
             if self.lan_acting_uuid == Some(uuid) {
                 return Ok(&mut self.player_attachments);
             }
@@ -164,17 +161,15 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/mod_api_host_generated.rs"));
 }
 
-pub(super) fn level_side<'a>(
-    level: &'a super::GameLevel<'_>,
-) -> horizon_client::mod_api::LevelSide<'a> {
+pub(super) fn level_side<'a>(level: &'a super::GameLevel<'_>) -> mod_api::LevelSide<'a> {
     if horizon_world::level::LevelAccess::is_client_side(level) {
-        horizon_client::mod_api::LevelSide::Client(level)
+        mod_api::LevelSide::Client(level)
     } else {
-        horizon_client::mod_api::LevelSide::Server(level)
+        mod_api::LevelSide::Server(level)
     }
 }
 
-impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
+impl mod_api::LevelHost for super::GameLevel<'_> {
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
         horizon_world::level::LevelAccess::block_state(self, BlockPos::new(pos[0], pos[1], pos[2]))
     }
@@ -196,28 +191,21 @@ impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
         self.native_authoritative
             .then(|| super::native_world_read::state_in_tag(self.items, self.registry, state, tag))
     }
-    fn item_stack_in_tag(
-        &self,
-        stack: &horizon_client::mod_api::ItemStack,
-        tag: &str,
-    ) -> Option<bool> {
+    fn item_stack_in_tag(&self, stack: &mod_api::ItemStack, tag: &str) -> Option<bool> {
         self.native_authoritative
             .then(|| super::native_world_read::stack_in_tag(self.items, stack, tag))
     }
-    fn fluid_state(&self, pos: [i32; 3]) -> Option<horizon_client::mod_api::FluidState> {
+    fn fluid_state(&self, pos: [i32; 3]) -> Option<mod_api::FluidState> {
         let [x, y, z] = pos;
         if !(self.world.shape.contains_y(y) && self.world.loaded(x, z)) {
             return None;
         }
         self.state_fluid_state(self.world.block(x, y, z))
     }
-    fn state_fluid_state(
-        &self,
-        state: BlockStateId,
-    ) -> Option<horizon_client::mod_api::FluidState> {
+    fn state_fluid_state(&self, state: BlockStateId) -> Option<mod_api::FluidState> {
         super::native_world_read::state_fluid(self.behaviours, self.registry, state)
     }
-    fn fluid_in_tag(&self, fluid: horizon_client::mod_api::FluidState, tag: &str) -> Option<bool> {
+    fn fluid_in_tag(&self, fluid: mod_api::FluidState, tag: &str) -> Option<bool> {
         self.native_authoritative
             .then(|| super::native_world_read::fluid_in_tag(self.items, fluid, tag))
     }
@@ -229,7 +217,7 @@ impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
     ) -> Option<BlockStateId> {
         self.native_state_with_property(state, key, value)
     }
-    fn brightness(&self, layer: horizon_client::mod_api::LightLayer, pos: [i32; 3]) -> i32 {
+    fn brightness(&self, layer: mod_api::LightLayer, pos: [i32; 3]) -> i32 {
         super::native_level_refs::world_brightness(self.world, layer, pos)
     }
     fn raw_brightness(&self, pos: [i32; 3], sky_darken: i32) -> i32 {
@@ -248,29 +236,28 @@ impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
                 .behaviours
                 .is_raining_at(self, BlockPos::new(pos[0], pos[1], pos[2]))
     }
-    fn enabled_features(&self) -> horizon_client::mod_api::FeatureFlags<'_> {
-        horizon_client::mod_api::FeatureFlags::new(self.enabled_features)
+    fn enabled_features(&self) -> mod_api::FeatureFlags<'_> {
+        mod_api::FeatureFlags::new(self.enabled_features)
     }
 }
 
-impl horizon_client::mod_api::LevelRandomHost for super::GameLevel<'_> {
+impl mod_api::LevelRandomHost for super::GameLevel<'_> {
     fn attachments(
         &mut self,
-        holder: horizon_client::mod_api::Holder,
-    ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
-    {
+        holder: mod_api::Holder,
+    ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         if !self.native_authoritative {
-            return Err(horizon_client::mod_api::AttachmentError::MissingHolder);
+            return Err(mod_api::AttachmentError::MissingHolder);
         }
         self.world.attachment_syncs.insert(holder);
         world_attachments(self.world, holder)
     }
-    fn random(&mut self) -> Option<&mut horizon_client::mod_api::LegacyRandom> {
+    fn random(&mut self) -> Option<&mut mod_api::LegacyRandom> {
         self.native_level_random()
     }
 }
 
-impl horizon_client::mod_api::LevelHost for super::native_hooks::HitLevel<'_> {
+impl mod_api::LevelHost for super::native_hooks::HitLevel<'_> {
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
         self.0.block(pos)
     }
@@ -299,15 +286,14 @@ impl horizon_client::mod_api::LevelHost for super::native_hooks::HitLevel<'_> {
     }
 }
 
-impl horizon_client::mod_api::LevelRandomHost for super::native_hooks::HitLevel<'_> {
+impl mod_api::LevelRandomHost for super::native_hooks::HitLevel<'_> {
     fn attachments(
         &mut self,
-        holder: horizon_client::mod_api::Holder,
-    ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
-    {
+        holder: mod_api::Holder,
+    ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         self.0.attachments(holder)
     }
-    fn random(&mut self) -> Option<&mut horizon_client::mod_api::LegacyRandom> {
+    fn random(&mut self) -> Option<&mut mod_api::LegacyRandom> {
         Some(self.0.random())
     }
 }
@@ -317,45 +303,38 @@ pub(super) struct LevelTicks<'a, L> {
     pub ticks: &'a mut Ticks,
 }
 
-impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>>
-    horizon_client::mod_api::LevelHost for LevelTicks<'b, L>
+impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::LevelHost
+    for LevelTicks<'b, L>
 {
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
-        horizon_client::mod_api::LevelHost::block_state(&*self.level, pos)
+        mod_api::LevelHost::block_state(&*self.level, pos)
     }
     fn state_block(&self, state: BlockStateId) -> Option<&str> {
         self.level.registry.state(state).map(|s| &*s.name)
     }
     fn state_string(&self, state: BlockStateId) -> Option<String> {
-        horizon_client::mod_api::LevelHost::state_string(&*self.level, state)
+        mod_api::LevelHost::state_string(&*self.level, state)
     }
     fn min_y(&self) -> i32 {
-        horizon_client::mod_api::LevelHost::min_y(&*self.level)
+        mod_api::LevelHost::min_y(&*self.level)
     }
     fn height(&self) -> i32 {
-        horizon_client::mod_api::LevelHost::height(&*self.level)
+        mod_api::LevelHost::height(&*self.level)
     }
     fn block_state_in_tag(&self, state: BlockStateId, tag: &str) -> Option<bool> {
-        horizon_client::mod_api::LevelHost::block_state_in_tag(&*self.level, state, tag)
+        mod_api::LevelHost::block_state_in_tag(&*self.level, state, tag)
     }
-    fn item_stack_in_tag(
-        &self,
-        stack: &horizon_client::mod_api::ItemStack,
-        tag: &str,
-    ) -> Option<bool> {
-        horizon_client::mod_api::LevelHost::item_stack_in_tag(&*self.level, stack, tag)
+    fn item_stack_in_tag(&self, stack: &mod_api::ItemStack, tag: &str) -> Option<bool> {
+        mod_api::LevelHost::item_stack_in_tag(&*self.level, stack, tag)
     }
-    fn fluid_state(&self, pos: [i32; 3]) -> Option<horizon_client::mod_api::FluidState> {
-        horizon_client::mod_api::LevelHost::fluid_state(&*self.level, pos)
+    fn fluid_state(&self, pos: [i32; 3]) -> Option<mod_api::FluidState> {
+        mod_api::LevelHost::fluid_state(&*self.level, pos)
     }
-    fn state_fluid_state(
-        &self,
-        state: BlockStateId,
-    ) -> Option<horizon_client::mod_api::FluidState> {
-        horizon_client::mod_api::LevelHost::state_fluid_state(&*self.level, state)
+    fn state_fluid_state(&self, state: BlockStateId) -> Option<mod_api::FluidState> {
+        mod_api::LevelHost::state_fluid_state(&*self.level, state)
     }
-    fn fluid_in_tag(&self, fluid: horizon_client::mod_api::FluidState, tag: &str) -> Option<bool> {
-        horizon_client::mod_api::LevelHost::fluid_in_tag(&*self.level, fluid, tag)
+    fn fluid_in_tag(&self, fluid: mod_api::FluidState, tag: &str) -> Option<bool> {
+        mod_api::LevelHost::fluid_in_tag(&*self.level, fluid, tag)
     }
     fn state_with_property(
         &self,
@@ -363,42 +342,39 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>>
         key: &str,
         value: &str,
     ) -> Option<BlockStateId> {
-        horizon_client::mod_api::LevelHost::state_with_property(&*self.level, state, key, value)
+        mod_api::LevelHost::state_with_property(&*self.level, state, key, value)
     }
-    fn brightness(&self, layer: horizon_client::mod_api::LightLayer, pos: [i32; 3]) -> i32 {
-        horizon_client::mod_api::LevelHost::brightness(&*self.level, layer, pos)
+    fn brightness(&self, layer: mod_api::LightLayer, pos: [i32; 3]) -> i32 {
+        mod_api::LevelHost::brightness(&*self.level, layer, pos)
     }
     fn raw_brightness(&self, pos: [i32; 3], sky_darken: i32) -> i32 {
-        horizon_client::mod_api::LevelHost::raw_brightness(&*self.level, pos, sky_darken)
+        mod_api::LevelHost::raw_brightness(&*self.level, pos, sky_darken)
     }
     fn is_loaded(&self, pos: [i32; 3]) -> bool {
-        horizon_client::mod_api::LevelHost::is_loaded(&*self.level, pos)
+        mod_api::LevelHost::is_loaded(&*self.level, pos)
     }
     fn is_raining_at(&self, pos: [i32; 3]) -> bool {
-        horizon_client::mod_api::LevelHost::is_raining_at(&*self.level, pos)
+        mod_api::LevelHost::is_raining_at(&*self.level, pos)
     }
-    fn enabled_features(&self) -> horizon_client::mod_api::FeatureFlags<'_> {
-        horizon_client::mod_api::LevelHost::enabled_features(&*self.level)
+    fn enabled_features(&self) -> mod_api::FeatureFlags<'_> {
+        mod_api::LevelHost::enabled_features(&*self.level)
     }
 }
 
-impl<'a: 'b, 'b> horizon_client::mod_api::LevelRandomHost
-    for LevelTicks<'b, &mut super::GameLevel<'a>>
-{
+impl<'a: 'b, 'b> mod_api::LevelRandomHost for LevelTicks<'b, &mut super::GameLevel<'a>> {
     fn attachments(
         &mut self,
-        holder: horizon_client::mod_api::Holder,
-    ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
-    {
-        horizon_client::mod_api::LevelRandomHost::attachments(&mut *self.level, holder)
+        holder: mod_api::Holder,
+    ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
+        mod_api::LevelRandomHost::attachments(&mut *self.level, holder)
     }
-    fn random(&mut self) -> Option<&mut horizon_client::mod_api::LegacyRandom> {
-        horizon_client::mod_api::LevelRandomHost::random(&mut *self.level)
+    fn random(&mut self) -> Option<&mut mod_api::LegacyRandom> {
+        mod_api::LevelRandomHost::random(&mut *self.level)
     }
 }
 
-impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>>
-    horizon_client::mod_api::LevelTicksHost for LevelTicks<'b, L>
+impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::LevelTicksHost
+    for LevelTicks<'b, L>
 {
     fn schedule_block_tick(&mut self, pos: [i32; 3], block: &str, delay: i32) -> bool {
         self.level
@@ -410,14 +386,12 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>>
     }
 }
 
-impl<'a: 'b, 'b> horizon_client::mod_api::LevelWriteHost
-    for LevelTicks<'b, &mut super::GameLevel<'a>>
-{
+impl<'a: 'b, 'b> mod_api::LevelWriteHost for LevelTicks<'b, &mut super::GameLevel<'a>> {
     fn set_block(
         &mut self,
         pos: [i32; 3],
         state: BlockStateId,
-        flags: horizon_client::mod_api::NativeBlockUpdateFlags,
+        flags: mod_api::NativeBlockUpdateFlags,
     ) -> bool {
         self.level
             .native_set_block(self.ticks, pos, state, flags.bits())
@@ -442,7 +416,7 @@ impl<'a: 'b, 'b> horizon_client::mod_api::LevelWriteHost
 
     fn send_particles(
         &mut self,
-        options: &horizon_client::mod_api::ParticleOptions,
+        options: &mod_api::ParticleOptions,
         state: Option<BlockStateId>,
         at: [f64; 3],
         spread: [f64; 3],

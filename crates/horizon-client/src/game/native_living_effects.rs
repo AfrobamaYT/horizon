@@ -13,7 +13,7 @@ use super::potions::mob_can_be_affected;
 use horizon_client::brewing;
 use horizon_client::effects::{EffectInstance, PlayerEffects};
 use horizon_client::mobs::Mob;
-use horizon_client::mod_api::{LivingRef, NativeActiveEffect};
+use mod_api::{LivingRef, NativeActiveEffect};
 
 /// A player's effect as the API's: the id namespaced as the registry has it.
 fn active_effect(e: &EffectInstance) -> NativeActiveEffect {
@@ -228,8 +228,8 @@ impl Game<'_> {
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::mobs::Mob;
-    use horizon_client::mod_api::{EntityRef, LivingRef, NativeActiveEffect, NativeWorldEpoch};
     use horizon_core::geometry::Vec3;
+    use mod_api::{EntityRef, LivingRef, NativeActiveEffect, NativeWorldEpoch};
 
     fn effect(id: &'static str, duration: i32, amplifier: i32) -> NativeActiveEffect {
         NativeActiveEffect {

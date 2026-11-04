@@ -3,11 +3,11 @@ use super::Game;
 use horizon_client::{
     bossbar::BossBar,
     lan::playerdata::{ints_uuid, uuid_ints},
-    mod_api::{BossBarColor, BossBarOverlay, BossBarRef, PlayerRef},
     scoreboard::comp_text,
     text::Text,
 };
 use horizon_world::identifier::Identifier;
+use mod_api::{BossBarColor, BossBarOverlay, BossBarRef, PlayerRef};
 
 impl Game<'_> {
     fn boss_bar_state(&self, bar: BossBarRef) -> Option<&BossBar> {
@@ -420,8 +420,8 @@ mod tests {
             assert!(seen(game, 456).is_some());
             // A player handle from an earlier session cannot edit membership.
             let stale = PlayerRef {
-                entity: horizon_client::mod_api::EntityRef::new(
-                    horizon_client::mod_api::NativeWorldEpoch::new(b.entity().epoch().get() + 1),
+                entity: mod_api::EntityRef::new(
+                    mod_api::NativeWorldEpoch::new(b.entity().epoch().get() + 1),
                     b.entity().id(),
                 ),
                 uuid: 456,

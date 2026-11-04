@@ -1,9 +1,7 @@
 //! Mob handles for native server mods.
 use super::{Game, commands::Target};
-use horizon_client::{
-    mobs::{self, Mob, Species, Who},
-    mod_api::{EntityRef, LivingRef, MobRef},
-};
+use horizon_client::mobs::{self, Mob, Species, Who};
+use mod_api::{EntityRef, LivingRef, MobRef};
 
 /// Brain-backed vanilla `getTarget` overrides. Piglins and hoglins use
 /// Horizon's `ai.target` as the stand-in for their brain memory.
@@ -343,8 +341,9 @@ impl Game<'_> {
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use super::*;
-    use horizon_client::{entities::ArmorStand, mobs::Mob, mod_api::NativeWorldEpoch};
+    use horizon_client::{entities::ArmorStand, mobs::Mob};
     use horizon_core::geometry::Vec3;
+    use mod_api::NativeWorldEpoch;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

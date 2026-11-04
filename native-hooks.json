@@ -1039,7 +1039,7 @@
     {
       "name": "world_drawn", "side": "client",
       "version": 1,
-      "target": "horizon_client_render::gfx::native_render::native_world_drawn",
+      "target": "mod_api::render::native_world_drawn",
       "mod_api": {
         "contract": "listen"
       }
@@ -1047,7 +1047,7 @@
     {
       "name": "render_needs", "side": "client",
       "version": 1,
-      "target": "horizon_client_render::gfx::native_render::native_render_needs",
+      "target": "mod_api::render::native_render_needs",
       "mod_api": {
         "contract": "collect",
         "out": "needs"
@@ -2805,7 +2805,7 @@
     {
       "name": "ingredient", "side": "both",
       "version": 1,
-      "target": "horizon_client_lib::crafting::native_ingredient",
+      "target": "mod_api::crafting::native_ingredient",
       "mod_api": {
         "contract": "collect",
         "out": "items"

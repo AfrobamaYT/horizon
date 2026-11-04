@@ -539,7 +539,7 @@ impl Game<'_> {
         if self.remote.is_some() {
             return;
         }
-        if crate::mod_api::listened(crate::mod_api::HookId::VanillaGameEvent) {
+        if mod_api::listened(mod_api::HookId::VanillaGameEvent) {
             let cause = event_cause(ctx.source, self.lan_acting_entity);
             let mut cancel = false;
             self.native_vanilla_game_event(self.dim.id(), event, pos, cause, &mut cancel);
@@ -1157,7 +1157,7 @@ impl Game<'_> {
                 f64::from(at.1),
                 f64::from(at.2) + 0.5,
             ];
-            let yaw = horizon_client::camera::wrap_degrees(self.world.random.next_float() * 360.0);
+            let yaw = mod_api::camera::wrap_degrees(self.world.random.next_float() * 360.0);
             self.next_entity += 1;
             let mut mob = Mob::new(
                 self.next_entity,
@@ -1267,7 +1267,7 @@ impl Game<'_> {
     /// `LightmapRenderStateExtractor`: the night vision effect's intensity
     /// (`GameRenderer.nightVisionScale`), or conduit power's water vision.
     pub(super) fn night_vision_intensity(&self, partial: f32) -> f32 {
-        use horizon_client::fog::FogType;
+        use mod_api::fog::FogType;
         if let Some(e) = self.potions.effects.get("night_vision") {
             // MobEffectInstance.endsWithin(200); -1 is infinite.
             return if e.duration < 0 || e.duration > 200 {
@@ -1676,7 +1676,7 @@ impl Game<'_> {
                 };
             }
             self.particles.add(
-                &horizon_client::particles::ParticleOptions::dust([1.0, 0.0, 0.0], 1.0),
+                &mod_api::particles::ParticleOptions::dust([1.0, 0.0, 0.0], 1.0),
                 [
                     f64::from(pos[0]) + at[0],
                     f64::from(pos[1]) + at[1],
@@ -1717,8 +1717,8 @@ impl Game<'_> {
         &mut self,
         pos: [i32; 3],
         held: Option<&horizon_client::items::ItemStack>,
-    ) -> Result<Option<horizon_client::mod_api::NativeInteractionResult>> {
-        use horizon_client::mod_api::NativeInteractionResult as Answer;
+    ) -> Result<Option<mod_api::NativeInteractionResult>> {
+        use mod_api::NativeInteractionResult as Answer;
         if !matches!(
             &*self.block_name(pos),
             "minecraft:redstone_ore" | "minecraft:deepslate_redstone_ore"

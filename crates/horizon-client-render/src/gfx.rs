@@ -48,6 +48,8 @@ mod entity_outline;
 #[cfg(test)]
 mod inter_stage_tests;
 #[cfg(test)]
+mod sprite_arrays_tests;
+#[cfg(test)]
 pub(crate) mod test_gpu;
 mod weather;
 use entity_batch::EntityBatch;
@@ -160,7 +162,7 @@ mod lod;
 mod native_material;
 mod native_pack;
 mod native_post;
-pub mod native_render;
+pub use mod_api::render as native_render;
 mod native_shadow;
 mod native_sky;
 mod occlusion;

@@ -262,15 +262,13 @@ mod tests {
                 pub struct Item;
             }
         }
-        pub(super) mod horizon_client {
+        pub(super) mod mod_api {
             pub mod camera {
                 pub struct CameraEntity;
                 pub struct FovPlayer;
             }
-            pub mod mod_api {
-                pub struct NativeClientInfo;
-                pub struct NativeArmorHurt;
-            }
+            pub struct NativeClientInfo;
+            pub struct NativeArmorHurt;
             pub mod menu {
                 pub struct MenuButtonContext {
                     pub player: u128,
@@ -774,7 +772,7 @@ mod tests {
             block_entities: vec![part(1, &calls)],
             ..Parts::default()
         });
-        let context = generated::horizon_client::menu::MenuButtonContext {
+        let context = generated::mod_api::menu::MenuButtonContext {
             player: 123,
             player_entity_id: 42,
             pos: [1, 2, 3],

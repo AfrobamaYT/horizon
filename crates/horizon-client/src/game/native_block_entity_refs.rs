@@ -2,14 +2,9 @@
 //! and `BlockEntity.setChanged` make. A write inside `host.transaction` is journaled
 //! (`transactions.rs`) and tells the world at the root commit.
 use super::{Game, transactions::After};
-use horizon_client::{
-    block_entity_nbt,
-    containers::BlockEntity,
-    mod_api::{BlockEntityRef, BlockEntityTypeKey, LevelRef, PlayerRef},
-    save,
-    world::World,
-};
+use horizon_client::{block_entity_nbt, containers::BlockEntity, save, world::World};
 use horizon_world::nbt::{Compound, Tag};
+use mod_api::{BlockEntityRef, BlockEntityTypeKey, LevelRef, PlayerRef};
 
 impl Game<'_> {
     fn native_block_entity_target(&self, entity: BlockEntityRef) -> Option<(&World, &BlockEntity)> {
@@ -319,10 +314,10 @@ fn loaded_block_entity(world: &World, [x, y, z]: [i32; 3]) -> Option<&BlockEntit
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mod_api::HostTransaction;
-    use crate::mod_api::ServerHost;
     use horizon_client::chunk::Chunk;
     use horizon_world::registry::BlockStateId;
+    use mod_api::HostTransaction;
+    use mod_api::ServerHost;
     use std::sync::Arc;
 
     #[test]
@@ -373,7 +368,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn player_opens_provider_and_refuses_non_provider() {
-        use horizon_client::mod_api::NativeBlockUpdateFlags;
+        use mod_api::NativeBlockUpdateFlags;
         super::super::native_guest_turn_tests::with_guests(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -433,7 +428,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn writes_merge_data_name_and_roll_back_with_a_transaction() {
         use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
-        use horizon_client::mod_api::NativeBlockUpdateFlags;
+        use mod_api::NativeBlockUpdateFlags;
         if run_fresh_cases(
             "game::native_block_entity_refs::tests::writes_merge_data_name_and_roll_back_with_a_transaction",
             "HORIZON_VANILLA_BE_REGISTRY_CHILD",
@@ -548,7 +543,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_abort_puts_back_the_lock_and_the_loot_table_roll() {
         use super::super::native_entity_refs::tests::with_game;
-        use horizon_client::mod_api::NativeBlockUpdateFlags;
+        use mod_api::NativeBlockUpdateFlags;
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -593,8 +588,8 @@ mod tests {
     fn a_level_hook_set_block_replaces_whole_states_and_their_block_entities() {
         use super::super::mod_api_host::LevelTicks;
         use super::super::native_entity_refs::tests::with_game;
-        use crate::mod_api::{LevelWriteHost, NativeBlockUpdateFlags};
         use horizon_world::chunk::BlockState;
+        use mod_api::{LevelWriteHost, NativeBlockUpdateFlags};
 
         fn write(
             game: &mut Game<'_>,

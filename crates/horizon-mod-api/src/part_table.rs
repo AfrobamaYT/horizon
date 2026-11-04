@@ -193,7 +193,7 @@ pub(super) fn installed_controllers() -> &'static [ControllerInfo] {
 }
 
 static INSTALLED: OnceLock<Installed> = OnceLock::new();
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 thread_local! {
     /// Tests install their own parts per thread, as they do their mods (`TEST_MODS`).
     static TEST_PARTS: Cell<Option<&'static Installed>> = const { Cell::new(None) };
@@ -210,7 +210,7 @@ thread_local! {
 }
 
 fn installed() -> Option<&'static Installed> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     if let Some(installed) = TEST_PARTS.get() {
         return Some(installed);
     }
@@ -246,7 +246,7 @@ impl std::ops::Deref for PartsRef {
 /// The parts hook `hook` asks: this game thread's resolved table, then the shared key parts
 /// when there are no tag parts, then the off-thread path.
 pub(crate) fn parts(hook: &'static str) -> PartsRef {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     TEST_PART_LOOKUPS.set(TEST_PART_LOOKUPS.get() + 1);
     let Some(installed) = installed() else {
         return PartsRef::Shared(&NO_PARTS);
@@ -458,7 +458,7 @@ impl Parts {
         index!(items, item_subscribed);
         index!(menus, menu_subscribed);
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn block_entity<'k>(
         &self,
         id: impl FnOnce() -> Option<&'k str>,
@@ -1138,20 +1138,19 @@ pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
             installed.hook_bits[*hook as usize] = true;
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     TEST_PARTS.set(Some(Box::leak(Box::new(installed))));
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "testing")))]
     if INSTALLED.set(installed).is_err() {
         log::warn!("Mod parts already installed; keeping the first table");
     }
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) mod tests {
     use super::super::*;
     use super::{Attached, KnownIds, mark_game_thread, resolve_parts};
-    use crate::mod_api;
     use std::any::{TypeId, type_name};
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
@@ -1191,7 +1190,7 @@ pub(crate) mod tests {
         struct Invalid;
         #[mod_api::__subscriptions]
         impl super::super::Hooks for Invalid {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
                 for path in ["", "other:press", "Uppercase", "has space"] {
                     r.block_entity_type(path).build();
                 }
@@ -1338,7 +1337,7 @@ pub(crate) mod tests {
     struct Doubler;
     #[mod_api::__subscriptions]
     impl Hooks for Doubler {
-        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
             r.block_part("test:gauge", Gauge);
             r.block_part("test:connector", Connector);
             r.block_part_tag("test:gauged", TagGauge);
@@ -2527,7 +2526,7 @@ pub(crate) mod tests {
     struct Chemist;
     #[mod_api::__subscriptions]
     impl Hooks for Chemist {
-        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
             let chem_vat = r.block_entity_type_key("test:chem_vat");
             r.block_entity_capability(&CHEMICALS, &chem_vat, |_, at| Some(Box::new(ChemTank(at))));
         }
@@ -2550,7 +2549,7 @@ pub(crate) mod tests {
     struct FixtureContent;
     #[mod_api::__subscriptions]
     impl Hooks for FixtureContent {
-        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
             for id in CAPABILITY_TYPES {
                 r.block_entity_type(id)
                     .blocks(&[&format!("test:{id}")])
@@ -2601,7 +2600,7 @@ pub(crate) mod tests {
         struct WeakPowerMod;
         #[mod_api::__subscriptions]
         impl Hooks for WeakPowerMod {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
                 r.block_part("minecraft:glass", WeakPower);
             }
         }
@@ -2627,7 +2626,7 @@ pub(crate) mod tests {
         struct PathMod;
         #[mod_api::__subscriptions]
         impl Hooks for PathMod {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
                 r.block_part(
                     "minecraft:glass",
                     Answers(&[
@@ -2667,7 +2666,7 @@ pub(crate) mod tests {
         struct LeaverMod;
         #[mod_api::__subscriptions]
         impl Hooks for LeaverMod {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
                 r.block_part("minecraft:glass", Leaver);
             }
         }
@@ -2683,7 +2682,7 @@ pub(crate) mod tests {
         struct RedstoneMod;
         #[mod_api::__subscriptions]
         impl Hooks for RedstoneMod {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
                 r.block_part("minecraft:glass", Connector);
             }
         }
@@ -3377,7 +3376,7 @@ pub(crate) mod tests {
         let sword = ItemResource::of(&stack("minecraft:iron_sword", 1, 0));
         let patch = |resource: &ItemResource| {
             let Some(Tag::Compound(patch)) =
-                crate::item_data::encode_components(&resource.to_stack(1))
+                horizon_items::item_data::encode_components(&resource.to_stack(1))
             else {
                 return Vec::new();
             };
@@ -4126,18 +4125,17 @@ pub(crate) mod tests {
             if self.at.side == Some(Direction::Up) {
                 return 0;
             }
-            crate::mod_api::backend_of(host)
+            crate::backend_of(host)
                 .and_then(|backend| backend.fluid_tank_count(self.at))
                 .unwrap_or(0)
         }
         fn resource(&self, host: &mut dyn ServerHost, index: usize) -> Option<FluidResource> {
             Some(FluidResource::of(
-                &crate::mod_api::backend_of(host)
-                    .and_then(|backend| backend.fluid_tank(self.at, index))?,
+                &crate::backend_of(host).and_then(|backend| backend.fluid_tank(self.at, index))?,
             ))
         }
         fn amount(&self, host: &mut dyn ServerHost, index: usize) -> u32 {
-            crate::mod_api::backend_of(host)
+            crate::backend_of(host)
                 .and_then(|backend| backend.fluid_tank(self.at, index))
                 .map_or(0, |held| held.amount)
         }
@@ -4147,7 +4145,7 @@ pub(crate) mod tests {
             index: usize,
             resource: &FluidResource,
         ) -> u32 {
-            crate::mod_api::backend_of(host).map_or(0, |backend| {
+            crate::backend_of(host).map_or(0, |backend| {
                 backend.fluid_tank_capacity(self.at, index, &resource.to_stack(1))
             })
         }
@@ -4159,7 +4157,7 @@ pub(crate) mod tests {
             resource: &FluidResource,
             amount: u32,
         ) -> u32 {
-            let Some(backend) = crate::mod_api::backend_mut_of(host) else {
+            let Some(backend) = crate::backend_mut_of(host) else {
                 return 0;
             };
             let rest = backend.fluid_tank_insert(self.at, index, resource.to_stack(amount), tx);
@@ -4177,8 +4175,8 @@ pub(crate) mod tests {
             resource: &FluidResource,
             amount: u32,
         ) -> u32 {
-            let held = crate::mod_api::backend_of(host)
-                .and_then(|backend| backend.fluid_tank(self.at, index));
+            let held =
+                crate::backend_of(host).and_then(|backend| backend.fluid_tank(self.at, index));
             if !held.is_some_and(|held| resource.matches(&held)) {
                 return 0;
             }
@@ -4187,7 +4185,7 @@ pub(crate) mod tests {
             } else {
                 0
             };
-            crate::mod_api::backend_mut_of(host)
+            crate::backend_mut_of(host)
                 .and_then(|backend| backend.fluid_tank_extract(self.at, index, amount + more, tx))
                 .map_or(0, |out| out.amount)
         }
@@ -4370,7 +4368,7 @@ pub(crate) mod tests {
     }
 
     fn potion(amount: u32, potion: &str) -> FluidStack {
-        let components = crate::item_data::StackData {
+        let components = horizon_items::item_data::StackData {
             potion: Some(Arc::from(potion)),
             ..Default::default()
         };
@@ -4502,15 +4500,15 @@ pub(crate) mod tests {
     }
     impl EnergyHandler for ModBattery {
         fn amount(&self, host: &mut dyn ServerHost) -> u32 {
-            crate::mod_api::backend_of(host)
+            crate::backend_of(host)
                 .and_then(|backend| backend.energy_amount(self.at))
                 .unwrap_or(0)
         }
         fn capacity(&self, host: &mut dyn ServerHost) -> u32 {
-            crate::mod_api::backend_of(host).map_or(0, |backend| backend.energy_capacity(self.at))
+            crate::backend_of(host).map_or(0, |backend| backend.energy_capacity(self.at))
         }
         fn insert(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
-            let went = crate::mod_api::backend_mut_of(host)
+            let went = crate::backend_mut_of(host)
                 .map_or(0, |backend| backend.energy_insert(self.at, amount, tx));
             match self.lie {
                 Lie::TakesMore => went + 100,
@@ -4522,7 +4520,7 @@ pub(crate) mod tests {
                 Lie::GivesMore => 100,
                 Lie::TakesMore => 0,
             };
-            crate::mod_api::backend_mut_of(host).map_or(0, |backend| {
+            crate::backend_mut_of(host).map_or(0, |backend| {
                 backend.energy_extract(self.at, amount + more, tx)
             })
         }

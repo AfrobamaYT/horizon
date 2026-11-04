@@ -1,8 +1,6 @@
 //! A mod crate's view of the mod API: `Hooks` is implemented with the names `mod_api` exports.
 //! The test is that this file builds with the exported event types.
-use horizon_client::mod_api::{
-    self, ClientHost, Hooks, InputKeyEvent, ModEntry, ScreenExclusionAreasEvent, winit,
-};
+use mod_api::{self, ClientHost, Hooks, InputKeyEvent, ModEntry, ScreenExclusionAreasEvent, winit};
 
 #[derive(Default)]
 struct Keys;

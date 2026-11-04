@@ -11,8 +11,8 @@ use horizon_client::{
         menu::{SlotBacking, Slots, VEHICLE_KEY_Y},
     },
     menu::{Kind, Menu},
-    mod_api::{EntityRef, MenuRef, MenuSlotBacking, PlayerRef},
 };
+use mod_api::{EntityRef, MenuRef, MenuSlotBacking, PlayerRef};
 
 impl Game<'_> {
     fn native_client_menu_name(&self, menu: MenuRef) -> Option<&str> {

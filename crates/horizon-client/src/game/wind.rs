@@ -477,12 +477,12 @@ impl Game<'_> {
             return Ok(());
         }
         if self.serving.is_some() || self.options.dedicated.is_some() {
-            let start = horizon_client::mod_api::NativeExplosionStart {
+            let start = mod_api::NativeExplosionStart {
                 dimension: self.dim.id(),
                 center,
                 radius,
                 fire: false,
-                interaction: horizon_client::mod_api::NativeBlockInteraction::TriggerBlock,
+                interaction: mod_api::NativeBlockInteraction::TriggerBlock,
                 // `DamageSources.explosion(source, owner)`.
                 damage_type: if cause.source.is_some() && cause.owner.is_some() {
                     "minecraft:player_explosion"
@@ -636,7 +636,7 @@ impl Game<'_> {
         at: glam::Vec3,
         light: u32,
         partial: f32,
-        out: &mut Vec<horizon_client::mesher::Vertex>,
+        out: &mut Vec<mod_api::render::Vertex>,
     ) {
         let Some(model) = self.entity_models.wind_charge.as_ref() else {
             return;

@@ -79,7 +79,7 @@ impl Game<'_> {
         };
         let mut menu = Box::new(Menu::new(kind));
         // Without a mod the take runs AnvilMenu.onTake's order in the click itself.
-        let hooked = !horizon_client::mod_api::mods().is_empty();
+        let hooked = !mod_api::mods().is_empty();
         menu.anvil_hook = kind == Kind::Anvil && hooked;
         // Likewise GrindstoneMenu's result onTake.
         menu.grind_hook = kind == Kind::Grindstone && hooked;
@@ -221,7 +221,7 @@ impl Game<'_> {
             let anvil_created =
                 gs.kind == StationKind::Anvil && gs.menu.anvil_created() && !cancelled;
             if anvil_created
-                && crate::mod_api::listened(crate::mod_api::HookId::AnvilUpdate)
+                && mod_api::listened(mod_api::HookId::AnvilUpdate)
                 && let Some(mut update) = gs.menu.anvil_update()
             {
                 let (uuid, entity_id) = self
@@ -482,7 +482,7 @@ impl Game<'_> {
             })
             .unwrap_or((0, 0, 0, String::new()));
         let bookcases = self.count_bookshelves(gs.pos);
-        let offers = if horizon_client::mod_api::mods().is_empty() {
+        let offers = if mod_api::mods().is_empty() {
             horizon_client::stations::enchant_offers(
                 &self.stations().enchantments,
                 self.items(),
@@ -506,7 +506,7 @@ impl Game<'_> {
             if let Some(item) = gs.menu.slot(0) {
                 for (row, original) in drawn.iter().enumerate() {
                     if let Some(original_level) = *original {
-                        let offer = horizon_client::stations::EnchantmentRow {
+                        let offer = mod_api::stations::EnchantmentRow {
                             player: guest_uuid,
                             player_entity_id: guest_entity_id,
                             row: row as i32,
@@ -593,17 +593,16 @@ impl Game<'_> {
         let enchanted_for_hook = enchanted.clone();
         let need = button as i32 + 1;
         // The enchantments the item got, for PlayerEnchantItemEvent.
-        let given =
-            crate::mod_api::listened(crate::mod_api::HookId::PlayerEnchantItem).then(|| {
-                horizon_client::stations::enchantment_list(
-                    &self.stations().enchantments,
-                    self.items(),
-                    seed,
-                    button,
-                    gs.menu.data[button],
-                    &item.item,
-                )
-            });
+        let given = mod_api::listened(mod_api::HookId::PlayerEnchantItem).then(|| {
+            horizon_client::stations::enchantment_list(
+                &self.stations().enchantments,
+                self.items(),
+                seed,
+                button,
+                gs.menu.data[button],
+                &item.item,
+            )
+        });
         // Player.onEnchantmentPerformed, and EnchantmentMenu's awardStat(ENCHANT_ITEM).
         self.as_guest(conn, |game| {
             game.enchantment_performed(need);
@@ -709,7 +708,7 @@ impl Game<'_> {
                 // other half). Single player's own player is a guest of
                 // its own host too (`lan.rs:165`), so this one path covers
                 // both single player and a LAN guest.
-                let context = horizon_client::menu::MenuButtonContext {
+                let context = mod_api::menu::MenuButtonContext {
                     player: uuid,
                     player_entity_id: entity_id,
                     pos: [pos.0, pos.1, pos.2],

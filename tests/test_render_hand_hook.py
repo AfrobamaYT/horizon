@@ -25,15 +25,11 @@ class RenderHandHookTests(unittest.TestCase):
 mod mod_api {
     pub enum HookId { RenderHand }
     pub fn listened(_: HookId) -> bool { true }
-}
-mod horizon_client {
-    pub mod mod_api {
-        pub struct NativeHandRender<'a> {
-            pub player: u128, pub player_entity_id: i32, pub hand: usize,
-            pub stack: Option<&'a i32>, pub partial: f32, pub interpolated_pitch: f32,
-            pub swing: f32, pub equip: f32, pub packed_light: u32,
-            pub translation: [f32; 3], pub rotation: [f32; 3], pub scale: f32,
-        }
+    pub struct NativeHandRender<'a> {
+        pub player: u128, pub player_entity_id: i32, pub hand: usize,
+        pub stack: Option<&'a i32>, pub partial: f32, pub interpolated_pitch: f32,
+        pub swing: f32, pub equip: f32, pub packed_light: u32,
+        pub translation: [f32; 3], pub rotation: [f32; 3], pub scale: f32,
     }
 }
 struct Model { previous_head_pitch: f32 }
@@ -41,7 +37,7 @@ struct Game { cancel: Option<usize>, calls: Vec<(usize, Option<i32>, f32, f32, f
 impl Game {
     fn own_uuid(&self) -> u128 { 7 }
     fn own_entity_id(&self) -> i32 { 9 }
-    fn native_render_hand(&mut self, render: &mut horizon_client::mod_api::NativeHandRender<'_>, canceled: &mut bool) {
+    fn native_render_hand(&mut self, render: &mut mod_api::NativeHandRender<'_>, canceled: &mut bool) {
         assert_eq!((render.player, render.player_entity_id, render.interpolated_pitch, render.packed_light), (7, 9, 2.0, 3 << 4 | 10 << 20));
         self.calls.push((render.hand, render.stack.copied(), render.partial, render.swing, render.equip));
         render.translation[0] += 2.0;

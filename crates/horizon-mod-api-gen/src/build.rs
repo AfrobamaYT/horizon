@@ -49,7 +49,7 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
         }
         Ok(())
     }
-    for path in ["native-hooks.json", "crates/horizon-client/src/mod_api.rs"] {
+    for path in ["native-hooks.json", "crates/horizon-mod-api/src/lib.rs"] {
         println!("cargo:rerun-if-changed={}", root.join(path).display());
     }
     directory(&root.join("tools/native-hook-fragments"), "json", false)?;

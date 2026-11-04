@@ -1536,7 +1536,7 @@ mod tests {
         }
         assert_eq!(
             host_param(&game, Some(true), false),
-            param("HostSide", "HostSide::of(self)")
+            param("HostSide", "super::execution_role::host_side(self)")
         );
         assert_eq!(
             super::host_param::validate(&game, "test", false, Some(false), false).unwrap_err(),
@@ -1622,10 +1622,7 @@ mod tests {
         };
         assert_eq!(fill("let _ = (player, cancel);", true), Ok(true));
         assert_eq!(
-            fill(
-                "horizon_client::mod_api::dispatch_h(self, mods(), player, cancel);",
-                true
-            ),
+            fill("mod_api::dispatch_h(self, mods(), player, cancel);", true),
             Ok(false)
         );
         for (body, in_game) in [
@@ -1689,7 +1686,7 @@ mod tests {
             "native-hooks.json",
             "tools/native-hook-fragments",
             "crates/horizon-client/src/game",
-            "crates/horizon-client/src/mod_api.rs",
+            "crates/horizon-mod-api/src/lib.rs",
         ]
         .map(str::to_owned)
         .into();
@@ -1865,7 +1862,8 @@ mod tests {
     #[test]
     fn contracted_hook_requires_dispatch_call() {
         let missing: syn::ImplItemFn = syn::parse_quote! { fn native_zoom(&self) { unrelated(); } };
-        let present: syn::ImplItemFn = syn::parse_quote! { fn native_zoom(&self) { horizon_client::mod_api::dispatch_zoom(); } };
+        let present: syn::ImplItemFn =
+            syn::parse_quote! { fn native_zoom(&self) { mod_api::dispatch_zoom(); } };
         assert!(!super::has_call(&missing.block, "dispatch_zoom"));
         assert!(super::has_call(&present.block, "dispatch_zoom"));
     }

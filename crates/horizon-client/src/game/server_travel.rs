@@ -986,13 +986,13 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mod_api::ServerHost;
+    use mod_api::ServerHost;
     use std::sync::Arc;
 
     #[test]
     #[ignore = "needs prepared resources"]
     fn arriving_vehicle_is_announced_once_after_destination_entities() {
-        use crate::mod_api::{self, EntityJoinLevelEvent, Flow, Hooks};
+        use mod_api::{self, EntityJoinLevelEvent, Flow, Hooks};
         use std::sync::Mutex;
         struct Observer(Arc<Mutex<Vec<u32>>>);
         #[mod_api::__subscriptions]

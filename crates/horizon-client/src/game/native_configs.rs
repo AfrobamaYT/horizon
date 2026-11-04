@@ -10,80 +10,14 @@
 //! (`native_config_reloading`). A server's configs are dropped when it stops
 //! (`native_config_unloading`).
 use super::Game;
-use horizon_client::mod_api::ConfigPath;
+use mod_api::ConfigPath;
+pub use mod_api::game::{NativeConfig, NativeConfigFile, NativeConfigKind};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 /// How often the files' modification times are read.
 const CHECK_EVERY: Duration = Duration::from_secs(1);
-
-/// Which side reads a config and when (NeoForge's `ModConfig.Type`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum NativeConfigKind {
-    /// The window only, when the game starts.
-    Client,
-    /// Once per process: the window when the game starts, or a dedicated
-    /// server when it starts. A single player's server thread shares the
-    /// window's.
-    Common,
-    /// The server, before `native_server_about_to_start`, for each world it
-    /// opens: the world's `serverconfig/<file>` when there is one, else
-    /// `config/<file>`.
-    Server,
-}
-
-impl NativeConfigKind {
-    /// The default file name's suffix, as NeoForge's.
-    fn suffix(self) -> &'static str {
-        match self {
-            Self::Client => "client",
-            Self::Common => "common",
-            Self::Server => "server",
-        }
-    }
-}
-
-/// A config a mod registers: its kind, its file in `config/` and the text
-/// written there when the file is missing.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct NativeConfig {
-    pub mod_id: String,
-    pub kind: NativeConfigKind,
-    /// A path relative to `config/`: `<mod id>-<kind>.toml` unless named.
-    pub file: String,
-    pub default: String,
-}
-
-impl NativeConfig {
-    /// `config/<mod_id>-<kind>.toml`, `default` when missing.
-    pub fn new(mod_id: &str, kind: NativeConfigKind, default: &str) -> Self {
-        Self {
-            mod_id: mod_id.to_owned(),
-            kind,
-            file: format!("{mod_id}-{}.toml", kind.suffix()),
-            default: default.to_owned(),
-        }
-    }
-    /// The same in another file of `config/`, such as `mymod/machines.toml`.
-    pub fn file(mut self, file: &str) -> Self {
-        file.clone_into(&mut self.file);
-        self
-    }
-}
-
-/// A config's file as the game read it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct NativeConfigFile {
-    pub mod_id: String,
-    pub kind: NativeConfigKind,
-    /// The registered name, relative to `config/` (or to a world's
-    /// `serverconfig/`, where that copy was read).
-    pub file: String,
-    pub text: String,
-}
 
 /// A loaded config, where it was read and what its file looked like then.
 struct Tracked {

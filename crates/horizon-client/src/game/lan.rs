@@ -1352,7 +1352,7 @@ impl Game<'_> {
             .then(|| horizon_client::lod_net::Service::new(net.lod_distance, biome_names.clone()));
         let lan = Lan::start_with(sync.clone(), net)?;
         let mut hub = Hub::new(lan, sync, encoder, config);
-        hub.sync_attachments = !crate::mod_api::mods().is_empty();
+        hub.sync_attachments = !mod_api::mods().is_empty();
         hub.flat_world = self.world_flat;
         hub.debug_world = self.world_debug;
         let port = hub.lan.port;
@@ -2138,7 +2138,7 @@ impl Game<'_> {
                     self.lan_flight_toggled(conn, flying);
                 }
                 HostEvent::Sneak { conn, sneaking } => {
-                    if !crate::mod_api::listened(crate::mod_api::HookId::PlayerToggleSneak) {
+                    if !mod_api::listened(mod_api::HookId::PlayerToggleSneak) {
                         continue;
                     }
                     if let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) {
@@ -2154,7 +2154,7 @@ impl Game<'_> {
                     name,
                     reason,
                 } => {
-                    if !crate::mod_api::listened(crate::mod_api::HookId::PlayerKicked) {
+                    if !mod_api::listened(mod_api::HookId::PlayerKicked) {
                         continue;
                     }
                     // The same poll can have removed the guest (their `Left`): the mods hear the
@@ -2172,7 +2172,7 @@ impl Game<'_> {
                     }
                 }
                 HostEvent::Input { conn, flags } => {
-                    if !crate::mod_api::listened(crate::mod_api::HookId::PlayerInput) {
+                    if !mod_api::listened(mod_api::HookId::PlayerInput) {
                         continue;
                     }
                     if let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) {
@@ -2186,8 +2186,8 @@ impl Game<'_> {
                     if let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) {
                         let (uuid, entity_id, name) = (g.uuid, g.entity_id, g.name.clone());
                         // The packet's raw ids become the enums once, here.
-                        let old = horizon_client::mod_api::NativeClientInfo::from(&*old);
-                        let new = horizon_client::mod_api::NativeClientInfo::from(&*new);
+                        let old = client_info(&old);
+                        let new = client_info(&new);
                         self.native_client_information_updated(uuid, entity_id, &name, &old, &new);
                     }
                 }
@@ -2266,7 +2266,7 @@ impl Game<'_> {
                 self.ui.rules.bool("player_movement_check"),
                 self.ui.rules.bool("elytra_movement_check"),
             );
-            host.hub.mods_loaded = !horizon_client::mod_api::mods().is_empty();
+            host.hub.mods_loaded = !mod_api::mods().is_empty();
             let pass = self.level_pass;
             let mut events = if pass.first {
                 horizon_client::spans::time("lan_poll", || host.hub.poll(&mut ctx))
@@ -2560,7 +2560,7 @@ impl Game<'_> {
                 // (`tick_server`): the network is read once, before the first.
                 // Player packets may already have been drained before
                 // scheduled block ticks (`tick_lan_packets`).
-                host.hub.mods_loaded = !horizon_client::mod_api::mods().is_empty();
+                host.hub.mods_loaded = !mod_api::mods().is_empty();
                 let pass = self.level_pass;
                 let mut events = if pass.first && !pass.packets_drained {
                     host.hub.poll(&mut ctx)
@@ -3148,7 +3148,7 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        if !crate::mod_api::listened(crate::mod_api::HookId::EntityPoseChange) {
+        if !mod_api::listened(mod_api::HookId::EntityPoseChange) {
             host.poses.clear();
             return;
         }
@@ -3365,5 +3365,34 @@ mod tests {
                 "mainhand", "offhand", "head", "chest", "legs", "feet", "body", "saddle"
             ]
         );
+    }
+}
+
+/// A client's settings as the mod API names them.
+fn client_info(
+    i: &horizon_protocol::packets::configuration::ClientInformation,
+) -> mod_api::NativeClientInfo {
+    mod_api::NativeClientInfo {
+        language: i.language.clone(),
+        view_distance: i.view_distance,
+        chat_visibility: match i.chat_visibility.rem_euclid(3) {
+            0 => mod_api::NativeChatVisibility::Full,
+            1 => mod_api::NativeChatVisibility::System,
+            _ => mod_api::NativeChatVisibility::Hidden,
+        },
+        chat_colors: i.chat_colors,
+        model_customisation: i.model_customisation,
+        main_hand: if i.main_hand == 1 {
+            mod_api::NativeMainHand::Right
+        } else {
+            mod_api::NativeMainHand::Left
+        },
+        text_filtering: i.text_filtering,
+        allows_listing: i.allows_listing,
+        particle_status: match i.particle_status.rem_euclid(3) {
+            0 => mod_api::NativeParticleStatus::All,
+            1 => mod_api::NativeParticleStatus::Decreased,
+            _ => mod_api::NativeParticleStatus::Minimal,
+        },
     }
 }

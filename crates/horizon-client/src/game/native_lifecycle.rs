@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::{Game, execution_role::ExecutionRole};
 // Their old home, for mixin code that names them here.
-pub(super) use horizon_client::mod_api::{
+pub(super) use mod_api::{
     NativeAuthority, NativeLifecycleContext, NativeTickId, NativeWorldEpoch, ServerTickPhase,
     WorldPhase,
 };

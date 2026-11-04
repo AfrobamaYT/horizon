@@ -7,9 +7,9 @@ use horizon_client::{
     items::ItemStack,
     mesher::Vertex,
     mobs::leash::{self, Holder, Pending},
-    mod_api::NativeLootDrops,
 };
 use horizon_world::nbt::Tag;
+use mod_api::NativeLootDrops;
 
 /// `Vec3.yRot(angle)`.
 /// `LocalPlayer.getRopeHoldPosition`'s `Mth.lerp(partialTick * 0.5F, getYRot(),

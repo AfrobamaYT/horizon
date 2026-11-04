@@ -2,8 +2,6 @@
 //! fixed places of a frame, which a mod's mixins hook like those of
 //! `horizon-client/src/game/native_hooks.rs`, and listed with them in `native-hooks.json`.
 
-use super::Vertex;
-use super::pack_draw::EntitySpan;
 use glam::{DVec3, Mat4};
 use horizon_client_core::subscribers::Subscribers;
 use std::sync::{
@@ -30,14 +28,14 @@ struct RenderInstalled {
     subscribers: Subscribers,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 thread_local! {
     static TEST_RENDERERS: std::cell::Cell<Option<&'static RenderInstalled>> =
         const { std::cell::Cell::new(None) };
 }
 
 fn render_installed() -> Option<&'static RenderInstalled> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     if let Some(installed) = TEST_RENDERERS.get() {
         return Some(installed);
     }
@@ -431,187 +429,74 @@ mod tests {
             "render_needs dispatch: before {baseline:.2} ns, subscribed {subscribed:.2} ns, empty {empty:.2} ns per call ({iterations} iterations)"
         );
     }
-
-    /// A mod samples `BlockSpriteArrays` as the renderer hands them over: a layer of the second
-    /// array through its view, texels sharp and repeating with the nearest sampler.
-    #[test]
-    fn a_pass_samples_a_sprite_layer_sharp() {
-        let instance = crate::gfx::test_gpu::instance();
-        let Some((device, queue)) =
-            pollster::block_on(instance.request_adapter(&Default::default()))
-                .ok()
-                .and_then(|adapter| {
-                    pollster::block_on(adapter.request_device(&Default::default())).ok()
-                })
-        else {
-            return;
+}
+/// An entity, item and effect vertex (the entity pipelines), with a face
+/// normal for `entity.wgsl`'s directional light.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Vertex {
+    pub pos: [f32; 3],
+    pub uv: [f32; 2],
+    pub layer: u32,
+    /// RGBA8: tint multiplied by directional shade and ambient occlusion.
+    pub color: u32,
+    /// Smooth light, 16x fixed point: sky in bits 0..8, block in bits 8..16.
+    pub light: u32,
+    /// RGBA8_SNORM face normal; w = -127 for two-sided lighting, 0 to keep baked/unlit colour,
+    /// [`CULL_BACK`] to keep it and also drop back-facing pixels.
+    pub normal: [i8; 4],
+    /// The `GLINT_TEXTURING` atlas UV for a foil item quad; zero elsewhere.
+    pub glint_uv: [f32; 2],
+}
+/// Where a run of `Frame::entities` begins, and what it is (slice 7): the run lasts until the
+/// next span. Recorded only while a shader pack draws entities, so Horizon's own frames carry
+/// none; Horizon itself still draws the whole list at once.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EntitySpan {
+    /// The first vertex.
+    pub start: u32,
+    /// The render stage (5.4: `ENTITIES`, `BLOCK_ENTITIES`, `PARTICLES`, `DESTROY`), which picks
+    /// the program.
+    pub stage: u32,
+    /// `entityId` for entities, `blockEntityId` for block entities (5.3), else 0.
+    pub id: i32,
+    /// An entity part that blends (a name tag, a shadow): `gbuffers_entities_translucent`.
+    pub translucent: bool,
+    /// Hidden from the camera (Horizon's entity culling, the player in first person): only the
+    /// shadow pass draws it.
+    pub hidden: bool,
+    /// The local player (`shadowPlayer`).
+    pub player: bool,
+    /// A block entity whose block emits light (`shadowLightBlockEntities`).
+    pub emissive: bool,
+}
+impl EntitySpan {
+    /// Marks vertices `start..end` of `spans`' list (one entity) as hidden: the span covering
+    /// `start` is split there, the spans inside are hidden, and the geometry after `end` goes
+    /// on in the last span's kind. False when no span covers `start`.
+    pub fn hide(spans: &mut Vec<EntitySpan>, start: usize, end: usize) -> bool {
+        let Some(i) = spans.iter().rposition(|s| s.start as usize <= start) else {
+            return false;
         };
-        let gl = device.adapter_info().backend == wgpu::Backend::Gl;
-        // two arrays of two 2 by 2 layers; array 1's layer 1 red, green / blue, white
-        let layers = super::super::array_layers(2, gl);
-        let quad = [
-            [255, 0, 0, 255],
-            [0, 255, 0, 255],
-            [0, 0, 255, 255],
-            [255; 4],
-        ];
-        let textures: Vec<wgpu::Texture> = (0..2)
-            .map(|array| {
-                let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: None,
-                    size: wgpu::Extent3d {
-                        width: 2,
-                        height: 2,
-                        depth_or_array_layers: layers,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                });
-                let mut texels = vec![0u8; 16 * layers as usize];
-                if array == 1 {
-                    texels[16..32].copy_from_slice(quad.as_flattened());
-                }
-                queue.write_texture(
-                    texture.as_image_copy(),
-                    &texels,
-                    wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(8),
-                        rows_per_image: Some(2),
-                    },
-                    texture.size(),
-                );
-                texture
-            })
-            .collect();
-        let unused = textures[0].create_view(&wgpu::TextureViewDescriptor {
-            dimension: Some(wgpu::TextureViewDimension::D2Array),
-            ..Default::default()
-        });
-        let views = super::super::sprite_views(&textures, &unused, Some(1));
-        let nearest = device.create_sampler(&super::super::SPRITE_NEAREST);
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(
-                "@group(0) @binding(0) var sprites: texture_2d_array<f32>;
-                 @group(0) @binding(1) var sprites_1: texture_2d_array<f32>;
-                 @group(0) @binding(2) var nearest: sampler;
-                 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
-                     return vec4(f32(i & 1u) * 4.0 - 1.0, f32(i >> 1u) * 4.0 - 1.0, 0.0, 1.0);
-                 }
-                 @fragment fn fs(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
-                     // inside each texel, and past the edge (repeating); the last reads array 0
-                     let uv = array(vec2(1.3, 0.2), vec2(0.7, 0.45), vec2(-0.8, 0.9), vec2(0.6, 0.6));
-                     let x = u32(at.x);
-                     if x == 4u {
-                         return textureSampleLevel(sprites, nearest, vec2(0.3), 1, 0.0);
-                     }
-                     return textureSampleLevel(sprites_1, nearest, uv[x], 1, 0.0);
-                 }"
-                .into(),
-            ),
-        });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: None,
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: Default::default(),
-            depth_stencil: None,
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::TextureFormat::Rgba8Unorm.into())],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
-        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &pipeline.get_bind_group_layout(0),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&views[0]),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&views[1]),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&nearest),
-                },
-            ],
-        });
-        let target = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width: 5,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let out = device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: u64::from(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT),
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder = device.create_command_encoder(&Default::default());
-        {
-            let view = target.create_view(&Default::default());
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-            pass.set_pipeline(&pipeline);
-            pass.set_bind_group(0, &group, &[]);
-            pass.draw(0..3, 0..1);
+        let after = spans[spans.len() - 1];
+        if spans[i].start as usize != start {
+            let split = EntitySpan {
+                start: start as u32,
+                ..spans[i]
+            };
+            spans.insert(i + 1, split);
         }
-        encoder.copy_texture_to_buffer(
-            target.as_image_copy(),
-            wgpu::TexelCopyBufferInfo {
-                buffer: &out,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT),
-                    rows_per_image: None,
-                },
-            },
-            target.size(),
-        );
-        queue.submit([encoder.finish()]);
-        out.slice(..).map_async(wgpu::MapMode::Read, |r| r.unwrap());
-        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-        let texels = out.slice(..).get_mapped_range().unwrap()[..20].to_vec();
-        let mut expected = quad.as_flattened().to_vec();
-        expected.extend([0, 0, 0, 0]);
-        assert_eq!(texels, expected);
+        for s in spans.iter_mut().skip(i) {
+            if s.start as usize >= start {
+                s.hidden = true;
+            }
+        }
+        if end > start {
+            spans.push(EntitySpan {
+                start: end as u32,
+                ..after
+            });
+        }
+        true
     }
 }

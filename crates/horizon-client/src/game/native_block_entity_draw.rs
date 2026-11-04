@@ -2,6 +2,7 @@
 //! (vanilla's `BlockEntityRenderer.submit`) gets a [`BlockEntityDraw`], whose
 //! pose stack (`PoseStack`) places what the helpers here add to the entity
 //! batch, as vanilla's block entity renderers draw.
+pub use mod_api::game::CubeFace;
 
 use super::{Dim, Game};
 use glam::{DVec3, Mat4, Quat, Vec3};
@@ -168,15 +169,6 @@ impl BlockEntityDraw {
             });
         }
     }
-}
-
-/// One face of a `native_draw_cube` box: its sprite (`mymod:entity/cog`,
-/// `mymod:block/casing`) and its UVs in texels of 16 per side, as a model
-/// face's `uv` (none takes the box's own, as a model's default).
-#[derive(Clone, Copy, Debug)]
-pub struct CubeFace<'a> {
-    pub sprite: &'a str,
-    pub uv: Option<[f32; 4]>,
 }
 
 /// 0xRRGGBB `tint` times `brightness`, as an opaque vertex colour.

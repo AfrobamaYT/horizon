@@ -12,15 +12,15 @@ use horizon_client::{
     Result,
     containers::{BlockEntity, HOPPER_SLOTS, ModContainer},
     items::{ItemStack, Items},
-    mod_api::{
-        self, BlockSide, Capability, ENTITY_AUTOMATION, EntityRef, ItemResource, ResourceHandler,
-    },
     world::World,
 };
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
 use horizon_world::{
     level::{Behaviours, LevelAccess},
     registry::BlockStateId,
+};
+use mod_api::{
+    self, BlockSide, Capability, ENTITY_AUTOMATION, EntityRef, ItemResource, ResourceHandler,
 };
 use std::{ops::ControlFlow, sync::Arc};
 
@@ -950,7 +950,7 @@ impl Game<'_> {
     ) -> u32 {
         let resource = ItemResource::of(stack);
         mod_api::run_transaction(self, |game, tx| {
-            let host: &mut dyn horizon_client::mod_api::ServerHost = game;
+            let host: &mut dyn mod_api::ServerHost = game;
             let went = part.insert_any(host, tx, &resource, stack.count);
             match part.checked(went, stack.count, &at) {
                 Some(0) | None => Err(()),
@@ -1021,7 +1021,7 @@ impl Game<'_> {
                 continue;
             }
             let moved = mod_api::run_transaction(self, |game, tx| {
-                let host: &mut dyn horizon_client::mod_api::ServerHost = game;
+                let host: &mut dyn mod_api::ServerHost = game;
                 let came = part.extract(host, tx, slot, &resource, 1);
                 if part.checked(came, 1, &at) != Some(1) {
                     return Err(());
@@ -1111,7 +1111,7 @@ impl Game<'_> {
         source: &View,
         destination: &View,
     ) -> bool {
-        if !crate::mod_api::listened(crate::mod_api::HookId::InventoryMoveItem) {
+        if !mod_api::listened(mod_api::HookId::InventoryMoveItem) {
             return false;
         }
         let containers = self.containers();
@@ -1239,7 +1239,7 @@ impl Game<'_> {
             // room, the setItem putting the bone meal back into the detached
             // container (whose bone meal is lost with it).
             let bone_meal = c.bone_meal.clone();
-            if crate::mod_api::listened(crate::mod_api::HookId::InventoryMoveItem) {
+            if mod_api::listened(mod_api::HookId::InventoryMoveItem) {
                 let mut cancel = false;
                 self.native_inventory_move_item(
                     [above.0, above.1, above.2],
@@ -2069,8 +2069,8 @@ mod part_front_tests {
     use horizon_client::chunk::Chunk;
     use horizon_client::containers::BlockEntity;
     use horizon_client::items::ItemStack;
-    use horizon_client::mod_api::NativeBlockUpdateFlags;
     use horizon_core::position::BlockPos;
+    use mod_api::NativeBlockUpdateFlags;
     use std::sync::Arc;
 
     fn stack(item: &str, count: u32) -> ItemStack {

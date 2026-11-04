@@ -37,7 +37,7 @@ fn item_model_property(
 }
 ```
 
-`ClientHost`, `ItemModelPropertyEvent`, and `StackView` are exported by `horizon_client::mod_api`. The stack is borrowed,
+`ClientHost`, `ItemModelPropertyEvent`, and `StackView` are exported by `mod_api`. The stack is borrowed,
 including for nested bundle items: `item`, `count`, explicit component `patch` (not merged
 defaults), and the runtime bundle selection. Listeners run in mod order; later answers win.
 Use `"property": "example:charged"` with both `on_true` and `on_false` in the item's
@@ -602,7 +602,7 @@ mob's death loot; on other rolls `place` is `None`.
 ### Recipe book category declarations (first slice of #5501)
 
 The `recipe_book_categories` hook declares recipe book categories. Trait mods import
-`RecipeBookCategory` from `horizon_client::mod_api` and append declarations in
+`RecipeBookCategory` from `mod_api` and append declarations in
 `Hooks::recipe_book_categories`:
 
 ```rust,ignore
@@ -1087,7 +1087,7 @@ for a key whose id or type does not match a registration, `listener` gives `None
 
 ```rust,ignore
 use std::sync::{Arc, RwLock};
-use horizon_client::mod_api::{
+use mod_api::{
     self, AddServerReloadListenersEvent, FileToIdConverter, Host, Hooks, Identifier,
     ReloadApply, ServerReloadContext, ReloadResourceError, ServerReloadListener,
 };
@@ -1165,7 +1165,7 @@ own live state.
 
 ```rust,ignore
 use std::sync::{Arc, RwLock};
-use horizon_client::mod_api::{
+use mod_api::{
     self, AddClientReloadListenersEvent, ClientHost, ClientReloadContext, ClientReloadListener,
     FileToIdConverter, Hooks, Identifier, ReloadApply, ReloadResourceError,
 };
@@ -3235,7 +3235,7 @@ The root Rust package depends on `horizon-client` for `mod_api`. Its root `src/l
 `impl Hooks` with the attribute:
 
 ```rust,ignore
-use horizon_client::mod_api::{self, Hooks};
+use mod_api::{self, Hooks};
 
 #[derive(Default)]
 struct Mod;
@@ -3309,7 +3309,7 @@ The generated trait method is `inject_<mod_id>_<trait_method>`. Its event, as a 
 is that name in CamelCase plus `Event`
 (`InjectExampleBeforeTickEvent`), with the bindings as fields under the same rules. Implement it on the object
 returned by that mod's generated factory; it is called only for that mod's object. Types must be
-public and available from both the target and `horizon_client::mod_api`. The kinds are HEAD listen,
+public and available from both the target and `mod_api`. The kinds are HEAD listen,
 or HEAD with `cancellable = true` for a unit-returning target (that method returns `Flow`, and
 `Flow::Cancel` returns early from the target), and RETURN, MODIFY_ARG and MODIFY_EXPRESSION_VALUE.
 For those three, the binding whose `value` is `$value` (its type is the returned, argument or
@@ -3348,7 +3348,7 @@ The launcher stages declarations in `.horizon-mod-api-injections.json`; Cargo co
 `HORIZON_MOD_API_INJECTIONS`. The declarations stay with cached mixin output, and generated Rust lives
 only in Cargo's `OUT_DIR`. A player build does not edit generated Rust in the source tree or run rustfmt.
 
-A linked trait mod implements `horizon_client::mod_api::Hooks`. Mixin injections run first.
+A linked trait mod implements `mod_api::Hooks`. Mixin injections run first.
 An injection that returns early skips trait mods. A claimed cancellation also skips trait mods.
 Otherwise, trait mods run in their supplied order. The first `Cancel` stops dispatch.
 For replacement hooks, the first `Some` wins. Collection hooks call every mod. Receiverless hooks have no `Host`.
@@ -3436,8 +3436,8 @@ With the `COUNTER` declaration from [Server attachments](#server-attachments) in
 
 ```rust
 fn count(game: &mut crate::game::Game<'_>) {
-    let host: &mut dyn horizon_client::mod_api::Host = game;
-    let holder = horizon_client::mod_api::Holder::Level;
+    let host: &mut dyn mod_api::Host = game;
+    let holder = mod_api::Holder::Level;
     if let Ok(old) = COUNTER.get(&mut *host, holder) {
         let _ = COUNTER.set(host, holder, old + 1);
     }
@@ -3448,7 +3448,7 @@ fn count(game: &mut crate::game::Game<'_>) {
 the same host exposes typed helpers.
 
 On a `GameLevel` method that takes `&mut self` (`native_random_tick`, `native_tick_block`, `native_perform_bonemeal`,
-`native_is_bonemeal_success`), bind `{ name = "level", ty = "&mut dyn crate::mod_api::LevelRandomHost", value = "&mut *self" }`
+`native_is_bonemeal_success`), bind `{ name = "level", ty = "&mut dyn mod_api::LevelRandomHost", value = "&mut *self" }`
 for attachments and `random()`. Scheduling and `set_block_property` stay on the `LevelTicksHost` and `LevelWriteHost` the
 hook points pass; `is_bonemeal_success` gets only a `LevelRandomHost`.
 
@@ -3462,7 +3462,7 @@ id = "count"
 target = "horizon_client::game::Game<'_>::tick_mobs"
 kind = "HEAD"
 trait_method = "count"
-bindings = [{ name = "host", ty = "&mut dyn crate::mod_api::Host", value = "&mut *self" }]
+bindings = [{ name = "host", ty = "&mut dyn mod_api::Host", value = "&mut *self" }]
 ```
 
 ```rust
@@ -3831,7 +3831,7 @@ It restores the previous list even if the closure panics. The test allocation is
 a static slice. Call `dispatch_<hook>(&mut host, args…)` inside the closure to build the event as the game does:
 
 ```rust
-use horizon_client::mod_api::{self, Hooks, Host, HostSide, ServerHost, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
+use mod_api::{self, Hooks, Host, HostSide, ServerHost, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 struct HostDouble;
@@ -3896,7 +3896,7 @@ keeps a copy for any holder it is asked about (see the sync paragraph below).
 without a codec) and `InvalidSyncPolicy` (sync without a codec).
 
 ```rust
-use horizon_client::mod_api::{AttachmentCodec, AttachmentError, AttachmentType, Compound, Holder, Tag};
+use mod_api::{AttachmentCodec, AttachmentError, AttachmentType, Compound, Holder, Tag};
 
 static COUNTER: AttachmentType<i32> = AttachmentType {
     namespace: "example", name: "counter", default: || 0,

@@ -3,12 +3,61 @@
 //! Trait mods are process-wide, like mixin module statics.
 //! Hooks use `&self + Send + Sync` for shared and reentrant calls; see `docs/native-mods.md`.
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
+extern crate self as mod_api;
+#[doc(hidden)]
+pub mod biome;
+#[doc(hidden)]
+pub mod block_sprites;
+#[doc(hidden)]
+pub mod camera;
+#[doc(hidden)]
+pub mod containers;
+#[doc(hidden)]
+pub mod crafting;
+#[doc(hidden)]
+pub mod crash;
+#[doc(hidden)]
+pub mod extras;
+#[doc(hidden)]
+pub mod extras_hud;
+#[doc(hidden)]
+pub mod first_person;
+#[doc(hidden)]
+pub mod fog;
+#[doc(hidden)]
+pub mod game;
+#[doc(hidden)]
+pub mod health;
+#[doc(hidden)]
+pub mod hud_layout;
+#[doc(hidden)]
+pub mod item_tooltip;
+#[doc(hidden)]
+pub mod menu;
+#[doc(hidden)]
+pub mod merchant;
+#[doc(hidden)]
+pub mod mesher;
+#[doc(hidden)]
+pub mod mobs;
+#[doc(hidden)]
+pub mod mod_chunk_tickets;
+#[doc(hidden)]
+pub mod music;
+#[doc(hidden)]
+pub mod particles;
+#[doc(hidden)]
+pub mod recipe_book;
+#[doc(hidden)]
+pub mod render;
+#[doc(hidden)]
+pub mod stations;
 use std::sync::{Arc, OnceLock};
 
 mod phase;
 pub use horizon_mods::Side;
 pub(crate) use phase::install_packages;
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) use phase::with_test_packages;
 pub use phase::{
     DataLoadContext, DataLoadOrigin, LoadedMods, PackageInfo, PackageKind, RegistrationContext,
@@ -40,47 +89,46 @@ pub use server_reload::{
 pub use crate::biome::{BiomeColors, SpawnEntry};
 pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
-pub use crate::command::Suggestion;
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
 pub use crate::crafting::{Ingredient, RecipeFile};
 pub use crate::extras::Corner;
 pub use crate::extras_hud::Corners;
 pub use crate::first_person::Hand;
 pub use crate::fog::{FogData, FogType};
-pub use crate::game::native_block_entity_draw::{BlockEntityDraw, CubeFace};
 pub use crate::game::{
-    NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeConfig,
+    CubeFace, NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeConfig,
     NativeConfigFile, NativeConfigKind, NativeDataMapType, NativeExperienceOrb, NativeFalling,
     NativeHeightmap, NativeHeldItem, NativeHit, NativeMapDecoration, NativeMapInfo,
     NativeMobRender, NativeModEvent, NativePlayerRender, NativeShake, PhantomSpawnResult,
     SleepProblem,
 };
-pub use crate::gamerules::Value as GameRuleValue;
-pub use crate::gfx::native_render::{
-    BlockSpriteArrays, RenderHookId, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn,
-    WorldDrawnEvent, render_hook_ids, wgpu,
-};
 pub use crate::health::{DamageContainer, HurtSource, Reduction, ShieldBlock, Victim};
-pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::item_tooltip::TooltipDisplay;
-pub use crate::items::ItemStack;
 pub use crate::menu::{LogicalSide, StackedOnOther};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
-pub use crate::mobs::data::PathComputationType;
+pub use crate::mobs::PathComputationType;
 pub use crate::mod_chunk_tickets::TicketOwner as NativeTicketOwner;
 pub use crate::mod_chunk_tickets::{TicketSet, TicketValidation};
 pub use crate::music::{Music, MusicLayer};
-pub use crate::particles::{ParticleOptions, ParticleType};
+pub use crate::particles::ParticleOptions;
 pub use crate::recipe_book::RecipeBookCategory;
-pub use crate::text::Text;
+pub use crate::render::{
+    BlockSpriteArrays, RenderHookId, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn,
+    WorldDrawnEvent, render_hook_ids, wgpu,
+};
 pub use horizon_assets::item_model::{DisplayContext, StackView};
+pub use horizon_client_core::gamerules::Value as GameRuleValue;
+pub use horizon_client_core::particle_type::ParticleType;
+pub use horizon_client_core::suggestion::Suggestion;
+pub use horizon_client_core::text::Text;
 pub use horizon_core::{
     geometry::Direction,
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
+pub use horizon_items::items::ItemStack;
 pub use horizon_items::items::TagRegistry;
 pub use horizon_world::consumable::UseAnimation;
 pub use horizon_world::player_inventory::EquipmentSlot;
@@ -100,21 +148,21 @@ pub use serde_json;
 /// The private handle cannot be constructed or taken out by a mod.
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::{BlockEntityTickEvent, ModBlockEntity};
+/// use mod_api::{BlockEntityTickEvent, ModBlockEntity};
 /// fn replace(event: &mut BlockEntityTickEvent<'_>) {
 ///     *event.entity = ModBlockEntity::default();
 /// }
 /// ```
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::BlockEntityTickEvent;
+/// use mod_api::BlockEntityTickEvent;
 /// fn take(event: &mut BlockEntityTickEvent<'_>) {
 ///     let _ = std::mem::take(&mut event.entity);
 /// }
 /// ```
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::{BlockEntityTickEvent, ModBlockEntity};
+/// use mod_api::{BlockEntityTickEvent, ModBlockEntity};
 /// fn access(event: &mut BlockEntityTickEvent<'_>) {
 ///     let _: &mut ModBlockEntity = event.entity.entity;
 /// }
@@ -1666,34 +1714,6 @@ pub struct NativeClientInfo {
     pub particle_status: NativeParticleStatus,
 }
 
-impl From<&horizon_protocol::packets::configuration::ClientInformation> for NativeClientInfo {
-    fn from(i: &horizon_protocol::packets::configuration::ClientInformation) -> Self {
-        Self {
-            language: i.language.clone(),
-            view_distance: i.view_distance,
-            chat_visibility: match i.chat_visibility.rem_euclid(3) {
-                0 => NativeChatVisibility::Full,
-                1 => NativeChatVisibility::System,
-                _ => NativeChatVisibility::Hidden,
-            },
-            chat_colors: i.chat_colors,
-            model_customisation: i.model_customisation,
-            main_hand: if i.main_hand == 1 {
-                NativeMainHand::Right
-            } else {
-                NativeMainHand::Left
-            },
-            text_filtering: i.text_filtering,
-            allows_listing: i.allows_listing,
-            particle_status: match i.particle_status.rem_euclid(3) {
-                0 => NativeParticleStatus::All,
-                1 => NativeParticleStatus::Decreased,
-                _ => NativeParticleStatus::Minimal,
-            },
-        }
-    }
-}
-
 /// A block face for a level support query.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1983,14 +2003,6 @@ pub enum NativeEffectDamage {
     /// The Wither effect's damage.
     Wither,
 }
-impl NativeEffectDamage {
-    pub(crate) fn mob_kind(self) -> crate::mobs::DamageKind {
-        match self {
-            Self::Magic => crate::mobs::DamageKind::Magic,
-            Self::Wither => crate::mobs::DamageKind::Wither,
-        }
-    }
-}
 
 /// A change requested by an effect tick, applied after its hooks return.
 #[doc(hidden)]
@@ -2261,14 +2273,14 @@ pub mod testing {
 /// Install the process-wide ordered list of mods.
 pub(crate) fn install(mods: Mods) -> &'static Installed {
     let installed = Installed::new(mods);
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     {
         // Tests can replace the list; mods() keeps its static slice lifetime.
         let installed = Box::leak(Box::new(installed));
         TEST_MODS.set(Some(installed));
         installed
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "testing")))]
     {
         assert!(MODS.set(installed).is_ok(), "trait mods are installed once");
         MODS.get().unwrap()
@@ -2427,22 +2439,15 @@ impl BlockHit {
 /// Opening one is reserved for this API:
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::{Backend, BackendRef};
+/// use mod_api::{Backend, BackendRef};
 /// fn reach(backend: BackendRef<'_>) { let _: &dyn Backend = backend.open(); }
 /// ```
 ///
 /// So is reading the backend it holds:
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::BackendRef;
+/// use mod_api::BackendRef;
 /// fn reach(backend: BackendRef<'_>) { let _ = backend.inner; }
-/// ```
-///
-/// And building one:
-///
-/// ```compile_fail
-/// use horizon_client::mod_api::BackendRef;
-/// fn build() { let _ = BackendRef::of; }
 /// ```
 #[doc(hidden)]
 pub struct BackendRef<'a> {
@@ -2454,7 +2459,7 @@ pub struct BackendRef<'a> {
 /// method of its own:
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::BackendMutRef;
+/// use mod_api::BackendMutRef;
 /// fn reach(backend: BackendMutRef<'_>) { backend.set_loaded(false); }
 /// ```
 #[doc(hidden)]
@@ -2491,7 +2496,7 @@ impl<'a> BackendMutRef<'a> {
 
 /// The read backend behind `host`, or `None` where the host has none; the
 /// caller answers its typed refusal instead of running on.
-pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
+pub(crate) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
     host.backend().map(|wrapper| wrapper.open())
 }
 
@@ -2499,7 +2504,7 @@ pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
 ///
 /// A mutable client hook can use client services:
 /// ```
-/// use horizon_client::mod_api::{self, ClientHost, Hooks, InputKeyEvent};
+/// use mod_api::{self, ClientHost, Hooks, InputKeyEvent};
 /// #[derive(Default)]
 /// struct ScreenMod;
 /// #[mod_api::horizon_mod]
@@ -2512,7 +2517,7 @@ pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
 ///
 /// Side enums are non-exhaustive: external matches must include a wildcard.
 /// ```compile_fail
-/// use horizon_client::mod_api::HostSide;
+/// use mod_api::HostSide;
 /// fn side(host: HostSide<'_>) {
 ///     match host { HostSide::Server(_) => (), HostSide::Client(_) => () }
 /// }
@@ -2520,32 +2525,28 @@ pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
 ///
 /// Wrong-side services do not compile:
 /// ```compile_fail
-/// use horizon_client::mod_api::ClientHost;
+/// use mod_api::ClientHost;
 /// fn wrong(host: &mut dyn ClientHost) { host.action_bar(0, todo!()); }
 /// ```
 /// ```compile_fail
-/// use horizon_client::mod_api::ServerHost;
+/// use mod_api::ServerHost;
 /// fn wrong(host: &mut dyn ServerHost) { host.mod_screen_open("example"); }
 /// ```
 ///
 /// A read-only hook receives only the base host, which cannot be used for a
 /// server or client operation, or opened as a backend by a mod:
 /// ```compile_fail
-/// use horizon_client::mod_api::{Host, ServerHost};
+/// use mod_api::{Host, ServerHost};
 /// fn server(_: &mut dyn ServerHost) {}
 /// fn read(host: &dyn Host) { server(host); }
 /// ```
 /// ```compile_fail
-/// use horizon_client::mod_api::{ClientHost, Host};
+/// use mod_api::{ClientHost, Host};
 /// fn client(_: &dyn ClientHost) {}
 /// fn read(host: &dyn Host) { client(host); }
 /// ```
 /// ```compile_fail
-/// use horizon_client::mod_api::{backend_of, Host};
-/// fn read(host: &dyn Host) { let _ = backend_of(host); }
-/// ```
-/// ```compile_fail
-/// use horizon_client::mod_api::{Host, ServerHost};
+/// use mod_api::{Host, ServerHost};
 /// fn read(host: &dyn Host) { let _ = host.downcast_ref::<dyn ServerHost>(); }
 /// ```
 impl HostSide<'_> {
@@ -2568,7 +2569,7 @@ impl LevelSide<'_> {
 
 /// The write backend behind `host`, or `None` where the host has none; the
 /// caller answers its typed refusal instead of running on.
-pub(in crate::mod_api) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&mut dyn BackendMut> {
+pub(crate) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&mut dyn BackendMut> {
     host.backend_mut().map(|wrapper| wrapper.open())
 }
 
@@ -2704,19 +2705,19 @@ host_attachment_host!(Host, ServerHost, ClientHost);
 ///
 /// A level host cannot be used as a game host:
 /// ```compile_fail
-/// use horizon_client::mod_api::{Host, LevelHost};
+/// use mod_api::{Host, LevelHost};
 /// fn game(_: &dyn Host) {}
 /// fn level(host: &dyn LevelHost) { game(host); }
 /// ```
 /// ```compile_fail
-/// use horizon_client::mod_api::{ClientHost, LevelHost, ServerHost};
+/// use mod_api::{ClientHost, LevelHost, ServerHost};
 /// fn server(_: &mut dyn ServerHost) {}
 /// fn client(_: &dyn ClientHost) {}
 /// fn level(host: &mut dyn LevelHost) { server(host); client(host); }
 /// ```
 /// A client-side level cannot write:
 /// ```compile_fail
-/// use horizon_client::mod_api::LevelSide;
+/// use mod_api::LevelSide;
 /// fn write(side: LevelSide<'_>) {
 ///     if let LevelSide::Client(level) = side { level.set_block_property([0, 0, 0], "a", "b", 0); }
 /// }
@@ -2954,13 +2955,13 @@ pub use horizon_mod_api_macros::__subscriptions;
 ///
 /// An implementation without the attribute does not compile:
 /// ```compile_fail
-/// use horizon_client::mod_api::Hooks;
+/// use mod_api::Hooks;
 /// struct Mod;
 /// impl Hooks for Mod {}
 /// ```
 /// Rustc rejects a misspelled trait method (E0407):
 /// ```compile_fail,E0407
-/// use horizon_client::mod_api::{self, Hooks};
+/// use mod_api::{self, Hooks};
 /// #[derive(Default)]
 /// struct Mod;
 /// #[mod_api::horizon_mod]
@@ -2970,7 +2971,7 @@ pub use horizon_mod_api_macros::__subscriptions;
 /// ```
 /// Two mod markers in one module define the same export:
 /// ```compile_fail,E0428
-/// use horizon_client::mod_api::{self, Hooks};
+/// use mod_api::{self, Hooks};
 /// #[derive(Default)] struct A;
 /// #[derive(Default)] struct B;
 /// #[mod_api::horizon_mod] impl Hooks for A {}
@@ -2978,7 +2979,7 @@ pub use horizon_mod_api_macros::__subscriptions;
 /// ```
 pub use horizon_mod_api_macros::{horizon_mod, horizon_part};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) use part_table::tests as part_tests;
 
 #[cfg(test)]
@@ -2987,7 +2988,6 @@ mod hooks_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mod_api;
     use std::sync::Mutex;
 
     #[test]
@@ -3148,7 +3148,7 @@ mod tests {
         struct StickMod<P>(P);
         #[mod_api::__subscriptions]
         impl<P: ItemPart + Clone> Hooks for StickMod<P> {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
                 r.item_part("minecraft:stick", self.0.clone());
             }
         }
@@ -3430,7 +3430,7 @@ mod tests {
         impl Hooks for MiningProbe {
             fn player_harvest_check(
                 &self,
-                _host: crate::mod_api::HostSide,
+                _host: crate::HostSide,
                 event: &mut PlayerHarvestCheckEvent,
             ) {
                 self.0.lock().unwrap().push(event.player);
@@ -3438,7 +3438,7 @@ mod tests {
             }
             fn player_break_speed(
                 &self,
-                _host: crate::mod_api::HostSide,
+                _host: crate::HostSide,
                 event: &mut PlayerBreakSpeedEvent,
             ) -> Flow {
                 self.0.lock().unwrap().push(event.player);
@@ -3526,15 +3526,11 @@ mod tests {
 
     #[mod_api::__subscriptions]
     impl Hooks for OffHandTop {
-        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
             r.item_part("minecraft:stick", HeardStick);
         }
 
-        fn right_click_block(
-            &self,
-            _: crate::mod_api::HostSide,
-            event: &mut RightClickBlockEvent,
-        ) -> Flow {
+        fn right_click_block(&self, _: crate::HostSide, event: &mut RightClickBlockEvent) -> Flow {
             let click = event.click;
             let top_half = click.hit.point[1] - f64::from(click.pos[1]) >= 0.5;
             if click.hand == Hand::Off
@@ -3708,7 +3704,7 @@ mod tests {
                 output: ItemStack::new("minecraft:potion", 1).with_potion("minecraft:awkward"),
             }],
         };
-        let items = crate::items::Items::for_tests(Default::default());
+        let items = horizon_items::items::Items::for_tests(Default::default());
         let water = ItemStack::new("minecraft:potion", 1).with_potion("minecraft:water");
         let awkward = ItemStack::new("minecraft:potion", 1).with_potion("minecraft:awkward");
         let fresh = || {
@@ -3843,7 +3839,7 @@ mod tests {
             block: "minecraft:air",
             lines: Vec::new(),
         };
-        let mut rules = crate::gamerules::GameRules::default();
+        let mut rules = horizon_client_core::gamerules::GameRules::default();
         // What `set_game_rule` and the other setters do.
         let mut set = |name: &str, value: GameRuleValue| {
             if rules.set(name, value) {
@@ -3987,7 +3983,7 @@ mod tests {
         use crate::menu::{Env, Input, Kind, LogicalSide, Menu};
         let root = std::env::temp_dir().join(format!("horizon-brewed-{}", std::process::id()));
         std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
-        let items = crate::items::Items::for_tests(Default::default());
+        let items = horizon_items::items::Items::for_tests(Default::default());
         let overlay = &horizon_world::loot::PackOverlay::NONE;
         let recipes = crate::crafting::Recipes::load(&root, &items, overlay).unwrap();
         let brewing = crate::brewing::Brewing::load(&root, &items, overlay);

@@ -3,16 +3,16 @@
 //! Written to `crash-reports/crash-<yyyy-MM-dd_HH.mm.ss>-client.txt` in the game folder when
 //! the main thread panics or `main` gets an error back. It leaves the machine only scrubbed, and
 //! only if the player allows crash reports (`telemetry`).
+pub use mod_api::crash::{
+    NativeModCall, NativeModGuard, clear_detail, current_native_mod, enter_native_mod, set_detail,
+};
 use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::{DateTime, Local};
 
-/// What the game is doing, set as it goes: graphics adapter, settings, packs, world.
-static DETAILS: Mutex<Vec<(&'static str, String)>> = Mutex::new(Vec::new());
 static REPORTED: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
@@ -20,48 +20,11 @@ thread_local! {
     static CONTAINED: Cell<u32> = const { Cell::new(0) };
     /// The message of the last panic `contain` caught on this thread, from the hook.
     static CAUGHT: RefCell<Option<String>> = const { RefCell::new(None) };
-    /// The native mod hook this thread is inside, for the panic hook to name.
-    static IN_NATIVE_MOD: Cell<Option<NativeModCall>> = const { Cell::new(None) };
-}
-
-/// A call into one hook of a native mod.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NativeModCall {
-    /// The mod's `[mod] id`.
-    pub id: &'static str,
-    pub hook: &'static str,
-    /// The part's type (`std::any::type_name`), when the call is to one of the mod's parts.
-    pub part: Option<&'static str>,
-}
-
-/// Marks this thread as inside `call` until the guard drops, which also happens while a panic
-/// unwinds. A hook called from a hook is named by the inner call.
-pub fn enter_native_mod(call: NativeModCall) -> NativeModGuard {
-    NativeModGuard {
-        outer: IN_NATIVE_MOD.with(|c| c.replace(Some(call))),
-    }
-}
-
-/// The `[mod] id` of the native mod this thread is inside a hook of, if any.
-pub fn current_native_mod() -> Option<&'static str> {
-    IN_NATIVE_MOD.with(Cell::get).map(|call| call.id)
-}
-
-/// Puts back the call that `enter_native_mod` found.
-#[must_use]
-pub struct NativeModGuard {
-    outer: Option<NativeModCall>,
-}
-
-impl Drop for NativeModGuard {
-    fn drop(&mut self) {
-        IN_NATIVE_MOD.with(|c| c.set(self.outer));
-    }
 }
 
 /// `message`, with the native mod hook this thread is inside, if any.
 fn attributed(message: String) -> String {
-    let Some(call) = IN_NATIVE_MOD.with(Cell::get) else {
+    let Some(call) = mod_api::crash::current_native_call() else {
         return message;
     };
     let part = call
@@ -110,27 +73,6 @@ fn contained_panic(info: &std::panic::PanicHookInfo) -> bool {
     );
     CAUGHT.with(|c| *c.borrow_mut() = Some(message));
     true
-}
-
-/// Sets one line of the report's details (replacing the last value under `key`).
-pub fn set_detail(key: &'static str, value: impl Into<String>) {
-    let mut details = DETAILS.lock().unwrap_or_else(|e| e.into_inner());
-    let value = value.into();
-    match details.iter_mut().find(|(k, _)| *k == key) {
-        Some(entry) => entry.1 = value,
-        None => details.push((key, value)),
-    }
-}
-
-pub fn clear_detail(key: &'static str) {
-    DETAILS
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .retain(|(k, _)| *k != key);
-}
-
-fn details() -> Vec<(&'static str, String)> {
-    DETAILS.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// Vanilla picks a line from a list of jokes; these only say what happened.
@@ -359,7 +301,7 @@ pub fn system_details(side: &str) -> Vec<(String, String)> {
         ("Memory".to_owned(), memory()),
     ];
     out.extend(
-        details()
+        mod_api::crash::details()
             .into_iter()
             .filter(|(k, _)| side != "server" || *k != "Render Settings")
             .map(|(k, v)| (k.to_owned(), v)),
@@ -869,7 +811,7 @@ mod tests {
     #[test]
     fn a_panic_becomes_a_report() {
         // A real panic through a hook, as the game's would be.
-        let caught = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let caught = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = caught.clone();
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {

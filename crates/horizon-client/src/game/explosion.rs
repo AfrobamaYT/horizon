@@ -8,13 +8,7 @@ use super::{
 };
 use horizon_client::health::DamageLevel;
 use horizon_client::{
-    Result,
-    blocks::Fluid,
-    collisions::SceneCollisions,
-    items::ItemStack,
-    mobs::Who,
-    mod_api::{NativeBlockInteraction, NativeExplosionStart},
-    text::Text,
+    Result, blocks::Fluid, collisions::SceneCollisions, items::ItemStack, mobs::Who, text::Text,
 };
 use horizon_core::{
     geometry::{Vec3, VoxelShape},
@@ -28,6 +22,7 @@ use horizon_world::{
     registry::BlockStateId,
     world_ray::{RayBlockMode, RayFluidMode, RayWorld, clip_world},
 };
+use mod_api::{NativeBlockInteraction, NativeExplosionStart};
 use std::{cmp::Ordering, io};
 
 /// `Level.clip` with `ClipContext.Block.COLLIDER`, no fluids and the
@@ -543,7 +538,7 @@ impl Game<'_> {
         }
         self.combat.forget_noted(outcome.canceled);
         if raised {
-            let source = horizon_client::health::HurtSource {
+            let source = mod_api::health::HurtSource {
                 damage_type,
                 causing: attacker.map_or(0, |(id, _)| *id as i32),
                 direct: 0,
@@ -861,7 +856,7 @@ impl Game<'_> {
     /// `ExplosionEvent.Start` for the explosion `start`: true when a mod
     /// cancels it, and nothing of it happens.
     pub(super) fn explosion_start_cancelled(&mut self, start: &NativeExplosionStart<'_>) -> bool {
-        if !crate::mod_api::listened(crate::mod_api::HookId::ExplosionStart) {
+        if !mod_api::listened(mod_api::HookId::ExplosionStart) {
             return false;
         }
         let mut cancel = false;

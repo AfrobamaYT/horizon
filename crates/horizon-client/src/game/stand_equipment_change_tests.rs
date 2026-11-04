@@ -3,13 +3,10 @@
 //! `living_equipment_change` like the six hand and armor slots.
 use std::sync::{Arc, Mutex};
 
-use horizon_client::{
-    entities::ArmorStand,
-    items::ItemStack,
-    mod_api::{self, Hooks, LivingEquipmentChangeEvent, ServerHost},
-};
+use horizon_client::{entities::ArmorStand, items::ItemStack};
 use horizon_core::geometry::Vec3;
 use horizon_items::equipment::{BODY, HEAD, SADDLE};
+use mod_api::{self, Hooks, LivingEquipmentChangeEvent, ServerHost};
 
 use super::native_entity_refs::tests::with_game;
 

@@ -8,17 +8,18 @@
 //! players (the hub's: a dedicated server's, a LAN host's, single player's
 //! server thread's), never on a client's.
 use super::{Dim, Game, commands::execute, lan::LanHost};
+pub use mod_api::game::NativeExperienceOrb;
 // Their old home, for mixin code that names them here.
-use horizon_client::mod_api::LevelRef;
-pub(crate) use horizon_client::mod_api::{NativeCommand, NativeServerPlayer};
 use horizon_client::{
     command::{ArgType, Dispatcher},
     lan::{abilities::PlayerAbilities, data::component_nbt, guest::Guest},
-    mod_api::{GameMode, NativePlayerAbilities, NativePlayerFood, PlayerRef},
     motion::PlayerMotion,
     text::Text,
 };
 use horizon_protocol::packets::play::{self, Clientbound as C};
+use mod_api::LevelRef;
+use mod_api::{GameMode, NativePlayerAbilities, NativePlayerFood, PlayerRef};
+pub(crate) use mod_api::{NativeCommand, NativeServerPlayer};
 use serde_json::{Map, Value, json};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
@@ -410,7 +411,7 @@ impl Game<'_> {
             .find(|g| g.uuid == uuid && g.dimension == level.dimension())
         {
             return (g.name == name).then_some(PlayerRef {
-                entity: crate::mod_api::EntityRef::new(epoch, g.entity_id as u32),
+                entity: mod_api::EntityRef::new(epoch, g.entity_id as u32),
                 uuid,
             });
         }
@@ -430,7 +431,7 @@ impl Game<'_> {
             .insert(conn, super::lan_actions::GuestPlay::default());
         self.next_entity = id;
         Some(PlayerRef {
-            entity: crate::mod_api::EntityRef::new(epoch, id),
+            entity: mod_api::EntityRef::new(epoch, id),
             uuid,
         })
     }
@@ -512,16 +513,13 @@ impl Game<'_> {
             .filter(|r| r.logged_in && r.profile == uuid)
         {
             return Some(PlayerRef {
-                entity: crate::mod_api::EntityRef::new(
-                    epoch,
-                    u32::try_from(remote.entity_id).ok()?,
-                ),
+                entity: mod_api::EntityRef::new(epoch, u32::try_from(remote.entity_id).ok()?),
                 uuid,
             });
         }
         let (_, id) = self.player_lookup(uuid)?;
         Some(PlayerRef {
-            entity: crate::mod_api::EntityRef::new(epoch, id),
+            entity: mod_api::EntityRef::new(epoch, id),
             uuid,
         })
     }
@@ -999,19 +997,6 @@ impl Game<'_> {
     pub(super) fn native_world_dir(&self) -> Option<PathBuf> {
         (!self.world_root.as_os_str().is_empty()).then(|| self.world_root.clone())
     }
-}
-
-/// An experience orb as a server mod reads it (`native_experience_orbs`).
-/// Read by mods only.
-#[derive(Clone, Debug)]
-pub struct NativeExperienceOrb {
-    /// The entity's ID, as `native_entity_join_level` names it.
-    pub id: u32,
-    pub position: [f64; 3],
-    /// `ExperienceOrb.value`: the points one pickup gives.
-    pub value: u32,
-    /// `ExperienceOrb.count`: orbs merged into this one, each worth `value`.
-    pub count: u32,
 }
 
 /// Whether an orb at `position` (its box: 0.5 wide and high, standing on

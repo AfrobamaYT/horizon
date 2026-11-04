@@ -7,10 +7,10 @@ use horizon_client::{
     arrows::Pickup,
     lan::playerdata::{ints_uuid, uuid_ints},
     mobs::Who,
-    mod_api::{EntityRef, NativeArrowPickup, NativeDeflection, ProjectileRef},
     projectiles::{OwnerFields, Projectile, ProjectileKind, Turn},
 };
 use horizon_core::geometry::Vec3;
+use mod_api::{EntityRef, NativeArrowPickup, NativeDeflection, ProjectileRef};
 
 /// Where a projectile handle's entity lives.
 #[derive(Clone, Copy)]
@@ -322,8 +322,9 @@ mod tests {
         fireworks::Rocket, native_entity_refs::tests::with_game, trident::ThrownTrident,
     };
     use super::*;
-    use horizon_client::{mobs::Mob, mod_api::NativeWorldEpoch, motion::PlayerMotion};
+    use horizon_client::{mobs::Mob, motion::PlayerMotion};
     use horizon_core::random::RandomSource;
+    use mod_api::NativeWorldEpoch;
 
     fn arrow(owner: Who) -> Projectile {
         let kind = ProjectileKind::Arrow {

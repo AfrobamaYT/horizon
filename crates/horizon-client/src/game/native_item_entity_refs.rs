@@ -3,8 +3,8 @@ use super::{Game, commands::Target};
 use horizon_client::{
     items::ItemStack,
     lan::playerdata::{ints_uuid, uuid_ints},
-    mod_api::{EntityRef, ItemEntityRef},
 };
+use mod_api::{EntityRef, ItemEntityRef};
 
 impl Game<'_> {
     fn native_item_entity_index(&self, item: ItemEntityRef) -> Option<usize> {
@@ -142,8 +142,9 @@ impl Game<'_> {
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use super::*;
-    use horizon_client::{entities::ArmorStand, mobs::Mob, mod_api::NativeWorldEpoch};
+    use horizon_client::{entities::ArmorStand, mobs::Mob};
     use horizon_core::geometry::Vec3;
+    use mod_api::NativeWorldEpoch;
 
     #[test]
     #[ignore = "needs prepared resources"]
