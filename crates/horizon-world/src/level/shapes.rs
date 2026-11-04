@@ -4,7 +4,7 @@
 //! to the next class (the Java `super` call), the end of the chain returns the
 //! state unchanged (`BlockBehaviour.updateShape`).
 use super::{
-    LevelAccess, Sim,
+    ConnectionKind, LevelAccess, Sim,
     classes::Class,
     query::{axis_of, clockwise, counter_clockwise, is_horizontal},
     states::BlockId,
@@ -942,19 +942,15 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let gate = b.instance_of(state, Class::FenceGate)
             && axis_of(b.facing(state)) == axis_of(clockwise(direction));
         let vanilla = (!b.is_exception_for_connection(state) && face_solid) || same_fence || gate;
-        if self.level.has_fence_connection_hook() {
-            // The hook's direction points from the fence to the neighbour.
-            self.level.adjust_fence_connects_to(
-                pos,
-                fence,
-                state,
-                direction.opposite(),
-                face_solid,
-                vanilla,
-            )
-        } else {
-            vanilla
-        }
+        self.connects_to(
+            ConnectionKind::Fence,
+            pos,
+            fence,
+            state,
+            direction.opposite(),
+            face_solid,
+            vanilla,
+        )
     }
     /// `IronBarsBlock.attachsTo` for the bars or pane `bars` at `pos`, then the
     /// hook. Vanilla's rule takes no direction: `direction` points from the bars
@@ -971,12 +967,15 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let vanilla = (!b.is_exception_for_connection(state) && face_solid)
             || b.instance_of(state, Class::IronBars)
             || b.in_set(state, &b.tags.walls);
-        if self.level.has_bars_attachment_hook() {
-            self.level
-                .adjust_bars_attach_to(pos, bars, state, direction, face_solid, vanilla)
-        } else {
-            vanilla
-        }
+        self.connects_to(
+            ConnectionKind::Bars,
+            pos,
+            bars,
+            state,
+            direction,
+            face_solid,
+            vanilla,
+        )
     }
     /// `WallBlock.connectsTo` for the wall `wall` at `pos`, then the hook.
     pub(crate) fn wall_connects_to(
@@ -995,16 +994,32 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             || (!b.is_exception_for_connection(state) && face_solid)
             || b.instance_of(state, Class::IronBars)
             || gate;
-        if self.level.has_wall_connection_hook() {
-            // The hook's direction points from the wall to the neighbour.
-            self.level.adjust_wall_connects_to(
-                pos,
-                wall,
-                state,
-                direction.opposite(),
-                face_solid,
-                vanilla,
-            )
+        self.connects_to(
+            ConnectionKind::Wall,
+            pos,
+            wall,
+            state,
+            direction.opposite(),
+            face_solid,
+            vanilla,
+        )
+    }
+    /// The level's answer to a `kind` connection of the block `state` at `pos`
+    /// toward `neighbour`, `direction` pointing from the block to it, once
+    /// vanilla's rule answered `vanilla`; vanilla's when no hook listens.
+    fn connects_to(
+        &self,
+        kind: ConnectionKind,
+        pos: BlockPos,
+        state: BlockStateId,
+        neighbour: BlockStateId,
+        direction: Direction,
+        face_solid: bool,
+        vanilla: bool,
+    ) -> bool {
+        if self.level.has_connection_hook() {
+            self.level
+                .adjust_connects_to(kind, pos, state, neighbour, direction, face_solid, vanilla)
         } else {
             vanilla
         }

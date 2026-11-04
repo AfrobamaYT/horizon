@@ -65,21 +65,11 @@ pub(crate) struct TestLevel {
     /// What `adjust_should_redstone_wire_connect_to` answers at a position: whether
     /// redstone wire connects there.
     pub wire_connect: HashMap<BlockPos, bool>,
-    /// What `adjust_fence_connects_to` answers for a neighbour state: whether
-    /// a fence connects an arm toward it.
-    pub fence_connect: HashMap<BlockStateId, bool>,
-    /// The directions `adjust_fence_connects_to` was asked about.
-    pub fence_directions: std::cell::RefCell<Vec<Direction>>,
-    /// What `adjust_wall_connects_to` answers for a neighbour state: whether
-    /// a wall connects a side toward it.
-    pub wall_connect: HashMap<BlockStateId, bool>,
-    /// The directions `adjust_wall_connects_to` was asked about.
-    pub wall_directions: std::cell::RefCell<Vec<Direction>>,
-    /// What `adjust_bars_attach_to` answers for a neighbour state: whether
-    /// iron bars or a pane attach an arm toward it.
-    pub bars_attach: HashMap<BlockStateId, bool>,
-    /// The directions `adjust_bars_attach_to` was asked about.
-    pub bars_directions: std::cell::RefCell<Vec<Direction>>,
+    /// What `adjust_connects_to` answers for a kind of connection and a
+    /// neighbour state: whether the fence, wall or bars connect toward it.
+    pub connect: HashMap<(ConnectionKind, BlockStateId), bool>,
+    /// The kinds and directions `adjust_connects_to` was asked about.
+    pub connection_asks: std::cell::RefCell<Vec<(ConnectionKind, Direction)>>,
     /// What `before_fire_odds` answers for a state.
     pub fire_odds: HashMap<BlockStateId, (i32, i32)>,
     /// What `before_smoke_source` answers for a state.
@@ -106,15 +96,11 @@ impl TestLevel {
             signals: HashMap::new(),
             weak_power: HashMap::new(),
             weak_power_directions: std::cell::RefCell::new(Vec::new()),
-            fence_directions: std::cell::RefCell::new(Vec::new()),
+            connection_asks: std::cell::RefCell::new(Vec::new()),
             analog: HashMap::new(),
             analog_states: HashSet::new(),
             wire_connect: HashMap::new(),
-            fence_connect: HashMap::new(),
-            wall_connect: HashMap::new(),
-            wall_directions: std::cell::RefCell::new(Vec::new()),
-            bars_attach: HashMap::new(),
-            bars_directions: std::cell::RefCell::new(Vec::new()),
+            connect: HashMap::new(),
             time: 0,
             day_time: 0,
             events: Vec::new(),
@@ -164,56 +150,24 @@ impl LevelAccess for TestLevel {
     ) -> bool {
         self.wire_connect.get(&pos).copied().unwrap_or(vanilla)
     }
-    fn has_fence_connection_hook(&self) -> bool {
-        !self.fence_connect.is_empty()
+    fn has_connection_hook(&self) -> bool {
+        !self.connect.is_empty()
     }
-    fn adjust_fence_connects_to(
+    fn adjust_connects_to(
         &self,
+        kind: ConnectionKind,
         _pos: BlockPos,
-        _fence: BlockStateId,
+        _state: BlockStateId,
         neighbour: BlockStateId,
         direction: Direction,
         _face_solid: bool,
         vanilla: bool,
     ) -> bool {
-        self.fence_directions.borrow_mut().push(direction);
-        self.fence_connect
-            .get(&neighbour)
+        self.connection_asks.borrow_mut().push((kind, direction));
+        self.connect
+            .get(&(kind, neighbour))
             .copied()
             .unwrap_or(vanilla)
-    }
-    fn has_wall_connection_hook(&self) -> bool {
-        !self.wall_connect.is_empty()
-    }
-    fn adjust_wall_connects_to(
-        &self,
-        _pos: BlockPos,
-        _wall: BlockStateId,
-        neighbour: BlockStateId,
-        direction: Direction,
-        _face_solid: bool,
-        vanilla: bool,
-    ) -> bool {
-        self.wall_directions.borrow_mut().push(direction);
-        self.wall_connect
-            .get(&neighbour)
-            .copied()
-            .unwrap_or(vanilla)
-    }
-    fn has_bars_attachment_hook(&self) -> bool {
-        !self.bars_attach.is_empty()
-    }
-    fn adjust_bars_attach_to(
-        &self,
-        _pos: BlockPos,
-        _bars: BlockStateId,
-        neighbour: BlockStateId,
-        direction: Direction,
-        _face_solid: bool,
-        vanilla: bool,
-    ) -> bool {
-        self.bars_directions.borrow_mut().push(direction);
-        self.bars_attach.get(&neighbour).copied().unwrap_or(vanilla)
     }
     fn adjust_analog_output(
         &self,
@@ -1509,136 +1463,67 @@ fn wire_connects_only_to_the_block_that_answers_should_redstone_wire_connect_to(
 }
 
 #[test]
-fn fence_connection_follows_fence_connects_to_both_ways() {
-    let mut w = world!();
-    let fence = w.id("oak_fence", &[]);
-    let stone = w.id("stone", &[]);
-    let glass = w.id("glass", &[]);
-    let pos = BlockPos::new(0, 1, 0);
-    let connects = |w: &mut World<'_>, neighbour, sturdy| {
-        w.f.behaviours
-            .sim(&mut w.level, &mut w.ticks)
-            .fence_connects_to(pos, fence, neighbour, sturdy, Direction::West)
-    };
-    // Vanilla: a sturdy face connects, a glass pane's face does not.
-    assert!(connects(&mut w, stone, true));
-    assert!(!connects(&mut w, glass, false));
-    // The hook denies what vanilla connects, and connects what it doesn't.
-    w.level.fence_connect.insert(stone, false);
-    w.level.fence_connect.insert(glass, true);
-    assert!(!connects(&mut w, stone, true));
-    assert!(connects(&mut w, glass, false));
-    // Vanilla's argument points from the neighbour to the fence; the hook is
-    // told the way from the fence to the neighbour.
-    assert_eq!(
-        *w.level.fence_directions.borrow().last().unwrap(),
-        Direction::East
-    );
-    // A state the hook doesn't answer keeps vanilla's answer.
-    let dirt = w.id("dirt", &[]);
-    assert!(connects(&mut w, dirt, true));
-}
-
-#[test]
-fn wall_connection_follows_wall_connects_to_both_ways() {
-    let mut w = world!();
-    let wall = w.id("cobblestone_wall", &[]);
-    let stone = w.id("stone", &[]);
-    let glass = w.id("glass", &[]);
-    let pos = BlockPos::new(0, 1, 0);
-    let connects = |w: &mut World<'_>, neighbour, sturdy| {
-        w.f.behaviours
-            .sim(&mut w.level, &mut w.ticks)
-            .wall_connects_to(pos, wall, neighbour, sturdy, Direction::West)
-    };
-    // Vanilla: a sturdy face connects, a glass block's face does not.
-    assert!(connects(&mut w, stone, true));
-    assert!(!connects(&mut w, glass, false));
-    // The hook denies what vanilla connects, and connects what it doesn't.
-    w.level.wall_connect.insert(stone, false);
-    w.level.wall_connect.insert(glass, true);
-    assert!(!connects(&mut w, stone, true));
-    assert!(connects(&mut w, glass, false));
-    // Vanilla's argument points from the neighbour to the wall; the hook is
-    // told the way from the wall to the neighbour.
-    assert_eq!(
-        *w.level.wall_directions.borrow().last().unwrap(),
-        Direction::East
-    );
-    // A state the hook doesn't answer keeps vanilla's answer.
-    let dirt = w.id("dirt", &[]);
-    assert!(connects(&mut w, dirt, true));
-    // Placed and updated walls take the hook's answer: glass east of a wall
-    // gives it a low side, stone west of it none.
-    w.floor(0, 2, "stone");
-    w.set(BlockPos::new(1, 1, 0), glass);
-    w.set(BlockPos::new(-1, 1, 0), stone);
-    w.place(
-        "cobblestone_wall",
-        BlockPos::new(0, 0, 0),
-        Direction::Up,
-        0.0,
-        90.0,
-        0.0,
-    );
-    assert_eq!(w.prop(pos, "east"), "low");
-    assert_eq!(w.prop(pos, "west"), "none");
-    w.set(BlockPos::new(0, 1, 1), dirt);
-    assert_eq!(w.prop(pos, "south"), "low");
-    assert_eq!(
-        *w.level.wall_directions.borrow().last().unwrap(),
-        Direction::South
-    );
-}
-
-#[test]
-fn bars_attachment_follows_bars_attach_to_both_ways() {
-    let mut w = world!();
-    let pane = w.id("glass_pane", &[]);
-    let stone = w.id("stone", &[]);
-    let glass = w.id("glass", &[]);
-    let pos = BlockPos::new(0, 1, 0);
-    let attaches = |w: &mut World<'_>, neighbour, sturdy| {
-        w.f.behaviours
-            .sim(&mut w.level, &mut w.ticks)
-            .bars_attach_to(pos, pane, neighbour, sturdy, Direction::East)
-    };
-    // Vanilla: a sturdy face attaches, a face that isn't does not.
-    assert!(attaches(&mut w, stone, true));
-    assert!(!attaches(&mut w, glass, false));
-    // The hook denies what vanilla attaches, and attaches what it doesn't.
-    w.level.bars_attach.insert(stone, false);
-    w.level.bars_attach.insert(glass, true);
-    assert!(!attaches(&mut w, stone, true));
-    assert!(attaches(&mut w, glass, false));
-    // The hook is told the way from the pane to the neighbour.
-    assert_eq!(
-        *w.level.bars_directions.borrow().last().unwrap(),
-        Direction::East
-    );
-    // A state the hook doesn't answer keeps vanilla's answer.
-    let dirt = w.id("dirt", &[]);
-    assert!(attaches(&mut w, dirt, true));
-    // Placed and updated panes take the hook's answer.
-    w.floor(0, 2, "stone");
-    w.set(BlockPos::new(1, 1, 0), glass);
-    w.set(BlockPos::new(-1, 1, 0), stone);
-    w.place(
-        "glass_pane",
-        BlockPos::new(0, 0, 0),
-        Direction::Up,
-        0.0,
-        90.0,
-        0.0,
-    );
-    assert_eq!(w.prop(pos, "east"), "true");
-    assert_eq!(w.prop(pos, "west"), "false");
-    w.set(BlockPos::new(0, 1, -1), dirt);
-    assert_eq!(w.prop(pos, "north"), "true");
-    assert_eq!(
-        *w.level.bars_directions.borrow().last().unwrap(),
-        Direction::North
-    );
+fn connections_follow_connects_to_both_ways() {
+    // Each kind with its block and the side values for connected and not.
+    for (kind, block, yes, no) in [
+        (ConnectionKind::Fence, "oak_fence", "true", "false"),
+        (ConnectionKind::Wall, "cobblestone_wall", "low", "none"),
+        (ConnectionKind::Bars, "glass_pane", "true", "false"),
+    ] {
+        let mut w = world!();
+        let own = w.id(block, &[]);
+        let stone = w.id("stone", &[]);
+        let glass = w.id("glass", &[]);
+        let dirt = w.id("dirt", &[]);
+        let pos = BlockPos::new(0, 1, 0);
+        // The neighbour is east of the block. Fences and walls take vanilla's
+        // direction, from the neighbour toward the block; bars take none, so
+        // theirs is the hook's.
+        let connects = |w: &mut World<'_>, neighbour, sturdy| {
+            let sim = w.f.behaviours.sim(&mut w.level, &mut w.ticks);
+            match kind {
+                ConnectionKind::Fence => {
+                    sim.fence_connects_to(pos, own, neighbour, sturdy, Direction::West)
+                }
+                ConnectionKind::Wall => {
+                    sim.wall_connects_to(pos, own, neighbour, sturdy, Direction::West)
+                }
+                ConnectionKind::Bars => {
+                    sim.bars_attach_to(pos, own, neighbour, sturdy, Direction::East)
+                }
+            }
+        };
+        // Vanilla: a sturdy face connects, a glass block's face does not.
+        assert!(connects(&mut w, stone, true), "{block}");
+        assert!(!connects(&mut w, glass, false), "{block}");
+        assert!(w.level.connection_asks.borrow().is_empty(), "{block}");
+        // The hook denies what vanilla connects, and connects what it doesn't.
+        w.level.connect.insert((kind, stone), false);
+        w.level.connect.insert((kind, glass), true);
+        assert!(!connects(&mut w, stone, true), "{block}");
+        assert!(connects(&mut w, glass, false), "{block}");
+        // The hook is told its kind and the way from the block to the neighbour.
+        assert_eq!(
+            *w.level.connection_asks.borrow().last().unwrap(),
+            (kind, Direction::East)
+        );
+        // A state the hook doesn't answer keeps vanilla's answer.
+        assert!(connects(&mut w, dirt, true), "{block}");
+        // Placed and updated blocks take the hook's answer: glass east of the
+        // block connects, stone west of it doesn't.
+        w.floor(0, 2, "stone");
+        w.set(BlockPos::new(1, 1, 0), glass);
+        w.set(BlockPos::new(-1, 1, 0), stone);
+        w.place(block, BlockPos::new(0, 0, 0), Direction::Up, 0.0, 90.0, 0.0);
+        assert_eq!(w.prop(pos, "east"), yes, "{block}");
+        assert_eq!(w.prop(pos, "west"), no, "{block}");
+        w.set(BlockPos::new(0, 1, 1), dirt);
+        assert_eq!(w.prop(pos, "south"), yes, "{block}");
+        assert_eq!(
+            *w.level.connection_asks.borrow().last().unwrap(),
+            (kind, Direction::South)
+        );
+    }
 }
 
 #[test]

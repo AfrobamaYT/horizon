@@ -1098,57 +1098,19 @@ impl GameLevel<'_> {
         );
     }
 
-    /// `FenceBlock.connectsTo`: set `connected` to say whether the fence
-    /// `state` at `pos` connects an arm toward `neighbour`, the state beside it,
-    /// `direction` pointing from the fence to that neighbour and `face_solid`
-    /// whether the neighbour's face toward the fence is sturdy. `connected` holds
-    /// vanilla's answer (a solid face, a fence of the same kind or a gate across the
-    /// arm): change it, to false as well as to true, when the fence is your own.
-    /// Asked whenever the fence settles its shape or is placed, inside the level's
-    /// update: answer from the arguments without touching the world. Only the fence block's own part is asked, so vanilla fences cost
-    /// nothing. Authoritative servers only.
+    /// Whether a fence, wall, or iron bars or pane connects a side
+    /// (`FenceBlock.connectsTo`, `WallBlock.connectsTo`,
+    /// `IronBarsBlock.attachsTo`, named by `kind`): set `connected` to say
+    /// whether the block `state` at `pos` connects toward `neighbour`, the
+    /// state beside it, `direction` pointing from the block to that neighbour
+    /// and `face_solid` whether the neighbour's face toward it is sturdy.
+    /// `connected` holds vanilla's answer: change it, to false as well as to
+    /// true, when the block is your own. Asked whenever the block settles its
+    /// shape or is placed, inside the level's update. Only the block's own
+    /// part is asked, so vanilla blocks cost nothing. Authoritative servers only.
     #[inline(always)]
-    pub(super) fn native_fence_connects_to(
-        &self,
-        dimension: LevelDimension,
-        pos: BlockPos,
-        state: BlockStateId,
-        neighbour: BlockStateId,
-        direction: Direction,
-        face_solid: bool,
-        connected: &mut bool,
-    ) {
-        mod_api::dispatch_fence_connects_to(
-            self, dimension, pos, state, neighbour, direction, face_solid, connected,
-        );
-    }
-
-    /// `WallBlock.connectsTo`: set `connected` to say whether the wall
-    /// `state` at `pos` connects a side toward `neighbour`, the state beside it,
-    /// `direction` pointing from the wall to that neighbour and `face_solid`
-    /// whether the neighbour's face toward the wall is sturdy. `connected` holds
-    /// vanilla's answer (a wall, a solid face, iron bars or a pane, or a gate
-    /// across the side): change it, to false as well as to true, when the wall is
-    /// your own. Asked whenever the wall settles its shape or is placed, inside
-    /// the level's update. Only the wall block's own part is asked, so vanilla
-    /// walls cost nothing. Authoritative servers only.
-    #[inline(always)]
-    pub(super) fn native_wall_connects_to(&self, call: mod_api::__private::WallConnectsToCall<'_>) {
-        mod_api::dispatch_wall_connects_to(self, call);
-    }
-
-    /// `IronBarsBlock.attachsTo`, for iron bars and glass panes: set `connected`
-    /// to say whether the bars or pane `state` at `pos` attach an arm toward
-    /// `neighbour`, the state beside it, `direction` pointing from the bars to
-    /// that neighbour and `face_solid` whether the neighbour's face toward the
-    /// bars is sturdy. `connected` holds vanilla's answer (a solid face, iron bars
-    /// or a pane, or a wall): change it, to false as well as to true, when the
-    /// bars are your own. Asked whenever the bars settle their shape or are
-    /// placed, inside the level's update. Only the bars block's own part is
-    /// asked, so vanilla bars and panes cost nothing. Authoritative servers only.
-    #[inline(always)]
-    pub(super) fn native_bars_attach_to(&self, call: mod_api::__private::BarsAttachToCall<'_>) {
-        mod_api::dispatch_bars_attach_to(self, call);
+    pub(super) fn native_connects_to(&self, call: mod_api::__private::ConnectsToCall<'_>) {
+        mod_api::dispatch_connects_to(self, call);
     }
 
     /// `BlockState.hasAnalogOutputSignal`: set `output` for a block of yours
