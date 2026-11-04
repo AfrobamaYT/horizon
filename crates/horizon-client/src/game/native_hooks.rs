@@ -392,7 +392,7 @@ impl Game<'_> {
             let to = NativeScreenView { id, ..none };
             self.decide_screen(&from, &to, true)
         };
-        if matches!(decision, ScreenDecision::Keep) {
+        if let ScreenDecision::Keep = decision {
             return;
         }
         if let Some(title) = self.title.as_mut() {
