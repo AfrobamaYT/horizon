@@ -36,8 +36,6 @@ const EXPORTS: &[&str] = &[
     "BlockEntityPart",
     "ItemPart",
     "MenuPart",
-    "EnergyHandler",
-    "PlaceProvider",
     "ServerReloadListener",
     "ClientReloadListener",
 ];

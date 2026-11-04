@@ -221,7 +221,7 @@ pub(super) fn guest(
                         lower(types, ty, &format!("(&p{i})"))
                     )
                     .unwrap();
-                    args.push(arg(types, ty, &format!("a{i}")));
+                    args.push(format!("a{i}"));
                 }
             }
             let (pattern, names) = unpack(&sig);
@@ -609,7 +609,7 @@ pub(super) fn host(
                         lower(types, ty, &format!("(&p{i})"))
                     )
                     .unwrap();
-                    args.push(arg(types, ty, &format!("a{i}")));
+                    args.push(format!("a{i}"));
                 }
             }
             let (pattern, names) = unpack(&sig);
@@ -649,6 +649,110 @@ pub(super) fn host(
         }
         code.push_str("}\n");
     }
+    // Each mod's exports, found by name in its group's instance: the build renames a mod's
+    // interfaces to `<mod id>-<interface>`, so one group holds every member's.
+    let mut fields = String::new();
+    let mut inits = String::new();
+    let mut getters = String::new();
+    for owner in owners.iter().filter(|o| EXPORTS.contains(o)) {
+        let kebab = interface(owner);
+        let iface = bound_ident(&kebab);
+        let ty = format!("{}Exports", kebab.to_upper_camel_case());
+        writeln!(
+            code,
+            "/// A mod's `{kebab}` exports.\npub(super) struct {ty} {{"
+        )
+        .unwrap();
+        let mut finds = String::new();
+        let mut calls = String::new();
+        let mut names = Vec::new();
+        let mut entries: Vec<(String, Vec<String>, Vec<String>)> = Vec::new();
+        for method in methods.iter().filter(|m| m.owner == *owner) {
+            let sig = signature(types, method)?;
+            entries.push((
+                wit_ident(&method.name),
+                sig.params.iter().map(|(_, w)| wire_rust(w)).collect(),
+                sig.results.iter().map(|r| wire_rust(r)).collect(),
+            ));
+        }
+        if super::SUBSCRIBED.iter().any(|(o, _)| o == owner) {
+            let params = if *owner == "Hooks" {
+                vec![]
+            } else {
+                vec!["u32".to_string()]
+            };
+            entries.push(("subscribed".into(), params, vec!["Vec<String>".into()]));
+        }
+        for (wit_name, params, results) in entries {
+            let name = bound_ident(&wit_name);
+            let ret = match results.as_slice() {
+                [] => "()".to_string(),
+                [one] => one.clone(),
+                many => format!("({},)", many.join(", ")),
+            };
+            let result = if results.is_empty() {
+                "()".to_string()
+            } else {
+                format!("({ret},)")
+            };
+            let tuple = |items: &[String]| {
+                if items.is_empty() {
+                    "()".to_string()
+                } else {
+                    format!("({},)", items.join(", "))
+                }
+            };
+            writeln!(
+                code,
+                "{name}: wasmtime::component::TypedFunc<{}, {result}>,",
+                tuple(&params)
+            )
+            .unwrap();
+            writeln!(
+                finds,
+                "let {name} = instance.get_export_index(&mut *store, Some(&interface), \"{wit_name}\").ok_or_else(|| super::LoadError::MissingExport(format!(\"{{name}}#{wit_name}\")))?; let {name} = instance.get_typed_func(&mut *store, &{name}).map_err(|e| super::LoadError::ChangedExport(format!(\"{{name}}#{wit_name}\"), e.to_string()))?;"
+            )
+            .unwrap();
+            let args: Vec<String> = (0..params.len()).map(|i| format!("p{i}")).collect();
+            let typed: Vec<String> = params
+                .iter()
+                .enumerate()
+                .map(|(i, p)| format!("p{i}: {p}"))
+                .collect();
+            let unwrap = if results.is_empty() {
+                "Ok(())"
+            } else {
+                "Ok(r.0)"
+            };
+            writeln!(
+                calls,
+                "pub(super) fn call_{name}(&self, store: &mut wasmtime::Store<super::State>, {}) -> wasmtime::Result<{ret}> {{ let r = self.{name}.call(&mut *store, {})?; {unwrap} }}",
+                typed.join(", "),
+                tuple(&args)
+            )
+            .unwrap();
+            names.push(name);
+        }
+        code.push_str("}\n");
+        writeln!(
+            code,
+            "impl {ty} {{\nfn find(store: &mut wasmtime::Store<super::State>, instance: &wasmtime::component::Instance, mod_id: &str) -> Result<Self, super::LoadError> {{ let name = format!(\"{{mod_id}}-{kebab}\"); let interface = instance.get_export_index(&mut *store, None, &name).ok_or_else(|| super::LoadError::MissingExport(name.clone()))?; {finds} Ok(Self {{ {} }}) }}\n{calls}}}",
+            names.join(", ")
+        )
+        .unwrap();
+        writeln!(fields, "{iface}: {ty},").unwrap();
+        writeln!(inits, "{iface}: {ty}::find(store, instance, mod_id)?,").unwrap();
+        writeln!(
+            getters,
+            "pub(super) fn horizon_mod_api_{iface}(&self) -> &{ty} {{ &self.{iface} }}"
+        )
+        .unwrap();
+    }
+    writeln!(
+        code,
+        "/// One mod's exports, typed once at load.\npub(super) struct ModExports {{ {fields} }}\nimpl ModExports {{\npub(super) fn find(store: &mut wasmtime::Store<super::State>, instance: &wasmtime::component::Instance, mod_id: &str) -> Result<Self, super::LoadError> {{ Ok(Self {{ {inits} }}) }}\n{getters}}}"
+    )
+    .unwrap();
     Ok(code)
 }
 
@@ -714,15 +818,21 @@ fn frame_objects(types: &Types<'_>, ty: &Ty, e: &str, out: &mut String) {
                         && let [Ty::Dyn(name, mutable)] = items.as_slice()
                     {
                         arms.push(format!(
-                            "{path}::{}(h) => frame.{}{}(&mut **h)",
+                            "{path}::{}(h) => frame.{}{}({}**h)",
                             case.rust,
                             name.to_snake_case(),
-                            if *mutable { "_mut" } else { "" }
+                            if *mutable { "_mut" } else { "" },
+                            if *mutable { "&mut " } else { "&" }
                         ));
                     }
                 }
                 if !arms.is_empty() {
-                    writeln!(out, "match &mut {e} {{ {} }}", arms.join(", ")).unwrap();
+                    writeln!(
+                        out,
+                        "let mut {e} = {e}; match &mut {e} {{ {} }}",
+                        arms.join(", ")
+                    )
+                    .unwrap();
                 }
             }
         }
