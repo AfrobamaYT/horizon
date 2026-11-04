@@ -277,12 +277,16 @@ fn libraries(root: &Path, manifest: &toml_edit::DocumentMut) -> Result<Vec<Libra
         else {
             continue;
         };
+        // The mod itself has no `[wasm]` before its first build, so it isn't read as one.
+        if dir.canonicalize().ok() == root.canonicalize().ok() {
+            continue;
+        }
         let Ok(text) = std::fs::read_to_string(dir.join(MANIFEST)) else {
             continue;
         };
         let theirs =
             horizon_mods::Manifest::parse(&text).map_err(|e| format!("{}: {e}", dir.display()))?;
-        if !wanted.contains(&theirs.id.as_str()) || dir == root {
+        if !wanted.contains(&theirs.id.as_str()) {
             continue;
         }
         let wasm = theirs.wasm.ok_or_else(|| {
@@ -422,8 +426,28 @@ fn rename(wasm: &[u8], id: &str) -> Result<Vec<u8>, String> {
             },
         );
     }
-    resolve.worlds[bindgen.world].exports = renamed;
-    resolve.worlds[bindgen.world].name = horizon_mods::manifest::export_prefix(id);
+    // The world, its exports renamed, in a package of the mod's own: the linker merges its
+    // members' packages by name, and theirs differ.
+    let prefix = horizon_mods::manifest::export_prefix(id);
+    let world = bindgen.world;
+    resolve.worlds[world].exports = renamed;
+    resolve.worlds[world].name = prefix.clone();
+    let name = wit_parser::PackageName {
+        namespace: "horizon-mod".into(),
+        name: prefix.clone(),
+        version: None,
+    };
+    let package = resolve.packages.alloc(wit_parser::Package {
+        name: name.clone(),
+        docs: Default::default(),
+        interfaces: Default::default(),
+        worlds: [(prefix, world)].into_iter().collect(),
+    });
+    resolve.package_names.insert(name, package);
+    if let Some(old) = resolve.worlds[world].package {
+        resolve.packages[old].worlds.retain(|_, w| *w != world);
+    }
+    resolve.worlds[world].package = Some(package);
     // The module again, its exports renamed and its old component-type sections dropped.
     let mut out = wasm_encoder::Module::new();
     for payload in wasmparser::Parser::new(0).parse_all(wasm) {
@@ -602,18 +626,48 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
             continue;
         }
         // A member imports the mod API (`<package>:<name>/…`) and its group (`env`, `GOT.*`).
-        // Any other import a crate declared (a JS runtime's, from `getrandom` under `zip`) is
-        // never called in the game: it becomes a group import the linker stubs to trap.
+        // Any other import a crate declared (a JS runtime's, from `getrandom` under `zip`,
+        // some under `env` itself) is never called in the game: it becomes a group import the
+        // linker stubs to trap, named for this member, as the linker makes one stub per
+        // importer and two members' would collide.
         if let wasmparser::Payload::ImportSection(reader) = &payload {
+            let member = Path::new(&output)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default()
+                .to_owned();
             let mut section = wasm_encoder::ImportSection::new();
             for import in reader.clone().into_imports() {
                 let import = import.map_err(|e| e.to_string())?;
-                let ours = import.module == "env"
-                    || import.module.starts_with("GOT.")
-                    || import.module.contains(':');
+                let js = import.name.starts_with("__wbindgen") || import.name.starts_with("__wbg");
+                let ours = !js
+                    && (import.module == "env"
+                        || import.module.starts_with("GOT.")
+                        || import.module.contains(':'));
                 let ty =
                     wasm_encoder::EntityType::try_from(import.ty).map_err(|e| format!("{e:?}"))?;
-                section.import(if ours { import.module } else { "env" }, import.name, ty);
+                if ours {
+                    section.import(import.module, import.name, ty);
+                } else {
+                    let name = format!("{member}:{}.{}", import.module, import.name);
+                    section.import("env", &name, ty);
+                }
+            }
+            module.section(&section);
+            continue;
+        }
+        // `--shared` exports every visible symbol; a member keeps only its group exports and
+        // the linker's own (`__wasm_*`), so two members' copies of a crate's `#[no_mangle]`
+        // items (a JS runtime's glue, the guest entry) don't collide in one group.
+        if let wasmparser::Payload::ExportSection(reader) = &payload
+            && role != "std"
+        {
+            let mut section = wasm_encoder::ExportSection::new();
+            for export in reader.clone() {
+                let export = export.map_err(|e| e.to_string())?;
+                if group_export(export.name) || export.name.starts_with("__wasm_") {
+                    section.export(export.name, export.kind.into(), export.index);
+                }
             }
             module.section(&section);
             continue;

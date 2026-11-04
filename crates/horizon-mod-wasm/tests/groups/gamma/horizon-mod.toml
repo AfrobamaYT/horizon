@@ -1,0 +1,11 @@
+id = "gamma"
+name = "gamma"
+version = "1.0.0"
+description = "A mod of a group of its own."
+api = "0.2"
+side = "both"
+capabilities = ["registries"]
+
+[wasm]
+sha512 = "78d507efed03e5914760fcc34d5fcd42a1f228acf1bc45ca98230e492f7b49026711fd6f951de27c1b8ac32639bae71fb3d5ec401a874407bd80ca5393748c7a"
+toolchain = "1.99.1 58cf8f9c35b355199727627d07ae34a4e2846d67"

@@ -1,0 +1,35 @@
+//! Answers counter_lib's capability for `test:counter_box` block entities, and asks it.
+use counter_lib::{COUNTER, Counter};
+use mod_api::{Flow, Hooks, Registrar, RegistrationContext, ServerChatEvent, ServerHost, Text};
+
+/// Where the test world's counter box is.
+const BOX: [i32; 3] = [0, 64, 0];
+
+struct Seven;
+impl Counter for Seven {
+    fn count(&self) -> u32 {
+        7
+    }
+}
+
+#[derive(Default)]
+pub struct Mod;
+
+#[mod_api::horizon_mod]
+impl Hooks for Mod {
+    fn register(&self, registrar: &mut dyn Registrar, _cx: &RegistrationContext<'_>) {
+        let kind = registrar.block_entity_type_key("test:counter_box");
+        registrar.block_entity_capability(&COUNTER, &kind, |_, _| {
+            Some(Box::new(Seven) as Box<dyn Counter>)
+        });
+    }
+
+    fn server_chat(&self, host: &mut dyn ServerHost, event: &mut ServerChatEvent<'_>) -> Flow {
+        let answer = host
+            .level("minecraft:overworld")
+            .and_then(|level| level.capability(host, &COUNTER, BOX, None))
+            .map_or("none".to_string(), |counter| counter.count().to_string());
+        *event.message = Text::literal(format!("{}: {answer}", env!("CARGO_PKG_NAME")));
+        Flow::Continue
+    }
+}

@@ -67,6 +67,10 @@ pub mod game {
         fn fields(&self) -> Self::Fields<'_>;
     }
 
+    /// A block entity type the game names.
+    pub fn block_entity_type_key(id: &str) -> BlockEntityTypeKey {
+        BlockEntityTypeKey(id.into())
+    }
     /// A block entity handle the game names.
     pub fn block_entity_ref(level: LevelRef, position: [i32; 3]) -> BlockEntityRef {
         BlockEntityRef { level, position }
