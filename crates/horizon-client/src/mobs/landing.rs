@@ -104,6 +104,7 @@ impl BlockLandingWorld for MobLanding<'_, '_, '_> {
     ) -> bool {
         let mut cancel = false;
         crate::landing::native_farmland_trample(
+            self.w.loop_context,
             self.mob.id,
             [position.x, position.y, position.z],
             state.0,
@@ -134,6 +135,7 @@ impl BlockLandingWorld for MobLanding<'_, '_, '_> {
     ) -> Result<bool, String> {
         let contact = Some((self.w, self.pos));
         Ok(self.mob.cause_fall_damage_at(
+            self.w.loop_context,
             self.level,
             distance,
             multiplier,

@@ -123,8 +123,9 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
             let context = mod_api::LoopContext::new(context);
             mod_api::dispatch_living_breathe(&context, entity, kind, can_breathe, consume, refill);
         },
-        farmland_trample: |entity, pos, state, distance, cancel| {
-            mod_api::dispatch_farmland_trample(entity, pos, state, distance, cancel);
+        farmland_trample: |context, entity, pos, state, distance, cancel| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_farmland_trample(&context, entity, pos, state, distance, cancel);
         },
         has_mods: || !mod_api::mods().is_empty(),
         player_name_format: |context, username, displayname| {
@@ -147,11 +148,13 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
                 cancel,
             );
         },
-        living_fall: |entity, kind, distance, multiplier, cancel| {
-            mod_api::dispatch_living_fall(entity, kind, distance, multiplier, cancel);
+        living_fall: |context, entity, kind, distance, multiplier, cancel| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_living_fall(&context, entity, kind, distance, multiplier, cancel);
         },
-        living_jump: |entity, kind| {
-            mod_api::dispatch_living_jump(entity, kind);
+        living_jump: |context, entity, kind| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_living_jump(&context, entity, kind);
         },
         living_jump_power: |context, entity, kind, power| {
             let context = mod_api::LoopContext::new(context);
@@ -168,8 +171,9 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
         player_stays_on_ground_surface: |entity, staying| {
             mod_api::dispatch_player_stays_on_ground_surface(entity, staying);
         },
-        ender_entity_teleport: |entity, kind, from, target, cancel| {
-            mod_api::dispatch_ender_entity_teleport(entity, kind, from, target, cancel);
+        ender_entity_teleport: |context, entity, kind, from, target, cancel| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_ender_entity_teleport(&context, entity, kind, from, target, cancel);
         },
         fluid_flow: |fluid, pos, flow| {
             mod_api::dispatch_fluid_flow(fluid, pos, flow);
