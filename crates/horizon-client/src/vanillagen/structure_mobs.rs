@@ -311,6 +311,7 @@ impl StructureMobFinalizer {
 
 #[cfg(test)]
 mod tests {
+    use horizon_world::native_load_context::DataLoadOrigin;
     use super::*;
 
     /// The bastion's crossbow piglin keeps its crossbow (STRUCTURE skips
@@ -451,10 +452,15 @@ mod tests {
         use crate::streaming::{ChunkGenerator, Proto};
         let assets = crate::assets::Assets::load(root).unwrap();
         let biomes = crate::biome::Biomes::load(root).unwrap();
+        let item_data = crate::test_resources::item_data(root, DataLoadOrigin::ServerDataLoad).unwrap();
+        let terrain_resources = crate::vanillagen::TerrainResources {
+            dir: &root.join("worldgen"),
+            registry: assets.registry,
+            biomes: &biomes,
+            item_data: &item_data,
+        };
         let terrain = super::super::VanillaTerrain::for_dimension(
-            &root.join("worldgen"),
-            assets.registry,
-            &biomes,
+            terrain_resources,
             seed,
             dimension,
         )
