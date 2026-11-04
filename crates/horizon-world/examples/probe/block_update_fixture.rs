@@ -148,6 +148,7 @@ impl LevelAccess for Cells {
                     id: 1011,
                     pos,
                     data: 0,
+                    source: None,
                 });
             }
             Some(PreRemove::Beacon) => self.events.push(LevelEvent::Sound {
@@ -368,7 +369,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         for event in &level.events {
             match event {
-                LevelEvent::LevelEvent { id, pos, data } => {
+                LevelEvent::LevelEvent { id, pos, data, .. } => {
                     let _ = writeln!(result, "L {} {} {}", id, p(*pos), data);
                 }
                 LevelEvent::Sound { pos, sound, .. } => {

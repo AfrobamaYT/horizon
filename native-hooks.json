@@ -1261,8 +1261,8 @@
       }
     },
     {
-      "name": "loot_table_load", "doc": "A native mod's hook point (docs/modding/src/how-to/native-mods.md), listed in `native-hooks.json` with the game's:\nthe loot table `id` (`minecraft:chests/simple_dungeon`, `minecraft:blocks/stone`,\n`minecraft:entities/zombie`) as it loads, its JSON after the data packs', before anything\nrolls it (NeoForge's `LootTableLoadEvent`, Fabric's `LootTableEvents.MODIFY`). Add pools to\n`table[\"pools\"]` or entries to a pool's `entries`, change or replace it (no pools: it drops\nnothing; keep its `random_sequence` when replacing it, as a mob's table without one drops\nnothing). Called once per table in id order when the server loads or reloads its data.", "side": "both",
-      "version": 1,
+      "name": "loot_table_load", "doc": "A native mod's hook point (docs/modding/src/how-to/native-mods.md), listed in `native-hooks.json` with the game's:\nthe loot table `id` (`minecraft:chests/simple_dungeon`, `minecraft:blocks/stone`,\n`minecraft:entities/zombie`) as it loads, its JSON after the data packs', before anything\nrolls it (NeoForge's `LootTableLoadEvent`, Fabric's `LootTableEvents.MODIFY`). Add pools to\n`table[\"pools\"]` or entries to a pool's `entries`, change or replace it (no pools: it drops\nnothing; keep its `random_sequence` when replacing it, as a mob's table without one drops\nnothing). Called once per table in id order when the server loads or reloads its data, with the\n`DataLoadContext` of that owning load (`origin()` is always `ServerDataLoad`: the client never loads\nloot tables, so the hook never fires there).", "context": "data_load",
+      "version": 2,
       "target": "horizon_world::loot::native_loot_table_load",
       "side": "server",
       "mod_api": {
@@ -1309,7 +1309,8 @@
     {
       "name": "modify_default_components", "doc": "Hook point for NeoForge's `ModifyDefaultComponentsEvent`: asked once per\nitem after registries freeze. Metadata readers share the resulting snapshot;\na datapack reload does not replay this event.", "side": "both",
       "context": "data_load",
-      "version": 1,
+      "version": 2,
+      "doc": "NeoForge 26.3's ModifyDefaultComponentsEvent: once per item after registries freeze, before the owning load publishes immutable defaults. Receives a read-only DataLoadContext with the actual ServerDataLoad or ClientPreload origin, frozen registry names, settings captured once for loaded packages at this load boundary, and the shared LoadedMods view. Readers and datapack reloads do not replay this event. No runtime Host, world handles or transaction access.",
       "target": "horizon_world::item_defaults::native_modify_default_components",
       "mod_api": {
         "contract": "collect",
