@@ -8509,6 +8509,15 @@ impl Game<'_> {
             [self.stack_in(self.selected).cloned(), self.offhand.clone()]
         } else if let Some(mob) = self.mobs.iter().find(|m| m.id as i32 == attacker) {
             [mob.extra.main_hand_stack().cloned(), None]
+        } else if let Some(guest) = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.guests.iter().find(|g| g.entity_id == attacker))
+        {
+            [
+                guest.inventory.get(guest.selected).cloned().flatten(),
+                guest.offhand.clone(),
+            ]
         } else {
             [None, None]
         };

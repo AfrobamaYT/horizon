@@ -338,3 +338,98 @@ fn the_push_draws_the_same_stream_with_and_without_a_mod_and_a_canceled_one_draw
     let canceled = next_draw_after_a_directionless_push(Some(true));
     assert_ne!(canceled, without, "a canceled push must not draw");
 }
+
+/// A guest's blow on another guest lands through `pvp_land`: the hook names the attacking guest
+/// and the sword in its hand, though the victim is the player swapped in when the push runs.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_guest_blow_on_a_guest_names_the_attacker_and_the_sword() {
+    let log = Arc::new(Mutex::new(Heard::default()));
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "probe",
+        Box::new(Probe(log.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        super::native_guest_turn_tests::with_guests(|game| {
+            let guest = game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap();
+            guest.inventory[guest.selected] = Some(ItemStack::new("minecraft:iron_sword", 1));
+            let mut victim =
+                horizon_client::motion::PlayerMotion::new(game.motion, Vec3::new(3.0, 64.0, 5.0))
+                    .unwrap();
+            victim.entity_id = 13;
+            let victim_guest = game.lan.as_mut().unwrap().hub.guest_mut(13).unwrap();
+            victim_guest.motion = Some(Box::new(victim));
+            // The guest has finished loading in.
+            victim_guest.load_timeout = 0;
+            // A fresh body is a creative one: change the mode away and back so the survival
+            // abilities apply to it.
+            game.as_guest(13, |g| {
+                use horizon_client::command::args::GameMode;
+                g.set_game_mode(GameMode::Creative);
+                g.set_game_mode(GameMode::Survival);
+            })
+            .unwrap();
+            let strike = super::lan_pvp::Strike::test_blow(12);
+            let hurt = game.pvp_land(super::lan_pvp::Victim::Guest(13), &strike);
+            let seen = log.lock().unwrap().incoming_causing.clone();
+            assert!(hurt, "not hurt; damage heard from {seen:?}");
+            assert_eq!(game.current_attack(), NO_ATTACK);
+        });
+    });
+    let heard = std::mem::take(&mut *log.lock().unwrap());
+    let sword = Some("minecraft:iron_sword".to_string());
+    assert!(
+        !heard.knocks.is_empty(),
+        "no push reached the hook; damage heard from {:?}",
+        heard.incoming_causing
+    );
+    assert!(
+        heard.knocks.iter().all(|k| *k == (12, sword.clone(), None)),
+        "heard {:?}",
+        heard.knocks
+    );
+}
+
+/// A mob's fireball on the player goes through `projectile_hit`, which lends the owner's attack:
+/// the hook names the shooter and the bow it holds.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_mobs_fireball_on_the_player_names_the_shooter_and_its_bow() {
+    use horizon_client::projectiles::{Hit, Projectile, ProjectileKind};
+    let heard = heard(|game, _| {
+        player_with_sword(game);
+        game.set_game_mode(horizon_client::command::args::GameMode::Survival);
+        zombie_at(game, 42, Vec3::new(0.0, 0.0, 6.0));
+        game.mobs
+            .last_mut()
+            .unwrap()
+            .extra
+            .set_main_hand_stack(Some(ItemStack::new("minecraft:bow", 1)));
+        let arrow = Projectile::new(
+            ProjectileKind::SmallFireball,
+            Vec3::new(0.0, 1.0, 0.5),
+            Some(Who::Mob(42)),
+        );
+        game.projectile_hit(
+            &arrow,
+            Hit::Entity {
+                who: Who::Player,
+                at: Vec3::new(0.0, 1.0, 0.0),
+            },
+        )
+        .unwrap();
+        assert_eq!(game.current_attack(), NO_ATTACK);
+    });
+    let bow = Some("minecraft:bow".to_string());
+    assert!(
+        !heard.knocks.is_empty(),
+        "no push reached the hook; damage heard from {:?}",
+        heard.incoming_causing
+    );
+    assert!(
+        heard.knocks.iter().all(|k| *k == (42, bow.clone(), None)),
+        "heard {:?}",
+        heard.knocks
+    );
+}
