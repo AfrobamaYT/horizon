@@ -4734,6 +4734,23 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_item_smelted(self, player, player_entity_id, stack, amount_removed);
     }
+    /// `PlayerEvent.ItemSmithedEvent`: a server player took `result` from a
+    /// smithing table (`SmithingMenu.onTake`, or `onQuickCraft` for a
+    /// shift-click): `player` is their UUID and `player_entity_id` their
+    /// network id, `inputs` the template, base and addition as they were
+    /// before the take used them (`None` for an empty slot). NeoForge fires it
+    /// first thing in `onTake`; here it comes once the click is done, so the
+    /// menu already holds the used inputs, but before the table sounds.
+    /// Server-side.
+    pub(super) fn native_player_item_smithed(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        inputs: &[Option<ItemStack>; 3],
+        result: &ItemStack,
+    ) {
+        mod_api::dispatch_player_item_smithed(self, player, player_entity_id, inputs, result);
+    }
     /// A server player enchanted `item` at an enchanting table
     /// (`EnchantmentMenu.clickMenuButton`): `enchantments` are the ones it was
     /// given, in order, as (id, level). `item` is the enchanted stack (an
