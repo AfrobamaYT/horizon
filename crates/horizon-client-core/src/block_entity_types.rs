@@ -30,7 +30,8 @@ impl BlockEntityTypes {
     }
 
     /// Whether a mod declared the block entity type `id`.
-    /// Wire keys include vanilla types; native declarations cannot use `minecraft:`.
+    /// Wire keys include vanilla types; `mod_content::Plan::new` refuses native
+    /// declarations in `minecraft:`.
     pub fn declares(&self, id: &str) -> bool {
         !id.starts_with("minecraft:") && self.keys.contains(id)
     }
@@ -83,11 +84,13 @@ mod tests {
                 "minecraft:chest".into(),
                 "test:machine".into(),
                 "test:single".into(),
+                "test:empty".into(),
             ],
         );
         for (id, declared) in [
             ("test:machine", true),
             ("test:single", true),
+            ("test:empty", true),
             ("minecraft:chest", false),
             ("test:press", false),
             ("test:mill", false),
