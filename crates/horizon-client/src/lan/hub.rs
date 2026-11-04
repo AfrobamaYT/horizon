@@ -4083,8 +4083,9 @@ impl Hub {
         let Some(g) = self.guest_mut(conn) else {
             return;
         };
-        g.game_mode = mode;
-        // GameType.updatePlayerAbilities.
+        g.change_game_mode(mode);
+        // GameType.updatePlayerAbilities: the mode's flags, on the abilities
+        // the fork keeps them in (spectator flies, creative keeps what it had).
         g.abilities.update_for_mode(mode);
         // ServerPlayerGameMode.changeGameModeForPlayer: a player left flying
         // by the change lands when the ground is within a block.
