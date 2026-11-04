@@ -3034,7 +3034,7 @@ fn stamp(base: &Path, jar_store: &Path, mods: &[ContentMod]) -> Result<String> {
             modified.as_nanos()
         ))
     };
-    let mut parts = vec!["horizon mod content 3".to_owned()];
+    let mut parts = vec!["horizon mod content 1".to_owned()];
     parts.push(meta(&std::env::current_exe()?)?);
     let base = std::path::absolute(base)?;
     parts.push(
@@ -3047,9 +3047,8 @@ fn stamp(base: &Path, jar_store: &Path, mods: &[ContentMod]) -> Result<String> {
     }
     for m in mods {
         parts.push(m.id.clone());
+        parts.push(format!("jars {}", serde_json::to_string(&m.jars)?));
         for jar in &m.jars {
-            // The complete reference and cache state identify this ordered layer.
-            parts.push(format!("jar {}", serde_json::to_string(jar)?));
             parts.push(meta(&jar.cache_path(jar_store)).unwrap_or_else(|_| "not cached".into()));
         }
         // What it declares, so blocks and items from code count too.
