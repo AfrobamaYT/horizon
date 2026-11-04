@@ -102,6 +102,8 @@ mod cosmetics;
 mod creaking;
 mod creative_hotbar;
 mod creatures;
+#[cfg(test)]
+mod crop_grow_tests;
 mod crossbow;
 pub(crate) mod cushions;
 mod debug_keys;
@@ -400,6 +402,7 @@ mod win;
 mod wind;
 mod wither;
 mod world_loading;
+mod xp_orb_targeting;
 mod zombie_reinforcements;
 mod zombie_villagers;
 use event_loop::EventLoopCtl;
@@ -1336,6 +1339,22 @@ impl LevelAccess for GameLevel<'_> {
         self.native_block_grow_feature(self.dimension, pos, &mut feature, &mut cancel);
         feature.filter(|_| !cancel).map(std::borrow::Cow::Owned)
     }
+    fn crop_grow_pre(&mut self, pos: BlockPos, state: BlockStateId, vanilla: bool) -> bool {
+        if !self.native_authoritative || !mod_api::__private::listened(mod_api::HookId::CropGrowPre)
+        {
+            return vanilla;
+        }
+        let mut result = mod_api::NativeTriState::Default;
+        self.native_crop_grow_pre(self.dimension, pos, state, &mut result);
+        result.or(vanilla)
+    }
+    fn crop_grow_post(&mut self, pos: BlockPos, original: BlockStateId) {
+        if self.native_authoritative && mod_api::__private::listened(mod_api::HookId::CropGrowPost)
+        {
+            let state = self.block_state(pos);
+            self.native_crop_grow_post(self.dimension, pos, original, state);
+        }
+    }
     fn allow_block_burn(&self, pos: BlockPos) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
@@ -1893,8 +1912,17 @@ impl LevelAccess for GameLevel<'_> {
             return None;
         }
         let previous = self.world.block(pos.x, pos.y, pos.z);
-        self.world.set(pos.x, pos.y, pos.z, state).ok()?;
+        self.world
+            .set_with_notification(pos.x, pos.y, pos.z, state, false)
+            .ok()?;
         Some(previous)
+    }
+    fn send_block_updated(&mut self, pos: BlockPos) {
+        if (self.client_side || self.tickets.block_ticking(pos.x >> 4, pos.z >> 4))
+            && let Some(log) = &mut self.world.block_log
+        {
+            log.push((pos.x, pos.y, pos.z));
+        }
     }
     fn is_loaded(&self, pos: BlockPos) -> bool {
         self.world.loaded(pos.x, pos.z)
@@ -7592,7 +7620,10 @@ impl Game<'_> {
                     };
                     if let Some(living) = mob {
                         let effect = mod_api::NativeActiveEffect::new(
-                            horizon_client::brewing::namespaced(def.id),
+                            mod_api::Identifier::parse_namespaced(
+                                horizon_client::brewing::namespaced(def.id),
+                            )
+                            .expect("the game's effect ids are namespaced"),
                             eff.duration,
                             eff.amplifier,
                             eff.ambient,
@@ -14480,8 +14511,8 @@ impl Game<'_> {
     }
     /// `ExperienceOrb.followNearbyPlayer`'s candidates: each orb goes for the
     /// nearest living player within 8 blocks, the host's own or a guest. Each
-    /// is the player's feet and the point the orb homes on.
-    pub(super) fn orb_followed(&self) -> Vec<([f64; 3], [f64; 3])> {
+    /// is the player's feet, the point the orb homes on and the player's UUID.
+    pub(super) fn orb_followed(&self) -> Vec<xp_orb_targeting::OrbCandidate> {
         let spectator = self.spectator();
         let player = self
             .player
@@ -14489,11 +14520,15 @@ impl Game<'_> {
             .filter(|p| !p.health.dead_or_dying() && !spectator && !self.lan_acting_fake);
         // ExperienceOrb.followNearbyPlayer: each orb goes for the nearest
         // living player within 8 blocks, the host's own or a guest.
-        let mut followed: Vec<([f64; 3], [f64; 3])> = player
+        let uuid = self
+            .level
+            .player_uuid
+            .map(horizon_client::lan::playerdata::ints_uuid);
+        let mut followed: Vec<xp_orb_targeting::OrbCandidate> = player
             .map(|p| {
                 let feet = [p.position.x, p.position.y, p.position.z];
                 let eye = f64::from(p.dimensions.eye_height);
-                (feet, [feet[0], feet[1] + eye / 2.0, feet[2]])
+                (feet, [feet[0], feet[1] + eye / 2.0, feet[2]], uuid)
             })
             .into_iter()
             .collect();
@@ -14512,7 +14547,7 @@ impl Game<'_> {
                     .filter(|g| !g.spectator())
                     .map(|g| {
                         let p = g.position;
-                        (p, [p[0], p[1] + g.eye_height() / 2.0, p[2]])
+                        (p, [p[0], p[1] + g.eye_height() / 2.0, p[2]], Some(g.uuid))
                     }),
             );
         }

@@ -948,7 +948,6 @@ pub enum NativeAuthority {
 }
 
 /// Supported vanilla `Block.UPDATE_*` flags for a level block write.
-/// Horizon currently sends all writes to clients regardless of client flags.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct NativeBlockUpdateFlags(i32);
@@ -958,6 +957,10 @@ impl NativeBlockUpdateFlags {
     pub const NONE: Self = Self(0);
     /// Notify neighboring blocks.
     pub const NEIGHBORS: Self = Self(1);
+    /// Send the block update to clients.
+    pub const CLIENTS: Self = Self(2);
+    /// Suppress the client-side block update notification.
+    pub const INVISIBLE: Self = Self(4);
     /// Skip neighbor shape updates.
     pub const KNOWN_SHAPE: Self = Self(16);
     /// Suppress drops caused by neighbor shape updates.
@@ -1336,17 +1339,17 @@ impl ItemEnchantments {
 
 /// A living entity's active effect (vanilla's `MobEffectInstance`), as
 /// [`LivingRef`] reads its effects and as `add_effect` gives one: the
-/// effect's id namespaced as the registry has it (`minecraft:speed`, a
-/// content mod's `mod:custom`; a bare vanilla id reads as `minecraft:`'s),
+/// effect's id, an [`Identifier`] namespaced as the registry has it
+/// (`minecraft:speed`, a content mod's `mod:custom`),
 /// the ticks left (-1 is infinite), the amplifier from 0, and the flags a
 /// beacon-style effect carries: `ambient` (an ambient one gives no
 /// particles) and `visible` (whether its particles show). Horizon keeps no
 /// separate show-icon flag: the icon always shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeActiveEffect {
     /// The effect's namespaced id.
-    pub id: &'static str,
+    pub id: Identifier,
     /// The ticks left; -1 is infinite.
     pub duration: i32,
     /// The amplifier, from 0.
@@ -1360,7 +1363,7 @@ pub struct NativeActiveEffect {
 impl NativeActiveEffect {
     /// Construct an effect with its duration, amplifier and visual flags.
     pub fn new(
-        id: &'static str,
+        id: Identifier,
         duration: i32,
         amplifier: i32,
         ambient: bool,
@@ -3583,6 +3586,10 @@ pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
     ) -> bool {
         unimplemented!("LevelWriteHost::set_block")
     }
+    /// Remove a block through `Level.removeBlock`, preserving its fluid. `moved` marks a piston move.
+    fn remove_block(&mut self, _pos: [i32; 3], _moved: bool) -> bool {
+        unimplemented!("LevelWriteHost::remove_block")
+    }
     /// Change a block property through `native_set_block_property`.
     fn set_block_property(
         &mut self,
@@ -4792,7 +4799,8 @@ pub(crate) mod built {
                 visible,
             } = v;
             Self {
-                id,
+                id: crate::Identifier::parse_namespaced(id)
+                    .expect("the game's effect ids are namespaced"),
                 duration,
                 amplifier,
                 ambient,

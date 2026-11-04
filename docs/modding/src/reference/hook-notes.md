@@ -176,8 +176,7 @@ requires a farmer at work and `mob_griefing` enabled.
 
 - `native_set_block`, a server-side `Game` helper that replaces a state in the current dimension through
   `Level.setBlock`. It accepts vanilla's neighbour and shape flags and returns whether a block changed; a block with a
-  block entity gets one. Horizon sends every write to players whatever the flags: `UPDATE_CLIENTS`, `UPDATE_INVISIBLE`
-  and `UPDATE_IMMEDIATE` change nothing yet. Hooks holding only `GameLevel` cannot call it yet.
+  block entity gets one. `UPDATE_CLIENTS` sends the update; `UPDATE_INVISIBLE` suppresses notification only on the client, as in `Level.setBlock`. Hooks holding only `GameLevel` cannot call it yet.
 
 - `GameLevel::native_play_sound` for registered vanilla sound events on an authoritative server.
   It queues the sound for nearby players in the level's dimension, including during a guest's turn.
@@ -238,8 +237,7 @@ requires a farmer at work and `mob_griefing` enabled.
   ticks randomly), and lava's fluid random tick runs either way. It needs the level mutably, which only `native_random_tick` and `native_tick_block` give. It is `Game::native_set_block_property` with `Level.setBlock`'s flags (`native_hooks::flags`): a
   vanilla crop grows with `flags::UPDATE_CLIENTS` (neighbours' shapes update, so an observer fires, but no neighbour
   gets `neighborChanged` and comparators aren't told), a furnace sets its `lit` with `flags::UPDATE_ALL` (both). Horizon
-  sends every write to players whatever the flags: `UPDATE_CLIENTS` (2), `UPDATE_INVISIBLE` (4) and `UPDATE_IMMEDIATE`
-  (8) change nothing yet. It writes at any loaded position, returns false off an authoritative server (the `Game` one too: a window that isn't a server), for a property or
+  sends updates when `UPDATE_CLIENTS` (2) is set; `UPDATE_INVISIBLE` (4) suppresses notification only on the client, as in `Level.setBlock`. `UPDATE_IMMEDIATE` (8) has no effect yet. It writes at any loaded position, returns false off an authoritative server (the `Game` one too: a window that isn't a server), for a property or
   value the block doesn't have, a position that isn't loaded, or a property that already has the value (nothing is written:
   vanilla's `Level.setBlock` returns false for an unchanged state, as `native_set_block` does), and true when the block changed. Elsewhere, `Game::native_set_block_property_with(pos, key, value, flags)` does the same, as a brewing
   stand's tick sets its bottles with `flags::UPDATE_CLIENTS`.
@@ -1017,6 +1015,8 @@ registration path.
 - a player changing dimension: `native_player_changed_dimension(player, name, from, to)` is heard once per move of a server's player into another level, when the move has ended (a portal's exit found and the player standing there, a command's teleport landed, a respawn in another level placed for good), with `from` and `to` as dimension ids (`minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`) and the player's state swapped in so that `native_tell` and the other helpers reach them. A move within a level is not heard.
 
 - A mod that hears `native_pickup_xp` sets `listened` in `native_pickup_xp_listened` (a HEAD injection); `native_pickup_xp(player, dimension, orb, value, count, canceled)` then runs before a server player takes an orb. Canceling leaves the orb and the pickup delay unchanged; otherwise the value is clamped to 1..=2,147,483,647 and the count to at least one, then one count is taken. `native_mending_repair(player, stack, experience, repair)` sees the damaged Mending item picked at random and can change the durability repair proposed for it, which is capped at its current damage. Turning a positive proposal into zero leaves the experience unspent (a zero vanilla proposal keeps vanilla's behaviour); if the picked stack is removed, changed except for its damage, or no longer eligible, the repair is skipped and the experience remains. The repair also decides how much experience is left for further repairs. It runs for `PlayerRef::give_experience_points` too. Both run on the integrated and the dedicated server, guests included.
+
+- Whom an experience orb follows (`XpOrbTargetingEvent`): `native_xp_orb_targeting(orb, scan_distance, following)`, on a server, for each orb as it ticks. `following` starts as the nearest living player within `scan_distance` (8) blocks who isn't a spectator, or `None`; set another player, or `None` to follow no one. The orb goes only for a living player who isn't a spectator and is in its level, and moves only once they are within 8 blocks. An orb that follows no one gets vanilla's push out of a block it is stuck in. Horizon looks for the nearest player on every orb tick, where vanilla keeps the player it follows while they stay within 8 blocks, so the hook is asked every tick for each orb (NeoForge asks only when the orb has no player in range). Clients still predict the orb's flight towards the nearest player; the server's position wins.
 
 - Where a loot roll happens, for a mod's own loot kinds: `ctx.place` in `native_loot_function` and
   `native_loot_condition` brings `LootContextParams.ORIGIN` (a broken block's centre, a dead mob's position), `BLOCK_ENTITY` (the broken
@@ -1871,6 +1871,15 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   to leave the position unchanged. Direct player flint-and-steel/fire-charge placement is not covered.
 - **`native_block_burn(dimension, pos, cancel)`** (on `GameLevel`): fire's burnout check is about to remove the block at
   `pos`. Set `cancel` to keep it.
+- **`native_crop_grow_pre(dimension, pos, state, result)`** and **`native_crop_grow_post(dimension, pos,
+  original_state, state)`** (on `GameLevel`): NeoForge's `CropGrowEvent.Pre` and `.Post`, at the random-tick growth of
+  crops (beetroot and torchflowers after their own 1 in 3 skip), stems, nether wart, cocoa, sweet berries, bamboo,
+  cactus, chorus flowers, sugar cane, kelp and the vines. `result` is a `NativeTriState`: `Default` keeps vanilla's
+  chance, `True` grows, `False` doesn't. Pre fires at NeoForge's positions (the block above for cactus and chorus,
+  the block grown into for kelp and vines). Vanilla's random roll is drawn first, in vanilla's order, and passed as
+  the default. Diverges from NeoForge, which draws bamboo's and sweet berries' roll later (only after the
+  other checks), so a NeoForge server's crops drift from vanilla's random sequence. Pitcher crops, bamboo
+  saplings and mangrove propagules don't fire, as in NeoForge.
 - **`native_dragon_egg_form(dimension, pos, cancel)`** (on `GameLevel`): the first Ender Dragon fight is about to place
   its egg at `pos`. Set `cancel` to leave the block unchanged.
 - **`native_fluid_level_change(dimension, pos, fluid, from, to, cancel)`** (on `GameLevel`): flowing `water` or `lava`
@@ -2128,7 +2137,7 @@ handle, an entity the client doesn't track and a level it doesn't show:
   vanilla. It moves the deadline the use-item Tick hook moves, so shield, bow, trident, spear, instrument and bundle uses,
   which don't count it, ignore it, and a call inside that Tick hook is overwritten by the hook's result. Nothing in use reads 0 and refuses a write. A mob's item use is a counter of its goal, so mobs read None.
 - `living.effects(host)` lists a living entity's active effects (vanilla's `activeEffects`) as `NativeActiveEffect`s — the
-  namespaced id, the ticks left (-1 infinite), the amplifier, and the `ambient` and `visible` flags; Horizon keeps no separate
+  namespaced id as an owned `Identifier`, the ticks left (-1 infinite), the amplifier, and the `ambient` and `visible` flags; Horizon keeps no separate
   show-icon flag, the icon always shows. `living.effect(host, id)` reads one (`getEffect`) and `living.potion_affected(host,
   id)` answers `hasEffect`; a bare vanilla id reads as `minecraft:`'s. `living.add_effect(host, &effect)` is
   `LivingEntity.addEffect` by the game's own path: a player's or a guest's goes through the potion machinery (its attribute
@@ -2273,7 +2282,7 @@ handle, an entity the client doesn't track and a level it doesn't show:
   `award_experience(host, x, y, z,
   amount)` splits experience into orbs (`ExperienceOrb.award`), all in the level in place.
 
-`level.set_block(host, pos, state, flags)` and `level.destroy_block(host, pos, drop)` change the level in place. Both return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill. Horizon sends all block changes to clients regardless of client-update flags.
+`level.set_block(host, pos, state, flags)`, `level.remove_block(host, pos, moved)` and `level.destroy_block(host, pos, drop)` change the level in place. They return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. Removal preserves the fluid's legacy block; `moved` marks a piston move. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. `CLIENTS` sends the update, while `INVISIBLE` suppresses notification only on the client, as in `Level.setBlock`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill.
 
 A helper whose catalog entry names a `receiver` (`entity`, `level`, `block_entity`) is called on that handle (for example `entity.position(host)`), rather than as an ID-based `Host` method.
 

@@ -28,6 +28,8 @@ mod tests {
         pub(super) struct Direction;
         #[derive(Clone, Copy)]
         pub(super) struct LevelDimension;
+        #[derive(Clone, Copy)]
+        pub(super) struct PlayerRef;
         pub(super) struct NeighbourUpdate;
         #[derive(Clone, Copy)]
         pub(super) struct PathComputationType;
