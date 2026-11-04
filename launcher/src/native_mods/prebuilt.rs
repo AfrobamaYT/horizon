@@ -7,21 +7,16 @@
 use super::{api, dependencies, Target};
 use crate::i18n::{tr, trf};
 use crate::rust_toolchain::{self, Toolchain};
+use horizon_mods::index::native;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Where prebuilt games are released: one `prebuilt-<commit>` prerelease per daily build of this
-/// fork's main (Diverges from upstream: horizon-rust/horizon has none).
-const REPO: &str = "arismoko/horizon";
 const IDENTITY: &str = "horizon-prebuilt.json";
 const TEMPLATE: &str = "native_main.rs.template";
 const SUMS: &str = "SHA256SUMS";
-/// The archive layout this launcher reads, in the archive's name (`prebuilt-game.yml`): a release
-/// made before this layout has no archive by that name, so its revision builds from source.
-const FORMAT: u32 = 1;
 /// The `fast` profile the prebuilt game is built with: the mods' code matches the game's.
 const OPT_LEVEL: &str = "opt-level=3";
 /// The archive's largest plausible unpacked size: a corrupt or hostile archive stops there.
@@ -128,15 +123,6 @@ pub(super) fn refusal(projects: &[api::Project<'_>]) -> Option<SourceReason> {
     })
 }
 
-/// The archive's name for this computer and `target`, as `prebuilt-game.yml` names it.
-fn archive(host: &str, target: Target) -> String {
-    let side = match target {
-        Target::Client => "",
-        Target::Server => "-server",
-    };
-    format!("horizon-prebuilt-v{FORMAT}-{host}{side}.tar.gz")
-}
-
 /// The prebuilt game for `revision` and `target`, downloaded and checked once, then kept in the
 /// launcher's data (`downloading` is told before a download starts); `Err(reason)` inside when
 /// there is none to use. The archive must match the
@@ -150,14 +136,18 @@ pub(super) fn fetch(
     let Some(host) = rust_toolchain::host() else {
         return Ok(Err(SourceReason::Host));
     };
-    let name = archive(host.target, target);
+    let name = native::prebuilt_archive(host.target, matches!(target, Target::Server));
     let dir = super::root()
         .join("prebuilt")
         .join(format!("{revision}-{}", name.trim_end_matches(".tar.gz")));
     if dir.join(IDENTITY).is_file() {
         return Ok(Ok(dir));
     }
-    let release = format!("https://github.com/{REPO}/releases/download/prebuilt-{revision}");
+    let release = format!(
+        "https://github.com/{}/releases/download/{}{revision}",
+        native::PREBUILT_REPO,
+        native::PREBUILT_TAG
+    );
     let Some(sums) = crate::backend::get_unless_missing(&format!("{release}/{SUMS}"))? else {
         return Ok(Err(SourceReason::NoRelease {
             revision: revision.to_owned(),
@@ -499,7 +489,7 @@ mod tests {
 
     #[test]
     fn the_archive_is_found_by_name_in_the_release_sums() {
-        let name = archive("x86_64-unknown-linux-gnu", Target::Server);
+        let name = native::prebuilt_archive("x86_64-unknown-linux-gnu", true);
         assert_eq!(
             name,
             "horizon-prebuilt-v1-x86_64-unknown-linux-gnu-server.tar.gz"

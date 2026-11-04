@@ -6,7 +6,7 @@ in. You need the launcher and a Horizon commit to build against.
 1. Make the project:
 
    ```sh
-   cargo horizon-mod new my_mod --template native --horizon <commit>
+   cargo horizon-mod new my_mod --template native
    ```
 
    It writes `horizon-mod.toml` (the manifest, with the exact build pins under `[native]`), `Cargo.toml` and
