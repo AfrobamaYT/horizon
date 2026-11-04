@@ -1101,7 +1101,6 @@
   "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod}: v Cargo.toml chýba závislosť od horizon-mod-api.",
   "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod}: Cargo.toml závisí od hry ({key}). Mod závisí iba od horizon-mod-api.",
   "{mod}: Cargo.toml has no package name.": "{mod}: v Cargo.toml chýba názov balíka.",
-  "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client požaduje {fields}. Serverové zostavenia nemajú grafické rozhranie; funkcie horizon-client spravuje spúšťač. Odstráňte features a použite default-features = false alebo toto nastavenie vynechajte.",
   "{mod}: {error}": "{mod}: {error}",
   "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "Vyhľadanie metadát JAR zlyhalo: {reason}. Umiestnite pôvodné súbory presne na tieto cesty vo vyrovnávacej pamäti a skúste to znova:\n"
 }
