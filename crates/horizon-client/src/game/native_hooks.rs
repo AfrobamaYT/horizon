@@ -36,7 +36,9 @@ use horizon_client::{
     extras_hud::Corners,
     fast_hash::FxHashMap,
     first_person::Hand,
-    health::{DamageContainer, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock, Victim},
+    health::{
+        DamageContainer, DamageHooks, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock, Victim,
+    },
     hud::{HudBatch, rgba},
     item_tooltip::TooltipDisplay,
     items::ItemStack,
@@ -73,7 +75,7 @@ use mod_api::{
     ScreenOpening, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
-    AttachmentStore, BlockHit, BonemealSource, FluidStack, GameRuleValue, LandingWrite,
+    AttachmentStore, BlockHit, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite,
     LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeBlockUpdateFlags,
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, UsePhase,
@@ -83,7 +85,7 @@ pub(crate) use mod_api::{
     NativeMinimap, NativeMod, NativeNoteInstrument, NativePanelEvent, NativePortalShape,
     NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
-use mod_api::{NativePermissionLevel, Recipe};
+use mod_api::{NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason, Recipe};
 use std::{
     collections::HashMap,
     fs,
@@ -821,16 +823,27 @@ impl GameLevel<'_> {
 
     /// An authoritative server is about to deliver `neighborChanged`.
     /// State and block IDs are valid in this level's registries for this call.
+    /// The host is the level with its ticks, as vanilla's `neighborChanged` gets the
+    /// level: a part may read its inputs (`signal`, `has_neighbor_signal`) and
+    /// schedule its tick here, as a diode does (`DiodeBlock.checkTickOnNeighbor`).
     #[inline(always)]
     pub(super) fn native_neighbor_changed(
         &self,
+        ticks: &mut Ticks,
         dimension: LevelDimension,
         pos: BlockPos,
         state: BlockStateId,
         changed: BlockId,
         moved: bool,
     ) {
-        mod_api::dispatch_neighbor_changed(self, dimension, pos, state, changed, moved);
+        mod_api::dispatch_neighbor_changed(
+            &mut super::mod_api_host::LevelTicks { level: self, ticks },
+            dimension,
+            pos,
+            state,
+            changed,
+            moved,
+        );
     }
 
     /// On an authoritative server, a fluid flows or fire spreads from `from`
@@ -5885,6 +5898,44 @@ impl Game<'_> {
         mod_api::dispatch_potential_spawns(self, dimension, category, pos, entries, canceled);
     }
 
+    /// `MobSpawnEvent.SpawnPlacementCheck`: the entity type `kind` may spawn
+    /// at `pos` for `reason` (light, ground, biome: `SpawnPlacements.checkSpawnRules`).
+    /// `default_result` is what vanilla's predicate answered; `result` starts
+    /// as `Default` (vanilla's answer stands). Server-side.
+    pub(super) fn native_mob_spawn_placement_check(
+        &self,
+        dimension: &str,
+        kind: &str,
+        reason: NativeSpawnReason,
+        pos: BlockPos,
+        default_result: bool,
+        result: &mut NativeSpawnCheck,
+    ) {
+        mod_api::dispatch_mob_spawn_placement_check(
+            self,
+            dimension,
+            kind,
+            reason,
+            pos,
+            default_result,
+            result,
+        );
+    }
+    /// `MobSpawnEvent.PositionCheck`: the freshly created mob of type `kind`
+    /// may stand at `pos` for `reason` (`Mob.checkSpawnRules` and
+    /// `checkSpawnObstruction`). `result` starts as `Default`: vanilla's two
+    /// checks decide; `Succeed` or `Fail` skips them. Server-side.
+    pub(super) fn native_mob_spawn_position_check(
+        &self,
+        dimension: &str,
+        kind: &str,
+        reason: NativeSpawnReason,
+        pos: [f64; 3],
+        result: &mut NativeSpawnCheck,
+    ) {
+        mod_api::dispatch_mob_spawn_position_check(self, dimension, kind, reason, pos, result);
+    }
+
     /// The world's spawn point changed to `pos` and `angle`.
     pub(super) fn native_spawn_change(&mut self, pos: [i32; 3], angle: [f32; 2]) {
         mod_api::dispatch_spawn_change(self, pos, angle);
@@ -7204,6 +7255,34 @@ impl Game<'_> {
     pub(super) fn native_chunk_unload(&mut self, dimension: &str, chunk: [i32; 2]) {
         mod_api::dispatch_chunk_unload(self, dimension, chunk);
     }
+    /// `player` started watching `chunk` (NeoForge's `ChunkWatchEvent.Watch`):
+    /// the chunk came into their view and goes to their client, once until
+    /// `native_chunk_unwatch`. Vanilla tells it as the chunk is queued
+    /// (`ChunkMap.markChunkPendingToSend`); Horizon picks a chunk only as it
+    /// sends it, so this comes just before `native_chunk_sent` for the same
+    /// chunk. Told after the server's network step for the level, with the
+    /// state after that step: the order per player and chunk is vanilla's.
+    /// Not told for the far ring's columns past the view distance. Server-side.
+    pub(super) fn native_chunk_watch(&mut self, player: PlayerRef, chunk: ChunkRef) {
+        mod_api::dispatch_chunk_watch(self, player, chunk);
+    }
+    /// `chunk`'s packet went to `player` (NeoForge's `ChunkWatchEvent.Sent`,
+    /// at the end of `PlayerChunkSender.sendChunk`), after
+    /// `native_chunk_watch`, so a mod can send its own data for the chunk
+    /// now. Told after the server's network step, as `native_chunk_watch`.
+    /// Not told for the far ring's columns. Server-side.
+    pub(super) fn native_chunk_sent(&mut self, player: PlayerRef, chunk: ChunkRef) {
+        mod_api::dispatch_chunk_sent(self, player, chunk);
+    }
+    /// `player` stopped watching `chunk` (NeoForge's `ChunkWatchEvent.UnWatch`,
+    /// `ChunkMap.dropChunk`): it left their view, or they leave the level
+    /// (through a portal or a teleport, or respawning) or the server. Once
+    /// for each chunk `native_chunk_watch` told of. After a disconnect the
+    /// player handle no longer reads. Told after the server's network step,
+    /// as `native_chunk_watch`. Not told when the server stops. Server-side.
+    pub(super) fn native_chunk_unwatch(&mut self, player: PlayerRef, chunk: ChunkRef) {
+        mod_api::dispatch_chunk_unwatch(self, player, chunk);
+    }
     /// `player` (`name`) joined the game (NeoForge's
     /// `PlayerLoggedInEvent`): placed in the world and listed in
     /// `native_server_players`, so `native_net_send_to_player` reaches them.
@@ -7877,6 +7956,17 @@ impl Game<'_> {
     pub(super) fn native_entity_mob_griefing(&self, entity: EntityRef, can_grief: &mut bool) {
         mod_api::dispatch_entity_mob_griefing(self, entity, can_grief);
     }
+    /// `LivingVisibilityEvent` (`LivingEntity.getVisibilityPercent`): how
+    /// visible `entity` is to `looking`, which scales the range a targeting
+    /// check sees it from. `visibility` comes in as vanilla's percent.
+    pub(super) fn native_living_visibility(
+        &self,
+        entity: LivingRef,
+        looking: Option<EntityRef>,
+        visibility: &mut f64,
+    ) {
+        mod_api::dispatch_living_visibility(self, entity, looking, visibility);
+    }
     /// `MobEffect.shouldApplyEffectTickThisTick` for a content mod's effect
     /// `effect` (`ruby:bleeding`), each tick a player or a mob has it, in
     /// `MobEffectInstance.tickServer` before it counts down: `tick_count` is
@@ -7943,52 +8033,6 @@ impl Game<'_> {
         amplifier: i32,
     ) {
         mod_api::dispatch_mob_effect_added(self, effect, entity, amplifier);
-    }
-    /// NeoForge's `LivingShieldBlockEvent`: entity `entity` of type `kind`
-    /// (`minecraft:player`, `minecraft:zombie`) is hit for `damage` from `source` (its
-    /// type and entities, as `native_living_incoming_damage` names them), and
-    /// `LivingEntity.applyItemBlocking` is
-    /// about to resolve what a raised `blocks_attacks` item stops. Every hit with damage
-    /// asks, raised item or not: `original_blocked` is whether vanilla blocks (only a
-    /// player raises one). Change `block`: `blocked` makes the entity block or not (a block
-    /// forced on a hit vanilla lets through stops all of it), `blocked_damage` what is
-    /// stopped (kept within 0 and `damage`) and `shield_damage` the durability a raised
-    /// item loses (below 0: vanilla's `itemDamage` of what is stopped). Set `blocked` to false and nothing is blocked; the event has no cancel. No `self`, as
-    /// `native_living_incoming_damage`: the game is in the middle of the hit.
-    pub(super) fn native_living_shield_block(
-        entity: i32,
-        kind: &str,
-        source: &HurtSource<'_>,
-        damage: f32,
-        original_blocked: bool,
-        block: &mut ShieldBlock,
-    ) {
-        mod_api::dispatch_living_shield_block(
-            entity,
-            kind,
-            source,
-            damage,
-            original_blocked,
-            block,
-        );
-    }
-    /// NeoForge's `LivingUseTotemEvent`: a killing blow on entity `entity` of type `kind`
-    /// from `source` (named as `native_living_incoming_damage` names it) would be taken by the
-    /// `death_protection` item `item` in its `hand` (main or off;
-    /// `LivingEntity.checkTotemDeathProtection`). Set `cancel` and the entity gets no
-    /// protection: it dies and the item is kept. A player or a mob holding a totem fires it; a
-    /// source that bypasses invulnerability never reaches it. `native_player_totem` still
-    /// hears a server player's totem that did save them, after this. No `self`, as
-    /// `native_living_shield_block`: the game is in the middle of the hit.
-    pub(super) fn native_living_use_totem(
-        entity: i32,
-        kind: &str,
-        source: &HurtSource<'_>,
-        hand: Hand,
-        item: &str,
-        cancel: &mut bool,
-    ) {
-        mod_api::dispatch_living_use_totem(entity, kind, source, hand, item, cancel);
     }
     /// Whether a mod hears projectiles' impacts (`native_projectile_impact`):
     /// set `hears`. Asked once a server tick before the projectiles fly; only
@@ -8143,16 +8187,16 @@ impl Game<'_> {
     }
 }
 
-/// `native_living_use_totem` for the damage code (`health::USE_TOTEM`): whether it
+/// `native_living_use_totem` for the damage code: whether it
 /// canceled the totem. The entity and the source are named as the damage hook names them.
-pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
+pub(super) fn use_totem(level: DamageLevel<'_>, hurting: Hurting<'_>, off_hand: bool) -> bool {
     if !mod_api::__private::listened(mod_api::HookId::LivingUseTotem) {
         return false;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
     let hand = if off_hand { Hand::Off } else { Hand::Main };
     let mut cancel = false;
-    Game::native_living_use_totem(
+    HitLevel(level).native_living_use_totem(
         entity,
         kind,
         &source,
@@ -8170,6 +8214,55 @@ pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
 pub(super) struct HitLevel<'a>(pub(super) DamageLevel<'a>);
 
 impl HitLevel<'_> {
+    /// NeoForge's `LivingShieldBlockEvent`: entity `entity` of type `kind`
+    /// (`minecraft:player`, `minecraft:zombie`) is hit for `damage` from `source` (its
+    /// type and entities, as `native_living_incoming_damage` names them), and
+    /// `LivingEntity.applyItemBlocking` is
+    /// about to resolve what a raised `blocks_attacks` item stops. Every hit with damage
+    /// asks, raised item or not: `original_blocked` is whether vanilla blocks (only a
+    /// player raises one). Change `block`: `blocked` makes the entity block or not (a block
+    /// forced on a hit vanilla lets through stops all of it), `blocked_damage` what is
+    /// stopped (kept within 0 and `damage`) and `shield_damage` the durability a raised
+    /// item loses (below 0: vanilla's `itemDamage` of what is stopped). Set `blocked` to false and nothing is blocked; the event has no cancel. The level is the hit's: its blocks, random and own
+    /// attachments.
+    pub(super) fn native_living_shield_block(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        damage: f32,
+        original_blocked: bool,
+        block: &mut ShieldBlock,
+    ) {
+        mod_api::dispatch_living_shield_block(
+            self,
+            entity,
+            kind,
+            source,
+            damage,
+            original_blocked,
+            block,
+        );
+    }
+    /// NeoForge's `LivingUseTotemEvent`: a killing blow on entity `entity` of type `kind`
+    /// from `source` (named as `native_living_incoming_damage` names it) would be taken by the
+    /// `death_protection` item `item` in its `hand` (main or off;
+    /// `LivingEntity.checkTotemDeathProtection`). Set `cancel` and the entity gets no
+    /// protection: it dies and the item is kept. A player or a mob holding a totem fires it; a
+    /// source that bypasses invulnerability never reaches it. `native_player_totem` still
+    /// hears a server player's totem that did save them, after this. The level is the hit's: its blocks, random and own
+    /// attachments.
+    pub(super) fn native_living_use_totem(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        hand: Hand,
+        item: &str,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_living_use_totem(self, entity, kind, source, hand, item, cancel);
+    }
     /// `Block.fallOn`: entity `entity` of type `kind` landed on `state` at `pos` after falling
     /// `distance` blocks. `damage` is the fall damage `causeFallDamage` calculated, before hurt
     /// handling and the fall sounds: change it, and zero prevents both. A creative or
@@ -8326,7 +8419,7 @@ impl HitLevel<'_> {
     }
 }
 
-/// `native_living_incoming_damage` for the damage code (`health::HURT_SERVER`): whether it
+/// `native_living_incoming_damage` for the damage code: whether it
 /// canceled the hit.
 pub(super) fn incoming_damage(
     level: DamageLevel<'_>,
@@ -8353,7 +8446,7 @@ pub(super) fn incoming_damage(
     canceled
 }
 
-/// `native_living_damage_pre` for the damage code (`health::DAMAGE_PRE`).
+/// `native_living_damage_pre` for the damage code.
 pub(super) fn damage_pre(
     level: DamageLevel<'_>,
     hurting: Hurting<'_>,
@@ -8366,7 +8459,7 @@ pub(super) fn damage_pre(
     HitLevel(level).native_living_damage_pre(entity, kind, &source, container);
 }
 
-/// `native_living_damage_post` for the damage code (`health::DAMAGE_POST`).
+/// `native_living_damage_post` for the damage code.
 pub(super) fn damage_post(
     level: DamageLevel<'_>,
     hurting: Hurting<'_>,
@@ -8379,16 +8472,24 @@ pub(super) fn damage_post(
     HitLevel(level).native_living_damage_post(entity, kind, &source, container);
 }
 
-/// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`). Its one
+/// `native_living_shield_block` for the damage code. Its one
 /// caller. The hurt entity and the source are named as the damage hook names them.
 pub(super) fn shield_block(
+    level: DamageLevel<'_>,
     hurting: Hurting<'_>,
     damage: f32,
     original_blocked: bool,
     block: &mut ShieldBlock,
 ) {
     let (entity, kind, source) = hurt_server_args(hurting);
-    Game::native_living_shield_block(entity, kind, &source, damage, original_blocked, block);
+    HitLevel(level).native_living_shield_block(
+        entity,
+        kind,
+        &source,
+        damage,
+        original_blocked,
+        block,
+    );
 }
 
 impl Game<'_> {
@@ -8426,7 +8527,7 @@ impl Game<'_> {
     }
 }
 
-/// `native_living_knockback` for the knockback code (`health::KNOCKBACK`): whether it
+/// `native_living_knockback` for the knockback code: whether it
 /// canceled the push. Its one caller. The pushed entity and the source are named as the
 /// damage hook names them.
 pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
@@ -8467,6 +8568,15 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
     canceled
 }
 
+/// The damage hooks every level of the game lends to its hits (`Game.damage_hooks`).
+pub(super) const DAMAGE_HOOKS: DamageHooks = DamageHooks {
+    incoming: Some(incoming_damage),
+    pre: Some(damage_pre),
+    post: Some(damage_post),
+    knockback: Some(knockback),
+    totem: Some(use_totem),
+    shield: Some(shield_block),
+};
 /// The contacts of a simulating entity with a block, as the simulation's own code (client-lib)
 /// reports them.
 pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
@@ -9731,6 +9841,11 @@ impl Game<'_> {
     /// else its path in words.
     pub(super) fn native_fluid_name(&self, fluid: &str) -> String {
         super::native_panel_recipes::fluid_name(fluid)
+    }
+    /// The selected language's text for a translation key (`Component.translatable`'s lookup), `None`
+    /// when no language layer defines it.
+    pub(super) fn native_translate(&self, key: &str) -> Option<String> {
+        horizon_client::lang::has(key).then(|| horizon_client::lang::get(key))
     }
     /// A line of text at `(x, y)` in GUI pixels, opaque `rgb`.
     pub(super) fn native_text(
@@ -11366,6 +11481,26 @@ mod tests {
                     .is_some()
             );
             assert_eq!(game.native_enchantment_min_cost("missing:unknown", 1), None);
+        });
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn translate_gives_the_text_of_a_defined_key_and_none_otherwise() {
+        use horizon_client::lang::{Language, ResourceSource, scoped};
+        struct Empty;
+        impl ResourceSource for Empty {
+            fn read(&self, _: &str) -> Option<Vec<u8>> {
+                None
+            }
+        }
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (got, _) = scoped(Language::load(&[&Empty], "en_us"), || {
+                (
+                    game.native_translate("horizon.options.controller"),
+                    game.native_translate("missing.key"),
+                )
+            });
+            assert_eq!(got, (Some("Controller".to_owned()), None));
         });
     }
     #[test]

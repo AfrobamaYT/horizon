@@ -111,6 +111,16 @@ fn header(wit_text: &str, macro_call: &str, options: &str) -> String {
     )
 }
 
+/// A copy of what `local`, a `&mut` record argument, holds before the call, so only what the
+/// call changed is sent back.
+fn before(types: &Types<'_>, sig: &Signature, ty: &Ty, local: &str, out: &mut String) {
+    if let Ty::Named(def) = ty
+        && sig.results.contains(&wit::out_name(&types.defs[*def]))
+    {
+        writeln!(out, "let b_{local} = before_{def}(&{local});").unwrap();
+    }
+}
+
 /// The function returning what the method's results tuple holds, after the call.
 fn results(
     types: &Types<'_>,
@@ -126,7 +136,7 @@ fn results(
     for (_, local, ty) in outs {
         match ty {
             Ty::Named(def) if sig.results.contains(&wit::out_name(&types.defs[*def])) => {
-                parts.push(format!("lower_out_{def}(&{local})"))
+                parts.push(format!("lower_out_{def}(&{local}, &b_{local})?"))
             }
             Ty::Named(def) if matches!(types.defs[*def].kind, Kind::Record(_)) => {}
             ty => parts.push(lower(types, ty, &format!("(&{local})"))),
@@ -267,6 +277,7 @@ pub(super) fn guest(
                         let value = place.value(inner, &source)?;
                         let local = format!("m{}", mut_locals.len());
                         writeln!(out, "let mut {local} = {value};").unwrap();
+                        before(types, &sig, inner, &local, &mut out);
                         call_args.push(format!("&mut {local}"));
                         mut_locals.push((0, local, (**inner).clone()));
                     }
@@ -574,6 +585,8 @@ pub(super) fn host(
             if sig.params.first().is_some_and(|(n, _)| n == "handler") {
                 args.push("self.index".to_string());
             }
+            // The arguments lowered before the call, by name.
+            let mut sent = Vec::new();
             for (i, (_, ty)) in method.params.iter().enumerate() {
                 frame_objects(types, ty, &format!("p{i}"), &mut frame);
                 if wit::wit(types, ty)?.is_some() {
@@ -583,9 +596,10 @@ pub(super) fn host(
                         lower(types, ty, &format!("(&p{i})"))
                     )
                     .unwrap();
-                    args.push(format!("a{i}"));
+                    sent.push(format!("a{i}"));
                 }
             }
+            args.extend(sent.iter().cloned());
             let (pattern, names) = unpack(&sig);
             let mut back = String::new();
             let mut next = usize::from(wit::wit(types, &method.ret)?.is_some());
@@ -620,6 +634,14 @@ pub(super) fn host(
                 Ty::Result(..) => "|| Err(super::refused())",
                 _ => "super::NoAnswer::no_answer",
             };
+            // An argument that can't cross (a tag past the limits) isn't sent: the call answers
+            // as one that didn't run, and the reason is logged.
+            if !sent.is_empty() {
+                let sent = sent.join(", ");
+                prep = format!(
+                    "let ({sent},) = match (|| -> Result<_, super::Refused> {{ {prep} Ok(({sent},)) }})() {{ Ok(a) => a, Err(why) => return super::unsent(&self.module, why, {no_answer}) }};"
+                );
+            }
             writeln!(
                 code,
                 "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ let mut frame = super::Frame::default(); {frame} {prep} self.call_or(frame, {no_answer}, |m, store| -> wasmtime::Result<_> {{ let {pattern} = m.horizon_mod_api_{iface}().call_{}(store, {})?; {back} Ok({value}) }}) }}",
@@ -782,6 +804,7 @@ fn host_import(
                 let value = place.value(inner, &source)?;
                 let local = format!("m{}", mut_locals.len());
                 writeln!(out, "let mut {local} = {value};").unwrap();
+                before(types, &sig, inner, &local, &mut out);
                 call_args.push(format!("&mut {local}"));
                 mut_locals.push((0, local, (**inner).clone()));
             }

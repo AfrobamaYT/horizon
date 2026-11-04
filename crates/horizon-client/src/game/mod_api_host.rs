@@ -3,7 +3,7 @@ use horizon_world::{
     attachments::{ATTACHMENTS_KEY, attachment_compound},
     level::Ticks,
 };
-use mod_api::BlockPos;
+use mod_api::{BlockPos, Direction};
 
 fn world_attachments(
     world: &mut horizon_client::world::World,
@@ -444,6 +444,34 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::Lev
     fn schedule_fluid_tick(&mut self, pos: [i32; 3], fluid: &str, delay: i32) -> bool {
         self.level
             .native_schedule_fluid_tick(self.ticks, pos, fluid, delay)
+    }
+    fn signal(&self, pos: [i32; 3], direction: Direction) -> i32 {
+        self.signals()
+            .signal(BlockPos::new(pos[0], pos[1], pos[2]), direction)
+    }
+    fn direct_signal(&self, pos: [i32; 3], direction: Direction) -> i32 {
+        self.signals()
+            .direct_signal(BlockPos::new(pos[0], pos[1], pos[2]), direction)
+    }
+    fn direct_signal_to(&self, pos: [i32; 3]) -> i32 {
+        self.signals()
+            .direct_signal_to(BlockPos::new(pos[0], pos[1], pos[2]))
+    }
+    fn best_neighbor_signal(&self, pos: [i32; 3]) -> i32 {
+        self.signals()
+            .best_neighbor_signal(BlockPos::new(pos[0], pos[1], pos[2]))
+    }
+    fn has_neighbor_signal(&self, pos: [i32; 3]) -> bool {
+        self.signals()
+            .has_neighbor_signal(BlockPos::new(pos[0], pos[1], pos[2]))
+    }
+}
+
+impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> LevelTicks<'b, L> {
+    /// The level in place read through the game's own `SignalGetter`, with this write's
+    /// comparator outputs.
+    fn signals(&self) -> horizon_world::level::Signals<'_, super::GameLevel<'a>> {
+        self.level.behaviours.signals(&*self.level, &*self.ticks)
     }
 }
 

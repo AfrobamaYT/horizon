@@ -13,7 +13,7 @@ use horizon_client::{
     blocks::Fluid,
     collisions::SceneCollisions,
     crafting::Recipes,
-    health::{HurtSource, Hurting, Knock, knockback_canceled},
+    health::{HurtSource, Hurting, Knock},
     items::ItemStack,
     mesher::Vertex,
     mobs::{
@@ -946,8 +946,13 @@ impl Game<'_> {
                 None
             },
             mob_hooks: (self.native_authoritative()
-                && (mod_api::__private::listened(mod_api::HookId::EndermanAnger)
-                    || mod_api::__private::listened(mod_api::HookId::EntityMobGriefing)))
+                && [
+                    mod_api::HookId::EndermanAnger,
+                    mod_api::HookId::EntityMobGriefing,
+                    mod_api::HookId::LivingVisibility,
+                ]
+                .into_iter()
+                .any(mod_api::__private::listened))
             .then_some(self as &dyn horizon_client::mobs::MobHooks),
             asks_animal_tame: self.remote.is_none()
                 && mod_api::__private::listened(mod_api::HookId::AnimalTame),
@@ -1134,6 +1139,7 @@ impl Game<'_> {
                 &mut lent,
                 Some(world_items!(self)),
                 Some(&self.pack.block_registries),
+                &self.damage_hooks,
             );
             let path_changes = horizon_client::mobs::collision_changes(&base, &path_writes);
             // Each mob keeps its snapshot slot all tick; the first slot of an
@@ -1462,7 +1468,7 @@ impl Game<'_> {
                 self.for_player(who, |g| {
                     // CatalystListener: trigger(player, killedEntity, damageSource).
                     let view = g.mob_entity(m);
-                    let blow = m.last_damage.map(|(d, _)| g.damage_view(d));
+                    let blow = g.last_blow(m);
                     g.trigger_killed_as(
                         "minecraft:kill_mob_near_sculk_catalyst",
                         &view,
@@ -1539,8 +1545,23 @@ impl Game<'_> {
         self.award_custom_stat("mob_kills", 1);
         self.score_player_killed(super::commands::Target::Mob(m.id));
         let view = self.mob_entity(m);
-        let blow = m.last_damage.map(|(d, _)| self.damage_view(d));
+        let blow = self.last_blow(m);
         self.trigger_killed(&view, blow.as_ref());
+    }
+    /// The damage source a mob died to (`die`'s), its direct entity included when the mob
+    /// recorded one ([`Mob::last_direct`]).
+    fn last_blow(&self, m: &Mob) -> Option<horizon_client::advancements::DamageView> {
+        let (d, _) = m.last_damage?;
+        let mut view = self.damage_view(d);
+        if let Some(kind) = m.last_direct {
+            view.direct = Some(horizon_client::advancements::EntityView {
+                kind: kind.into(),
+                position: d.from.unwrap_or_default(),
+                ..Default::default()
+            });
+            view.is_direct = false;
+        }
+        Some(view)
     }
     /// A mob's damage source as advancement predicates see it: its type, the
     /// causing entity, and the projectile when one dealt it.
@@ -4468,6 +4489,22 @@ impl Game<'_> {
             self.remember_mob_player_credit(id);
         }
     }
+    /// `LivingEntity.hurtServer` for a snowball, egg or pearl (`kind`) that hurt the mob `id`,
+    /// 0 damage included: the hit is its owner's, and a player's fires PLAYER_HURT_ENTITY.
+    fn thrown_hurt_mob(&mut self, p: &Projectile, id: u32, kind: &str, amount: f32) {
+        self.player_hurt_mob(p, id);
+        if p.owner == Some(Who::Player)
+            && let Some(m) = self.mobs.iter().find(|m| m.id == id)
+        {
+            let victim = self.mob_entity(m);
+            let direct = horizon_client::advancements::EntityView {
+                kind: kind.into(),
+                position: [p.position.x, p.position.y, p.position.z],
+                ..Default::default()
+            };
+            self.player_hit(&victim, "minecraft:thrown", Some(direct), amount);
+        }
+    }
     /// `projectile_hit` for a projectile the guest `conn` shot, run as them;
     /// as the host's when they have left.
     fn guest_projectile_hit(&mut self, conn: u32, p: &Projectile, hit: Hit) -> Result<()> {
@@ -5206,13 +5243,15 @@ impl Game<'_> {
                     } else {
                         0.0
                     };
-                    m.damage_projectile(
+                    if m.damage_projectile(
                         crate::game::entity::damage_level_of!(self),
                         amount,
                         source,
                         aim,
                         [p.velocity.x, p.velocity.z],
-                    );
+                    ) {
+                        self.thrown_hurt_mob(p, id, "minecraft:snowball", amount);
+                    }
                 } else if let Hit::Entity {
                     who: Who::Mob(id), ..
                 } = hit
@@ -5275,13 +5314,15 @@ impl Game<'_> {
                 } = hit
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
-                    m.damage_projectile(
+                    if m.damage_projectile(
                         crate::game::entity::damage_level_of!(self),
                         0.0,
                         source,
                         aim,
                         [p.velocity.x, p.velocity.z],
-                    );
+                    ) {
+                        self.thrown_hurt_mob(p, id, "minecraft:egg", 0.0);
+                    }
                 } else if let Hit::Entity {
                     who: Who::Mob(id), ..
                 } = hit
@@ -5313,13 +5354,15 @@ impl Game<'_> {
                 } = hit
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
-                    m.damage_projectile(
+                    if m.damage_projectile(
                         crate::game::entity::damage_level_of!(self),
                         0.0,
                         source,
                         aim,
                         [p.velocity.x, p.velocity.z],
-                    );
+                    ) {
+                        self.thrown_hurt_mob(p, id, "minecraft:ender_pearl", 0.0);
+                    }
                 } else if let Hit::Entity {
                     who: Who::Mob(id), ..
                 } = hit
@@ -5818,6 +5861,11 @@ impl Game<'_> {
             self.audio
                 .play(sound, Some(self.mobs[index].center()), 1.0, 1.0);
             self.trigger_item("minecraft:filled_bucket", &filled);
+            // PlayerInteractTrigger: the water bucket as it was, and the mob picked up.
+            if let Some(stack) = &held {
+                let target = self.mob_entity(&self.mobs[index]);
+                self.trigger_item_entity("minecraft:player_interacted_with_entity", stack, &target);
+            }
             let species = bucket.trim_end_matches("_bucket").to_owned();
             let id = self.mobs[index].id as i32;
             // Leashable.dropLeash, then discard.
@@ -7911,11 +7959,7 @@ fn knock_back(
         x: xd,
         z: zd,
     };
-    if knockback_canceled(
-        level.reborrow(),
-        Hurting::Player(p.entity_id, source),
-        &mut knock,
-    ) {
+    if level.knockback_canceled(Hurting::Player(p.entity_id, source), &mut knock) {
         return;
     }
     let Knock {
@@ -7985,6 +8029,29 @@ impl horizon_client::mobs::MobHooks for Game<'_> {
     }
     fn can_grief(&self, mob: u32, rule: bool) -> bool {
         self.entity_grief(mob, rule)
+    }
+    fn grief_hooked(&self) -> bool {
+        Game::grief_hooked(self)
+    }
+    fn living_visibility(&self, player: &PlayerView, looking: u32, visibility: f64) -> f64 {
+        if !mod_api::__private::listened(mod_api::HookId::LivingVisibility) {
+            return visibility;
+        }
+        let Some(epoch) = self.native_lifecycle.epoch() else {
+            return visibility;
+        };
+        let uuid = horizon_client::lan::playerdata::ints_uuid(player.uuid);
+        let Some(player) = self.native_player_ref(uuid) else {
+            return visibility;
+        };
+        let mut visibility = visibility;
+        self.native_living_visibility(
+            mod_api::LivingRef::new(player.entity()),
+            Some(mod_api::EntityRef::new(epoch, looking)),
+            &mut visibility,
+        );
+        // CommonHooks.getEntityVisibilityMultiplier: never below 0.
+        visibility.max(0.0)
     }
 }
 
@@ -8069,6 +8136,57 @@ mod mob_griefing_tests {
                     asked,
                     [(denied, true), (other, true), (denied, true), (other, true)]
                 );
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod living_visibility_tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use super::super::native_item_places::tests::{guest, open_to_lan};
+    use std::sync::{Arc, Mutex};
+
+    /// Halves the player's visibility, and logs what it was asked.
+    struct Halve(Arc<Mutex<Vec<(u32, Option<u32>, f64)>>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Halve {
+        fn living_visibility(
+            &self,
+            _: &dyn mod_api::Host,
+            event: &mut mod_api::LivingVisibilityEvent,
+        ) {
+            let looking = event.looking.map(|e| e.id());
+            self.0
+                .lock()
+                .unwrap()
+                .push((event.entity.entity().id(), looking, event.visibility));
+            event.visibility *= 0.5;
+        }
+    }
+
+    /// `LivingVisibilityEvent` for a guest a mob targets: the mod gets the
+    /// guest, the mob and vanilla's percent, and its answer is the percent.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_mod_halves_a_guests_visibility() {
+        let heard = Arc::default();
+        let mods = vec![mod_api::ModEntry::new(
+            "halve",
+            Box::new(Halve(Arc::clone(&heard))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                open_to_lan(game);
+                let mut seen = guest(5);
+                seen.loaded = true;
+                game.lan.as_mut().unwrap().hub.guests.push(seen);
+                let view = game.lan_guest_views()[0].1.clone();
+                let world = game.mob_world_base(&[]);
+                assert!(world.mob_hooks.is_some(), "asked only while a mod listens");
+                assert_eq!(world.player_visibility(&view, 900, 0.8), 0.4);
+                assert_eq!(*heard.lock().unwrap(), [(24, Some(900), 0.8)]);
             });
         });
     }
@@ -8929,15 +9047,14 @@ mod pearl_tests {
 #[cfg(test)]
 mod knockback_tests {
     use super::*;
-    use horizon_client::health::{DamageLevel, KNOCKBACK};
+    use horizon_client::health::{DamageHooks, DamageLevel};
 
     /// What the hook of these tests saw: the player, its source (as damage
     /// type, causing, direct) and the push.
     type Pushes = std::sync::Mutex<Vec<(i32, (String, i32, i32), Knock)>>;
     static PUSHES: Pushes = std::sync::Mutex::new(Vec::new());
 
-    /// Sets the native knockback hook of these tests (global: it stays set for
-    /// the process) for players 9201 to 9203: it records the push, cancels
+    /// Sets the native knockback hook of these tests for players 9201 to 9203: it records the push, cancels
     /// 9201's and doubles 9202's strength and turns its direction around.
     fn hook(_: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
         let Hurting::Player(entity @ 9201..=9203, s) = pushed else {
@@ -8969,12 +9086,13 @@ mod knockback_tests {
         if !root.join("movement-properties.nbt").exists() {
             return;
         }
-        let installed = *KNOCKBACK.get_or_init(|| hook);
-        type Hook = fn(DamageLevel<'_>, Hurting<'_>, &mut Knock) -> bool;
-        assert!(std::ptr::fn_addr_eq(installed, hook as Hook));
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
         let resources = horizon_client::motion::MotionResources::load(&root, &assets).unwrap();
-        let mut test_level = horizon_client::health::TestLevel::new(1);
+        let hooks = DamageHooks {
+            knockback: Some(hook),
+            ..DamageHooks::NONE
+        };
+        let mut test_level = horizon_client::health::TestLevel::with_hooks(1, hooks);
         let hit = HurtSource {
             damage_type: "minecraft:player_attack",
             causing: 5,

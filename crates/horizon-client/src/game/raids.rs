@@ -1408,13 +1408,12 @@ impl Game<'_> {
             let y = self.surface_height(x, z);
             if Self::is_village(centers, [x, y, z])
                 && spawn_rules::check_spawn_rules(
+                    "minecraft:zombie",
                     Species::Zombie,
                     &self.natural_level(),
                     spawn_rules::Reason::Event,
                     &mut random,
-                    x,
-                    y,
-                    z,
+                    [x, y, z],
                 )
             {
                 found = Some([f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5]);

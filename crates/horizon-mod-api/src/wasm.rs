@@ -8,15 +8,12 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// A value from the game that the mod API can't hold (a stack that doesn't decode, a list
-/// of the wrong length): the game broke the interface, so the call traps.
-#[derive(Debug)]
-pub(crate) struct Refused;
+use crate::wasm_refused::Refused;
 
 fn expect<T>(value: Result<T, Refused>) -> T {
     match value {
         Ok(value) => value,
-        Err(Refused) => panic!("the game sent a value the mod API can't hold"),
+        Err(why) => panic!("a value can't cross between the game and this mod: {why}"),
     }
 }
 
@@ -70,7 +67,7 @@ impl Drop for Keep {
 }
 
 fn array<T, const N: usize>(items: Vec<T>) -> Result<[T; N], Refused> {
-    items.try_into().map_err(|_| Refused)
+    items.try_into().map_err(|_| Refused::SHAPE)
 }
 
 /// The one `&'static str` for each distinct string: ids and dimensions the game names.

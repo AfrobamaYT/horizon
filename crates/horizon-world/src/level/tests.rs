@@ -423,7 +423,14 @@ fn block_observation_follows_successful_commits_only() {
                 .borrow_mut()
                 .push(Observation::Block(pos, old, new));
         }
-        fn observe_neighbor_changed(&self, _: BlockPos, _: BlockStateId, _: BlockId, _: bool) {
+        fn observe_neighbor_changed(
+            &self,
+            _: &mut Ticks,
+            _: BlockPos,
+            _: BlockStateId,
+            _: BlockId,
+            _: bool,
+        ) {
             self.seen.borrow_mut().push(Observation::Neighbor);
         }
     }
@@ -488,6 +495,7 @@ fn neighbor_observation_follows_dispatch_order() {
         }
         fn observe_neighbor_changed(
             &self,
+            _: &mut Ticks,
             pos: BlockPos,
             state: BlockStateId,
             changed: BlockId,
@@ -551,7 +559,14 @@ impl LevelAccess for Asker {
     fn game_time(&self) -> i64 {
         self.inner.game_time()
     }
-    fn observe_neighbor_changed(&self, pos: BlockPos, _: BlockStateId, _: BlockId, _: bool) {
+    fn observe_neighbor_changed(
+        &self,
+        _: &mut Ticks,
+        pos: BlockPos,
+        _: BlockStateId,
+        _: BlockId,
+        _: bool,
+    ) {
         self.seen.borrow_mut().push(pos);
     }
     fn affect_neighbors_after_removal(
@@ -731,6 +746,7 @@ fn random_tick_hook_can_change_the_block_and_skip_its_own_tick() {
         }
         fn observe_neighbor_changed(
             &self,
+            _: &mut Ticks,
             _pos: BlockPos,
             _state: BlockStateId,
             _changed: BlockId,

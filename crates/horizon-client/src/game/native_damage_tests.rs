@@ -4,10 +4,7 @@
 use super::dragon::{Dragon, SPECIAL};
 use super::entity::damage_level_of;
 use super::native_entity_refs::tests::with_game;
-use horizon_client::{
-    health,
-    mobs::{Damage, DamageKind, Mob},
-};
+use horizon_client::mobs::{Damage, DamageKind, Mob};
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use mod_api::{
     self, Hooks, LevelRandomHost, LivingDamagePostEvent, LivingDamagePreEvent,
@@ -71,9 +68,6 @@ impl Hooks for Probe {
 
 /// Runs `test` in a game with the probe installed, and returns what it heard.
 fn heard(test: impl FnOnce(&mut super::Game<'_>)) -> Heard {
-    let _ = health::HURT_SERVER.set(super::native_hooks::incoming_damage);
-    let _ = health::DAMAGE_PRE.set(super::native_hooks::damage_pre);
-    let _ = health::DAMAGE_POST.set(super::native_hooks::damage_post);
     let log = Arc::new(Mutex::new(Heard::default()));
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
         "probe",
@@ -171,4 +165,16 @@ fn the_container_names_what_armor_took() {
     // clamps 2 - 10 / 2 up to a fifth of the armor, 0.4, and keeps 1 - 0.4 / 25 of the hit.
     let after = 10.0 * (1.0 - 0.4_f32 / 25.0);
     assert_eq!(heard.pre, [(225011, 10.0, after, 10.0 - after)]);
+}
+
+/// A level built the normal way lends the game's hooks to its hits: a path that built it
+/// without them would run no mod's damage hook.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_game_built_level_has_every_damage_hook() {
+    with_game(|game| {
+        let hooks = &game.damage_hooks;
+        assert!(hooks.incoming.is_some() && hooks.pre.is_some() && hooks.post.is_some());
+        assert!(hooks.knockback.is_some() && hooks.totem.is_some() && hooks.shield.is_some());
+    });
 }

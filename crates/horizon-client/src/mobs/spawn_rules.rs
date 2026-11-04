@@ -31,6 +31,32 @@ pub enum Reason {
     Load,
     DimensionTravel,
 }
+impl From<Reason> for mod_api::NativeSpawnReason {
+    fn from(reason: Reason) -> Self {
+        use mod_api::NativeSpawnReason as N;
+        match reason {
+            Reason::Natural => N::Natural,
+            Reason::ChunkGeneration => N::ChunkGeneration,
+            Reason::Spawner => N::Spawner,
+            Reason::TrialSpawner => N::TrialSpawner,
+            Reason::Reinforcement => N::Reinforcement,
+            Reason::Patrol => N::Patrol,
+            Reason::Structure => N::Structure,
+            Reason::Event => N::Event,
+            Reason::Command => N::Command,
+            Reason::SpawnItemUse => N::SpawnItemUse,
+            Reason::MobSummoned => N::MobSummoned,
+            Reason::Conversion => N::Conversion,
+            Reason::Breeding => N::Breeding,
+            Reason::Triggered => N::Triggered,
+            Reason::Jockey => N::Jockey,
+            Reason::Dispenser => N::Dispenser,
+            Reason::Bucket => N::Bucket,
+            Reason::Load => N::Load,
+            Reason::DimensionTravel => N::DimensionTravel,
+        }
+    }
+}
 impl Reason {
     pub fn is_spawner(self) -> bool {
         matches!(self, Self::Spawner | Self::TrialSpawner)
@@ -87,6 +113,18 @@ pub trait SpawnLevel {
     /// `getNearestPlayer(x, y, z, distance, true) != null`: a survival or
     /// adventure player that close.
     fn player_near(&self, x: f64, y: f64, z: f64, distance: f64) -> bool;
+    /// `MobSpawnEvent.SpawnPlacementCheck`: what the check answers once
+    /// `vanilla`, the type's own predicate, has run. Only the game's level
+    /// tells mods.
+    fn placement_check(
+        &self,
+        _entity: &str,
+        _reason: Reason,
+        _at: [i32; 3],
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
 }
 
 fn name<L: SpawnLevel>(l: &L, x: i32, y: i32, z: i32) -> &str {
@@ -313,8 +351,26 @@ fn surface_water<L: SpawnLevel>(l: &L, x: i32, y: i32, z: i32) -> bool {
         && name(l, x, y + 1, z) == "minecraft:water"
 }
 
-/// `SpawnPlacements.checkSpawnRules`.
+/// `SpawnPlacements.checkSpawnRules` for the entity type `entity` (a species
+/// can stand for several types), then `MobSpawnEvent.SpawnPlacementCheck`
+/// through [`SpawnLevel::placement_check`].
 pub fn check_spawn_rules<L: SpawnLevel>(
+    entity: &str,
+    s: Species,
+    l: &L,
+    reason: Reason,
+    random: &mut impl RandomSource,
+    at: [i32; 3],
+) -> bool {
+    if !allowed_in_peaceful(s) && l.peaceful() {
+        return false;
+    }
+    let [x, y, z] = at;
+    let vanilla = placement_predicate(s, l, reason, random, x, y, z);
+    l.placement_check(entity, reason, at, vanilla)
+}
+/// The type's spawn predicate (`SpawnPlacements.Data.predicate`).
+fn placement_predicate<L: SpawnLevel>(
     s: Species,
     l: &L,
     reason: Reason,
@@ -324,9 +380,6 @@ pub fn check_spawn_rules<L: SpawnLevel>(
     z: i32,
 ) -> bool {
     use Species as S;
-    if !allowed_in_peaceful(s) && l.peaceful() {
-        return false;
-    }
     let below = |l: &L| name(l, x, y - 1, z).to_owned();
     match s {
         S::Axolotl => tag(l, "minecraft:axolotls_spawnable_on", x, y - 1, z),

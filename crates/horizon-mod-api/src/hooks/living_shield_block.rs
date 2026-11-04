@@ -10,12 +10,15 @@ pub trait Hooks {
     /// player raises one). Change `block`: `blocked` makes the entity block or not (a block
     /// forced on a hit vanilla lets through stops all of it), `blocked_damage` what is
     /// stopped (kept within 0 and `damage`) and `shield_damage` the durability a raised
-    /// item loses (below 0: vanilla's `itemDamage` of what is stopped). Set `blocked` to false and nothing is blocked, as NeoForge's `setBlocked(false)`; the event has no cancel. No `self`, as
-    /// `native_living_incoming_damage`: the game is in the middle of the hit.
+    /// item loses (below 0: vanilla's `itemDamage` of what is stopped). Set `blocked` to false and nothing is blocked, as NeoForge's `setBlocked(false)`; the event has no cancel. The level is the hit's: its blocks, random and own
+    /// attachments.
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "LivingShieldBlockEvent"
+        host = "level",
+        neoforge = "LivingShieldBlockEvent",
+        version = 2,
+        target = "horizon_client::game::native_hooks::HitLevel<'_>::native_living_shield_block"
     )]
     fn living_shield_block();
 }

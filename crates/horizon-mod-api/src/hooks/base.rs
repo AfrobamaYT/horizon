@@ -89,11 +89,15 @@ pub trait Hooks {
     fn block_changed();
     /// An authoritative server is about to deliver `neighborChanged`.
     /// State and block IDs are valid in this level's registries for this call.
+    /// The host is the level with its ticks, as vanilla's `neighborChanged` gets the
+    /// level: a part may read its inputs (`signal`, `has_neighbor_signal`) and
+    /// schedule its tick here, as a diode does (`DiodeBlock.checkTickOnNeighbor`).
     #[hook(
         side = "server",
         contract = "listen",
         scope = "block",
         key = "state",
+        version = 2,
         target = "horizon_client::game::native_hooks::GameLevel<'_>::native_neighbor_changed"
     )]
     fn neighbor_changed();
