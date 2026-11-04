@@ -2268,7 +2268,7 @@ mod tests {
         .unwrap();
         fs::write(
             root.join("data/minecraft/recipe/iron_ingot.json"),
-            file("minecraft:smelting", "vanilla-iron"),
+            file("minecraft:stonecutting", "vanilla-iron"),
         )
         .unwrap();
         let items = Items::for_tests(HashMap::new());
@@ -2290,8 +2290,9 @@ mod tests {
                 .by_type
                 .contains_key("minecraft:from_a_later_version")
         );
-        // Vanilla's types answer through the same table.
-        assert_eq!(ids("minecraft:smelting"), ["minecraft:iron_ingot"]);
+        // Vanilla's types answer through the same table (a type the game doesn't parse keeps its file;
+        // one it parses and drops, `minecraft:smelting` with no result, is no recipe).
+        assert_eq!(ids("minecraft:stonecutting"), ["minecraft:iron_ingot"]);
         // Not crafted, and no recipe-book meta of their own.
         assert!(recipes.crafting.is_empty() && recipes.cooking.is_empty());
         assert!(!recipes.meta.keys().any(|k| k.starts_with("mymod:")));
@@ -2304,7 +2305,7 @@ mod tests {
             ("recipe/pack:d".to_owned(), vec![file("mymod:crusher", "d")]),
             (
                 "recipe/minecraft:iron_ingot".to_owned(),
-                vec![file("minecraft:smelting", "pack-iron")],
+                vec![file("minecraft:stonecutting", "pack-iron")],
             ),
             (
                 "recipe/minecraft:p".to_owned(),
@@ -2326,7 +2327,7 @@ mod tests {
         assert_eq!(crusher[1].json["tag"], "pack-b");
         assert_eq!(recipes.by_type["pack:press"][0].id, "minecraft:p");
         assert_eq!(
-            recipes.by_type["minecraft:smelting"][0].json["tag"],
+            recipes.by_type["minecraft:stonecutting"][0].json["tag"],
             "pack-iron"
         );
         let _ = fs::remove_dir_all(&root);
