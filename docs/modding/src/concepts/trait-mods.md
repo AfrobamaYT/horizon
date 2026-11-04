@@ -555,6 +555,7 @@ tables and allocates nothing:
 | `states_of(block) -> Option<BlockStateRange>` | `StateDefinition.getPossibleStates`, as the block's consecutive ids |
 
 None for an unknown state or block, and on a host with no game behind it (a mod's test double).
+
 ### Fake players
 
 `host.fake_player(level, uuid, name)` makes, or finds again, a player with no connection in the level in place, as
