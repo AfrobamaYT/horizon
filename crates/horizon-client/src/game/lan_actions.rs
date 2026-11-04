@@ -6217,6 +6217,41 @@ mod tests {
 
     #[test]
     #[ignore = "requires prepared game resources"]
+    fn block_menu_click_keeps_spent_action_on_cancellation() {
+        use horizon_client::{
+            chunk::Chunk, lan::guest::GuestKind, mod_api::NativeBlockUpdateFlags,
+        };
+        use std::sync::Arc;
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let chest = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:chest")
+                .unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [0, 64, 0],
+                chest,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            assert!(!game.lan_open_container(12, (2, 64, 0)));
+            game.lan.as_mut().unwrap().hub.guests[0].kind = GuestKind::Fake;
+            assert!(game.lan_open_container(12, (0, 64, 0)));
+            assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_none());
+            game.lan.as_mut().unwrap().hub.guests[0].kind = GuestKind::Network;
+            assert!(game.lan_open_container(12, (0, 64, 0)));
+            assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_some());
+        });
+    }
+
+    #[test]
+    #[ignore = "requires prepared game resources"]
     fn block_parts_pick_and_use_on_the_server_and_for_a_guest() {
         use super::super::{lan::LanSettings, native_entity_refs::tests::with_game};
         use crate::mod_api::{
