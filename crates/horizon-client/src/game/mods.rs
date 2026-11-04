@@ -1,4 +1,4 @@
-//! Mods in the game (`docs/mods.md`): content mods' blocks, items, data and
+//! Mods in the game (`docs/modding/src/how-to/content-mods.md`): content mods' blocks, items, data and
 //! assets (`content_root`), and the Mods page's rows. Code mods are native
 //! (`native_hooks.rs`); executable components in content packages are refused.
 use super::{Game, execution_role::ExecutionRole};

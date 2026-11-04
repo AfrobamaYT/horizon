@@ -1,5 +1,5 @@
 //! Vehicles and passengers for native server mods, through an `EntityRef`
-//! (docs/native-mods.md, "Entity and level handles", #7387): what an entity
+//! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): what an entity
 //! rides, who rides it, and getting off. Players ride boats, minecarts and
 //! mounts; mobs ride mobs, boats and minecarts. Reads return `None` for a
 //! stale handle or on a client.

@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "player_xp_change",
+      "doc": "A server player's experience points are about to change through\n`Player.giveExperiencePoints` (NeoForge's `PlayerXpEvent.XpChange`): an\norb pickup after mending, an advancement reward, or `/xp add ... points`.\nChange the signed `amount` (in points) or set `cancel` to give nothing.\nExperience bottles and furnaces make orbs, so they come through the orb\npath. Server-side.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_xp_change",
       "neoforge": "PlayerXpEvent.XpChange",
       "side": "server",

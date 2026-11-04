@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "add_server_reload_listeners",
+      "doc": "Register server data reload listeners after packs are selected. The\nhost gives registry access at registration, as\n`AddServerReloadListenersEvent.getRegistryAccess` does.",
       "side": "server",
       "host": "read",
       "version": 1,

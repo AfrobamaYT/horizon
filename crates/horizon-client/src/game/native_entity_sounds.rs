@@ -1,5 +1,5 @@
 //! An entity's sounds, game events, entity events and spectator state for
-//! native server mods, through an `EntityRef` (docs/native-mods.md, "Entity
+//! native server mods, through an `EntityRef` (docs/modding/src/how-to/native-mods.md, "Entity
 //! and level handles"): `Entity.playSound`, `gameEvent`,
 //! `Level.broadcastEntityEvent`, `getSoundSource` and `isSpectator`. They
 //! return None or false for a stale handle, on a client, and for an entity
