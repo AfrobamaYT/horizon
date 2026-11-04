@@ -57,7 +57,7 @@ fn side(host: &HostSide<'_>) -> LogicalSide {
 
 #[mod_api::__subscriptions]
 impl Hooks for Observer {
-    fn register(&self, r: &mut Registrar) {
+    fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
         for block in ["minecraft:lever", "minecraft:stone", "minecraft:campfire"] {
             r.block_part(block, self.clone());
         }
