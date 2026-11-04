@@ -198,7 +198,7 @@ requires a farmer at work and `mob_griefing` enabled.
   draws replaces all the rows — armour, hearts, food, air and the heights above the hotbar — for that
   frame. Nothing answered draws Horizon's own.
 
-- Right-clicking an entity, on the server for every player: `native_interact_entity` hears a right click on
+- Right-clicking an entity, on the server for every player: `native_entity_interact` hears a right click on
   an entity (its id and type, and the stack in the hand) where `Player.interactOn` starts, once per hand. A mod that claims
   it swings the hand instead of the entity's and the item's own interaction.
 

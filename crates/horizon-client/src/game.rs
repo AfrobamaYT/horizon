@@ -6665,7 +6665,7 @@ impl Game<'_> {
             let kind = self.target_type(entity);
             let stack = self.held().cloned();
             let mut claimed = false;
-            self.native_interact_entity(id, &kind, stack.as_ref(), &mut claimed);
+            self.native_entity_interact(id, &kind, stack.as_ref(), &mut claimed);
             if claimed {
                 self.swing_arm();
                 return Ok(true);

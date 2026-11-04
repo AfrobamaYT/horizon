@@ -2067,14 +2067,14 @@ impl Game<'_> {
     /// the click: the hand swings and neither runs. Asked once per hand, as
     /// vanilla tries the main hand then the off hand. Server-side, for every
     /// player of the world (the helpers read the acting one).
-    pub(super) fn native_interact_entity(
+    pub(super) fn native_entity_interact(
         &mut self,
         entity: i32,
         kind: &str,
         stack: Option<&ItemStack>,
         claimed: &mut bool,
     ) {
-        mod_api::dispatch_interact_entity(self, entity, kind, stack, claimed);
+        mod_api::dispatch_entity_interact(self, entity, kind, stack, claimed);
     }
     /// The local player left-clicks empty space, with any main-hand stack.
     /// Client-side only; the server does not receive this event.

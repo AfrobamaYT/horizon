@@ -926,9 +926,9 @@
       }
     },
     {
-      "name": "interact_entity", "doc": "A player right-clicks the entity `entity` (`Entity.getId`) of type\n`kind` (`minecraft:cow`) with `self.hand`, holding `stack` (none in an\nempty hand): where `Player.interactOn` starts, before the entity's own\n`interact` and the item's `interactLivingEntity`. Set `claimed` to take\nthe click: the hand swings and neither runs. Asked once per hand, as\nvanilla tries the main hand then the off hand. Server-side, for every\nplayer of the world (the helpers read the acting one).", "side": "server",
+      "name": "entity_interact", "doc": "A player right-clicks the entity `entity` (`Entity.getId`) of type\n`kind` (`minecraft:cow`) with `self.hand`, holding `stack` (none in an\nempty hand): where `Player.interactOn` starts, before the entity's own\n`interact` and the item's `interactLivingEntity`. Set `claimed` to take\nthe click: the hand swings and neither runs. Asked once per hand, as\nvanilla tries the main hand then the off hand. Server-side, for every\nplayer of the world (the helpers read the acting one). Diverges from upstream: renamed from\n`interact_entity`, to NeoForge's `PlayerInteractEvent.EntityInteract`.", "neoforge": "PlayerInteractEvent.EntityInteract", "side": "server",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_interact_entity",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_interact",
       "mod_api": {
         "contract": "cancel",
         "out": "claimed"
