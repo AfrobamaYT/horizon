@@ -8468,8 +8468,6 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
     canceled
 }
 
-/// The contacts of a simulating entity with a block, as the simulation's own code (client-lib)
-/// reports them.
 /// The damage hooks every level of the game lends to its hits (`Game.damage_hooks`).
 pub(super) const DAMAGE_HOOKS: DamageHooks = DamageHooks {
     incoming: Some(incoming_damage),
@@ -8479,6 +8477,8 @@ pub(super) const DAMAGE_HOOKS: DamageHooks = DamageHooks {
     totem: Some(use_totem),
     shield: Some(shield_block),
 };
+/// The contacts of a simulating entity with a block, as the simulation's own code (client-lib)
+/// reports them.
 pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
     horizon_client::block_contact::Hooks {
         step_on: |dimension, c| {
