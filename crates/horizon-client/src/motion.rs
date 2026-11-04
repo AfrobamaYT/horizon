@@ -76,6 +76,14 @@ pub fn native_living_flying_speed(context: &LoopContext, entity: u32, kind: &str
     crate::native_client_hooks::living_flying_speed(context, entity, kind, speed);
 }
 
+/// The player's crouch edge backoff asks whether it is staying on the ground surface
+/// (`Player.isStayingOnGroundSurface`; beyond NeoForge: there is no counterpart). Mods may change it.
+/// Fires on replayed ticks too, so a listener must be a pure function of its inputs.
+#[inline(never)]
+pub fn native_player_stays_on_ground_surface(entity: u32, staying: &mut bool) {
+    crate::native_client_hooks::player_stays_on_ground_surface(entity, staying);
+}
+
 pub(crate) mod environment;
 mod fluids;
 pub use fluids::{
@@ -2262,7 +2270,9 @@ impl EdgeBackoffWorld for MotionWorld<'_, '_, '_> {
         Ok(self.player.attribute("minecraft:step_height")? as f32)
     }
     fn staying_on_ground_surface(&mut self) -> Result<bool> {
-        Ok(self.player.shift_key_down)
+        let mut staying = self.player.shift_key_down;
+        native_player_stays_on_ground_surface(self.player.entity_id as u32, &mut staying);
+        Ok(staying)
     }
     fn on_ground(&mut self) -> Result<bool> {
         Ok(self.player.ground.on_ground)
