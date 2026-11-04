@@ -88,6 +88,10 @@ use winit::{event::MouseButton, keyboard::KeyCode};
 
 pub(super) struct ObservedScreen {
     id: &'static str,
+    /// Not a `Screen` value: the title's own screen or an overlay drawn over
+    /// gameplay (sign editor, book, dialog, prompt). `set_screen` never sees
+    /// it open or close.
+    overlay: bool,
     menu: Option<String>,
     title: Option<Text>,
     rect: [f32; 4],
@@ -168,12 +172,11 @@ impl Game<'_> {
             self.screen = screen;
             return;
         }
-        let mut outcome = None;
-        {
+        let outcome = {
             let current = self.screen_change_view(self.screen);
             let new = self.screen_change_view(screen);
-            self.native_screen_opening(&current, &new, &mut outcome);
-        }
+            self.screen_change(&current, &new, true, self.screen != Screen::Playing)
+        };
         let mut screen = screen;
         let mut owner = None;
         match outcome {
@@ -187,10 +190,6 @@ impl Game<'_> {
         if self.screen == screen && owner.is_none() {
             return;
         }
-        if self.screen != Screen::Playing {
-            let old = self.screen_change_view(self.screen);
-            self.native_screen_closing(&old);
-        }
         self.screen = screen;
         if let Some(owner) = owner {
             self.native_mod_screen = Some(owner);
@@ -202,6 +201,28 @@ impl Game<'_> {
             self.mining = None;
             self.capture(false);
         }
+    }
+    /// The events of one change of screen, in NeoForge's order, for
+    /// `set_screen` and for the overlays `observe_screen` announces: `opens`
+    /// fires `screen_opening` (`ScreenEvent.Opening`) from `current` to `new`
+    /// (a screen of `playing` is vanilla's null) and returns a mod's answer;
+    /// then, unless it cancelled, `closes` fires `screen_closing` for
+    /// `current`.
+    fn screen_change(
+        &self,
+        current: &NativeScreenView<'_>,
+        new: &NativeScreenView<'_>,
+        opens: bool,
+        closes: bool,
+    ) -> Option<ScreenOpening> {
+        let mut outcome = None;
+        if opens {
+            self.native_screen_opening(current, new, &mut outcome);
+        }
+        if closes && outcome != Some(ScreenOpening::Cancel) {
+            self.native_screen_closing(current);
+        }
+        outcome
     }
     /// `screen` as the screen hooks see it while it opens or closes: no
     /// renderer (a test, a window not yet up) leaves its rectangle empty.
@@ -244,8 +265,11 @@ impl Game<'_> {
         if mod_api::mods().is_empty() {
             return;
         }
+        // Only the title's screens and the overlays show over `Screen::Playing`.
+        let overlay = self.screen == Screen::Playing;
         let current = self.observed_screen_view().map(|view| ObservedScreen {
             id: view.id,
+            overlay,
             menu: view.menu.map(str::to_owned),
             title: view.title.cloned(),
             rect: view.rect,
@@ -253,12 +277,36 @@ impl Game<'_> {
             mouse: view.mouse,
             partial_tick: view.partial_tick,
         });
+        self.observe_change(current);
+    }
+    /// What the frame's screen changed since the last one. The `Screen` list
+    /// announces its own changes in `set_screen`; the title's screens and the
+    /// overlays have no single place they open or close, so they are
+    /// announced here, through the same `screen_change` and in the same order,
+    /// but after the change: a mod's answer to `screen_opening` cannot keep
+    /// them shut. `screen_init_post` follows for every kind, on opening and on
+    /// a resize.
+    fn observe_change(&mut self, current: Option<ObservedScreen>) {
         let changed = match (&self.observed_screen, &current) {
             (Some(old), Some(new)) => old.id != new.id || old.menu != new.menu,
             (None, None) => false,
             _ => true,
         };
         if changed {
+            let old = self.observed_screen.as_ref().filter(|old| old.overlay);
+            let opens = current.as_ref().is_some_and(|new| new.overlay)
+                || (current.is_none() && old.is_some());
+            if old.is_some() || opens {
+                let none = self.screen_change_view(Screen::Playing);
+                let from = old.map(ObservedScreen::view);
+                let to = current.as_ref().map(ObservedScreen::view);
+                self.screen_change(
+                    from.as_ref().unwrap_or(&none),
+                    to.as_ref().unwrap_or(&none),
+                    opens,
+                    from.is_some(),
+                );
+            }
             if let Some(new) = &current {
                 self.native_screen_init_post(&new.view());
             }
@@ -11164,6 +11212,45 @@ mod screen_open_tests {
             take(log);
             game.set_screen(Screen::Inventory);
             assert!(take(log).is_empty());
+        });
+    }
+
+    fn observed(id: &'static str, overlay: bool) -> Option<ObservedScreen> {
+        Some(ObservedScreen {
+            id,
+            overlay,
+            menu: None,
+            title: None,
+            rect: [0.0; 4],
+            slots: 0,
+            mouse: [0.0; 2],
+            partial_tick: 0.0,
+        })
+    }
+
+    /// An overlay (here a sign editor) is announced as a screen is: Opening
+    /// when it shows, Opening back to `playing` and Closing when it goes. A
+    /// `Screen` the observer sees change was announced by `set_screen`, so it
+    /// is not announced twice.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn an_overlay_fires_opening_then_closing_through_the_observer() {
+        run(|game, log, _| {
+            game.observe_change(observed("sign_editor", true));
+            assert_eq!(take(log), ["opening playing->sign_editor"]);
+            game.observe_change(observed("sign_editor", true));
+            assert!(take(log).is_empty());
+            game.observe_change(None);
+            assert_eq!(
+                take(log),
+                ["opening sign_editor->playing", "closing sign_editor"]
+            );
+            game.observe_change(observed("inventory", false));
+            game.observe_change(None);
+            assert!(take(log).is_empty());
+            game.observe_change(observed("inventory", false));
+            game.observe_change(observed("sign_editor", true));
+            assert_eq!(take(log), ["opening playing->sign_editor"]);
         });
     }
 
