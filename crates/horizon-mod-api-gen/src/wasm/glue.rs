@@ -165,11 +165,14 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         Ty::Str(_) => format!("{e}.to_string()"),
         Ty::List(item, _) | Ty::Array(item, _) => {
             format!(
-                "{e}.iter().map(|x| {}).collect::<Vec<_>>()",
+                "{e}.iter().map(|x| Ok({})).collect::<Result<Vec<_>, Refused>>()?",
                 lower(types, item, "x")
             )
         }
-        Ty::Option(item) => format!("{e}.as_ref().map(|x| {})", lower(types, item, "x")),
+        Ty::Option(item) => format!(
+            "{e}.as_ref().map(|x| Ok::<_, Refused>({})).transpose()?",
+            lower(types, item, "x")
+        ),
         Ty::Result(ok, err) => format!(
             "match {e} {{ Ok(x) => Ok({}), Err(x) => Err({}) }}",
             lower_or_unit(types, ok, "x"),
@@ -191,7 +194,7 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         }
         Ty::Ref(inner, _) => lower(types, inner, &format!("(&**{e})")),
         Ty::Boxed(inner) | Ty::Shared(inner) => lower(types, inner, &format!("(&**{e})")),
-        Ty::Named(def) => format!("lower_{def}({e})"),
+        Ty::Named(def) => format!("lower_{def}({e})?"),
     }
 }
 
@@ -590,7 +593,7 @@ pub(super) fn conversions(
                 format!("match v {{ {}, {EVERY_CASE} }}", arms.join(", "))
             }
             Kind::Via(form) => format!(
-                "{{ let f: {} = ::core::convert::From::from(v); {} }}",
+                "{{ let f: {} = ::core::convert::TryFrom::try_from(v).map_err(Refused::because)?; {} }}",
                 super::sides::rust_ty(types, form, false),
                 lower(types, form, "(&f)")
             ),
@@ -603,10 +606,10 @@ pub(super) fn conversions(
                 lower(types, frame, "v"),
                 rust.split('<').next().unwrap()
             ),
-            Kind::Json => "serde_json::to_string(v).unwrap_or_default()".into(),
+            Kind::Json => "serde_json::to_string(v).map_err(Refused::because)?".into(),
             Kind::Opaque(_) => unreachable!(),
         };
-        writeln!(code, "#[allow(unused_variables, unreachable_patterns, clippy::all)] fn lower_{id}(v: &{rust}) -> {wire} {{ {body} }}").unwrap();
+        writeln!(code, "#[allow(unused_variables, unreachable_patterns, clippy::all)] fn lower_{id}(v: &{rust}) -> Result<{wire}, Refused> {{ Ok({body}) }}").unwrap();
         // Lifting, for types that own their contents.
         if def.lifetimes == 0 {
             let path = rust.as_str();
@@ -695,7 +698,7 @@ pub(super) fn conversions(
                                     }
                                     // A chain's link: only the chain, holding the next, builds it.
                                     Payload::Record(..) if link.is_some() => {
-                                        format!("{source}(_) => return Err(Refused)")
+                                        format!("{source}(_) => return Err(Refused::SHAPE)")
                                     }
                                     Payload::Record(_, fields) => {
                                         let parts: Vec<String> = fields
@@ -724,13 +727,14 @@ pub(super) fn conversions(
                     format!("match w {{ {} }}", arms.join(", "))
                 }
                 Kind::Via(form) => format!(
-                    "{{ let f: {} = {}; ::core::convert::TryFrom::try_from(f).map_err(|_| Refused)? }}",
+                    "{{ let f: {} = {}; ::core::convert::TryFrom::try_from(f).map_err(|_| Refused::because(\"a {} that doesn't convert\"))? }}",
                     super::sides::rust_ty(types, form, false),
-                    lift(types, form, "w")
+                    lift(types, form, "w"),
+                    path.trim_start_matches("crate::")
                 ),
                 Kind::Chain { frame, case, link } if case.is_empty() => format!(
                     "{{ let mut frames = w.into_iter().rev(); let mut v = {}; for frame in frames {{ let mut outer = {}; outer.{link} = Some(Box::new(v)); v = outer; }} v }}",
-                    lift(types, frame, "frames.next().ok_or(Refused)?"),
+                    lift(types, frame, "frames.next().ok_or(Refused::SHAPE)?"),
                     lift(types, frame, "frame"),
                 ),
                 Kind::Chain { frame, case, link } => {
@@ -756,14 +760,14 @@ pub(super) fn conversions(
                         })
                         .collect();
                     format!(
-                        "{{ let mut frames = w.into_iter().rev(); let mut v = {}; for frame in frames {{ v = match frame {{ {}::{}(p) => {path}::{case} {{ {link}: Box::new(v), {} }}, _ => return Err(Refused) }}; }} v }}",
-                        lift(types, frame, "frames.next().ok_or(Refused)?"),
+                        "{{ let mut frames = w.into_iter().rev(); let mut v = {}; for frame in frames {{ v = match frame {{ {}::{}(p) => {path}::{case} {{ {link}: Box::new(v), {} }}, _ => return Err(Refused::SHAPE) }}; }} v }}",
+                        lift(types, frame, "frames.next().ok_or(Refused::SHAPE)?"),
                         wire_path(frame_def),
                         bound_type(&linked.wit),
                         parts.join(", ")
                     )
                 }
-                Kind::Json => "serde_json::from_str(&w).map_err(|_| Refused)?".into(),
+                Kind::Json => "serde_json::from_str(&w).map_err(Refused::because)?".into(),
                 Kind::Opaque(_) => unreachable!(),
             };
             writeln!(code, "#[allow(unused_variables, clippy::all)] fn lift_{id}(w: {wire}) -> Result<{path}, Refused> {{ Ok({body}) }}").unwrap();
@@ -788,14 +792,14 @@ pub(super) fn conversions(
                             if let Ty::Named(inner) = &**inner
                                 && wit::has_out(types, &types.defs[*inner]) =>
                         {
-                            format!("lower_out_{inner}(&*v.{})", f.rust)
+                            format!("lower_out_{inner}(&*v.{})?", f.rust)
                         }
                         ty => lower(types, ty, &format!("(&v.{})", f.rust)),
                     };
                     format!("{}: {value}", bound_ident(&f.wit))
                 })
                 .collect();
-            writeln!(code, "#[allow(unused_variables, clippy::all)] fn lower_out_{id}(v: &{rust}) -> {out} {{ {out} {{ {} }} }}", parts.join(", ")).unwrap();
+            writeln!(code, "#[allow(unused_variables, clippy::all)] fn lower_out_{id}(v: &{rust}) -> Result<{out}, Refused> {{ Ok({out} {{ {} }}) }}", parts.join(", ")).unwrap();
             let mut writes = String::new();
             for f in &writable {
                 let source = format!("o.{}", bound_ident(&f.wit));
