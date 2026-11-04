@@ -1,7 +1,7 @@
 //! Particles a server sends its players and its clients draw:
 //! `ClientboundLevelParticlesPacket` (`ServerLevel.sendParticles`, which
 //! `/particle` uses) and `ClientboundExplodePacket` (`ServerLevel.explode`).
-use super::{Game, lan::LanHost};
+use super::{Game, lan::LanHost, level_sounds::LevelSound};
 use horizon_client::lan::containers::within_range;
 use horizon_client::lan::hub::Hub;
 use horizon_client::particles::{ParticleOptions, ParticleType};
@@ -15,6 +15,7 @@ use horizon_protocol::{
     packets::play::{self, Clientbound as C},
 };
 use horizon_world::registry::BlockStateId;
+use mod_api::SoundSource;
 
 /// A particle request awaiting delivery to players in its level.
 pub(super) struct QueuedParticle {
@@ -628,15 +629,15 @@ impl Game<'_> {
         }
         for sound in std::mem::take(&mut self.creatures.lan_sounds) {
             let emitter = sound.entity.and_then(|id| u32::try_from(id).ok());
-            let Some(heard) = self.ask_level_sound(
-                sound.dimension,
-                &sound.sound,
-                sound.at,
-                sound.source as usize,
-                sound.volume,
-                sound.pitch,
-                emitter,
-            ) else {
+            let mut asked = LevelSound::new(&sound.sound, sound.at, sound.volume, sound.pitch)
+                .in_source(
+                    SoundSource::ALL
+                        .get(sound.source as usize)
+                        .copied()
+                        .unwrap_or(SoundSource::Master),
+                );
+            asked.emitter = emitter;
+            let Some(heard) = self.ask_level_sound(sound.dimension, asked) else {
                 continue;
             };
             let Some(host) = &self.lan else { return };

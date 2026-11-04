@@ -4,15 +4,56 @@
 
 use std::borrow::Cow;
 
-use mod_api::{HookId, SoundSource};
+use mod_api::{HookId, Identifier, SoundSource};
 
 use super::Game;
-use super::native_hooks::mod_sound_ok;
+use super::native_hooks::level_sound_playable;
+
+/// A sound the server's level is about to play, as vanilla asked for it.
+pub(super) struct LevelSound<'a> {
+    pub name: &'a str,
+    pub at: [f64; 3],
+    pub volume: f32,
+    pub pitch: f32,
+    pub source: SoundSource,
+    /// The entity vanilla binds the sound to (`playSound(except, sourceEntity, ...)`);
+    /// none for a sound at a position, as `Entity.playSound`'s.
+    pub emitter: Option<u32>,
+}
+
+impl<'a> LevelSound<'a> {
+    /// A sound at `at` in the source its event name belongs to.
+    pub fn new(name: &'a str, at: [f64; 3], volume: f32, pitch: f32) -> Self {
+        let source = SoundSource::ALL
+            .get(horizon_client::settings::sound_source(name))
+            .copied()
+            .unwrap_or(SoundSource::Master);
+        Self {
+            name,
+            at,
+            volume,
+            pitch,
+            source,
+            emitter: None,
+        }
+    }
+
+    pub fn in_source(self, source: SoundSource) -> Self {
+        Self { source, ..self }
+    }
+
+    pub fn bound_to(self, emitter: u32) -> Self {
+        Self {
+            emitter: Some(emitter),
+            ..self
+        }
+    }
+}
 
 /// A sound after the mods: what goes in the packet.
 pub(super) struct HeardSound<'a> {
     pub name: Cow<'a, str>,
-    pub source: usize,
+    pub source: SoundSource,
     pub volume: f32,
     pub pitch: f32,
 }
@@ -24,111 +65,97 @@ fn listened() -> bool {
 }
 
 impl Game<'_> {
-    /// `Level.playSound`'s packet for the players near `at` in the level in
-    /// place, but the player on connection `except`, once the mods allowed
-    /// it. `source` is the sound's index in `SoundSource` order. `emitter` is the entity vanilla binds the sound to
-    /// (`playSound(except, sourceEntity, ...)`); none for a sound at a
-    /// position, as `Entity.playSound`'s.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn send_level_sound(
-        &mut self,
-        name: &str,
-        at: [f64; 3],
-        volume: f32,
-        pitch: f32,
-        source: usize,
-        emitter: Option<u32>,
-        except: Option<u32>,
-    ) {
+    /// `Level.playSound`'s packet for the players near the sound's position in
+    /// the level in place, but the player on connection `except`, once the
+    /// mods allowed it.
+    pub(super) fn send_level_sound(&mut self, sound: LevelSound<'_>, except: Option<u32>) {
+        let at = sound.at;
         let dimension = self.dim.id();
-        let Some(sound) = self.ask_level_sound(dimension, name, at, source, volume, pitch, emitter)
-        else {
+        let Some(heard) = self.ask_level_sound(dimension, sound) else {
             return;
         };
         if let Some(host) = self.lan.as_ref() {
             host.hub.sound(
-                &sound.name,
+                &heard.name,
                 at,
-                sound.volume,
-                sound.pitch,
-                sound.source as i32,
+                heard.volume,
+                heard.pitch,
+                heard.source as i32,
                 except,
             );
         }
     }
 
     /// `ServerLevel.playSeededSound`'s `EventHooks.onPlaySoundAtEntity` or
-    /// `onPlaySoundAtPosition`: `play_level_sound_at_entity` when `emitter`
-    /// is an entity a mod can name, `play_level_sound_at_position` otherwise.
-    /// None when a mod cancels it or leaves it unplayable (not a sound id,
-    /// or a volume or pitch that isn't finite and at least 0). With no
-    /// listener, the sound as asked, borrowed.
-    #[allow(clippy::too_many_arguments)]
+    /// `onPlaySoundAtPosition`: `play_level_sound_at_entity` when the sound's
+    /// emitter is an entity a mod can name, `play_level_sound_at_position`
+    /// otherwise. None when a mod cancels it or leaves it unplayable (a volume
+    /// or pitch that isn't finite and at least 0). With no listener, the sound
+    /// as asked, borrowed.
     pub(super) fn ask_level_sound<'a>(
         &mut self,
         dimension: &str,
-        name: &'a str,
-        at: [f64; 3],
-        source: usize,
-        volume: f32,
-        pitch: f32,
-        emitter: Option<u32>,
+        sound: LevelSound<'a>,
     ) -> Option<HeardSound<'a>> {
+        let LevelSound {
+            name,
+            at,
+            volume,
+            pitch,
+            source,
+            emitter,
+        } = sound;
+        let asked = HeardSound {
+            name: Cow::Borrowed(name),
+            source,
+            volume,
+            pitch,
+        };
         if !listened() {
-            return Some(HeardSound {
-                name: Cow::Borrowed(name),
-                source,
-                volume,
-                pitch,
-            });
+            return Some(asked);
         }
         // The mods see a namespaced id (`minecraft:entity.pig.ambient`).
-        let mut sound = if name.contains(':') {
-            name.to_owned()
-        } else {
-            format!("minecraft:{name}")
+        let Ok(mut id) = Identifier::parse(name) else {
+            return Some(asked);
         };
-        let mut source_now = SoundSource::ALL
-            .get(source)
-            .copied()
-            .unwrap_or(SoundSource::Master);
-        let (mut volume_now, mut pitch_now, mut cancel) = (volume, pitch, false);
+        let (mut source_now, mut volume_now, mut pitch_now, mut cancel) =
+            (source, volume, pitch, false);
         match emitter.and_then(|id| self.native_entity(id)) {
             Some(entity) => self.native_play_level_sound_at_entity(
-                entity,
-                &mut sound,
-                &mut source_now,
-                &mut volume_now,
-                &mut pitch_now,
-                volume,
-                pitch,
-                &mut cancel,
+                mod_api::__private::PlayLevelSoundAtEntityCall {
+                    entity,
+                    sound: &mut id,
+                    source: &mut source_now,
+                    volume: &mut volume_now,
+                    pitch: &mut pitch_now,
+                    original_volume: volume,
+                    original_pitch: pitch,
+                    cancel: &mut cancel,
+                },
             ),
             None => {
                 let level = self.native_level(dimension)?;
                 self.native_play_level_sound_at_position(
-                    level,
-                    at,
-                    &mut sound,
-                    &mut source_now,
-                    &mut volume_now,
-                    &mut pitch_now,
-                    volume,
-                    pitch,
-                    &mut cancel,
+                    mod_api::__private::PlayLevelSoundAtPositionCall {
+                        level,
+                        position: at,
+                        sound: &mut id,
+                        source: &mut source_now,
+                        volume: &mut volume_now,
+                        pitch: &mut pitch_now,
+                        original_volume: volume,
+                        original_pitch: pitch,
+                        cancel: &mut cancel,
+                    },
                 );
             }
         }
-        let source = SoundSource::ALL
-            .iter()
-            .position(|&s| s == source_now)
-            .unwrap_or(0);
-        if cancel || !mod_sound_ok(&sound, at, source, volume_now, pitch_now) {
+        if cancel || !level_sound_playable(at, volume_now, pitch_now) {
             return None;
         }
         Some(HeardSound {
-            name: Cow::Owned(sound),
-            source,
+            name: Cow::Owned(id.to_string()),
+            source: source_now,
             volume: volume_now,
             pitch: pitch_now,
         })
@@ -160,8 +187,8 @@ mod tests {
             self.0
                 .lock()
                 .unwrap()
-                .push(("position", e.sound.clone(), None));
-            match e.sound.as_str() {
+                .push(("position", e.sound.to_string(), None));
+            match e.sound.to_string().as_str() {
                 "minecraft:block.chest.locked" => {
                     assert_eq!((e.original_volume, e.original_pitch), (1.0, 1.0));
                     (e.volume, e.pitch, *e.source) = (0.25, 2.0, SoundSource::Ambient);
@@ -179,8 +206,8 @@ mod tests {
             self.0
                 .lock()
                 .unwrap()
-                .push(("entity", e.sound.clone(), Some(e.entity.id())));
-            *e.sound = "minecraft:entity.cow.ambient".into();
+                .push(("entity", e.sound.to_string(), Some(e.entity.id())));
+            *e.sound = mod_api::Identifier::parse("minecraft:entity.cow.ambient").unwrap();
             mod_api::Flow::Continue
         }
     }
@@ -227,6 +254,8 @@ mod tests {
                 game.lan_host(settings, net, config).unwrap();
                 let (a, rx) = guest(21, 21, [1.0, 64.0, 2.0]);
                 game.lan.as_mut().unwrap().hub.guests.push(a);
+                let (b, rx_b) = guest(22, 22, [1.0, 64.0, 3.0]);
+                game.lan.as_mut().unwrap().hub.guests.push(b);
                 let at = [2.0, 64.0, 2.0];
 
                 // The tick's sounds, at their positions.
@@ -275,12 +304,31 @@ mod tests {
                 };
                 assert_eq!(format!("{:?}", p.sound), format!("{:?}", expected.sound));
 
+                // `Player.playSound` for the first guest (eating): the other
+                // guest hears it, and the mods were asked first.
+                game.as_guest(21, |game| {
+                    game.guest_player_sounds.push((
+                        "minecraft:entity.generic.eat".into(),
+                        at,
+                        1.0,
+                        1.0,
+                    ));
+                })
+                .unwrap();
+                let got = packets(&rx_b);
+                let Some(Clientbound::Sound(p)) = got.last() else {
+                    panic!("expected the guest's sound")
+                };
+                assert_eq!(p.source, SoundSource::Players as i32);
+                assert!(packets(&rx).is_empty(), "not the guest who made it");
+
                 assert_eq!(
                     *heard.lock().unwrap(),
                     [
                         ("position", "minecraft:block.chest.locked".into(), None),
                         ("position", "minecraft:entity.pig.ambient".into(), None),
                         ("entity", "minecraft:entity.player.burp".into(), Some(40)),
+                        ("position", "minecraft:entity.generic.eat".into(), None),
                     ]
                 );
             });
