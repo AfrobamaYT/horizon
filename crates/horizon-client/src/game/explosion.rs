@@ -1088,7 +1088,7 @@ impl Game<'_> {
                     false,
                 )
             });
-            self.native_block_drops(pos, state, None, None, Some(radius), &mut drops);
+            self.native_block_loot(pos, state, None, None, Some(radius), &mut drops);
             for mut stack in drops {
                 if &*stack.item == "minecraft:air" || stack.count == 0 {
                     continue;

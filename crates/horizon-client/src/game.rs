@@ -4466,7 +4466,7 @@ impl Game<'_> {
                 }
             });
         let player = self.native_acting_id();
-        self.native_block_drops(pos, state, Some(player), held, None, &mut drops);
+        self.native_block_loot(pos, state, Some(player), held, None, &mut drops);
         drops
     }
     /// Block.popResource
@@ -6662,14 +6662,34 @@ impl Game<'_> {
                 if let Some(p) = self.player.as_mut() {
                     p.cause_food_exhaustion(0.005);
                 }
-                let drops = self.block_loot_at(pos, state, held.as_ref(), loot_entity);
+                let stacks = self.block_loot_at(pos, state, held.as_ref(), loot_entity);
                 let silk = held
                     .as_ref()
                     .is_some_and(|h| h.enchantment_level("minecraft:silk_touch") > 0);
-                for d in drops {
-                    if &*d.item != "minecraft:air" {
-                        self.pop_resource(pos, d);
-                    }
+                // Block.dropResources: the item entities, then spawnAfterBreak's
+                // experience, with the mods' say between the two.
+                let breaker = Some(self.native_acting_id());
+                let dropped = self.with_level(|_, level, _| {
+                    level.block_dropped(
+                        BlockPos::new(pos[0], pos[1], pos[2]),
+                        state,
+                        breaker,
+                        held.as_ref(),
+                        stacks,
+                    )
+                });
+                for item in dropped.items {
+                    self.spawn_item(item.stack, item.position, item.velocity, item.pickup_delay);
+                }
+                if dropped.experience > 0 {
+                    self.spawn_orbs(
+                        [
+                            f64::from(pos[0]) + 0.5,
+                            f64::from(pos[1]) + 0.5,
+                            f64::from(pos[2]) + 0.5,
+                        ],
+                        dropped.experience,
+                    );
                 }
                 // BeehiveBlock.playerDestroy: silk touch keeps the bees in, so
                 // the trigger counts them; otherwise they are out already.
@@ -6684,6 +6704,7 @@ impl Game<'_> {
                 // tool has silk touch (#prevents_infested_spawns) or blocks don't drop.
                 if facts.name.starts_with("minecraft:infested_")
                     && !silk
+                    && !dropped.canceled
                     && self.ui.rules.bool("block_drops")
                 {
                     let at = [
@@ -6694,22 +6715,6 @@ impl Game<'_> {
                     if let Some(id) = self.spawn_mob("minecraft:silverfish", at, false) {
                         self.mob_poof(id);
                     }
-                }
-                // SpawnerBlock.spawnAfterBreak pops its experience whatever the tool.
-                let xp = if silk && &*facts.name != "minecraft:spawner" {
-                    0
-                } else {
-                    self.block_experience(&facts.name)
-                };
-                if xp > 0 {
-                    self.spawn_orbs(
-                        [
-                            f64::from(pos[0]) + 0.5,
-                            f64::from(pos[1]) + 0.5,
-                            f64::from(pos[2]) + 0.5,
-                        ],
-                        xp,
-                    );
                 }
                 // TurtleEggBlock.playerDestroy: after the drops, one egg of a
                 // mined stack is taken and the rest stay.
@@ -14529,33 +14534,6 @@ impl Game<'_> {
         let pos = BlockPos::new(target[0], target[1], target[2]);
         let state = self.with_level(|b, level, ticks| b.fire_state_for(level, ticks, pos));
         self.level_set(target, state)
-    }
-    /// DropExperienceBlock / RedStoneOreBlock / SculkBlock experience ranges.
-    fn block_experience(&mut self, name: &str) -> u32 {
-        let (min, max) = match name.trim_start_matches("minecraft:") {
-            "coal_ore" | "deepslate_coal_ore" => (0, 2),
-            "nether_gold_ore" => (0, 1),
-            "lapis_ore" | "deepslate_lapis_ore" | "nether_quartz_ore" => (2, 5),
-            "diamond_ore" | "deepslate_diamond_ore" | "emerald_ore" | "deepslate_emerald_ore" => {
-                (3, 7)
-            }
-            "redstone_ore" | "deepslate_redstone_ore" => (1, 5),
-            "sculk" => (1, 1),
-            "sculk_catalyst" | "sculk_sensor" | "calibrated_sculk_sensor" | "sculk_shrieker" => {
-                (5, 5)
-            }
-            // SpawnerBlock.spawnAfterBreak: 15 + nextInt(15) + nextInt(15).
-            "spawner" => {
-                let r = &mut self.world.random;
-                let a = r.next_int_bound(15).unwrap_or(0);
-                return (15 + a + r.next_int_bound(15).unwrap_or(0)) as u32;
-            }
-            _ => (0, 0),
-        };
-        if max == 0 {
-            return 0;
-        }
-        (min + self.world.random.next_int_bound(max - min + 1).unwrap_or(0)) as u32
     }
     /// `ExperienceOrb.followNearbyPlayer`'s candidates: each orb goes for the
     /// nearest living player within 8 blocks, the host's own or a guest. Each
