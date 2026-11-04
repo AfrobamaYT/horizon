@@ -1098,29 +1098,19 @@ impl GameLevel<'_> {
         );
     }
 
-    /// `FenceBlock.connectsTo`: set `connected` to say whether the fence
-    /// `state` at `pos` connects an arm toward `neighbour`, the state beside it,
-    /// `direction` pointing from the fence to that neighbour and `face_solid`
-    /// whether the neighbour's face toward the fence is sturdy. `connected` holds
-    /// vanilla's answer (a solid face, a fence of the same kind or a gate across the
-    /// arm): change it, to false as well as to true, when the fence is your own.
-    /// Asked whenever the fence settles its shape or is placed, inside the level's
-    /// update: answer from the arguments without touching the world. Only the fence block's own part is asked, so vanilla fences cost
-    /// nothing. Authoritative servers only.
+    /// Whether a fence, wall, or iron bars or pane connects a side
+    /// (`FenceBlock.connectsTo`, `WallBlock.connectsTo`,
+    /// `IronBarsBlock.attachsTo`, named by `kind`): set `connected` to say
+    /// whether the block `state` at `pos` connects toward `neighbour`, the
+    /// state beside it, `direction` pointing from the block to that neighbour
+    /// and `face_solid` whether the neighbour's face toward it is sturdy.
+    /// `connected` holds vanilla's answer: change it, to false as well as to
+    /// true, when the block is your own. Asked whenever the block settles its
+    /// shape or is placed, inside the level's update. Only the block's own
+    /// part is asked, so vanilla blocks cost nothing. Authoritative servers only.
     #[inline(always)]
-    pub(super) fn native_fence_connects_to(
-        &self,
-        dimension: LevelDimension,
-        pos: BlockPos,
-        state: BlockStateId,
-        neighbour: BlockStateId,
-        direction: Direction,
-        face_solid: bool,
-        connected: &mut bool,
-    ) {
-        mod_api::dispatch_fence_connects_to(
-            self, dimension, pos, state, neighbour, direction, face_solid, connected,
-        );
+    pub(super) fn native_connects_to(&self, call: mod_api::__private::ConnectsToCall<'_>) {
+        mod_api::dispatch_connects_to(self, call);
     }
 
     /// `BlockState.hasAnalogOutputSignal`: set `output` for a block of yours

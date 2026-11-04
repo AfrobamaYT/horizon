@@ -213,7 +213,8 @@ pub use horizon_world::{
         AttachmentType, AttachmentValue, AttachmentWrite, Holder,
     },
     level::{
-        BlockId, Dimension as LevelDimension, LandingWrite, NeighbourUpdate, PlacementContext,
+        BlockId, ConnectionKind, Dimension as LevelDimension, LandingWrite, NeighbourUpdate,
+        PlacementContext,
     },
     loot::{LootStack, NativeLootContext},
     registry::BlockStateId,

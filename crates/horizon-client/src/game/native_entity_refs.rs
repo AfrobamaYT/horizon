@@ -1034,38 +1034,47 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn block_part_flips_fence_connections_in_a_real_game_level() {
+    fn block_part_flips_fence_wall_and_pane_connections_in_a_real_game_level() {
         use horizon_client::chunk::Chunk;
         use horizon_core::{geometry::Direction, position::BlockPos};
         use std::sync::Arc;
 
-        mod_api::__private::part_tests::fence_game_thread();
+        mod_api::__private::part_tests::connection_game_thread();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             let registry = game.pack.assets.registry;
-            let oak = registry.default_state("minecraft:oak_fence").unwrap();
-            let spruce = registry.default_state("minecraft:spruce_fence").unwrap();
-            let stone = registry.default_state("minecraft:stone").unwrap();
-            let torch = registry.default_state("minecraft:torch").unwrap();
+            let state = |name: &str| registry.default_state(name).unwrap();
+            let stone = state("minecraft:stone");
+            let torch = state("minecraft:torch");
             let pos = BlockPos::new(5, 64, 5);
             let neighbour = BlockPos::new(6, 64, 5);
-            let arm = |game: &mut crate::game::Game<'_>, fence, beside| {
+            let side = |game: &mut crate::game::Game<'_>, block, beside| {
                 game.world.set(6, 64, 5, beside).unwrap();
                 let shaped = game.with_level(|b, level, ticks| {
-                    b.update_shape(level, ticks, fence, pos, Direction::East, neighbour, beside)
+                    b.update_shape(level, ticks, block, pos, Direction::East, neighbour, beside)
                 });
                 registry.state(shaped).unwrap().properties["east"].clone()
             };
             game.world.set(5, 63, 5, stone).unwrap();
-            // Vanilla joins a fence to a sturdy face and not to a torch; the oak
-            // fence's part flips both answers, the spruce fence has no part.
-            assert_eq!(arm(game, oak, stone), "false");
-            assert_eq!(arm(game, oak, torch), "true");
-            assert_eq!(arm(game, spruce, stone), "true");
-            assert_eq!(arm(game, spruce, torch), "false");
+            // Vanilla joins each to a sturdy face and not to a torch. The part on
+            // the oak fence, cobblestone wall and glass pane flips both answers;
+            // the spruce fence, brick wall and iron bars have none.
+            for (block, with_part, yes, no) in [
+                ("oak_fence", true, "true", "false"),
+                ("spruce_fence", false, "true", "false"),
+                ("cobblestone_wall", true, "low", "none"),
+                ("brick_wall", false, "low", "none"),
+                ("glass_pane", true, "true", "false"),
+                ("iron_bars", false, "true", "false"),
+            ] {
+                let block_state = state(&format!("minecraft:{block}"));
+                let (sturdy, not) = if with_part { (no, yes) } else { (yes, no) };
+                assert_eq!(side(game, block_state, stone), sturdy, "{block} by stone");
+                assert_eq!(side(game, block_state, torch), not, "{block} by a torch");
+            }
         });
     }
 
