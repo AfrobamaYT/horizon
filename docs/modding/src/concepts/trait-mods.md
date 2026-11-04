@@ -68,8 +68,8 @@ and in the server thread's log line, with the `horizon-mod.toml` id. Each entry 
 `entry::main_with` must bind its id and hooks together: `ModEntry::new("example", example::hooks())`.
 The ordered list is `Mods = Arc<[ModEntry]>`; there is no separate naming step or unnamed entry.
 Before installation, `mod_api::mods()` still returns an empty list. Parts retain their registering mod's
-id for startup errors and hook panics. The game stops. Render hooks and trait injections
-are not named yet.
+id for startup errors and hook panics. The game stops. A trait injection's panic names its mod and
+the generated method (`inject_<mod>_<method>`); render hooks are not named yet.
 
 A code mod may declare its own injection in the trait as a rare escape hatch; the form, its generated method and its
 limits are in [Injections](../injections.md).
@@ -118,7 +118,8 @@ hooks can run on any loading thread; item default changes must be identical on e
 The trait has every hook in `native-hooks.json` and the pending fragments ([Adding a hook](#adding-a-hook)).
 Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `block_state` through `LevelAccess::block_state`, client-side detection and
-`state_with_property`. It also reads light and loaded state, through the game's own queries:
+`state_with_property`. `state_string(state)` serializes the full name and properties, or returns `None`
+for an unknown state; `min_y()` and `height()` read the level's build range. It also reads light and loaded state, through the game's own queries:
 `brightness(LightLayer::Block | Sky, pos)` (`getBrightness`, the stored 0 to 15),
 `raw_brightness(pos, sky_darken)` (`getRawBrightness`, which `CropBlock.randomTick` asks with 0)
 and `is_loaded(pos)` (`Level.isLoaded`: inside the build height and in a loaded chunk),

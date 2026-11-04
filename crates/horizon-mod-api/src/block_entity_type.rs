@@ -82,6 +82,7 @@ impl fmt::Display for BlockEntityTypeLookupError {
 
 impl std::error::Error for BlockEntityTypeLookupError {}
 
+/// Checks that every registered block entity type key names a type the game knows.
 pub fn validate_block_entity_type_keys(
     types: &horizon_client_core::block_entity_types::BlockEntityTypes,
 ) -> Result<(), BlockEntityTypeLookupError> {

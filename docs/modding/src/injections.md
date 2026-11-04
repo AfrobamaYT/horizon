@@ -126,7 +126,7 @@ id = "count"
 target = "horizon_client::game::Game<'_>::tick_mobs"
 kind = "HEAD"
 trait_method = "count"
-bindings = [{ name = "host", ty = "&mut dyn crate::mod_api::Host", value = "&mut *self" }]
+bindings = [{ name = "host", ty = "&mut dyn mod_api::Host", value = "&mut *self" }]
 ```
 
 ```rust,ignore
@@ -186,6 +186,7 @@ stop the build:
 - A `cancellable` `HEAD` on a hook point: a `Break` skips the later injections and the function's body.
 - A raw `target` that is a catalog hook point's function: ``use `hook = "frame"`, `hook_version = 1`, or implement
   `Hooks::frame` with no injection``.
+  A scoped hook says "the `<name>` Part method" instead of `Hooks::<name>`.
 
 A panic inside a trait injection reports the mod and the generated method
 (`in native mod <id>, hook inject_<mod>_<method>`).

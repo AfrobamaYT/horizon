@@ -583,7 +583,9 @@ pub struct NativeItemFished<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Answered<T> {
+    /// The replace hook's answer.
     pub answer: T,
+    /// The `[mod] id` of the mod that answered.
     pub mod_id: &'static str,
 }
 
