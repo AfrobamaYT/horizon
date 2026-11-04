@@ -4,7 +4,8 @@
       "name": "entity_inside",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_inside",
       "side": "server",
-      "mod_api": {"contract": "listen", "scope": "block", "key": "state"}
+      "mod_api": {"contract": "listen", "scope": "block", "key": "state"},
+      "doc": "An entity is inside a block state this part is attached to (`Block.entityInside`). `event.precise` is `Entity.checkInsideBlocks`' flag: the entity moved nearly a block, or its box at the target touches the block. Fires for mobs, projectiles, dropped items and players on the server, once per entity and block per move, after the entity-kind batch (or the player's turn) has ticked, not mid-sweep; a contact whose entity is gone or whose block changed is dropped. Vanilla's `InsideBlockEffectApplier` is not exposed."
     }
   ]
 }

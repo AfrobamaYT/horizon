@@ -94,15 +94,9 @@ pub fn is_precise(
     at_target: horizon_core::geometry::Aabb,
     position: BlockPos,
 ) -> bool {
-    use horizon_core::geometry::{Aabb, Vec3};
     let far = 0.999_990_000_000_252_6_f64;
-    let min = Vec3::new(
-        f64::from(position.x),
-        f64::from(position.y),
-        f64::from(position.z),
-    );
     from.distance_squared(to) > far * far
-        || at_target.intersects(Aabb::new(min, min.add_vector(Vec3::new(1.0, 1.0, 1.0))))
+        || at_target.intersects(horizon_core::geometry::Aabb::block(position))
 }
 
 fn dispatch(event: Event<'_>, damage: &mut f32) {

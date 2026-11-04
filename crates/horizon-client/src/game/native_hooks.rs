@@ -22,10 +22,10 @@ use super::{
 use horizon_assets::item_model::StackView;
 use horizon_client::creative::Creative;
 use horizon_client::mod_api::{
-    self, Answered, ClientReloadListeners, EffectTickChange, EntityRef, EquipmentSlot, GameRuleActor,
-    LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
-    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
-    NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening,
+    self, Answered, ClientReloadListeners, EffectTickChange, EntityRef, EquipmentSlot,
+    GameRuleActor, LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender,
+    NativeItemDrop, NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood,
+    NativeProgressType, NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening,
     ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{

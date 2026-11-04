@@ -780,7 +780,12 @@ fn effects_from_blocks(
                         m.id as i32,
                         w.world.block(x, y, z),
                         horizon_core::position::BlockPos::new(x, y, z),
-                        true,
+                        crate::block_contact::is_precise(
+                            m.previous,
+                            m.position,
+                            m.bounds_at(m.position).deflate(Vec3::new(1e-5, 1e-5, 1e-5)),
+                            horizon_core::position::BlockPos::new(x, y, z),
+                        ),
                     );
                     visited.push(p);
                     match w.block_name(x, y, z) {

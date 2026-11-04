@@ -342,6 +342,7 @@ impl Game<'_> {
         let dimension =
             (self.serving.is_some() || self.options.dedicated.is_some()).then_some(self.dim.id());
         let result = horizon_client::block_contact::in_level(dimension, || f(self));
+        self.native_drain_entity_inside();
         self.leave_guest(swap);
         Some(result)
     }
