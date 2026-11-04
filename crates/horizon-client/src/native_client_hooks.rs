@@ -16,6 +16,9 @@ pub struct NativeClientHooks {
     pub living_drown: fn(u32, &str, &mut bool, &mut f32, i32, &mut bool),
     pub living_fall: fn(u32, &str, &mut f64, &mut f32, &mut bool),
     pub living_jump: fn(u32, &str),
+    pub living_jump_power: fn(u32, &str, &mut f32),
+    pub living_speed: fn(u32, &str, &mut f32),
+    pub living_flying_speed: fn(u32, &str, &mut f32),
     pub ender_entity_teleport: fn(u32, &str, [f64; 3], &mut [f64; 3], &mut bool),
 }
 
@@ -136,6 +139,24 @@ pub(crate) fn living_fall(
 pub(crate) fn living_jump(entity: u32, kind: &str) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.living_jump)(entity, kind);
+    }
+}
+
+pub(crate) fn living_jump_power(entity: u32, kind: &str, power: &mut f32) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.living_jump_power)(entity, kind, power);
+    }
+}
+
+pub(crate) fn living_speed(entity: u32, kind: &str, speed: &mut f32) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.living_speed)(entity, kind, speed);
+    }
+}
+
+pub(crate) fn living_flying_speed(entity: u32, kind: &str, speed: &mut f32) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.living_flying_speed)(entity, kind, speed);
     }
 }
 

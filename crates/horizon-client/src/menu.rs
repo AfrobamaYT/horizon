@@ -4260,6 +4260,9 @@ pub(crate) mod tests {
                 living_drown: |_, _, _, _, _, _| {},
                 living_fall: |_, _, _, _, _| {},
                 living_jump: |_, _| {},
+                living_jump_power: |_, _, _| {},
+                living_speed: |_, _, _| {},
+                living_flying_speed: |_, _, _| {},
                 ender_entity_teleport: |_, _, _, _, _| {},
             });
         assert!(installed.is_ok());

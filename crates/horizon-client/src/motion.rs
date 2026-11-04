@@ -52,6 +52,29 @@ pub fn native_living_jump(entity: u32, kind: &str) {
     crate::native_client_hooks::living_jump(entity, kind);
 }
 
+/// A living entity's jump power is about to be used (beyond NeoForge: there is no counterpart).
+/// Mods may change it. Fires on replayed ticks too, so a listener must be a pure function of its inputs.
+#[inline(never)]
+pub fn native_living_jump_power(entity: u32, kind: &str, power: &mut f32) {
+    crate::native_client_hooks::living_jump_power(entity, kind, power);
+}
+
+/// A living entity's movement speed is about to drive its travel (beyond NeoForge: there is no
+/// counterpart). Mods may change it. Fires on replayed ticks too, so a listener must be a pure
+/// function of its inputs.
+#[inline(never)]
+pub fn native_living_speed(entity: u32, kind: &str, speed: &mut f32) {
+    crate::native_client_hooks::living_speed(entity, kind, speed);
+}
+
+/// A living entity's airborne acceleration is about to be used (beyond NeoForge: there is no
+/// counterpart). Mods may change it. Fires on replayed ticks too, so a listener must be a pure
+/// function of its inputs.
+#[inline(never)]
+pub fn native_living_flying_speed(entity: u32, kind: &str, speed: &mut f32) {
+    crate::native_client_hooks::living_flying_speed(entity, kind, speed);
+}
+
 pub(crate) mod environment;
 mod fluids;
 pub use fluids::{
@@ -2742,18 +2765,21 @@ impl LivingAirWorld for MotionWorld<'_, '_, '_> {
         self.player.attribute("minecraft:friction_modifier")
     }
     fn speed(&mut self) -> Result<f32> {
-        Ok(self.player.attribute("minecraft:movement_speed")? as f32)
+        let mut speed = self.player.attribute("minecraft:movement_speed")? as f32;
+        native_living_speed(self.player.entity_id as u32, "minecraft:player", &mut speed);
+        Ok(speed)
     }
     fn flying_speed(&mut self) -> Result<f32> {
-        if self.player.flying {
+        let mut speed = if self.player.flying {
             // Player.getFlyingSpeed: abilities speed, doubled when sprinting.
-            return Ok(self.player.flying_speed * if self.player.sprinting { 2.0 } else { 1.0 });
-        }
-        Ok(if self.player.sprinting {
+            self.player.flying_speed * if self.player.sprinting { 2.0 } else { 1.0 }
+        } else if self.player.sprinting {
             0.025999999
         } else {
             0.02
-        })
+        };
+        native_living_flying_speed(self.player.entity_id as u32, "minecraft:player", &mut speed);
+        Ok(speed)
     }
     fn yaw(&mut self) -> Result<f32> {
         Ok(self.player.yaw)
@@ -2838,6 +2864,10 @@ impl LivingMotionWorld for MotionWorld<'_, '_, '_> {
     fn set_velocity(&mut self, v: Vec3) -> Result<()> {
         self.player.velocity = v;
         Ok(())
+    }
+    fn adjust_jump_power(&mut self, mut power: f32) -> f32 {
+        native_living_jump_power(self.player.entity_id as u32, "minecraft:player", &mut power);
+        power
     }
     fn jump_strength(&mut self) -> Result<f64> {
         self.player.attribute("minecraft:jump_strength")

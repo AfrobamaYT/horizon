@@ -146,6 +146,15 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
         living_jump: |entity, kind| {
             mod_api::dispatch_living_jump(entity, kind);
         },
+        living_jump_power: |entity, kind, power| {
+            mod_api::dispatch_living_jump_power(entity, kind, power);
+        },
+        living_speed: |entity, kind, speed| {
+            mod_api::dispatch_living_speed(entity, kind, speed);
+        },
+        living_flying_speed: |entity, kind, speed| {
+            mod_api::dispatch_living_flying_speed(entity, kind, speed);
+        },
         ender_entity_teleport: |entity, kind, from, target, cancel| {
             mod_api::dispatch_ender_entity_teleport(entity, kind, from, target, cancel);
         },
