@@ -4608,9 +4608,9 @@ mod wither_block_slowdown_tests {
                 m.fall_distance = 4.5;
                 m.stuck_multiplier = Vec3::ZERO;
                 let mut test_level = crate::health::TestLevel::new(42);
-                let random = &mut test_level.level();
+                let mut level = test_level.level();
                 let mut events = Vec::new();
-                effects_from_blocks(&mut m, w, random, &mut events);
+                effects_from_blocks(&mut m, w, &mut level, &mut events);
                 assert_eq!(m.fall_distance, 0.0, "cow fall distance reset");
                 assert_eq!(
                     m.stuck_multiplier,
@@ -4630,9 +4630,9 @@ mod wither_block_slowdown_tests {
             m.fall_distance = 4.5;
             m.stuck_multiplier = Vec3::ZERO;
             let mut test_level = crate::health::TestLevel::new(42);
-            let random = &mut test_level.level();
+            let mut level = test_level.level();
             let mut events = Vec::new();
-            effects_from_blocks(&mut m, w, random, &mut events);
+            effects_from_blocks(&mut m, w, &mut level, &mut events);
             assert_eq!(m.fall_distance, 0.0, "cow fall distance reset");
             assert_eq!(
                 m.stuck_multiplier,
@@ -4653,9 +4653,9 @@ mod wither_block_slowdown_tests {
                 m.fall_distance = 4.5;
                 m.stuck_multiplier = Vec3::ZERO;
                 let mut test_level = crate::health::TestLevel::new(42);
-                let random = &mut test_level.level();
+                let mut level = test_level.level();
                 let mut events = Vec::new();
-                effects_from_blocks(&mut m, w, random, &mut events);
+                effects_from_blocks(&mut m, w, &mut level, &mut events);
                 assert_eq!(m.fall_distance, 4.5, "wither fall distance preserved");
                 assert_eq!(m.stuck_multiplier, Vec3::ZERO, "wither not slowed");
             });
@@ -4671,9 +4671,9 @@ mod wither_block_slowdown_tests {
             m.fall_distance = 4.5;
             m.stuck_multiplier = Vec3::ZERO;
             let mut test_level = crate::health::TestLevel::new(42);
-            let random = &mut test_level.level();
+            let mut level = test_level.level();
             let mut events = Vec::new();
-            effects_from_blocks(&mut m, w, random, &mut events);
+            effects_from_blocks(&mut m, w, &mut level, &mut events);
             assert_eq!(m.fall_distance, 4.5, "wither fall distance preserved");
             assert_eq!(m.stuck_multiplier, Vec3::ZERO, "wither not slowed");
         });
@@ -4714,9 +4714,9 @@ mod wither_block_slowdown_tests {
                 m.previous = Vec3::new(0.5, 64.0, 0.5);
                 m.position = Vec3::new(0.52, 64.0, 0.5);
                 let mut test_level = crate::health::TestLevel::new(42);
-                let random = &mut test_level.level();
+                let mut level = test_level.level();
                 let mut events = Vec::new();
-                effects_from_blocks(&mut m, w, random, &mut events);
+                effects_from_blocks(&mut m, w, &mut level, &mut events);
                 assert_eq!(
                     m.health,
                     initial_health - 0.86,

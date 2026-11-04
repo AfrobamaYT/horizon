@@ -1442,7 +1442,7 @@ mod tests {
     fn a_knockback_hook_cannot_make_the_push_nonfinite() {
         fn hook(_: DamageLevel<'_>, _: Hurting<'_>, knock: &mut Knock) -> bool {
             knock.strength = f64::NAN;
-            knock.x = knock.x * 2.0;
+            knock.x *= 2.0;
             false
         }
         let mut level = crate::health::TestLevel::with_hooks(

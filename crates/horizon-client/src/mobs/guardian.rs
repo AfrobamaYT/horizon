@@ -373,13 +373,14 @@ mod elder_home_tests {
         with_test_world(&[], |w, types| {
             let kind = Arc::new(types.types["minecraft:elder_guardian"].clone());
             let mut test_level = crate::health::TestLevel::new(0);
+            let mut level = test_level.level();
             let mut events = Vec::new();
             let mut m = Mob::new(1, kind.clone(), Vec3::new(10.7, 64.2, -20.9), 0.0);
             elder_server_ai_step(
                 &mut m,
                 &mut Cx {
                     w,
-                    level: &mut test_level.level(),
+                    level: &mut level,
                     events: &mut events,
                 },
             );
@@ -393,7 +394,7 @@ mod elder_home_tests {
                 &mut kept,
                 &mut Cx {
                     w,
-                    level: &mut test_level.level(),
+                    level: &mut level,
                     events: &mut events,
                 },
             );
