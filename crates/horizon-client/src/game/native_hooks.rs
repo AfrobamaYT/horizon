@@ -625,6 +625,25 @@ impl GameLevel<'_> {
         mod_api::dispatch_fluid_level_change(self, dimension, pos, fluid, from, to, cancel);
     }
 
+    /// A fluid source at `pos` (`state`) is about to count towards turning
+    /// the flowing fluid beside it into a source (NeoForge's
+    /// `CreateFluidSourceEvent`, `FlowingFluid.getNewLiquid`): two counted
+    /// sources beside a block over a solid block or a source make it one.
+    /// Asked for each horizontal neighbour source, whenever the game works
+    /// out a block's new fluid, spread checks included: answer fast.
+    /// `can_convert` starts as the fluid's rule (`water_source_conversion`
+    /// or `lava_source_conversion`). Server-side.
+    #[inline(always)]
+    pub(super) fn native_create_fluid_source(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        can_convert: &mut bool,
+    ) {
+        mod_api::dispatch_create_fluid_source(self, dimension, pos, state, can_convert);
+    }
+
     /// A non-persistent leaf block at distance 7 is about to decay at `pos`.
     /// Set `cancel` to keep it. Server-side.
     #[inline(always)]
