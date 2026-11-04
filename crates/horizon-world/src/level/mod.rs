@@ -154,6 +154,20 @@ pub enum NeighbourUpdate {
     /// `Level.updateNeighborsAtExceptFromFacing`: all neighbours but the one in the direction.
     NeighboursExcept(Direction),
 }
+/// A write a block's part asks for when an entity lands on it (`Block.fallOn`'s own
+/// `setBlockAndUpdate` or `destroyBlock`), at the block the entity landed on. The level
+/// applies each once the entity's batch has ticked, in the order asked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LandingWrite {
+    /// `Level.setBlockAndUpdate(pos, state)`: farmland turned to dirt.
+    SetBlock(BlockStateId),
+    /// `Level.destroyBlock(pos, drop)`: a turtle egg broken, with its drops or without.
+    DestroyBlock {
+        /// Whether the block drops its resources.
+        drop: bool,
+    },
+}
 pub use interact::{InteractionResult, PlayerContext, PlayerEffect, UseBranch, hit_slot};
 pub use pistons::{BlockEventData, MovingPiston};
 pub use place::{PlaceContext, PlaceOutcome, PlacementContext};

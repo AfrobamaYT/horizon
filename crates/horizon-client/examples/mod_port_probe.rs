@@ -3,7 +3,7 @@
 //! writes what Horizon makes of every block state, drop, recipe and tag the
 //! NeoForge oracle exported.
 //!
-//! cargo run -p horizon-client --example mod_port_probe -- PREPARED WORK OUT.json [MOD...]
+//! cargo run -p horizon-client-lib --example mod_port_probe -- PREPARED WORK OUT.json [MOD...]
 //!
 //! WORK is a `horizon-port-pack` work folder: `oracle/facts.json` and
 //! `mods/<id>/carry/`. The root is built in `WORK/horizon-root`.
@@ -86,6 +86,7 @@ fn main() -> Result<()> {
         mods.push(ContentMod {
             id: package.manifest.id.clone(),
             content,
+            jars: package.manifest.jar,
         });
     }
     mods.sort_by(|a, b| a.id.cmp(&b.id));
@@ -95,7 +96,13 @@ fn main() -> Result<()> {
         let what = what.to_owned();
         move |e: Box<dyn std::error::Error>| format!("{what}: {e}")
     };
-    mod_content::build(base, &mods, &root).map_err(step("content root"))?;
+    mod_content::build(
+        base,
+        &horizon_client::logging::game_home().join("jars"),
+        &mods,
+        &root,
+    )
+    .map_err(step("content root"))?;
     let built = began.elapsed().as_secs_f64();
     let assets = Assets::load(&root).map_err(step("assets"))?;
     let registry = assets.registry;
@@ -238,8 +245,8 @@ fn main() -> Result<()> {
                         "max_stack_size": i.max_stack,
                         "block": i.block.map(|b| b.0),
                         "max_damage": i.max_damage,
-                        "modifiers": i.modifiers.iter().map(|(attribute, id, amount, operation, slot)| {
-                            json!({"type": attribute, "id": id, "amount": amount, "operation": operation, "slot": slot})
+                        "modifiers": i.modifiers.iter().map(|m| {
+                            json!({"type": m.attribute, "id": m.id, "amount": m.amount, "operation": m.operation, "slot": m.slot})
                         }).collect::<Vec<_>>(),
                         "tool": i.tool_damage_per_block.map(|per_block| json!({
                             "rules": i.tool.iter().map(|r| json!({"blocks": r.blocks, "speed": r.speed, "correct_for_drops": r.correct})).collect::<Vec<_>>(),

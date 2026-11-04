@@ -1,7 +1,11 @@
 //! Prepare data for the final game command, before shell or graphics wrappers obscure it.
-use super::{collect, prepare, JarConflict, Permission, PrepareError};
-use crate::launch::{self, Launch};
+use super::{prepare, Permission, PrepareError};
+use crate::{
+    i18n::trf,
+    launch::{self, Launch},
+};
 use horizon_mods::{
+    manifest::{collect_jar_requirements, JarConflict},
     mod_list::ModList,
     packages,
     selection::{self, LaunchArguments},
@@ -22,7 +26,10 @@ impl fmt::Display for LaunchError {
         match self {
             Self::Command { program, source } => write!(f, "{}: {source}", program.display()),
             Self::Packages(error) => fmt::Display::fmt(error, f),
-            Self::Conflict(error) => fmt::Display::fmt(error, f),
+            Self::Conflict(error) => f.write_str(&trf("SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.", &[
+                ("hash", error.first.sha512()), ("first_id", error.first.id()), ("first_version", error.first.version()),
+                ("second_id", error.second.id()), ("second_version", error.second.version()),
+            ])),
             Self::Prepare(error) => fmt::Display::fmt(error, f),
         }
     }
@@ -72,11 +79,12 @@ pub fn prepare_launch(
         &args.context.dev_mods,
     )
     .collect();
-    let jars = collect(
-        content
+    let jars = collect_jar_requirements(
+        native
             .iter()
-            .map(|p| &p.package.manifest)
-            .chain(native.iter().map(|p| &p.manifest)),
+            .map(|p| &p.manifest)
+            .chain(content.iter().map(|p| &p.package.manifest))
+            .map(|m| (m.id.as_str(), m.jar.as_slice())),
     )
     .map_err(LaunchError::Conflict)?;
     prepare(&args.context.home, &jars, permission).map_err(LaunchError::Prepare)

@@ -1448,15 +1448,15 @@ impl MotionWorld<'_, '_, '_> {
             let on = self.legacy_on_position()?;
             let under = self.assets.registry.state(self.block(on));
             if let Some(block) = under {
-                crate::block_contact::emit(crate::block_contact::Event::StepOn(
+                crate::block_contact::step_on(
+                    &block.name,
                     crate::block_contact::Contact {
                         entity: self.player.entity_id,
                         kind: "minecraft:player",
-                        block: &block.name,
                         state: self.block(on),
                         position: on,
                     },
-                ));
+                );
             }
             let magma = under.is_some_and(|s| s.name == "minecraft:magma_block");
             let slime = under.is_some_and(|s| s.name == "minecraft:slime_block");
@@ -2642,7 +2642,8 @@ impl RestitutionWorld for MotionWorld<'_, '_, '_> {
         state: BlockStateId,
         position: BlockPos,
         fall_distance: f64,
-    ) -> Result<()> {
+        movement: Vec3,
+    ) -> Result<Vec3> {
         self.player.events.push(MotionEvent::Bounce {
             state,
             position,
@@ -2656,7 +2657,18 @@ impl RestitutionWorld for MotionWorld<'_, '_, '_> {
                 position,
                 horizon_world::block_landing::LandingEntityKind::Player,
             )
-            .map_err(|e| e.to_string().into())
+            .map_err(|e| e.to_string())?;
+        Ok(crate::block_contact::bounce(
+            &mut crate::health::DamageLevel::of(&mut *self.scene, self.assets.registry),
+            crate::block_contact::Contact {
+                entity: self.player.entity_id,
+                kind: "minecraft:player",
+                state,
+                position,
+            },
+            fall_distance,
+            movement,
+        ))
     }
     fn bounce_event(&mut self) -> Result<()> {
         Ok(())

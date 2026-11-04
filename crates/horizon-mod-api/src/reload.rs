@@ -235,12 +235,14 @@ impl<L: ?Sized + 'static> ReloadCore<L> {
     }
 }
 
-/// A failed reload of one side's listeners: the ordering failed, or a
-/// listener's `prepare` returned an error. Both sides share this form, so the
-/// reload paths report listeners alike.
+/// A failed reload: accepted originals were unavailable, listener ordering
+/// failed, or a listener's `prepare` returned an error. Both sides share this
+/// form, so the reload paths report listeners alike.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ReloadStageError {
+    /// An accepted root's original jars or input record could not be read.
+    OriginalJars(horizon_mods::manifest::JarInputsError),
     /// The listeners could not be ordered.
     Order(ReloadOrderError),
     /// A listener's `prepare` failed.
@@ -254,6 +256,7 @@ pub enum ReloadStageError {
 impl std::fmt::Display for ReloadStageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::OriginalJars(error) => error.fmt(f),
             Self::Order(error) => error.fmt(f),
             Self::Listener { listener, source } => {
                 write!(f, "reload listener {listener}: {source}")
@@ -264,6 +267,7 @@ impl std::fmt::Display for ReloadStageError {
 impl std::error::Error for ReloadStageError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(match self {
+            Self::OriginalJars(error) => error,
             Self::Order(error) => error,
             Self::Listener { source, .. } => source,
         })

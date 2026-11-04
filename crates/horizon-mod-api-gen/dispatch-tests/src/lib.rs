@@ -47,6 +47,7 @@ mod tests {
         pub(super) trait LevelRandomHost: LevelHost {}
         pub(super) trait LevelWriteHost: LevelTicksHost + LevelRandomHost {}
         pub(super) struct Compound;
+        pub(super) struct LandingWrite;
         pub(super) struct Tag;
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
@@ -86,6 +87,12 @@ mod tests {
         pub(super) struct BlockHit;
         pub(super) struct NativeBlockClick<'a>(pub &'a ());
         pub(super) struct NativeItemClick<'a>(pub &'a ());
+        #[derive(Clone, Copy)]
+        pub(super) enum InteractionKey {
+            Attack,
+            Use,
+            PickBlock,
+        }
         #[derive(Clone, Copy)]
         pub(super) enum UsePhase {
             ItemBeforeBlock,

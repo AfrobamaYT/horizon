@@ -2636,7 +2636,7 @@ impl Game<'_> {
                                 .mobs
                                 .iter()
                                 .find(|m| m.id == id)
-                                .map_or(0.0, |m| self.mob_knockback_resistance(m));
+                                .map_or(0.0, super::lan_attributes::mob_knockback_resistance);
                             (hurt, resistance)
                         }
                     };

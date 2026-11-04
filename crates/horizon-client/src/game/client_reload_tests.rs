@@ -370,9 +370,13 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
             // registrations, which a test must not freeze for the others
             // (`brewing`'s mod effects among them).
             let merged = |packs: &[horizon_client::packs::Pack]| {
-                let base = crate::game::mods::content_overlay(&resources, &sources)
-                    .unwrap()
-                    .root;
+                let base = crate::game::mods::content_overlay(
+                    &resources,
+                    &sources,
+                    &horizon_client::logging::game_home().join("jars"),
+                )
+                .unwrap()
+                .root;
                 horizon_client::packs::resource_root(&base, packs, &crate::game::packs::cache_dir())
                     .unwrap()
             };
