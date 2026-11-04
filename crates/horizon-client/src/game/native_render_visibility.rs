@@ -7,13 +7,12 @@ use std::sync::Arc;
 
 impl Game<'_> {
     /// Asks `native_block_render_visibility` again for every state and, when the answers differ
-    /// from those in use, remeshes every loaded section with them. Call it when your answer
-    /// changes (a toggle key, a scan finishing) and once when the player joins, not every
-    /// frame: a rebuild takes the workers a few seconds. With no part answering, nothing is
-    /// asked and the mesher keeps its no-mod path.
+    /// from those in use, remeshes every loaded section with them. Call it when your answer changes (a toggle key, a scan
+    /// finishing) and once when the player joins, not every frame: a rebuild takes the workers a
+    /// few seconds. With no part answering, nothing is asked and the mesher keeps its no-mod path.
     pub(super) fn native_refresh_render_visibility(&mut self) {
         let asked = mod_api::__private::has_scoped_hook(mod_api::HookId::BlockRenderVisibility);
-        let hidden: Arc<[bool]> = if asked {
+        let mut hidden: Arc<[bool]> = if asked {
             (0..self.pack.assets.registry.len())
                 .map(|state| {
                     let mut hidden = false;
@@ -25,15 +24,22 @@ impl Game<'_> {
             Arc::from([])
         };
         // A table that hides nothing is no table at all.
-        let hidden = if hidden.contains(&true) {
-            hidden
-        } else {
-            Arc::from([])
-        };
-        if hidden == self.streaming.hidden_states {
+        if !hidden.contains(&true) {
+            hidden = Arc::from([]);
+        }
+        if hidden == self.pack.context.hidden_states {
             return;
         }
-        self.streaming.hidden_states = hidden;
-        self.all_sections_changed();
+        let old = &self.pack.context;
+        self.pack.context = Arc::new(horizon_client::streaming::WorkerContext {
+            assets: old.assets.clone(),
+            render: old.render.clone(),
+            tables: old.tables.clone(),
+            biomes: old.biomes.clone(),
+            light: old.light.clone(),
+            hidden_states: hidden,
+        });
+        let context = self.worker_context();
+        self.streaming.reload_resources(&mut self.world, context);
     }
 }

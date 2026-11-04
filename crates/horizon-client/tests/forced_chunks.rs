@@ -94,6 +94,7 @@ fn forced_chunks_reach_vanillas_rings() {
         biomes: Arc::new(Biomes::load(&root).unwrap()),
         assets,
         render: render.clone(),
+        hidden_states: Arc::from([]),
     });
     let mut streaming = Streaming::new(Arc::new(Plain), context, 2);
     // The player stands far away: only the forced chunk's own rings are

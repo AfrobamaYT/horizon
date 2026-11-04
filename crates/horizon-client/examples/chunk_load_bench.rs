@@ -89,6 +89,7 @@ fn main() -> Result<(), Error> {
         biomes: biomes.clone(),
         assets: assets.clone(),
         render,
+        hidden_states: Arc::from([]),
     });
     let item_data = test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
     let terrain = VanillaTerrain::new(

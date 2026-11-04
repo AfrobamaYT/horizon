@@ -207,7 +207,6 @@ mod music;
 mod names;
 mod narrator;
 mod native_biome_colors;
-mod native_render_visibility;
 pub mod native_block_entity_draw;
 mod native_block_entity_refs;
 mod native_block_sprites;
@@ -278,6 +277,7 @@ mod native_projectiles;
 mod native_quick_move;
 mod native_raid_refs;
 mod native_recipes;
+mod native_render_visibility;
 mod native_server;
 mod native_shaders;
 mod native_sound_refs;
@@ -2404,6 +2404,7 @@ impl PackResources {
             tables: old.tables.clone(),
             biomes,
             light: old.light.clone(),
+            hidden_states: old.hidden_states.clone(),
         })
     }
     /// The pack tables over their parts, which `load_resources` builds on
@@ -2431,6 +2432,7 @@ impl PackResources {
                 tables,
                 biomes,
                 light,
+                hidden_states: Arc::from([]),
             }),
             assets,
             render,

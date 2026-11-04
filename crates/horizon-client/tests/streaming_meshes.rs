@@ -68,6 +68,7 @@ fn columns_loaded_past_the_render_distance_mesh_when_they_come_in_range() {
         biomes: Arc::new(Biomes::load(&root).unwrap()),
         assets,
         render: render.clone(),
+        hidden_states: Arc::from([]),
     });
     let mut streaming = Streaming::new(Arc::new(Saved), context, 3);
     streaming.radius = 4;
@@ -153,6 +154,7 @@ fn relit_columns_keep_every_mesh_current() {
         biomes: Arc::new(Biomes::load(&root).unwrap()),
         assets: assets.clone(),
         render: render.clone(),
+        hidden_states: Arc::from([]),
     });
     let state = |name: &str| assets.registry.default_state(name).unwrap().0;
     let (stone, glowstone, torch) = (

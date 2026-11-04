@@ -74,6 +74,7 @@ fn a_tall_column_streams_lights_and_meshes_to_its_top() {
         biomes: Arc::new(Biomes::load(&root).unwrap()),
         assets: assets.clone(),
         render: render.clone(),
+        hidden_states: Arc::from([]),
     });
     let state = |name: &str| assets.registry.default_state(name).unwrap().0;
     let (stone, torch) = (state("minecraft:stone"), state("minecraft:torch"));
