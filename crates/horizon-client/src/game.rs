@@ -12776,9 +12776,10 @@ impl Game<'_> {
     /// ServerExplosion: rays from a 16^3 grid lose (resistance + 0.3) * 0.3 per step.
     /// A mob explosion (`ServerLevel.explode` with `ExplosionInteraction.MOB`:
     /// blocks are kept without mobGriefing, else the mob_explosion_drop_decay
-    /// rule picks decay).
-    fn explode(&mut self, center: [f64; 3], radius: f32) -> Result<()> {
-        let interaction = if !self.ui.rules.bool("mob_griefing") {
+    /// rule picks decay). NeoForge asks `canEntityGrief` for `source`, the
+    /// exploding entity (the rule alone without one).
+    fn explode(&mut self, source: Option<u32>, center: [f64; 3], radius: f32) -> Result<()> {
+        let interaction = if !self.can_entity_grief(source) {
             explosion::BlockInteraction::Keep
         } else {
             self.destroy_type("mob_explosion_drop_decay")

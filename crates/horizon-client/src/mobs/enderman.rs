@@ -437,7 +437,7 @@ impl Goal for TakeBlock {
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         // EndermanTakeBlockGoal.canUse: needs mobGriefing, checked before the draw.
         m.extra.carried.is_none()
-            && cx.w.mob_griefing
+            && cx.w.can_grief(m.id)
             && m.random.next_int_bound(reduced(20)).unwrap_or(1) == 0
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
@@ -489,7 +489,7 @@ impl Goal for LeaveBlock {
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         // EndermanLeaveBlockGoal.canUse: needs mobGriefing, checked before the draw.
         m.extra.carried.is_some()
-            && cx.w.mob_griefing
+            && cx.w.can_grief(m.id)
             && m.random.next_int_bound(reduced(2000)).unwrap_or(1) == 0
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {

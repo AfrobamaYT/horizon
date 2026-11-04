@@ -216,7 +216,10 @@ impl Goal for UseSpell {
         if self.spell == Spell::Wololo {
             // EvokerWololoSpellGoal.canUse: a blue sheep within the box
             // (16 sideways, 4 up or down) and `range(16)`, no target, griefing on.
-            if m.ai.target.is_some() || m.extra.counter > 0 || age < self.next || !cx.w.mob_griefing
+            if m.ai.target.is_some()
+                || m.extra.counter > 0
+                || age < self.next
+                || !cx.w.can_grief(m.id)
             {
                 return false;
             }

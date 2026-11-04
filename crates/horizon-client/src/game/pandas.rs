@@ -36,7 +36,10 @@ impl Game<'_> {
                 e.pickup_delay == 0 && g.panda_eats_from_ground(&e.stack.item)
             };
             // Mob.aiStep: the items within the box grown by (1, 0, 1).
-            if griefing && m.can_pick_up_loot() && m.extra.main_hand_id().is_none() {
+            if m.can_pick_up_loot()
+                && self.entity_grief(m.id, griefing)
+                && m.extra.main_hand_id().is_none()
+            {
                 let reach = m.bounds().inflate(Vec3::new(1.0, 0.0, 1.0));
                 let taken = self
                     .dropped
