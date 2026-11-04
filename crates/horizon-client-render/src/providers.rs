@@ -86,6 +86,27 @@ impl Providers {
             _ => 0.0,
         }
     }
+    /// The chance that a `compostable` layers provider adds a layer: the weight of its non-zero
+    /// layers in the default distribution (the composter's empty-level case is left out), or its
+    /// plain number.
+    pub fn layer_chance(&self, v: &Value) -> f32 {
+        let def = v.as_str().and_then(|n| self.ints.get(n)).unwrap_or(v);
+        let base = def.get("default").unwrap_or(def);
+        if let Some(n) = base.as_f64() {
+            return n as f32;
+        }
+        let weights: Vec<(f64, f64)> = base["distribution"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|e| (e["data"].as_f64().unwrap_or(0.0), e["weight"].as_f64().unwrap_or(0.0)))
+            .collect();
+        let total: f64 = weights.iter().map(|(_, w)| w).sum();
+        if total <= 0.0 {
+            return 0.0;
+        }
+        (weights.iter().filter(|(d, _)| *d > 0.0).map(|(_, w)| w).sum::<f64>() / total) as f32
+    }
     /// A plain `context_int_provider` value or reference (no context conditions).
     pub fn int_value(&self, v: &Value) -> i32 {
         Self::eval(v, false, &self.ints, 0) as i32

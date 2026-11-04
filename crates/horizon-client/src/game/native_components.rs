@@ -42,7 +42,7 @@ impl Game<'_> {
     /// resolved), None where it is not compostable. API @API:item_components@.
     pub(super) fn native_item_compost_chance(&self, item: &str) -> Option<f32> {
         let layers = self.items().get(item)?.compostable.as_ref()?;
-        Some(self.res.providers().float_value(layers, 0.0))
+        Some(self.res.providers().layer_chance(layers))
     }
     /// Whether an enchantment on `stack` has effect component `effect`, by the world's
     /// enchantment definitions (`EnchantmentHelper.has`), behind
