@@ -6,7 +6,7 @@
 //! game thread inside the tick, only when the world is open to the network.
 use super::{
     Lan, NetEvent,
-    chunk_watch::{ChunkWatchKind, record},
+    chunk_watch::{ChunkWatchKind, ChunkWatchLog},
     chunks::ChunkEncoder,
     data::SyncData,
     entity::{Entities, EntityState, Viewer},
@@ -288,7 +288,7 @@ pub struct Hub {
     pub native_menu_events: Vec<super::menu::NativeMenuEvent>,
     /// The chunks players started and stopped watching, for the mods
     /// (`chunk_watch`): recorded only while a mod listens.
-    pub chunk_watches: Vec<super::chunk_watch::ChunkWatch>,
+    pub chunk_watches: ChunkWatchLog,
     /// Kicks waiting for the game thread to notify native mods.
     pending_kicks: Vec<HostEvent>,
     /// The entities players started and stopped tracking, collected by
@@ -740,7 +740,7 @@ impl Hub {
             entity_gone: Vec::new(),
             mod_commands: (serde_json::Value::Null, None),
             native_menu_events: Vec::new(),
-            chunk_watches: Vec::new(),
+            chunk_watches: ChunkWatchLog::default(),
             pending_kicks: Vec::new(),
             native_tracking: Vec::new(),
             attachment_snapshots: Vec::new(),
@@ -2282,14 +2282,15 @@ impl Hub {
             if watching {
                 // ChunkMap.markChunkPendingToSend, then PlayerChunkSender.sendChunk's end:
                 // Horizon picks a chunk only as it sends it.
-                let near: Vec<_> = taken.iter().map(|&idx| g.chunk_queue[idx]).collect();
-                for &key in &near {
+                for &idx in &taken {
+                    let key = g.chunk_queue[idx];
                     if g.watched.insert(key) {
-                        record(&mut self.chunk_watches, g, ChunkWatchKind::Watch, key);
+                        self.chunk_watches.push(g, ChunkWatchKind::Watch, key);
                     }
                 }
-                for key in near {
-                    record(&mut self.chunk_watches, g, ChunkWatchKind::Sent, key);
+                for &idx in &taken {
+                    let key = g.chunk_queue[idx];
+                    self.chunk_watches.push(g, ChunkWatchKind::Sent, key);
                 }
             }
             let mut seen: Vec<_> = taken
@@ -2368,7 +2369,7 @@ impl Hub {
             entered.sort_unstable();
             for key in entered {
                 g.watched.insert(key);
-                record(&mut self.chunk_watches, g, ChunkWatchKind::Watch, key);
+                self.chunk_watches.push(g, ChunkWatchKind::Watch, key);
             }
         }
         requeue(&mut g.chunk_queue, &g.sent_chunks, (cx, cz), r);
@@ -5749,11 +5750,14 @@ mod tests {
     fn watches(
         hub: &mut Hub,
     ) -> Vec<(super::super::chunk_watch::ChunkWatchKind, String, [i32; 2])> {
-        std::mem::take(&mut hub.chunk_watches)
+        hub.chunk_watches
+            .take()
             .into_iter()
-            .map(|w| {
-                assert_eq!((w.uuid, w.entity_id), (1, 1));
-                (w.kind, w.dimension, w.chunk)
+            .flat_map(|run| {
+                run.watches.into_iter().map(move |w| {
+                    assert_eq!((w.uuid, w.entity_id), (1, 1));
+                    (w.kind, run.dimension.clone(), w.chunk)
+                })
             })
             .collect()
     }
@@ -5822,10 +5826,25 @@ mod tests {
                 streaming: None,
             };
             hub.change_level(0, [0.5, 64.0, 0.5], 0.0, None, true, 0, &ctx);
-            assert_eq!(watches(&mut hub), run(Unwatch, &overworld()));
-            // The nether's chunks, then a disconnect.
+            // The nether's chunks: the level left and the new one are a run
+            // each, which names its level once.
             send_chunks(&mut hub, &mut world);
-            assert_eq!(watches(&mut hub).len(), 8);
+            let runs = hub.chunk_watches.take();
+            let levels: Vec<_> = runs
+                .iter()
+                .map(|r| (r.dimension.as_str(), r.watches.len()))
+                .collect();
+            assert_eq!(
+                levels,
+                [("minecraft:overworld", 4), ("minecraft:the_nether", 8)]
+            );
+            let left: Vec<_> = runs[0]
+                .watches
+                .iter()
+                .map(|w| (w.kind, overworld(), w.chunk))
+                .collect();
+            assert_eq!(left, run(Unwatch, &overworld()));
+            // Then a disconnect.
             let _ = hub.remove_guest(0, "bye");
             assert_eq!(watches(&mut hub), run(Unwatch, "minecraft:the_nether"));
         });
