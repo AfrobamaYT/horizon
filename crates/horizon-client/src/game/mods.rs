@@ -516,18 +516,20 @@ mod tests {
                 Box::new(Models(calls.clone())),
             )]
             .into(),
-            || crate::mod_api::with_test_packages(&["registration_test"], || {
-                register_standalone_models(ExecutionRole::IntegratedServer);
-                register_standalone_models(ExecutionRole::DedicatedServer);
-                assert_eq!(calls.load(Ordering::Relaxed), 0);
-                register_standalone_models(ExecutionRole::Client);
-                assert_eq!(calls.load(Ordering::Relaxed), 1);
-                assert!(
-                    horizon_client::models::standalone()
-                        .iter()
-                        .any(|id| id == "registration_test:block/shaft")
-                );
-            }),
+            || {
+                crate::mod_api::with_test_packages(&["registration_test"], || {
+                    register_standalone_models(ExecutionRole::IntegratedServer);
+                    register_standalone_models(ExecutionRole::DedicatedServer);
+                    assert_eq!(calls.load(Ordering::Relaxed), 0);
+                    register_standalone_models(ExecutionRole::Client);
+                    assert_eq!(calls.load(Ordering::Relaxed), 1);
+                    assert!(
+                        horizon_client::models::standalone()
+                            .iter()
+                            .any(|id| id == "registration_test:block/shaft")
+                    );
+                })
+            },
         );
     }
 

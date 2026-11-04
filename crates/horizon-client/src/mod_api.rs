@@ -6,10 +6,10 @@
 use std::sync::{Arc, OnceLock};
 
 mod phase;
+pub use horizon_mods::Side;
 pub(crate) use phase::install_packages;
 #[cfg(test)]
 pub(crate) use phase::with_test_packages;
-pub use horizon_mods::Side;
 pub use phase::{LoadedMods, PackageInfo, PackageKind, RegistrationContext};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};

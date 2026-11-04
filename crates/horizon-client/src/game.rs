@@ -22153,7 +22153,9 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         }
     }
     let mut early_settings = Settings::load(&Game::options_path());
-    options.mods.select(&std::env::current_dir()?, &early_settings.mods.enabled);
+    options
+        .mods
+        .select(&std::env::current_dir()?, &early_settings.mods.enabled);
     crate::mod_api::install_packages(options.mods.native.packages(), &options.mods.selected);
     if let Err(refused) = crate::mod_api::install_parts(crate::mod_api::mods()) {
         panic!("Mod parts refused:\n{}", refused.join("\n"));

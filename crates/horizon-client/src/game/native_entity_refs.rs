@@ -440,10 +440,7 @@ pub(super) mod tests {
         }
         let _mods = horizon_client::mod_api::part_tests::game_thread();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        Some(
-            super::super::mods::content_root(&base, &Default::default())
-                .unwrap(),
-        )
+        Some(super::super::mods::content_root(&base, &Default::default()).unwrap())
     }
 
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
