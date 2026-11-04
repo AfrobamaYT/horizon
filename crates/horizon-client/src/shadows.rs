@@ -332,7 +332,12 @@ mod tests {
         flagged.invisible = true;
         let mut potion = Mob::new(3, kind, Vec3::ZERO, 0.0);
         potion.add_effect("minecraft:invisibility", 600, 0);
-        crate::mobs::ai::tick_effects(&mut potion, level, None);
+        crate::mobs::ai::tick_effects(
+            &mut potion,
+            crate::test_resources::server_loop_context(),
+            level,
+            None,
+        );
         let mobs = [seen, flagged, potion];
         let casters: Vec<_> = mob_casters(&mobs, 0.5).collect();
         assert_eq!(

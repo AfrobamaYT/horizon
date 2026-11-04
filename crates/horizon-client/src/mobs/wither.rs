@@ -301,7 +301,7 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
         }
         m.extra.counter = left;
         if m.age.is_multiple_of(10) {
-            m.heal(10.0);
+            m.heal(w.loop_context, 10.0);
         }
         return;
     }
@@ -430,7 +430,7 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
         }
     }
     if m.age.is_multiple_of(20) {
-        m.heal(1.0);
+        m.heal(w.loop_context, 1.0);
     }
 }
 /// `WitherBoss.hurtServer` filter: not while charging, no arrows once

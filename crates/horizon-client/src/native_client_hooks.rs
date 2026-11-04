@@ -8,13 +8,13 @@ use std::sync::OnceLock;
 pub struct NativeClientHooks {
     pub menu_slot_rules: fn(&LoopContext, &str, usize, &ItemStack, &mut bool, &mut u32),
     pub item_stacked_on_other: fn(&LoopContext, &mut crate::menu::StackedOnOther<'_>, &mut bool),
-    pub living_heal: fn(u32, &mut f32, &mut bool),
-    pub living_breathe: fn(u32, &str, &mut bool, &mut i32, &mut i32),
+    pub living_heal: fn(&LoopContext, u32, &mut f32, &mut bool),
+    pub living_breathe: fn(&LoopContext, u32, &str, &mut bool, &mut i32, &mut i32),
     pub farmland_trample: fn(u32, [i32; 3], u32, f64, &mut bool),
     pub has_mods: fn() -> bool,
     pub player_name_format: fn(&LoopContext, &crate::text::Text, &mut crate::text::Text),
     pub player_tab_list_name_format: fn(&LoopContext, u128, &str, &mut Option<crate::text::Text>),
-    pub living_drown: fn(u32, &str, &mut bool, &mut f32, i32, &mut bool),
+    pub living_drown: fn(&LoopContext, u32, &str, &mut bool, &mut f32, i32, &mut bool),
     pub living_fall: fn(u32, &str, &mut f64, &mut f32, &mut bool),
     pub living_jump: fn(u32, &str),
     pub living_jump_power: fn(&LoopContext, u32, &str, &mut f32),
@@ -55,13 +55,14 @@ pub(crate) fn item_stacked_on_other(
     }
 }
 
-pub(crate) fn living_heal(entity: u32, amount: &mut f32, cancel: &mut bool) {
+pub(crate) fn living_heal(context: &LoopContext, entity: u32, amount: &mut f32, cancel: &mut bool) {
     if let Some(hooks) = HOOKS.get() {
-        (hooks.living_heal)(entity, amount, cancel);
+        (hooks.living_heal)(context, entity, amount, cancel);
     }
 }
 
 pub(crate) fn living_breathe(
+    context: &LoopContext,
     entity: u32,
     kind: &str,
     can_breathe: &mut bool,
@@ -69,7 +70,7 @@ pub(crate) fn living_breathe(
     refill: &mut i32,
 ) {
     if let Some(hooks) = HOOKS.get() {
-        (hooks.living_breathe)(entity, kind, can_breathe, consume, refill);
+        (hooks.living_breathe)(context, entity, kind, can_breathe, consume, refill);
     }
 }
 
@@ -111,6 +112,7 @@ pub(crate) fn player_tab_list_name_format(
 }
 
 pub(crate) fn living_drown(
+    context: &LoopContext,
     entity: u32,
     kind: &str,
     is_drowning: &mut bool,
@@ -120,6 +122,7 @@ pub(crate) fn living_drown(
 ) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.living_drown)(
+            context,
             entity,
             kind,
             is_drowning,

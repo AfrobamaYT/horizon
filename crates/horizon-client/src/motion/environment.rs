@@ -107,10 +107,16 @@ impl MotionWorld<'_, '_, '_> {
         let breath = if self.player.client_side {
             vanilla
         } else {
-            breathe(self.player.entity_id as u32, "minecraft:player", vanilla)
+            breathe(
+                self.loop_context,
+                self.player.entity_id as u32,
+                "minecraft:player",
+                vanilla,
+            )
         };
         // LivingDrownEvent, likewise.
         if let Some(drowning) = drown(
+            self.loop_context,
             self.player.entity_id as u32,
             "minecraft:player",
             &mut self.player.air,

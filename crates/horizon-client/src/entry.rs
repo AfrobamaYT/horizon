@@ -115,11 +115,13 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
             let context = mod_api::LoopContext::new(context);
             mod_api::dispatch_item_stacked_on_other(&context, event, canceled);
         },
-        living_heal: |entity, amount, cancel| {
-            mod_api::dispatch_living_heal(entity, amount, cancel);
+        living_heal: |context, entity, amount, cancel| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_living_heal(&context, entity, amount, cancel);
         },
-        living_breathe: |entity, kind, can_breathe, consume, refill| {
-            mod_api::dispatch_living_breathe(entity, kind, can_breathe, consume, refill);
+        living_breathe: |context, entity, kind, can_breathe, consume, refill| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_living_breathe(&context, entity, kind, can_breathe, consume, refill);
         },
         farmland_trample: |entity, pos, state, distance, cancel| {
             mod_api::dispatch_farmland_trample(entity, pos, state, distance, cancel);
@@ -133,8 +135,10 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
             let context = mod_api::LoopContext::new(context);
             mod_api::dispatch_player_tab_list_name_format(&context, player, name, display_name);
         },
-        living_drown: |entity, kind, is_drowning, damage_amount, bubble_count, cancel| {
+        living_drown: |context, entity, kind, is_drowning, damage_amount, bubble_count, cancel| {
+            let context = mod_api::LoopContext::new(context);
             mod_api::dispatch_living_drown(
+                &context,
                 entity,
                 kind,
                 is_drowning,

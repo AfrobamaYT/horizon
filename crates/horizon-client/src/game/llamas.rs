@@ -31,7 +31,7 @@ impl Game<'_> {
             loved = true;
         }
         if m.health < m.attrs.max_health {
-            m.heal(heal);
+            m.heal(&self.loop_context, heal);
             used = true;
         }
         let mut happy = false;
