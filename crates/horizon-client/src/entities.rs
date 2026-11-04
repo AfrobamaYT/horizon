@@ -90,7 +90,7 @@ fn slime_at(world: &World, facts: &BlockFacts, x: i32, y: i32, z: i32) -> bool {
 }
 
 mod fluids;
-pub use fluids::update_entity_fluids;
+pub use fluids::{fluid_flow, update_entity_fluids};
 
 /// `LivingEntity.createItemStackToDrop`'s motion for a stack thrown by an
 /// entity facing `yaw` and `pitch` (degrees), from that entity's random:

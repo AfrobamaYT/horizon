@@ -39,3 +39,23 @@ fn mob_despawn(&self, _: &dyn mod_api::Host, event: &mut mod_api::MobDespawnEven
 ```
 
 The wither and the ender dragon override `checkDespawn` in vanilla, so the event is not fired for them.
+
+## Adding or removing a custom spawner
+
+The level's custom spawners (phantoms, patrols, cats, village sieges, the wandering trader) are a list a mod edits once, in `modify_custom_spawners`. A mod's own spawner is a key plus `custom_spawner_tick`, which runs every tick while mob spawning is on:
+
+```rust,ignore
+fn modify_custom_spawners(&self, _: &dyn mod_api::Host, event: &mut mod_api::ModifyCustomSpawnersEvent<'_>) {
+    // no phantoms in this world
+    event.spawners.remove(&mod_api::SpawnerEntry::Builtin(mod_api::SpawnerKind::Phantom));
+    event.spawners.add(mod_api::SpawnerKey::new("mymod:rat_swarm").unwrap());
+}
+
+fn custom_spawner_tick(&self, host: &mut dyn mod_api::ServerHost, event: &mut mod_api::CustomSpawnerTickEvent<'_>) {
+    if event.key.as_str() == "mymod:rat_swarm" && event.spawn_enemies {
+        // spawn through `host`
+    }
+}
+```
+
+Every mod is asked about every key, so a mod ignores keys it does not own. See [the hook notes](../reference/hook-notes.md#custom-spawners).

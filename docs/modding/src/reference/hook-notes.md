@@ -462,6 +462,13 @@ one, where vanilla gives the `by` one.
 
 - Chunks and players coming and going, on the server: `native_chunk_load` (with whether the chunk is new), `native_chunk_unload`, and
   `native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Changes made to the departing chunk in `native_chunk_unload` aren't saved: as in vanilla, the chunk is saved before it unloads.
+- Sounds the server plays to its players: `native_play_level_sound_at_position` and `native_play_level_sound_at_entity`
+  (NeoForge's `PlayLevelSoundEvent.AtPosition` and `.AtEntity`, in `ServerLevel.playSeededSound`). As in vanilla, a mob's own
+  sounds (`Entity.playSound`) are at its position; only `playSound(except, sourceEntity, ...)` sounds are at an entity: here a
+  goat horn and a mod's sound bound to an entity. A mod may change the sound, its source, volume and pitch, or cancel it. Every
+  server sound packet but `/playsound`'s goes through `Game::send_level_sound` (`game/level_sounds.rs`), or the native-sound
+  flush for a mod's own, so a new sound site asks the mods by calling it. The tick's sounds are asked as they go out, at the end
+  of the tick. With no listener, the cost is one `listened` check per sound and nothing is allocated.
 - Chunks a player watches, on the server: `native_chunk_watch(player, chunk)`, `native_chunk_sent(player, chunk)` and
   `native_chunk_unwatch(player, chunk)` (NeoForge's `ChunkWatchEvent.Watch`, `Sent` and `UnWatch`). Each chunk that comes into a
   player's view is watched, then sent; it's unwatched when it leaves the view, when the player leaves the level (a portal, a
@@ -940,6 +947,7 @@ registration path.
   grow fuller).
 
 - A server's recipes reach its Horizon clients, as NeoForge's `OnDatapackSyncEvent.sendRecipes` and `RecipesReceivedEvent`: on the server, `native_datapack_sync(recipe_types)` takes the recipe types (`minecraft:smelting`, `mymod:crusher`) a mod's client half needs, asked once per load, the same types for every player (NeoForge asks per joining player); Horizon sends their final recipes (data packs merged, load conditions held) to every Horizon client when it joins and after each `/reload`, in payloads within the clientbound cap, and nothing to a vanilla client. On the client the recipe helpers (`native_recipes`, `native_recipes_of_type`) then give the server's recipes of those types in place of the window's own, single player included, and `native_recipes_received(recipe_types)` says they came. No type asked: nothing is sent and nothing changes; none asked after a load that asked some: the clients go back to their own recipes and `native_recipes_received` comes with no types.
+- `level.craft(host, width, height, &items)` (`RecipeManager.getRecipeFor(CRAFTING, CraftingInput.of(width, height, items), level)`, then `assemble` and `getRemainingItems`) asks what a crafting grid makes, as a mechanical crafter or a compacting press needs: `width` and `height` from 1 to 3, `items` row by row, `None` for an empty slot. It runs the crafting table's own matcher on the world's recipes, data packs' and special ones (fireworks, dyeing, map extending...) included, and answers a `CraftResult`: the `output` stack and the `remainders`, what each slot keeps once the craft takes one item from it (an empty bucket for a milk bucket), in the grid's own order. A grid may sit anywhere in its `width` by `height`, as in the crafting table. `None` when no recipe matches or it makes nothing, for another size, and off the server. A call costs up to one pass over the crafting recipes: 5 to 20 µs on a desktop with vanilla's 1,266 (`benchmarks/craft-match-2026-11-04`), so a mod that asks every tick keeps the answer until its grid changes, as the crafting menu does. Diverges from upstream: new helper.
 
 - `native_input_key(key, action, modifiers)` runs after a real window keyboard event finishes handling, including shortcuts, screen consumption and repeats (`InputEvent.Key`). key is vanilla's name for the physical key (`key.keyboard.a`; `key.keyboard.unknown` for one it doesn't name), action is `KeyAction::Press`, `Repeat` or `Release`, and modifiers use the screen hooks' GLFW bits, captured before handling. Not cancellable. Foreign-window and OS synthetic focus events skip it. Window callback only: pad, focus and control-socket input are not window key events.
 
@@ -2125,6 +2133,11 @@ handle, an entity the client doesn't track and a level it doesn't show:
   the world's height reads as `None`. `level.brightness(host, LightLayer::Block | Sky, pos)` reads the stored light
   (`getBrightness`) the same way, as the game's own light query holds it, and is `None` where the block read is.
   `level.fluid_state(host, pos)` reads the fluid there the same way.
+  `level.fluid_flow(host, pos)` (`FluidState.getFlow`) reads its current as a `Vec3`, through the function that pushes
+  entities, so a `fluid_flow` listener's change is what it reads: zero where no fluid flows, `None` where the block read
+  is. It reads on a client too, from the client's own copy of the level. It costs what one entity's push by that block
+  does: up to twelve block reads around `pos` (the four neighbours and below them; falling fluid also checks
+  their faces), with no allocation, plus the `fluid_flow` listeners.
 - `level.seed(host)`, `difficulty` (`"normal"`, as `/difficulty` names it), `game_rule(host, "keep_inventory")` (a
   `GameRuleValue`, `Bool` or `Int`; None for an unknown rule), `weather` (rain and thunder levels, 0.0 to 1.0; both 0
   where the level has no weather), `is_raining` and `is_thundering` read its world settings.
@@ -2780,7 +2793,7 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 
 ## Fluid flow
 
-- **`native_fluid_flow(fluid, pos, flow)`**: edit the current (`FlowingFluid.getFlow`) of the fluid block at `pos` as it pushes an entity: the player, mobs, dropped items, experience orbs, armor stands and arrows all read it through the one shared helper. It runs for each fluid block the entity touches in a tick, before the vanilla scale for shallow fluid, so keep the listener short. The renderer's own flow vector (a fluid texture's rotation) is not changed. It fires on both sides and on the client's replayed ticks, so a mod registers on both and keeps the listener a pure function of its inputs. With no listener the cost is one `listened` branch per fluid block. Beyond NeoForge (no counterpart); Diverges from upstream: new hook.
+- **`native_fluid_flow(fluid, pos, flow)`**: edit the current (`FlowingFluid.getFlow`) of the fluid block at `pos` as it pushes an entity: the player, mobs, dropped items, experience orbs, armor stands and arrows all read it through the one shared helper. It runs for each fluid block the entity touches in a tick, before the vanilla scale for shallow fluid, so keep the listener short. The renderer's own flow vector (a fluid texture's rotation) is not changed. `level.fluid_flow(host, pos)` reads the edited current. It fires on both sides and on the client's replayed ticks, so a mod registers on both and keeps the listener a pure function of its inputs. With no listener the cost is one `listened` branch per fluid block. Beyond NeoForge (no counterpart); Diverges from upstream: new hook.
 
 ## Minecart pass
 
@@ -2793,6 +2806,14 @@ The six combat hooks (`living_incoming_damage`, `damage_pre`, `damage_post`, `li
 **Migration (`living_use_totem`, `living_shield_block`, now version 2):** both now take the hit's level host as their first argument, as `living_incoming_damage` does: its blocks, random and own attachments, with no writes beyond them. Add the parameter (`level: &mut dyn LevelRandomHost`); the event, its fields, its order and its cancel rules are unchanged. `living_shield_block` fires inside `hurtServer` before the armor and enchantment reductions and sees the hit's `damage` as it came in; `living_use_totem` fires after health reached 0 and before `die`. Tick-time effect: one extra pointer in the hit and the same `listened` early-outs. Diverges from upstream: the two hooks gain the level host that upstream's catalog rows did not have.
 
 **Attacker and held stacks (`living_knockback`, the weapon of `living_incoming_damage`):** the attacker's id and the stacks it holds come from the hit that started the attack, not from process state, so a hit nested inside another (a thorns reply, a guest's attack during the host's) names its own attacker and nothing is left behind afterwards. No event field, order, random draw or cancel rule changes, so neither hook's version does. The game copies the held stacks only while a mod listens; without one the hit carries the attacker id and two empty slots, no allocation.
+
+## Custom spawners
+
+`modify_custom_spawners` (NeoForge's `ModifyCustomSpawnersEvent`) fires once per level, the first time the level ticks its custom spawners, with the level's `CustomSpawners` list: vanilla's five (`WanderingTrader`, `Patrol`, `Cat`, `VillageSiege`, `Phantom`) in the order Horizon ticks them. `remove` takes an entry out so it never ticks (its random draws go with it); `add` appends a mod's own spawner by a `SpawnerKey`. With no listener, or one that leaves the list alone, nothing changes: the same spawners tick in the same order.
+
+NeoForge's list holds `CustomSpawner` objects. An object a guest implements cannot cross to a wasm mod, so a mod's spawner is a key it owns and the `custom_spawner_tick(dimension, key, spawn_enemies)` hook stands for `CustomSpawner.tick`: it runs once per tick for each key in the list, in list order, while the `spawn_mobs` rule is on, and the mod that owns the key spawns through its `host`. Every mod gets the call and the others ignore it. A level with no mod spawner pays one list walk per tick and no hook call. Beyond NeoForge: a key plus a tick hook in place of an object.
+
+Horizon ticks vanilla's spawners where it always has: the trader, patrol, cat and siege spawners in the custom spawner block (vanilla's own order differs, and moving it is a separate parity change) and the phantom spawner with the stats, after the mobs. A mod's spawners tick after them in list order, so the position of the `Phantom` entry in the list does not move it. Listeners run on replayed ticks, so they are pure functions of their inputs.
 
 ## Block drops
 

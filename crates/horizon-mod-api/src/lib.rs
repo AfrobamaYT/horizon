@@ -132,7 +132,7 @@ pub use crate::biome::{BiomeColors, SpawnEntry};
 pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
-pub use crate::crafting::{Ingredient, Recipe, RecipePropertyAddition};
+pub use crate::crafting::{CraftResult, Ingredient, Recipe, RecipePropertyAddition};
 pub use crate::extras::Corner;
 pub use crate::extras_hud::Corners;
 pub use crate::first_person::Hand;
@@ -3504,6 +3504,36 @@ impl BlockHit {
     }
 }
 
+/// A vector of doubles, as vanilla's `Vec3`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+// exhaustive: a vector is its three components, as vanilla's `Vec3`
+pub struct Vec3 {
+    /// East (+) and west (-).
+    pub x: f64,
+    /// Up (+) and down (-).
+    pub y: f64,
+    /// South (+) and north (-).
+    pub z: f64,
+}
+impl Vec3 {
+    /// The zero vector (`Vec3.ZERO`).
+    pub const ZERO: Self = Self::new(0.0, 0.0, 0.0);
+    /// New.
+    pub const fn new(x: f64, y: f64, z: f64) -> Self {
+        Self { x, y, z }
+    }
+}
+impl From<glam::DVec3> for Vec3 {
+    fn from(v: glam::DVec3) -> Self {
+        Self::new(v.x, v.y, v.z)
+    }
+}
+impl From<Vec3> for glam::DVec3 {
+    fn from(v: Vec3) -> Self {
+        Self::new(v.x, v.y, v.z)
+    }
+}
+
 /// The game's read-only native backend, as [`Host::backend`] hands it out.
 ///
 /// The backend is reached only through [`Host::backend`] and
@@ -4123,7 +4153,9 @@ pub use block_states::{BlockStates, HostBlockStates};
 mod energy_capability;
 pub use energy_capability::{ENERGY, EnergyHandler, ITEM_ENERGY, move_energy};
 mod fluid_capability;
-pub use fluid_capability::{FLUIDS, FluidResource, FluidStack, ITEM_FLUIDS};
+pub use fluid_capability::{
+    FLUIDS, FluidIngredient, FluidResource, FluidStack, ITEM_FLUIDS, SizedFluidIngredient,
+};
 mod item_place;
 mod menu_slot;
 pub use menu_slot::MenuSlotBacking;
@@ -4135,6 +4167,8 @@ pub use resource::{
     ResourceHandler, move_resources,
 };
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
+mod custom_spawners;
+pub use custom_spawners::{CustomSpawners, SpawnerEntry, SpawnerError, SpawnerKey, SpawnerKind};
 mod block_entity_type;
 pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;

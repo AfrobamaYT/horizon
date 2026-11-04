@@ -1317,14 +1317,17 @@ impl PropertyAdditions {
 }
 impl ResolvedSources {
     /// The recipes under `root` and `overlay`, resolved for `context`'s load.
+    /// The pass's context carries the same resources' fluid tags, for the
+    /// ingredient hooks' fluid ingredients.
     pub fn load(
         root: &Path,
         overlay: &PackOverlay,
         context: &horizon_world::native_load_context::LoadContext,
     ) -> Result<Self> {
+        let context = context.with_fluid_tags(horizon_items::items::fluid_tag_list(root, overlay)?);
         Ok(Self::resolve(
             horizon_items::recipe_sources::sources(root, overlay)?,
-            context,
+            &context,
         ))
     }
     /// `load`, an unreadable recipe folder leaving no recipes.

@@ -108,6 +108,7 @@ mod creatures;
 mod crop_grow_tests;
 mod crossbow;
 pub(crate) mod cushions;
+mod custom_spawners;
 mod debug_keys;
 mod debug_lines;
 mod debug_options;
@@ -187,6 +188,7 @@ mod lan_waypoints;
 mod launch_api;
 mod leads;
 mod level_particles;
+mod level_sounds;
 mod levels;
 mod lightning;
 mod living_attributes;
@@ -13266,6 +13268,7 @@ impl Game<'_> {
         self.player_spawn = None;
         self.creatures.reset_trader();
         self.creatures.cat_tick = 0;
+        self.creatures.custom_spawners.clear();
         self.portals = Default::default();
         self.experience = Experience {
             level: self.level.xp_level,
