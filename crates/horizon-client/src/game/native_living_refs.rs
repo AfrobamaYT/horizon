@@ -101,7 +101,7 @@ impl Game<'_> {
     /// stale handle.
     ///
     /// On a client, only the local player is one: the client keeps the others'
-    /// equipment, effects and health only as far as it draws them.
+    /// equipment, effects and health only as far as it draws them. API 382.
     pub(super) fn native_living(&self, entity: EntityRef) -> Option<LivingRef> {
         let living = LivingRef::new(entity);
         self.native_living_read_target(living).map(|_| living)
@@ -482,6 +482,9 @@ impl Game<'_> {
     /// mobs, armor stands and the dragon store all eight slots. An armor
     /// stand's body and saddle are storage only: vanilla's `canUseSlot`
     /// refuses them for interaction. None means empty, unsupported or stale.
+    /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):
+    /// None when it is empty, the entity has no such slot (a player has no
+    /// body or saddle slot), or the handle is stale. API 382.
     pub(super) fn native_living_equipment(
         &self,
         living: LivingRef,
@@ -627,6 +630,8 @@ impl Game<'_> {
     }
 
     /// The stack in hand `hand` (`LivingEntity.getItemInHand`).
+    /// The stack in hand `hand` (`LivingEntity.getItemInHand`). API
+    /// 382.
     pub(super) fn native_living_hand_item(
         &self,
         living: LivingRef,
@@ -646,7 +651,7 @@ impl Game<'_> {
     /// unsupported or stale.
     /// This is a direct write: it takes effect and is final immediately, even
     /// inside `host.transaction`. A mob's write makes any equip/unequip event
-    /// and equip sound immediately; a stand's or the dragon's makes neither.
+    /// and equip sound immediately; a stand's or the dragon's makes neither. API 382.
     pub(super) fn native_living_set_equipment(
         &mut self,
         living: LivingRef,
