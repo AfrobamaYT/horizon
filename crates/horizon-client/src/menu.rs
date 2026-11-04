@@ -2794,8 +2794,7 @@ impl Menu {
                 } else if index != 1 && index != 0 {
                     let smelts = env
                         .recipes
-                        .cook(&format!("minecraft:{recipe}"), &stack)
-                        .is_some();
+                        .cooking_accepts(&format!("minecraft:{recipe}"), &stack);
                     if smelts {
                         if !self.move_to(env, &mut stack, 0, 1, false) {
                             return None;

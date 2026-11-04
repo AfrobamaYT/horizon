@@ -180,6 +180,7 @@ mod tests {
         pub(super) struct NativeConfig;
         pub(super) struct NativeConfigFile;
         pub(super) struct RecipeBookCategory;
+        pub(super) struct RecipePropertyAddition;
         pub(super) struct NativeMapDecoration;
         pub(super) struct NativeMapInfo<'a>(pub &'a ());
         pub(super) struct NativePlayerRender<'a>(pub &'a ());
