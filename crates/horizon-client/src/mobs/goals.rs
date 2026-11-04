@@ -823,6 +823,9 @@ impl Mob {
                 visibility *= 0.5;
             }
         }
+        if scale {
+            visibility = w.player_visibility(p, self.id, visibility);
+        }
         let dist = (range * visibility).max(2.0);
         if self.distance_sqr(p.position) > dist * dist {
             return false;
@@ -3231,6 +3234,12 @@ mod eat_block_tests {
         fn can_grief(&self, mob: u32, rule: bool) -> bool {
             rule || mob == 1
         }
+        fn grief_hooked(&self) -> bool {
+            true
+        }
+        fn living_visibility(&self, _: &crate::mobs::PlayerView, _: u32, visibility: f64) -> f64 {
+            visibility
+        }
     }
 
     /// NeoForge's `canEntityGrief`: with the rule off, a mod's yes for this
@@ -3591,5 +3600,59 @@ mod move_to_block_tests {
         }
         let goal = MoveToBlock::new(1.0, 24, 2);
         assert_eq!(goal.walk([5, 64, 5], |_| true), Some([5, 63, 5]));
+    }
+}
+
+#[cfg(test)]
+mod visibility_hook_tests {
+    use crate::mobs::world::{test_player, with_test_world};
+    use crate::mobs::{Mob, MobHooks, PlayerView};
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    /// A mod's `living_visibility`: a quarter as visible to mob 1, a
+    /// hundred times as visible to anyone else.
+    struct Scale;
+    impl MobHooks for Scale {
+        fn enderman_anger_suppressed(&self, _: u32, _: &PlayerView) -> bool {
+            false
+        }
+        fn can_grief(&self, _: u32, rule: bool) -> bool {
+            rule
+        }
+        fn grief_hooked(&self) -> bool {
+            false
+        }
+        fn living_visibility(&self, _: &PlayerView, looking: u32, visibility: f64) -> f64 {
+            if looking == 1 {
+                visibility * 0.25
+            } else {
+                visibility * 100.0
+            }
+        }
+    }
+
+    /// NeoForge's `LivingVisibilityEvent` scales the range a targeting check
+    /// sees the player from, and `getVisibilityPercent` clamps it to 10.
+    #[test]
+    fn a_mods_visibility_scales_the_targeting_range() {
+        with_test_world(&[], |w, types| {
+            let mut w = w.clone();
+            let kind = Arc::new(types.types["minecraft:zombie"].clone());
+            let mut near = Mob::new(1, kind.clone(), Vec3::new(0.5, 64.0, 0.5), 0.0);
+            let mut far = Mob::new(2, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            w.player = Some(test_player(Vec3::new(10.5, 64.0, 0.5)));
+            assert!(near.can_see_player_through_walls(&w, 16.0));
+            w.mob_hooks = Some(&Scale);
+            assert!(
+                !near.can_see_player_through_walls(&w, 16.0),
+                "16 x 0.25 = 4 blocks"
+            );
+            // x100 clamps to 10: 160 blocks.
+            w.player = Some(test_player(Vec3::new(150.5, 64.0, 0.5)));
+            assert!(far.can_see_player_through_walls(&w, 16.0));
+            w.player = Some(test_player(Vec3::new(170.5, 64.0, 0.5)));
+            assert!(!far.can_see_player_through_walls(&w, 16.0));
+        });
     }
 }

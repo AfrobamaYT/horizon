@@ -29,7 +29,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         moved: bool,
     ) {
         self.level
-            .observe_neighbor_changed(pos, state, changed, moved);
+            .observe_neighbor_changed(self.ticks, pos, state, changed, moved);
         let b = self.b;
         let block = b.block(state);
         let chain = &b.data(state).chain;
