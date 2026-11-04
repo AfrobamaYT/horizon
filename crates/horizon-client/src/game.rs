@@ -13654,10 +13654,13 @@ impl Game<'_> {
     }
     /// `BlockTransformer.TransformParticle.send`: its level event.
     pub(super) fn transform_particle(&mut self, particle: &str, pos: [i32; 3]) {
+        let source = self
+            .lan_acting_uuid
+            .map(horizon_world::level::LevelEventPlayer);
         match particle {
-            "scrape" => self.level_event_at(3005, pos, 0),
-            "wax_on" => self.level_event_at(3003, pos, 0),
-            "wax_off" => self.level_event_at(3004, pos, 0),
+            "scrape" => self.level_event_from(source, 3005, pos, 0),
+            "wax_on" => self.level_event_from(source, 3003, pos, 0),
+            "wax_off" => self.level_event_from(source, 3004, pos, 0),
             _ => {}
         }
     }
@@ -13984,7 +13987,10 @@ impl Game<'_> {
                 // HoneycombItem.useOn: ITEM_USED_ON_BLOCK before the swap.
                 self.trigger_block("minecraft:item_used_on_block", hit.pos, stack);
                 self.level_set(hit.pos, state)?;
-                self.level_event_at(3003, hit.pos, 0);
+                let source = self
+                    .lan_acting_uuid
+                    .map(horizon_world::level::LevelEventPlayer);
+                self.level_event_from(source, 3003, hit.pos, 0);
                 self.audio.play(
                     "minecraft:item.honeycomb.wax_on",
                     Some(at(hit.pos)),
