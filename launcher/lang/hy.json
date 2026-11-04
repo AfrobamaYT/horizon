@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Իրեր ձեր խաղացողի համար, որոնք տեսնում են Horizon-ում խաղացող բոլորը։",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Գործարկիչի այս կառուցվածքը չունի Microsoft-ի մուտք (HORIZON_MSA_CLIENT_ID), ուստի այն չի կարող սկսել խաղը:",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Սա տեղափոխում է օրինակը Horizon {version}: Այն կազմում է խաղը զրոյից, ուստի այն ավելի երկար է տևում, քան սովորական վերակառուցումը` մինչև 30 րոպե:",
   "This server's Horizon": "Այս սերվերի Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Այս սերվերի Horizon-ը շատ հին է՝ դրա կրկնօրինակներն այստեղ թվարկելու համար. դրանք պահուստային թղթապանակում են: Թարմացրեք այն ստորև:",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Այս սերվերի Horizon-ը չափազանց հին է՝ իր կարգավորումներն այստեղ ցուցադրելու համար: Թարմացրեք այն Backups ներդիրում, այնուհետև դրանք հայտնվում են:",

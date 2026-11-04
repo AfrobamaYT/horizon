@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Asjad mängija jaoks, mida näevad kõik, kes Horizonis mängivad.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Sellel käivitusprogrammi järgul pole Microsofti sisselogimist (HORIZON_MSA_CLIENT_ID), seega ei saa see mängu käivitada.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "See viib eksemplari üle versioonile Horizon {version}. Mäng kompileeritakse nullist, seega kulub rohkem aega kui tavalisel ümberehitamisel: kuni 30 minutit.",
   "This server's Horizon": "Selle serveri Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Selle serveri Horizon on liiga vana, et selle varukoopiaid siin loetleda: need on selle varukoopiate kaustas. Värskendage seda allpool.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Selle serveri Horizon on liiga vana, et selle seadeid siin kuvada. Värskendage seda vahekaardil Varukoopiad, seejärel need kuvatakse.",

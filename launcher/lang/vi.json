@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Đồ để mặc cho người chơi của bạn, mọi người chơi trên Horizon đều thấy.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Bản dựng trình khởi chạy này không có thông tin đăng nhập vào Microsoft (HORIZON_MSA_CLIENT_ID) nên không thể bắt đầu trò chơi.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Mã nguồn trò chơi này không có mẫu mục trong danh mục mod mã máy. Hãy cập nhật Horizon và dựng lại các mod cho trò chơi này.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Thao tác này sẽ chuyển phiên bản sang Horizon {version}. Nó biên dịch trò chơi từ đầu nên mất nhiều thời gian hơn so với việc xây dựng lại thông thường: lên tới 30 phút.",
   "This server's Horizon": "Horizon của máy chủ này",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Horizon của máy chủ này đã quá cũ để liệt kê các bản sao lưu của nó ở đây: chúng nằm trong thư mục sao lưu của nó. Cập nhật nó dưới đây.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Horizon của máy chủ này quá cũ để hiển thị cài đặt của nó ở đây. Cập nhật nó trên tab Sao lưu, sau đó chúng xuất hiện.",

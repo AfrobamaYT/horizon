@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "ನಿಮ್ಮ ಆಟಗಾರನಿಗೆ ಧರಿಸಲು ವಸ್ತುಗಳು, Horizon ನಲ್ಲಿ ಆಡುವ ಎಲ್ಲರಿಗೂ ಕಾಣಿಸುತ್ತವೆ.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "ಲಾಂಚರ್‌ನ ಈ ಬಿಲ್ಡ್ ಯಾವುದೇ Microsoft ಸೈನ್-ಇನ್ (HORIZON_MSA_CLIENT_ID) ಹೊಂದಿಲ್ಲ, ಆದ್ದರಿಂದ ಇದು ಆಟವನ್ನು ಪ್ರಾರಂಭಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "ಇದು ನಿದರ್ಶನವನ್ನು Horizon {version} ಗೆ ಸರಿಸುತ್ತದೆ. ಇದು ಮೊದಲಿನಿಂದ ಆಟವನ್ನು ಕಂಪೈಲ್ ಮಾಡುತ್ತದೆ, ಆದ್ದರಿಂದ ಇದು ಸಾಮಾನ್ಯ ಪುನರ್ನಿರ್ಮಾಣಕ್ಕಿಂತ ಹೆಚ್ಚು ಸಮಯ ತೆಗೆದುಕೊಳ್ಳುತ್ತದೆ: 30 ನಿಮಿಷಗಳವರೆಗೆ.",
   "This server's Horizon": "ಈ ಸರ್ವರ್‌ನ Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "ಈ ಸರ್ವರ್‌ನ Horizon ಅದರ ಬ್ಯಾಕಪ್‌ಗಳನ್ನು ಇಲ್ಲಿ ಪಟ್ಟಿ ಮಾಡಲು ತುಂಬಾ ಹಳೆಯದಾಗಿದೆ: ಅವುಗಳು ಅದರ ಬ್ಯಾಕಪ್‌ಗಳ ಫೋಲ್ಡರ್‌ನಲ್ಲಿವೆ. ಅದನ್ನು ಕೆಳಗೆ ನವೀಕರಿಸಿ.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "ಈ ಸರ್ವರ್‌ನ Horizon ಅದರ ಸೆಟ್ಟಿಂಗ್‌ಗಳನ್ನು ಇಲ್ಲಿ ತೋರಿಸಲು ತುಂಬಾ ಹಳೆಯದಾಗಿದೆ. ಅದನ್ನು ಬ್ಯಾಕಪ್‌ಗಳ ಟ್ಯಾಬ್‌ನಲ್ಲಿ ನವೀಕರಿಸಿ, ನಂತರ ಅವು ಕಾಣಿಸಿಕೊಳ್ಳುತ್ತವೆ.",

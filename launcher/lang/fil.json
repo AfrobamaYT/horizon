@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Mga isusuot para sa iyong player, nakikita ng lahat ng naglalaro sa Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Ang build na ito ng launcher ay walang Microsoft sign-in (HORIZON_MSA_CLIENT_ID), kaya hindi nito masisimulan ang laro.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Inililipat nito ang instance sa Horizon {version}. Pinagsasama-sama nito ang laro mula sa simula, kaya mas matagal kaysa sa normal na muling pagbuo: hanggang 30 minuto.",
   "This server's Horizon": "Ang server na ito ay Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Masyadong luma ang Horizon ng server na ito upang ilista ang mga backup nito dito: nasa folder ng mga backup ang mga ito. I-update ito sa ibaba.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Ang Horizon ng server na ito ay masyadong luma upang ipakita ang mga setting nito dito. I-update ito sa tab na Mga Backup, pagkatapos ay lalabas ang mga ito.",

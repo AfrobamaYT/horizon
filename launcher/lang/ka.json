@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "ნივთები თქვენი მოთამაშისთვის, რომლებსაც ხედავს ყველა, ვინც Horizon-ზე თამაშობს.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "გამშვების ამ კონსტრუქციას არ აქვს Microsoft-ის შესვლა (HORIZON_MSA_CLIENT_ID), ამიტომ მას არ შეუძლია თამაშის დაწყება.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "ეს გადააქვს ეგზემპლარს Horizon {version}-ზე. ის აწყობს თამაშს ნულიდან, ასე რომ, ჩვეულებრივ აღდგენაზე მეტი დრო სჭირდება: 30 წუთამდე.",
   "This server's Horizon": "ამ სერვერის Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "ამ სერვერის Horizon ძალიან ძველია მისი სარეზერვო ასლების აქ ჩამოსათვლელად: ისინი მის სარეზერვო საქაღალდეშია. განაახლეთ იგი ქვემოთ.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "ამ სერვერის Horizon ძალიან ძველია მისი პარამეტრების აქ საჩვენებლად. განაახლეთ ის სარეზერვო ჩანართზე, შემდეგ ისინი გამოჩნდება.",

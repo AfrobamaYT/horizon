@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Daiktai tavo žaidėjui, kuriuos mato visi, žaidžiantys Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Šioje paleidimo priemonės versijoje nėra „Microsoft“ prisijungimo (HORIZON_MSA_CLIENT_ID), todėl negalima paleisti žaidimo.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Šiame žaidimo pirminiame kode nėra vietinio kodo inventoriaus įrašo šablono. Atnaujinkite Horizon ir iš naujo sukompiliuokite modifikacijas šiam žaidimui.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Tai perkelia egzempliorių į „Horizontą“ {version}. Jis sukompiliuoja žaidimą nuo nulio, todėl užtrunka ilgiau nei įprastas atkūrimas: iki 30 minučių.",
   "This server's Horizon": "Šio serverio „Horizon“.",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "Šio serverio „Horizon“ yra per senas, kad būtų galima čia išvardyti atsargines kopijas: jos yra atsarginių kopijų aplanke. Atnaujinkite jį žemiau.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "Šio serverio horizontas yra per senas, kad čia būtų rodomi jo nustatymai. Atnaujinkite jį skirtuke Atsarginės kopijos, tada jie pasirodys.",

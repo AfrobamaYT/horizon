@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Aĵoj por porti sur via ludanto, videblaj al ĉiuj, kiuj ludas en Horizon.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Ĉi tiu konstruo de la lanĉilo ne havas Microsoft ensaluti (HORIZON_MSA_CLIENT_ID), do ĝi ne povas komenci la ludon.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Ĉi tio movas la kazon al Horizon {version}. Ĝi kompilas la ludon de nulo, do ĝi daŭras pli longe ol normala rekonstruo: ĝis 30 minutoj.",
   "This server's Horizon": "Ĉi tiu servilo estas Horizon",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "La Horizon de ĉi tiu servilo estas tro malnova por listigi ĝiajn sekurkopiojn ĉi tie: ili estas en ĝia dosierujo de sekurkopioj. Ĝisdatigu ĝin sube.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "La Horizon de ĉi tiu servilo estas tro malnova por montri ĝiajn agordojn ĉi tie. Ĝisdatigu ĝin sur la langeto Rezervoj, tiam ili aperas.",

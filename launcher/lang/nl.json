@@ -924,7 +924,6 @@
   "Things to wear for your player, seen by everyone who plays on Horizon.": "Dingen om te dragen voor uw speler, zichtbaar voor iedereen die op Horizon speelt.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Deze build van het opstartprogramma heeft geen Microsoft-aanmelding (HORIZON_MSA_CLIENT_ID), dus het spel kan niet worden gestart.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Deze spelbroncode bevat geen sjabloon voor een vermelding in de native inventaris. Werk Horizon bij en bouw de mods opnieuw voor dit spel.",
-  "This moves the instance to Horizon {version}. It compiles the game from scratch, so it takes longer than a normal rebuild: up to 30 minutes.": "Hierdoor wordt de instantie naar Horizon {version} verplaatst. Het compileert het spel helemaal opnieuw, dus het duurt langer dan een normale herbouw: maximaal 30 minuten.",
   "This server's Horizon": "De Horizon van deze server",
   "This server's Horizon is too old to list its backups here: they're in its backups folder. Update it below.": "De Horizon van deze server is te oud om de back-ups hier weer te geven: ze staan in de back-upmap. Update het hieronder.",
   "This server's Horizon is too old to show its settings here. Update it on the Backups tab, then they appear.": "De Horizon van deze server is te oud om de instellingen hier weer te geven. Update het op het tabblad Back-ups, waarna ze verschijnen.",
