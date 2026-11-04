@@ -423,9 +423,9 @@ mod tests {
             );
 
             // Merge preserves omitted data; replacement clears the name and items.
-            assert!(chest.merge_data(game, compound("{LootTable:\"minecraft:chests/simple_dungeon\"}")));
+            assert!(chest.merge_data(game, compound("{CustomName:\"Changed\"}")));
             assert_eq!(slot3(game), Some(3));
-            assert_eq!(chest.name(game), Some("Kept".to_owned()));
+            assert_eq!(chest.name(game), Some("Changed".to_owned()));
             game.world.block_log = Some(Vec::new());
             assert!(chest.replace_data(game, compound("{}")));
             assert_eq!((slot3(game), chest.name(game)), (None, None));
