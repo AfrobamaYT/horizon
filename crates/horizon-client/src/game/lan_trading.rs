@@ -309,8 +309,7 @@ impl Game<'_> {
             g.carried = menu.carried.take();
         }
         self.register_exploration_maps(made);
-        let (session, traded) = self.merchant_apply(session, gm.merchant.mob);
-        gm.merchant.session = session;
+        let (mut session, traded) = self.merchant_apply(session, gm.merchant.mob);
         if !traded.is_empty() {
             // The guest's own statistic and advancements.
             if let Some((uuid, name)) = self
@@ -322,8 +321,12 @@ impl Game<'_> {
             {
                 self.native_player_trade(uuid, &name, entity_id);
             }
-            self.as_guest(conn, |g| g.merchant_traded(gm.merchant.mob, &traded));
+            let mob = gm.merchant.mob;
+            self.as_guest(conn, |g| {
+                g.merchant_traded(mob, &mut session.offers, &traded)
+            });
         }
+        gm.merchant.session = session;
         self.drop_guest_items(gi, dropped);
         self.lan_send_offers(conn, &mut gm, false);
         self.lan_send_merchant_content(conn, &mut gm);
