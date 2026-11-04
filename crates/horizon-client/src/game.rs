@@ -19453,6 +19453,7 @@ impl Game<'_> {
                         }
                         result => result?,
                     };
+                    self.native_render_frame_post(elapsed);
                     self.apply_cursor_icon();
                     // The frame's spans, taken every frame they are recorded so they never
                     // pile up: the slow-frame line's, and the session's (`perf.frame`).

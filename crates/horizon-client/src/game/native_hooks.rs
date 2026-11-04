@@ -1730,9 +1730,15 @@ impl Game<'_> {
             categories,
         );
     }
-    /// Once a frame, in a world or not, after Horizon's extras.
-    pub(super) fn native_frame(&mut self, elapsed: Duration) {
-        mod_api::dispatch_frame(self, elapsed);
+    /// Once a frame, in a world or not, after Horizon's extras and just
+    /// before the frame is rendered (`RenderFrameEvent.Pre`).
+    pub(super) fn native_render_frame_pre(&mut self, elapsed: Duration) {
+        mod_api::dispatch_render_frame_pre(self, elapsed);
+    }
+    /// Once a frame, in a world or not, right after the frame was rendered
+    /// (`RenderFrameEvent.Post`).
+    pub(super) fn native_render_frame_post(&mut self, elapsed: Duration) {
+        mod_api::dispatch_render_frame_post(self, elapsed);
     }
     /// Client-side evaluation of a mod's namespaced conditional item model property.
     /// Set value only for a property your mod owns; unhandled properties stay false.

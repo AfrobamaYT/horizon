@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "render_frame_pre",
+      "doc": "Once a frame, in a world or not, after Horizon's extras and just before\nthe frame is rendered (NeoForge's `RenderFrameEvent.Pre`). `elapsed` is\nthe frame's time. Client-side.",
+      "side": "client",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_render_frame_pre",
+      "neoforge": "RenderFrameEvent.Pre",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}
