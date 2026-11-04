@@ -296,7 +296,7 @@ pub fn catch_stop_signals() {
 #[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
 pub fn catch_stop_signals() {}
 
-/// The game's global allocator (`#[global_allocator]` in its `main.rs`).
+/// The game's global allocator (`#[global_allocator]` in `horizon-client`'s library).
 /// World generation, meshing and the tick allocate and free small blocks on
 /// every worker at once; the system heaps serialise them (Windows' heap was
 /// 16% of a chunk's generation time), mimalloc keeps a heap per thread.

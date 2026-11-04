@@ -180,12 +180,7 @@ pub(super) fn stage(
     let mut deps = toml::Table::new();
     // The generated game's features own sound/controllers, including the server's
     // `--no-default-features`; its client dependency never enables them independently.
-    for name in [
-        "horizon-client",
-        "horizon-mod-api",
-        "horizon-threads",
-        "horizon-mods",
-    ] {
+    for name in ["horizon-client", "horizon-mod-api", "horizon-mods"] {
         let mut dependency = path_dep(&format!("../{name}"));
         if name == "horizon-client" {
             dependency.insert("default-features".into(), false.into());
