@@ -3,6 +3,7 @@
 
 pub mod active_effect_tick;
 pub mod active_effects;
+pub mod arm_pose;
 pub mod attachments;
 pub mod attribute_health;
 pub mod attribute_map;

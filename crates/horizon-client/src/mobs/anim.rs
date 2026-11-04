@@ -330,25 +330,7 @@ fn bob(p: &mut Poses, n: &str, age: f32, scale: f32) {
     q[5] += scale * ((age * 0.09).mcos() * 0.05 + 0.05);
     q[3] += scale * ((age * 0.067).msin() * 0.05);
 }
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ArmPose {
-    Empty,
-    Item,
-    Block,
-    Bow,
-    CrossbowHold,
-    CrossbowCharge,
-    /// Raising a trident to throw it (or to launch with Riptide).
-    ThrowTrident,
-    /// Playing a goat horn.
-    TootHorn,
-    /// Looking through a spyglass (`HumanoidModel.ArmPose.SPYGLASS`).
-    Spyglass,
-    /// A spear held out (`HumanoidModel.ArmPose.SPEAR`), at rest or charging.
-    Spear,
-    /// A brush being used (`HumanoidModel.ArmPose.BRUSH`).
-    Brush,
-}
+pub use horizon_world::arm_pose::ArmPose;
 /// HumanoidModel.setupAnim with empty hands (endermen).
 /// Passes `isPassenger` so a seated enderman keeps the humanoid riding pose
 /// (vanilla EndermanModel.setupAnim calls super first, then halves/clamps xRot).
@@ -431,14 +413,6 @@ impl Hum {
             spear: [None; 2],
             spear_ticks: [0.0; 2],
         }
-    }
-}
-impl ArmPose {
-    fn two_handed(self) -> bool {
-        matches!(self, Self::Bow | Self::CrossbowHold | Self::CrossbowCharge)
-    }
-    fn affects_offhand(self) -> bool {
-        self.two_handed() || self == Self::ThrowTrident
     }
 }
 /// `AnimationUtils.animateCrossbowHold`.
@@ -890,12 +864,17 @@ pub fn setup(
             );
             // AvatarRenderer.getArmPose: a loaded crossbow is held up, an item in
             // use poses its arm by its use animation, a spear is held out.
-            let hand_pose = |held: Option<&str>, using: bool, spear: bool| match held {
-                None => ArmPose::Empty,
-                Some("minecraft:crossbow") if m.extra.charged && s.swing == 0.0 => {
+            let hand_pose = |held: Option<&str>,
+                             declared: Option<ArmPose>,
+                             using: bool,
+                             spear: bool| match (held, declared) {
+                (None, _) => ArmPose::Empty,
+                // A mod item's `arm_pose` replaces what the item would do.
+                (Some(_), Some(declared)) => declared,
+                (Some("minecraft:crossbow"), None) if m.extra.charged && s.swing == 0.0 => {
                     ArmPose::CrossbowHold
                 }
-                Some(_) => match using.then_some(m.extra.use_animation) {
+                (Some(_), None) => match using.then_some(m.extra.use_animation) {
                     Some(UseAnimation::Block) => ArmPose::Block,
                     Some(UseAnimation::Bow) => ArmPose::Bow,
                     Some(UseAnimation::Trident) => ArmPose::ThrowTrident,
@@ -909,12 +888,22 @@ pub fn setup(
                 },
             };
             let pose = if player {
-                hand_pose(m.extra.main_hand_id(), using_main, main_spear.is_some())
+                hand_pose(
+                    m.extra.main_hand_id(),
+                    m.extra.held_arm_pose[0],
+                    using_main,
+                    main_spear.is_some(),
+                )
             } else {
                 right
             };
             let off = if player && !pose.affects_offhand() {
-                hand_pose(m.extra.off_hand_id(), using_off, off_spear.is_some())
+                hand_pose(
+                    m.extra.off_hand_id(),
+                    m.extra.held_arm_pose[1],
+                    using_off,
+                    off_spear.is_some(),
+                )
             } else {
                 ArmPose::Empty
             };
@@ -1530,6 +1519,54 @@ mod flight_pose_tests {
         assert_eq!(p.get("left_arm")[4], 0.0);
         assert!((p.get("right_arm")[3] + PI / 10.0).abs() < 1e-6);
         assert_eq!(p.get("right_arm")[4], 0.0);
+    }
+
+    #[test]
+    fn a_declared_arm_pose_replaces_the_pose_the_held_item_gives() {
+        let state = State {
+            pos: 0.0,
+            speed: 0.0,
+            age: 0.0,
+            y_rot: 0.0,
+            x_rot: 0.0,
+            swing: 0.0,
+            baby: false,
+            partial: 0.0,
+        };
+        let make = || Poses {
+            map: ["head", "right_arm", "left_arm", "right_leg", "left_leg"]
+                .into_iter()
+                .map(|n| (key(n), [0.0; 9]))
+                .collect(),
+            dummy: [0.0; 9],
+            skipped: Default::default(),
+            hidden: Default::default(),
+            version: 0,
+        };
+        let mut m = player();
+        m.extra.set_slot_id(
+            horizon_items::equipment::MAINHAND,
+            Some("ruby:skillet".into()),
+        );
+        // A held item with no declaration keeps the ITEM pose.
+        let mut p = make();
+        setup(&m, &state, &mut p, &HashMap::new());
+        assert!((p.get("right_arm")[3] + PI / 10.0).abs() < 1e-6);
+        // HumanoidModel.setupAnim's BRUSH pose, though nothing is being used.
+        m.extra.held_arm_pose[0] = Some(ArmPose::Brush);
+        let mut p = make();
+        setup(&m, &state, &mut p, &HashMap::new());
+        assert!((p.get("right_arm")[3] + PI / 5.0).abs() < 1e-6);
+        // The off hand's declaration poses the left arm, and the main hand keeps its own.
+        m.extra.set_slot_id(
+            horizon_items::equipment::OFFHAND,
+            Some("ruby:skillet".into()),
+        );
+        m.extra.held_arm_pose = [None, Some(ArmPose::Brush)];
+        let mut p = make();
+        setup(&m, &state, &mut p, &HashMap::new());
+        assert!((p.get("left_arm")[3] + PI / 5.0).abs() < 1e-6);
+        assert!((p.get("right_arm")[3] + PI / 10.0).abs() < 1e-6);
     }
 
     /// ModelPart.createPartLookup fills the name map with putIfAbsent, so of two

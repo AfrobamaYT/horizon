@@ -457,6 +457,11 @@ impl Game<'_> {
                 Default::default,
                 horizon_client::first_person::item_use_animation,
             );
+        let held_arm_pose = [self.selected, super::shield::OFFHAND_SLOT].map(|slot| {
+            self.stack_in(slot)
+                .and_then(|stack| self.items().get(&stack.item))
+                .and_then(|info| info.arm_pose)
+        });
         let charged = self.inventory[self.selected]
             .as_ref()
             .is_some_and(|s| s.data().is_some_and(|d| !d.charged.is_empty()));
@@ -568,6 +573,7 @@ impl Game<'_> {
         m.extra.using_item = using;
         m.extra.using_off_hand = using_off_hand;
         m.extra.use_animation = use_animation;
+        m.extra.held_arm_pose = held_arm_pose;
         m.extra.charged = charged;
         m.extra.ints[5] = charge_duration;
         m.extra.elytra.tick(fall_flying, crouching, velocity);
