@@ -156,6 +156,28 @@ pub use horizon_core::{
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
+/// The registry facts a recipe viewer needs for an enchantment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct EnchantmentInfo {
+    /// Registry name, including namespace.
+    pub id: String,
+    /// Largest supported level.
+    pub max_level: u32,
+    /// Whether the enchantment is in the curse tag.
+    pub curse: bool,
+}
+impl EnchantmentInfo {
+    /// Construct registry facts for an enchantment.
+    pub fn new(id: String, max_level: u32, curse: bool) -> Self {
+        Self {
+            id,
+            max_level,
+            curse,
+        }
+    }
+}
+
 pub use horizon_items::items::ItemStack;
 pub use horizon_items::items::TagRegistry;
 pub use horizon_world::consumable::UseAnimation;

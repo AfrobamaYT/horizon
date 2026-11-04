@@ -65,9 +65,9 @@ use horizon_world::{
 use mod_api::NativePermissionLevel;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EntityRef,
-    EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand,
-    NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
+    self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EnchantmentInfo,
+    EntityRef, EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera,
+    NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
     NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
     PathComputationType, Placement, RecipeBookCategory, ScreenOpening, ServerReloadListeners,
     ServerTickPhase, TicketController, ToolUse, WorldPhase,
@@ -9356,28 +9356,33 @@ impl Game<'_> {
     pub(super) fn native_cursor(&self) -> [f32; 2] {
         [self.cursor.0, self.cursor.1]
     }
-    /// Every registered enchantment as (id, max level, is a curse), in registry order.
-    pub(super) fn native_enchantments(&self) -> Vec<(String, u32, bool)> {
-        self.native_stations().enchantments.summary()
+    /// Registered enchantments, in registry order.
+    pub(super) fn native_enchantments(&self) -> Vec<EnchantmentInfo> {
+        let enchantments = &self.stations().enchantments;
+        enchantments
+            .list
+            .iter()
+            .map(|e| {
+                mod_api::EnchantmentInfo::new(
+                    e.id.to_string(),
+                    e.max_level,
+                    enchantments.is_curse(&e.id),
+                )
+            })
+            .collect()
     }
-    fn native_stations(&self) -> &horizon_client::stations::StationData {
-        match &self.world_tables {
-            Some(t) => &t.stations,
-            None => self.res.stations(),
-        }
-    }
-    /// `Enchantment.getMinCost(level)`: the enchanting power the level needs (0 for an unknown id).
-    pub(super) fn native_enchantment_min_cost(&self, id: &str, level: u32) -> i32 {
-        self.native_stations()
+    /// `Enchantment.getMinCost(level)`: the enchanting power needed, or None for an unknown id.
+    pub(super) fn native_enchantment_min_cost(&self, id: &str, level: u32) -> Option<i32> {
+        self.stations()
             .enchantments
             .get(id)
-            .map_or(0, |e| e.min_cost.calculate(level))
+            .map(|e| e.min_cost.calculate(level))
     }
     /// Whether enchantment `id` can go on `item` (`Enchantment.isSupportedItem`).
     pub(super) fn native_enchantment_supports(&self, id: &str, item: &str) -> bool {
-        self.native_stations()
+        self.stations()
             .enchantments
-            .can_enchant(self.res.items(), id, item)
+            .can_enchant(self.items(), id, item)
     }
     /// The size of sprite `name` in its own pixels, if there is one.
     pub(super) fn native_sprite_size(&self, name: &str) -> Option<[f32; 2]> {
@@ -10971,6 +10976,26 @@ fn mod_screen_opens(
 #[cfg(test)]
 mod tests {
     use mod_api::__private::game::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn enchantment_registry_returns_records_and_unknown_cost() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let all = game.native_enchantments();
+            let sharpness = all.iter().find(|e| e.id == "minecraft:sharpness").unwrap();
+            assert_eq!((sharpness.max_level, sharpness.curse), (5, false));
+            let binding = all
+                .iter()
+                .find(|e| e.id == "minecraft:binding_curse")
+                .unwrap();
+            assert!(binding.curse);
+            assert!(
+                game.native_enchantment_min_cost("minecraft:sharpness", 1)
+                    .is_some()
+            );
+            assert_eq!(game.native_enchantment_min_cost("missing:unknown", 1), None);
+        });
+    }
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn declared_types_create_tick_and_reload_through_game() {
