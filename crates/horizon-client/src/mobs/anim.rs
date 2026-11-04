@@ -4,6 +4,7 @@
 use super::{Mob, Part, keyframes::AnimationState, living::wrap};
 use crate::fast_hash::{FxHashMap, FxHashSet};
 use horizon_core::geometry::trig::Mth;
+use horizon_world::consumable::UseAnimation;
 use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_6, PI};
 
@@ -887,41 +888,33 @@ pub fn setup(
                 spear_in(m.extra.main_hand_id()),
                 spear_in(m.extra.off_hand_id()),
             );
-            let pose = if player {
-                match m.extra.main_hand_id() {
-                    Some(_) if using_main && m.extra.blocking => ArmPose::Block,
-                    Some("minecraft:bow") if using_main => ArmPose::Bow,
-                    Some("minecraft:trident") if using_main => ArmPose::ThrowTrident,
-                    Some("minecraft:spyglass") if using_main => ArmPose::Spyglass,
-                    Some("minecraft:goat_horn") if using_main => ArmPose::TootHorn,
-                    Some("minecraft:crossbow") if using_main && !m.extra.charged => {
-                        ArmPose::CrossbowCharge
-                    }
-                    Some("minecraft:crossbow") if m.extra.charged && s.swing == 0.0 => {
-                        ArmPose::CrossbowHold
-                    }
-                    Some("minecraft:brush") if using_main => ArmPose::Brush,
-                    Some(_) if main_spear.is_some() => ArmPose::Spear,
-                    Some(_) => ArmPose::Item,
-                    None => ArmPose::Empty,
+            // AvatarRenderer.getArmPose: a loaded crossbow is held up, an item in
+            // use poses its arm by its use animation, a spear is held out.
+            let hand_pose = |held: Option<&str>, using: bool, spear: bool| match held {
+                None => ArmPose::Empty,
+                Some("minecraft:crossbow") if m.extra.charged && s.swing == 0.0 => {
+                    ArmPose::CrossbowHold
                 }
+                Some(_) => match using.then_some(m.extra.use_animation) {
+                    Some(UseAnimation::Block) => ArmPose::Block,
+                    Some(UseAnimation::Bow) => ArmPose::Bow,
+                    Some(UseAnimation::Trident) => ArmPose::ThrowTrident,
+                    Some(UseAnimation::Crossbow) => ArmPose::CrossbowCharge,
+                    Some(UseAnimation::Spyglass) => ArmPose::Spyglass,
+                    Some(UseAnimation::TootHorn) => ArmPose::TootHorn,
+                    Some(UseAnimation::Brush) => ArmPose::Brush,
+                    Some(UseAnimation::Spear) => ArmPose::Spear,
+                    _ if spear => ArmPose::Spear,
+                    _ => ArmPose::Item,
+                },
+            };
+            let pose = if player {
+                hand_pose(m.extra.main_hand_id(), using_main, main_spear.is_some())
             } else {
                 right
             };
-            let off = if player && m.extra.off_hand_id().is_some() && !pose.affects_offhand() {
-                if off_spear.is_some() {
-                    ArmPose::Spear
-                } else if using_off && m.extra.blocking {
-                    ArmPose::Block
-                } else if using_off && m.extra.off_hand_id() == Some("minecraft:spyglass") {
-                    ArmPose::Spyglass
-                } else if using_off && m.extra.off_hand_id() == Some("minecraft:goat_horn") {
-                    ArmPose::TootHorn
-                } else if using_off && m.extra.off_hand_id() == Some("minecraft:brush") {
-                    ArmPose::Brush
-                } else {
-                    ArmPose::Item
-                }
+            let off = if player && !pose.affects_offhand() {
+                hand_pose(m.extra.off_hand_id(), using_off, off_spear.is_some())
             } else {
                 ArmPose::Empty
             };
@@ -1443,7 +1436,7 @@ mod flight_pose_tests {
             Some("minecraft:shield".into()),
         );
         m.extra.using_item = 20;
-        m.extra.blocking = true;
+        m.extra.use_animation = UseAnimation::Block;
         setup(&m, &state, &mut p, &HashMap::new());
         // HumanoidModel.setupAnim's BLOCK pose.
         assert!((p.get("right_arm")[3] + 0.942_477_9).abs() < 1e-6);
@@ -1495,11 +1488,11 @@ mod flight_pose_tests {
             version: 0,
         };
         let mut m = player();
-        m.extra.set_slot_id(
-            horizon_items::equipment::MAINHAND,
-            Some("minecraft:brush".into()),
-        );
+        m.extra
+            .set_slot_id(horizon_items::equipment::MAINHAND, Some("ruby:wand".into()));
         m.extra.using_item = 20;
+        // A content item's consumable names the animation, not its id.
+        m.extra.use_animation = UseAnimation::Brush;
         let mut p = make();
         setup(&m, &state, &mut p, &HashMap::new());
         // HumanoidModel.setupAnim's BRUSH pose.
@@ -1530,6 +1523,7 @@ mod flight_pose_tests {
         );
         m.extra.using_item = 20;
         m.extra.using_off_hand = true;
+        m.extra.use_animation = UseAnimation::Brush;
         let mut p = make();
         setup(&m, &state, &mut p, &HashMap::new());
         assert!((p.get("left_arm")[3] + PI / 5.0).abs() < 1e-6);

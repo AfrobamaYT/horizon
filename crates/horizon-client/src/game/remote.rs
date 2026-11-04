@@ -4094,6 +4094,10 @@ impl Game<'_> {
                 if p.event == 69 {
                     self.remote_ravager_roar(p.id);
                 }
+                // ClientPacketListener.handleEntityEvent 63: a sniffer's digging sound.
+                if p.event == 63 {
+                    self.start_sniffer_digging_sound(p.id as u32);
+                }
                 // ClientPacketListener.handleEntityEvent 21: a guardian's hum.
                 if p.event == 21 {
                     self.start_guardian_sound(p.id as u32);
@@ -5268,7 +5272,7 @@ impl Game<'_> {
         slim: bool,
     ) -> Option<std::sync::Arc<horizon_client::mobs::Part>> {
         use horizon_client::mobs::skin_layers;
-        if !self.settings.three_d_skin_layers {
+        if !self.settings.extras.three_d_skin_layers {
             return None;
         }
         let key = (skin.to_owned(), slim);
@@ -6156,6 +6160,7 @@ impl Game<'_> {
                 assets: &self.pack.assets,
                 collision_binding: self.collision,
                 resources: self.motion,
+                tag_items: None,
             }
             .controlled_simulation_tick_with_sprint_window(keys, sprint_window)?;
         } else {
@@ -6171,6 +6176,7 @@ impl Game<'_> {
                     assets: &self.pack.assets,
                     collision_binding: self.collision,
                     resources: self.motion,
+                    tag_items: None,
                 }
                 .passenger_pose_tick()?;
             }
@@ -6757,17 +6763,20 @@ impl Game<'_> {
             // used before this one. Another player's use particles; a mob's
             // drawn bow only needs the count (its pull follows it).
             if player {
-                // AvatarRenderer.getArmPose: the used item's BLOCK animation
-                // (an item with `blocks_attacks`) raises the arm.
+                // AvatarRenderer.getArmPose: the used item's use animation
+                // poses the arm.
                 let used = if m.extra.using_off_hand {
                     m.extra.off_hand_id()
                 } else {
                     m.extra.main_hand_id()
                 };
-                m.extra.blocking = m.extra.using_item > 0
-                    && used
-                        .and_then(|i| world_items!(self).get(i))
-                        .is_some_and(|i| i.blocks_attacks.is_some());
+                m.extra.use_animation = used
+                    .and_then(|i| world_items!(self).get(i))
+                    .filter(|_| m.extra.using_item > 0)
+                    .map_or_else(
+                        Default::default,
+                        horizon_client::first_person::item_use_animation,
+                    );
             }
             if m.extra.using_item > 0 {
                 if player {
@@ -11588,12 +11597,24 @@ mod tests {
             assert_eq!((xp.level, xp.progress, xp.total), (3, 0.25, 30));
             assert_eq!(player.xp_needed_for_next_level(game), Some(13));
 
+            // The main inventory retains typed stacks and their damage, in slot order.
+            let mut stack = mod_api::ItemStack::new("minecraft:diamond_pickaxe", 1);
+            stack.damage = 7;
+            game.inventory.fill(None);
+            game.inventory[3] = Some(stack.clone());
+            game.inventory[8] = Some(mod_api::ItemStack::new("minecraft:stone", 12));
+            assert_eq!(
+                player.inventory(game),
+                Some(vec![stack, mod_api::ItemStack::new("minecraft:stone", 12)])
+            );
+
             // Another player: the client isn't sent their state.
             let epoch = player.entity().epoch();
             let other = mod_api::__private::game::player_ref(EntityRef::new(epoch, 8), 43);
             assert_eq!(other.game_mode(game), None);
             assert_eq!(other.food(game), None);
             assert_eq!(other.selected_slot(game), None);
+            assert_eq!(other.inventory(game), None);
         });
     }
 

@@ -1559,6 +1559,31 @@ impl LevelAccess for GameLevel<'_> {
         );
         connected
     }
+    fn has_fence_connection_hook(&self) -> bool {
+        self.native_authoritative
+            && mod_api::__private::has_scoped_hook(mod_api::HookId::FenceConnectsTo)
+    }
+    fn adjust_fence_connects_to(
+        &self,
+        pos: BlockPos,
+        fence: BlockStateId,
+        neighbour: BlockStateId,
+        direction: Direction,
+        face_solid: bool,
+        vanilla: bool,
+    ) -> bool {
+        let mut connected = vanilla;
+        self.native_fence_connects_to(
+            self.dimension,
+            pos,
+            fence,
+            neighbour,
+            direction,
+            face_solid,
+            &mut connected,
+        );
+        connected
+    }
     fn adjust_signal(
         &self,
         pos: BlockPos,
@@ -4455,11 +4480,14 @@ impl Game<'_> {
         let v = horizon_client::entities::drop_motion(r, self.yaw, self.pitch, randomly);
         let y = eye[1] - f64::from(0.3f32);
         // ItemTossEvent: a canceled toss never enters the world; what was thrown is gone.
-        let player = self.native_acting_id();
-        let mut canceled = false;
-        self.native_item_toss(player, &thrown.item, thrown.count, &mut canceled);
-        if canceled {
-            return None;
+        // Only `drop(.., false)` tosses fire it: a death's scatter (`randomly`) does not.
+        if !randomly {
+            let player = self.native_acting_id();
+            let mut canceled = false;
+            self.native_item_toss(player, &thrown.item, thrown.count, &mut canceled);
+            if canceled {
+                return None;
+            }
         }
         self.spawn_item(thrown, [eye[0], y, eye[2]], v, 40);
         let uuid = thrown_from_hand.then(|| self.acting_player_uuid());
@@ -21880,6 +21908,7 @@ fn start_game<'a>(
     // The initial load's client reload listeners, registered and staged by
     // the loader thread, publish now that the game owns the assets.
     client_reload::apply_client_reload(client_applies);
+    game.refresh_loop_context();
     // After the mods: their templates are among the ids it lists.
     game.preload_registries();
     game.start_agent_control()?;

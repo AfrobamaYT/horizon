@@ -65,12 +65,12 @@ use horizon_world::{
 use mod_api::NativePermissionLevel;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EntityRef,
-    EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand,
-    NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
+    self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EnchantmentInfo,
+    EntityRef, EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera,
+    NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
     NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
-    PathComputationType, Placement, RecipeBookCategory, ScreenOpening, ServerReloadListeners,
-    ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    PathComputationType, Placement, PlayerRef, RecipeBookCategory, ScreenOpening,
+    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
@@ -994,6 +994,31 @@ impl GameLevel<'_> {
     ) {
         mod_api::dispatch_should_redstone_wire_connect_to(
             self, dimension, pos, state, direction, connected,
+        );
+    }
+
+    /// `FenceBlock.connectsTo`: set `connected` to say whether the fence
+    /// `state` at `pos` connects an arm toward `neighbour`, the state beside it,
+    /// `direction` pointing from the fence to that neighbour and `face_solid`
+    /// whether the neighbour's face toward the fence is sturdy. `connected` holds
+    /// vanilla's answer (a solid face, a fence of the same kind or a gate across the
+    /// arm): change it, to false as well as to true, when the fence is your own.
+    /// Asked whenever the fence settles its shape or is placed, inside the level's
+    /// update: answer from the arguments without touching the world. Only the fence block's own part is asked, so vanilla fences cost
+    /// nothing. Authoritative servers only.
+    #[inline(always)]
+    pub(super) fn native_fence_connects_to(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        neighbour: BlockStateId,
+        direction: Direction,
+        face_solid: bool,
+        connected: &mut bool,
+    ) {
+        mod_api::dispatch_fence_connects_to(
+            self, dimension, pos, state, neighbour, direction, face_solid, connected,
         );
     }
 
@@ -4183,17 +4208,44 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_tnt_primed(self, player, pos, cancel);
     }
-    /// A server player selected a new hotbar slot. The player's state is not swapped in. Set `cancel`
-    /// to keep the old slot; the client is sent that slot again.
-    pub(super) fn native_player_item_held(
+    /// `PlayerSwitchHotbarSlotEvent.Pre`: a server player is switching from hotbar slot `old_slot`
+    /// to `new_slot` (0 to 8), after the slot range check and before the selected slot changes.
+    /// Fired only when the slot differs. The player's state is not swapped in. Set `cancel` to keep
+    /// the old slot; the client is sent that slot again, and the post hook doesn't fire.
+    pub(super) fn native_player_switch_hotbar_slot_pre(
         &mut self,
         player: u128,
-        name: &str,
-        from_slot: i32,
-        to_slot: i32,
+        player_entity_id: i32,
+        old_slot: i32,
+        new_slot: i32,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_player_item_held(self, player, name, from_slot, to_slot, cancel);
+        mod_api::dispatch_player_switch_hotbar_slot_pre(
+            self,
+            player,
+            player_entity_id,
+            old_slot,
+            new_slot,
+            cancel,
+        );
+    }
+    /// `PlayerSwitchHotbarSlotEvent.Post`: a server player switched from hotbar slot `old_slot`
+    /// to `new_slot`, after the selected slot changed and a main-hand item use stopped. The
+    /// player's state is not swapped in.
+    pub(super) fn native_player_switch_hotbar_slot_post(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        old_slot: i32,
+        new_slot: i32,
+    ) {
+        mod_api::dispatch_player_switch_hotbar_slot_post(
+            self,
+            player,
+            player_entity_id,
+            old_slot,
+            new_slot,
+        );
     }
     /// A server player picked an item from a block or entity, before it enters the hotbar. `pos` is
     /// zero for an entity; `entity_id` is zero for a block. The player's state is swapped in. Set
@@ -5270,6 +5322,24 @@ impl Game<'_> {
             payload,
             cancel,
         );
+    }
+    /// A server entity is about to be teleported by `/tp` or `/teleport`
+    /// (NeoForge's `EntityTeleportEvent.TeleportCommand`, in
+    /// `TeleportCommand.performTeleport`, once per teleported entity):
+    /// `dimension` is the level it arrives in, `entity` its network id,
+    /// `from` its feet now and `to` where the command sends it. A mod may
+    /// move `to` (a value that is not a number is ignored). Canceling leaves
+    /// the entity where it is; the command still reports success.
+    /// `native_entity_teleport` and `native_player_teleported` hear it after.
+    pub(super) fn native_teleport_command(
+        &mut self,
+        dimension: &str,
+        entity: u32,
+        from: [f64; 3],
+        to: &mut [f64; 3],
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_teleport_command(self, dimension, entity, from, to, cancel);
     }
     /// A server entity was moved by a same-level teleport command, after its
     /// position changed. `entity` is its network id; `from` and `to` are
@@ -8669,6 +8739,16 @@ fn put_block_entity(world: &mut horizon_client::world::World, pos: [i32; 3], ent
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
 impl Game<'_> {
+    /// `Inventory.items`: the non-empty main inventory stacks in slot order, including
+    /// their components. None for a stale or unavailable player; on clients only the
+    /// local player's inventory is available.
+    pub(super) fn native_player_inventory(&self, player: PlayerRef) -> Option<Vec<ItemStack>> {
+        let inventory = match self.player_read_both(player)? {
+            super::native_server::PlayerRead::Acting { .. } => &self.inventory,
+            super::native_server::PlayerRead::Guest(guest) => &guest.inventory,
+        };
+        Some(inventory.iter().flatten().cloned().collect())
+    }
     /// The id of the item in the slot under the pointer on the open container screen
     /// (`AbstractContainerScreen.getHoveredSlot().getItem()`), None over no slot or an empty one.
     pub(super) fn native_screen_hovered_item(&self) -> Option<String> {
@@ -9355,6 +9435,34 @@ impl Game<'_> {
     /// Where the mouse is, in GUI pixels.
     pub(super) fn native_cursor(&self) -> [f32; 2] {
         [self.cursor.0, self.cursor.1]
+    }
+    /// Registered enchantments, in registry order.
+    pub(super) fn native_enchantments(&self) -> Vec<EnchantmentInfo> {
+        let enchantments = &self.stations().enchantments;
+        enchantments
+            .list
+            .iter()
+            .map(|e| {
+                mod_api::EnchantmentInfo::new(
+                    e.id.to_string(),
+                    e.max_level,
+                    enchantments.is_curse(&e.id),
+                )
+            })
+            .collect()
+    }
+    /// `Enchantment.getMinCost(level)`: the enchanting power needed, or None for an unknown id.
+    pub(super) fn native_enchantment_min_cost(&self, id: &str, level: u32) -> Option<i32> {
+        self.stations()
+            .enchantments
+            .get(id)
+            .map(|e| e.min_cost.calculate(level))
+    }
+    /// Whether enchantment `id` can go on `item` (`Enchantment.isSupportedItem`).
+    pub(super) fn native_enchantment_supports(&self, id: &str, item: &str) -> bool {
+        self.stations()
+            .enchantments
+            .can_enchant(self.items(), id, item)
     }
     /// The size of sprite `name` in its own pixels, if there is one.
     pub(super) fn native_sprite_size(&self, name: &str) -> Option<[f32; 2]> {
@@ -10948,6 +11056,26 @@ fn mod_screen_opens(
 #[cfg(test)]
 mod tests {
     use mod_api::__private::game::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn enchantment_registry_returns_records_and_unknown_cost() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let all = game.native_enchantments();
+            let sharpness = all.iter().find(|e| e.id == "minecraft:sharpness").unwrap();
+            assert_eq!((sharpness.max_level, sharpness.curse), (5, false));
+            let binding = all
+                .iter()
+                .find(|e| e.id == "minecraft:binding_curse")
+                .unwrap();
+            assert!(binding.curse);
+            assert!(
+                game.native_enchantment_min_cost("minecraft:sharpness", 1)
+                    .is_some()
+            );
+            assert_eq!(game.native_enchantment_min_cost("missing:unknown", 1), None);
+        });
+    }
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn declared_types_create_tick_and_reload_through_game() {
@@ -12654,7 +12782,7 @@ mod entity_inside_tests {
                 let level = game.native_level(game.dim.id()).unwrap();
                 let stack = || ItemStack::new("minecraft:stone", 1);
                 let kept = game
-                    .native_level_spawn_item(level, 1.5, 70.0, 1.5, stack())
+                    .native_level_spawn_item(level, 1.5, 70.0, 1.5, stack(), 10)
                     .unwrap();
                 let at = |x| BlockPos::new(x, 64, 1);
                 in_level(Some(game.dim.id()), || {
@@ -12738,6 +12866,42 @@ mod entity_place_tests {
                 let at = BlockPos::new(1, 64, 1);
                 let state = game.world.block(0, 0, 0);
                 assert!(!game.place_canceled(1, at, state, state, None));
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod item_toss_tests {
+    use super::*;
+    use mod_api::{Flow, Hooks, ItemTossEvent, ModEntry, ServerHost, testing::with_mods};
+    use std::sync::{Arc, Mutex};
+
+    /// Counts the tosses it hears and cancels each.
+    struct Tosser(Arc<Mutex<u32>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Tosser {
+        fn item_toss(&self, _host: &mut dyn ServerHost, _event: &mut ItemTossEvent<'_>) -> Flow {
+            *self.0.lock().unwrap() += 1;
+            Flow::Cancel
+        }
+    }
+
+    /// A toss asks `item_toss` and a cancel stops the item entity; the
+    /// random scatter of a death's drops is not a toss and is never asked.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn only_a_toss_fires_item_toss_not_the_death_scatter() {
+        let heard = Arc::new(Mutex::new(0));
+        let mods = vec![ModEntry::new("toss_probe", Box::new(Tosser(heard.clone())))];
+        with_mods(mods.into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let eye = [0.5, 65.0, 0.5];
+                let stack = || ItemStack::new("minecraft:dirt", 1);
+                assert!(game.throw_from_eyes(stack(), eye, false, true).is_none());
+                assert_eq!(*heard.lock().unwrap(), 1);
+                assert!(game.throw_from_eyes(stack(), eye, true, false).is_some());
+                assert_eq!(*heard.lock().unwrap(), 1);
             });
         });
     }

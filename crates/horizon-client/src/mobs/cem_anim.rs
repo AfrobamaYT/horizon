@@ -11,6 +11,7 @@
 
 use super::{Mob, Part, anim::Poses, anim::State};
 use horizon_optifine::cem::expr::{Expr, compile};
+use horizon_world::consumable::UseAnimation;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -683,7 +684,7 @@ fn params(m: &Mob, s: &State, frame: &Frame, rule_index: f32, slots: &mut [f32])
             Sprinting => flag(m.extra.sprinting),
             Sneaking => flag(m.extra.crouching),
             // A player's `isBlocking`: the item in use blocks attacks.
-            Blocking => flag(m.extra.blocking),
+            Blocking => flag(m.extra.use_animation == UseAnimation::Block),
             // `isVisuallyCrawling`: the swimming pose out of water.
             Crawling => flag(swim_pose && !m.fluids.in_water),
             Swimming => flag(swim_pose),
@@ -990,7 +991,7 @@ mod tests {
         m.extra.crouching = true;
         // The player's main hand option set to left.
         m.extra.main_hand_left = true;
-        m.extra.blocking = true;
+        m.extra.use_animation = UseAnimation::Block;
         // The swimming pose out of water: crawling.
         m.extra.pose = 3;
         m.extra.using_item = 3;

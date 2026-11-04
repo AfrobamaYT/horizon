@@ -46,6 +46,8 @@ pub enum HostAccess {
 pub enum PhaseContext {
     Registration,
     DataLoad,
+    /// A hook fired inside a menu, recipe or player-list loop of one side.
+    Loop,
 }
 
 /// The kind of thing whose Parts a scoped hook calls.

@@ -483,6 +483,20 @@ fn not_built(
 }
 
 impl Game<'_> {
+    /// Build this client's loop context over the loaded registries and the mods'
+    /// current settings, and hand it to its audio. Called where a resource
+    /// generation starts or reloads; a server has no sound and builds none.
+    pub(super) fn refresh_loop_context(&mut self) {
+        if !self.options.execution_role.is_client() {
+            return;
+        }
+        let context = self.res.core.item_data.context().loop_context(
+            horizon_world::native_load_context::LoopSide::Client,
+            mod_api::__private::loaded_mods().ids(),
+        );
+        self.audio.set_loop_context(context);
+    }
+
     /// Lists the installed mods on the Mods page. Content mods load with the resources
     /// (`content_root`); native ones are built into the game (`native_hooks.rs`). Unsupported
     /// files get the same unreadable-file row as any other invalid package.
