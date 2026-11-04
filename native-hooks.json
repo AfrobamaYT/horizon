@@ -1271,8 +1271,8 @@
       }
     },
     {
-      "name": "loot_table_load", "doc": "A native mod's hook point (docs/modding/src/how-to/native-mods.md), listed in `native-hooks.json` with the game's:\nthe loot table `id` (`minecraft:chests/simple_dungeon`, `minecraft:blocks/stone`,\n`minecraft:entities/zombie`) as it loads, its JSON after the data packs', before anything\nrolls it (NeoForge's `LootTableLoadEvent`, Fabric's `LootTableEvents.MODIFY`). Add pools to\n`table[\"pools\"]` or entries to a pool's `entries`, change or replace it (no pools: it drops\nnothing; keep its `random_sequence` when replacing it, as a mob's table without one drops\nnothing). Called once per table in id order when the server loads or reloads its data.", "side": "both",
-      "version": 1,
+      "name": "loot_table_load", "doc": "A native mod's hook point (docs/modding/src/how-to/native-mods.md), listed in `native-hooks.json` with the game's:\nthe loot table `id` (`minecraft:chests/simple_dungeon`, `minecraft:blocks/stone`,\n`minecraft:entities/zombie`) as it loads, its JSON after the data packs', before anything\nrolls it (NeoForge's `LootTableLoadEvent`, Fabric's `LootTableEvents.MODIFY`). Add pools to\n`table[\"pools\"]` or entries to a pool's `entries`, change or replace it (no pools: it drops\nnothing; keep its `random_sequence` when replacing it, as a mob's table without one drops\nnothing). Called once per table in id order when the server loads or reloads its data, with the\n`DataLoadContext` of that owning load (`origin()` is always `ServerDataLoad`: the client never loads\nloot tables, so the hook never fires there).", "context": "data_load",
+      "version": 2,
       "target": "horizon_world::loot::native_loot_table_load",
       "side": "server",
       "mod_api": {
