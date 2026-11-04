@@ -135,6 +135,27 @@ binding names a parameter, and a trait mod's event gains fields; a test that cal
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
 
+### State flags on the living handles
+
+`host.living(entity)` and `host.mob(entity)` make the handles of [#7387](../reference/hook-notes.md)'s handle design, and
+the state flags sit where vanilla keeps them: the ones `LivingEntity` owns read and write through `LivingRef`, the ones
+`Mob` owns through `MobRef`. Reads take the shared host, writes the server one; a stale handle or a kind the game keeps
+no such state for reads `None` and writes `false`, as every handle does.
+
+Through `LivingRef`: the glide (`is_gliding`, `gliding_ticks`, `stop_gliding`), the sleep of the player in place or a
+villager (`is_sleeping`, `sleeping_pos`, `start_sleeping`, `stop_sleeping`, `set_sleeping_pos`, `clear_sleeping_pos`),
+the jump of the player in place (`is_jumping`, `set_is_jumping`), climbing (`is_climbing`, the same `onClimbable`
+movement uses) and the baby read (`baby`). The sleep writes are the local player's own: a guest's client tucks itself
+in, so a guest's window refuses, and on a dedicated server every turn is a guest's. The wake stands the sleeper up
+beside the bed, exactly as the game's own waking does, and `set_sleeping_pos` moves nothing - it names the bed, the
+next entity sync tells the players around.
+
+Through `MobRef`: `no_ai`/`set_no_ai` (`Mob.isNoAi` and `setNoAi`: the mob stands, saved as `NoAI`),
+`set_baby` (`Mob.setBaby`: a full day of growing up, saved as `Age` where the kind saves an age), and the persistence
+pair `persistence_required`/`set_persistence_required` plus `requires_custom_persistence`
+(`Mob.isPersistenceRequired` and kin: vanilla gives the setter no way back). A `/summon` and a spawn egg set their
+flags before the entity-join hook runs, so a mod's own write in that hook is what stays.
+
 ### The build's warnings
 
 Before it builds, the launcher reads the mods' injections and writes warnings to `native/build.log`; none stops the

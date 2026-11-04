@@ -168,6 +168,7 @@ mod living_destroy_block;
 mod living_drops;
 mod living_effects;
 mod living_experience_drop;
+mod living_flags;
 mod living_get_projectile;
 mod living_health;
 mod living_health_writes;

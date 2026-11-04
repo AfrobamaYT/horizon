@@ -335,6 +335,52 @@ impl Game<'_> {
     pub(super) fn native_mob_set_persistence_required(&mut self, mob: MobRef) -> bool {
         self.native_mob_set_flag(mob, MobFlag::Persistent, true)
     }
+
+    /// `Mob.requiresCustomPersistence`. The game's despawn rule holds
+    /// exactly the `PersistenceRequired` mobs, so this is that flag.
+    pub(super) fn native_mob_requires_custom_persistence(&self, mob: MobRef) -> Option<bool> {
+        self.native_mob_flag(mob, MobFlag::Persistent)
+    }
+
+    /// `Mob.isNoAi`: the mob stands where it is and its goals do not run,
+    /// while what NoAI keeps running in vanilla (the daylight burn of the
+    /// undead, a horse's tail) still does. Saved with it as `NoAI`. None
+    /// for anything but a mob.
+    pub(super) fn native_mob_no_ai(&self, mob: MobRef) -> Option<bool> {
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        Some(self.mobs.iter().find(|m| m.id == id && !m.removed)?.no_ai)
+    }
+
+    /// `Mob.setNoAi`: whether the mob's own AI runs. With no AI the mob
+    /// stands (what NoAI keeps in vanilla still runs), and the flag is
+    /// saved with it as `NoAI`. False for anything but a mob.
+    pub(super) fn native_mob_set_no_ai(&mut self, mob: MobRef, no_ai: bool) -> bool {
+        let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
+            return false;
+        };
+        self.mobs
+            .iter_mut()
+            .find(|m| m.id == id && !m.removed)
+            .map(|m| m.no_ai = no_ai)
+            .is_some()
+    }
+
+    /// `Mob.setBaby`: with `baby`, the mob becomes a baby (age `-24000`, a
+    /// full day of growing up, saved with it as `Age` where the kind saves
+    /// an age); without it, it grows up on the spot (age `0`). False for
+    /// anything but a mob.
+    pub(super) fn native_mob_set_baby(&mut self, mob: MobRef, baby: bool) -> bool {
+        let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
+            return false;
+        };
+        self.mobs
+            .iter_mut()
+            .find(|m| m.id == id && !m.removed)
+            .map(|m| m.extra.age = if baby { -24000 } else { 0 })
+            .is_some()
+    }
 }
 
 #[cfg(test)]
