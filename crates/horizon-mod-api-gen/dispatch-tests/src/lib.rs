@@ -197,6 +197,9 @@ mod tests {
         pub(super) struct NativeLifecycleContext;
         pub(super) struct RegistrationContext<'a>(pub &'a str);
         pub(super) struct DataLoadContext<'a>(pub &'a str);
+        pub(super) struct LoopContext<'a>(pub &'a str);
+        pub(super) struct SoundPlay;
+        pub(super) struct ChannelRef;
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
         #[derive(Clone, Copy)]
