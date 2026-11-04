@@ -121,6 +121,7 @@ pub fn main() -> Result<()> {
                 resources: &resources,
                 tag_items: None,
                 block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
             }
             .update_auto_jump(fl(&c["xa"]), fl(&c["za"]))?;
         }

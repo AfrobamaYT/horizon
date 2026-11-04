@@ -149,14 +149,17 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
         living_jump: |entity, kind| {
             mod_api::dispatch_living_jump(entity, kind);
         },
-        living_jump_power: |entity, kind, power| {
-            mod_api::dispatch_living_jump_power(entity, kind, power);
+        living_jump_power: |context, entity, kind, power| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_living_jump_power(&context, entity, kind, power);
         },
-        living_speed: |entity, kind, speed| {
-            mod_api::dispatch_living_speed(entity, kind, speed);
+        living_speed: |context, entity, kind, speed| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_living_speed(&context, entity, kind, speed);
         },
-        living_flying_speed: |entity, kind, speed| {
-            mod_api::dispatch_living_flying_speed(entity, kind, speed);
+        living_flying_speed: |context, entity, kind, speed| {
+            let context = mod_api::LoopContext::new(context);
+            mod_api::dispatch_living_flying_speed(&context, entity, kind, speed);
         },
         player_stays_on_ground_surface: |entity, staying| {
             mod_api::dispatch_player_stays_on_ground_surface(entity, staying);
