@@ -1509,7 +1509,7 @@ pub mod tests {
         struct Invalid;
         #[mod_api::__subscriptions]
         impl super::super::Hooks for Invalid {
-            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 for path in ["", "other:press", "Uppercase", "has space"] {
                     r.block_entity_type(path).build();
                 }
@@ -1529,7 +1529,7 @@ pub mod tests {
         struct Invalid;
         #[mod_api::__subscriptions]
         impl Hooks for Invalid {
-            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
                 for id in ["press", "minecraft:", "Upper:chest", "test:has space"] {
                     r.block_entity_type_key(id);
                 }
@@ -1658,7 +1658,7 @@ pub mod tests {
     struct Doubler;
     #[mod_api::__subscriptions]
     impl Hooks for Doubler {
-        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
             r.block_part("test:gauge", Gauge);
             r.block_part("test:connector", Connector);
             r.block_part_tag("test:gauged", TagGauge);
@@ -2885,7 +2885,7 @@ pub mod tests {
     struct Chemist;
     #[mod_api::__subscriptions]
     impl Hooks for Chemist {
-        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
             let chem_vat = r.block_entity_type_key("test:chem_vat");
             r.block_entity_capability(&CHEMICALS, &chem_vat, |_, at| Some(Box::new(ChemTank(at))));
         }
@@ -2908,14 +2908,14 @@ pub mod tests {
     struct FixtureContent;
     #[mod_api::__subscriptions]
     impl Hooks for FixtureContent {
-        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
             for id in CAPABILITY_TYPES {
                 r.block_entity_type(id)
                     .blocks(&[&format!("test:{id}")])
                     .build();
             }
         }
-        fn blocks(&self, _context: &mod_api::RegistrationContext<'_>, event: &mut BlocksEvent<'_>) {
+        fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
             event.blocks.extend(
                 ["gauge", "connector", "press", "hoard"]
                     .into_iter()
@@ -2959,7 +2959,7 @@ pub mod tests {
         struct WeakPowerMod;
         #[mod_api::__subscriptions]
         impl Hooks for WeakPowerMod {
-            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 r.block_part("minecraft:glass", WeakPower);
             }
         }
@@ -2985,7 +2985,7 @@ pub mod tests {
         struct PathMod;
         #[mod_api::__subscriptions]
         impl Hooks for PathMod {
-            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 r.block_part(
                     "minecraft:glass",
                     Answers(&[
@@ -3025,7 +3025,7 @@ pub mod tests {
         struct LeaverMod;
         #[mod_api::__subscriptions]
         impl Hooks for LeaverMod {
-            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 r.block_part("minecraft:glass", Leaver);
             }
         }
@@ -3041,7 +3041,7 @@ pub mod tests {
         struct RedstoneMod;
         #[mod_api::__subscriptions]
         impl Hooks for RedstoneMod {
-            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 r.block_part("minecraft:glass", Connector);
             }
         }

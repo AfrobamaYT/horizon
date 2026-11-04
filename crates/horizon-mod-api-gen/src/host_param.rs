@@ -96,8 +96,8 @@ pub(super) fn context_param(
     args.remove(0);
     Ok(Some(HostParam {
         ty: match kind {
-            HookContext::Registration => "&RegistrationContext<'_>",
-            HookContext::DataLoad => "&DataLoadContext<'_>",
+            HookContext::Registration => "&RegistrationContext",
+            HookContext::DataLoad => "&dyn DataLoadContext",
         }
         .into(),
         call: "context",
@@ -168,13 +168,13 @@ mod tests {
         for (kind, input, public) in [
             (
                 HookContext::Registration,
-                "&RegistrationContext<'_>",
-                "&RegistrationContext<'_>",
+                "&RegistrationContext",
+                "&RegistrationContext",
             ),
             (
                 HookContext::DataLoad,
                 "&LoadContext<'_>",
-                "&DataLoadContext<'_>",
+                "&dyn DataLoadContext",
             ),
         ] {
             let hook = CatalogHook {

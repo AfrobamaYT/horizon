@@ -472,7 +472,7 @@ one, where vanilla gives the `by` one.
   changes otherwise, `native_update_output_neighbors(dimension, pos)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
 
 `Hooks::component_types`, `blocks`, `items` and `standalone_models` take
-`&RegistrationContext<'_>` before their event; `Hooks::register` takes it after
+`&RegistrationContext` before their event; `Hooks::register` takes it after
 its `Registrar`. `context.mods()` returns a read-only `LoadedMods` view whose
 `ids()` lists startup code and selected content packages in dispatch order. These
 contexts are supplied by the engine and have no game `Host`, handle constructors
@@ -1933,7 +1933,7 @@ place; `native_server_tick` does not define one, so name the dimension and expec
 Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global loot modifiers and Fabric's
 `LootTableEvents.MODIFY` and `MODIFY_DROPS` do. A mod's own loot function and condition kinds are #5451.
 
-- **`horizon_world::loot::native_loot_table_load(context, id, table)`**: each table's JSON as it loads, after the data packs'. `Hooks::loot_table_load` gets the owning load's `&DataLoadContext<'_>` first (see "Items' default components"); its `origin()` is always `ServerDataLoad`, since only the server loads loot tables. Push a pool
+- **`horizon_world::loot::native_loot_table_load(context, id, table)`**: each table's JSON as it loads, after the data packs'. `Hooks::loot_table_load` gets the owning load's `&dyn DataLoadContext` first (see "Items' default components"); its `origin()` is always `ServerDataLoad`, since only the server loads loot tables. Push a pool
   onto `table["pools"]` or an entry onto a pool's `entries`; chests, block and mob drops, fishing and the rest then roll the
   changed table. Keep a replaced table's `random_sequence`: a mob's table without one drops nothing. It runs once per table on
   each server data load and `/reload`, not on client preloads. It is a free function in
@@ -2578,12 +2578,13 @@ clicks already.
 
 ### Items' default components
 
-`Hooks::modify_default_components` receives `&DataLoadContext<'_>` before its
+`Hooks::modify_default_components` receives `&dyn DataLoadContext` before its
 `ModifyDefaultComponentsEvent`. The engine supplies this read-only phase context:
 `origin()` is `DataLoadOrigin::ServerDataLoad` or `ClientPreload`, `registry(name)`
-borrows names in registry ID order, `setting(mod_id, key)` returns a loaded mod's
+gives the names in registry ID order as a shared `Arc<[String]>` (no copy), `setting(mod_id, key)` returns a loaded mod's
 setting captured when the owning context is built (including missing keys), and
-`mods()` borrows the same `LoadedMods` view used during registration. A later owning
+`mods()` gives the same `LoadedMods` view used during registration (shared; cloning it
+copies no package). A later owning
 load captures fresh settings even when it reuses registry inputs; runtime Host
 settings still read live storage. There is no game Host, handle construction or
 transaction. The origin describes the actual owning load, not its thread name or

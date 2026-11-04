@@ -85,7 +85,8 @@ pub mod __private;
 mod phase;
 pub use horizon_mods::Side;
 pub use phase::{
-    DataLoadContext, DataLoadOrigin, LoadedMods, PackageInfo, PackageKind, RegistrationContext,
+    DataLoadContext, DataLoadOrigin, LoadedMods, OwningLoad, PackageInfo, PackageKind,
+    RegistrationContext,
 };
 mod config_files;
 pub use config_files::{
@@ -3641,7 +3642,7 @@ mod tests {
         struct StickMod<P>(P);
         #[mod_api::__subscriptions]
         impl<P: ItemPart + Clone> Hooks for StickMod<P> {
-            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 r.item_part("minecraft:stick", self.0.clone());
             }
         }
@@ -3975,7 +3976,7 @@ mod tests {
 
     #[mod_api::__subscriptions]
     impl Hooks for OffHandTop {
-        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
             r.item_part("minecraft:stick", HeardStick);
         }
 

@@ -22,7 +22,7 @@ impl ItemPart for Stick {
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
-    fn register(&self, registrar: &mut dyn Registrar, _cx: &RegistrationContext<'_>) {
+    fn register(&self, registrar: &mut dyn Registrar, _cx: &RegistrationContext) {
         registrar.item_part("minecraft:stick", Stick);
     }
 

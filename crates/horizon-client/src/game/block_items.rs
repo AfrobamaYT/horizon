@@ -467,11 +467,7 @@ mod tests {
         struct TestMod;
         #[mod_api::__subscriptions]
         impl Hooks for TestMod {
-            fn register(
-                &self,
-                registrar: &mut dyn Registrar,
-                _: &mod_api::RegistrationContext<'_>,
-            ) {
+            fn register(&self, registrar: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
                 let kind = registrar
                     .block_entity_type("crate")
                     .blocks(&[CRATE])
@@ -480,11 +476,7 @@ mod tests {
                     .block_entity_part(&kind, Crate)
                     .expect("native type");
             }
-            fn blocks(
-                &self,
-                _context: &mod_api::RegistrationContext<'_>,
-                event: &mut BlocksEvent<'_>,
-            ) {
+            fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
                 event.blocks.push(horizon_mods::content::Block {
                     id: CRATE.into(),
                     template: "minecraft:white_banner".into(),

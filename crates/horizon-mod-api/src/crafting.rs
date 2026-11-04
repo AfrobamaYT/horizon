@@ -20,7 +20,7 @@ pub fn native_ingredient(
     data: &serde_json::Map<String, Value>,
     items: &mut Vec<String>,
 ) {
-    crate::dispatch_ingredient(&DataLoadContext::new(context), kind, data, items);
+    crate::dispatch_ingredient(&crate::OwningLoad::new(context), kind, data, items);
 }
 /// A mod's own ingredient kind, matching a concrete stack at craft time:
 /// the ingredient's `test` calls here with the kind, its JSON and the

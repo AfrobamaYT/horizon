@@ -17,14 +17,17 @@ pub enum DataLoadOrigin {
 /// Immutable metadata captured with the loaded item data. Later data loads
 /// borrow the same registry snapshot instead of scanning it again.
 pub struct LoadInputs {
-    registries: BTreeMap<String, Vec<String>>,
+    registries: BTreeMap<String, Arc<[String]>>,
     settings_root: PathBuf,
 }
 
 impl LoadInputs {
     pub fn new(registries: BTreeMap<String, Vec<String>>, settings_root: PathBuf) -> Self {
         Self {
-            registries,
+            registries: registries
+                .into_iter()
+                .map(|(name, ids)| (name, ids.into()))
+                .collect(),
             settings_root,
         }
     }
@@ -85,8 +88,8 @@ impl LoadContext {
     }
 
     /// Names in registry ID order, from the load's registry snapshot.
-    pub fn registry(&self, name: &str) -> Option<&[String]> {
-        self.inputs.registries.get(name).map(Vec::as_slice)
+    pub fn registry(&self, name: &str) -> Option<Arc<[String]>> {
+        self.inputs.registries.get(name).cloned()
     }
 
     /// A loaded mod's setting captured at this load boundary, with no file I/O.

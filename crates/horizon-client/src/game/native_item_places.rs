@@ -1331,7 +1331,7 @@ mod tests {
         struct Pigs(Bin);
         #[mod_api::__subscriptions]
         impl Hooks for Pigs {
-            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
                 let bin = self.0.clone();
                 r.entity_capability(&ENTITY_AUTOMATION, "minecraft:pig", move |_, _, side| {
                     bin.sides.lock().unwrap().push(side);
@@ -1587,7 +1587,7 @@ mod tests {
         struct Energy;
         #[mod_api::__subscriptions]
         impl Hooks for Energy {
-            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
                 r.entity_capability(&ENTITY_ENERGY, "minecraft:pig", |_, _, _| None);
             }
         }

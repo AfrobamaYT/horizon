@@ -2400,7 +2400,7 @@ impl Game<'_> {
     }
     /// Register namespaced NBT component types before content loads.
     pub(super) fn native_component_types(
-        context: &mod_api::RegistrationContext<'_>,
+        context: &mod_api::RegistrationContext,
         types: &mut Vec<String>,
     ) {
         mod_api::dispatch_component_types(context, types);
@@ -2421,7 +2421,7 @@ impl Game<'_> {
     /// nothing but your code. Declarations that don't pass the files' checks
     /// are logged and that namespace's are left out.
     pub(super) fn native_blocks(
-        context: &mod_api::RegistrationContext<'_>,
+        context: &mod_api::RegistrationContext,
         blocks: &mut Vec<horizon_mods::content::Block>,
     ) {
         mod_api::dispatch_blocks(context, blocks);
@@ -2434,7 +2434,7 @@ impl Game<'_> {
     /// block's item comes with its block (`item: true`), not from here.
     /// Asked once at start, on every side.
     pub(super) fn native_items(
-        context: &mod_api::RegistrationContext<'_>,
+        context: &mod_api::RegistrationContext,
         items: &mut Vec<horizon_mods::content::Item>,
     ) {
         mod_api::dispatch_items(context, items);
@@ -2450,7 +2450,7 @@ impl Game<'_> {
     /// out; an id without a namespace is dropped. Only the client asks it,
     /// as NeoForge's ModelEvent.RegisterStandalone is a client mod-bus event.
     pub(super) fn native_standalone_models(
-        context: &mod_api::RegistrationContext<'_>,
+        context: &mod_api::RegistrationContext,
         models: &mut Vec<String>,
     ) {
         mod_api::dispatch_standalone_models(context, models);
@@ -10783,11 +10783,7 @@ mod tests {
         }
         #[mod_api::__subscriptions]
         impl Hooks for User {
-            fn register(
-                &self,
-                registrar: &mut dyn Registrar,
-                _: &mod_api::RegistrationContext<'_>,
-            ) {
+            fn register(&self, registrar: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
                 let kind = registrar.block_entity_type_key("be_test:shared");
                 registrar
                     .block_entity_part(&kind, Press)
@@ -10810,11 +10806,7 @@ mod tests {
         }
         #[mod_api::__subscriptions]
         impl Hooks for TestMod {
-            fn register(
-                &self,
-                registrar: &mut dyn Registrar,
-                _: &mod_api::RegistrationContext<'_>,
-            ) {
+            fn register(&self, registrar: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
                 let kind = registrar
                     .block_entity_type("shared")
                     .blocks(if self.invalid {
@@ -10829,11 +10821,7 @@ mod tests {
                     .blocks(&[EMPTY])
                     .build();
             }
-            fn blocks(
-                &self,
-                _context: &mod_api::RegistrationContext<'_>,
-                event: &mut BlocksEvent<'_>,
-            ) {
+            fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
                 event.blocks.extend([FIRST, SECOND, EMPTY, PLAIN].map(|id| {
                     horizon_mods::content::Block {
                         id: id.into(),
@@ -12375,7 +12363,7 @@ mod entity_inside_tests {
     struct Mod(Stone);
     #[mod_api::__subscriptions]
     impl Hooks for Mod {
-        fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
             r.block_part("minecraft:stone", self.0.clone());
         }
     }

@@ -104,11 +104,11 @@ pub fn main_with(
     if horizon_world::native_load_hooks::install(
         horizon_world::native_load_hooks::NativeLoadHooks {
             loot_table_load: |context, id, table| {
-                let context = mod_api::DataLoadContext::new(context);
+                let context = mod_api::OwningLoad::new(context);
                 mod_api::dispatch_loot_table_load(&context, id, table);
             },
             modify_default_components: |context, item, components| {
-                let context = mod_api::DataLoadContext::new(context);
+                let context = mod_api::OwningLoad::new(context);
                 mod_api::dispatch_modify_default_components(&context, item, components);
             },
             loot_function: |kind, data, ctx, stack| {

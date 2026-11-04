@@ -1,6 +1,6 @@
 //! Restricted views for registration and data loading.
 pub use horizon_world::native_load_context::DataLoadOrigin;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// Whether a package contains compiled code or content alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,11 +65,11 @@ impl PackageInfo {
     }
 }
 
-static PACKAGES: OnceLock<Vec<PackageInfo>> = OnceLock::new();
+static PACKAGES: OnceLock<Arc<[PackageInfo]>> = OnceLock::new();
 
 #[cfg(any(test, feature = "testing"))]
 thread_local! {
-    static TEST_PACKAGES: std::cell::Cell<Option<&'static [PackageInfo]>> = const { std::cell::Cell::new(None) };
+    static TEST_PACKAGES: std::cell::RefCell<Option<Arc<[PackageInfo]>>> = const { std::cell::RefCell::new(None) };
 }
 /// Runs `f` with only the packages `ids` installed, for tests.
 #[cfg(any(test, feature = "testing"))]
@@ -84,8 +84,7 @@ pub fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
             PackageInfo::new(PackageKind::Code, &manifest)
         })
         .collect();
-    let packages = Box::leak(packages.into_boxed_slice());
-    TEST_PACKAGES.set(Some(packages));
+    TEST_PACKAGES.set(Some(packages.into()));
     let result = f();
     TEST_PACKAGES.set(None);
     result
@@ -114,25 +113,26 @@ pub fn install_packages(
     content: &[horizon_mods::selection::SelectedPackage],
 ) {
     assert!(
-        PACKAGES.set(inventory(native, content)).is_ok(),
+        PACKAGES.set(inventory(native, content).into()).is_ok(),
         "package inventory already installed"
     );
 }
 
-/// Read-only view of the startup package inventory.
+/// Read-only view of the startup package inventory, shared: cloning it copies no package.
+#[derive(Clone)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct LoadedMods<'a> {
-    pub(crate) entries: &'a [PackageInfo],
+pub struct LoadedMods {
+    pub(crate) entries: Arc<[PackageInfo]>,
 }
 
-impl LoadedMods<'_> {
+impl LoadedMods {
     pub(crate) fn new() -> Self {
         #[cfg(any(test, feature = "testing"))]
-        if let Some(entries) = TEST_PACKAGES.get() {
+        if let Some(entries) = TEST_PACKAGES.with_borrow(Clone::clone) {
             return Self { entries };
         }
         Self {
-            entries: PACKAGES.get().map_or(&[], Vec::as_slice),
+            entries: PACKAGES.get().cloned().unwrap_or_else(|| Arc::new([])),
         }
     }
 
@@ -158,26 +158,26 @@ impl LoadedMods<'_> {
 /// ```compile_fail
 /// use mod_api::{Host, RegistrationContext};
 /// fn game(_: &dyn Host) {}
-/// fn registration(context: &RegistrationContext<'_>) { game(context); }
+/// fn registration(context: &RegistrationContext) { game(context); }
 /// ```
 ///
 /// ```compile_fail
 /// use mod_api::{Host, RegistrationContext};
-/// fn registration(context: &RegistrationContext<'_>) { let _ = Host::entity(context, 1); }
+/// fn registration(context: &RegistrationContext) { let _ = Host::entity(context, 1); }
 /// ```
 ///
 /// ```compile_fail
 /// use mod_api::{HostTransaction, RegistrationContext};
-/// fn registration(context: &mut RegistrationContext<'_>) {
+/// fn registration(context: &mut RegistrationContext) {
 ///     let _: Result<(), ()> = context.transaction(|_, _| Ok(()));
 /// }
 /// ```
 // exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct RegistrationContext<'a> {
-    pub(crate) mods: LoadedMods<'a>,
+pub struct RegistrationContext {
+    pub(crate) mods: LoadedMods,
 }
 
-impl RegistrationContext<'_> {
+impl RegistrationContext {
     pub(crate) fn new() -> Self {
         Self {
             mods: LoadedMods::new(),
@@ -185,7 +185,7 @@ impl RegistrationContext<'_> {
     }
 
     /// The loaded-mod view, independent of this phase's event or registrar.
-    pub fn mods(&self) -> &LoadedMods<'_> {
+    pub fn mods(&self) -> &LoadedMods {
         &self.mods
     }
 }
@@ -196,52 +196,63 @@ impl RegistrationContext<'_> {
 /// ```compile_fail
 /// use mod_api::{DataLoadContext, Host};
 /// fn game(_: &dyn Host) {}
-/// fn load(context: &DataLoadContext<'_>) { game(context); }
+/// fn load(context: &dyn DataLoadContext) { game(context); }
 /// ```
 ///
 /// ```compile_fail
 /// use mod_api::{DataLoadContext, Host};
-/// fn load(context: &DataLoadContext<'_>) { let _ = Host::entity(context, 1); }
+/// fn load(context: &dyn DataLoadContext) { let _ = Host::entity(context, 1); }
 /// ```
 ///
 /// ```compile_fail
 /// use mod_api::{DataLoadContext, HostTransaction};
-/// fn load(context: &mut DataLoadContext<'_>) {
+/// fn load(context: &mut dyn DataLoadContext) {
 ///     let _: Result<(), ()> = context.transaction(|_, _| Ok(()));
 /// }
 /// ```
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct DataLoadContext<'a> {
-    source: &'a horizon_world::native_load_context::LoadContext,
-    mods: LoadedMods<'a>,
+pub trait DataLoadContext {
+    /// The phase selected at the owning load boundary.
+    fn origin(&self) -> DataLoadOrigin;
+
+    /// Registry names in ID order, from this resource generation's snapshot.
+    fn registry(&self, name: &str) -> Option<Arc<[String]>>;
+
+    /// A loaded mod's setting captured at the owning load boundary, without file I/O.
+    fn setting(&self, mod_id: &str, key: &str) -> Option<String>;
+
+    /// The same loaded-mod view available during registration.
+    fn mods(&self) -> LoadedMods;
 }
 
-impl<'a> DataLoadContext<'a> {
-    pub(crate) fn new(source: &'a horizon_world::native_load_context::LoadContext) -> Self {
+/// The game's owning load, as a [`DataLoadContext`].
+// hidden: the game's side of the context, not part of the mod surface
+#[doc(hidden)]
+pub struct OwningLoad<'a> {
+    source: &'a horizon_world::native_load_context::LoadContext,
+    mods: LoadedMods,
+}
+
+impl<'a> OwningLoad<'a> {
+    pub fn new(source: &'a horizon_world::native_load_context::LoadContext) -> Self {
         Self {
             source,
             mods: LoadedMods::new(),
         }
     }
+}
 
-    /// The phase selected at the owning load boundary.
-    pub fn origin(&self) -> DataLoadOrigin {
+impl DataLoadContext for OwningLoad<'_> {
+    fn origin(&self) -> DataLoadOrigin {
         self.source.origin()
     }
-
-    /// Registry names in ID order, from this resource generation's snapshot.
-    pub fn registry(&self, name: &str) -> Option<&[String]> {
+    fn registry(&self, name: &str) -> Option<Arc<[String]>> {
         self.source.registry(name)
     }
-
-    /// A loaded mod's setting captured at the owning load boundary, without file I/O.
-    pub fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
+    fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
         self.source.setting(mod_id, key)
     }
-
-    /// The same loaded-mod view available during registration.
-    pub fn mods(&self) -> &LoadedMods<'_> {
-        &self.mods
+    fn mods(&self) -> LoadedMods {
+        self.mods.clone()
     }
 }
 
@@ -271,7 +282,9 @@ mod tests {
             }
         };
         let entries = inventory(&native, &[package("1"), package("2")]);
-        let view = LoadedMods { entries: &entries };
+        let view = LoadedMods {
+            entries: entries.into(),
+        };
         assert_eq!(view.ids().collect::<Vec<_>>(), ["runtime", "plain"]);
         let runtime = view.get("runtime").unwrap();
         assert_eq!(runtime.kind(), PackageKind::Code);

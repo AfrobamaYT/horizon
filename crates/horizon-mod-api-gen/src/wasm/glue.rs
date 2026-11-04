@@ -581,6 +581,10 @@ pub(super) fn conversions(
                 super::sides::rust_ty(types, form, false),
                 lower(types, form, "(&f)")
             ),
+            Kind::Chain { frame, case, link } if case.is_empty() => format!(
+                "{{ let mut frames = Vec::new(); let mut v = v; loop {{ frames.push({}); match &v.{link} {{ Some(next) => v = &**next, None => break frames }} }} }}",
+                lower(types, frame, "v"),
+            ),
             Kind::Chain { frame, case, link } => format!(
                 "{{ let mut frames = Vec::new(); let mut v = v; loop {{ frames.push({}); match v {{ {}::{case} {{ {link}, .. }} => v = &**{link}, _ => break frames }} }} }}",
                 lower(types, frame, "v"),
@@ -710,6 +714,11 @@ pub(super) fn conversions(
                     "{{ let f: {} = {}; ::core::convert::TryFrom::try_from(f).map_err(|_| Refused)? }}",
                     super::sides::rust_ty(types, form, false),
                     lift(types, form, "w")
+                ),
+                Kind::Chain { frame, case, link } if case.is_empty() => format!(
+                    "{{ let mut frames = w.into_iter().rev(); let mut v = {}; for frame in frames {{ let mut outer = {}; outer.{link} = Some(Box::new(v)); v = outer; }} v }}",
+                    lift(types, frame, "frames.next().ok_or(Refused)?"),
+                    lift(types, frame, "frame"),
                 ),
                 Kind::Chain { frame, case, link } => {
                     let Ty::Named(frame_id) = frame else {

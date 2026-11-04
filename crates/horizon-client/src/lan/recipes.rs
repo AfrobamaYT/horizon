@@ -394,7 +394,7 @@ mod content_tests {
     impl mod_api::Hooks for AspectListener {
         fn ingredient(
             &self,
-            context: &mod_api::DataLoadContext<'_>,
+            context: &dyn mod_api::DataLoadContext,
             event: &mut mod_api::IngredientEvent<'_>,
         ) {
             self.0

@@ -28,7 +28,7 @@ pub mod wasm_host {
 pub use crate::{part_table::tests as part_tests, phase::with_test_packages};
 
 /// The startup package inventory at an owning engine load boundary.
-pub fn loaded_mods() -> LoadedMods<'static> {
+pub fn loaded_mods() -> LoadedMods {
     LoadedMods::new()
 }
 
@@ -209,7 +209,7 @@ pub mod game {
     pub trait RegistrationContextNew {
         fn new() -> Self;
     }
-    impl RegistrationContextNew for RegistrationContext<'_> {
+    impl RegistrationContextNew for RegistrationContext {
         fn new() -> Self {
             RegistrationContext::new()
         }
@@ -290,24 +290,6 @@ pub mod game {
     impl<'a> BackendMutRefOf<'a> for BackendMutRef<'a> {
         fn of(inner: &'a mut dyn BackendMut) -> Self {
             BackendMutRef::of(inner)
-        }
-    }
-
-    pub use self::dataloadcontextnew::DataLoadContextNew;
-    mod dataloadcontextnew {
-        #[allow(unused_imports)]
-        use crate::phase::*;
-        #[allow(unused_imports)]
-        use crate::*;
-        #[allow(unused_imports)]
-        use std::sync::OnceLock;
-        pub trait DataLoadContextNew<'a>: Sized {
-            fn new(source: &'a horizon_world::native_load_context::LoadContext) -> Self;
-        }
-        impl<'a> DataLoadContextNew<'a> for DataLoadContext<'a> {
-            fn new(source: &'a horizon_world::native_load_context::LoadContext) -> Self {
-                DataLoadContext::new(source)
-            }
         }
     }
 

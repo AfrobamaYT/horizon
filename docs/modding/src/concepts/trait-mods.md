@@ -184,7 +184,7 @@ impl BlockPart for Gauge {
 
 #[mod_api::horizon_mod]
 impl Hooks for MyMod {
-    fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext<'_>) {
+    fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
         r.block_part("minecraft:stone", Gauge);
     }
 }

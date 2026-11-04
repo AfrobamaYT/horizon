@@ -882,7 +882,7 @@ mod tests {
     impl mod_api::Hooks for Broken {
         fn component_types(
             &self,
-            _context: &mod_api::RegistrationContext<'_>,
+            _context: &mod_api::RegistrationContext,
             _event: &mut mod_api::ComponentTypesEvent<'_>,
         ) {
             panic!("a broken mod");

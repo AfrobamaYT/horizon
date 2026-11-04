@@ -82,9 +82,10 @@ pub(crate) enum Kind {
     Variant(Vec<Case>),
     /// Crosses as its form, declared on the type with `#[wasm(via = Form)]`.
     Via(Ty),
-    /// An enum one case of which holds another of it in a box (`ItemPlace::Nested`): it crosses
-    /// as the list of its frames (`frame`, a variant of the same cases less that field),
-    /// outermost first, the last one not that case.
+    /// An enum one case of which holds another of it in a box (`ItemPlace::Nested`), or a struct
+    /// with an optional boxed one of it (`LootEntity::vehicle`): it crosses as the list of its
+    /// frames (`frame`: the same cases less that field, or the struct with it left at `None`),
+    /// outermost first, the last one not that case or with no next. `case` is empty for a struct.
     Chain {
         frame: Ty,
         case: String,
@@ -511,10 +512,32 @@ impl<'a> Types<'a> {
     /// `kind` of def `id`, as a chain when one case's record holds a boxed `id`: that field
     /// leaves the case, which becomes the frame's (a def of its own).
     fn chain(&mut self, id: usize, kind: Kind) -> Kind {
+        let own = Ty::Boxed(Box::new(Ty::Named(id)));
+        if let Kind::Record(mut fields) = kind {
+            let next = Ty::Option(Box::new(own));
+            let Some(at) = fields.iter().position(|f| f.ty == next) else {
+                return Kind::Record(fields);
+            };
+            // The frame keeps the field, as a unit that doesn't cross and lifts as `None`.
+            fields[at].ty = Ty::Unit;
+            let link = fields[at].rust.clone();
+            let def = &self.defs[id];
+            let frame = Def {
+                rust: def.rust.clone(),
+                wit: format!("{}-frame", def.wit),
+                lifetimes: def.lifetimes,
+                kind: Kind::Record(fields),
+            };
+            let frame = self.push(frame);
+            return Kind::Chain {
+                frame: Ty::Named(frame),
+                case: String::new(),
+                link,
+            };
+        }
         let Kind::Variant(mut cases) = kind else {
             return kind;
         };
-        let own = Ty::Boxed(Box::new(Ty::Named(id)));
         let linked = cases.iter_mut().find_map(|case| match &mut case.payload {
             Payload::Record(_, fields) => {
                 let at = fields.iter().position(|f| f.ty == own)?;

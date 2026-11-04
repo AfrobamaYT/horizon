@@ -587,7 +587,7 @@ mod tests {
         impl Hooks for Models {
             fn standalone_models(
                 &self,
-                context: &RegistrationContext<'_>,
+                context: &RegistrationContext,
                 event: &mut StandaloneModelsEvent<'_>,
             ) {
                 assert_eq!(

@@ -17,7 +17,7 @@ pub struct Mod;
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
-    fn register(&self, registrar: &mut dyn Registrar, _cx: &RegistrationContext<'_>) {
+    fn register(&self, registrar: &mut dyn Registrar, _cx: &RegistrationContext) {
         let kind = registrar.block_entity_type_key("test:counter_box");
         registrar.block_entity_capability(&COUNTER, &kind, |_, _| {
             Some(Box::new(Seven) as Box<dyn Counter>)

@@ -30,6 +30,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "Registrar",
     "CapabilityProviders",
     "TicketValidation",
+    "DataLoadContext",
     "ServerReloadListeners",
     "ClientReloadListeners",
     "ServerReloadResources",
