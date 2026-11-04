@@ -22,16 +22,22 @@ use horizon_world::{
     level::{Behaviours, LevelAccess},
     registry::BlockStateId,
 };
-use std::sync::Arc;
+use std::{ops::ControlFlow, sync::Arc};
 
 type Pos = (i32, i32, i32);
 
-/// What a hopper reaches among the entities at its target (`ENTITY_AUTOMATION`).
+/// What item automation reaches among the entities at its target (`ENTITY_AUTOMATION`).
 enum AutomationEntity {
     /// A container entity the game answers for, by id: reached as a vanilla container.
     Container(u32),
     /// An entity a mod's provider answers for, with its handler.
     Part(EntityRef, Capability<dyn ResourceHandler<ItemResource>>),
+}
+
+/// A block or entity destination, reached through its slots or a mod's handler.
+enum ContainerTarget<'a> {
+    View(&'a View),
+    Part(Capability<dyn ResourceHandler<ItemResource>>),
 }
 
 /// `HopperBlockEntity` transient state (`TransferCooldown`, `tickedGameTime`).
@@ -1323,11 +1329,6 @@ impl Game<'_> {
         );
         found
     }
-    /// `HopperBlockEntity.getEntityContainer`: one of `container_entities_at`, picked at random.
-    fn entity_container_at(&mut self, at: [f64; 3]) -> Option<u32> {
-        let found = self.container_entities_at(at);
-        self.pick_index(found.len()).map(|pick| found[pick])
-    }
     /// The index `RandomSource.nextInt(len)` picks of `len` candidates: the level's one draw,
     /// none for no candidate.
     fn pick_index(&mut self, len: usize) -> Option<usize> {
@@ -1337,12 +1338,12 @@ impl Game<'_> {
         let pick = self.world.random.next_int_bound(len as i32).unwrap_or(0);
         Some(pick as usize)
     }
-    /// The entity a hopper reaches around `at` from `side`, through `ENTITY_AUTOMATION`: one of
+    /// The entity item automation reaches around `at` from `side`, through `ENTITY_AUTOMATION`: one of
     /// the container entities the game has there, and, once a mod registered a provider for it,
     /// the entities whose mod provider answers it, picked at random as `getEntityContainer` picks, the one draw.
     /// A game container entity a mod provider answers ahead of the game is reached through
-    /// that answer. With no mod providing `ENTITY_AUTOMATION` this is `entity_container_at`:
-    /// nothing more is looked up.
+    /// that answer. With no mod providing `ENTITY_AUTOMATION`, only vanilla containers are
+    /// considered: nothing more is looked up.
     fn automation_entity_at(&mut self, at: [f64; 3], side: Direction) -> Option<AutomationEntity> {
         let vanilla = self.container_entities_at(at);
         if !mod_api::has_entity_providers(&ENTITY_AUTOMATION) {
@@ -1379,18 +1380,31 @@ impl Game<'_> {
         let pick = self.pick_index(found.len())?;
         Some(found.swap_remove(pick))
     }
-    /// Runs `f` on the block container at `pos`, or an entity container there.
+    /// Runs `f` on the block container at `pos`, or one entity there, with providers taking
+    /// the game's slots' place when registered ahead of them.
     fn with_container_at<R>(
         &mut self,
         pos: Pos,
-        f: impl FnOnce(&mut Self, &View) -> R,
+        side: Direction,
+        f: impl FnOnce(&mut Self, ContainerTarget<'_>) -> R,
     ) -> Option<R> {
-        if let Some(view) = self.containers().view(pos, false) {
-            return Some(f(self, &view));
+        if let Some(part) = self.item_part_at(pos, side) {
+            return Some(f(self, ContainerTarget::Part(part)));
         }
-        let id =
-            self.entity_container_at([pos.0 as f64 + 0.5, pos.1 as f64 + 0.5, pos.2 as f64 + 0.5])?;
-        self.with_entity_container(id, f)
+        if let Some(view) = self.containers().view(pos, false) {
+            return Some(f(self, ContainerTarget::View(&view)));
+        }
+        let centre = [
+            f64::from(pos.0) + 0.5,
+            f64::from(pos.1) + 0.5,
+            f64::from(pos.2) + 0.5,
+        ];
+        match self.automation_entity_at(centre, side)? {
+            AutomationEntity::Container(id) => {
+                self.with_entity_container(id, |game, view| f(game, ContainerTarget::View(view)))
+            }
+            AutomationEntity::Part(_, part) => Some(f(self, ContainerTarget::Part(part))),
+        }
     }
     /// Runs `f` on a container entity's items as a container, under the
     /// placeholder key its menu uses (the open menu's copy when it is open),
@@ -1583,64 +1597,40 @@ impl Game<'_> {
         else {
             return Ok(());
         };
-        let Some(stack) = self.containers().get(&view, slot).cloned() else {
+        let Some(mut stack) = self.containers().get(&view, slot).cloned() else {
             return Ok(());
         };
         let target = offset(key, facing);
-        if dropper && let Some(part) = self.item_part_at(target, facing.opposite()) {
-            // NeoForge's `dropperInsertHook`: a part in front is offered one item in the
-            // container's place, taken from the slot as it is once the part took it; what it
-            // refuses stays.
-            let one = ItemStack { count: 1, ..stack };
-            let at = [target.0, target.1, target.2];
-            self.put_into_part(&part, at, &one, |game, _| {
-                game.take_one_journaled(&view, slot)
-            });
-            self.container_changed(key);
-            return Ok(());
-        }
         let remaining = if dropper {
             let side = facing.opposite();
-            let insert = |game: &mut Self, into: &View| {
-                let one = ItemStack {
-                    count: 1,
-                    ..stack.clone()
-                };
-                let inserted = game.add_item(None, into, one, Some(side)).is_none();
-                if inserted {
-                    game.view_changed(into);
-                }
-                inserted
-            };
-            let inserted = if let Some(view) = self.containers().view(target, false) {
-                Some(insert(self, &view))
-            } else {
-                let centre = [
-                    f64::from(target.0) + 0.5,
-                    f64::from(target.1) + 0.5,
-                    f64::from(target.2) + 0.5,
-                ];
-                match self.automation_entity_at(centre, side) {
-                    Some(AutomationEntity::Container(id)) => self.with_entity_container(id, insert),
-                    Some(AutomationEntity::Part(_, part)) => {
-                        // As for a part in a block in front: offered one item, in the
-                        // container's place; what it refuses stays.
-                        let one = ItemStack {
-                            count: 1,
-                            ..stack.clone()
-                        };
-                        let at = [target.0, target.1, target.2];
-                        self.put_into_part(&part, at, &one, |game, _| {
-                            game.take_one_journaled(&view, slot)
-                        });
-                        self.container_changed(key);
-                        return Ok(());
+            let inserted = self.with_container_at(target, side, |game, into| match into {
+                ContainerTarget::View(into) => {
+                    let one = ItemStack {
+                        count: 1,
+                        ..stack.clone()
+                    };
+                    let inserted = game.add_item(None, into, one, Some(side)).is_none();
+                    if inserted {
+                        game.view_changed(into);
                     }
-                    None => None,
+                    ControlFlow::Continue(inserted)
                 }
-            };
+                ContainerTarget::Part(part) => {
+                    // `dropperInsertHook`: the handler's writes and taking one from the
+                    // live source slot share a transaction, including feedback into it.
+                    stack.count = 1;
+                    game.put_into_part(&part, [target.0, target.1, target.2], &stack, |game, _| {
+                        game.take_one_journaled(&view, slot)
+                    });
+                    ControlFlow::Break(())
+                }
+            });
             match inserted {
-                Some(inserted) => Some(ItemStack {
+                Some(ControlFlow::Break(())) => {
+                    self.container_changed(key);
+                    return Ok(());
+                }
+                Some(ControlFlow::Continue(inserted)) => Some(ItemStack {
                     count: stack.count - u32::from(inserted),
                     ..stack
                 })
