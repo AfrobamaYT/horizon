@@ -285,6 +285,8 @@ mod native_recipes;
 mod native_render_visibility;
 mod native_server;
 mod native_shaders;
+#[cfg(test)]
+mod native_shield_totem_tests;
 mod native_sound_refs;
 mod native_ticks;
 mod native_visuals;
