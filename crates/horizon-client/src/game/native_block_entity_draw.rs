@@ -479,11 +479,11 @@ impl Game<'_> {
         rgb: u32,
     ) {
         let [x, y] = at;
-        let call = horizon_client::block_entity_render::TextCall {
+        let call = horizon_client::block_entity_render::TextRun {
             matrix: draw.pose(),
             x,
             y,
-            text: text.to_owned(),
+            text,
             color: 0xFF00_0000 | rgb,
             outline: 0,
             light: draw.light,
