@@ -135,6 +135,22 @@ impl Toolchain {
         self.dir.join("bin").join(exe("cargo"))
     }
 
+    pub fn rustc(&self) -> PathBuf {
+        self.dir.join("bin").join(exe("rustc"))
+    }
+
+    /// Where Rust's own libraries for this computer are: the standard library a dynamically
+    /// linked program loads (the prebuilt game's).
+    pub fn target_libdir(&self) -> Option<PathBuf> {
+        host().map(|host| {
+            self.dir
+                .join("lib")
+                .join("rustlib")
+                .join(host.target)
+                .join("lib")
+        })
+    }
+
     /// MinGW-w64's programs (gcc, as, dlltool), when the toolchain brings it (Windows).
     pub fn mingw_bin(&self) -> PathBuf {
         self.dir.join(MINGW_DIR).join("bin")
@@ -156,7 +172,7 @@ impl Toolchain {
             cmd.current_dir(root);
         }
         cmd.env("PATH", std::env::join_paths(paths).unwrap_or(path))
-            .env("RUSTC", self.dir.join("bin").join(exe("rustc")))
+            .env("RUSTC", self.rustc())
             .env("CARGO_HOME", cargo_home());
         // gcc, as, ld — and `cargo install`'s build — put scratch files in the temp dir,
         // which has to be a path they can open too: the build's own, never the player's
@@ -179,7 +195,7 @@ impl Toolchain {
     /// `rustc --version`, once the toolchain answers.
     pub fn version(&self) -> Result<String, String> {
         let out = self
-            .command(&self.dir.join("bin").join(exe("rustc")))
+            .command(&self.rustc())
             .arg("--version")
             .output()
             .map_err(|e| format!("Rust {VERSION} doesn't start: {e}"))?;

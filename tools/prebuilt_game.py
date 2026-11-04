@@ -25,6 +25,12 @@ PROFILE = "fast"
 SUFFIXES = (".rmeta", ".so", ".dll", ".dll.a", ".dylib")
 IDENTITY = "horizon-prebuilt.json"
 LOCK = "Cargo.lock"
+# The launcher's generated `main.rs` comes from the game it links against.
+TEMPLATE = "native_main.rs.template"
+# Source files the folder carries besides compiler outputs.
+CARRIED = {IDENTITY: None, LOCK: ROOT / LOCK, TEMPLATE: ROOT / "crates/horizon-client/src" / TEMPLATE}
+# What the game's build script asks the `horizon-client` executable's link for (Windows' 8 MB main stack).
+LINK_ARG = "cargo:rustc-link-arg-bin=horizon-client="
 
 
 def run(command: list[str], **kwargs) -> str:
@@ -64,7 +70,12 @@ def build(out: Path, server: bool) -> None:
         # Metadata, proc macros and the game; the other crates' code is inside the game's dylib.
         if file.name.endswith(SUFFIXES):
             shutil.copy2(file, deps / file.name)
-    shutil.copy2(ROOT / LOCK, out / LOCK)
+    for name, source in CARRIED.items():
+        if source is not None:
+            shutil.copy2(source, out / name)
+    # The newest run of the game's build script is this build's.
+    script = max((target_dir / PROFILE / "build").glob("horizon-client-*/output"), key=lambda p: p.stat().st_mtime)
+    link_args = [line[len(LINK_ARG):] for line in script.read_text().splitlines() if line.startswith(LINK_ARG)]
     files = {str(path.relative_to(out).as_posix()): sha256(path) for path in sorted(out.rglob("*")) if path.is_file()}
     identity = {
         "commit": run(["git", "rev-parse", "HEAD"], cwd=ROOT).strip(),
@@ -73,6 +84,7 @@ def build(out: Path, server: bool) -> None:
         "profile": PROFILE,
         "side": "server" if server else "client",
         "rustflags": rustflags,
+        "link_args": link_args,
         "files": files,
     }
     (out / IDENTITY).write_text(json.dumps(identity, indent=2) + "\n")
@@ -89,7 +101,7 @@ def check(out: Path) -> None:
     """Only compiler outputs: a stray asset, vanilla file or anything else fails the build."""
     stray = [
         path for path in out.rglob("*")
-        if path.is_file() and path.name not in (IDENTITY, LOCK)
+        if path.is_file() and not (path.parent == out and path.name in CARRIED)
         and not (path.parent == out / "deps" and path.name.endswith(SUFFIXES))
     ]
     if stray:
@@ -114,13 +126,15 @@ def smoke(out: Path) -> None:
         (scratch / "mod_0.rs").write_text(starter.replace("{id}", "smoke"))
         run(["rustc", *common, "--crate-type", "rlib", "--crate-name", "mod_0", *extern("mod_api"),
              "--out-dir", str(scratch), str(scratch / "mod_0.rs")])
-        template = (ROOT / "crates/horizon-client/src/native_main.rs.template").read_text()
+        template = (out / TEMPLATE).read_text()
         main = template.replace("/* MOD_ENTRIES */", '        "smoke" => mod_0::hooks,\n').replace(
             "/* BUILT_MODS */",
             '    horizon_mods::runtime::BuiltMod { id: "smoke", version: "0.1.0", side: horizon_mods::Side::Both },\n',
         )
         (scratch / "main.rs").write_text(main)
+        link_args = json.loads((out / IDENTITY).read_text())["link_args"]
         run(["rustc", *common, "--crate-type", "bin", "--crate-name", "horizon_client_smoke",
+             *(flag for arg in link_args for flag in ("-C", f"link-arg={arg}")),
              "--extern", f"horizon_client={game_dylib(deps)}", *extern("mod_api"), *extern("horizon_mods"),
              "--extern", f"mod_0={scratch / 'libmod_0.rlib'}", "-L", f"dependency={scratch}",
              "-o", str(scratch / "horizon-client"), str(scratch / "main.rs")])
