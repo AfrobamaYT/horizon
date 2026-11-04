@@ -58,17 +58,29 @@ impl BlockEntityPart for Changes {
     }
 }
 
+#[derive(Clone, Copy)]
+enum NoticeAction {
+    Observe,
+    Write,
+    Panic,
+}
+
 #[derive(Clone)]
 struct Observed {
     changes: Changes,
-    self_writes: bool,
+    action: NoticeAction,
 }
 
 #[mod_api::horizon_part]
 impl BlockPart for Observed {
     fn contents_changed(&self, host: &mut dyn ServerHost, event: &mut ContentsChangedEvent) {
         self.changes.contents_changed(host, event);
-        if !self.self_writes || event.pos != BlockPos::new(0, 64, 0) {
+        match self.action {
+            NoticeAction::Observe => return,
+            NoticeAction::Panic => panic!("contents notice panic probe"),
+            NoticeAction::Write => {}
+        }
+        if event.pos != BlockPos::new(0, 64, 0) {
             return;
         }
         let pos = [event.pos.x, event.pos.y, event.pos.z];
@@ -116,7 +128,7 @@ impl Hooks for Observed {
 
 fn with_changes(
     name: &str,
-    self_writes: bool,
+    action: NoticeAction,
     test: impl FnOnce(&mut Game<'_>, LevelRef, Changes),
 ) {
     if run_fresh_cases(name, "HORIZON_CONTENTS_CHANGED_CHILD", &["game"]) {
@@ -127,7 +139,7 @@ fn with_changes(
         "contents_changed",
         Box::new(Observed {
             changes: changes.clone(),
-            self_writes,
+            action,
         }),
     )]
     .into();
@@ -155,7 +167,7 @@ fn place(game: &mut Game<'_>, level: LevelRef, pos: [i32; 3], block: &str) {
 fn a_contents_notice_reads_the_root_commit_and_not_aborted_writes() {
     with_changes(
         "game::machines::contents_changed_tests::a_contents_notice_reads_the_root_commit_and_not_aborted_writes",
-        false,
+        NoticeAction::Observe,
         |game, level, changes| {
             let pos = [0, 64, 0];
             place(game, level, pos, "minecraft:chest");
@@ -226,7 +238,7 @@ fn a_contents_notice_reads_the_root_commit_and_not_aborted_writes() {
 fn a_self_write_does_not_reenter_but_another_backing_block_notifies() {
     with_changes(
         "game::machines::contents_changed_tests::a_self_write_does_not_reenter_but_another_backing_block_notifies",
-        true,
+        NoticeAction::Write,
         |game, level, changes| {
             let source = [0, 64, 0];
             let other = [2, 64, 0];
@@ -313,10 +325,35 @@ fn a_self_write_does_not_reenter_but_another_backing_block_notifies() {
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_panicking_part_does_not_leave_its_contents_notice_guarded() {
+    with_changes(
+        "game::machines::contents_changed_tests::a_panicking_part_does_not_leave_its_contents_notice_guarded",
+        NoticeAction::Panic,
+        |game, level, changes| {
+            let pos = [0, 64, 0];
+            place(game, level, pos, "minecraft:chest");
+            changes.0.lock().unwrap().clear();
+            let entity = game.block_entity(level, pos).unwrap();
+            for _ in 0..2 {
+                assert!(
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        entity.set_changed(game)
+                    }))
+                    .is_err()
+                );
+            }
+            // Both calls reach the Part: the first unwind did not leave a stale active position.
+            assert_eq!(changes.0.lock().unwrap().len(), 2);
+        },
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_double_container_notifies_each_backing_block_once() {
     with_changes(
         "game::machines::contents_changed_tests::a_double_container_notifies_each_backing_block_once",
-        false,
+        NoticeAction::Observe,
         |game, level, changes| {
             let base = game
                 .pack
@@ -382,7 +419,7 @@ fn a_double_container_notifies_each_backing_block_once() {
 fn a_native_types_inherited_block_part_reads_the_committed_payload() {
     with_changes(
         "game::machines::contents_changed_tests::a_native_types_inherited_block_part_reads_the_committed_payload",
-        false,
+        NoticeAction::Observe,
         |game, level, changes| {
             let pos = [0, 64, 0];
             place(game, level, pos, DEPOT);
@@ -419,7 +456,7 @@ fn a_native_types_inherited_block_part_reads_the_committed_payload() {
 fn a_crafter_notices_its_source_but_not_a_vehicles_placeholder() {
     with_changes(
         "game::machines::contents_changed_tests::a_crafter_notices_its_source_but_not_a_vehicles_placeholder",
-        false,
+        NoticeAction::Observe,
         |game, level, changes| {
             use crate::game::minecarts::{CartKind, Minecart};
             let pos = [0, 66, 0];

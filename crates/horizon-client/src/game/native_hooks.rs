@@ -86,6 +86,16 @@ use std::{
 };
 use winit::{event::MouseButton, keyboard::KeyCode};
 
+struct ContentsChangedGuard<'a, 'game> {
+    game: &'a mut Game<'game>,
+}
+
+impl Drop for ContentsChangedGuard<'_, '_> {
+    fn drop(&mut self) {
+        self.game.contents_changing.pop();
+    }
+}
+
 pub(super) struct ObservedScreen {
     id: &'static str,
     /// Not a `Screen` value: the title's own screen or an overlay drawn over
@@ -2283,8 +2293,8 @@ impl Game<'_> {
             return;
         }
         self.contents_changing.push((level, pos));
-        mod_api::dispatch_contents_changed(self, level, pos, state);
-        self.contents_changing.pop();
+        let notice = ContentsChangedGuard { game: self };
+        mod_api::dispatch_contents_changed(&mut *notice.game, level, pos, state);
     }
     /// Block `block`'s block entity has item slots (a `WorldlyContainer`):
     /// set `container` when the block is yours. Asked once for each mod
