@@ -955,11 +955,15 @@
 //! that would break such a bundle is not made.
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
+
+mod fire;
+
 use super::native_data_maps::NativeDataMapType;
 use super::{
     Game, GameLevel, LevelDimension, Screen,
-    execution_role::ExecutionRole,
+    execution_role::{self, ExecutionRole},
     maps::{NativeMapDecoration, NativeMapInfo},
+    mod_api_host,
     native_block_entity_draw::BlockEntityDraw,
     native_configs::{NativeConfig, NativeConfigFile},
     native_mob_draw::{NativeMobRender, NativePlayerRender},
@@ -1508,7 +1512,7 @@ impl GameLevel<'_> {
     /// `newBlockEntity` gets no level.
     #[inline(always)]
     pub(super) fn native_block_entity(&self, block: &str, entity: &mut Option<Compound>) {
-        mod_api::dispatch_block_entity(super::mod_api_host::level_side(self), block, entity);
+        self.fire_block_entity(block, entity);
     }
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side.
     #[inline(always)]
@@ -1520,7 +1524,7 @@ impl GameLevel<'_> {
         count: u32,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_hopper_pickup_item(self, dimension, pos, item, count, cancel);
+        self.fire_hopper_pickup_item(dimension, pos, item, count, cancel);
     }
     /// `Block.dropResources` built the item entities `drops` for the block
     /// `state` broken at `pos` by `breaker` (a player's UUID, none for a
@@ -1555,7 +1559,7 @@ impl GameLevel<'_> {
         old: BlockStateId,
         new: BlockStateId,
     ) {
-        mod_api::dispatch_block_changed(self, dimension, pos, old, new);
+        self.fire_block_changed(dimension, pos, old, new);
     }
 
     /// Liquid at `liquid_pos` is about to place `state` at `pos`. Set
@@ -1629,7 +1633,7 @@ impl GameLevel<'_> {
         state: BlockStateId,
         can_convert: &mut bool,
     ) {
-        mod_api::dispatch_create_fluid_source(self, dimension, pos, state, can_convert);
+        self.fire_create_fluid_source(dimension, pos, state, can_convert);
     }
 
     /// A non-persistent leaf block at distance 7 is about to decay at `pos`.
@@ -1641,7 +1645,7 @@ impl GameLevel<'_> {
         pos: BlockPos,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_leaves_decay(self, dimension, pos, cancel);
+        self.fire_leaves_decay(dimension, pos, cancel);
     }
 
     /// Farmland at `pos` is about to change moisture from `from` to `to`.
@@ -1655,13 +1659,13 @@ impl GameLevel<'_> {
         to: i32,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_moisture_change(self, dimension, pos, from, to, cancel);
+        self.fire_moisture_change(dimension, pos, from, to, cancel);
     }
 
     /// A sponge at `pos` absorbed water and became wet. Server-side.
     #[inline(always)]
     pub(super) fn native_sponge_absorb(&self, dimension: LevelDimension, pos: BlockPos) {
-        mod_api::dispatch_sponge_absorb(self, dimension, pos);
+        self.fire_sponge_absorb(dimension, pos);
     }
 
     /// A sapling, azalea, mushroom or fungus at `pos` is about to grow into the
@@ -1677,7 +1681,7 @@ impl GameLevel<'_> {
         feature: &mut Option<String>,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_block_grow_feature(self, dimension, pos, feature, cancel);
+        self.fire_block_grow_feature(dimension, pos, feature, cancel);
     }
 
     /// A crop-like block at `pos` is about to grow on a random tick
@@ -1697,7 +1701,7 @@ impl GameLevel<'_> {
         state: BlockStateId,
         result: &mut NativeTriState,
     ) {
-        mod_api::dispatch_crop_grow_pre(self, dimension, pos, state, result);
+        self.fire_crop_grow_pre(dimension, pos, state, result);
     }
 
     /// A crop-like block grew (NeoForge's `CropGrowEvent.Post`).
@@ -1712,7 +1716,7 @@ impl GameLevel<'_> {
         original_state: BlockStateId,
         state: BlockStateId,
     ) {
-        mod_api::dispatch_crop_grow_post(self, dimension, pos, original_state, state);
+        self.fire_crop_grow_post(dimension, pos, original_state, state);
     }
 
     /// A block at `pos` is about to fade from `from` to `to` because of
@@ -2118,7 +2122,7 @@ impl GameLevel<'_> {
         entity: &ModBlockEntity,
         drops: &mut Vec<ItemStack>,
     ) {
-        mod_api::dispatch_pre_remove_side_effects(self, pos, state, entity, drops);
+        self.fire_pre_remove_side_effects(pos, state, entity, drops);
     }
 
     /// An authoritative server's `ServerLevel.tickChunk` is about to
@@ -2907,7 +2911,7 @@ impl Game<'_> {
     }
     /// Once a client tick, before the window's tick runs (`ClientTickEvent.Pre`).
     pub(super) fn native_client_tick_pre(&mut self) {
-        mod_api::dispatch_client_tick_pre(self);
+        self.fire_client_tick_pre();
     }
     /// Once a client tick, after the window's tick ran (`ClientTickEvent.Post`).
     pub(super) fn native_client_tick_post(&mut self) {
@@ -2922,7 +2926,7 @@ impl Game<'_> {
         partial: f32,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_block_highlight(self, pos, state, partial, canceled);
+        self.fire_block_highlight(pos, state, partial, canceled);
     }
     /// The world frame's local visual sources. Push requests; Horizon validates
     /// and limits them before rendering. Called only while a world is visible.
@@ -3277,7 +3281,7 @@ impl Game<'_> {
         action: mod_api::KeyAction,
         modifiers: u32,
     ) {
-        mod_api::dispatch_input_key(self, key, action, modifiers);
+        self.fire_input_key(key, action, modifiers);
     }
     /// Deliver a non-repeat key press to the native panel.
     pub(super) fn native_panel_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) {
@@ -3375,7 +3379,7 @@ impl Game<'_> {
         jump: &mut bool,
         sneak: &mut bool,
     ) {
-        mod_api::dispatch_movement_input(self, forward, strafe, jump, sneak);
+        self.fire_movement_input(forward, strafe, jump, sneak);
     }
     /// World field of view, after normal calculation and zoom and before projection/Nausea.
     /// Called for world rendering and near-plane overlays; hand/HUD FOV uses its own path.
@@ -4503,7 +4507,7 @@ impl Game<'_> {
         screen: &NativeScreenView<'_>,
         areas: &mut Vec<[f32; 4]>,
     ) {
-        mod_api::dispatch_screen_exclusion_areas(self, screen, areas);
+        self.fire_screen_exclusion_areas(screen, areas);
     }
     pub(super) fn track_drag_button(&mut self, button: MouseButton, pressed: bool) {
         // Any release ends the drag, as vanilla's `MouseHandler.onButton` clears `activeButton`:
@@ -13260,6 +13264,143 @@ mod tests {
             Some(super::BlockEntity::Banner(_))
         ));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn generated_fire_matches_dispatch() {
+        use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
+        use mod_api::{ClientHost, Flow, Hooks, ModEntry};
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Default)]
+        struct Listener(usize, Arc<Mutex<Vec<usize>>>);
+        #[mod_api::horizon_mod]
+        impl Hooks for Listener {
+            fn block_highlight(
+                &self,
+                _: &dyn ClientHost,
+                _: &mut mod_api::BlockHighlightEvent,
+            ) -> Flow {
+                self.1.lock().unwrap().push(self.0);
+                if self.0 == 1 {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+            fn screen_exclusion_areas(
+                &self,
+                _: &dyn ClientHost,
+                event: &mut mod_api::ScreenExclusionAreasEvent<'_>,
+            ) {
+                self.1.lock().unwrap().push(self.0);
+                event.areas.push([self.0 as f32, 0.0, 0.0, 0.0]);
+            }
+            fn movement_input(&self, _: &dyn ClientHost, event: &mut mod_api::MovementInputEvent) {
+                self.1.lock().unwrap().push(self.0);
+                event.forward += self.0 as f32;
+            }
+        }
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            super::super::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = super::super::execution_role::ExecutionRole::IntegratedServer;
+        let game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let mods = (0..3)
+            .map(|i| ModEntry::new("listener", Box::new(Listener(i, trace.clone()))))
+            .collect::<Vec<_>>();
+        mod_api::testing::with_mods(mods.into(), || {
+            let run = |fire: bool| {
+                trace.lock().unwrap().clear();
+                let mut canceled = false;
+                if fire {
+                    game.fire_block_highlight(
+                        [1, 2, 3],
+                        super::BlockStateId(7),
+                        0.5,
+                        &mut canceled,
+                    );
+                } else {
+                    mod_api::dispatch_block_highlight(
+                        &game,
+                        [1, 2, 3],
+                        super::BlockStateId(7),
+                        0.5,
+                        &mut canceled,
+                    );
+                }
+                let cancel_trace = trace.lock().unwrap().clone();
+                trace.lock().unwrap().clear();
+                let view = super::ObservedScreen {
+                    id: "inventory",
+                    overlay: false,
+                    menu: None,
+                    title: None,
+                    rect: [0.0; 4],
+                    slots: 0,
+                    mouse: [0.0; 2],
+                    partial_tick: 0.0,
+                };
+                let mut areas = Vec::new();
+                if fire {
+                    game.fire_screen_exclusion_areas(&view.view(), &mut areas);
+                } else {
+                    mod_api::dispatch_screen_exclusion_areas(&game, &view.view(), &mut areas);
+                }
+                let collect_trace = trace.lock().unwrap().clone();
+                trace.lock().unwrap().clear();
+                let (mut forward, mut strafe, mut jump, mut sneak) = (1.0, 0.0, false, false);
+                if fire {
+                    game.fire_movement_input(&mut forward, &mut strafe, &mut jump, &mut sneak);
+                } else {
+                    mod_api::dispatch_movement_input(
+                        &game,
+                        &mut forward,
+                        &mut strafe,
+                        &mut jump,
+                        &mut sneak,
+                    );
+                }
+                (
+                    canceled,
+                    cancel_trace,
+                    areas,
+                    collect_trace,
+                    forward,
+                    trace.lock().unwrap().clone(),
+                )
+            };
+            let old = run(false);
+            assert!(old.0);
+            assert_eq!(old.1, [0, 1]);
+            assert_eq!(old.3, [0, 1, 2]);
+            assert_eq!(old.4, 4.0);
+            assert_eq!(old, run(true));
+        });
     }
 
     /// With no window to lay a screen out in there is no slot under the pointer.
