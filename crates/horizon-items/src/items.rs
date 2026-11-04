@@ -519,6 +519,12 @@ pub fn load_tags(
         .map(|(k, v)| (k, v.into_iter().collect()))
         .collect())
 }
+/// The fluid tags of `root` and `overlay` (`data/<ns>/tags/fluid`): each tag
+/// id to the fluids it names, in the sources' order. What a recipe load puts
+/// into its context, for the fluid ingredients' `#tags`.
+pub fn fluid_tag_list(root: &Path, overlay: &PackOverlay) -> Result<HashMap<String, Vec<String>>> {
+    load_tag_lists(root, "fluid", overlay)
+}
 /// The registries whose tags a mod can list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TagRegistry {
