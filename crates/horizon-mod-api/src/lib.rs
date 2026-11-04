@@ -178,7 +178,8 @@ pub use horizon_world::nbt::Tag;
 pub use horizon_world::player_inventory::EquipmentSlot;
 pub use horizon_world::{
     attachments::{
-        AttachmentCodec, AttachmentError, AttachmentHost, AttachmentType, Attachments, Holder,
+        AttachmentCodec, AttachmentError, AttachmentForm, AttachmentPolicy, AttachmentStore,
+        AttachmentType, AttachmentValue, AttachmentWrite, Holder,
     },
     level::{
         BlockId, Dimension as LevelDimension, LandingWrite, NeighbourUpdate, PlacementContext,
@@ -3195,16 +3196,42 @@ pub use generated_host::{
 /// Result of accessing or decoding an attachment.
 pub type AttachmentResult<T> = std::result::Result<T, AttachmentError>;
 
-macro_rules! host_attachment_host {
+// hidden: the game's maps behind the store, not part of the mod surface
+#[doc(hidden)]
+pub use horizon_world::attachments::{AttachmentHost, Attachments};
+
+/// A host is the store of its holders' attachments, so `TYPE.get(host, holder)` reads one.
+macro_rules! host_attachment_store {
     ($($host:ident),+) => { $(
-        impl AttachmentHost for dyn $host + '_ {
-            fn attachments(&mut self, holder: Holder) -> Result<&mut Attachments, AttachmentError> {
-                Host::attachments(self, holder)
+        impl AttachmentStore for dyn $host + '_ {
+            fn holds(&mut self, holder: Holder, namespace: &str, name: &str) -> AttachmentResult<bool> {
+                self.attachments().holds(holder, namespace, name)
+            }
+            fn decoded(&mut self, holder: Holder, namespace: &str, name: &str) -> AttachmentResult<Option<AttachmentValue>> {
+                self.attachments().decoded(holder, namespace, name)
+            }
+            fn saved(&mut self, holder: Holder, namespace: &str, name: &str) -> AttachmentResult<Option<Compound>> {
+                self.attachments().saved(holder, namespace, name)
+            }
+            fn store(&mut self, holder: Holder, namespace: &str, name: &str, value: AttachmentValue, form: AttachmentForm) -> AttachmentResult<()> {
+                self.attachments().store(holder, namespace, name, value, form)
+            }
+            fn discard(&mut self, holder: Holder, namespace: &str, name: &str, sync: bool) -> AttachmentResult<()> {
+                self.attachments().discard(holder, namespace, name, sync)
+            }
+            fn queue_sync(&mut self, holder: Holder, namespace: &str, name: &str) -> AttachmentResult<()> {
+                self.attachments().queue_sync(holder, namespace, name)
             }
         }
     )+ };
 }
-host_attachment_host!(Host, ServerHost, ClientHost);
+host_attachment_store!(
+    Host,
+    ServerHost,
+    ClientHost,
+    LevelRandomHost,
+    LevelWriteHost
+);
 
 /// Read-only level services, like vanilla's `LevelReader`.
 ///
@@ -3315,8 +3342,8 @@ pub trait LevelHost {
 
 /// Access vanilla's `Level.random`, so draws come in vanilla's order.
 pub trait LevelRandomHost: LevelHost {
-    /// Access a holder's server-owned attachment map.
-    fn attachments(&mut self, _holder: Holder) -> Result<&mut Attachments, AttachmentError> {
+    /// The holders' server-owned attachments; `TYPE.get(host, holder)` reads one through it.
+    fn attachments(&mut self) -> &mut dyn AttachmentStore {
         unimplemented!("LevelRandomHost::attachments")
     }
     /// A copy of the level's random stream through `native_level_random`, or None on a
@@ -3416,17 +3443,6 @@ pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
         unimplemented!("LevelWriteHost::level_event")
     }
 }
-
-macro_rules! level_attachment_host {
-    ($($host:ident),+) => { $(
-        impl AttachmentHost for dyn $host + '_ {
-            fn attachments(&mut self, holder: Holder) -> Result<&mut Attachments, AttachmentError> {
-                LevelRandomHost::attachments(self, holder)
-            }
-        }
-    )+ };
-}
-level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
 mod capability;
 pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS};

@@ -55,7 +55,9 @@ pub(super) fn rust_ty(types: &Types<'_>, ty: &Ty, ret: bool) -> String {
         Ty::Shared(inner) => format!("std::sync::Arc<{}>", rust_ty(types, inner, ret)),
         Ty::Named(def) => rust_path(&types.defs[*def]),
         Ty::Dyn(name, mutable) => {
-            let lifetime = if ret { "'static " } else { "" };
+            // A returned shared one is the guest's unit, for any borrow; a mutable one, being
+            // invariant, keeps the borrow's own lifetime.
+            let lifetime = if ret && !mutable { "'static " } else { "" };
             let m = if *mutable { "mut " } else { "" };
             format!("&{lifetime}{m}dyn {}", trait_path(name))
         }
@@ -334,8 +336,14 @@ fn guest_call(
     }
     let value = if wit::wit(types, &method.ret)?.is_some() {
         guest_ret(types, &method.ret, &names[0])
-    } else if let Ty::Dyn(..) = method.ret {
-        format!("&Guest as {}", rust_ty(types, &method.ret, true))
+    } else if let Ty::Dyn(_, mutable) = method.ret {
+        // `Guest` is a unit: leaking one allocates nothing.
+        let guest = if mutable {
+            "Box::leak(Box::new(Guest))"
+        } else {
+            "&Guest"
+        };
+        format!("{guest} as {}", rust_ty(types, &method.ret, true))
     } else {
         "()".to_string()
     };
@@ -896,10 +904,15 @@ fn frame(servers: &[(&str, Vec<&str>)]) -> String {
         let name = snake(owner);
         let ty = path(owner);
         if let Some((_, from, expr)) = super::REACHED.iter().find(|(o, ..)| o == owner) {
-            let mutable = from.ends_with("_mut");
+            // An empty `from`: `expr` reaches it from the frame itself, mutably.
+            let mutable = from.is_empty() || from.ends_with("_mut");
+            let body = match *from {
+                "" => expr.to_string(),
+                from => format!("let h = {from}()?; {expr}"),
+            };
             writeln!(
                 getters,
-                "pub(crate) fn {name}{m}() -> wasmtime::Result<&'static {mm}{ty}> {{ let h = {from}()?; {expr} }}",
+                "pub(crate) fn {name}{m}() -> wasmtime::Result<&'static {mm}{ty}> {{ {body} }}",
                 m = if mutable { "_mut" } else { "" },
                 mm = if mutable { "mut " } else { "" },
             )

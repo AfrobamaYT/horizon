@@ -241,7 +241,16 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
     }
 }
 
-impl mod_api::LevelRandomHost for super::GameLevel<'_> {
+impl mod_api::AttachmentHost for Game<'_> {
+    fn attachments(
+        &mut self,
+        holder: mod_api::Holder,
+    ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
+        self.attachment_map(holder)
+    }
+}
+
+impl mod_api::AttachmentHost for super::GameLevel<'_> {
     fn attachments(
         &mut self,
         holder: mod_api::Holder,
@@ -251,6 +260,12 @@ impl mod_api::LevelRandomHost for super::GameLevel<'_> {
         }
         self.world.attachment_syncs.insert(holder);
         world_attachments(self.world, holder)
+    }
+}
+
+impl mod_api::LevelRandomHost for super::GameLevel<'_> {
+    fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
+        self
     }
     fn random(&mut self) -> Option<mod_api::LegacyRandom> {
         self.native_level_random().cloned()
@@ -289,12 +304,18 @@ impl mod_api::LevelHost for super::native_hooks::HitLevel<'_> {
     }
 }
 
-impl mod_api::LevelRandomHost for super::native_hooks::HitLevel<'_> {
+impl mod_api::AttachmentHost for super::native_hooks::HitLevel<'_> {
     fn attachments(
         &mut self,
         holder: mod_api::Holder,
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         self.0.attachments(holder)
+    }
+}
+
+impl mod_api::LevelRandomHost for super::native_hooks::HitLevel<'_> {
+    fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
+        self
     }
     fn random(&mut self) -> Option<mod_api::LegacyRandom> {
         Some(self.0.random().clone())
@@ -369,11 +390,8 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::Lev
 }
 
 impl<'a: 'b, 'b> mod_api::LevelRandomHost for LevelTicks<'b, &mut super::GameLevel<'a>> {
-    fn attachments(
-        &mut self,
-        holder: mod_api::Holder,
-    ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
-        mod_api::LevelRandomHost::attachments(&mut *self.level, holder)
+    fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
+        mod_api::LevelRandomHost::attachments(&mut *self.level)
     }
     fn random(&mut self) -> Option<mod_api::LegacyRandom> {
         mod_api::LevelRandomHost::random(&mut *self.level)

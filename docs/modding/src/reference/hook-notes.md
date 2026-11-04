@@ -313,7 +313,7 @@ requires a farmer at work and `mob_griefing` enabled.
   replaced or broken with side effects (not under flag 256). Its part puts the stacks it held in `drops`, and they
   scatter as `Containers.dropItemStack` scatters them, after the block entity's own container slots. It runs inside
   the level's write with the level host, like `neighbor_changed`; the block entity is still in place, so the part
-  reads its attachments through `attachments(Holder::BlockEntity(pos))`. A part that returns nothing draws nothing.
+  reads its attachments with `TYPE.get(host, Holder::BlockEntity(pos))`, the level host being their store. A part that returns nothing draws nothing.
   A block entity that removes its own block during its `block_entity_tick` or `menu_button` is out of the level for
   that call, so its part isn't asked: its attachments go with it, and only its container slots come back out.
 

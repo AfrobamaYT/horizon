@@ -72,8 +72,8 @@ use mod_api::{
     ToolUse, WorldPhase,
 };
 use mod_api::{
-    AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
-    LandingWrite, LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeBlockUpdateFlags,
+    AttachmentStore, BlockHit, BonemealSource, FluidStack, GameRuleValue, LandingWrite,
+    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeBlockUpdateFlags,
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, UsePhase,
 };
@@ -8556,13 +8556,11 @@ impl Game<'_> {
         let slot = self.slot_at(&batch, self.cursor.0, self.cursor.1)?;
         Some(self.slot_view(slot)?.item.to_string())
     }
-    /// Access a server-owned holder's attachment map. On a client it is the
-    /// copy of what the server synced: `set` and `remove` change only the copy.
-    pub(super) fn native_attachments(
-        &mut self,
-        holder: Holder,
-    ) -> AttachmentResult<&mut Attachments> {
-        self.attachment_map(holder)
+    /// The server-owned holders' attachments; `TYPE.get(host, holder)` reads
+    /// one. On a client it is the copy of what the server synced: `set` and
+    /// `remove` change only the copy.
+    pub(super) fn native_attachments(&mut self) -> &mut dyn AttachmentStore {
+        self
     }
     /// Read a loaded, light-emitting block. No implicit chunk loading.
     pub(super) fn native_lit_block_name(&self, pos: [i32; 3]) -> Option<&str> {

@@ -31,6 +31,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "CapabilityProviders",
     "TicketValidation",
     "DataLoadContext",
+    "AttachmentStore",
     "ServerReloadListeners",
     "ClientReloadListeners",
     "ServerReloadResources",
@@ -39,6 +40,12 @@ pub(super) const IMPORTS: &[&str] = &[
 /// Imported traits a call never hands over, each reached through another's method instead.
 pub(super) const REACHED: &[(&str, &str, &str)] = &[
     ("ConfigFiles", "host", "Ok(h.config_files())"),
+    // A level hook's host first: inside a level write it is the one the call hands over.
+    (
+        "AttachmentStore",
+        "",
+        "level_random_host_mut().map(|h| h.attachments()).or_else(|_| host_mut().map(|h| h.attachments()))",
+    ),
     (
         "CapabilityProviders",
         "host",

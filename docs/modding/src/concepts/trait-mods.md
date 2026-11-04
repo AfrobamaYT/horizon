@@ -595,6 +595,10 @@ keeps a copy for any holder it is asked about (see the sync paragraph below).
 `AttachmentError` distinguishes `MissingHolder`, `TypeMismatch`, `Decode`, `Encode`,
 `InvalidNamespace` (a malformed saved compound), `InvalidCopyPolicy` (death-copy
 without a codec) and `InvalidSyncPolicy` (sync without a codec).
+Every host is an `AttachmentStore` (and `host.attachments()` gives it): the typed methods
+stand on its few erased ones, so they work the same in a native mod and a wasm mod. A
+value keeps its own Rust type, shared: reading one clones it out, and copying a holder's
+data copies no value.
 
 ```rust
 use mod_api::{AttachmentCodec, AttachmentError, AttachmentType, Compound, Holder, Tag};
