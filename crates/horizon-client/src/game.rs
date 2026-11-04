@@ -592,6 +592,11 @@ struct Options {
     session_stdin: bool,
 }
 impl Options {
+    /// Whether this `Game` is the process's client start: not a dedicated server, and not
+    /// a splitscreen guest, whose `run` is another local player joining the same process.
+    fn is_client_start(&self) -> bool {
+        self.execution_role.is_client() && !self.split_guest
+    }
     /// The name to join servers with: the one given, else the offline name kept
     /// next to options.txt (created on first use).
     fn player_name(&self) -> String {
@@ -22100,6 +22105,12 @@ fn start_game<'a>(
     if game.options.execution_role == execution_role::ExecutionRole::DedicatedServer {
         game.run_dedicated()?;
         return Ok(None);
+    }
+    // FMLClientSetupEvent: once per process, here in `run`, after the initial load applied.
+    // A dedicated server has no client and returned above; a splitscreen guest's `run` is
+    // another local player of the same process.
+    if game.options.is_client_start() {
+        game.native_client_setup();
     }
     match game.options.world.clone() {
         _ if game.options.server.is_some() => {
