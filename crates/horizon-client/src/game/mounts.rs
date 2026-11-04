@@ -699,6 +699,7 @@ impl Game<'_> {
         {
             let mut events = Vec::new();
             r.cause_fall_damage_from(
+                &self.loop_context,
                 crate::game::entity::damage_level_of!(self),
                 distance,
                 modifier,
@@ -1185,7 +1186,11 @@ mod tests {
         // pushes along the rider's look, starts the 40-tick dash clock, raises
         // DASH and queues the dash sound.
         m.extra.set_saddled(true);
-        equine::ridden_step(&mut m);
+        equine::ridden_step(
+            &mut m,
+            &crate::game::test_server_load()
+                .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
+        );
         assert_eq!(m.rider.expect("the rider stays on").jump, 0.0);
         assert_eq!(m.extra.anim_ticks, 40, "the dash clock");
         assert!(m.extra.flag2, "DASH");

@@ -2330,13 +2330,14 @@ impl Game<'_> {
     pub(super) fn native_command(&mut self, command: &str, ran: &mut bool) {
         mod_api::dispatch_command(super::execution_role::host_side(self), command, ran);
     }
-    /// The commands `native_command` runs, by name and without their slash:
-    /// push the ones that are yours. Asked when a connection starts and
-    /// again when the server sends its own tree, so the chat box colours,
-    /// completes and lists them as the game's own; a name the game already
-    /// has keeps that command's behaviour.
-    pub(super) fn native_commands(&mut self, commands: &mut Vec<&'static str>) {
-        mod_api::dispatch_commands(self, commands);
+    /// The client's own commands (`RegisterClientCommandsEvent`), which
+    /// `native_command` runs: push a `NativeCommand` per usage. Asked when a
+    /// connection starts and again when the server sends its own tree, so the
+    /// chat box colours, completes and lists them as the game's own; a name
+    /// the game already has keeps that command's behaviour. A client command
+    /// has no operator level: one with a nonzero level is left out.
+    pub(super) fn native_register_client_commands(&mut self, commands: &mut Vec<NativeCommand>) {
+        mod_api::dispatch_register_client_commands(self, commands);
     }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base.
@@ -7833,6 +7834,17 @@ impl Game<'_> {
     pub(super) fn native_on_equip(&mut self, slot: &str, new: Option<&ItemStack>) {
         mod_api::dispatch_on_equip(self, slot, new);
     }
+    /// `EnderManAngerEvent`: `player` stares at enderman `enderman`
+    /// (`Enderman.isBeingStaredBy` passed). Set `cancel` and the stare
+    /// doesn't count: no anger, no freezing in place, no teleport closer.
+    pub(super) fn native_enderman_anger(
+        &self,
+        enderman: EntityRef,
+        player: PlayerRef,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_enderman_anger(self, enderman, player, cancel);
+    }
     /// `MobEffect.shouldApplyEffectTickThisTick` for a content mod's effect
     /// `effect` (`ruby:bleeding`), each tick a player or a mob has it, in
     /// `MobEffectInstance.tickServer` before it counts down: `tick_count` is
@@ -9013,21 +9025,6 @@ impl Game<'_> {
             self.with_level(|_, level, ticks| level.native_set_block(ticks, pos, state, flags));
         let _ = self.process_level_events();
         changed
-    }
-    /// The strongest redstone signal reaching the block at `pos` from its six
-    /// neighbours, 0 to 15 (`SignalGetter.getBestNeighborSignal`, what a
-    /// dispenser or a piston reads), in the level in place, `dimension`. 0 on
-    /// a client's copy of the world and for another dimension. A mod's
-    /// explosive, launcher or machine reads it in its block entity's tick to
-    /// go off or switch on.
-    pub(super) fn native_neighbor_signal(&mut self, dimension: &str, pos: [i32; 3]) -> i32 {
-        if (self.serving.is_none() && self.options.dedicated.is_none())
-            || dimension != self.dim.id()
-        {
-            return 0;
-        }
-        let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        self.with_level(|b, level, ticks| b.best_neighbor_signal(level, ticks, at))
     }
     /// The rain and thunder levels of the world in place, each 0.0 to 1.0
     /// (`Level.getRainLevel` and `Level.getThunderLevel`): what a solar panel

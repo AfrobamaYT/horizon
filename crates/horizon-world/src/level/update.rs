@@ -1,7 +1,8 @@
 //! `Level.setBlock`, `LevelChunk.setBlockState` and the
 //! `CollectingNeighborUpdater` that orders neighbour and shape updates.
 use super::{
-    LevelAccess, LevelEvent, Sim, classes::Class, flags, orientation::Orientation, states::BlockId,
+    LevelAccess, LevelEvent, Signals, Sim, classes::Class, flags, orientation::Orientation,
+    states::BlockId,
 };
 use crate::{fluid::FluidState, registry::BlockStateId};
 use horizon_core::{
@@ -197,9 +198,6 @@ impl Update {
 }
 
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
-    pub fn state(&self, pos: BlockPos) -> BlockStateId {
-        self.level.block_state(pos)
-    }
     pub fn fluid_at(&self, pos: BlockPos) -> FluidState {
         self.b.fluid(self.state(pos))
     }
@@ -721,5 +719,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
             }
         }
+    }
+}
+
+impl<L: LevelAccess + ?Sized> Signals<'_, L> {
+    pub fn state(&self, pos: BlockPos) -> BlockStateId {
+        self.level.block_state(pos)
+    }
+}
+
+/// `Sim` reads these through its [`Signals`], so there is one implementation of each.
+impl<L: LevelAccess + ?Sized> Sim<'_, L> {
+    pub fn state(&self, pos: BlockPos) -> BlockStateId {
+        self.signals().state(pos)
     }
 }
