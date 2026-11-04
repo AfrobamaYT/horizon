@@ -11351,6 +11351,20 @@ mod tests {
                     .and_then(|player| game.native_menu_ref(player))
                     .is_none()
             );
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "MenuReadTest").unwrap();
+            game.enter_remote_dimension(&other, false, Reason::Other);
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            let reconnected = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            assert_eq!(game.native_menu_slot_count(before_logout), None);
+            assert_eq!(game.native_menu_slot_count(reconnected), Some(46));
+            assert_ne!(reconnected, before_logout);
         });
     }
 
