@@ -8280,8 +8280,10 @@ impl Game<'_> {
     ) {
         let at = [pos.x, pos.y, pos.z];
         match write {
+            // `Level.setBlockAndUpdate`: flag 3, the neighbours and the clients.
             LandingWrite::SetBlock(state) => {
-                self.native_level_set_block(level, at, state, NativeBlockUpdateFlags::NEIGHBORS);
+                let flags = NativeBlockUpdateFlags::NEIGHBORS | NativeBlockUpdateFlags::CLIENTS;
+                self.native_level_set_block(level, at, state, flags);
             }
             LandingWrite::DestroyBlock { drop } => {
                 self.native_level_destroy_block(level, at, drop);
@@ -13096,10 +13098,23 @@ mod entity_inside_tests {
                 farmland,
                 "nothing writes mid-batch"
             );
+            game.world.block_log = Some(Vec::new());
             game.drain_entity_inside();
             assert_eq!(game.world.block(1, 64, 1), dirt);
             assert_eq!(game.world.block(2, 64, 1), farmland);
             assert_eq!(game.world.block(3, 64, 1), air, "the stone is destroyed");
+            // Both writes reach the clients (`setBlockAndUpdate` and `destroyBlock` are
+            // flag 3); the dropped one sends nothing.
+            let log = game.world.block_log.take().unwrap();
+            assert!(log.contains(&(1, 64, 1)), "the set block is sent: {log:?}");
+            assert!(
+                log.contains(&(3, 64, 1)),
+                "the destroyed block is sent: {log:?}"
+            );
+            assert!(
+                !log.contains(&(2, 64, 1)),
+                "the dropped write sends nothing"
+            );
             assert!(take_pending().is_empty());
         });
     }
