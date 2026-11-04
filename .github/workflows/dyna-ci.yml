@@ -282,6 +282,8 @@ jobs:
           else
             python3 tools/check_public_tree.py --history
           fi
+      - name: Check duplicate public native functions per crate
+        run: python3 tools/sync_upstream.py --check
       - name: Test offline research tooling
         run: python3 -m unittest discover -s tests -v
       - name: Install Dyna runner dependencies without root
