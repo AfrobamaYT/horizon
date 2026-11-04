@@ -44,6 +44,8 @@ jobs:
       self_hosted: ${{ steps.runner.outputs.self_hosted }}
       # The ignored-tests shard matrix: every shard on main, the affected ones on a pull request (empty: none).
       ignored_matrix: ${{ steps.matrix.outputs.matrix || '{"shard":[]}' }}
+      # Whether the wasm runtime, the mod API or its generator changed: on main, always.
+      wasm: ${{ steps.wasm.outputs.wasm }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,6 +69,19 @@ jobs:
             python3 tools/ci/ignored_shards.py --matrix --all >> "$GITHUB_OUTPUT"
           else
             python3 tools/ci/ignored_shards.py --matrix "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Does this change touch wasm mods?
+        id: wasm
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = push ] || git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -qE '^(crates/(horizon-mod-api|horizon-mod-api-gen|horizon-mod-wasm|horizon-mods)/|Cargo\.lock$)'; then
+            echo wasm=true >> "$GITHUB_OUTPUT"
+          else
+            echo wasm=false >> "$GITHUB_OUTPUT"
           fi
 
   pool-watch:
@@ -127,6 +142,104 @@ jobs:
           cargo +stable clippy --workspace --all-targets -- -D warnings
           # The server build (released as horizon-engine): the game without sound or controllers.
           cargo +stable clippy -p horizon-client --all-targets --no-default-features -- -D warnings
+
+  wasm-mods:
+    # A mod built to mod.wasm and loaded as the game loads it; the mod API's generated WIT as an
+    # artifact, and what this change does to it in the job summary (a report, never a failure).
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install Rust toolchains and the ALSA and udev headers
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+          rustup toolchain install stable --profile minimal
+          rustup toolchain install 1.99.1 --profile minimal --component rust-src --target wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm-mods
+          workspaces: |
+            .
+            docs/modding/examples/wasm-hello -> target/horizon-mod
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build the sample to mod.wasm, and the std member the game ships
+        run: |
+          cargo +stable build -p cargo-horizon-mod -p xtask
+          cd docs/modding/examples/wasm-hello
+          ../../../../target/debug/cargo-horizon-mod horizon-mod build --wasm
+          ../../../../target/debug/cargo-horizon-mod horizon-mod wasm-std "$GITHUB_WORKSPACE/target/horizon-wasm-std.wasm"
+      - name: Load it in the runtime
+        env:
+          HORIZON_WASM_SAMPLE: ${{ github.workspace }}/docs/modding/examples/wasm-hello/target/horizon-mod/hello_wasm.hmod
+          HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
+        run: cargo +stable test -p horizon-mod-wasm --test sample -- --ignored
+      - name: Mods sharing a library, linked in one group, and a mod of another group
+        env:
+          HORIZON_WASM_GROUPS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/groups
+          HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
+        run: |
+          for mod in counter_lib alpha beta gamma; do
+            (cd "$HORIZON_WASM_GROUPS/$mod" && "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod build --wasm)
+          done
+          cargo +stable test -p horizon-mod-wasm --test groups -- --ignored
+      - name: The mod API's WIT, and what this change does to it
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          target/debug/xtask mod-api wit target/wit-head
+          if git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            git worktree add -q ../wit-base "$BASE_SHA"
+            (cd ../wit-base && "$GITHUB_WORKSPACE/target/debug/xtask" mod-api wit "$GITHUB_WORKSPACE/target/wit-base") || true
+          fi
+          if [ -f target/wit-base/mod-api.wit ]; then
+            python3 tools/ci/wit_report.py target/wit-base/mod-api.wit target/wit-head/mod-api.wit >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No mod-api.wit to compare with at $BASE_SHA: this is the first." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mod-api-wasm
+          path: |
+            target/wit-head/mod-api.wit
+            target/horizon-wasm-std.wasm
+            docs/modding/examples/wasm-hello/target/horizon-mod/hello_wasm.hmod
+
+  wasm-bench:
+    # What a wasm mod costs against the same mod built native, in release: a table in the job
+    # summary (a report, never a failure; timings on shared runners are indicative). Only when
+    # the wasm runtime, the mod API or its generator changed.
+    needs: changes
+    if: github.event_name != 'schedule' && needs.changes.outputs.wasm == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchains and the ALSA and udev headers
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+          rustup toolchain install stable --profile minimal
+          rustup toolchain install 1.99.1 --profile minimal --component rust-src --target wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm-bench
+          workspaces: |
+            .
+            crates/horizon-mod-wasm/tests/bench -> target/horizon-mod
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build the benchmark mod to mod.wasm, and the std member
+        run: |
+          cargo +stable build -p cargo-horizon-mod
+          cd crates/horizon-mod-wasm/tests/bench
+          ../../../../target/debug/cargo-horizon-mod horizon-mod build --wasm
+          ../../../../target/debug/cargo-horizon-mod horizon-mod wasm-std "$GITHUB_WORKSPACE/target/horizon-wasm-std.wasm"
+      - name: The same hook native and as mod.wasm
+        env:
+          HORIZON_WASM_BENCH: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/bench/target/horizon-mod/bench_mod.hmod
+          HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
+        run: cargo +stable test --release -p horizon-mod-wasm --test bench -- --ignored --nocapture
 
   verify:
     needs: changes

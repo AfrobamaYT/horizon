@@ -1,0 +1,23 @@
+[package]
+name = "horizon-mod-wasm"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "The one runtime for wasm mods: groups packages by their dependencies, links each group, caches it and runs it"
+
+[dependencies]
+horizon-mod-api = { path = "../horizon-mod-api", features = ["wasm-host"] }
+horizon-mods = { path = "../horizon-mods", default-features = false }
+wasmtime = { version = "50", default-features = false, features = ["anyhow", "cranelift", "component-model", "runtime", "std", "parallel-compilation", "pulley"] }
+wit-component = "0.261"
+semver = "1"
+log = "0.4"
+
+[dev-dependencies]
+# A component built in the test, importing a function this game doesn't have.
+wasm-encoder = "0.261"
+wit-parser = "0.261"
+
+[lints]
+workspace = true

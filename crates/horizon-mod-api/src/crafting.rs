@@ -21,7 +21,7 @@ pub fn native_ingredient(
     data: &serde_json::Map<String, Value>,
     items: &mut Vec<String>,
 ) {
-    crate::dispatch_ingredient(&DataLoadContext::new(context), kind, data, items);
+    crate::dispatch_ingredient(&crate::OwningLoad::new(context), kind, data, items);
 }
 /// Items a mod adds to one of the recipe property sets: the items a furnace,
 /// blast furnace, smoker, campfire, smithing table slot or brewing stand slot
@@ -59,7 +59,7 @@ pub fn native_recipe_property_sets(
     context: &LoadContext,
     additions: &mut Vec<RecipePropertyAddition>,
 ) {
-    crate::dispatch_recipe_property_sets(&DataLoadContext::new(context), additions);
+    crate::dispatch_recipe_property_sets(&crate::OwningLoad::new(context), additions);
 }
 /// A mod's own ingredient kind, matching a concrete stack at craft time:
 /// the ingredient's `test` calls here with the kind, its JSON and the
@@ -69,12 +69,13 @@ pub fn native_recipe_property_sets(
 /// answer must be the same for the same stack.
 #[inline(never)]
 pub fn native_ingredient_test(
+    context: &horizon_world::native_load_context::LoopContext,
     kind: &str,
     data: &serde_json::Map<String, Value>,
     stack: &ItemStack,
     accept: &mut bool,
 ) {
-    crate::dispatch_ingredient_test(kind, data, stack, accept);
+    crate::dispatch_ingredient_test(&crate::OwningLoop::new(context), kind, data, stack, accept);
 }
 /// Where `Ingredient::resolve` leaves the hook's answer inside the occurrence
 /// it resolved. Written and read only here; the loads that own the sources
@@ -112,7 +113,7 @@ pub fn dedup_keep_order(items: &mut Vec<String>) {
 }
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct Ingredient {
     /// The items it accepts, however the source shape named them.
@@ -128,7 +129,7 @@ pub struct Ingredient {
     pub children: Option<(Shape, Vec<Self>)>,
 }
 /// How a shape's children combine at match time.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 // exhaustive: a closed set the game matches without a wildcard
 pub enum Shape {
     /// Any child matching the stack is enough.
@@ -324,17 +325,28 @@ impl Ingredient {
             children: nested,
         })
     }
-    /// `Ingredient.test`: a stack the list names — and for a mod's own
-    /// kind, one the match-time hook accepts (`ICustomIngredient.test`).
-    pub fn test(&self, stack: &ItemStack) -> bool {
+    /// `Ingredient.test`: whether `stack` fits: a stack the list names, and
+    /// for a mod's own kind one the match-time hook accepts
+    /// (`ICustomIngredient.test`). The game answers with the loop context of
+    /// the side `host` runs on; a host without a game refuses every stack.
+    pub fn test(&self, host: &dyn Host, stack: &ItemStack) -> bool {
+        backend_of(host).is_some_and(|backend| backend.recipe_ingredient_test(self, stack))
+    }
+    /// `test` with the loop context the game already holds, for the game's
+    /// own matching.
+    pub(crate) fn test_in(
+        &self,
+        context: &horizon_world::native_load_context::LoopContext,
+        stack: &ItemStack,
+    ) -> bool {
         match &self.children {
             // Each child its own `test`, as on NeoForge — a mod's kind
             // among them answers through its hook.
-            Some((Shape::Compound, kids)) => kids.iter().any(|k| k.test(stack)),
-            Some((Shape::Intersection, kids)) => kids.iter().all(|k| k.test(stack)),
+            Some((Shape::Compound, kids)) => kids.iter().any(|k| k.test_in(context, stack)),
+            Some((Shape::Intersection, kids)) => kids.iter().all(|k| k.test_in(context, stack)),
             Some((Shape::Difference, kids)) => {
-                kids.first().is_some_and(|k| k.test(stack))
-                    && kids.get(1).is_none_or(|k| !k.test(stack))
+                kids.first().is_some_and(|k| k.test_in(context, stack))
+                    && kids.get(1).is_none_or(|k| !k.test_in(context, stack))
             }
             None => {
                 if !self.items.contains(&*stack.item) {
@@ -342,7 +354,7 @@ impl Ingredient {
                 }
                 if let Some((kind, data)) = &self.custom {
                     let mut accept = true;
-                    native_ingredient_test(kind, data, stack, &mut accept);
+                    native_ingredient_test(context, kind, data, stack, &mut accept);
                     return accept;
                 }
                 true

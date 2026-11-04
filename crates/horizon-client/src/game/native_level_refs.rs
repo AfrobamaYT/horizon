@@ -157,10 +157,10 @@ impl Game<'_> {
                 };
                 let (own, rest): (Vec<_>, Vec<_>) =
                     loaded.into_iter().partition(|t| t.controller == slot);
-                let (mut validation, removals) =
-                    mod_api::mod_chunk_tickets::TicketValidation::new(owner, own.clone());
+                let mut validation =
+                    mod_api::mod_chunk_tickets::ControllerTickets::new(owner, own.clone());
                 self.native_validate_tickets(dim.id(), controller, &mut validation);
-                let removed = removals.into_removed();
+                let removed = validation.into_removed();
                 loaded = rest;
                 loaded.extend(own.into_iter().filter(|t| !removed.contains(t)));
             }
@@ -536,7 +536,7 @@ mod tests {
             let mut expected = game.world.random.clone();
             let host: &mut dyn ServerHost = game;
             let drawn: Vec<i32> = (0..3)
-                .map(|_| level.random(&mut *host).unwrap().next_int())
+                .map(|_| level.with_random(&mut *host, |r| r.next_int()).unwrap())
                 .collect();
             let want: Vec<i32> = (0..3).map(|_| expected.next_int()).collect();
             assert_eq!(drawn, want);
@@ -550,7 +550,7 @@ mod tests {
             };
             let parked = LevelRef::new(level.epoch(), other.id());
             let host: &mut dyn ServerHost = game;
-            assert!(parked.random(&mut *host).is_none(), "not open yet");
+            assert!(parked.random(&*host).is_none(), "not open yet");
             let back = game.dim;
             game.enter_level(other).unwrap();
             game.enter_level(back).unwrap();
@@ -562,7 +562,7 @@ mod tests {
                 .clone();
             let in_place = game.world.random.clone();
             let host: &mut dyn ServerHost = game;
-            let drawn = parked.random(&mut *host).unwrap().next_long();
+            let drawn = parked.with_random(&mut *host, |r| r.next_long()).unwrap();
             assert_eq!(drawn, expected.next_long());
             let mut after = game
                 .levels
@@ -580,7 +580,7 @@ mod tests {
                 game.dim.id(),
             );
             let host: &mut dyn ServerHost = game;
-            assert!(stale.random(&mut *host).is_none());
+            assert!(stale.with_random(&mut *host, |r| r.next_int()).is_none());
         });
     }
 
@@ -603,7 +603,7 @@ mod tests {
     struct Machines;
     #[mod_api::__subscriptions]
     impl Hooks for Machines {
-        fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
             r.register_ticket_controller("quarry", true);
             r.register_ticket_controller("machines:drill", true);
             r.register_ticket_controller("plain", false);
@@ -628,7 +628,7 @@ mod tests {
     struct Other;
     #[mod_api::__subscriptions]
     impl Hooks for Other {
-        fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
             r.register_ticket_controller("vault", true);
         }
         fn validate_tickets(&self, _: &mut dyn ServerHost, e: &mut ValidateTicketsEvent<'_>) {
@@ -1075,7 +1075,7 @@ mod tests {
         struct Idle;
         #[mod_api::__subscriptions]
         impl Hooks for Idle {
-            fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
                 r.register_ticket_controller("quarry", true);
             }
         }

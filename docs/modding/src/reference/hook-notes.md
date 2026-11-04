@@ -291,12 +291,12 @@ requires a farmer at work and `mob_griefing` enabled.
   `ItemEntityRef::set_stack` changes one's nonempty stack; discarding an entity is a separate operation. The query acts on
   the level in place.
 
-- `LevelRef::random(host)`, the server level's own random (vanilla's `Level.random`, NeoForge mods'
+- `LevelRef::with_random(host, |random| ...)`, the server level's own random (vanilla's `Level.random`, NeoForge mods'
   `level.getRandom()`): a mod draws from the stream vanilla's explosions and block drops use, so its draws shift theirs
-  as a Java mod's would. The draws are made at the call site on that level's real stream, also for a level parked while
-  the server ticks another. It is `None` on a client of a server, for a stale handle and for a level that isn't open:
+  as a Java mod's would. The closure draws on the level's stream and the level keeps it after (`random(host)` is a copy
+  of it, `set_random(host, random)` stores one back), also for a level parked while the server ticks another. It is `None` on a client of a server, for a stale handle and for a level that isn't open:
   the Nether and the End open when someone first goes there and close after 300 ticks with nobody in them. Inside a
-  restricted level hook, `LevelRandomHost::random` is the same stream.
+  restricted level hook, `with_random` on the `LevelRandomHost` draws from the same stream.
 
 - The server starting and stopping, on the single player server thread and on a dedicated server:
   `native_server_about_to_start(dedicated)` before the worlds load (NeoForge's `ServerAboutToStartEvent`), and
@@ -324,7 +324,7 @@ requires a farmer at work and `mob_griefing` enabled.
   replaced or broken with side effects (not under flag 256). Its part puts the stacks it held in `drops`, and they
   scatter as `Containers.dropItemStack` scatters them, after the block entity's own container slots. It runs inside
   the level's write with the level host, like `neighbor_changed`; the block entity is still in place, so the part
-  reads its attachments through `attachments(Holder::BlockEntity(pos))`. A part that returns nothing draws nothing.
+  reads its attachments with `TYPE.get(host, Holder::BlockEntity(pos))`, the level host being their store. A part that returns nothing draws nothing.
   A block entity that removes its own block during its `block_entity_tick` or `menu_button` is out of the level for
   that call, so its part isn't asked: its attachments go with it, and only its container slots come back out.
 
@@ -491,7 +491,7 @@ one, where vanilla gives the `by` one.
   changes otherwise, `native_update_output_neighbors(dimension, pos)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
 
 `Hooks::component_types`, `blocks`, `items` and `standalone_models` take
-`&RegistrationContext<'_>` before their event; `Hooks::register` takes it after
+`&RegistrationContext` before their event; `Hooks::register` takes it after
 its `Registrar`. `context.mods()` returns a read-only `LoadedMods` view whose
 `ids()` lists startup code and selected content packages in dispatch order. These
 contexts are supplied by the engine and have no game `Host`, handle constructors
@@ -745,7 +745,7 @@ trailing `/`, or empty, `.` or `..` components. Converter fields and reload-view
 
 The prepare context is the pack view only, as vanilla's `ResourceManager`. Like vanilla's
 `SimplePreparableReloadListener`, `ServerReloadListener::prepare` parses and validates without
-changing live state and returns `ReloadApply::new(move || { /* publish parsed state */ })`.
+changing live state and returns `<dyn ReloadApply>::new(move || { /* publish parsed state */ })`.
 All listeners prepare before **any** apply runs. Do not read another listener's new published
 state in prepare: dependencies order both phases but do not remove this barrier. Publication
 cannot fail. As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a listener that
@@ -763,8 +763,10 @@ already be registered; unknown names fail immediately, and cycles fail after reg
 `last()` are ordering boundaries. These anchors and dependency ends use `Identifier`. Mod
 listeners run after vanilla by default, in registration order; an explicit dependency before
 `functions()` works without a false cycle. Use these anchors rather than their string values. The read-only `get_registry`,
-`get_graph`, `get_name_lookup(listener)` and `get_last_vanilla_listener` expose the registered
-objects, dependencies and vanilla anchor. Horizon does not expose NeoForge's condition
+`get_graph` and `get_last_vanilla_listener` give the registered names, the dependency edges and
+the vanilla anchor's name, by value (NeoForge's give the objects; a mod keeps its own listener's
+`Arc`, and its name is the one it registered it under). `prepare` returns
+`Box<dyn ReloadApply>`; `<dyn ReloadApply>::new(move || ...)` makes one from a closure. Horizon does not expose NeoForge's condition
 context here.
 
 `event.listeners.add_retained_listener(&key, converter, listener)` also keeps the listener
@@ -788,7 +790,7 @@ use mod_api::{
 #[derive(Default)]
 struct MachineData(Arc<RwLock<serde_json::Value>>);
 impl ServerReloadListener for MachineData {
-    fn prepare(&self, context: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+    fn prepare(&self, context: &ServerReloadContext) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
         let id = Identifier::parse("my_mod:press").unwrap();
         let next = match context.read(&id) {
             Some(bytes) => serde_json::from_slice(bytes)
@@ -796,7 +798,7 @@ impl ServerReloadListener for MachineData {
             None => serde_json::Value::Null,
         };
         let live = self.0.clone();
-        Ok(ReloadApply::new(move || *live.write().unwrap() = next))
+        Ok(<dyn ReloadApply>::new(move || *live.write().unwrap() = next))
     }
 }
 #[derive(Default)]
@@ -866,7 +868,7 @@ use mod_api::{
 #[derive(Default)]
 struct Theme(Arc<RwLock<serde_json::Value>>);
 impl ClientReloadListener for Theme {
-    fn prepare(&self, context: &ClientReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+    fn prepare(&self, context: &ClientReloadContext) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
         let id = Identifier::parse("my_mod:theme").unwrap();
         let next = match context.read(&id) {
             Some(bytes) => serde_json::from_slice(bytes)
@@ -874,7 +876,7 @@ impl ClientReloadListener for Theme {
             None => serde_json::Value::Null,
         };
         let live = self.0.clone();
-        Ok(ReloadApply::new(move || *live.write().unwrap() = next))
+        Ok(<dyn ReloadApply>::new(move || *live.write().unwrap() = next))
     }
 }
 #[derive(Default)]
@@ -1068,7 +1070,7 @@ registration path.
 
 - The helper `native_physical_window_size()`, which returns the window's width and height in physical pixels, independent of GUI scale. It returns no size on a server or when no window exists.
 
-- A recipe ingredient of a mod's own kind. The ingredient entry that names a type in a namespace outside minecraft: reaches native_ingredient(context, kind, data, items) at load time. Fill items with the item ids the ingredient matches (item ids only: components are not checked; a match-time hook follows separately). Duplicates are removed keeping first-seen order. The hook gets the `DataLoadContext` of the load that parses the recipes and hears each occurrence of the kind once per load, nested ones and ones under any slot a recipe reads an ingredient from included, before the load's tables parse the recipes: the client's own recipe load has `origin()` `ClientPreload`, the server's `ServerDataLoad`. A server loads its recipes once however many tables and copies read them (its recipe tables, the stations and the copy synchronised to guests, on a dedicated server too), and a `/reload` asks again once; a client that only joins a remote server is never told `ServerDataLoad`. The answer must be the same every time. An unclaimed kind leaves the list empty and the recipe fails.
+- A recipe ingredient of a mod's own kind. The ingredient entry that names a type in a namespace outside minecraft: reaches native_ingredient(context, kind, data, items) at load time. Fill items with the item ids the ingredient matches (item ids only: components are checked by the separate `ingredient_test` hook at match time). Duplicates are removed keeping first-seen order. The hook gets the `DataLoadContext` of the load that parses the recipes and hears each occurrence of the kind once per load, nested ones and ones under any slot a recipe reads an ingredient from included, before the load's tables parse the recipes: the client's own recipe load has `origin()` `ClientPreload`, the server's `ServerDataLoad`. A server loads its recipes once however many tables and copies read them (its recipe tables, the stations and the copy synchronised to guests, on a dedicated server too), and a `/reload` asks again once; a client that only joins a remote server is never told `ServerDataLoad`. The answer must be the same every time. An unclaimed kind leaves the list empty and the recipe fails.
 
 - A frame's two moments, as NeoForge's `RenderFrameEvent.Pre` and `.Post`: `render_frame_pre(host, event)` runs once a frame (in a world or not) after Horizon's extras and just before the frame is rendered, and `render_frame_post` right after it was rendered; both carry the frame's time as `event.elapsed`. They replace the single `frame` hook, which fired at the pre moment: a mod that implemented `frame` implements `render_frame_pre`. Client side; a frame with no listener costs one branch.
 - Items a mod's own recipe type takes in a station slot. `native_recipe_property_sets(context, additions)` is asked once per load, after the recipes are resolved, with the `DataLoadContext` of the load that owns them (`origin()` `ServerDataLoad` on a server, `ClientPreload` on a client's own load), and again after `/reload`. Push one `RecipePropertyAddition::new(set, items)` per set to add to (`minecraft:furnace_input`, `blast_furnace_input`, `smoker_input`, `campfire_input`, `smithing_template`, `smithing_base`, `smithing_addition`, `brewing_input`, `brewing_reagent`); the vanilla recipes' items stay in. The furnace shift-click, the smithing and brewing slots and the set a client is sent read the one answer, so the client predicts what the server accepts. An unknown set key or an item that is air is logged and skipped; an item the registry does not know is ignored. The answer must be the same every time.
@@ -1437,6 +1439,7 @@ registration path.
 
 - `Game::native_mod_image(width, height, rgba)`: a mod's own RGBA image, uploaded into the HUD atlas slot `horizon/modimage` (1024 by 1024) and drawn with `native_sprite`, whose source rectangle crops and stretches it, so a map or a schematic view needs no texture of its own. The slot is reserved only while a native mod is loaded, so a game without mods pays none of its 4 MiB. False for an image that is not `width * height` pixels of four bytes, is larger than the slot, or when there is no slot. Each upload is a texture patch of the image, so send one when the image changed, not every frame.
 - A living entity drowning (`native_living_drown`), with changeable drowning and damage, a read-only bubble count and cancellation.
+- `Game::native_translate(key)`: the selected language's text for a translation key, or `None` when no language layer defines it (`I18n.exists`), so a mod can fall back its own way (a recipe viewer names an item tag by `tag.item.<namespace>.<path>` and falls back to the id). NeoForge: `I18n.exists` and `I18n.get`. Client-side.
 - `Game::native_enchantments()`, `Game::native_enchantment_supports(id, item)` and `Game::native_enchantment_min_cost(id, level)`: every registered enchantment as an `EnchantmentInfo { id, max_level, curse }` record in registry order, whether one can go on an item (`Enchantment.isSupportedItem`), and the power a level needs (`Enchantment.getMinCost`), or `None` for an unknown enchantment. What a recipe viewer lists for grindstone and anvil enchanting. NeoForge: the `enchantment` registry (`RegistryAccess.lookupOrThrow(Registries.ENCHANTMENT)`), `Enchantment.getMaxLevel`, `Enchantment.isSupportedItem`, `Enchantment.getMinCost`, the `minecraft:curse` tag. Client-side.
 - `Game::native_fluid(batch, fluid, [x, y], size)` and `Game::native_fluid_name(fluid)`: a fluid (`minecraft:water`, `mymod:oil`) as a square of `size` GUI pixels, the GUI sprite its look names (`data/<mod>/horizon/fluid/<name>.json`) tinted with its colour, else a flat square of the colour (vanilla water and lava have theirs), and its name as the lang gives it. What a recipe viewer draws for a fluid stack; the slot, the amount and the tooltip are the mod's. NeoForge: `IClientFluidTypeExtensions.getStillTexture` and `getTintColor`. Client-side.
 
@@ -1690,7 +1693,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   not heard, nor is the host of a LAN world's rod. The player's state is swapped in, so `native_acting_player`,
   `native_tell` and the item helpers reach them.
 - **`native_block_dispense_armor(dimension, pos, item, target)`**: a dispenser equipped `item` on the first eligible player, mob or armor stand in front of its block at `pos`. The equip, item consumption, sound and game event have completed; `target` names the kind of entity equipped.
-- **`native_block_exp(dimension, pos, block, experience)`**: a block with a vanilla experience drop is about to award its points at `pos`. Change `experience` before the orbs are awarded.
 - **`native_block_shear_entity(dimension, pos, entity, kind)`**: a dispenser sheared the entity of `kind` and id `entity` at the block in front of the dispenser at `pos`, after applying the shearing effects.
 - **`native_block_receive_game(dimension, pos, block, event, cancel)`**: a sculk sensor, calibrated sensor or shrieker received the vibration `event`. Set `cancel` to suppress its response.
 - **`native_brewing_start(pos, ingredient)`**: a brewing stand at `pos` starts its timer for `ingredient`, after it consumes fuel. Server-side.
@@ -1738,6 +1740,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_entity_change_block(entity, kind, pos, from, to)`**: a mob changed a block, after the new state was applied.
 - **`native_entity_break_door(entity, kind, pos)`**: a mob finished breaking a door at `pos`, after the block was removed.
 - **`native_creeper_power(entity, lightning)`**: a lightning strike charged the creeper.
+- **`native_entity_mob_griefing(entity, can_grief)`**: may `entity` change the world (NeoForge's `EntityMobGriefingEvent`, `EventHooks.canEntityGrief`)? `can_grief` comes in as the `mob_griefing` rule. Horizon asks at each site where NeoForge 26.3 calls `canEntityGrief`, with the same entity: the exploding entity for a mob explosion, the owner for a mob's arrow or small fireball, the wither for its rose, otherwise the mob itself. Where NeoForge keeps the plain rule read (door breaking, the dragon's walls, pitcher crops, weaving, and the explosion's decorations, items and vehicles), the rule decides. The game asks through `Game::can_entity_grief` and the mob AI through `MobWorld::can_grief`. With no listener both read the rule: one `listened` check, no dispatch. A ghast fireball's fire is not placed by Horizon yet, so its `canEntityGrief(owner)` ask is missing with it.
 - **`native_enderman_anger(enderman, player, cancel)`**: `player` stares at `enderman` (NeoForge's `EnderManAngerEvent`, last in `Enderman.isBeingStaredBy`, once the look cone, line of sight and carved pumpkin checks passed). It is asked each time the enderman's goals check the stare: to get angry, to freeze while looked at, and to teleport away up close. Set `cancel` and that stare doesn't count. The mob AI asks through `MobWorld::mob_hooks`, which is set only on the server while a mod listens: with no listener the stare check costs nothing more.
 
   Mob AI asks mods through `MobWorld::mob_hooks`, an `Option<&dyn MobHooks>`: one trait in the client lib, implemented once by the game, whose methods only build the hook's arguments and call its generated `native_*` entry. It is `Some` only on an authoritative server while a mod listens to one of its hooks, and each method is gated by its own hook's `listened`, so adding a method costs nothing to mods that don't listen to it. The hook gets a read `Host` over the game while the mob tick runs: the mobs being ticked and the level's random and attachments are lent to the tick, so through that host every mob's handle reads as gone and level attachments read as none. Use the event's own fields; anything that must write waits for a deferred hook.
@@ -1997,7 +2000,7 @@ place; `native_server_tick` does not define one, so name the dimension and expec
 Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global loot modifiers and Fabric's
 `LootTableEvents.MODIFY` and `MODIFY_DROPS` do. A mod's own loot function and condition kinds are #5451.
 
-- **`horizon_world::loot::native_loot_table_load(context, id, table)`**: each table's JSON as it loads, after the data packs'. `Hooks::loot_table_load` gets the owning load's `&DataLoadContext<'_>` first (see "Items' default components"); its `origin()` is always `ServerDataLoad`, since only the server loads loot tables. Push a pool
+- **`horizon_world::loot::native_loot_table_load(context, id, table)`**: each table's JSON as it loads, after the data packs'. `Hooks::loot_table_load` gets the owning load's `&dyn DataLoadContext` first (see "Items' default components"); its `origin()` is always `ServerDataLoad`, since only the server loads loot tables. Push a pool
   onto `table["pools"]` or an entry onto a pool's `entries`; chests, block and mob drops, fishing and the rest then roll the
   changed table. Keep a replaced table's `random_sequence`: a mob's table without one drops nothing. It runs once per table on
   each server data load and `/reload`, not on client preloads. It is a free function in
@@ -2091,6 +2094,15 @@ handle, an entity the client doesn't track and a level it doesn't show:
   `has_enough_food` and `can_eat`; `abilities` (what the game mode gives, then `ClientboundPlayerAbilities`' flags and
   speeds); `selected_slot` (the hotbar slot held); `experience` (`ClientboundSetExperience`) and
   `xp_needed_for_next_level`. Another player reads `None` there: the client is not sent their state.
+- The local player's open menu: `host.local_player()` then `player.container_menu(host)` makes a `MenuRef` for the menu
+  the client has open (the player's own inventory when none is), and `menu.slot_count(host)`, `slot(host, index)` and
+  `carried(host)` read it as the server's `ClientboundContainerSetSlot` and `SetCursorItem` packets left it. Indexes are
+  the menu's own slot order (the same `slot_backing` names), not network slot ids. Another player's menu is `None`, and
+  so are `container_id` and `kind` on a client (server reads). A slot reads `Some(None)` when empty and the outer `None`
+  when it doesn't exist or the menu is unavailable; a menu type the client has no slot map for reads `None` throughout
+  rather than guessed contents. A handle goes stale, and reads `None`, when its menu is closed or replaced (a reused
+  window id included), on a respawn, a dimension change or a logout, and after a reconnect. Nothing here sends a packet
+  or changes the menu.
 
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
@@ -2678,10 +2690,10 @@ clicks already.
 
 ### The loop context
 
-`LoopContext<'_>` is the read-only view for a hook fired inside a menu, recipe or
+`dyn LoopContext` is the read-only view for a hook fired inside a menu, recipe or
 player-list loop, where no game is at hand (a catalog entry names it with
 `"context": "loop"`; `menu_slot_rules`, `item_stacked_on_other`, `player_name_format`,
-`player_tab_list_name_format`, `living_jump_power`, `living_speed`, `living_flying_speed`, `living_heal`, `living_breathe`, `living_drown`, `living_fall`, `farmland_trample`, `living_jump`, `ender_entity_teleport` and the sound hooks below take it). `side()` is `LoopSide::Server` or
+`player_tab_list_name_format`, `living_jump_power`, `living_speed`, `living_flying_speed`, `living_heal`, `living_breathe`, `living_drown`, `living_fall`, `farmland_trample`, `living_jump`, `ender_entity_teleport`, `ingredient_test` and the sound hooks below take it). `side()` is `LoopSide::Server` or
 `LoopSide::Client`, `registry(name)` borrows names in registry ID order,
 `setting(mod_id, key)` returns a loaded mod's setting captured when the context was
 built, and `mods()` is the `LoadedMods` view of registration. It has no game Host,
@@ -2697,6 +2709,8 @@ displayname)` and `player_tab_list_name_format(context, player, name, display_na
 commands (both sides) and for the Tab list (server). All three are contract version `2`: a mod written for `1` takes the
 context as a new first argument of the `Hooks` method, and reads the side from it instead of `event.side`.
 
+`native_ingredient_test(context, kind, data, stack, accept)` is the match-time half of a mod's own ingredient kind: it runs when recipe matching tests a concrete stack against the kind, with `accept` already true. `context` is the loop context of the side that matches: the server's for the server's crafting grids, furnaces, stations and recipe tables, the client's for the client's own grid prediction, recipe book and ghost recipes. It fires inside recipe matching, so it takes no `Host` (a deferred call would reorder matching). Matching passes the context explicitly from the game or menu environment that holds it; there is no global. A mod reads an ingredient with `Ingredient::test(host, stack)` (`&dyn Host`, as handle reads do): the game answers with its own loop context, a mod never builds one, and the old `test(stack)` is gone. `Ingredient` is plain data. `ingredient` (load, `DataLoadContext`) and `ingredient_test` stay separate hooks and the load path is unchanged. Contract version `2`: a mod written for `1` takes the context as a new first argument of the `Hooks` method. With no listener the cost is one `listened` branch per test; the context is one pointer, with no allocation. Recipe matching tests every slot change on both sides (per tick for a furnace) and on each click.
+
 ### Sound hooks
 
 Four client hooks take the `LoopContext` from the sound engine, which has no game at hand and plays sounds from its own loops:
@@ -2709,12 +2723,13 @@ All four early-out on the mod's subscription before building a `SoundPlay`, so a
 
 ### Items' default components
 
-`Hooks::modify_default_components` receives `&DataLoadContext<'_>` before its
+`Hooks::modify_default_components` receives `&dyn DataLoadContext` before its
 `ModifyDefaultComponentsEvent`. The engine supplies this read-only phase context:
 `origin()` is `DataLoadOrigin::ServerDataLoad` or `ClientPreload`, `registry(name)`
-borrows names in registry ID order, `setting(mod_id, key)` returns a loaded mod's
+gives the names in registry ID order as a shared `Arc<[String]>` (no copy), `setting(mod_id, key)` returns a loaded mod's
 setting captured when the owning context is built (including missing keys), and
-`mods()` borrows the same `LoadedMods` view used during registration. A later owning
+`mods()` gives the same `LoadedMods` view used during registration (shared; cloning it
+copies no package). A later owning
 load captures fresh settings even when it reuses registry inputs; runtime Host
 settings still read live storage. There is no game Host, handle construction or
 transaction. The origin describes the actual owning load, not its thread name or
@@ -2758,3 +2773,11 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 ## Minecart pass
 
 - **`BlockPart::minecart_pass(host, event)`** (`MinecartPassEvent { state, pos, entity }`): a minecart passed over a rail block state the Part is attached to, at the moment vanilla calls `activateMinecart` for an activator rail, here for every rail. It is the Part form of Forge's `IBaseRailExtension.onMinecartPass`, which NeoForge 26.3 no longer has, so there is no global hook. With the old minecart physics it fires once per tick the cart is on a rail; with `minecart_improvements` once per track iteration, so a fast cart can pass several times in a tick. It is recorded during the cart's step and delivered after the cart's batch has ticked, through the same drain as `entity_inside`, with a `&mut dyn ServerHost`, so a write the part makes (a velocity change through `EntityRef`) lands on the stored cart. A pass whose cart is gone or whose rail changed is dropped. Only a rail state a Part listens for is recorded: with no such Part, one `block_listens` test per rail step. Beyond NeoForge; Diverges from upstream: new hook.
+
+## Combat hook ownership
+
+The six combat hooks (`living_incoming_damage`, `damage_pre`, `damage_post`, `living_knockback`, `living_use_totem`, `living_shield_block`) are lent to each hit by the game that runs it, not installed once per process. A mod sees no difference: order, arguments and cancel rules are unchanged.
+
+## Block drops
+
+- **`block_drops(level, dimension, pos, state, breaker, tool, drops, experience, cancel)`** (NeoForge's `BlockDropsEvent`): `Block.dropResources` built the item entities for a broken block and nothing has spawned yet. Edit `drops` (`NativeItemDrop`: stack, position, velocity, pickup delay) or `experience`, or set `cancel` for no drops, no experience and no `spawnAfterBreak` effects (an infested block's silverfish; a bee nest's bees are `playerDestroy`'s and still come out). `breaker` is the player's UUID, none for a level-side break; `tool` is their stack. It fires on the player's break and on every level-side `Block.dropResources`. Positions and motions are drawn before the event, in vanilla's order, listener or not, and the list is the one that spawns, so a mod that leaves it alone changes nothing. It runs inside a level write, so it gets the level host: reads and the level's random, no writes. Not fired for explosion drops, mob block breaks, dispensers or other loot-table drops; a level-side break is not asked `loot_drops`. Tick-time effect: none beyond one `listened` branch with no listeners. Beyond NeoForge: level-side breaks fire it too. Diverges from upstream: `block_exp` is removed into `experience` (its catalog row named no NeoForge event).

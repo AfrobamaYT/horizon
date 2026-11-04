@@ -253,9 +253,10 @@ fn pickup_instead_of_push(species: Species, is_passenger: bool, cart_is_vehicle:
     !cart_is_vehicle && !is_passenger && species != Species::IronGolem
 }
 
-/// `Entity.canRide` for a cart: the boarding cooldown, and a warden never rides.
+/// `Entity.canRide` for a cart: the boarding cooldown, and a warden or the
+/// wither never rides (`canRide` false).
 fn can_ride_cart(species: Species, boarding_cooldown: i32) -> bool {
-    boarding_cooldown <= 0 && species != Species::Warden
+    boarding_cooldown <= 0 && !matches!(species, Species::Warden | Species::Wither)
 }
 
 /// `Entity.positionRider` on an `AbstractMinecart`: passenger attachment less
@@ -2873,9 +2874,9 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_furnace_cart_is_capped_at_half_the_rule_speed_under_the_new_physics() {
         super::super::native_entity_refs::tests::with_game(|game| {
-            game.level
-                .enabled_features
-                .push("minecraft:minecart_improvements".into());
+            let mut features = game.level.enabled_features.to_vec();
+            features.push("minecraft:minecart_improvements".into());
+            game.level.enabled_features = features.into();
             game.ui.rules =
                 horizon_client::gamerules::GameRules::with_features(&game.level.enabled_features);
             let rule = f64::from(game.ui.rules.int("max_minecart_speed")) / 20.0;
@@ -3136,6 +3137,12 @@ mod tests {
         assert!(!pickup_instead_of_push(Species::Cow, true, false));
         assert!(!can_ride_cart(Species::Cow, 60));
         assert!(!can_ride_cart(Species::Warden, 0));
+    }
+
+    /// `WitherBoss.canRide` returns false, so a moving cart cannot scoop the boss up.
+    #[test]
+    fn a_wither_never_rides_a_cart() {
+        assert!(!can_ride_cart(Species::Wither, 0));
     }
 
     #[test]

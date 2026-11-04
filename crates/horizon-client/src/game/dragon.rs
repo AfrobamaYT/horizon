@@ -657,7 +657,8 @@ impl Dragon {
         if damage > 0.0 {
             let hurting = horizon_client::health::Hurting::Dragon(self.id as i32, source);
             let block = horizon_client::health::no_block(damage);
-            let blocked = horizon_client::health::shield_block(hurting, damage, block)
+            let blocked = level
+                .shield_block(hurting, damage, block)
                 .map_or(0.0, |b| b.blocked_damage);
             damage -= blocked;
             container.record_block(blocked);
@@ -2446,7 +2447,7 @@ impl Game<'_> {
             }
         }
         // LivingDestroyBlockEvent: a block a mod keeps is still in the wall.
-        if !mod_api::mods().is_empty() {
+        if !mod_api::__private::mods().is_empty() {
             removed.retain(|p| {
                 let kept = !self.may_destroy(dragon_id, "minecraft:ender_dragon", *p);
                 in_wall |= kept;
@@ -4878,10 +4879,9 @@ mod tests {
     }
     /// Sets the native damage hook of these tests: it records the dragon
     /// hits of entities 9001 to 9005, cancels 9001's, doubles 9002's, makes
-    /// 9003's -5 and 9004's NaN. `HURT_SERVER` is global, so it stays set for
-    /// every test of the process; the other tests' dragons are entity 0.
-    fn set_hook() {
-        use horizon_client::health::{DamageContainer, DamageLevel, HURT_SERVER, Hurting, Victim};
+    /// 9003's -5 and 9004's NaN. The other tests' dragons are entity 0.
+    fn hooks() -> horizon_client::health::DamageHooks {
+        use horizon_client::health::{DamageContainer, DamageHooks, DamageLevel, Hurting, Victim};
         fn hook(
             _: DamageLevel<'_>,
             hurting: Hurting<'_>,
@@ -4902,13 +4902,10 @@ mod tests {
             }
             entity == 9001
         }
-        type Hook = fn(DamageLevel<'_>, Hurting<'_>, Victim, &mut DamageContainer) -> bool;
-        let installed = *HURT_SERVER.get_or_init(|| hook);
-        let ours: Hook = hook;
-        assert!(
-            std::ptr::fn_addr_eq(installed, ours),
-            "another native damage hook is set"
-        );
+        DamageHooks {
+            incoming: Some(hook),
+            ..DamageHooks::NONE
+        }
     }
     fn dragon_as(entity: u32) -> Dragon {
         let mut d = dragon(flying());
@@ -4918,9 +4915,8 @@ mod tests {
 
     #[test]
     fn the_native_damage_hook_changes_or_cancels_a_dragons_hit() {
-        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut test_level = horizon_client::health::TestLevel::with_hooks(0, hooks());
         let level = &mut test_level.level();
-        set_hook();
         // EnderDragon.hurt returns true whatever reallyHurt did. A canceled
         // hit takes no health, starts no cooldown and isn't full: what
         // hurt_dragon_part reads to credit the player and play the hurt sound.

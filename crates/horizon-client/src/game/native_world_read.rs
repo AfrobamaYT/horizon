@@ -237,8 +237,8 @@ mod tests {
             assert_eq!(iron.ingredients.len(), 1);
             assert!(iron.ingredients[0].items.contains("minecraft:raw_iron"));
             assert_eq!(iron.results[0].item.as_ref(), "minecraft:iron_ingot");
-            let bucket = game
-                .native_recipes_of_type("minecraft:crafting_shaped")
+            let shaped = game.native_recipes_of_type("minecraft:crafting_shaped");
+            let bucket = shaped
                 .iter()
                 .find(|recipe| recipe.id == "minecraft:bucket")
                 .expect("vanilla's bucket recipe");
@@ -468,6 +468,7 @@ mod tests {
                         game.pack.assets.registry,
                         Some(world_items!(game)),
                         Some(&game.pack.block_registries),
+                        &game.damage_hooks,
                     ));
                 assert_eq!(
                     hit.block_state_id("minecraft:oak_slab[waterlogged=true]"),
@@ -501,6 +502,7 @@ mod tests {
                         game.pack.assets.registry,
                         None,
                         None,
+                        &game.damage_hooks,
                     ));
                 assert_eq!(hit.block_state_id("minecraft:stone"), None);
                 assert_eq!(hit.block_state_default("minecraft:stone"), None);

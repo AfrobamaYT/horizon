@@ -45,6 +45,11 @@
       "name": "level_random", "side": "server",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_level_random",
       "receiver": "level"
+    },
+    {
+      "name": "level_set_random", "side": "server",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_level_set_random",
+      "receiver": "level"
     }
   ]
 }

@@ -2,9 +2,9 @@
 //! answer a capability, such as [`ENTITY_ITEMS`], beside the game's own (NeoForge's
 //! `Capabilities.Item.ENTITY`). A player's inventory is the game's own answer for a player.
 use super::{
-    Capability, ComponentId, Direction, EnergyHandler, EntityProvider, EntityRef, FluidResource,
-    Host, ItemPlace, ItemResource, PREVENT_ARMOR_CHANGE, ProvidedBy, ResourceHandler, ServerHost,
-    Tag, Transaction, backend_of,
+    Capability, ComponentId, Direction, EnergyHandler, EntityRef, FluidResource, Host, ItemPlace,
+    ItemResource, PREVENT_ARMOR_CHANGE, ProvidedBy, ResourceHandler, ServerHost, Tag, Transaction,
+    backend_of,
 };
 use std::marker::PhantomData;
 
@@ -96,12 +96,17 @@ impl EntityRef {
             return None;
         }
         let mut game = None;
-        let parts = super::providers(ProvidedBy::Entity, key.name, host, |host| self.kind(host));
+        let table = host.capability_providers();
+        let kind = table
+            .provided(ProvidedBy::Entity, key.name)
+            .then(|| self.kind(host))
+            .flatten();
         super::answered(
-            super::ask_providers::<EntityProvider<T, C>, T>(
-                parts,
+            super::ask_providers(
                 host,
-                |provider, host| provider(host, self, context),
+                |index| table.entity_provider(key.name, kind.as_deref()?, index),
+                super::EntityProviderOf::get::<T, C>,
+                |provider, host| provider.provide(host, self, context),
                 |host| {
                     game = key.default.and_then(|default| default(host, self, context));
                     game.is_some()

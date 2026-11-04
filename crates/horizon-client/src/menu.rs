@@ -17,6 +17,7 @@ use crate::{
 #[cfg(test)]
 use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
 use horizon_world::native_load_context::{LoopContext, LoopSide};
+use mod_api::__private::game::IngredientTest;
 pub use mod_api::menu::{
     AnvilCraft, AnvilUpdate, AnvilVanilla, CarriedAccess, GrindstonePlace, GrindstoneTake,
     LogicalSide, MenuButtonContext, SlotView, StackedOnOther,
@@ -1034,7 +1035,7 @@ impl Menu {
     fn crafter_result(&mut self, env: &Env) {
         self.containers[RESULT][0] = env
             .recipes
-            .find(&self.containers[MAIN], 3)
+            .find(env.loop_context, &self.containers[MAIN], 3)
             .map(|(_, stack)| stack)
             .filter(|s| s.count > 0);
     }
@@ -1119,7 +1120,7 @@ impl Menu {
                 .stonecutting
                 .iter()
                 .enumerate()
-                .filter(|(_, r)| r.input.test(stack))
+                .filter(|(_, r)| r.input.test_in(env.loop_context, stack))
                 .map(|(i, _)| i)
                 .collect(),
             None => Vec::new(),
@@ -1410,9 +1411,9 @@ impl Menu {
     /// `SmithingMenu.createResult`.
     fn smith_result(&mut self, env: &Env) {
         let [a, b, c] = [0, 1, 2].map(|i| self.containers[MAIN][i].as_ref());
-        self.containers[RESULT][0] = env
-            .station_recipes
-            .smithing_result(env.enchantments, a, b, c);
+        self.containers[RESULT][0] =
+            env.station_recipes
+                .smithing_result(env.loop_context, env.enchantments, a, b, c);
     }
 
     /// `SmithingMenu.slotsChanged`'s `hasRecipeError`: every input filled and no result.
@@ -1608,7 +1609,9 @@ impl Menu {
             Role::LoomDye => env.banners.loom_dye(env.items, stack).is_some(),
             Role::LoomPattern => env.banners.is_pattern_item(env.items, stack),
             Role::GrindInput => crate::stations::grindstone_accepts(env.items, stack),
-            Role::SmithInput(i) => env.station_recipes.smithing_accepts(i, stack),
+            Role::SmithInput(i) => env
+                .station_recipes
+                .smithing_accepts(env.loop_context, i, stack),
             Role::EnchantItem => true,
             Role::Lapis => &*stack.item == "minecraft:lapis_lazuli",
             Role::BeaconPay => env
@@ -1957,7 +1960,7 @@ impl Menu {
         }
         let result = env
             .recipes
-            .find(&self.containers[GRID], self.grid_size)
+            .find(env.loop_context, &self.containers[GRID], self.grid_size)
             .and_then(|(id, stack)| {
                 if env.limited_crafting {
                     // `RecipeCraftingHolder.setRecipeUsed`: special recipes or known recipes craft.
@@ -2067,6 +2070,7 @@ impl Menu {
                     self.item_smithed.push((inputs.clone(), taken.clone()));
                 }
                 if let Some((id, _)) = env.station_recipes.smithing_recipe(
+                    env.loop_context,
                     env.enchantments,
                     inputs[0].as_ref(),
                     inputs[1].as_ref(),
@@ -2115,14 +2119,14 @@ impl Menu {
         }
         let n = self.grid_size;
         let grid = self.containers[GRID].clone();
-        if let Some((id, _)) = env.recipes.find(&grid, n) {
+        if let Some((id, _)) = env.recipes.find(env.loop_context, &grid, n) {
             self.crafted.push((format!("minecraft:{id}"), grid.clone()));
             self.item_crafted
                 .push((format!("minecraft:{id}"), taken.clone()));
         }
         let remaining = env
             .recipes
-            .find(&grid, n)
+            .find(env.loop_context, &grid, n)
             .map(|(id, _)| env.recipes.remainders(id, &grid, n))
             .unwrap_or_else(|| {
                 // CraftingRecipe.defaultCraftingReminder
@@ -2578,7 +2582,7 @@ impl Menu {
                     .station_recipes
                     .stonecutting
                     .iter()
-                    .any(|r| r.input.test(&stack))
+                    .any(|r| r.input.test_in(env.loop_context, &stack))
                 {
                     if !self.move_to(env, &mut stack, 0, 1, false) {
                         return None;
@@ -2743,7 +2747,9 @@ impl Menu {
                 let into_inputs = self.kind == Kind::Anvil
                     || (0..3).any(|i| {
                         self.containers[MAIN][i].is_none()
-                            && env.station_recipes.smithing_accepts(i, &stack)
+                            && env
+                                .station_recipes
+                                .smithing_accepts(env.loop_context, i, &stack)
                     });
                 if index == result {
                     if !self.move_to(env, &mut stack, start, end, true) {
@@ -2814,9 +2820,11 @@ impl Menu {
                         self.furnace_take(env, &clicked);
                     }
                 } else if index != 1 && index != 0 {
-                    let smelts = env
-                        .recipes
-                        .cooking_accepts(&format!("minecraft:{recipe}"), &stack);
+                    let smelts = env.recipes.cooking_accepts(
+                        env.loop_context,
+                        &format!("minecraft:{recipe}"),
+                        &stack,
+                    );
                     if smelts {
                         if !self.move_to(env, &mut stack, 0, 1, false) {
                             return None;
@@ -3703,7 +3711,7 @@ pub(crate) mod tests {
     impl mod_api::Hooks for AppleSets {
         fn recipe_property_sets(
             &self,
-            _: &mod_api::DataLoadContext<'_>,
+            _: &dyn mod_api::DataLoadContext,
             event: &mut mod_api::RecipePropertySetsEvent<'_>,
         ) {
             for set in ["furnace_input", "brewing_reagent", "smithing_addition"] {
@@ -3740,7 +3748,11 @@ pub(crate) mod tests {
                     &crate::test_resources::server_load(),
                 );
                 assert_eq!(stations.brewing.is_reagent(&apple), added);
-                assert_eq!(env.station_recipes.smithing_accepts(2, &apple), added);
+                assert_eq!(
+                    env.station_recipes
+                        .smithing_accepts(env.loop_context, 2, &apple),
+                    added
+                );
                 // Vanilla's own entries stay.
                 assert!(
                     stations

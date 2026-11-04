@@ -453,7 +453,7 @@ impl SpawnLevel for GameLevel<'_, '_> {
 }
 impl NaturalLevel for GameLevel<'_, '_> {
     fn spawn_hooks(&self) -> bool {
-        !mod_api::mods().is_empty()
+        !mod_api::__private::mods().is_empty()
     }
     fn potential_spawns(&self, category: Category, pos: [i32; 3], entries: &mut Vec<SpawnEntry>) {
         let mut canceled = false;

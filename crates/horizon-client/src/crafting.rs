@@ -10,7 +10,9 @@ use crate::{
     particles::{DYE_FIREWORK_COLORS, FireworkExplosion, FireworkShape},
 };
 use horizon_world::loot::PackOverlay;
+use horizon_world::native_load_context::LoopContext;
 use horizon_world::nbt::Tag;
+use mod_api::__private::game::IngredientTest;
 pub use mod_api::crafting::{Ingredient, Shape, native_ingredient, native_ingredient_test};
 use serde_json::Value;
 use std::{
@@ -453,6 +455,7 @@ struct Facts {
 /// The tables recipes consult.
 pub struct Context<'a> {
     recipes: &'a Recipes,
+    context: &'a LoopContext,
     /// A filled map's scale, when its data is known.
     pub map_scale: &'a dyn Fn(i32) -> Option<u8>,
 }
@@ -481,7 +484,9 @@ impl Special {
                 let mut color = None;
                 let (mut target, mut source) = (false, false);
                 for s in &stacks {
-                    let Some(this) = banner::banner_color(&s.item).filter(|_| ing.test(s)) else {
+                    let Some(this) =
+                        banner::banner_color(&s.item).filter(|_| ing.test_in(ctx.context, s))
+                    else {
                         return false;
                     };
                     match color {
@@ -511,13 +516,13 @@ impl Special {
                 }
                 let (mut patterned, mut clear) = (false, false);
                 for s in &stacks {
-                    if ing.test(s) && banner::banner_color(&s.item).is_some() {
+                    if ing.test_in(ctx.context, s) && banner::banner_color(&s.item).is_some() {
                         if patterned {
                             return false;
                         }
                         patterned = true;
                     } else {
-                        if !tgt.test(s) || clear || !banner::layers(s).is_empty() {
+                        if !tgt.test_in(ctx.context, s) || clear || !banner::layers(s).is_empty() {
                             return false;
                         }
                         clear = true;
@@ -540,13 +545,13 @@ impl Special {
                 let mut found: Option<&ItemStack> = None;
                 let mut materials = 0;
                 for s in &stacks {
-                    if base.test(s) {
+                    if base.test_in(ctx.context, s) {
                         if found.is_some() {
                             return false;
                         }
                         found = Some(s);
                     } else {
-                        if !material.test(s) {
+                        if !material.test_in(ctx.context, s) {
                             return false;
                         }
                         materials += 1;
@@ -578,13 +583,13 @@ impl Special {
                 }
                 let (mut has_target, mut has_dyes) = (false, false);
                 for s in &stacks {
-                    if target.test(s) {
+                    if target.test_in(ctx.context, s) {
                         if has_target {
                             return false;
                         }
                         has_target = true;
                     } else {
-                        if !dye.test(s) || ctx.dye(s).is_none() {
+                        if !dye.test_in(ctx.context, s) || ctx.dye(s).is_none() {
                             return false;
                         }
                         has_dyes = true;
@@ -601,7 +606,7 @@ impl Special {
                 (0..3).all(|y| {
                     (0..3).all(|x| {
                         let ing = if x == 1 && y == 1 { source } else { material };
-                        input.get(x, y).is_some_and(|s| ing.test(s))
+                        input.get(x, y).is_some_and(|s| ing.test_in(ctx.context, s))
                     })
                 })
             }
@@ -617,7 +622,7 @@ impl Special {
                 }
                 let (mut has_material, mut has_source) = (false, false);
                 for s in &stacks {
-                    if source.test(s) {
+                    if source.test_in(ctx.context, s) {
                         let Some(book) = s.data().and_then(|d| d.written.as_ref()) else {
                             return false;
                         };
@@ -627,7 +632,7 @@ impl Special {
                         }
                         has_source = true;
                     } else {
-                        if !material.test(s) {
+                        if !material.test_in(ctx.context, s) {
                             return false;
                         }
                         has_material = true;
@@ -644,17 +649,17 @@ impl Special {
                 let mut has_shell = false;
                 let mut fuels = 0;
                 for s in &stacks {
-                    if shell.test(s) {
+                    if shell.test_in(ctx.context, s) {
                         if has_shell {
                             return false;
                         }
                         has_shell = true;
-                    } else if fuel.test(s) {
+                    } else if fuel.test_in(ctx.context, s) {
                         fuels += 1;
                         if fuels > 3 {
                             return false;
                         }
-                    } else if !star.test(s) {
+                    } else if !star.test_in(ctx.context, s) {
                         return false;
                     }
                 }
@@ -674,25 +679,25 @@ impl Special {
                 let (mut has_fuel, mut has_dye, mut has_shape) = (false, false, false);
                 let (mut has_trail, mut has_twinkle) = (false, false);
                 for s in &stacks {
-                    if twinkle.test(s) {
+                    if twinkle.test_in(ctx.context, s) {
                         if has_twinkle {
                             return false;
                         }
                         has_twinkle = true;
-                    } else if trail.test(s) {
+                    } else if trail.test_in(ctx.context, s) {
                         if has_trail {
                             return false;
                         }
                         has_trail = true;
-                    } else if fuel.test(s) {
+                    } else if fuel.test_in(ctx.context, s) {
                         if has_fuel {
                             return false;
                         }
                         has_fuel = true;
-                    } else if dye.test(s) && ctx.dye(s).is_some() {
+                    } else if dye.test_in(ctx.context, s) && ctx.dye(s).is_some() {
                         has_dye = true;
                     } else {
-                        if !shapes.iter().any(|(_, ing)| ing.test(s)) || has_shape {
+                        if !shapes.iter().any(|(_, ing)| ing.test_in(ctx.context, s)) || has_shape {
                             return false;
                         }
                         has_shape = true;
@@ -706,10 +711,10 @@ impl Special {
                 }
                 let (mut has_dye, mut has_target) = (false, false);
                 for s in &stacks {
-                    if dye.test(s) && ctx.dye(s).is_some() {
+                    if dye.test_in(ctx.context, s) && ctx.dye(s).is_some() {
                         has_dye = true;
                     } else {
-                        if !target.test(s) || has_target {
+                        if !target.test_in(ctx.context, s) || has_target {
                             return false;
                         }
                         has_target = true;
@@ -724,7 +729,7 @@ impl Special {
                 let ring = (0..3).all(|y| {
                     (0..3).all(|x| {
                         let ing = if x == 1 && y == 1 { map } else { material };
-                        input.get(x, y).is_some_and(|s| ing.test(s))
+                        input.get(x, y).is_some_and(|s| ing.test_in(ctx.context, s))
                     })
                 });
                 if !ring {
@@ -746,10 +751,18 @@ impl Special {
                 input.width == 3
                     && input.height == 3
                     && stacks.len() == 4
-                    && input.get(1, 0).is_some_and(|s| back.test(s))
-                    && input.get(0, 1).is_some_and(|s| left.test(s))
-                    && input.get(2, 1).is_some_and(|s| right.test(s))
-                    && input.get(1, 2).is_some_and(|s| front.test(s))
+                    && input
+                        .get(1, 0)
+                        .is_some_and(|s| back.test_in(ctx.context, s))
+                    && input
+                        .get(0, 1)
+                        .is_some_and(|s| left.test_in(ctx.context, s))
+                    && input
+                        .get(2, 1)
+                        .is_some_and(|s| right.test_in(ctx.context, s))
+                    && input
+                        .get(1, 2)
+                        .is_some_and(|s| front.test_in(ctx.context, s))
             }
             Self::RepairItem => Self::repair_pair(ctx, &stacks).is_some(),
         }
@@ -793,9 +806,9 @@ impl Special {
             } => {
                 let (mut banner_stack, mut shield) = (None, None);
                 for s in &stacks {
-                    if ing.test(s) && banner::banner_color(&s.item).is_some() {
+                    if ing.test_in(ctx.context, s) && banner::banner_color(&s.item).is_some() {
                         banner_stack = Some(*s);
-                    } else if target.test(s) {
+                    } else if target.test_in(ctx.context, s) {
                         shield = Some(*s);
                     }
                 }
@@ -821,15 +834,15 @@ impl Special {
                     let mut materials = 0;
                     let mut found = None;
                     for s in &stacks {
-                        if base.test(s) {
+                        if base.test_in(ctx.context, s) {
                             found = Some(*s);
-                        } else if material.test(s) {
+                        } else if material.test_in(ctx.context, s) {
                             materials += 1;
                         }
                     }
                     result.over(found?, materials)
                 } else {
-                    let s = stacks.iter().find(|s| base.test(s))?;
+                    let s = stacks.iter().find(|s| base.test_in(ctx.context, s))?;
                     result.over(s, 0)
                 }
             }
@@ -841,13 +854,13 @@ impl Special {
                 let mut dyes = Vec::new();
                 let mut target_stack: Option<&ItemStack> = None;
                 for s in &stacks {
-                    if target.test(s) {
+                    if target.test_in(ctx.context, s) {
                         if target_stack.is_some() {
                             return None;
                         }
                         target_stack = Some(s);
                     } else {
-                        if !dye.test(s) {
+                        if !dye.test_in(ctx.context, s) {
                             return None;
                         }
                         // getOrDefault(DYE, WHITE)
@@ -878,13 +891,15 @@ impl Special {
                 let mut copies = 0u32;
                 let mut book: Option<&ItemStack> = None;
                 for s in &stacks {
-                    if source.test(s) && s.data().is_some_and(|d| d.written.is_some()) {
+                    if source.test_in(ctx.context, s)
+                        && s.data().is_some_and(|d| d.written.is_some())
+                    {
                         if book.is_some() {
                             return None;
                         }
                         book = Some(s);
                     } else {
-                        if !material.test(s) {
+                        if !material.test_in(ctx.context, s) {
                             return None;
                         }
                         copies += 1;
@@ -904,9 +919,9 @@ impl Special {
                 let mut explosions = Vec::new();
                 let mut fuels = 0u8;
                 for s in &stacks {
-                    if fuel.test(s) {
+                    if fuel.test_in(ctx.context, s) {
                         fuels += 1;
-                    } else if star.test(s)
+                    } else if star.test_in(ctx.context, s)
                         && let Some(e) = s.data().and_then(|d| d.firework_explosion.clone())
                     {
                         explosions.push(e);
@@ -931,13 +946,15 @@ impl Special {
                 let (mut has_twinkle, mut has_trail) = (false, false);
                 let mut colors = Vec::new();
                 for s in &stacks {
-                    if let Some((found, _)) = shapes.iter().find(|(_, ing)| ing.test(s)) {
+                    if let Some((found, _)) =
+                        shapes.iter().find(|(_, ing)| ing.test_in(ctx.context, s))
+                    {
                         shape = *found;
-                    } else if twinkle.test(s) {
+                    } else if twinkle.test_in(ctx.context, s) {
                         has_twinkle = true;
-                    } else if trail.test(s) {
+                    } else if trail.test_in(ctx.context, s) {
                         has_trail = true;
-                    } else if dye.test(s) {
+                    } else if dye.test_in(ctx.context, s) {
                         colors.push(DYE_FIREWORK_COLORS[ctx.dye(s).unwrap_or(0)].1);
                     }
                 }
@@ -959,9 +976,9 @@ impl Special {
                 let mut colors = Vec::new();
                 let mut target_stack = None;
                 for s in &stacks {
-                    if dye.test(s) {
+                    if dye.test_in(ctx.context, s) {
                         colors.push(DYE_FIREWORK_COLORS[ctx.dye(s).unwrap_or(0)].1);
-                    } else if target.test(s) {
+                    } else if target.test_in(ctx.context, s) {
                         target_stack = Some(*s);
                     }
                 }
@@ -1117,7 +1134,7 @@ pub struct Recipes {
     pub cooking: Vec<Cooking>,
     /// Every effective recipe's file, by recipe type (`minecraft:smelting`,
     /// `mymod:crusher`), in file order: data packs merged, load conditions held.
-    pub by_type: HashMap<String, Vec<mod_api::Recipe>>,
+    pub by_type: HashMap<String, std::sync::Arc<[mod_api::Recipe]>>,
     /// `category` and `group` of each crafting recipe, by file name.
     pub meta: HashMap<String, (String, String)>,
     facts: HashMap<Arc<str>, Facts>,
@@ -1169,8 +1186,9 @@ fn shrink(pattern: &[Vec<char>]) -> Vec<Vec<char>> {
     }
 }
 /// A perfect matching of the ingredients to distinct stacks (`StackedContents.canCraft`).
-fn matches_all(ingredients: &[Ingredient], stacks: &[&ItemStack]) -> bool {
+fn matches_all(context: &LoopContext, ingredients: &[Ingredient], stacks: &[&ItemStack]) -> bool {
     fn augment(
+        context: &LoopContext,
         i: usize,
         ingredients: &[Ingredient],
         stacks: &[&ItemStack],
@@ -1178,11 +1196,11 @@ fn matches_all(ingredients: &[Ingredient], stacks: &[&ItemStack]) -> bool {
         seen: &mut [bool],
     ) -> bool {
         for s in 0..stacks.len() {
-            if seen[s] || !ingredients[i].test(stacks[s]) {
+            if seen[s] || !ingredients[i].test_in(context, stacks[s]) {
                 continue;
             }
             seen[s] = true;
-            if owner[s].is_none_or(|o| augment(o, ingredients, stacks, owner, seen)) {
+            if owner[s].is_none_or(|o| augment(context, o, ingredients, stacks, owner, seen)) {
                 owner[s] = Some(i);
                 return true;
             }
@@ -1195,7 +1213,7 @@ fn matches_all(ingredients: &[Ingredient], stacks: &[&ItemStack]) -> bool {
     let mut owner = vec![None; stacks.len()];
     (0..ingredients.len()).all(|i| {
         let mut seen = vec![false; stacks.len()];
-        augment(i, ingredients, stacks, &mut owner, &mut seen)
+        augment(context, i, ingredients, stacks, &mut owner, &mut seen)
     })
 }
 pub use horizon_items::recipe_sources::qualified;
@@ -1702,7 +1720,10 @@ impl Recipes {
         Ok(Self {
             crafting,
             cooking,
-            by_type,
+            by_type: by_type
+                .into_iter()
+                .map(|(kind, files)| (kind, files.into()))
+                .collect(),
             meta,
             facts,
             curses,
@@ -1711,17 +1732,28 @@ impl Recipes {
         })
     }
     /// Match a `size`x`size` grid (row-major) against the crafting recipes.
-    pub fn craft(&self, grid: &[Option<ItemStack>], size: usize) -> Option<ItemStack> {
-        self.find(grid, size).map(|(_, result)| result)
+    pub fn craft(
+        &self,
+        context: &LoopContext,
+        grid: &[Option<ItemStack>],
+        size: usize,
+    ) -> Option<ItemStack> {
+        self.find(context, grid, size).map(|(_, result)| result)
     }
     /// `craft` with the matched recipe's id (the file name without namespace).
-    pub fn find(&self, grid: &[Option<ItemStack>], size: usize) -> Option<(&str, ItemStack)> {
-        self.find_with(grid, size, &|_| None)
+    pub fn find(
+        &self,
+        context: &LoopContext,
+        grid: &[Option<ItemStack>],
+        size: usize,
+    ) -> Option<(&str, ItemStack)> {
+        self.find_with(context, grid, size, &|_| None)
     }
     /// `RecipeManager.getRecipeFor(CRAFTING, ...)` with a lookup for the scale
     /// of a filled map (map extending reads the map's saved data).
     pub fn find_with(
         &self,
+        context: &LoopContext,
         grid: &[Option<ItemStack>],
         size: usize,
         map_scale: &dyn Fn(i32) -> Option<u8>,
@@ -1729,6 +1761,7 @@ impl Recipes {
         let input = Input::of(grid, size)?;
         let ctx = Context {
             recipes: self,
+            context,
             map_scale,
         };
         for (name, recipe) in &self.crafting {
@@ -1767,7 +1800,7 @@ impl Recipes {
                             let rx = if mirror { width - 1 - x } else { x };
                             match (&cells[y * width + rx], input.get(x, y)) {
                                 (None, None) => true,
-                                (Some(i), Some(s)) => i.test(s),
+                                (Some(i), Some(s)) => i.test_in(ctx.context, s),
                                 _ => false,
                             }
                         })
@@ -1778,12 +1811,19 @@ impl Recipes {
             Recipe::Shapeless {
                 ingredients,
                 result,
-            } => matches_all(ingredients, &input.stacks()).then(|| Some(result.create())),
+            } => matches_all(ctx.context, ingredients, &input.stacks())
+                .then(|| Some(result.create())),
         }
     }
     /// `recipe.matches(craftSlots.asCraftInput())` for one recipe by id
     /// (`minecraft:name`).
-    pub fn recipe_matches(&self, id: &str, grid: &[Option<ItemStack>], size: usize) -> bool {
+    pub fn recipe_matches(
+        &self,
+        context: &LoopContext,
+        id: &str,
+        grid: &[Option<ItemStack>],
+        size: usize,
+    ) -> bool {
         let name = id.trim_start_matches("minecraft:");
         let Some((_, recipe)) = self.crafting.iter().find(|(n, _)| n == name) else {
             return false;
@@ -1793,6 +1833,7 @@ impl Recipes {
         };
         let ctx = Context {
             recipes: self,
+            context,
             map_scale: &|_| None,
         };
         Self::assemble_if_matches(&ctx, &input, recipe).is_some()
@@ -1902,7 +1943,7 @@ impl Recipes {
             .find(|c| c.id == id)
             .map_or(0.0, |c| c.experience)
     }
-    pub fn cook(&self, kind: &str, input: &ItemStack) -> Option<&Cooking> {
+    pub fn cook(&self, context: &LoopContext, kind: &str, input: &ItemStack) -> Option<&Cooking> {
         // Every recipe an item names, not just the first: a mod's match-time
         // hook may refuse the one the first recipe would take (`Ingredient::test`).
         let index = self.cook_index.get_or_init(|| {
@@ -1915,11 +1956,11 @@ impl Recipes {
             }
             index
         });
-        index
-            .get(kind)?
-            .get(&*input.item)?
-            .iter()
-            .find_map(|i| self.cooking.get(*i).filter(|c| c.ingredient.test(input)))
+        index.get(kind)?.get(&*input.item)?.iter().find_map(|i| {
+            self.cooking
+                .get(*i)
+                .filter(|c| c.ingredient.test_in(context, input))
+        })
     }
     /// What mods added to the property set `key` (`furnace_input`).
     pub fn property_set(&self, key: &str) -> Option<&HashSet<String>> {
@@ -1928,8 +1969,8 @@ impl Recipes {
     /// Whether a furnace of recipe type `kind` (`minecraft:smelting`) takes
     /// `input` (`RecipePropertySet.test`): a recipe of that type names it, or
     /// a mod added it to the kind's input set.
-    pub fn cooking_accepts(&self, kind: &str, input: &ItemStack) -> bool {
-        self.cook(kind, input).is_some()
+    pub fn cooking_accepts(&self, context: &LoopContext, kind: &str, input: &ItemStack) -> bool {
+        self.cook(context, kind, input).is_some()
             || crate::lan::recipes::PROPERTY_SETS
                 .iter()
                 .any(|(set, recipe_type, _)| {
@@ -1938,15 +1979,18 @@ impl Recipes {
     }
     /// `cook` by scanning every recipe, as it was before the index.
     #[cfg(test)]
-    fn cook_scan(&self, kind: &str, input: &ItemStack) -> Option<&Cooking> {
+    fn cook_scan(&self, context: &LoopContext, kind: &str, input: &ItemStack) -> Option<&Cooking> {
         self.cooking
             .iter()
-            .find(|c| c.kind == kind && c.ingredient.test(input))
+            .find(|c| c.kind == kind && c.ingredient.test_in(context, input))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    fn lc() -> &'static LoopContext {
+        crate::test_resources::server_loop_context()
+    }
     use super::*;
     use crate::banner::BannerLayer;
     use std::fs;
@@ -2096,19 +2140,19 @@ mod tests {
             r#"{"type":"neoforge:compound","children":["minecraft:oak_planks","minecraft:birch_planks"]}"#,
         );
         assert!(compound.children.is_some(), "the children stay with it");
-        assert!(compound.test(&stack("minecraft:oak_planks")));
-        assert!(compound.test(&stack("minecraft:birch_planks")));
-        assert!(!compound.test(&stack("minecraft:stone")));
+        assert!(compound.test_in(lc(), &stack("minecraft:oak_planks")));
+        assert!(compound.test_in(lc(), &stack("minecraft:birch_planks")));
+        assert!(!compound.test_in(lc(), &stack("minecraft:stone")));
         let inter = parse(
             r#"{"type":"neoforge:intersection","ingredients":["minecraft:oak_planks",["minecraft:oak_planks","minecraft:birch_planks"]]}"#,
         );
-        assert!(inter.test(&stack("minecraft:oak_planks")));
-        assert!(!inter.test(&stack("minecraft:birch_planks")));
+        assert!(inter.test_in(lc(), &stack("minecraft:oak_planks")));
+        assert!(!inter.test_in(lc(), &stack("minecraft:birch_planks")));
         let diff = parse(
             r#"{"type":"neoforge:difference","base":["minecraft:oak_planks","minecraft:birch_planks"],"subtracted":"minecraft:birch_planks"}"#,
         );
-        assert!(diff.test(&stack("minecraft:oak_planks")));
-        assert!(!diff.test(&stack("minecraft:birch_planks")));
+        assert!(diff.test_in(lc(), &stack("minecraft:oak_planks")));
+        assert!(!diff.test_in(lc(), &stack("minecraft:birch_planks")));
     }
 
     #[test]
@@ -2370,7 +2414,7 @@ mod tests {
         )
         .unwrap();
         let grid = [Some(ItemStack::new("minecraft:flint", 1)), None, None, None];
-        let (_, made) = recipes.find(&grid, 2).unwrap();
+        let (_, made) = recipes.find(lc(), &grid, 2).unwrap();
         assert_eq!((&*made.item, made.count), ("minecraft:stick", 1));
         let _ = fs::remove_dir_all(&root);
     }
@@ -2502,8 +2546,8 @@ mod tests {
         ] {
             for n in 0..420 {
                 let stack = ItemStack::new(&format!("minecraft:item_{n}"), 1);
-                let a = recipes.cook(kind, &stack).map(|c| &c.id);
-                let b = recipes.cook_scan(kind, &stack).map(|c| &c.id);
+                let a = recipes.cook(lc(), kind, &stack).map(|c| &c.id);
+                let b = recipes.cook_scan(lc(), kind, &stack).map(|c| &c.id);
                 assert_eq!(a, b, "{kind} item_{n}");
             }
         }
@@ -2519,14 +2563,14 @@ mod tests {
         let t = std::time::Instant::now();
         let a = stacks
             .iter()
-            .filter(|s| recipes.cook_scan("smelting", s).cloned().is_some())
+            .filter(|s| recipes.cook_scan(lc(), "smelting", s).cloned().is_some())
             .count();
         let before = t.elapsed().as_secs_f64() * 1e3;
-        recipes.cook("smelting", &stacks[0]);
+        recipes.cook(lc(), "smelting", &stacks[0]);
         let t = std::time::Instant::now();
         let b = stacks
             .iter()
-            .filter(|s| recipes.cook("smelting", s).is_some())
+            .filter(|s| recipes.cook(lc(), "smelting", s).is_some())
             .count();
         let after = t.elapsed().as_secs_f64() * 1e3;
         assert_eq!(a, b);
@@ -2545,6 +2589,7 @@ mod tests {
         };
         let ctx = Context {
             recipes: &recipes,
+            context: lc(),
             map_scale: &|_| None,
         };
         let mut grid: Vec<Option<ItemStack>> = cells.iter().cloned().map(Some).collect();
@@ -2594,9 +2639,9 @@ mod tests {
         let only_a = ingredient(&["a"]);
         let (a, b) = (ItemStack::new("a", 1), ItemStack::new("b", 1));
         // Greedy matching would give `a` to the first ingredient and fail.
-        assert!(matches_all(&[any.clone(), only_a.clone()], &[&a, &b]));
-        assert!(!matches_all(&[only_a.clone(), only_a], &[&a, &b]));
-        assert!(!matches_all(&[any], &[&a, &b]));
+        assert!(matches_all(lc(), &[any.clone(), only_a.clone()], &[&a, &b]));
+        assert!(!matches_all(lc(), &[only_a.clone(), only_a], &[&a, &b]));
+        assert!(!matches_all(lc(), &[any], &[&a, &b]));
     }
     #[test]
     fn dyes_blend_like_dyed_item_color() {

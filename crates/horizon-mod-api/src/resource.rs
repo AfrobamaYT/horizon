@@ -57,7 +57,7 @@ pub const PREVENT_ARMOR_CHANGE: EnchantmentEffect =
 /// An empty slot holds none.
 #[derive(Clone)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct ItemResource(ItemStack);
+pub struct ItemResource(pub(crate) ItemStack);
 
 impl ItemResource {
     /// What `stack` is, whatever its count.

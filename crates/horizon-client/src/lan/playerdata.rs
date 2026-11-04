@@ -837,13 +837,24 @@ mod tests {
         };
         let dir = world("attachments");
         let mut original = guest();
-        original.attachments.set(&keep, 31).unwrap();
+        keep.set(
+            &mut original.attachments,
+            horizon_world::attachments::Holder::Level,
+            31,
+        )
+        .unwrap();
         save(&original, &dir);
         let mut loaded = guest();
         loaded.uuid = original.uuid;
         assert!(load(&mut loaded, &dir));
         loaded.attachments = loaded.attachments.copy_on_death().unwrap();
-        assert_eq!(loaded.attachments.get(&keep), Ok(31));
+        assert_eq!(
+            keep.get(
+                &mut loaded.attachments,
+                horizon_world::attachments::Holder::Level
+            ),
+            Ok(31)
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

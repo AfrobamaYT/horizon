@@ -870,6 +870,40 @@ impl Snbt<'_> {
     }
 }
 
+/// A tag as its network NBT bytes (`write_network`), the form it crosses to a wasm mod in; a
+/// tag past the default limits is refused, with the reason.
+impl TryFrom<&Tag> for Vec<u8> {
+    type Error = Error;
+    fn try_from(tag: &Tag) -> Result<Self, Error> {
+        write_network(tag, Limits::default())
+    }
+}
+
+/// A tag read from its network NBT bytes (`read_network`).
+impl TryFrom<Vec<u8>> for Tag {
+    type Error = Error;
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Error> {
+        read_network(&bytes, Limits::default()).map(|(tag, _)| tag)
+    }
+}
+
+impl From<&Compound> for Tag {
+    fn from(compound: &Compound) -> Self {
+        Tag::Compound(compound.clone())
+    }
+}
+
+/// The compound a compound tag holds; any other tag is refused as itself.
+impl TryFrom<Tag> for Compound {
+    type Error = Tag;
+    fn try_from(tag: Tag) -> Result<Self, Tag> {
+        match tag {
+            Tag::Compound(compound) => Ok(compound),
+            tag => Err(tag),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

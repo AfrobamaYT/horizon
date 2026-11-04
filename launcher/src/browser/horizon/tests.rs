@@ -316,7 +316,7 @@ fn executable_content_is_refused_without_installing_or_skipping_code() {
     v.file.sha256 = index::sha256_file(&path).unwrap();
     v.file.signature = None;
     let e = put(&index, true, &home).unwrap_err();
-    assert_eq!(e, "mod.wasm: unsupported executable file in a content mod");
+    assert_eq!(e, "mod.wasm needs a [wasm] section");
     assert!(!home.join("horizon-mods/coords_hud.hmod").exists());
     assert!(installed::Installed::load(&home).entries.is_empty());
     fs::remove_dir_all(home).unwrap();

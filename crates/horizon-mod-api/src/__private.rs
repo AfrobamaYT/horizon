@@ -19,14 +19,24 @@ pub use crate::part_table::{
     has_scoped_hook, install_parts, mark_game_thread, parts, resolve_parts,
 };
 pub use crate::phase::install_packages;
+/// The game's side of wasm mods, for `horizon-mod-wasm`.
+#[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
+pub mod wasm_host {
+    pub use crate::wasm_host::{Budgets, CallRefused, LoadError, Member, instantiate};
+}
 /// The registered structure types, for the executable to hand to the engine's
 /// `StructureRegistry` before any world opens.
 pub use crate::structure_type::installed_structure_types;
 #[cfg(any(test, feature = "testing"))]
 pub use crate::{part_table::tests as part_tests, phase::with_test_packages};
 
+/// The trait mods installed, in dispatch order: the game's own list, not part of the mod surface.
+pub fn mods() -> &'static [ModEntry] {
+    crate::mods()
+}
+
 /// The startup package inventory at an owning engine load boundary.
-pub fn loaded_mods() -> LoadedMods<'static> {
+pub fn loaded_mods() -> LoadedMods {
     LoadedMods::new()
 }
 
@@ -65,6 +75,28 @@ pub mod game {
         fn fields(&self) -> Self::Fields<'_>;
     }
 
+    /// `Ingredient::test` with the loop context the game's own matching holds.
+    pub trait IngredientTest {
+        fn test_in(
+            &self,
+            context: &horizon_world::native_load_context::LoopContext,
+            stack: &ItemStack,
+        ) -> bool;
+    }
+    impl IngredientTest for Ingredient {
+        fn test_in(
+            &self,
+            context: &horizon_world::native_load_context::LoopContext,
+            stack: &ItemStack,
+        ) -> bool {
+            Ingredient::test_in(self, context, stack)
+        }
+    }
+
+    /// A block entity type the game names.
+    pub fn block_entity_type_key(id: &str) -> BlockEntityTypeKey {
+        BlockEntityTypeKey(id.into())
+    }
     /// A block entity handle the game names.
     pub fn block_entity_ref(level: LevelRef, position: [i32; 3]) -> BlockEntityRef {
         BlockEntityRef { level, position }
@@ -232,7 +264,7 @@ pub mod game {
     pub trait RegistrationContextNew {
         fn new() -> Self;
     }
-    impl RegistrationContextNew for RegistrationContext<'_> {
+    impl RegistrationContextNew for RegistrationContext {
         fn new() -> Self {
             RegistrationContext::new()
         }
@@ -256,12 +288,12 @@ pub mod game {
         fn new() -> Self;
         fn finish(self) -> Result<crate::server_reload::OrderedServerReload, ReloadOrderError>;
     }
-    impl ServerReloadListenersOrder for ServerReloadListeners {
+    impl ServerReloadListenersOrder for crate::server_reload::ServerListenerRegistry {
         fn new() -> Self {
-            ServerReloadListeners::new()
+            crate::server_reload::ServerListenerRegistry::new()
         }
         fn finish(self) -> Result<crate::server_reload::OrderedServerReload, ReloadOrderError> {
-            ServerReloadListeners::finish(self)
+            crate::server_reload::ServerListenerRegistry::finish(self)
         }
     }
 
@@ -275,9 +307,9 @@ pub mod game {
             ReloadOrderError,
         >;
     }
-    impl ClientReloadListenersOrder for ClientReloadListeners {
+    impl ClientReloadListenersOrder for crate::client_reload::ClientListenerRegistry {
         fn new() -> Self {
-            ClientReloadListeners::new()
+            crate::client_reload::ClientListenerRegistry::new()
         }
         fn finish(
             self,
@@ -285,16 +317,16 @@ pub mod game {
             Vec<crate::reload::RegisteredListener<dyn ClientReloadListener>>,
             ReloadOrderError,
         > {
-            ClientReloadListeners::finish(self)
+            crate::client_reload::ClientListenerRegistry::finish(self)
         }
     }
 
     pub trait ServerReloadResourcesInstall {
         fn install(&mut self, retained: Vec<crate::server_reload::RetainedEntry>);
     }
-    impl ServerReloadResourcesInstall for ServerReloadResources {
+    impl ServerReloadResourcesInstall for crate::server_reload::RetainedListeners {
         fn install(&mut self, retained: Vec<crate::server_reload::RetainedEntry>) {
-            ServerReloadResources::install(self, retained)
+            crate::server_reload::RetainedListeners::install(self, retained)
         }
     }
 
@@ -313,42 +345,6 @@ pub mod game {
     impl<'a> BackendMutRefOf<'a> for BackendMutRef<'a> {
         fn of(inner: &'a mut dyn BackendMut) -> Self {
             BackendMutRef::of(inner)
-        }
-    }
-
-    pub use self::dataloadcontextnew::DataLoadContextNew;
-    mod dataloadcontextnew {
-        #[allow(unused_imports)]
-        use crate::phase::*;
-        #[allow(unused_imports)]
-        use crate::*;
-        #[allow(unused_imports)]
-        use std::sync::OnceLock;
-        pub trait DataLoadContextNew<'a>: Sized {
-            fn new(source: &'a horizon_world::native_load_context::LoadContext) -> Self;
-        }
-        impl<'a> DataLoadContextNew<'a> for DataLoadContext<'a> {
-            fn new(source: &'a horizon_world::native_load_context::LoadContext) -> Self {
-                DataLoadContext::new(source)
-            }
-        }
-    }
-
-    pub use self::loopcontextnew::LoopContextNew;
-    mod loopcontextnew {
-        #[allow(unused_imports)]
-        use crate::phase::*;
-        #[allow(unused_imports)]
-        use crate::*;
-        #[allow(unused_imports)]
-        use std::sync::OnceLock;
-        pub trait LoopContextNew<'a>: Sized {
-            fn new(source: &'a horizon_world::native_load_context::LoopContext) -> Self;
-        }
-        impl<'a> LoopContextNew<'a> for LoopContext<'a> {
-            fn new(source: &'a horizon_world::native_load_context::LoopContext) -> Self {
-                LoopContext::new(source)
-            }
         }
     }
 

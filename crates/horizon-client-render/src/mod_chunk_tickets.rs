@@ -4,7 +4,7 @@
 //! each other's. `Streaming` keeps the union with `/forceload`'s chunks in its
 //! `forced` set, which is all loading and ticking read.
 pub use mod_api::mod_chunk_tickets::{
-    ModTicket, TicketOwner, TicketRemovals, TicketSet, TicketValidation,
+    ControllerTickets, ModTicket, TicketOwner, TicketSet, TicketValidation,
 };
 use std::collections::{BTreeSet, HashMap};
 
@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn validation_shows_and_removes_the_controllers_tickets_to_its_owner_only() {
         let (block, entity) = (TicketOwner::Block([1, 2, 3]), TicketOwner::Entity(9));
-        let (mut v, removals) = TicketValidation::new(
+        let mut v = ControllerTickets::new(
             "m",
             vec![
                 ticket(0, block, (0, 0)),
@@ -189,7 +189,7 @@ mod tests {
         assert!(!v.remove_block_ticket([1, 2, 3], [0, 1], false));
         assert_eq!(v.remove_entity_tickets(9), 1);
         assert_eq!(v.remove_block_tickets([1, 2, 3]), 1);
-        assert_eq!(removals.into_removed().len(), 3);
+        assert_eq!(v.into_removed().len(), 3);
     }
 
     #[test]
@@ -200,7 +200,8 @@ mod tests {
             ..ticket(0, owner, (3, 3))
         };
         let both = vec![ticket(0, owner, (3, 3)), spawning];
-        let (mut v, removals) = TicketValidation::new("m", both.clone());
+        let mut v1 = ControllerTickets::new("m", both.clone());
+        let v = &mut v1;
         let _m = in_mod("m");
         assert_eq!(
             v.block_tickets(),
@@ -213,17 +214,17 @@ mod tests {
         assert!(v.remove_block_ticket([4, 5, 6], [3, 3], false));
         assert!(v.block_tickets().is_empty());
         // The other order, and the entity side.
-        let (mut v, r2) = TicketValidation::new("m", both.clone());
-        assert!(v.remove_block_ticket([4, 5, 6], [3, 3], false));
-        assert_eq!(v.block_tickets(), vec![([4, 5, 6], set(&[], &[[3, 3]]))]);
+        let mut v2 = ControllerTickets::new("m", both.clone());
+        assert!(v2.remove_block_ticket([4, 5, 6], [3, 3], false));
+        assert_eq!(v2.block_tickets(), vec![([4, 5, 6], set(&[], &[[3, 3]]))]);
         // Remove-all takes both.
-        let (mut v, r3) = TicketValidation::new("m", both);
-        assert_eq!(v.remove_block_tickets([4, 5, 6]), 2);
-        assert_eq!(removals.into_removed().len(), 2);
-        assert_eq!(r2.into_removed().len(), 1);
-        assert_eq!(r3.into_removed().len(), 2);
+        let mut v3 = ControllerTickets::new("m", both);
+        assert_eq!(v3.remove_block_tickets([4, 5, 6]), 2);
+        assert_eq!(v1.into_removed().len(), 2);
+        assert_eq!(v2.into_removed().len(), 1);
+        assert_eq!(v3.into_removed().len(), 2);
         let entity = TicketOwner::Entity(7);
-        let (mut v, removals) = TicketValidation::new(
+        let mut v = ControllerTickets::new(
             "m",
             vec![
                 ticket(0, entity, (1, 1)),
@@ -235,6 +236,6 @@ mod tests {
         );
         assert!(v.remove_entity_ticket(7, [1, 1], true));
         assert_eq!(v.entity_tickets(), vec![(7, set(&[[1, 1]], &[]))]);
-        assert!(removals.into_removed()[0].natural_spawning);
+        assert!(v.into_removed()[0].natural_spawning);
     }
 }

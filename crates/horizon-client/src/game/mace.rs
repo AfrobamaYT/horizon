@@ -549,9 +549,7 @@ impl Game<'_> {
                 };
                 let level = crate::game::entity::damage_level_of!(self);
                 let pushed = horizon_client::health::Hurting::ArmorStand(id as i32, source);
-                if horizon_client::health::knockback_canceled(level.reborrow(), pushed, &mut knock)
-                    || knock.strength <= 0.0
-                {
+                if level.knockback_canceled(pushed, &mut knock) || knock.strength <= 0.0 {
                     continue;
                 }
                 let (mut kx, mut kz) = (knock.x, knock.z);

@@ -174,7 +174,7 @@ impl Game<'_> {
             ..self.menu_env()
         };
         load_player(menu, &host.hub.guests[gi]);
-        menu.brewed_potion_hook = !mod_api::mods().is_empty();
+        menu.brewed_potion_hook = !mod_api::__private::mods().is_empty();
         menu.item_smelted_hook = menu.brewed_potion_hook;
         let result = op(menu, &env);
         if let Some(maps) = maps {
@@ -248,7 +248,7 @@ impl Game<'_> {
         let uuid = g.uuid;
         let mut result = self
             .recipes()
-            .find(&g.craft_grid, 2)
+            .find(&self.loop_context, &g.craft_grid, 2)
             .map(|(_, stack)| stack);
         if mod_api::__private::listened(mod_api::HookId::PrepareItemCraft) {
             let name = g.name.clone();
@@ -413,7 +413,7 @@ impl Game<'_> {
                     f.items[k] = menu.slot(k).cloned();
                 }
                 // AbstractFurnaceBlockEntity.setItem: only a new input restarts cooking.
-                f.input_clicked(world_recipes!(self), items[0].clone());
+                f.input_clicked(&self.loop_context, world_recipes!(self), items[0].clone());
             }
             // BrewingStandBlockEntity.serverTick notices a new ingredient itself.
             Some(BlockEntity::Brewing(b)) => {

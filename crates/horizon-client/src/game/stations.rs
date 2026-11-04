@@ -787,6 +787,7 @@ impl Game<'_> {
             }
             Kind::Smithing => {
                 s.result = data.recipes.smithing_result(
+                    &self.loop_context,
                     &data.enchantments,
                     s.inputs[0].as_ref(),
                     s.inputs[1].as_ref(),
@@ -3084,7 +3085,7 @@ impl Game<'_> {
         let consumed_fuel = was_unfueled && b.fuel > 0;
         let started = was_idle && b.brew_time > 0;
         let ingredient = started.then(|| b.ingredient.clone()).flatten();
-        let hooked = !mod_api::mods().is_empty();
+        let hooked = !mod_api::__private::mods().is_empty();
         let stacks = (due && hooked).then(|| b.items.clone());
         let at = [pos.0, pos.1, pos.2];
         let mut post = false;
@@ -3246,7 +3247,7 @@ mod tests {
         struct Mod;
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
-            fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
                 r.item_part("minecraft:stick", Lore);
             }
             fn item_tooltip(&self, _: &dyn ClientHost, event: &mut ItemTooltipEvent<'_>) {

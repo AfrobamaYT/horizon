@@ -1034,7 +1034,7 @@ impl Goal for EatBerries {
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
         if self.block.reached {
             if self.waited >= 40 {
-                if cx.w.mob_griefing {
+                if cx.w.can_grief(m.id) {
                     self.pick(m, cx);
                 }
             } else {

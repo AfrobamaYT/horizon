@@ -1,0 +1,17 @@
+id = "beta"
+name = "beta"
+version = "1.0.0"
+description = "A dependent of counter_lib."
+api = "0.2"
+side = "both"
+capabilities = ["registries"]
+
+[dependencies]
+counter_lib = "^1"
+
+[wasm]
+sha512 = "b313e39132e19c405fa9a0cb150d4345ad41b4ce4b30f81eca0a97bbad995e3a4f88e72ff390480ccbe778e1f300ee228750a7760e64991530b3a9a0794960c9"
+toolchain = "1.99.1 58cf8f9c35b355199727627d07ae34a4e2846d67"
+
+[wasm.linked]
+counter_lib = "cb13422661917dd2d91767ec8c95198d028b37db382613ca3b22886eb044649edd919a5ca0b9649472728ba77a95f31c2bbc69fbd4132e7e5758160b836583fa"

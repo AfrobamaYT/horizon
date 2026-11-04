@@ -7,8 +7,8 @@ use horizon_world::nbt::Tag;
 /// builds a hover tooltip.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TooltipDisplay<'a> {
-    component: Option<&'a Tag>,
-    ominous_banner: bool,
+    pub(crate) component: Option<&'a Tag>,
+    pub(crate) ominous_banner: bool,
 }
 impl<'a> TooltipDisplay<'a> {
     pub fn for_stack(stack: &'a ItemStack) -> Self {

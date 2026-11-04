@@ -63,7 +63,7 @@ mod tests {
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
         pub(super) struct GameRuleValue;
-        pub(super) struct FeatureFlags<'a>(pub &'a ());
+        pub(super) struct FeatureFlags(pub ());
         pub(super) struct GameRuleActor<'a>(pub(super) &'a str);
         pub(super) struct NativePortalShape;
         pub(super) struct NativeNoteInstrument;
@@ -198,9 +198,25 @@ mod tests {
             Owners,
         }
         pub(super) struct NativeLifecycleContext;
-        pub(super) struct RegistrationContext<'a>(pub &'a str);
-        pub(super) struct DataLoadContext<'a>(pub &'a str);
-        pub(super) struct LoopContext<'a>(pub &'a str);
+        pub(super) struct RegistrationContext(pub &'static str);
+        pub(super) trait DataLoadContext {
+            fn origin(&self) -> &'static str;
+        }
+        pub(super) struct Load(pub &'static str);
+        impl DataLoadContext for Load {
+            fn origin(&self) -> &'static str {
+                self.0
+            }
+        }
+        pub(super) trait LoopContext {
+            fn side(&self) -> &'static str;
+        }
+        pub(super) struct Loop(pub &'static str);
+        impl LoopContext for Loop {
+            fn side(&self) -> &'static str {
+                self.0
+            }
+        }
         pub(super) struct SoundPlay;
         pub(super) struct ChannelRef;
         pub(super) struct ToolUse;
@@ -227,8 +243,8 @@ mod tests {
         pub(super) struct ServerTickPhase;
         #[derive(Clone, Copy)]
         pub(super) struct WorldPhase;
-        pub(super) struct ServerReloadListeners;
-        pub(super) struct ClientReloadListeners;
+        pub(super) trait ServerReloadListeners {}
+        pub(super) trait ClientReloadListeners {}
     }
     use serde_json::{Map, Value};
     use stubs::*;
@@ -327,8 +343,9 @@ mod tests {
                 pub struct GrindstoneTake;
             }
             pub mod mod_chunk_tickets {
-                pub struct TicketValidation;
+                pub trait TicketValidation {}
             }
+            pub use mod_chunk_tickets::TicketValidation;
             pub mod stations {
                 pub struct EnchantmentRow<'a>(std::marker::PhantomData<&'a ()>);
             }
@@ -419,7 +436,7 @@ mod tests {
             Self { id, hooks }
         }
     }
-    struct Registrar;
+    trait Registrar {}
     /// The parts every thing in a scope has, whatever its key: a test's own, or none.
     #[derive(Default)]
     struct Parts {
@@ -489,7 +506,7 @@ mod tests {
         impl Hooks for Registration {
             fn component_types(
                 &self,
-                context: &RegistrationContext<'_>,
+                context: &RegistrationContext,
                 event: &mut ComponentTypesEvent<'_>,
             ) {
                 assert_eq!(context.0, "bootstrap");
@@ -514,7 +531,7 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Gated {
             #[cfg(any())]
-            fn loot_table_load(&self, _: &DataLoadContext<'_>, _: &mut LootTableLoadEvent<'_>) {
+            fn loot_table_load(&self, _: &dyn DataLoadContext, _: &mut LootTableLoadEvent<'_>) {
                 unreachable!()
             }
             #[cfg(not(any()))]
@@ -561,7 +578,7 @@ mod tests {
         struct Listener(Arc<std::sync::atomic::AtomicUsize>);
         #[mod_api::__subscriptions]
         impl Hooks for Listener {
-            fn loot_table_load(&self, _: &DataLoadContext<'_>, _: &mut LootTableLoadEvent<'_>) {
+            fn loot_table_load(&self, _: &dyn DataLoadContext, _: &mut LootTableLoadEvent<'_>) {
                 self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
@@ -578,8 +595,8 @@ mod tests {
         install(mods.into());
         ENTERED.with(|entered| entered.borrow_mut().clear());
         let mut table = serde_json::json!([]);
-        dispatch_loot_table_load(&DataLoadContext("defaults"), "test", &mut table);
-        dispatch_loot_table_load(&DataLoadContext("defaults"), "test", &mut table);
+        dispatch_loot_table_load(&Load("defaults"), "test", &mut table);
+        dispatch_loot_table_load(&Load("defaults"), "test", &mut table);
         assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 2);
         ENTERED.with(|entered| {
             let entered = entered.borrow();
@@ -598,20 +615,16 @@ mod tests {
         struct Active;
         #[mod_api::__subscriptions]
         impl Hooks for Active {
-            fn loot_table_load(&self, _: &DataLoadContext<'_>, event: &mut LootTableLoadEvent<'_>) {
-                dispatch_modify_default_components(
-                    &DataLoadContext("defaults"),
-                    "test",
-                    &mut Map::new(),
-                );
-                Other.loot_table_load(&DataLoadContext("defaults"), event);
+            fn loot_table_load(&self, _: &dyn DataLoadContext, event: &mut LootTableLoadEvent<'_>) {
+                dispatch_modify_default_components(&Load("defaults"), "test", &mut Map::new());
+                Other.loot_table_load(&Load("defaults"), event);
             }
         }
         install(vec![ModEntry::new("active", Box::new(Active))].into());
         ENTERED.with(|entered| entered.borrow_mut().clear());
         let mut table = serde_json::json!([]);
-        dispatch_loot_table_load(&DataLoadContext("defaults"), "test", &mut table);
-        dispatch_loot_table_load(&DataLoadContext("defaults"), "test", &mut table);
+        dispatch_loot_table_load(&Load("defaults"), "test", &mut table);
+        dispatch_loot_table_load(&Load("defaults"), "test", &mut table);
         ENTERED.with(|entered| {
             assert_eq!(
                 entered
@@ -711,8 +724,8 @@ mod tests {
         fn menu_subscribed(&self) -> &'static [Option<HookId>] {
             &[]
         }
-        fn menu_slot_rules(&self, context: &LoopContext<'_>, event: &mut MenuSlotRulesEvent<'_>) {
-            assert_eq!(context.0, "loop");
+        fn menu_slot_rules(&self, context: &dyn LoopContext, event: &mut MenuSlotRulesEvent<'_>) {
+            assert_eq!(context.side(), "loop");
             event.may_place = false;
             event.max_stack = self.id;
         }
@@ -762,15 +775,15 @@ mod tests {
                 Flow::Continue
             }
         }
-        fn loot_table_load(&self, _: &DataLoadContext<'_>, event: &mut LootTableLoadEvent<'_>) {
+        fn loot_table_load(&self, _: &dyn DataLoadContext, event: &mut LootTableLoadEvent<'_>) {
             event.table.as_array_mut().unwrap().push(self.id.into());
         }
         fn modify_default_components(
             &self,
-            context: &DataLoadContext<'_>,
+            context: &dyn DataLoadContext,
             event: &mut ModifyDefaultComponentsEvent<'_>,
         ) {
-            assert_eq!(context.0, "defaults");
+            assert_eq!(context.origin(), "defaults");
             let value = event
                 .components
                 .entry("order")
@@ -869,7 +882,7 @@ mod tests {
         });
         let (mut may_place, mut max_stack) = (true, 64);
         dispatch_menu_slot_rules(
-            &LoopContext("loop"),
+            &Loop("loop"),
             "test:menu",
             0,
             &ItemStack::default(),
@@ -1195,10 +1208,10 @@ mod tests {
         let mods: Arc<[ModEntry]> = mods.into();
         install(mods.clone());
         let mut table = serde_json::json!([]);
-        dispatch_loot_table_load(&DataLoadContext("defaults"), "table", &mut table);
+        dispatch_loot_table_load(&Load("defaults"), "table", &mut table);
         assert_eq!(table, serde_json::json!([1, 2]));
         let mut components = Map::new();
-        dispatch_modify_default_components(&DataLoadContext("defaults"), "item", &mut components);
+        dispatch_modify_default_components(&Load("defaults"), "item", &mut components);
         assert_eq!(components["order"], serde_json::json!([1, 2]));
         let mut host = TestHost;
         dispatch_level_tick_pre(&mut host, "overworld");
