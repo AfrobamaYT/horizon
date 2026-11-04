@@ -2446,7 +2446,7 @@ impl Game<'_> {
             }
         }
         // LivingDestroyBlockEvent: a block a mod keeps is still in the wall.
-        if !mod_api::mods().is_empty() {
+        if !mod_api::__private::mods().is_empty() {
             removed.retain(|p| {
                 let kept = !self.may_destroy(dragon_id, "minecraft:ender_dragon", *p);
                 in_wall |= kept;

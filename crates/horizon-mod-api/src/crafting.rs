@@ -21,7 +21,7 @@ pub fn native_ingredient(
     data: &serde_json::Map<String, Value>,
     items: &mut Vec<String>,
 ) {
-    crate::dispatch_ingredient(&DataLoadContext::new(context), kind, data, items);
+    crate::dispatch_ingredient(&crate::OwningLoad::new(context), kind, data, items);
 }
 /// Items a mod adds to one of the recipe property sets: the items a furnace,
 /// blast furnace, smoker, campfire, smithing table slot or brewing stand slot
@@ -59,7 +59,7 @@ pub fn native_recipe_property_sets(
     context: &LoadContext,
     additions: &mut Vec<RecipePropertyAddition>,
 ) {
-    crate::dispatch_recipe_property_sets(&DataLoadContext::new(context), additions);
+    crate::dispatch_recipe_property_sets(&crate::OwningLoad::new(context), additions);
 }
 /// A mod's own ingredient kind, matching a concrete stack at craft time:
 /// the ingredient's `test` calls here with the kind, its JSON and the
@@ -112,7 +112,7 @@ pub fn dedup_keep_order(items: &mut Vec<String>) {
 }
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct Ingredient {
     /// The items it accepts, however the source shape named them.
@@ -128,7 +128,7 @@ pub struct Ingredient {
     pub children: Option<(Shape, Vec<Self>)>,
 }
 /// How a shape's children combine at match time.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 // exhaustive: a closed set the game matches without a wildcard
 pub enum Shape {
     /// Any child matching the stack is enough.

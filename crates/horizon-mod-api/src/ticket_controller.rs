@@ -21,7 +21,7 @@ pub(crate) struct ControllerInfo {
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TicketController {
     /// Its place in the installed controller table.
-    slot: u32,
+    pub(crate) slot: u32,
 }
 
 /// The slot of a handle whose registration was refused: no table has it.

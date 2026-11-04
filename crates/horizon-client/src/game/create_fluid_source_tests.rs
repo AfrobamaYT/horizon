@@ -9,7 +9,7 @@ static HEARD: Mutex<Vec<(i32, i32, i32, bool)>> = Mutex::new(Vec::new());
 struct Dry;
 #[mod_api::__subscriptions]
 impl Hooks for Dry {
-    fn register(&self, _: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {}
+    fn register(&self, _: &mut dyn Registrar, _: &mod_api::RegistrationContext) {}
     fn create_fluid_source(&self, _: &dyn LevelHost, event: &mut CreateFluidSourceEvent) {
         let BlockPos { x, y, z } = event.pos;
         HEARD.lock().unwrap().push((x, y, z, event.can_convert));

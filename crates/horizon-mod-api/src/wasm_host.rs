@@ -1,0 +1,761 @@
+//! The game's side of the WebAssembly interface (feature `wasm-host`): the generated host
+//! forwarding answers a mod's imports from the hosts of the call in progress, and the
+//! generated proxies make a wasm mod a [`Hooks`] and its handlers parts. Loading, linking and
+//! checking packages is `horizon-mod-wasm`'s; this module runs what it instantiated.
+use crate::HookId;
+use glue::Frame;
+use std::any::Any;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, TryLockError};
+use std::time::{Duration, Instant};
+use wasmtime::Store;
+use wasmtime::component::{Component, Instance, Linker};
+
+/// A value a mod sent that the mod API can't hold: the call traps.
+#[derive(Debug)]
+pub(crate) struct Refused;
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the mod sent a value the mod API can't hold")
+    }
+}
+
+impl std::error::Error for Refused {}
+
+/// Why a linked group can't run, named for the Mods page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LoadError {
+    /// The module doesn't export an interface or function this game calls.
+    MissingExport(String),
+    /// An export this game calls has another type than the game's.
+    ChangedExport(String, String),
+    /// The game doesn't provide the first import the module needs, or provides it with another
+    /// type.
+    Import {
+        /// The import (`horizon:mod-api/host@0.1.0#entity`).
+        import: String,
+        /// What is wrong with it.
+        why: String,
+    },
+}
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingExport(name) => write!(f, "mod.wasm doesn't export `{name}`"),
+            Self::ChangedExport(name, why) => {
+                write!(f, "mod.wasm's `{name}` has another type: {why}")
+            }
+            Self::Import { import, why } => {
+                write!(
+                    f,
+                    "mod.wasm imports `{import}`, which this game doesn't have: {why}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for LoadError {}
+
+/// Run budgets, in wasmtime fuel units (about one per instruction).
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct Budgets {
+    /// What one hook or part call may spend.
+    pub call: u64,
+    /// What a group's start-up (its constructors and `register`) may spend.
+    pub init: u64,
+    /// The most memory one group may grow to, in bytes.
+    pub memory: usize,
+    /// The most bytes of new names (a `&'static str` the game keeps for good) one group may
+    /// give the game, beside its memory.
+    pub names: usize,
+}
+
+impl Default for Budgets {
+    fn default() -> Self {
+        Self {
+            call: 50_000_000,
+            init: 4_000_000_000,
+            memory: 256 << 20,
+            names: 1 << 20,
+        }
+    }
+}
+
+/// A group's store data: its limits; the hosts of the call in progress are on the thread.
+pub(crate) struct State {
+    limits: wasmtime::StoreLimits,
+}
+
+thread_local! {
+    /// The frame of the innermost call into a mod on this thread.
+    static CURRENT: Cell<*mut Frame> = const { Cell::new(std::ptr::null_mut()) };
+    /// The mod that call runs in, whose handlers an import hands over.
+    static CALLER: Cell<Option<Arc<Running>>> = const { Cell::new(None) };
+}
+
+/// The objects of the call in progress on this thread (`glue::Frame`).
+fn current() -> wasmtime::Result<&'static mut Frame> {
+    let frame = CURRENT.get();
+    // SAFETY: `call` sets the pointer to a frame on its stack and restores the previous
+    // one before that frame drops; imports run only inside a call.
+    unsafe { frame.as_mut() }.ok_or_else(|| wasmtime::Error::msg("a mod import ran outside a call"))
+}
+
+/// The trap for an object the call didn't hand over: the mod asked for what its hook doesn't
+/// give (a client call from a server hook).
+fn missing(what: &str) -> wasmtime::Error {
+    wasmtime::Error::msg(format!("this hook gives no {what}"))
+}
+
+fn array<T, const N: usize>(items: Vec<T>) -> Result<[T; N], Refused> {
+    items.try_into().map_err(|_| Refused)
+}
+
+/// The one `&'static str` for each distinct string a mod names. The game keeps each for good,
+/// so a new one is charged to the calling mod's group, which is refused past `Budgets::names`.
+fn intern(value: String) -> Result<&'static str, Refused> {
+    static INTERNED: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
+    let mut interned = INTERNED.lock().unwrap_or_else(|e| e.into_inner());
+    let set = interned.get_or_insert_with(HashSet::new);
+    if let Some(existing) = set.get(value.as_str()) {
+        return Ok(existing);
+    }
+    let module = CALLER.take().ok_or(Refused)?;
+    let group = &module.group;
+    let charged = group.names.fetch_add(value.len(), Ordering::Relaxed) + value.len();
+    CALLER.set(Some(module.clone()));
+    if charged > group.budgets.names {
+        return Err(Refused);
+    }
+    let leaked: &'static str = Box::leak(value.into_boxed_str());
+    set.insert(leaked);
+    Ok(leaked)
+}
+
+/// One call's storage for the values its borrowed arguments point into, as on the guest.
+#[derive(Default)]
+pub(crate) struct Keep {
+    held: RefCell<Vec<(*mut u8, unsafe fn(*mut u8))>>,
+}
+
+impl Keep {
+    fn hold<T>(&self, value: T) -> *mut T {
+        unsafe fn drop_box<T>(pointer: *mut u8) {
+            // SAFETY: `pointer` came from `Box::into_raw` of a `Box<T>` in `hold`, once.
+            drop(unsafe { Box::from_raw(pointer.cast::<T>()) });
+        }
+        let pointer = Box::into_raw(Box::new(value));
+        self.held.borrow_mut().push((pointer.cast(), drop_box::<T>));
+        pointer
+    }
+    pub(crate) fn str(&self, value: String) -> &str {
+        // SAFETY: the box stays allocated, unmoved and handed out once, until `self` drops.
+        unsafe { &*self.hold(value) }
+    }
+    pub(crate) fn slice<T>(&self, value: Vec<T>) -> &[T] {
+        // SAFETY: as in `str`.
+        unsafe { &*self.hold(value) }
+    }
+    pub(crate) fn val<T>(&self, value: T) -> &T {
+        // SAFETY: as in `str`.
+        unsafe { &*self.hold(value) }
+    }
+}
+
+impl Drop for Keep {
+    fn drop(&mut self) {
+        for (pointer, drop) in self.held.get_mut().drain(..).rev() {
+            // SAFETY: each entry is a live box `hold` made, dropped once here.
+            unsafe { drop(pointer) };
+        }
+    }
+}
+
+/// How long a call waits for a group another thread is running before it refuses.
+const GROUP_WAIT: Duration = Duration::from_secs(5);
+
+/// One linked dependency group: one store, one memory, one copy of each member's code.
+// exhaustive: its fields are private
+pub struct Group {
+    store: Mutex<Store<State>>,
+    /// The thread running the group now, so a call back into it from that thread refuses
+    /// instead of deadlocking.
+    running: AtomicU64,
+    poisoned: AtomicBool,
+    budgets: Budgets,
+    /// The bytes of new names it gave the game, against `budgets.names`.
+    names: AtomicUsize,
+    wait: Duration,
+}
+
+thread_local! {
+    /// This thread's number, for `Group::running` (0 is no thread).
+    static THREAD: u64 = {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    };
+    /// How many groups this thread is inside now.
+    static INSIDE: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Why a call into a group didn't run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CallRefused {
+    /// A trap stopped the group earlier; it runs no more calls.
+    Stopped,
+    /// The call came back into the group from inside one of its own calls.
+    Reentered,
+    /// Another thread is running the group: past the wait, or at once when this thread is
+    /// inside another group, since two threads each holding a group and waiting for the
+    /// other's would deadlock.
+    Busy,
+}
+
+/// A group entered by this thread, left when dropped.
+struct Entered<'a> {
+    group: &'a Group,
+    store: MutexGuard<'a, Store<State>>,
+}
+
+impl Drop for Entered<'_> {
+    fn drop(&mut self) {
+        self.group.running.store(0, Ordering::Release);
+        INSIDE.with(|n| n.set(n.get() - 1));
+    }
+}
+
+impl Group {
+    fn new(store: Store<State>, budgets: Budgets, wait: Duration) -> Self {
+        Self {
+            store: Mutex::new(store),
+            running: AtomicU64::new(0),
+            poisoned: AtomicBool::new(false),
+            budgets,
+            names: AtomicUsize::new(0),
+            wait,
+        }
+    }
+
+    fn enter(&self) -> Result<Entered<'_>, CallRefused> {
+        if self.poisoned.load(Ordering::Relaxed) {
+            return Err(CallRefused::Stopped);
+        }
+        let me = THREAD.with(|n| *n);
+        if self.running.load(Ordering::Acquire) == me {
+            return Err(CallRefused::Reentered);
+        }
+        // A thread already inside a group never waits for another one.
+        let deadline = Instant::now()
+            + if INSIDE.with(Cell::get) > 0 {
+                Duration::ZERO
+            } else {
+                self.wait
+            };
+        let store = loop {
+            match self.store.try_lock() {
+                Ok(guard) => break guard,
+                Err(TryLockError::Poisoned(e)) => break e.into_inner(),
+                Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_micros(50))
+                }
+                Err(TryLockError::WouldBlock) => return Err(CallRefused::Busy),
+            }
+        };
+        self.running.store(me, Ordering::Release);
+        INSIDE.with(|n| n.set(n.get() + 1));
+        Ok(Entered { group: self, store })
+    }
+}
+
+/// One wasm mod of a group, as its calls run: its group, its exports and its id.
+struct Running {
+    group: Arc<Group>,
+    exports: glue::ModExports,
+    id: &'static str,
+    /// The indexes of its handlers the game no longer holds, for the mod to drop at its next
+    /// call.
+    released: Mutex<Vec<u32>>,
+}
+
+/// One wasm mod of a group: the [`Hooks`](crate::Hooks) the game dispatches to.
+// exhaustive: its fields are private
+pub struct WasmMod {
+    module: Arc<Running>,
+    subscribed: &'static [Option<HookId>],
+}
+
+/// One of a wasm mod's registered parts or handlers, by the index the mod keeps it under.
+// exhaustive: its fields are private
+pub struct WasmHandler {
+    module: Arc<Running>,
+    index: u32,
+    subscribed: &'static [Option<HookId>],
+    /// An erased provider (`dyn Any`): `index` is its address in the group's memory, which
+    /// the mod never frees.
+    erased: bool,
+}
+
+/// What a call answers when the mod gives no answer (its call refused, or a trap): what a
+/// mod not listening would.
+pub(crate) trait NoAnswer {
+    fn no_answer() -> Self;
+}
+
+impl<T: Default> NoAnswer for T {
+    fn no_answer() -> Self {
+        T::default()
+    }
+}
+
+impl NoAnswer for crate::Flow {
+    fn no_answer() -> Self {
+        crate::Flow::Continue
+    }
+}
+
+impl Running {
+    /// Runs one call with `frame`'s hosts, charging its fuel to this mod. A refused call or a
+    /// trap answers `no_answer()`; a trap stops the whole group.
+    fn call_or<T>(
+        self: &Arc<Self>,
+        mut frame: Frame,
+        no_answer: impl FnOnce() -> T,
+        f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
+    ) -> T {
+        let mut entered = match self.group.enter() {
+            Ok(entered) => entered,
+            Err(refused) => {
+                log::warn!("wasm mod {}: call refused: {refused:?}", self.id);
+                return no_answer();
+            }
+        };
+        let store = &mut *entered.store;
+        let budget = self.group.budgets.call;
+        let _ = store.set_fuel(budget);
+        let previous = CURRENT.replace(&mut frame);
+        let caller = CALLER.replace(Some(self.clone()));
+        let released =
+            std::mem::take(&mut *self.released.lock().unwrap_or_else(|e| e.into_inner()));
+        let result = match released.is_empty() {
+            true => Ok(()),
+            false => self
+                .exports
+                .horizon_mod_api_hooks()
+                .call_release_handlers(store, released),
+        }
+        .and_then(|()| f(&self.exports, store));
+        CALLER.set(caller);
+        CURRENT.set(previous);
+        drop(entered);
+        match result {
+            Ok(value) => value,
+            Err(error) => {
+                self.group.poisoned.store(true, Ordering::Relaxed);
+                log::error!("wasm mod {} stopped its group: {error:#}", self.id);
+                no_answer()
+            }
+        }
+    }
+}
+
+/// The error a fallible export answers when the mod's call didn't run (refused, or a trap).
+fn refused<E: From<(crate::Identifier, String)>>() -> E {
+    let mod_api = crate::Identifier::parse("horizon:wasm_mod").expect("a valid id");
+    E::from((mod_api, "the mod's call didn't run".into()))
+}
+
+impl WasmMod {
+    fn call_or<T>(
+        &self,
+        frame: Frame,
+        no_answer: impl FnOnce() -> T,
+        f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
+    ) -> T {
+        self.module.call_or(frame, no_answer, f)
+    }
+}
+
+impl WasmHandler {
+    fn call_or<T>(
+        &self,
+        frame: Frame,
+        no_answer: impl FnOnce() -> T,
+        f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
+    ) -> T {
+        self.module.call_or(frame, no_answer, f)
+    }
+}
+
+/// A mod's handler shows as its index, the game knowing nothing more of it.
+impl std::fmt::Debug for WasmHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WasmHandler")
+            .field("mod", &self.module.id)
+            .field("index", &self.index)
+            .finish()
+    }
+}
+
+impl Drop for WasmHandler {
+    fn drop(&mut self) {
+        OWNED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&(self as *const Self as usize));
+        if self.erased {
+            return;
+        }
+        self.module
+            .released
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(self.index);
+    }
+}
+
+/// Where each proxy the game holds of a wasm mod's handler lives, with its mod and that mod's
+/// index, so one handed back to its own mod goes by that index (`hand_over`).
+static OWNED: LazyLock<Mutex<HashMap<usize, Owned>>> = LazyLock::new(Default::default);
+
+#[derive(Clone, Copy)]
+struct Owned {
+    module: usize,
+    group: usize,
+    index: u32,
+    erased: bool,
+}
+
+thread_local! {
+    /// The game's objects each group holds (a capability's handler, another group's or a
+    /// native mod's provider), by group, at the index the group calls them by. A group's
+    /// calls run on the thread holding it, so they stay on this one.
+    static HELD: RefCell<HashMap<usize, Held>> = RefCell::default();
+}
+
+/// One group's held objects: each an `Arc` of its trait object, and the free indexes.
+#[derive(Default)]
+struct Held {
+    objects: Vec<Option<Box<dyn Any>>>,
+    free: Vec<u32>,
+}
+
+fn group_of(module: &Running) -> usize {
+    Arc::as_ptr(&module.group) as usize
+}
+
+/// The calling mod, and its group, if a call runs.
+fn caller() -> (usize, usize) {
+    let module = CALLER.take();
+    let ids = module
+        .as_ref()
+        .map_or((0, 0), |m| (Arc::as_ptr(m) as usize, group_of(m)));
+    CALLER.set(module);
+    ids
+}
+
+fn caller_group() -> usize {
+    caller().1
+}
+
+/// `proxy`, registered by where it lives.
+fn owned<P: Deref<Target = WasmHandler>>(proxy: P) -> P {
+    let at = &*proxy as *const WasmHandler as usize;
+    OWNED.lock().unwrap_or_else(|e| e.into_inner()).insert(
+        at,
+        Owned {
+            module: Arc::as_ptr(&proxy.module) as usize,
+            group: group_of(&proxy.module),
+            index: proxy.index,
+            erased: proxy.erased,
+        },
+    );
+    proxy
+}
+
+/// The handler record for `object` as the calling mod gets it: its own handler by its own
+/// index (an erased provider, by its address, to any mod of its group, which shares its
+/// memory), else the game's object, held for it.
+fn hand_over<T: ?Sized + 'static>(object: Arc<T>) -> glue::horizon::mod_api::types::Handler {
+    let (module, group) = caller();
+    let at = Arc::as_ptr(&object) as *const () as usize;
+    let own = OWNED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&at)
+        .copied();
+    if let Some(Owned { index, .. }) = own.filter(|own| match own.erased {
+        true => own.group == group,
+        false => own.module == module,
+    }) {
+        return glue::horizon::mod_api::types::Handler {
+            index,
+            subscribed: Vec::new(),
+            held: false,
+        };
+    }
+    let index = HELD.with(|held| {
+        let mut held = held.borrow_mut();
+        let held = held.entry(group).or_default();
+        let object: Box<dyn Any> = Box::new(object);
+        match held.free.pop() {
+            Some(index) => {
+                held.objects[index as usize] = Some(object);
+                index
+            }
+            None => {
+                held.objects.push(Some(object));
+                (held.objects.len() - 1) as u32
+            }
+        }
+    });
+    glue::horizon::mod_api::types::Handler {
+        index,
+        subscribed: Vec::new(),
+        held: true,
+    }
+}
+
+/// [`hand_over`] for a boxed object: a proxy moving into an `Arc` is registered where it lands.
+fn hand_over_box<T: ?Sized + 'static>(object: Box<T>) -> glue::horizon::mod_api::types::Handler {
+    let at = &*object as *const T as *const () as usize;
+    let own = OWNED.lock().unwrap_or_else(|e| e.into_inner()).remove(&at);
+    let object: Arc<T> = Arc::from(object);
+    if let Some(own) = own {
+        OWNED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(Arc::as_ptr(&object) as *const () as usize, own);
+    }
+    hand_over(object)
+}
+
+/// The calling mod's held object at `index`, as the trait it is called through.
+fn held<T: ?Sized + 'static>(index: u32) -> wasmtime::Result<Arc<T>> {
+    let group = caller_group();
+    HELD.with(|held| {
+        held.borrow()
+            .get(&group)
+            .and_then(|held| held.objects.get(index as usize)?.as_ref())
+            .and_then(|object| object.downcast_ref::<Arc<T>>())
+            .cloned()
+    })
+    .ok_or_else(|| wasmtime::Error::msg("a mod called an object the game doesn't hold for it"))
+}
+
+impl glue::horizon::mod_api::held_handles::Host for State {
+    fn release(&mut self, handle: u32) -> wasmtime::Result<()> {
+        let group = caller_group();
+        HELD.with(|held| {
+            if let Some(held) = held.borrow_mut().get_mut(&group)
+                && let Some(slot) = held.objects.get_mut(handle as usize)
+                && slot.take().is_some()
+            {
+                held.free.push(handle);
+            }
+        });
+        Ok(())
+    }
+}
+
+/// The hooks a subscribed-hooks export named.
+fn hook_ids(names: Vec<String>) -> &'static [Option<HookId>] {
+    Box::leak(
+        names
+            .iter()
+            .map(|n| glue::hook_id(n))
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+    )
+}
+
+/// The game's proxy of a handler the calling mod handed over (a part it registers), which calls
+/// back into it by the index it keeps the handler under.
+fn handler_of(handler: glue::horizon::mod_api::types::Handler) -> Result<WasmHandler, Refused> {
+    let module = CALLER.take().ok_or(Refused)?;
+    CALLER.set(Some(module.clone()));
+    Ok(WasmHandler {
+        module,
+        index: handler.index,
+        subscribed: hook_ids(handler.subscribed),
+        erased: false,
+    })
+}
+
+/// The game's proxy of an erased provider the calling mod handed over, at `handler.index` in
+/// its group's memory. No call goes through it: only mods of that group take it back.
+fn erased_of(handler: glue::horizon::mod_api::types::Handler) -> Result<WasmHandler, Refused> {
+    let mut proxy = handler_of(handler)?;
+    proxy.erased = true;
+    Ok(proxy)
+}
+
+/// The import an instantiation refused: wasmtime names the interface in its outer context and the
+/// function in the next (`component imports instance `…``, `instance export `…``), and says why
+/// last.
+fn refused_import(error: wasmtime::Error) -> LoadError {
+    let named: Vec<String> = error
+        .chain()
+        .take(2)
+        .filter_map(|layer| {
+            let text = layer.to_string();
+            let (_, rest) = text.split_once('`')?;
+            Some(rest.split_once('`')?.0.to_owned())
+        })
+        .collect();
+    LoadError::Import {
+        import: named.join("#"),
+        why: error.root_cause().to_string(),
+    }
+}
+
+/// A member of a group: its mod id, and the prefix of its exports, `<prefix>-<interface>`.
+// exhaustive: the runtime names each member it links, and nothing else builds one
+pub struct Member {
+    /// The mod's id.
+    pub id: &'static str,
+    /// The prefix of its exports (`horizon_mods::manifest::export_prefix`).
+    pub exports: String,
+}
+
+/// Instantiates a linked group and makes each member, in dependency order, a mod entry.
+pub fn instantiate(
+    engine: &wasmtime::Engine,
+    component: &Component,
+    members: &[Member],
+    budgets: Budgets,
+) -> Result<Vec<crate::ModEntry>, LoadError> {
+    let mut linker = Linker::<State>::new(engine);
+    glue::Mod::add_to_linker::<State, wasmtime::component::HasSelf<State>>(&mut linker, |s| s)
+        .expect("the game's own imports are defined once");
+    let limits = wasmtime::StoreLimitsBuilder::new()
+        .memory_size(budgets.memory)
+        .build();
+    let mut store = Store::new(engine, State { limits });
+    store.limiter(|state| &mut state.limits);
+    let _ = store.set_fuel(budgets.init);
+    let instance: Instance = linker
+        .instantiate(&mut store, component)
+        .map_err(refused_import)?;
+    let mut found = Vec::new();
+    for member in members {
+        let exports = glue::ModExports::find(&mut store, &instance, &member.exports)?;
+        found.push((member.id, exports));
+    }
+    let group = Arc::new(Group::new(store, budgets, GROUP_WAIT));
+    let mut entries = Vec::new();
+    for (id, exports) in found {
+        let module = Arc::new(Running {
+            group: group.clone(),
+            exports,
+            id,
+            released: Mutex::new(Vec::new()),
+        });
+        let names = module.call_or(Frame::default(), Vec::new, |m, store| {
+            m.horizon_mod_api_hooks().call_subscribed(store)
+        });
+        let hooks = WasmMod {
+            module,
+            subscribed: hook_ids(names),
+        };
+        entries.push(crate::ModEntry::new(id, Box::new(hooks)));
+    }
+    Ok(entries)
+}
+
+#[allow(
+    clippy::all,
+    unreachable_code,
+    unused_imports,
+    unused_variables,
+    unused_parens,
+    dead_code,
+    non_snake_case,
+    unused_mut
+)]
+mod glue {
+    use super::{array, intern};
+    include!(concat!(env!("OUT_DIR"), "/wasm_host_generated.rs"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn group(wait: Duration) -> Arc<Group> {
+        let engine = wasmtime::Engine::default();
+        let limits = wasmtime::StoreLimitsBuilder::new().build();
+        Arc::new(Group::new(
+            Store::new(&engine, State { limits }),
+            Budgets::default(),
+            wait,
+        ))
+    }
+
+    #[test]
+    fn a_call_back_into_its_own_group_is_refused_at_once() {
+        let group = group(Duration::from_secs(60));
+        let _inside = group.enter().unwrap();
+        let started = Instant::now();
+        assert_eq!(group.enter().err(), Some(CallRefused::Reentered));
+        assert!(started.elapsed() < Duration::from_millis(100));
+    }
+
+    #[test]
+    fn two_threads_each_inside_a_group_calling_the_other_refuse_at_once() {
+        let (a, b) = (
+            group(Duration::from_secs(60)),
+            group(Duration::from_secs(60)),
+        );
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let cross = |mine: Arc<Group>, theirs: Arc<Group>, barrier: Arc<std::sync::Barrier>| {
+            std::thread::spawn(move || {
+                let _inside = mine.enter().unwrap();
+                barrier.wait();
+                let started = Instant::now();
+                let refused = theirs.enter().err();
+                // Hold on until the other thread has tried too.
+                barrier.wait();
+                (refused, started.elapsed())
+            })
+        };
+        let one = cross(a.clone(), b.clone(), barrier.clone());
+        let two = cross(b, a, barrier);
+        for thread in [one, two] {
+            let (refused, took) = thread.join().unwrap();
+            assert_eq!(refused, Some(CallRefused::Busy));
+            assert!(took < Duration::from_millis(100), "{took:?}");
+        }
+    }
+
+    #[test]
+    fn a_call_waits_for_another_thread_then_refuses_or_runs() {
+        let group = group(Duration::from_millis(200));
+        let inside = group.enter().unwrap();
+        let other = group.clone();
+        let refused = std::thread::spawn(move || other.enter().err())
+            .join()
+            .unwrap();
+        assert_eq!(refused, Some(CallRefused::Busy));
+        let other = group.clone();
+        let waiting = std::thread::spawn(move || other.enter().is_ok());
+        std::thread::sleep(Duration::from_millis(20));
+        drop(inside);
+        assert!(waiting.join().unwrap());
+    }
+
+    #[test]
+    fn a_stopped_group_runs_nothing() {
+        let group = group(Duration::ZERO);
+        group.poisoned.store(true, Ordering::Relaxed);
+        assert_eq!(group.enter().err(), Some(CallRefused::Stopped));
+    }
+}

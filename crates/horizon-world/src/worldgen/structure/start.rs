@@ -109,7 +109,7 @@ pub enum StructureKind {
 /// `find_generation_point` reads.
 pub struct ModType {
     pub ty: Arc<dyn ModStructureType>,
-    pub config: Value,
+    pub config: Arc<Value>,
 }
 impl std::fmt::Debug for ModType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -444,7 +444,7 @@ impl StructureRegistry {
                 other => match mod_types.get(other) {
                     Some(ty) => StructureKind::Mod(ModType {
                         ty: ty.clone(),
-                        config: v.clone(),
+                        config: Arc::new(v.clone()),
                     }),
                     None => StructureKind::Unsupported(other.to_owned()),
                 },

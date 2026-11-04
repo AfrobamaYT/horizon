@@ -1953,7 +1953,7 @@ mod tests {
     #[test]
     fn entity_attachment_boundary_includes_passengers() {
         use horizon_world::attachments::{
-            AttachmentCodec, AttachmentError, AttachmentType, Attachments,
+            AttachmentCodec, AttachmentError, AttachmentType, Attachments, Holder,
         };
         let key = AttachmentType {
             namespace: "test",
@@ -1972,7 +1972,7 @@ mod tests {
         let root_id = [1, 2, 3, 4];
         let child_id = [5, 6, 7, 8];
         let mut data = Attachments::default();
-        data.set(&key, 29).unwrap();
+        key.set(&mut data, Holder::Level, 29).unwrap();
         let maps = [(child_id, data)].into();
         let mut root = Tag::compound([
             ("UUID", Tag::IntArray(root_id.to_vec())),
@@ -1990,7 +1990,10 @@ mod tests {
         };
         let mut loaded = HashMap::new();
         read_attachments(&children[0], child_id, &mut loaded);
-        assert_eq!(loaded.get_mut(&child_id).unwrap().get(&key), Ok(29));
+        assert_eq!(
+            key.get(loaded.get_mut(&child_id).unwrap(), Holder::Level),
+            Ok(29)
+        );
     }
 
     /// Entities as a save before every entity held attachments wrote them (a vanilla compound
@@ -2100,7 +2103,11 @@ mod tests {
             let id = id.unwrap_or_else(|| panic!("{kind}: loaded without its UUID"));
             let map = game.attachment_map_quiet(mod_api::Holder::Entity(id));
             let map = map.unwrap_or_else(|e| panic!("{kind}: not a holder: {e:?}"));
-            assert_eq!(map.get(&MARK), Ok(n), "{kind}: attachments not loaded");
+            assert_eq!(
+                MARK.get(map, mod_api::Holder::Level),
+                Ok(n),
+                "{kind}: attachments not loaded"
+            );
             let tag = saved.iter().find(|t| entity_nbt::uuid(t) == Some(uuid));
             let tag = tag.unwrap_or_else(|| panic!("{kind}: saved without its UUID"));
             assert_eq!(

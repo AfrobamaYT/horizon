@@ -12,7 +12,7 @@ use super::{
 };
 use horizon_mods::content::BlockEntityType;
 use std::{
-    any::{Any, TypeId, type_name},
+    any::{Any, type_name},
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     marker::PhantomData,
@@ -34,8 +34,7 @@ pub struct Attached<P: ?Sized> {
     /// Its place in its mod's registrations: a mod's parts on one thing keep this order, key or
     /// tag (#41 §3).
     order: usize,
-    /// The part's kind: one per thing.
-    kind: TypeId,
+    /// The part's kind, its Rust type's name: one part of each kind per thing.
     pub(super) type_name: &'static str,
     pub(super) part: Arc<P>,
 }
@@ -46,7 +45,6 @@ impl<P: ?Sized> Attached<P> {
             mod_id: self.mod_id,
             mod_index: self.mod_index,
             order: self.order,
-            kind: self.kind,
             type_name: self.type_name,
             part,
         }
@@ -66,7 +64,7 @@ fn insert_part<P: ?Sized>(
     refused: &mut Vec<String>,
 ) -> bool {
     let list = table.entry(id.into()).or_default();
-    if let Some(other) = list.iter().find(|other| other.kind == part.kind) {
+    if let Some(other) = list.iter().find(|other| other.type_name == part.type_name) {
         refused.push(format!(
             "{} is attached to {id} twice, by {} and {}",
             part.type_name, other.mod_id, part.mod_id
@@ -92,12 +90,12 @@ pub struct Parts {
     menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
     /// Capability providers by capability name, then by block entity type, in registration
     /// order.
-    capabilities: Capabilities,
+    capabilities: Capabilities<BlockProviderOf>,
     /// Item capability providers by capability name, then by item, in registration order.
-    item_capabilities: Capabilities,
+    item_capabilities: Capabilities<ItemProviderOf>,
     /// Entity capability providers by capability name, then by entity type, in registration
     /// order.
-    entity_capabilities: Capabilities,
+    entity_capabilities: Capabilities<EntityProviderOf>,
     /// The mods' own item places (`ItemPlace::Mod`), by provider name.
     place_providers: HashMap<&'static str, (&'static str, Arc<dyn PlaceProvider>)>,
     /// Only the parts that override each scoped hook, resolved at load or reload.
@@ -117,7 +115,7 @@ pub struct HookParts {
     menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
 }
 
-type Capabilities = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart>>>;
+type Capabilities<P> = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart<P>>>>;
 
 enum ProviderTarget<'a> {
     BlockEntity(&'a super::BlockEntityTypeKey),
@@ -130,33 +128,188 @@ pub(crate) struct BlockEntityTypeRequest {
     pub(crate) kind: super::BlockEntityTypeKey,
 }
 
-/// A capability provider a mod registered: an `Arc` of [`BlockProvider`], [`ItemProvider`] or
-/// [`EntityProvider`] of the capability's handler trait.
+/// A capability provider a mod registered: a [`BlockProviderOf`], [`ItemProviderOf`] or
+/// [`EntityProviderOf`].
 #[derive(Clone)]
-pub(crate) struct CapabilityPart {
+pub(crate) struct CapabilityPart<P> {
     mod_id: &'static str,
     /// The handler type it gives, for refusing a capability name answered with two.
     type_name: &'static str,
     /// Asked ahead of the game's own provider.
     before_game: bool,
-    provider: Arc<dyn Any + Send + Sync>,
+    provider: P,
 }
 
 /// What answers a capability for a block entity of one type: given the block entity and the
-/// side asked about, its handler, or none to leave it to the next provider.
-pub type BlockProvider<T> = dyn Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync;
+/// side asked about, its handler, or none to leave it to the next provider. A closure
+/// `|host, at| Some(Box::new(Tank(at)))` is one.
+pub trait BlockCapabilityProvider<T: ?Sized>: Send + Sync {
+    /// The handler for the block entity at `at`, or none.
+    fn provide(&self, host: &mut dyn ServerHost, at: BlockSide) -> Option<Box<T>>;
+}
+impl<T: ?Sized, F> BlockCapabilityProvider<T> for F
+where
+    F: Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync,
+{
+    fn provide(&self, host: &mut dyn ServerHost, at: BlockSide) -> Option<Box<T>> {
+        self(host, at)
+    }
+}
 /// What answers an item capability for one item: given where the stack lives, its handler, or
-/// none to leave it to the next provider.
-pub type ItemProvider<T> = dyn Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync;
+/// none to leave it to the next provider. A closure is one.
+pub trait ItemCapabilityProvider<T: ?Sized>: Send + Sync {
+    /// The handler for the stack at `at`, or none.
+    fn provide(&self, host: &mut dyn ServerHost, at: &ItemPlace) -> Option<Box<T>>;
+}
+impl<T: ?Sized, F> ItemCapabilityProvider<T> for F
+where
+    F: Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync,
+{
+    fn provide(&self, host: &mut dyn ServerHost, at: &ItemPlace) -> Option<Box<T>> {
+        self(host, at)
+    }
+}
 /// What answers an entity capability for one entity type: given the entity and the lookup's
 /// context (its [`EntityCapabilityKey`]'s `C`), its handler, or none to leave it to the next
-/// provider.
-pub type EntityProvider<T, C = ()> =
-    dyn Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync;
+/// provider. A closure is one.
+pub trait EntityCapabilityProvider<T: ?Sized, C>: Send + Sync {
+    /// The handler for `entity`, asked with `context`, or none.
+    fn provide(&self, host: &mut dyn ServerHost, entity: EntityRef, context: C) -> Option<Box<T>>;
+}
+impl<T: ?Sized, C, F> EntityCapabilityProvider<T, C> for F
+where
+    F: Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync,
+{
+    fn provide(&self, host: &mut dyn ServerHost, entity: EntityRef, context: C) -> Option<Box<T>> {
+        self(host, entity, context)
+    }
+}
+/// A block capability provider, as the registrar keeps it.
+pub type BlockProvider<T> = dyn BlockCapabilityProvider<T>;
+/// An item capability provider, as the registrar keeps it.
+pub type ItemProvider<T> = dyn ItemCapabilityProvider<T>;
+/// An entity capability provider, as the registrar keeps it.
+pub type EntityProvider<T, C = ()> = dyn EntityCapabilityProvider<T, C>;
+
+/// A capability provider whose handler type is a mod's own (a key a library's `[api]` crate
+/// publishes), erased: only mods linked with that crate know its handler type.
+// hidden: the registrar's erased provider, not part of the mod surface
+// exhaustive: its fields are private, so mods cannot build or destructure it
+#[doc(hidden)]
+#[derive(Clone)]
+pub struct OwnProvider {
+    /// The `Arc` of the provider trait object, which a lookup of that handler type downcasts:
+    /// a wasm mod's, in the game or another group, is the game's proxy, which no lookup takes.
+    pub(crate) provider: Arc<dyn Any + Send + Sync>,
+    pub(crate) handler: &'static str,
+}
+
+/// How a lookup reads the capability providers mods registered, in the order they are asked
+/// (those registered `before_game`, then the others, each in registration order): the game's
+/// table, which a wasm mod reads through the game.
+// hidden: a lookup's view of the registrar's table, not part of the mod surface
+#[doc(hidden)]
+pub trait CapabilityProviders {
+    /// Whether any mod answers capability `name` of the things `by` names.
+    fn provided(&self, by: ProvidedBy, name: &str) -> bool;
+    /// The `index`th provider of block entity capability `name` for block entity type `kind`,
+    /// with its mod and whether it is asked ahead of the game.
+    fn block_entity_provider(
+        &self,
+        name: &str,
+        kind: &str,
+        index: u32,
+    ) -> Option<(BlockProviderOf, &'static str, bool)>;
+    /// The `index`th provider of item capability `name` for item `item`.
+    fn item_provider(
+        &self,
+        name: &str,
+        item: &str,
+        index: u32,
+    ) -> Option<(ItemProviderOf, &'static str, bool)>;
+    /// The `index`th provider of entity capability `name` for entity type `kind`.
+    fn entity_provider(
+        &self,
+        name: &str,
+        kind: &str,
+        index: u32,
+    ) -> Option<(EntityProviderOf, &'static str, bool)>;
+    /// The provider of the item places named `name`, with its mod.
+    fn place_provider(&self, name: &str) -> Option<(Arc<dyn PlaceProvider>, &'static str)>;
+}
+
+/// The registrar's table, as the game reads it.
+pub(crate) struct InstalledProviders;
+
+impl CapabilityProviders for InstalledProviders {
+    fn provided(&self, by: ProvidedBy, name: &str) -> bool {
+        installed().is_some_and(|installed| match by {
+            ProvidedBy::BlockEntity => installed.keys.capabilities.contains_key(name),
+            ProvidedBy::Item => installed.keys.item_capabilities.contains_key(name),
+            ProvidedBy::Entity => installed.keys.entity_capabilities.contains_key(name),
+        })
+    }
+    fn block_entity_provider(
+        &self,
+        name: &str,
+        kind: &str,
+        index: u32,
+    ) -> Option<(BlockProviderOf, &'static str, bool)> {
+        nth(&installed()?.keys.capabilities, name, kind, index)
+    }
+    fn item_provider(
+        &self,
+        name: &str,
+        item: &str,
+        index: u32,
+    ) -> Option<(ItemProviderOf, &'static str, bool)> {
+        nth(&installed()?.keys.item_capabilities, name, item, index)
+    }
+    fn entity_provider(
+        &self,
+        name: &str,
+        kind: &str,
+        index: u32,
+    ) -> Option<(EntityProviderOf, &'static str, bool)> {
+        nth(&installed()?.keys.entity_capabilities, name, kind, index)
+    }
+    fn place_provider(&self, name: &str) -> Option<(Arc<dyn PlaceProvider>, &'static str)> {
+        let (owner, provider) = installed()?.keys.place_providers.get(name)?;
+        Some((provider.clone(), *owner))
+    }
+}
+
+fn nth<P: Clone>(
+    table: &Capabilities<P>,
+    name: &str,
+    id: &str,
+    index: u32,
+) -> Option<(P, &'static str, bool)> {
+    let part = table.get(name)?.get(id)?.get(index as usize)?;
+    Some((part.provider.clone(), part.mod_id, part.before_game))
+}
+
+/// A provider by its handler type: one case for each handler type `mod_api`'s keys name
+/// (generated from them), and [`OwnProvider`] for a mod's own.
+#[allow(missing_docs)]
+mod providers_of {
+    use super::*;
+    // The keys' handler types and contexts, as the generated cases name them.
+    #[allow(unused_imports)]
+    use crate::*;
+    include!(concat!(
+        env!("OUT_DIR"),
+        "/capability_providers_generated.rs"
+    ));
+}
+pub use providers_of::{BlockProviderOf, EntityProviderOf, ItemProviderOf};
 
 /// Which things a capability's providers are registered by.
-#[derive(Clone, Copy)]
-pub(crate) enum ProvidedBy {
+// hidden: a lookup's view of the registrar's table, not part of the mod surface
+// exhaustive: the three kinds of thing a capability is asked of
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub enum ProvidedBy {
     BlockEntity,
     Item,
     Entity,
@@ -401,7 +554,7 @@ fn add_tagged<P: ?Sized>(
         };
         for member in members {
             let list = table.entry(member.as_str().into()).or_default();
-            match list.iter_mut().find(|a| a.kind == part.kind) {
+            match list.iter_mut().find(|a| a.type_name == part.type_name) {
                 Some(other) => {
                     log::warn!(
                         "{} is attached to {member} twice, by {} and {} (#{tag}); {}'s is kept",
@@ -532,56 +685,40 @@ pub fn has_entity_providers<T: ?Sized + 'static, C: 'static>(
         .is_some_and(|by_kind| !by_kind.is_empty())
 }
 
-/// The providers mods registered for capability `name`, of the things `by` names, for the id
-/// `id` works out, in registration order. With none registered for `name`, `id` isn't asked.
-pub(crate) fn providers<'h, S: AsRef<str>>(
-    by: ProvidedBy,
-    name: &str,
-    host: &'h dyn Host,
-    id: impl FnOnce(&'h dyn Host) -> Option<S>,
-) -> &'static [CapabilityPart] {
-    let table = installed().map(|installed| match by {
-        ProvidedBy::BlockEntity => &installed.keys.capabilities,
-        ProvidedBy::Item => &installed.keys.item_capabilities,
-        ProvidedBy::Entity => &installed.keys.entity_capabilities,
-    });
-    let by_id = table
-        .and_then(|table| table.get(name))
-        .filter(|by_id| !by_id.is_empty());
-    by_id
-        .and_then(|by_id| by_id.get(id(host)?.as_ref()))
-        .map_or(&[][..], Vec::as_slice)
-}
-
-/// Asks `parts`, a capability's providers, in the fork's chosen order (NeoForge's javadoc
-/// doesn't state one between mods' providers and the game's): those registered `before_game`
-/// in registration order, then the game's own (`game`: whether it answers), then the others in
-/// registration order; the first to answer wins.
-pub(crate) fn ask_providers<P: ?Sized + 'static, T: ?Sized>(
-    parts: &[CapabilityPart],
+/// Asks the providers `nth` gives (by index, in the order they are asked: those registered
+/// `before_game`, then the others), and the game's own (`game`: whether it answers) between the
+/// two, in the fork's chosen order (NeoForge's javadoc doesn't state one between mods'
+/// providers and the game's); the first to answer wins. `get` takes a provider of this
+/// capability's handler type out of its case: a provider of a mod's own type the asker isn't
+/// linked with is passed over.
+pub(crate) fn ask_providers<O, P: ?Sized + 'static, T: ?Sized>(
     host: &mut dyn ServerHost,
+    nth: impl Fn(u32) -> Option<(O, &'static str, bool)>,
+    get: impl Fn(&O) -> Option<&Arc<P>>,
     call: impl Fn(&P, &mut dyn ServerHost) -> Option<Box<T>>,
     game: impl FnOnce(&mut dyn ServerHost) -> bool,
 ) -> Answer<T> {
-    let ask = |before_game: bool, host: &mut dyn ServerHost| {
-        parts
-            .iter()
-            .filter(|part| part.before_game == before_game)
-            .find_map(|part| {
-                let provider = part.provider.downcast_ref::<Arc<P>>()?;
-                Some(Capability {
-                    handler: call(provider, host)?,
-                    owner: Some(part.mod_id),
-                })
-            })
-    };
-    if let Some(found) = ask(true, host) {
-        return Answer::Mod(found);
+    let mut game = Some(game);
+    let mut index = 0;
+    while let Some((provider, owner, before_game)) = nth(index) {
+        index += 1;
+        if !before_game
+            && let Some(game) = game.take()
+            && game(host)
+        {
+            return Answer::Game;
+        }
+        if let Some(handler) = get(&provider).and_then(|provider| call(provider, host)) {
+            return Answer::Mod(Capability {
+                handler,
+                owner: Some(owner),
+            });
+        }
     }
-    if game(host) {
-        return Answer::Game;
+    match game.is_some_and(|game| game(host)) {
+        true => Answer::Game,
+        false => Answer::Nobody,
     }
-    ask(false, host).map_or(Answer::Nobody, Answer::Mod)
 }
 
 /// The providers mods registered for capability `key` and the type of the block entity at
@@ -593,10 +730,12 @@ pub fn block_entity_providers<T: ?Sized + 'static>(
     host: &dyn Host,
     at: BlockSide,
 ) -> Option<BlockEntityProviders<T>> {
-    let parts = providers(ProvidedBy::BlockEntity, key.name, host, |host| {
-        at.kind(host)
-    });
-    (!parts.is_empty()).then_some(BlockEntityProviders {
+    let parts = installed()?
+        .keys
+        .capabilities
+        .get(key.name)?
+        .get(at.kind(host)?.id())?;
+    Some(BlockEntityProviders {
         parts,
         at,
         handler: PhantomData,
@@ -606,7 +745,7 @@ pub fn block_entity_providers<T: ?Sized + 'static>(
 /// A block entity's providers of one capability ([`block_entity_providers`]).
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityProviders<T: ?Sized + 'static> {
-    parts: &'static [CapabilityPart],
+    parts: &'static [CapabilityPart<BlockProviderOf>],
     at: BlockSide,
     handler: PhantomData<fn() -> Box<T>>,
 }
@@ -616,10 +755,11 @@ impl<T: ?Sized + 'static> BlockEntityProviders<T> {
     /// registered `before_game`, else, where the game has no answer (`game`), the first mod's.
     pub fn ask(self, host: &mut dyn ServerHost, game: bool) -> Option<Capability<T>> {
         let at = self.at;
-        let answer = ask_providers::<BlockProvider<T>, T>(
-            self.parts,
+        let answer = ask_providers(
             host,
-            |provider, host| provider(host, at),
+            |index| self.parts.nth(index),
+            BlockProviderOf::get::<T>,
+            |provider, host| provider.provide(host, at),
             |_| game,
         );
         match answer {
@@ -639,8 +779,12 @@ pub fn entity_providers<T: ?Sized + 'static, C: Copy + 'static>(
     entity: EntityRef,
     context: C,
 ) -> Option<EntityProviders<T, C>> {
-    let parts = providers(ProvidedBy::Entity, key.name, host, |host| entity.kind(host));
-    (!parts.is_empty()).then_some(EntityProviders {
+    let parts = installed()?
+        .keys
+        .entity_capabilities
+        .get(key.name)?
+        .get(&*entity.kind(host)?)?;
+    Some(EntityProviders {
         parts,
         entity,
         context,
@@ -651,7 +795,7 @@ pub fn entity_providers<T: ?Sized + 'static, C: Copy + 'static>(
 /// An entity's providers of one capability ([`entity_providers`]).
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct EntityProviders<T: ?Sized + 'static, C: 'static> {
-    parts: &'static [CapabilityPart],
+    parts: &'static [CapabilityPart<EntityProviderOf>],
     entity: EntityRef,
     context: C,
     handler: PhantomData<fn() -> Box<T>>,
@@ -662,10 +806,11 @@ impl<T: ?Sized + 'static, C: Copy + 'static> EntityProviders<T, C> {
     /// registered `before_game`, else, where the game has no answer (`game`), the first mod's.
     pub fn ask(self, host: &mut dyn ServerHost, game: bool) -> Option<Capability<T>> {
         let (entity, context) = (self.entity, self.context);
-        match ask_providers::<EntityProvider<T, C>, T>(
-            self.parts,
+        match ask_providers(
             host,
-            |provider, host| provider(host, entity, context),
+            |index| self.parts.nth(index),
+            EntityProviderOf::get::<T, C>,
+            |provider, host| provider.provide(host, entity, context),
             |_| game,
         ) {
             Answer::Mod(found) => Some(found),
@@ -674,10 +819,16 @@ impl<T: ?Sized + 'static, C: Copy + 'static> EntityProviders<T, C> {
     }
 }
 
-/// The mod's provider of the item places named `provider`, with the mod's index.
-pub(crate) fn place_provider(provider: &str) -> Option<(&'static str, Arc<dyn PlaceProvider>)> {
-    let (owner, provider) = installed()?.keys.place_providers.get(provider)?;
-    Some((*owner, provider.clone()))
+/// A provider list's `index`th, as [`CapabilityProviders`] gives it.
+trait Nth<P> {
+    fn nth(&self, index: u32) -> Option<(P, &'static str, bool)>;
+}
+
+impl<P: Clone> Nth<P> for [CapabilityPart<P>] {
+    fn nth(&self, index: u32) -> Option<(P, &'static str, bool)> {
+        let part = self.get(index as usize)?;
+        Some((part.provider.clone(), part.mod_id, part.before_game))
+    }
 }
 
 fn attached<'a, 'k, P: ?Sized>(
@@ -690,10 +841,232 @@ fn attached<'a, 'k, P: ?Sized>(
     id().and_then(|id| table.get(id)).map_or(&[], Vec::as_slice)
 }
 
-/// What a mod's [`Hooks::register`](super::Hooks::register) attaches its parts with. A thing takes one part of each
+/// What a mod's [`Hooks::register`](super::Hooks::register) attaches its parts with, and
+/// declares its block entity types and ticket controllers on. A thing takes one part of each
 /// kind: the same kind twice on one thing refuses the mods at startup, naming both.
+///
+/// Mods call the generic methods on `dyn Registrar` (`r.item_part("mymod:wrench", Wrench)`);
+/// they reach the trait's own methods, one implementation for native and wasm mods.
+pub trait Registrar {
+    /// Look up a vanilla or another mod's type. The final registry validates it at load.
+    fn block_entity_type_key(&mut self, id: &str) -> super::BlockEntityTypeKey;
+    /// Declare block entity type `path` in this mod's namespace, held by `blocks`; mods usually
+    /// reach it through `block_entity_type`.
+    fn declare_block_entity_type(
+        &mut self,
+        path: &str,
+        blocks: Vec<String>,
+    ) -> super::BlockEntityTypeKey;
+    /// Register ticket controller `name`, the way NeoForge's `RegisterTicketControllersEvent`
+    /// does once at startup, and keep the handle for `chunk.set_mod_forced`. `name` is
+    /// `quarry` or `mymod:quarry`; the controller's id is in the calling mod's namespace
+    /// (`mymod:quarry`), and another mod's namespace refuses the mods at startup, as does an id
+    /// registered twice. `validates` is whether it validates its saved tickets: the
+    /// `validate_tickets` hook then runs for it when a level loads them (NeoForge's
+    /// `LoadingValidationCallback`). A world's tickets of a controller no loaded mod registers are
+    /// dropped when it loads.
+    fn register_ticket_controller(&mut self, name: &str, validates: bool) -> TicketController;
+    /// Attach `part`, of kind `kind` (its type's name), to block `block`.
+    fn attach_block_part(&mut self, block: &str, kind: &'static str, part: Arc<dyn BlockPart>);
+    /// Attach `part`, of kind `kind`, to the mod block entity type `key`.
+    fn attach_block_entity_part(
+        &mut self,
+        key: &super::BlockEntityTypeKey,
+        kind: &'static str,
+        part: Arc<dyn BlockEntityPart>,
+    ) -> Result<(), super::BlockEntityPartError>;
+    /// Attach `part`, of kind `kind`, to item `item`.
+    fn attach_item_part(&mut self, item: &str, kind: &'static str, part: Arc<dyn ItemPart>);
+    /// Attach `part`, of kind `kind`, to the mod menu type `menu`.
+    fn attach_menu_part(&mut self, menu: &str, kind: &'static str, part: Arc<dyn MenuPart>);
+    /// Attach `part`, of kind `kind`, to every block in tag `tag`.
+    fn attach_block_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn BlockPart>);
+    /// Attach `part`, of kind `kind`, to every item in tag `tag`.
+    fn attach_item_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn ItemPart>);
+    /// Answer block entity capability `name` for type `kind` with `provider`, asked ahead of the
+    /// game's own when `before_game`; mods reach it through `block_entity_capability`.
+    fn provide_block_entity_capability(
+        &mut self,
+        name: &'static str,
+        kind: &super::BlockEntityTypeKey,
+        before_game: bool,
+        provider: BlockProviderOf,
+    );
+    /// Answer item capability `name` for item `item` with `provider`; mods reach it through
+    /// `item_capability`.
+    fn provide_item_capability(
+        &mut self,
+        name: &'static str,
+        item: &str,
+        before_game: bool,
+        provider: ItemProviderOf,
+    );
+    /// Answer entity capability `name` for entity type `kind` with `provider`; mods reach it
+    /// through `entity_capability`.
+    fn provide_entity_capability(
+        &mut self,
+        name: &'static str,
+        kind: &str,
+        before_game: bool,
+        provider: EntityProviderOf,
+    );
+    /// Read and write the item places `ItemPlace::Mod { provider: name, .. }` with `provider`,
+    /// as an accessory mod exposes its slots. One provider a name.
+    fn place_provider(&mut self, name: &'static str, provider: Arc<dyn PlaceProvider>);
+    /// Register structure type `name` with `ty`; mods reach it through
+    /// `register_structure_type`.
+    fn add_structure_type(&mut self, name: &str, ty: Arc<dyn super::StructureType>);
+}
+
+impl dyn Registrar + '_ {
+    /// Register structure type `name` (`tower` or `mymod:tower`), the way
+    /// NeoForge's registries `STRUCTURE_TYPE` and `STRUCTURE_PIECE` register
+    /// once at startup: a data pack structure with `"type": "modid:tower"`
+    /// then generates by `ty`'s code — its own start and pieces, placed by the
+    /// game's own spacing, biome and terrain-adaptation checks. The type's id
+    /// is in the calling mod's namespace (`mymod:tower`); another mod's
+    /// namespace, an empty name and an id registered twice refuse the mods at
+    /// startup, naming the mod. `ty`'s `load_piece` is its saved pieces'
+    /// loader: keep the type for as long as the game runs.
+    pub fn register_structure_type<T: super::StructureType>(&mut self, name: &str, ty: T) {
+        self.add_structure_type(name, Arc::new(ty));
+    }
+    /// Declare a block entity type in this mod's namespace.
+    pub fn block_entity_type(&mut self, id: &str) -> super::BlockEntityTypeBuilder<'_> {
+        super::BlockEntityTypeBuilder {
+            id: id.to_owned(),
+            registrar: self,
+            blocks: Vec::new(),
+        }
+    }
+    /// Attach `part` to block `block` (`mymod:shaft`, `minecraft:oak_log`).
+    pub fn block_part<P: BlockPart>(&mut self, block: &str, part: P) {
+        self.attach_block_part(block, type_name::<P>(), Arc::new(part));
+    }
+    /// Attach a Part to a native type, including one another mod declares later.
+    /// Vanilla keys are usable for capabilities, but not for native payload Parts.
+    pub fn block_entity_part<P: BlockEntityPart>(
+        &mut self,
+        kind: &super::BlockEntityTypeKey,
+        part: P,
+    ) -> Result<(), super::BlockEntityPartError> {
+        self.attach_block_entity_part(kind, type_name::<P>(), Arc::new(part))
+    }
+    /// Attach `part` to every block in tag `tag` (`minecraft:logs`, without `#`), as each game's
+    /// tags have it when its world opens and after `/reload`.
+    pub fn block_part_tag<P: BlockPart>(&mut self, tag: &str, part: P) {
+        self.attach_block_part_tag(tag, type_name::<P>(), Arc::new(part));
+    }
+    /// Attach `part` to every item in tag `tag` (`minecraft:axes`, without `#`).
+    pub fn item_part_tag<P: ItemPart>(&mut self, tag: &str, part: P) {
+        self.attach_item_part_tag(tag, type_name::<P>(), Arc::new(part));
+    }
+    /// Attach `part` to item `item` (`mymod:wrench`).
+    pub fn item_part<P: ItemPart>(&mut self, item: &str, part: P) {
+        self.attach_item_part(item, type_name::<P>(), Arc::new(part));
+    }
+    /// Attach `part` to the mod menu type `menu`.
+    pub fn menu_part<P: MenuPart>(&mut self, menu: &str, part: P) {
+        self.attach_menu_part(menu, type_name::<P>(), Arc::new(part));
+    }
+    /// Answer capability `key` for block entity type `kind` with `provider`, which gives
+    /// a handler for one block entity and side, or none:
+    /// `r.block_entity_capability(&ITEMS, &press, |_, _| Some(Box::new(PressItems)))`.
+    /// Like NeoForge's `RegisterCapabilitiesEvent`, providers add up: in the fork's chosen order
+    /// (NeoForge's javadoc states none), the game's own is asked first, then the mods' in
+    /// registration order, and the first to answer wins.
+    pub fn block_entity_capability<T: ?Sized + 'static>(
+        &mut self,
+        key: &CapabilityKey<T>,
+        kind: &super::BlockEntityTypeKey,
+        provider: impl Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
+    ) {
+        self.provide_block_entity_capability(
+            key.name,
+            kind,
+            false,
+            BlockProviderOf::of(Arc::new(provider)),
+        );
+    }
+    /// `block_entity_capability`, asked ahead of the game's own
+    /// provider (NeoForge's priority), as a mod that replaces how a block entity's slots are
+    /// reached.
+    pub fn block_entity_capability_before_game<T: ?Sized + 'static>(
+        &mut self,
+        key: &CapabilityKey<T>,
+        kind: &super::BlockEntityTypeKey,
+        provider: impl Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
+    ) {
+        self.provide_block_entity_capability(
+            key.name,
+            kind,
+            true,
+            BlockProviderOf::of(Arc::new(provider)),
+        );
+    }
+    /// Answer item capability `key` for item `item` (`mymod:backpack`) with `provider`, which
+    /// gives a handler for the stack at one place, or none: `r.item_capability(&ITEM_ITEMS,
+    /// "mymod:backpack", |_, _| Some(Box::new(Backpack)))`. Asked as
+    /// `block_entity_capability`'s are.
+    pub fn item_capability<T: ?Sized + 'static>(
+        &mut self,
+        key: &ItemCapabilityKey<T>,
+        item: &str,
+        provider: impl Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
+    ) {
+        self.provide_item_capability(
+            key.name,
+            item,
+            false,
+            ItemProviderOf::of(Arc::new(provider)),
+        );
+    }
+    /// `item_capability`, asked ahead of the game's own provider.
+    pub fn item_capability_before_game<T: ?Sized + 'static>(
+        &mut self,
+        key: &ItemCapabilityKey<T>,
+        item: &str,
+        provider: impl Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
+    ) {
+        self.provide_item_capability(key.name, item, true, ItemProviderOf::of(Arc::new(provider)));
+    }
+    /// Answer entity capability `key` for entity type `kind` (`mymod:robot`,
+    /// `minecraft:player`) with `provider`, which gives a handler for one entity, or none:
+    /// `r.entity_capability(&ENTITY_ITEMS, "mymod:robot", |_, robot, ()| Some(Box::new(Cargo(robot))))`.
+    /// Asked as `block_entity_capability`'s are.
+    pub fn entity_capability<T: ?Sized + 'static, C: 'static>(
+        &mut self,
+        key: &EntityCapabilityKey<T, C>,
+        kind: &str,
+        provider: impl Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync + 'static,
+    ) {
+        self.provide_entity_capability(
+            key.name,
+            kind,
+            false,
+            EntityProviderOf::of(Arc::new(provider)),
+        );
+    }
+    /// `entity_capability`, asked ahead of the game's own provider,
+    /// as a mod that replaces how a player's inventory is reached.
+    pub fn entity_capability_before_game<T: ?Sized + 'static, C: 'static>(
+        &mut self,
+        key: &EntityCapabilityKey<T, C>,
+        kind: &str,
+        provider: impl Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync + 'static,
+    ) {
+        self.provide_entity_capability(
+            key.name,
+            kind,
+            true,
+            EntityProviderOf::of(Arc::new(provider)),
+        );
+    }
+}
+
+/// The game's [`Registrar`]: every mod's registrations, checked as they come.
 // exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct Registrar {
+pub struct PartRegistrar {
     mod_id: &'static str,
     mod_index: usize,
     /// Parts registered so far, by every mod: the next part's `order`.
@@ -707,7 +1080,7 @@ pub struct Registrar {
     refused: Vec<String>,
 }
 
-impl Registrar {
+impl PartRegistrar {
     fn new(mod_id: &'static str) -> Self {
         Self {
             mod_id,
@@ -720,130 +1093,6 @@ impl Registrar {
             controllers: Vec::new(),
             structure_types: Vec::new(),
             refused: Vec::new(),
-        }
-    }
-
-    /// Look up a vanilla or another mod's type. The final registry validates it at load.
-    pub fn block_entity_type_key(&mut self, id: &str) -> super::BlockEntityTypeKey {
-        if !horizon_mods::content::namespaced_id(id) {
-            self.refused.push(format!(
-                "mod {}: invalid block entity type {id:?}",
-                self.mod_id
-            ));
-        }
-        let kind = super::BlockEntityTypeKey(id.into());
-        self.requested_types.push(BlockEntityTypeRequest {
-            mod_id: self.mod_id,
-            kind: kind.clone(),
-        });
-        kind
-    }
-
-    /// Register structure type `name` (`tower` or `mymod:tower`), the way
-    /// NeoForge's registries `STRUCTURE_TYPE` and `STRUCTURE_PIECE` register
-    /// once at startup: a data pack structure with `"type": "modid:tower"`
-    /// then generates by `ty`'s code — its own start and pieces, placed by the
-    /// game's own spacing, biome and terrain-adaptation checks. The type's id
-    /// is in the calling mod's namespace (`mymod:tower`); another mod's
-    /// namespace, an empty name and an id registered twice refuse the mods at
-    /// startup, naming the mod. `ty`'s `load_piece` is its saved pieces'
-    /// loader: keep the type for as long as the game runs.
-    pub fn register_structure_type<T: super::StructureType>(&mut self, name: &str, ty: T) {
-        let (namespace, path) = name.split_once(':').unwrap_or((self.mod_id, name));
-        let id = format!("{}:{}", self.mod_id, path);
-        let refusal = if namespace != self.mod_id {
-            Some(format!(
-                "{} registered structure type {name:?} in the namespace {namespace:?}, which is not its own",
-                self.mod_id
-            ))
-        } else if path.is_empty() {
-            Some(format!(
-                "{} registered a structure type with no name",
-                self.mod_id
-            ))
-        } else {
-            self.structure_types
-                .iter()
-                .any(|t| *t.id == *id)
-                .then(|| format!("{} registered structure type {id} twice", self.mod_id))
-        };
-        if let Some(refusal) = refusal {
-            self.refused.push(refusal);
-            return;
-        }
-        let engine_type = super::structure_type::Adapter::new(&id, ty).into_engine_type();
-        self.structure_types
-            .push(super::structure_type::StructureTypeInfo {
-                id: id.into(),
-                ty: engine_type,
-            });
-    }
-
-    /// Declare a block entity type in this mod's namespace.
-    pub fn block_entity_type(&mut self, id: &str) -> super::BlockEntityTypeBuilder<'_> {
-        super::BlockEntityTypeBuilder {
-            id: format!("{}:{id}", self.mod_id),
-            registrar: self,
-            blocks: Vec::new(),
-        }
-    }
-
-    pub(super) fn register_block_entity_type(
-        &mut self,
-        id: String,
-        blocks: Vec<String>,
-    ) -> super::BlockEntityTypeKey {
-        if !horizon_mods::content::namespaced_id(&id) {
-            self.refused.push(format!("invalid block entity type {id}"));
-        }
-        let key = super::BlockEntityTypeKey(id.as_str().into());
-        self.block_entity_types.push(BlockEntityType { id, blocks });
-        key
-    }
-
-    /// Register ticket controller `name`, the way NeoForge's `RegisterTicketControllersEvent`
-    /// does once at startup, and keep the handle for `chunk.set_mod_forced`. `name` is
-    /// `quarry` or `mymod:quarry`; the controller's id is in the calling mod's namespace
-    /// (`mymod:quarry`), and another mod's namespace refuses the mods at startup, as does an id
-    /// registered twice. `validates` is whether it validates its saved tickets: the
-    /// `validate_tickets` hook then runs for it when a level loads them (NeoForge's
-    /// `LoadingValidationCallback`). A world's tickets of a controller no loaded mod registers are
-    /// dropped when it loads.
-    pub fn register_ticket_controller(&mut self, name: &str, validates: bool) -> TicketController {
-        ticket_controller::register(
-            &mut self.controllers,
-            &mut self.refused,
-            self.mod_id,
-            name,
-            validates,
-        )
-    }
-
-    /// Attach `part` to block `block` (`mymod:shaft`, `minecraft:oak_log`).
-    pub fn block_part<P: BlockPart>(&mut self, block: &str, part: P) {
-        self.attach::<P, dyn BlockPart>(|p| &mut p.blocks, block, Arc::new(part));
-    }
-    /// Attach a Part to a native type, including one another mod declares later.
-    /// Vanilla keys are usable for capabilities, but not for native payload Parts.
-    pub fn block_entity_part<P: BlockEntityPart>(
-        &mut self,
-        kind: &super::BlockEntityTypeKey,
-        part: P,
-    ) -> Result<(), super::BlockEntityPartError> {
-        if kind.id().starts_with("minecraft:") {
-            return Err(super::BlockEntityPartError::VanillaType { kind: kind.clone() });
-        }
-        if self.attach_known::<P, dyn BlockEntityPart>(
-            |p| &mut p.block_entity_kinds,
-            kind.id(),
-            Arc::new(part),
-        ) {
-            Ok(())
-        } else {
-            Err(super::BlockEntityPartError::Duplicate {
-                kind: kind.clone(),
-                part: type_name::<P>(),
-            })
         }
     }
 
@@ -884,165 +1133,18 @@ impl Registrar {
             parts.sort_by_key(|part| (part.mod_index, part.order));
         }
     }
-    /// Attach `part` to every block in tag `tag` (`minecraft:logs`, without `#`), as each game's
-    /// tags have it when its world opens and after `/reload`.
-    pub fn block_part_tag<P: BlockPart>(&mut self, tag: &str, part: P) {
-        let part = self.tagged::<P, dyn BlockPart>(tag, Arc::new(part));
-        self.tags.blocks.extend(part);
-    }
-    /// Attach `part` to every item in tag `tag` (`minecraft:axes`, without `#`).
-    pub fn item_part_tag<P: ItemPart>(&mut self, tag: &str, part: P) {
-        let part = self.tagged::<P, dyn ItemPart>(tag, Arc::new(part));
-        self.tags.items.extend(part);
-    }
-    /// Attach `part` to item `item` (`mymod:wrench`).
-    pub fn item_part<P: ItemPart>(&mut self, item: &str, part: P) {
-        self.attach::<P, dyn ItemPart>(|p| &mut p.items, item, Arc::new(part));
-    }
-    /// Answer capability `key` for block entity type `kind` with `provider`, which gives
-    /// a handler for one block entity and side, or none:
-    /// `r.block_entity_capability(&ITEMS, &press, |_, _| Some(Box::new(PressItems)))`.
-    /// Like NeoForge's `RegisterCapabilitiesEvent`, providers add up: in the fork's chosen order
-    /// (NeoForge's javadoc states none), the game's own is asked first, then the mods' in
-    /// registration order, and the first to answer wins.
-    pub fn block_entity_capability<T: ?Sized + 'static>(
-        &mut self,
-        key: &CapabilityKey<T>,
-        kind: &super::BlockEntityTypeKey,
-        provider: impl Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
-    ) {
-        let provider: Arc<BlockProvider<T>> = Arc::new(provider);
-        self.capability::<T, _>(
-            |p| &mut p.capabilities,
-            key.name,
-            ProviderTarget::BlockEntity(kind),
-            false,
-            provider,
-        );
-    }
-    /// [`block_entity_capability`](Self::block_entity_capability), asked ahead of the game's own
-    /// provider (NeoForge's priority), as a mod that replaces how a block entity's slots are
-    /// reached.
-    pub fn block_entity_capability_before_game<T: ?Sized + 'static>(
-        &mut self,
-        key: &CapabilityKey<T>,
-        kind: &super::BlockEntityTypeKey,
-        provider: impl Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
-    ) {
-        let provider: Arc<BlockProvider<T>> = Arc::new(provider);
-        self.capability::<T, _>(
-            |p| &mut p.capabilities,
-            key.name,
-            ProviderTarget::BlockEntity(kind),
-            true,
-            provider,
-        );
-    }
-    /// Answer item capability `key` for item `item` (`mymod:backpack`) with `provider`, which
-    /// gives a handler for the stack at one place, or none: `r.item_capability(&ITEM_ITEMS,
-    /// "mymod:backpack", |_, _| Some(Box::new(Backpack)))`. Asked as
-    /// [`block_entity_capability`](Self::block_entity_capability)'s are.
-    pub fn item_capability<T: ?Sized + 'static>(
-        &mut self,
-        key: &ItemCapabilityKey<T>,
-        item: &str,
-        provider: impl Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
-    ) {
-        let provider: Arc<ItemProvider<T>> = Arc::new(provider);
-        self.capability::<T, _>(
-            |p| &mut p.item_capabilities,
-            key.name,
-            ProviderTarget::Id(item),
-            false,
-            provider,
-        );
-    }
-    /// [`item_capability`](Self::item_capability), asked ahead of the game's own provider.
-    pub fn item_capability_before_game<T: ?Sized + 'static>(
-        &mut self,
-        key: &ItemCapabilityKey<T>,
-        item: &str,
-        provider: impl Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
-    ) {
-        let provider: Arc<ItemProvider<T>> = Arc::new(provider);
-        self.capability::<T, _>(
-            |p| &mut p.item_capabilities,
-            key.name,
-            ProviderTarget::Id(item),
-            true,
-            provider,
-        );
-    }
-    /// Answer entity capability `key` for entity type `kind` (`mymod:robot`,
-    /// `minecraft:player`) with `provider`, which gives a handler for one entity, or none:
-    /// `r.entity_capability(&ENTITY_ITEMS, "mymod:robot", |_, robot, ()| Some(Box::new(Cargo(robot))))`.
-    /// Asked as [`block_entity_capability`](Self::block_entity_capability)'s are.
-    pub fn entity_capability<T: ?Sized + 'static, C: 'static>(
-        &mut self,
-        key: &EntityCapabilityKey<T, C>,
-        kind: &str,
-        provider: impl Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync + 'static,
-    ) {
-        let provider: Arc<EntityProvider<T, C>> = Arc::new(provider);
-        self.capability::<T, _>(
-            |p| &mut p.entity_capabilities,
-            key.name,
-            ProviderTarget::Id(kind),
-            false,
-            provider,
-        );
-    }
-    /// [`entity_capability`](Self::entity_capability), asked ahead of the game's own provider,
-    /// as a mod that replaces how a player's inventory is reached.
-    pub fn entity_capability_before_game<T: ?Sized + 'static, C: 'static>(
-        &mut self,
-        key: &EntityCapabilityKey<T, C>,
-        kind: &str,
-        provider: impl Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync + 'static,
-    ) {
-        let provider: Arc<EntityProvider<T, C>> = Arc::new(provider);
-        self.capability::<T, _>(
-            |p| &mut p.entity_capabilities,
-            key.name,
-            ProviderTarget::Id(kind),
-            true,
-            provider,
-        );
-    }
-    /// Read and write the item places `ItemPlace::Mod { provider: name, .. }` with `provider`,
-    /// as an accessory mod exposes its slots. One provider a name.
-    pub fn place_provider(&mut self, name: &'static str, provider: Arc<dyn PlaceProvider>) {
-        if !namespaced(name) {
-            self.refused.push(format!(
-                "{} provides item places {name:?}, which is not a namespaced name",
-                self.mod_id
-            ));
-            return;
-        }
-        if let Some((other, _)) = self.parts.place_providers.get(name) {
-            self.refused.push(format!(
-                "item places {name} are provided twice, by {} and {}",
-                *other, self.mod_id
-            ));
-            return;
-        }
-        self.parts
-            .place_providers
-            .insert(name, (self.mod_id, provider));
-    }
-
     /// Adds `provider` for capability `name` and `id` to `table`. Refused for a capability name
     /// or an id with no namespace, and for a capability name another provider answers with
     /// another handler type (two mods each declaring their own key under one name, rather than
     /// sharing the one the defining mod's `[api]` crate publishes): asked by one type, the other's
     /// providers would never answer.
-    fn capability<T: ?Sized + 'static, P: ?Sized + Send + Sync + 'static>(
+    fn capability<P>(
         &mut self,
-        table: fn(&mut Parts) -> &mut Capabilities,
+        table: fn(&mut Parts) -> &mut Capabilities<P>,
         name: &'static str,
         target: ProviderTarget<'_>,
         before_game: bool,
-        provider: Arc<P>,
+        (provider, handler): (P, &'static str),
     ) {
         let me = self.mod_id;
         if !namespaced(name) {
@@ -1063,43 +1165,43 @@ impl Registrar {
                 id
             }
         };
-        let providers = table(&mut self.parts).entry(name).or_default();
-        if let Some(other) = providers.values().flatten().next()
-            && !other.provider.is::<Arc<P>>()
+        let by_id = table(&mut self.parts).entry(name).or_default();
+        if let Some(other) = by_id.values().flatten().next()
+            && other.type_name != handler
         {
             self.refused.push(format!(
-                "capability {name} is answered with two handler types, {} by {} and {} by {me}",
-                other.type_name,
-                other.mod_id,
-                type_name::<T>(),
+                "capability {name} is answered with two handler types, {} by {} and {handler} by {me}",
+                other.type_name, other.mod_id,
             ));
             return;
         }
-        providers
-            .entry(id.into())
-            .or_default()
-            .push(CapabilityPart {
-                mod_id: self.mod_id,
-                type_name: type_name::<T>(),
+        let providers = by_id.entry(id.into()).or_default();
+        // Those asked ahead of the game first, each kind in registration order.
+        let at = if before_game {
+            providers.partition_point(|part| part.before_game)
+        } else {
+            providers.len()
+        };
+        providers.insert(
+            at,
+            CapabilityPart {
+                mod_id: me,
+                type_name: handler,
                 before_game,
-                provider: Arc::new(provider),
-            });
+                provider,
+            },
+        );
     }
-    /// Attach `part` to the mod menu type `menu`.
-    pub fn menu_part<P: MenuPart>(&mut self, menu: &str, part: P) {
-        self.attach::<P, dyn MenuPart>(|p| &mut p.menus, menu, Arc::new(part));
-    }
-
-    /// `part`, of kind `K`, for tag `tag`; none if it is refused.
-    fn tagged<K: 'static, P: ?Sized>(
+    /// `part`, of kind `kind`, for tag `tag`; none if it is refused.
+    fn tagged<P: ?Sized>(
         &mut self,
+        kind: &'static str,
         tag: &str,
         part: Arc<P>,
     ) -> Option<(Box<str>, Attached<P>)> {
-        let name = type_name::<K>();
         if tag.starts_with('#') || !namespaced(tag) {
             self.refused.push(format!(
-                "{} attached {name} to tag {tag:?}, which is not a namespaced tag name (write it without #)",
+                "{} attached {kind} to tag {tag:?}, which is not a namespaced tag name (write it without #)",
                 self.mod_id
             ));
             return None;
@@ -1111,34 +1213,34 @@ impl Registrar {
                 mod_id: self.mod_id,
                 mod_index: self.mod_index,
                 order: self.registered,
-                kind: TypeId::of::<K>(),
-                type_name: name,
+                type_name: kind,
                 part,
             },
         ))
     }
 
-    /// Attach `part`, of kind `K`, to `id` in `table`; false if it is refused.
-    fn attach<K: 'static, P: ?Sized>(
+    /// Attach `part`, of kind `kind`, to `id` in `table`; false if it is refused.
+    fn attach<P: ?Sized>(
         &mut self,
         table: fn(&mut Parts) -> &mut HashMap<Box<str>, Vec<Attached<P>>>,
+        kind: &'static str,
         id: &str,
         part: Arc<P>,
     ) -> bool {
-        let name = type_name::<K>();
         if !namespaced(id) {
             self.refused.push(format!(
-                "{} attached {name} to {id:?}, which is not a namespaced id",
+                "{} attached {kind} to {id:?}, which is not a namespaced id",
                 self.mod_id
             ));
             return false;
         }
-        self.attach_known::<K, P>(table, id, part)
+        self.attach_known(table, kind, id, part)
     }
 
-    fn attach_known<K: 'static, P: ?Sized>(
+    fn attach_known<P: ?Sized>(
         &mut self,
         table: fn(&mut Parts) -> &mut HashMap<Box<str>, Vec<Attached<P>>>,
+        kind: &'static str,
         id: &str,
         part: Arc<P>,
     ) -> bool {
@@ -1146,8 +1248,7 @@ impl Registrar {
             mod_id: self.mod_id,
             mod_index: self.mod_index,
             order: self.registered + 1,
-            kind: TypeId::of::<K>(),
-            type_name: type_name::<K>(),
+            type_name: kind,
             part,
         };
         let inserted = insert_part(table(&mut self.parts), id, part, &mut self.refused);
@@ -1158,14 +1259,206 @@ impl Registrar {
     }
 }
 
+impl Registrar for PartRegistrar {
+    fn add_structure_type(&mut self, name: &str, ty: Arc<dyn super::StructureType>) {
+        let (namespace, path) = name.split_once(':').unwrap_or((self.mod_id, name));
+        let id = format!("{}:{}", self.mod_id, path);
+        let refusal = if namespace != self.mod_id {
+            Some(format!(
+                "{} registered structure type {name:?} in the namespace {namespace:?}, which is not its own",
+                self.mod_id
+            ))
+        } else if path.is_empty() {
+            Some(format!(
+                "{} registered a structure type with no name",
+                self.mod_id
+            ))
+        } else {
+            self.structure_types
+                .iter()
+                .any(|t| *t.id == *id)
+                .then(|| format!("{} registered structure type {id} twice", self.mod_id))
+        };
+        if let Some(refusal) = refusal {
+            self.refused.push(refusal);
+            return;
+        }
+        let engine_type = super::structure_type::Adapter::new(&id, ty).into_engine_type();
+        self.structure_types
+            .push(super::structure_type::StructureTypeInfo {
+                id: id.into(),
+                ty: engine_type,
+            });
+    }
+
+    fn block_entity_type_key(&mut self, id: &str) -> super::BlockEntityTypeKey {
+        if !horizon_mods::content::namespaced_id(id) {
+            self.refused.push(format!(
+                "mod {}: invalid block entity type {id:?}",
+                self.mod_id
+            ));
+        }
+        let kind = super::BlockEntityTypeKey(id.into());
+        self.requested_types.push(BlockEntityTypeRequest {
+            mod_id: self.mod_id,
+            kind: kind.clone(),
+        });
+        kind
+    }
+
+    fn declare_block_entity_type(
+        &mut self,
+        path: &str,
+        blocks: Vec<String>,
+    ) -> super::BlockEntityTypeKey {
+        let id = format!("{}:{path}", self.mod_id);
+        if !horizon_mods::content::namespaced_id(&id) {
+            self.refused.push(format!("invalid block entity type {id}"));
+        }
+        let key = super::BlockEntityTypeKey(id.as_str().into());
+        self.block_entity_types.push(BlockEntityType { id, blocks });
+        key
+    }
+
+    fn register_ticket_controller(&mut self, name: &str, validates: bool) -> TicketController {
+        ticket_controller::register(
+            &mut self.controllers,
+            &mut self.refused,
+            self.mod_id,
+            name,
+            validates,
+        )
+    }
+
+    fn attach_block_part(&mut self, block: &str, kind: &'static str, part: Arc<dyn BlockPart>) {
+        self.attach(|p| &mut p.blocks, kind, block, part);
+    }
+
+    fn attach_block_entity_part(
+        &mut self,
+        key: &super::BlockEntityTypeKey,
+        kind: &'static str,
+        part: Arc<dyn BlockEntityPart>,
+    ) -> Result<(), super::BlockEntityPartError> {
+        if key.id().starts_with("minecraft:") {
+            return Err(super::BlockEntityPartError::VanillaType { kind: key.clone() });
+        }
+        if self.attach_known(|p| &mut p.block_entity_kinds, kind, key.id(), part) {
+            Ok(())
+        } else {
+            Err(super::BlockEntityPartError::Duplicate {
+                kind: key.clone(),
+                part: kind,
+            })
+        }
+    }
+
+    fn attach_item_part(&mut self, item: &str, kind: &'static str, part: Arc<dyn ItemPart>) {
+        self.attach(|p| &mut p.items, kind, item, part);
+    }
+
+    fn attach_menu_part(&mut self, menu: &str, kind: &'static str, part: Arc<dyn MenuPart>) {
+        self.attach(|p| &mut p.menus, kind, menu, part);
+    }
+
+    fn attach_block_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn BlockPart>) {
+        let part = self.tagged(kind, tag, part);
+        self.tags.blocks.extend(part);
+    }
+
+    fn attach_item_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn ItemPart>) {
+        let part = self.tagged(kind, tag, part);
+        self.tags.items.extend(part);
+    }
+
+    fn provide_block_entity_capability(
+        &mut self,
+        name: &'static str,
+        kind: &super::BlockEntityTypeKey,
+        before_game: bool,
+        provider: BlockProviderOf,
+    ) {
+        self.capability(
+            |p| &mut p.capabilities,
+            name,
+            ProviderTarget::BlockEntity(kind),
+            before_game,
+            {
+                let handler = provider.handler();
+                (provider, handler)
+            },
+        );
+    }
+
+    fn provide_item_capability(
+        &mut self,
+        name: &'static str,
+        item: &str,
+        before_game: bool,
+        provider: ItemProviderOf,
+    ) {
+        self.capability(
+            |p| &mut p.item_capabilities,
+            name,
+            ProviderTarget::Id(item),
+            before_game,
+            {
+                let handler = provider.handler();
+                (provider, handler)
+            },
+        );
+    }
+
+    fn provide_entity_capability(
+        &mut self,
+        name: &'static str,
+        kind: &str,
+        before_game: bool,
+        provider: EntityProviderOf,
+    ) {
+        self.capability(
+            |p| &mut p.entity_capabilities,
+            name,
+            ProviderTarget::Id(kind),
+            before_game,
+            {
+                let handler = provider.handler();
+                (provider, handler)
+            },
+        );
+    }
+
+    /// Read and write the item places `ItemPlace::Mod { provider: name, .. }` with `provider`,
+    /// as an accessory mod exposes its slots. One provider a name.
+    fn place_provider(&mut self, name: &'static str, provider: Arc<dyn PlaceProvider>) {
+        if !namespaced(name) {
+            self.refused.push(format!(
+                "{} provides item places {name:?}, which is not a namespaced name",
+                self.mod_id
+            ));
+            return;
+        }
+        if let Some((other, _)) = self.parts.place_providers.get(name) {
+            self.refused.push(format!(
+                "item places {name} are provided twice, by {} and {}",
+                *other, self.mod_id
+            ));
+            return;
+        }
+        self.parts
+            .place_providers
+            .insert(name, (self.mod_id, provider));
+    }
+}
+
 fn namespaced(id: &str) -> bool {
     id.split_once(':')
         .is_some_and(|(namespace, path)| !namespace.is_empty() && !path.is_empty())
 }
 
 /// Every mod's [`Hooks::register`](super::Hooks::register) run against one registrar, in dispatch order.
-fn register_all(mods: &[ModEntry]) -> Registrar {
-    let mut registrar = Registrar::new(mods[0].id);
+fn register_all(mods: &[ModEntry]) -> PartRegistrar {
+    let mut registrar = PartRegistrar::new(mods[0].id);
     let context = super::RegistrationContext::new();
     for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
         registrar.mod_id = mods[index].id;
@@ -1234,7 +1527,7 @@ pub mod tests {
     #[cfg(test)]
     use super::{Attached, KnownIds, resolve_parts};
     #[cfg(test)]
-    use std::any::{TypeId, type_name};
+    use std::any::type_name;
     #[cfg(test)]
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
@@ -1275,7 +1568,7 @@ pub mod tests {
         struct Invalid;
         #[mod_api::__subscriptions]
         impl super::super::Hooks for Invalid {
-            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 for path in ["", "other:press", "Uppercase", "has space"] {
                     r.block_entity_type(path).build();
                 }
@@ -1295,7 +1588,7 @@ pub mod tests {
         struct Invalid;
         #[mod_api::__subscriptions]
         impl Hooks for Invalid {
-            fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
                 for id in ["press", "minecraft:", "Upper:chest", "test:has space"] {
                     r.block_entity_type_key(id);
                 }
@@ -1318,21 +1611,21 @@ pub mod tests {
         impl mod_api::StructureType for Tower {
             fn find_generation_point(
                 &self,
-                _: &mut mod_api::GenerationContext<'_>,
+                _: &mut dyn mod_api::GenerationContext,
             ) -> Option<mod_api::FoundStructure> {
                 None
             }
             fn load_piece(
                 &self,
                 _: &mod_api::Compound,
-            ) -> Option<Box<dyn mod_api::StructurePiece>> {
+            ) -> Option<std::sync::Arc<dyn mod_api::StructurePiece>> {
                 None
             }
         }
         struct Invalid;
         #[mod_api::__subscriptions]
         impl Hooks for Invalid {
-            fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
                 r.register_structure_type("tower", Tower);
                 r.register_structure_type("tower", Tower);
                 r.register_structure_type("other:tower", Tower);
@@ -1473,7 +1766,7 @@ pub mod tests {
     struct Doubler;
     #[mod_api::__subscriptions]
     impl Hooks for Doubler {
-        fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
             r.block_part("test:gauge", Gauge);
             r.block_part("test:connector", Connector);
             r.block_part_tag("test:gauged", TagGauge);
@@ -2700,7 +2993,7 @@ pub mod tests {
     struct Chemist;
     #[mod_api::__subscriptions]
     impl Hooks for Chemist {
-        fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
             let chem_vat = r.block_entity_type_key("test:chem_vat");
             r.block_entity_capability(&CHEMICALS, &chem_vat, |_, at| Some(Box::new(ChemTank(at))));
         }
@@ -2723,14 +3016,14 @@ pub mod tests {
     struct FixtureContent;
     #[mod_api::__subscriptions]
     impl Hooks for FixtureContent {
-        fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+        fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
             for id in CAPABILITY_TYPES {
                 r.block_entity_type(id)
                     .blocks(&[&format!("test:{id}")])
                     .build();
             }
         }
-        fn blocks(&self, _context: &mod_api::RegistrationContext<'_>, event: &mut BlocksEvent<'_>) {
+        fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
             event.blocks.extend(
                 ["gauge", "connector", "press", "hoard"]
                     .into_iter()
@@ -2774,7 +3067,7 @@ pub mod tests {
         struct WeakPowerMod;
         #[mod_api::__subscriptions]
         impl Hooks for WeakPowerMod {
-            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 r.block_part("minecraft:glass", WeakPower);
             }
         }
@@ -2800,7 +3093,7 @@ pub mod tests {
         struct PathMod;
         #[mod_api::__subscriptions]
         impl Hooks for PathMod {
-            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 r.block_part(
                     "minecraft:glass",
                     Answers(&[
@@ -2840,7 +3133,7 @@ pub mod tests {
         struct LeaverMod;
         #[mod_api::__subscriptions]
         impl Hooks for LeaverMod {
-            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 r.block_part("minecraft:glass", Leaver);
             }
         }
@@ -2856,7 +3149,7 @@ pub mod tests {
         struct FenceMod;
         #[mod_api::__subscriptions]
         impl Hooks for FenceMod {
-            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 r.block_part("minecraft:oak_fence", FenceRule);
             }
         }
@@ -2871,7 +3164,7 @@ pub mod tests {
         struct RedstoneMod;
         #[mod_api::__subscriptions]
         impl Hooks for RedstoneMod {
-            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 r.block_part("minecraft:glass", Connector);
             }
         }
@@ -3079,7 +3372,6 @@ pub mod tests {
             mod_id: ["earlier", "later"][mod_index],
             mod_index,
             order: 0,
-            kind: TypeId::of::<Gauge>(),
             type_name: "Gauge",
             part: Arc::new(Gauge),
         };
@@ -4077,7 +4369,7 @@ pub mod tests {
 
     #[test]
     fn ticket_controllers_get_the_callers_namespace_and_refuse_anothers() {
-        let mut r = Registrar::new("first");
+        let mut r = super::PartRegistrar::new("first");
         r.register_ticket_controller("quarry", true);
         r.register_ticket_controller("first:drill", false);
         assert!(r.refused.is_empty(), "{:?}", r.refused);
@@ -4100,7 +4392,7 @@ pub mod tests {
 
     #[test]
     fn a_ticket_controller_registered_twice_refuses_the_mods_naming_mod_and_id() {
-        let mut r = Registrar::new("first");
+        let mut r = super::PartRegistrar::new("first");
         r.register_ticket_controller("quarry", true);
         r.register_ticket_controller("first:quarry", false);
         r.mod_id = "second";
@@ -4117,14 +4409,15 @@ pub mod tests {
 
     #[test]
     fn a_place_provider_given_twice_is_refused() {
-        let mut r = Registrar::new("first");
-        r.place_provider("test:charms", Arc::new(Charms));
+        let mut r = super::PartRegistrar::new("first");
+        (&mut r as &mut dyn Registrar).place_provider("test:charms", Arc::new(Charms));
         r.mod_id = "second";
         r.mod_index = 1;
-        r.place_provider("test:charms", Arc::new(Charms));
-        r.place_provider("charms", Arc::new(Charms));
+        (&mut r as &mut dyn Registrar).place_provider("test:charms", Arc::new(Charms));
+        (&mut r as &mut dyn Registrar).place_provider("charms", Arc::new(Charms));
         let invalid = r.block_entity_type_key("pipe");
-        r.block_entity_capability(&ITEMS, &invalid, |_, at| Some(Box::new(Pipe(at))));
+        (&mut r as &mut dyn Registrar)
+            .block_entity_capability(&ITEMS, &invalid, |_, at| Some(Box::new(Pipe(at))));
         assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
         assert!(
             r.refused[0]
@@ -4143,19 +4436,25 @@ pub mod tests {
             CapabilityKey::new("test:chemical");
         const UNNAMESPACED: CapabilityKey<dyn ResourceHandler<Chemical>> =
             CapabilityKey::new("chemical");
-        let mut r = Registrar::new("first");
+        let mut r = super::PartRegistrar::new("first");
         let chem_tank = r.block_entity_type_key("test:chem_tank");
-        r.block_entity_capability(&CHEMICALS, &chem_tank, |_, at| Some(Box::new(ChemTank(at))));
+        (&mut r as &mut dyn Registrar)
+            .block_entity_capability(&CHEMICALS, &chem_tank, |_, at| Some(Box::new(ChemTank(at))));
         r.mod_id = "second";
         r.mod_index = 1;
         let chem_vat = r.block_entity_type_key("test:chem_vat");
-        r.block_entity_capability(&NOT_CHEMICALS, &chem_vat, |_, at| {
-            Some(Box::new(ModTank { at, lie: None }))
-        });
-        r.block_entity_capability(&CHEMICALS, &chem_vat, |_, at| Some(Box::new(ChemTank(at))));
-        r.block_entity_capability(&UNNAMESPACED, &chem_vat, |_, at| {
-            Some(Box::new(ChemTank(at)))
-        });
+        (&mut r as &mut dyn Registrar).block_entity_capability(
+            &NOT_CHEMICALS,
+            &chem_vat,
+            |_, at| Some(Box::new(ModTank { at, lie: None })),
+        );
+        (&mut r as &mut dyn Registrar)
+            .block_entity_capability(&CHEMICALS, &chem_vat, |_, at| Some(Box::new(ChemTank(at))));
+        (&mut r as &mut dyn Registrar).block_entity_capability(
+            &UNNAMESPACED,
+            &chem_vat,
+            |_, at| Some(Box::new(ChemTank(at))),
+        );
         assert_eq!(r.refused.len(), 2, "{:?}", r.refused);
         let two_types = &r.refused[0];
         assert!(
@@ -4921,9 +5220,9 @@ pub mod tests {
 
     #[test]
     fn a_mods_tag_part_registered_first_runs_before_its_key_part() {
-        let mut r = Registrar::new("registrar-test");
-        r.block_part_tag("test:gauged", TagGauge);
-        r.block_part("test:gauge", Gauge);
+        let mut r = super::PartRegistrar::new("registrar-test");
+        (&mut r as &mut dyn Registrar).block_part_tag("test:gauged", TagGauge);
+        (&mut r as &mut dyn Registrar).block_part("test:gauge", Gauge);
         let tags = HashMap::from([(
             "test:gauged".to_owned(),
             HashSet::from(["test:gauge".to_owned()]),
@@ -4938,10 +5237,10 @@ pub mod tests {
 
     #[test]
     fn a_vanilla_type_refuses_a_native_payload_part_at_registration() {
-        let mut r = Registrar::new("test");
+        let mut r = super::PartRegistrar::new("test");
         let kind = r.block_entity_type_key("minecraft:chest");
         assert_eq!(
-            r.block_entity_part(&kind, Press),
+            (&mut r as &mut dyn Registrar).block_entity_part(&kind, Press),
             Err(BlockEntityPartError::VanillaType { kind }),
         );
         assert!(r.parts.block_entity_kinds.is_empty());
@@ -4951,11 +5250,16 @@ pub mod tests {
 
     #[test]
     fn a_duplicate_native_part_returns_its_typed_error_and_keeps_the_first() {
-        let mut r = Registrar::new("test");
-        let kind = r.block_entity_type("press").blocks(&["test:press"]).build();
-        r.block_entity_part(&kind, Press).unwrap();
+        let mut r = super::PartRegistrar::new("test");
+        let kind = (&mut r as &mut dyn Registrar)
+            .block_entity_type("press")
+            .blocks(&["test:press"])
+            .build();
+        (&mut r as &mut dyn Registrar)
+            .block_entity_part(&kind, Press)
+            .unwrap();
         assert_eq!(
-            r.block_entity_part(&kind, Press),
+            (&mut r as &mut dyn Registrar).block_entity_part(&kind, Press),
             Err(BlockEntityPartError::Duplicate {
                 kind: kind.clone(),
                 part: type_name::<Press>()
@@ -5002,14 +5306,14 @@ pub mod tests {
         struct Other;
         #[mod_api::horizon_part]
         impl BlockPart for Other {}
-        let mut r = Registrar::new("first");
-        r.block_part("test:gauge", Gauge);
+        let mut r = super::PartRegistrar::new("first");
+        (&mut r as &mut dyn Registrar).block_part("test:gauge", Gauge);
         r.mod_id = "second";
         r.mod_index = 1;
-        r.block_part("test:gauge", Other);
-        r.block_part("test:gauge", Gauge);
-        r.block_part("gauge", Other);
-        r.block_part_tag("#test:gauged", Other);
+        (&mut r as &mut dyn Registrar).block_part("test:gauge", Other);
+        (&mut r as &mut dyn Registrar).block_part("test:gauge", Gauge);
+        (&mut r as &mut dyn Registrar).block_part("gauge", Other);
+        (&mut r as &mut dyn Registrar).block_part_tag("#test:gauged", Other);
         assert_eq!(r.parts.blocks["test:gauge"].len(), 2);
         assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
         assert!(

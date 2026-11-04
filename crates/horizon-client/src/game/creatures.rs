@@ -1420,7 +1420,7 @@ impl Game<'_> {
             self.set_bed_occupied(bed, false);
         }
         // The killing blow for the drop hooks, before the player's hit is forgotten.
-        let source = (!mod_api::mods().is_empty()).then(|| self.mob_damage_source(m));
+        let source = (!mod_api::__private::mods().is_empty()).then(|| self.mob_damage_source(m));
         let killer = self
             .last_hurt_by_player
             .remove(&m.id)

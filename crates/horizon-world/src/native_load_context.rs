@@ -17,14 +17,17 @@ pub enum DataLoadOrigin {
 /// Immutable metadata captured with the loaded item data. Later data loads
 /// borrow the same registry snapshot instead of scanning it again.
 pub struct LoadInputs {
-    registries: BTreeMap<String, Vec<String>>,
+    registries: BTreeMap<String, Arc<[String]>>,
     settings_root: PathBuf,
 }
 
 impl LoadInputs {
     pub fn new(registries: BTreeMap<String, Vec<String>>, settings_root: PathBuf) -> Self {
         Self {
-            registries,
+            registries: registries
+                .into_iter()
+                .map(|(name, ids)| (name, ids.into()))
+                .collect(),
             settings_root,
         }
     }
@@ -59,8 +62,8 @@ impl Snapshot {
         Self { inputs, settings }
     }
 
-    fn registry(&self, name: &str) -> Option<&[String]> {
-        self.inputs.registries.get(name).map(Vec::as_slice)
+    fn registry(&self, name: &str) -> Option<Arc<[String]>> {
+        self.inputs.registries.get(name).cloned()
     }
 
     fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
@@ -118,7 +121,7 @@ impl LoadContext {
     }
 
     /// Names in registry ID order, from the load's registry snapshot.
-    pub fn registry(&self, name: &str) -> Option<&[String]> {
+    pub fn registry(&self, name: &str) -> Option<Arc<[String]>> {
         self.snapshot.registry(name)
     }
 
@@ -150,7 +153,7 @@ impl LoopContext {
     }
 
     /// Names in registry ID order, from the registry snapshot it was built over.
-    pub fn registry(&self, name: &str) -> Option<&[String]> {
+    pub fn registry(&self, name: &str) -> Option<Arc<[String]>> {
         self.snapshot.registry(name)
     }
 
@@ -230,7 +233,10 @@ mod tests {
 
         assert_eq!(client.side(), LoopSide::Client);
         assert_eq!(server.side(), LoopSide::Server);
-        assert_eq!(client.registry("item"), Some(&["a:b".to_owned()][..]));
+        assert_eq!(
+            client.registry("item").as_deref(),
+            Some(&["a:b".to_owned()][..])
+        );
         assert_eq!(server.registry("item"), client.registry("item"));
         assert_eq!(client.setting("active", "mode").as_deref(), Some("one"));
         assert_eq!(server.setting("active", "mode").as_deref(), Some("two"));

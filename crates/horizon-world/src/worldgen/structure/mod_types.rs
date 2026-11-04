@@ -30,7 +30,7 @@ pub trait ModStructureType: Send + Sync {
         context: &mut dyn StartContext,
         chunk: ChunkPos,
         // The structure's own JSON config, as the data pack has it.
-        config: &serde_json::Value,
+        config: &Arc<serde_json::Value>,
         // Seeded as vanilla seeds it for the chunk (`setLargeFeatureSeed`).
         random: &mut WorldgenRandom<LegacyRandom>,
     ) -> Option<([i32; 3], Vec<Box<dyn LegacyPiece>>)>;
@@ -98,7 +98,7 @@ mod tests {
             &self,
             _context: &mut dyn StartContext,
             chunk: ChunkPos,
-            _config: &serde_json::Value,
+            _config: &Arc<serde_json::Value>,
             _random: &mut WorldgenRandom<LegacyRandom>,
         ) -> Option<([i32; 3], Vec<Box<dyn LegacyPiece>>)> {
             let origin = [chunk.x * 16, 64, chunk.z * 16];

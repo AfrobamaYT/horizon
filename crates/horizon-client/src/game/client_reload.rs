@@ -12,7 +12,7 @@ use super::packs::reload_files;
 use horizon_client::datapack::DataPack;
 use mod_api::{
     __private::reload::{PreparedStep, ReloadStageError, apply_listeners, prepare_listeners},
-    ClientHost, ClientReloadContext, ClientReloadListener, ClientReloadListeners, HookId, Host,
+    ClientHost, ClientReloadContext, ClientReloadListener, HookId, Host,
 };
 
 /// One client reload step to run later on the game-owning thread: a mod
@@ -30,8 +30,8 @@ impl Game<'_> {
     /// Registers a later reload's client listeners through the game
     /// (`native_add_client_reload_listeners`), gated on the hook being
     /// listened to.
-    pub(super) fn register_client_reload_listeners(&self) -> ClientReloadListeners {
-        let mut listeners = ClientReloadListeners::new();
+    pub(super) fn register_client_reload_listeners(&self) -> mod_api::ClientListenerRegistry {
+        let mut listeners = <mod_api::ClientListenerRegistry as mod_api::__private::game::ClientReloadListenersOrder>::new();
         if mod_api::__private::listened(HookId::AddClientReloadListeners) {
             self.native_add_client_reload_listeners(&mut listeners);
         }
@@ -42,8 +42,8 @@ impl Game<'_> {
 /// Registers the first load's client listeners: no game exists yet, so
 /// [`StartupClientHost`] stands in, as NeoForge's construction-time event
 /// fires on a client whose resources are not loaded either.
-pub(super) fn register_startup_client_reload_listeners() -> ClientReloadListeners {
-    let mut listeners = ClientReloadListeners::new();
+pub(super) fn register_startup_client_reload_listeners() -> mod_api::ClientListenerRegistry {
+    let mut listeners = <mod_api::ClientListenerRegistry as mod_api::__private::game::ClientReloadListenersOrder>::new();
     if mod_api::__private::listened(HookId::AddClientReloadListeners) {
         mod_api::dispatch_add_client_reload_listeners(&StartupClientHost, &mut listeners);
     }
@@ -55,7 +55,7 @@ pub(super) fn register_startup_client_reload_listeners() -> ClientReloadListener
 /// off the game-owning thread.
 pub(super) fn stage_client_reload(
     root: &std::path::Path,
-    listeners: ClientReloadListeners,
+    listeners: mod_api::ClientListenerRegistry,
 ) -> Result<Vec<PreparedClientReload>, ReloadStageError> {
     let pack = DataPack::builtin(root);
     let ordered = listeners.finish().map_err(ReloadStageError::Order)?;

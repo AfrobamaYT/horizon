@@ -45,7 +45,7 @@ impl VanillaServerListeners {
 /// filesystem paths. Its fields are private so the view can grow.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ServerReloadContext {
-    files: ReloadFiles,
+    pub(crate) files: ReloadFiles,
 }
 impl ServerReloadContext {
     pub(crate) fn new(files: ReloadFiles) -> Self {
@@ -76,22 +76,117 @@ pub trait ServerReloadListener: Send + Sync + 'static {
     /// keeps every listener's previous data. A panic in `prepare` or the
     /// returned apply is not recovered: it stops the server, and the crash
     /// report names the listener and the mod that registered it.
-    fn prepare(&self, context: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError>;
+    fn prepare(
+        &self,
+        context: &ServerReloadContext,
+    ) -> Result<Box<dyn ReloadApply>, ReloadResourceError>;
 }
 impl ServerReloadListener for Boundary {
-    fn prepare(&self, _: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
-        Ok(ReloadApply::new(|| {}))
+    fn prepare(
+        &self,
+        _: &ServerReloadContext,
+    ) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
+        Ok(<dyn ReloadApply>::new(|| {}))
     }
 }
 
-/// A read-only registry/graph view with registration methods, rebuilt on each
-/// server reload. Listener names need not belong to the registering mod.
+/// The server reload's listener registry, as `add_server_reload_listeners` hands it out: its
+/// registration methods and a read-only view of names and edges, rebuilt on each server reload.
+/// Listener names need not belong to the registering mod.
+pub trait ServerReloadListeners {
+    /// Register a unique listener and converter, e.g. `FileToIdConverter::json("machines")`.
+    /// Keep the `Arc` to read the listener's published state outside reloads.
+    fn add_listener(
+        &mut self,
+        id: Identifier,
+        converter: FileToIdConverter,
+        listener: Arc<dyn ServerReloadListener>,
+    ) -> Result<(), ReloadOrderError>;
+    /// [`add_listener`](Self::add_listener), keeping `retained` (the listener itself, as the
+    /// mod holds it) in the reload resources; mods reach it through `add_retained_listener`.
+    fn add_retained(
+        &mut self,
+        id: Identifier,
+        converter: FileToIdConverter,
+        listener: Arc<dyn ServerReloadListener>,
+        retained: Arc<dyn Any + Send + Sync>,
+    ) -> Result<(), ReloadOrderError>;
+    /// Require `first` before `second`; both names must already be registered.
+    fn add_dependency(
+        &mut self,
+        first: Identifier,
+        second: Identifier,
+    ) -> Result<(), ReloadOrderError>;
+    /// The registered names in registration order, boundaries included.
+    fn get_registry(&self) -> Vec<Identifier>;
+    /// The dependency edges as `(first, second)` names.
+    fn get_graph(&self) -> Vec<(Identifier, Identifier)>;
+    /// The name of the vanilla anchor preceding mod listeners by default.
+    fn get_last_vanilla_listener(&self) -> Identifier;
+}
+
+impl dyn ServerReloadListeners + '_ {
+    /// Register a listener whose object is also kept in the reload resources, as
+    /// NeoForge's `addRetainedListener(key, listener)`: the caller builds the
+    /// typed `ListenerKey` (`ListenerKey::new(id)`), and reads the object back
+    /// through `ServerReloadResources` after the reload, from any server hook.
+    pub fn add_retained_listener<T: ServerReloadListener>(
+        &mut self,
+        key: &ListenerKey<T>,
+        converter: FileToIdConverter,
+        listener: Arc<T>,
+    ) -> Result<(), ReloadOrderError> {
+        self.add_retained(key.id().clone(), converter, listener.clone(), listener)
+    }
+}
+
+/// The game's [`ServerReloadListeners`].
 // exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct ServerReloadListeners {
+pub struct ServerListenerRegistry {
     core: super::reload::ReloadCore<dyn ServerReloadListener>,
     retained: Vec<RetainedEntry>,
 }
-impl ServerReloadListeners {
+impl ServerReloadListeners for ServerListenerRegistry {
+    fn add_listener(
+        &mut self,
+        id: Identifier,
+        converter: FileToIdConverter,
+        listener: Arc<dyn ServerReloadListener>,
+    ) -> Result<(), ReloadOrderError> {
+        self.core.add_listener(id, converter, listener)
+    }
+    fn add_retained(
+        &mut self,
+        id: Identifier,
+        converter: FileToIdConverter,
+        listener: Arc<dyn ServerReloadListener>,
+        retained: Arc<dyn Any + Send + Sync>,
+    ) -> Result<(), ReloadOrderError> {
+        self.core.add_listener(id.clone(), converter, listener)?;
+        self.retained.push(RetainedEntry { id, any: retained });
+        Ok(())
+    }
+    fn add_dependency(
+        &mut self,
+        first: Identifier,
+        second: Identifier,
+    ) -> Result<(), ReloadOrderError> {
+        self.core.add_dependency(first, second)
+    }
+    fn get_registry(&self) -> Vec<Identifier> {
+        self.core.registry().map(|(id, _)| id.clone()).collect()
+    }
+    fn get_graph(&self) -> Vec<(Identifier, Identifier)> {
+        self.core
+            .graph()
+            .map(|(first, second)| (first.clone(), second.clone()))
+            .collect()
+    }
+    fn get_last_vanilla_listener(&self) -> Identifier {
+        VanillaServerListeners::functions()
+    }
+}
+impl ServerListenerRegistry {
     pub(crate) fn new() -> Self {
         Self {
             core: super::reload::ReloadCore::new(
@@ -102,62 +197,6 @@ impl ServerReloadListeners {
             ),
             retained: Vec::new(),
         }
-    }
-    /// Register a unique listener and converter, e.g. `FileToIdConverter::json("machines")`.
-    /// Retain the Arc to read the listener's published state outside reloads.
-    pub fn add_listener(
-        &mut self,
-        id: Identifier,
-        converter: FileToIdConverter,
-        listener: Arc<impl ServerReloadListener>,
-    ) -> Result<(), ReloadOrderError> {
-        self.core.add_listener(id, converter, listener)
-    }
-    /// Register a listener whose object is also kept in the reload resources, as
-    /// NeoForge's `addRetainedListener(key, listener)`: the caller builds the
-    /// typed `ListenerKey` (`ListenerKey::new(id)`), and reads the object back
-    /// through `ReloadResources` after the reload, from any server hook.
-    pub fn add_retained_listener<T: ServerReloadListener>(
-        &mut self,
-        key: &ListenerKey<T>,
-        converter: FileToIdConverter,
-        listener: Arc<T>,
-    ) -> Result<(), ReloadOrderError> {
-        self.add_listener(key.id().clone(), converter, listener.clone())?;
-        self.retained.push(RetainedEntry {
-            id: key.id().clone(),
-            any: listener,
-        });
-        Ok(())
-    }
-    /// Require `first` before `second`; both names must already be registered.
-    pub fn add_dependency(
-        &mut self,
-        first: Identifier,
-        second: Identifier,
-    ) -> Result<(), ReloadOrderError> {
-        self.core.add_dependency(first, second)
-    }
-    /// Names and listener objects in registration order, including boundaries.
-    pub fn get_registry(&self) -> impl Iterator<Item = (&Identifier, &dyn ServerReloadListener)> {
-        self.core
-            .registry()
-            .map(|(id, entry)| (id, entry.listener.as_ref()))
-    }
-    /// Find a listener's registered name, or None for an unregistered object.
-    pub fn get_name_lookup(&self, listener: &dyn ServerReloadListener) -> Option<&Identifier> {
-        self.core.find_name(listener)
-    }
-    /// Read-only dependency edges as `(first, second)` names.
-    pub fn get_graph(&self) -> impl Iterator<Item = (&Identifier, &Identifier)> {
-        self.core.graph()
-    }
-    /// The vanilla anchor preceding mod listeners by default.
-    pub fn get_last_vanilla_listener(&self) -> &dyn ServerReloadListener {
-        self.get_registry()
-            .find(|(id, _)| **id == VanillaServerListeners::functions())
-            .unwrap()
-            .1
     }
     pub(crate) fn finish(self) -> Result<OrderedServerReload, ReloadOrderError> {
         Ok(OrderedServerReload {
@@ -229,22 +268,36 @@ impl<T: ?Sized> Eq for ListenerKey<T> {}
 /// The retained server reload listeners of the last successful reload, as
 /// NeoForge's `ReloadableServerResources`, reached from
 /// `ServerHost::reload_resources`. A new reload replaces the whole store.
+pub trait ServerReloadResources {
+    /// The object retained under `id`, as its registering mod handed it over; mods read it
+    /// through `listener`.
+    fn retained(&self, id: &Identifier) -> Option<Arc<dyn Any + Send + Sync>>;
+}
+impl dyn ServerReloadResources + '_ {
+    /// The retained listener registered under `key` in the last successful
+    /// reload; `None` when nothing is registered under it, its type differs, or
+    /// no reload has succeeded yet. The downcast itself checks the type.
+    pub fn listener<T: ServerReloadListener>(&self, key: &ListenerKey<T>) -> Option<Arc<T>> {
+        self.retained(key.id())?.downcast::<T>().ok()
+    }
+}
+
+/// The game's [`ServerReloadResources`].
 #[derive(Default)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct ServerReloadResources {
+pub struct RetainedListeners {
     entries: BTreeMap<Identifier, Arc<dyn Any + Send + Sync>>,
 }
-impl ServerReloadResources {
+impl ServerReloadResources for RetainedListeners {
+    fn retained(&self, id: &Identifier) -> Option<Arc<dyn Any + Send + Sync>> {
+        self.entries.get(id).cloned()
+    }
+}
+impl RetainedListeners {
     pub(crate) fn install(&mut self, retained: Vec<RetainedEntry>) {
         self.entries = retained
             .into_iter()
             .map(|entry| (entry.id, entry.any))
             .collect();
-    }
-    /// The retained listener registered under `key` in the last successful
-    /// reload; `None` when nothing is registered under it, its type differs, or
-    /// no reload has succeeded yet. The downcast itself checks the type.
-    pub fn listener<T: ServerReloadListener>(&self, key: &ListenerKey<T>) -> Option<Arc<T>> {
-        self.entries.get(key.id())?.clone().downcast::<T>().ok()
     }
 }

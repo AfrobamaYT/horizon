@@ -5,14 +5,19 @@ use mod_api::__private::game::*;
 
 /// Start the game. The executable supplies the allocator and retains the mod API marker.
 pub fn main() {
-    main_with(Default::default(), &[]);
+    main_with(Vec::new(), &[]);
 }
 
 /// Start the game with named trait mods in dispatch order.
-pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::BuiltMod]) {
-    let native: crate::Result<_> = std::env::current_exe()
-        .map_err(Into::into)
-        .and_then(|exe| horizon_mods::runtime::Runtime::load(&exe, built).map_err(Into::into));
+pub fn main_with(
+    mut mods: Vec<mod_api::ModEntry>,
+    built: &'static [horizon_mods::runtime::BuiltMod],
+) {
+    let exe = std::env::current_exe();
+    let native: crate::Result<_> = exe
+        .as_ref()
+        .map_err(|e| e.to_string().into())
+        .and_then(|exe| horizon_mods::runtime::Runtime::load(exe, built).map_err(Into::into));
     let native = match native {
         Ok(native) => native,
         Err(error) => {
@@ -21,8 +26,6 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
         }
     };
     crate::gfx::native_render::set_mods_built_in(!native.built().is_empty());
-    // First: a trait injection into anything below (logging, the crash handler) calls its mod.
-    mod_api::__private::install(mods);
     horizon_threads::configure_allocator();
     horizon_client::telemetry::mark_start();
     horizon_client::spans::startup::init(std::time::Instant::now());
@@ -41,6 +44,27 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
             std::process::exit(game::exit_code::USAGE);
         }
     };
+    // Wasm mods join the native ones after them, in dependency order, from the same selection
+    // as content mods. Then the mods are installed, before anything below (logging, the crash
+    // handler) that a trait injection may call into.
+    if let Ok(exe) = &exe {
+        let config = horizon_mod_wasm::RuntimeConfig {
+            pulley: launch
+                .rest
+                .iter()
+                .any(|arg| matches!(arg, Argument::Switch(s) if s == "--wasm-interpreter")),
+            cache: Some(launch.context.home.join("wasm-cache")),
+            ..Default::default()
+        };
+        let game_dir = &launch.context.game_dir;
+        mods.extend(horizon_mod_wasm::load_installed(
+            exe,
+            game_dir,
+            &launch.context.dev_mods,
+            &config,
+        ));
+    }
+    mod_api::__private::install(mods.into());
     let help = launch.is_information_request();
     logging::set_game_home(launch.context.home.clone());
     // The dedicated server logs in its own folder, as vanilla's does; the game in its home.
@@ -70,7 +94,7 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
         crash::install(home.clone(), side);
         ram_limit::start(&home, side);
     }
-    let renderers = mod_api::mods()
+    let renderers = mod_api::__private::mods()
         .iter()
         .filter_map(|m| m.fields().hooks.render())
         .collect();
@@ -80,11 +104,11 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
     if horizon_world::native_load_hooks::install(
         horizon_world::native_load_hooks::NativeLoadHooks {
             loot_table_load: |context, id, table| {
-                let context = mod_api::DataLoadContext::new(context);
+                let context = mod_api::OwningLoad::new(context);
                 mod_api::dispatch_loot_table_load(&context, id, table);
             },
             modify_default_components: |context, item, components| {
-                let context = mod_api::DataLoadContext::new(context);
+                let context = mod_api::OwningLoad::new(context);
                 mod_api::dispatch_modify_default_components(&context, item, components);
             },
             loot_function: |kind, data, ctx, stack| {
@@ -108,36 +132,36 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
     }
     if !crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
         menu_slot_rules: |context, menu, slot, stack, may_place, max_stack| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_menu_slot_rules(&context, menu, slot, stack, may_place, max_stack);
         },
         item_stacked_on_other: |context, event, canceled| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_item_stacked_on_other(&context, event, canceled);
         },
         living_heal: |context, entity, amount, cancel| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_heal(&context, entity, amount, cancel);
         },
         living_breathe: |context, entity, kind, can_breathe, consume, refill| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_breathe(&context, entity, kind, can_breathe, consume, refill);
         },
         farmland_trample: |context, entity, pos, state, distance, cancel| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_farmland_trample(&context, entity, pos, state, distance, cancel);
         },
-        has_mods: || !mod_api::mods().is_empty(),
+        has_mods: || !mod_api::__private::mods().is_empty(),
         player_name_format: |context, username, displayname| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_player_name_format(&context, username, displayname);
         },
         player_tab_list_name_format: |context, player, name, display_name| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_player_tab_list_name_format(&context, player, name, display_name);
         },
         living_drown: |context, entity, kind, is_drowning, damage_amount, bubble_count, cancel| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_drown(
                 &context,
                 entity,
@@ -149,30 +173,30 @@ pub fn main_with(mods: mod_api::Mods, built: &'static [horizon_mods::runtime::Bu
             );
         },
         living_fall: |context, entity, kind, distance, multiplier, cancel| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_fall(&context, entity, kind, distance, multiplier, cancel);
         },
         living_jump: |context, entity, kind| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_jump(&context, entity, kind);
         },
         living_jump_power: |context, entity, kind, power| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_jump_power(&context, entity, kind, power);
         },
         living_speed: |context, entity, kind, speed| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_speed(&context, entity, kind, speed);
         },
         living_flying_speed: |context, entity, kind, speed| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_living_flying_speed(&context, entity, kind, speed);
         },
         player_stays_on_ground_surface: |entity, staying| {
             mod_api::dispatch_player_stays_on_ground_surface(entity, staying);
         },
         ender_entity_teleport: |context, entity, kind, from, target, cancel| {
-            let context = mod_api::LoopContext::new(context);
+            let context = mod_api::OwningLoop::new(context);
             mod_api::dispatch_ender_entity_teleport(&context, entity, kind, from, target, cancel);
         },
         fluid_flow: |fluid, pos, flow| {

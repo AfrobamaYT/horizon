@@ -291,12 +291,12 @@ requires a farmer at work and `mob_griefing` enabled.
   `ItemEntityRef::set_stack` changes one's nonempty stack; discarding an entity is a separate operation. The query acts on
   the level in place.
 
-- `LevelRef::random(host)`, the server level's own random (vanilla's `Level.random`, NeoForge mods'
+- `LevelRef::with_random(host, |random| ...)`, the server level's own random (vanilla's `Level.random`, NeoForge mods'
   `level.getRandom()`): a mod draws from the stream vanilla's explosions and block drops use, so its draws shift theirs
-  as a Java mod's would. The draws are made at the call site on that level's real stream, also for a level parked while
-  the server ticks another. It is `None` on a client of a server, for a stale handle and for a level that isn't open:
+  as a Java mod's would. The closure draws on the level's stream and the level keeps it after (`random(host)` is a copy
+  of it, `set_random(host, random)` stores one back), also for a level parked while the server ticks another. It is `None` on a client of a server, for a stale handle and for a level that isn't open:
   the Nether and the End open when someone first goes there and close after 300 ticks with nobody in them. Inside a
-  restricted level hook, `LevelRandomHost::random` is the same stream.
+  restricted level hook, `with_random` on the `LevelRandomHost` draws from the same stream.
 
 - The server starting and stopping, on the single player server thread and on a dedicated server:
   `native_server_about_to_start(dedicated)` before the worlds load (NeoForge's `ServerAboutToStartEvent`), and
@@ -324,7 +324,7 @@ requires a farmer at work and `mob_griefing` enabled.
   replaced or broken with side effects (not under flag 256). Its part puts the stacks it held in `drops`, and they
   scatter as `Containers.dropItemStack` scatters them, after the block entity's own container slots. It runs inside
   the level's write with the level host, like `neighbor_changed`; the block entity is still in place, so the part
-  reads its attachments through `attachments(Holder::BlockEntity(pos))`. A part that returns nothing draws nothing.
+  reads its attachments with `TYPE.get(host, Holder::BlockEntity(pos))`, the level host being their store. A part that returns nothing draws nothing.
   A block entity that removes its own block during its `block_entity_tick` or `menu_button` is out of the level for
   that call, so its part isn't asked: its attachments go with it, and only its container slots come back out.
 
@@ -485,7 +485,7 @@ one, where vanilla gives the `by` one.
   changes otherwise, `native_update_output_neighbors(dimension, pos)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
 
 `Hooks::component_types`, `blocks`, `items` and `standalone_models` take
-`&RegistrationContext<'_>` before their event; `Hooks::register` takes it after
+`&RegistrationContext` before their event; `Hooks::register` takes it after
 its `Registrar`. `context.mods()` returns a read-only `LoadedMods` view whose
 `ids()` lists startup code and selected content packages in dispatch order. These
 contexts are supplied by the engine and have no game `Host`, handle constructors
@@ -739,7 +739,7 @@ trailing `/`, or empty, `.` or `..` components. Converter fields and reload-view
 
 The prepare context is the pack view only, as vanilla's `ResourceManager`. Like vanilla's
 `SimplePreparableReloadListener`, `ServerReloadListener::prepare` parses and validates without
-changing live state and returns `ReloadApply::new(move || { /* publish parsed state */ })`.
+changing live state and returns `<dyn ReloadApply>::new(move || { /* publish parsed state */ })`.
 All listeners prepare before **any** apply runs. Do not read another listener's new published
 state in prepare: dependencies order both phases but do not remove this barrier. Publication
 cannot fail. As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a listener that
@@ -757,8 +757,10 @@ already be registered; unknown names fail immediately, and cycles fail after reg
 `last()` are ordering boundaries. These anchors and dependency ends use `Identifier`. Mod
 listeners run after vanilla by default, in registration order; an explicit dependency before
 `functions()` works without a false cycle. Use these anchors rather than their string values. The read-only `get_registry`,
-`get_graph`, `get_name_lookup(listener)` and `get_last_vanilla_listener` expose the registered
-objects, dependencies and vanilla anchor. Horizon does not expose NeoForge's condition
+`get_graph` and `get_last_vanilla_listener` give the registered names, the dependency edges and
+the vanilla anchor's name, by value (NeoForge's give the objects; a mod keeps its own listener's
+`Arc`, and its name is the one it registered it under). `prepare` returns
+`Box<dyn ReloadApply>`; `<dyn ReloadApply>::new(move || ...)` makes one from a closure. Horizon does not expose NeoForge's condition
 context here.
 
 `event.listeners.add_retained_listener(&key, converter, listener)` also keeps the listener
@@ -782,7 +784,7 @@ use mod_api::{
 #[derive(Default)]
 struct MachineData(Arc<RwLock<serde_json::Value>>);
 impl ServerReloadListener for MachineData {
-    fn prepare(&self, context: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+    fn prepare(&self, context: &ServerReloadContext) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
         let id = Identifier::parse("my_mod:press").unwrap();
         let next = match context.read(&id) {
             Some(bytes) => serde_json::from_slice(bytes)
@@ -790,7 +792,7 @@ impl ServerReloadListener for MachineData {
             None => serde_json::Value::Null,
         };
         let live = self.0.clone();
-        Ok(ReloadApply::new(move || *live.write().unwrap() = next))
+        Ok(<dyn ReloadApply>::new(move || *live.write().unwrap() = next))
     }
 }
 #[derive(Default)]
@@ -860,7 +862,7 @@ use mod_api::{
 #[derive(Default)]
 struct Theme(Arc<RwLock<serde_json::Value>>);
 impl ClientReloadListener for Theme {
-    fn prepare(&self, context: &ClientReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+    fn prepare(&self, context: &ClientReloadContext) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
         let id = Identifier::parse("my_mod:theme").unwrap();
         let next = match context.read(&id) {
             Some(bytes) => serde_json::from_slice(bytes)
@@ -868,7 +870,7 @@ impl ClientReloadListener for Theme {
             None => serde_json::Value::Null,
         };
         let live = self.0.clone();
-        Ok(ReloadApply::new(move || *live.write().unwrap() = next))
+        Ok(<dyn ReloadApply>::new(move || *live.write().unwrap() = next))
     }
 }
 #[derive(Default)]
@@ -1990,7 +1992,7 @@ place; `native_server_tick` does not define one, so name the dimension and expec
 Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global loot modifiers and Fabric's
 `LootTableEvents.MODIFY` and `MODIFY_DROPS` do. A mod's own loot function and condition kinds are #5451.
 
-- **`horizon_world::loot::native_loot_table_load(context, id, table)`**: each table's JSON as it loads, after the data packs'. `Hooks::loot_table_load` gets the owning load's `&DataLoadContext<'_>` first (see "Items' default components"); its `origin()` is always `ServerDataLoad`, since only the server loads loot tables. Push a pool
+- **`horizon_world::loot::native_loot_table_load(context, id, table)`**: each table's JSON as it loads, after the data packs'. `Hooks::loot_table_load` gets the owning load's `&dyn DataLoadContext` first (see "Items' default components"); its `origin()` is always `ServerDataLoad`, since only the server loads loot tables. Push a pool
   onto `table["pools"]` or an entry onto a pool's `entries`; chests, block and mob drops, fishing and the rest then roll the
   changed table. Keep a replaced table's `random_sequence`: a mob's table without one drops nothing. It runs once per table on
   each server data load and `/reload`, not on client preloads. It is a free function in
@@ -2680,7 +2682,7 @@ clicks already.
 
 ### The loop context
 
-`LoopContext<'_>` is the read-only view for a hook fired inside a menu, recipe or
+`dyn LoopContext` is the read-only view for a hook fired inside a menu, recipe or
 player-list loop, where no game is at hand (a catalog entry names it with
 `"context": "loop"`; `menu_slot_rules`, `item_stacked_on_other`, `player_name_format`,
 `player_tab_list_name_format`, `living_jump_power`, `living_speed`, `living_flying_speed`, `living_heal`, `living_breathe`, `living_drown`, `living_fall`, `farmland_trample`, `living_jump`, `ender_entity_teleport` and the sound hooks below take it). `side()` is `LoopSide::Server` or
@@ -2711,12 +2713,13 @@ All four early-out on the mod's subscription before building a `SoundPlay`, so a
 
 ### Items' default components
 
-`Hooks::modify_default_components` receives `&DataLoadContext<'_>` before its
+`Hooks::modify_default_components` receives `&dyn DataLoadContext` before its
 `ModifyDefaultComponentsEvent`. The engine supplies this read-only phase context:
 `origin()` is `DataLoadOrigin::ServerDataLoad` or `ClientPreload`, `registry(name)`
-borrows names in registry ID order, `setting(mod_id, key)` returns a loaded mod's
+gives the names in registry ID order as a shared `Arc<[String]>` (no copy), `setting(mod_id, key)` returns a loaded mod's
 setting captured when the owning context is built (including missing keys), and
-`mods()` borrows the same `LoadedMods` view used during registration. A later owning
+`mods()` gives the same `LoadedMods` view used during registration (shared; cloning it
+copies no package). A later owning
 load captures fresh settings even when it reuses registry inputs; runtime Host
 settings still read live storage. There is no game Host, handle construction or
 transaction. The origin describes the actual owning load, not its thread name or

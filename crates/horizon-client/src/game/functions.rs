@@ -1065,7 +1065,7 @@ mod tests {
             // World-open selection and completions must both use the incoming
             // level's flags, even while `self.level` is still the old level.
             game.ui.registries.by_registry.clear();
-            game.level.enabled_features.clear();
+            game.level.enabled_features = Default::default();
             std::fs::write(
                 pack.join("pack.mcmeta"),
                 r#"{"features":{"enabled":["test:feature"]}}"#,

@@ -10,6 +10,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 /// An error loading a resource, including the resource that caused it.
 #[derive(Debug)]
+#[horizon_mod_api_macros::wasm(via = (Identifier, String))]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ReloadResourceError {
     resource: Identifier,
@@ -27,6 +28,20 @@ impl ReloadResourceError {
         }
     }
 }
+/// The error as its resource and message, the form it crosses a wasm mod's boundary in.
+impl From<&ReloadResourceError> for (Identifier, String) {
+    fn from(error: &ReloadResourceError) -> Self {
+        (error.resource.clone(), error.source.to_string())
+    }
+}
+impl From<(Identifier, String)> for ReloadResourceError {
+    fn from((resource, message): (Identifier, String)) -> Self {
+        Self {
+            resource,
+            source: message.into(),
+        }
+    }
+}
 impl std::fmt::Display for ReloadResourceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: {}", self.resource, self.source)
@@ -38,17 +53,30 @@ impl std::error::Error for ReloadResourceError {
     }
 }
 
-/// Infallible publication, run only after every listener prepared successfully.
-/// One closure is allocated per listener per reload, never per tick.
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct ReloadApply(Box<dyn FnOnce() + Send>);
-impl ReloadApply {
+/// Infallible publication, run once, only after every listener prepared successfully: what a
+/// listener's `prepare` hands back. One per listener per reload, never per tick;
+/// `<dyn ReloadApply>::new(move || ...)` makes one from a closure.
+pub trait ReloadApply: Send + Sync {
+    /// Publish the prepared state.
+    fn apply(&self);
+}
+impl dyn ReloadApply {
     /// Capture newly parsed state without publishing it yet.
-    pub fn new(apply: impl FnOnce() + Send + 'static) -> Self {
-        Self(Box::new(apply))
+    // The closure runs once, so it may move the parsed state into the live one.
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(apply: impl FnOnce() + Send + 'static) -> Box<dyn ReloadApply> {
+        Box::new(Once(std::sync::Mutex::new(Some(Box::new(apply)))))
     }
-    pub(crate) fn apply(self) {
-        (self.0)();
+}
+/// A closure run on the first `apply`.
+type Publish = Box<dyn FnOnce() + Send>;
+struct Once(std::sync::Mutex<Option<Publish>>);
+impl ReloadApply for Once {
+    fn apply(&self) {
+        let publish = self.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(publish) = publish {
+            publish();
+        }
     }
 }
 
@@ -282,7 +310,7 @@ pub enum PreparedStep<V = ()> {
     /// A mod listener's prepared step.
     Mod {
         /// Applies the prepared result.
-        apply: ReloadApply,
+        apply: Box<dyn ReloadApply>,
         /// The owning mod's id, or `None` for the game's own.
         owner: Option<&'static str>,
         /// The listener's name.
@@ -304,7 +332,7 @@ pub fn prepare_listeners<L: ?Sized, C, V>(
     phase: &'static str,
     vanilla: impl Fn(&RegisteredListener<L>) -> Option<V>,
     context_of: impl Fn(&Identifier, &FileToIdConverter) -> C,
-    prepare_of: impl Fn(&L, &C) -> Result<ReloadApply, ReloadResourceError>,
+    prepare_of: impl Fn(&L, &C) -> Result<Box<dyn ReloadApply>, ReloadResourceError>,
 ) -> Result<Vec<PreparedStep<V>>, ReloadStageError> {
     let mut prepared = Vec::new();
     for listener in ordered {
@@ -356,7 +384,7 @@ pub fn apply_listeners<V>(
 /// sides' contexts; each side keeps its own context type so a wrong-side read
 /// does not compile.
 // exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct ReloadFiles(BTreeMap<Identifier, Vec<u8>>);
+pub struct ReloadFiles(pub(crate) BTreeMap<Identifier, Vec<u8>>);
 impl ReloadFiles {
     pub(crate) fn new(files: BTreeMap<Identifier, Vec<u8>>) -> Self {
         Self(files)

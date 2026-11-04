@@ -25,6 +25,12 @@ glam = "0.30"
 # The render hooks' types only: no backend, so the crate builds for wasm32.
 wgpu = { version = "30.0.1", default-features = false, features = ["std"] }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wit-bindgen = { version = "0.46", default-features = false, features = ["macros"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wasmtime = { version = "50", optional = true, default-features = false, features = ["anyhow", "cranelift", "component-model", "runtime", "std"] }
+
 [build-dependencies]
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 
@@ -35,6 +41,8 @@ horizon-client-render = { path = "../horizon-client-render" }
 [features]
 # Scoped mod installation for other crates' tests (`mod_api::testing`).
 testing = []
+# The game's side of WebAssembly mods: host forwarding and the mod proxies.
+wasm-host = ["dep:wasmtime"]
 
 [lints]
 workspace = true

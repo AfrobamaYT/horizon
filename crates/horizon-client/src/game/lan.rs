@@ -1391,7 +1391,7 @@ impl Game<'_> {
         let features = if self.level.enabled_features.is_empty() {
             vec!["minecraft:vanilla".to_owned()]
         } else {
-            self.level.enabled_features.clone()
+            self.level.enabled_features.to_vec()
         };
         // A world whose packs change biomes sends its own biome registry.
         let packed = self.world_biomes.clone().filter(|b| b.has_packs());
@@ -1454,7 +1454,7 @@ impl Game<'_> {
             .then(|| horizon_client::lod_net::Service::new(net.lod_distance, biome_names.clone()));
         let lan = Lan::start_with(sync.clone(), net)?;
         let mut hub = Hub::new(lan, sync, encoder, config, self.loop_context.clone());
-        hub.sync_attachments = !mod_api::mods().is_empty();
+        hub.sync_attachments = !mod_api::__private::mods().is_empty();
         hub.flat_world = self.world_flat;
         hub.debug_world = self.world_debug;
         let port = hub.lan.port;
@@ -2415,7 +2415,7 @@ impl Game<'_> {
                 self.ui.rules.bool("player_movement_check"),
                 self.ui.rules.bool("elytra_movement_check"),
             );
-            host.hub.mods_loaded = !mod_api::mods().is_empty();
+            host.hub.mods_loaded = !mod_api::__private::mods().is_empty();
             let pass = self.level_pass;
             let mut events = if pass.first {
                 horizon_client::spans::time("lan_poll", || host.hub.poll(&mut ctx))
@@ -2709,7 +2709,7 @@ impl Game<'_> {
                 // (`tick_server`): the network is read once, before the first.
                 // Player packets may already have been drained before
                 // scheduled block ticks (`tick_lan_packets`).
-                host.hub.mods_loaded = !mod_api::mods().is_empty();
+                host.hub.mods_loaded = !mod_api::__private::mods().is_empty();
                 let pass = self.level_pass;
                 let mut events = if pass.first && !pass.packets_drained {
                     host.hub.poll(&mut ctx)

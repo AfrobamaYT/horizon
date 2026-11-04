@@ -746,6 +746,20 @@ pub fn format_translation(template: &str, args: &[Text]) -> Text {
     out
 }
 
+/// Text as its JSON component.
+impl From<&Text> for serde_json::Value {
+    fn from(text: &Text) -> Self {
+        text.component()
+    }
+}
+
+/// Text from its JSON component, its translations left as their keys.
+impl From<serde_json::Value> for Text {
+    fn from(component: serde_json::Value) -> Self {
+        crate::component::to_text(&component, &mut |s| Text::literal(s)).with_component(component)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

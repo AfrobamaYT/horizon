@@ -730,7 +730,7 @@ impl Options {
                 Argument::Switch(arg) => match arg.as_str() {
                     "--help" | "-h" => {
                         println!(
-                            "Horizon — Minecraft Java Edition {} in Rust\n\n  --resources PATH        Prepared resources (horizon-prepare)\n  --render-distance N     Chunks, 2..128 (default 12)\n  --world NAME            World folder under saves/ (default \"New World\")\n  --seed N                World seed for new worlds (default 0)\n  --width N, --height N   Window size (default 1280 x 720)\n  --creative              Creative mode (default survival)\n  --test-terrain          Simple test terrain instead of vanilla generation\n  --frames N              Exit after N frames (testing)\n  --world-frames N        Exit after N frames drawn in the world (testing)\n  --smoke-report PATH     Write a JSON report on exit\n  --benchmark SCENARIO    Run a benchmark (standard, village, forest, ocean, mountain), write its report to benchmarks/ and quit\n  --control               Accept horizon-ctl commands on a local socket\n  --control-socket PATH   Control socket path (default $XDG_RUNTIME_DIR/horizon-control.sock)\n  --server HOST[:PORT]    Join a multiplayer server (offline mode) at start\n  --quickPlaySingleplayer WORLD  Open this world of saves/ at start, only if it exists (vanilla's)\n  --quickPlayMultiplayer HOST[:PORT]  The same as --server (vanilla's name)\n  --name NAME             Player name for multiplayer (default: generated once, kept in horizon-player.txt)\n  --session-file PATH     Signed-in account from the launcher (read once, then deleted)\n  --session-stdin         The same account as JSON on standard input\n  --game-dir DIR          Game folder: saves, options.txt, packs, mods (default: the working directory)\n  --home DIR              Logs and crash reports (default $HORIZON_HOME, else the platform data folder)\n  --player-dir DIR        This player's own files when several play in one game folder: options.txt, logs, horizon-player.txt, servers.dat, screenshots\n  --fullscreen            Open the window fullscreen\n  --launch-api            Print the Launch API version and options as JSON (docs/api/launch.md)\n  --dev-mod PATH          A content mod (.hmod or folder) to develop: always on\n  --pregen                Add Horizon's /pregen command (docs/pregeneration.md)\n\nControls: mouse look, WASD move, Space jump, Left Shift sneak, Left Ctrl sprint,\nleft click break, right click place/use, 1-9/scroll hotbar, E inventory,\nQ drop, F3 debug, Esc pause.",
+                            "Horizon — Minecraft Java Edition {} in Rust\n\n  --resources PATH        Prepared resources (horizon-prepare)\n  --render-distance N     Chunks, 2..128 (default 12)\n  --world NAME            World folder under saves/ (default \"New World\")\n  --seed N                World seed for new worlds (default 0)\n  --width N, --height N   Window size (default 1280 x 720)\n  --creative              Creative mode (default survival)\n  --test-terrain          Simple test terrain instead of vanilla generation\n  --frames N              Exit after N frames (testing)\n  --world-frames N        Exit after N frames drawn in the world (testing)\n  --smoke-report PATH     Write a JSON report on exit\n  --benchmark SCENARIO    Run a benchmark (standard, village, forest, ocean, mountain), write its report to benchmarks/ and quit\n  --control               Accept horizon-ctl commands on a local socket\n  --control-socket PATH   Control socket path (default $XDG_RUNTIME_DIR/horizon-control.sock)\n  --server HOST[:PORT]    Join a multiplayer server (offline mode) at start\n  --quickPlaySingleplayer WORLD  Open this world of saves/ at start, only if it exists (vanilla's)\n  --quickPlayMultiplayer HOST[:PORT]  The same as --server (vanilla's name)\n  --name NAME             Player name for multiplayer (default: generated once, kept in horizon-player.txt)\n  --session-file PATH     Signed-in account from the launcher (read once, then deleted)\n  --session-stdin         The same account as JSON on standard input\n  --game-dir DIR          Game folder: saves, options.txt, packs, mods (default: the working directory)\n  --home DIR              Logs and crash reports (default $HORIZON_HOME, else the platform data folder)\n  --player-dir DIR        This player's own files when several play in one game folder: options.txt, logs, horizon-player.txt, servers.dat, screenshots\n  --fullscreen            Open the window fullscreen\n  --launch-api            Print the Launch API version and options as JSON (docs/api/launch.md)\n  --dev-mod PATH          A content mod (.hmod or folder) to develop: always on\n  --pregen                Add Horizon's /pregen command (docs/pregeneration.md)\n  --wasm-interpreter      Run wasm mods interpreted (Pulley) instead of compiled: slower, for hosts without JIT\n\nControls: mouse look, WASD move, Space jump, Left Shift sneak, Left Ctrl sprint,\nleft click break, right click place/use, 1-9/scroll hotbar, E inventory,\nQ drop, F3 debug, Esc pause.",
                             horizon_core::VANILLA_VERSION
                         );
                         return Ok(None);
@@ -758,6 +758,8 @@ impl Options {
                     ),
                     // Horizon's own commands (/pregen), off by default as on vanilla.
                     "--pregen" => horizon_client::command::vanilla::set_horizon_commands(true),
+                    // Read by `entry::main_with` when it loads the wasm mods.
+                    "--wasm-interpreter" => {}
                     _ => return Err(format!("{arg}: unknown option").into()),
                 },
                 Argument::Dedicated(args) => {
@@ -1023,7 +1025,7 @@ struct GameLevel<'w> {
     raining: bool,
     thundering: bool,
     /// The world's enabled feature flags as this side knows them (`LevelReader.enabledFeatures`).
-    enabled_features: &'w [String],
+    enabled_features: &'w std::sync::Arc<[String]>,
     player_box: Option<([f64; 3], [f64; 3])>,
     /// The LAN guests in this level who trigger blocks (not spectators).
     guest_boxes: Vec<([f64; 3], [f64; 3])>,
@@ -3528,7 +3530,7 @@ struct Game<'a> {
     /// State of `/spectate`, `/posteffect`, `/debug`, `/waypoint` and friends.
     cmds: commands::extra::CommandExtras,
     /// The retained server reload listeners of the last successful reload.
-    reload_resources: mod_api::ServerReloadResources,
+    reload_resources: mod_api::RetainedListeners,
     ui: chat::UiState,
     combat: combat::CombatTracker,
     /// Each guest's own `CombatTracker`, out of `combat` between turns.
@@ -7091,7 +7093,7 @@ impl Game<'_> {
                     (result, UseBranch::ItemOn)
                 } else if self.hand == Hand::Main {
                     let mut empty_answer = None;
-                    if !mod_api::mods().is_empty() {
+                    if !mod_api::__private::mods().is_empty() {
                         let empty_held = self.held().cloned();
                         let click = self.block_click(hit, self.hand, empty_held.as_ref());
                         self.native_use_without_item(state, &click, &mut empty_answer);
@@ -10613,7 +10615,7 @@ impl Game<'_> {
             None => game_of.iter().position(|x| *x == Some(g)),
         };
         let mut menu = Menu::new(kind);
-        menu.brewed_potion_hook = !mod_api::mods().is_empty();
+        menu.brewed_potion_hook = !mod_api::__private::mods().is_empty();
         if matches!(kind, Kind::Mount(_)) {
             menu.mount = self.mount_menu_entity();
         }
@@ -13920,7 +13922,7 @@ impl Game<'_> {
                 t.particle.clone(),
             )
         };
-        if mod_api::mods().is_empty() {
+        if mod_api::__private::mods().is_empty() {
             let (new, t) = vanilla?;
             return Some(result(new, t));
         }
@@ -14357,7 +14359,7 @@ impl Game<'_> {
                 // With mods, the fire goes in and `BaseFireBlock.onPlace`
                 // fills the frame, as vanilla's order is, so that
                 // `portal_spawn` is asked once, where vanilla asks it.
-                if !mod_api::mods().is_empty() || !self.try_light_portal(target)? {
+                if !mod_api::__private::mods().is_empty() || !self.try_light_portal(target)? {
                     self.place_used_fire(target)?;
                 }
                 let sound = horizon_client::items::fire_starter_sound(item == "fire_charge");
@@ -16810,7 +16812,7 @@ impl Game<'_> {
         let depth_far =
             horizon_client::camera::depth_far(terrain_distance, self.settings.cloud_range);
         // Only native mods read it: no matrices or allocation per frame without one.
-        let mods_read_camera = !mod_api::mods().is_empty();
+        let mods_read_camera = !mod_api::__private::mods().is_empty();
         self.native_camera_frame = (mods_read_camera && !title).then(|| {
             let partial = camera_alpha as f32;
             mod_api::NativeCamera {
@@ -20726,7 +20728,7 @@ impl Game<'_> {
     fn load_server_loot(&mut self) {
         self.server_items = None;
         let overlay = pack_files(&self.world_tables);
-        let loot = if mod_api::mods().is_empty() {
+        let loot = if mod_api::__private::mods().is_empty() {
             horizon_client::structure_blocks::world_loot_data(
                 &self.options.resources,
                 &overlay,
@@ -20749,7 +20751,7 @@ impl Game<'_> {
                 }
             }
         };
-        if !mod_api::mods().is_empty()
+        if !mod_api::__private::mods().is_empty()
             && let Some(loot) = &loot
         {
             let mut items = self.items().clone();
@@ -22720,7 +22722,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         .mods
         .select(&std::env::current_dir()?, &early_settings.mods.enabled);
     mod_api::__private::install_packages(options.mods.native.packages(), &options.mods.selected);
-    if let Err(refused) = mod_api::__private::install_parts(mod_api::mods()) {
+    if let Err(refused) = mod_api::__private::install_parts(mod_api::__private::mods()) {
         panic!("Mod parts refused:\n{}", refused.join("\n"));
     }
     // The structure types those mods registered, handed to the engine before
@@ -23126,7 +23128,7 @@ mod tests {
         struct ReloadMod;
         #[mod_api::__subscriptions]
         impl Hooks for ReloadMod {
-            fn register(&self, registrar: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
+            fn register(&self, registrar: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
                 registrar.block_part_tag("test:reload", TagPart);
             }
             fn data_pack_files(&self, _: &mut dyn ServerHost, event: &mut DataPackFilesEvent<'_>) {

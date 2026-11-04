@@ -8,7 +8,7 @@ fn files() -> FileToIdConverter {
 
 #[test]
 fn registry_views_and_explicit_order_before_vanilla() {
-    let mut listeners = ServerReloadListeners::new();
+    let mut listeners = ServerListenerRegistry::new();
     let first = Arc::new(Boundary);
     let second = Arc::new(Boundary);
     listeners
@@ -18,19 +18,11 @@ fn registry_views_and_explicit_order_before_vanilla() {
         .add_listener(id("test_mod:second"), files(), second.clone())
         .unwrap();
     assert_eq!(
-        listeners.get_name_lookup(first.as_ref()),
-        Some(&id("test_mod:first"))
-    );
-    assert_eq!(listeners.get_name_lookup(&Boundary), None);
-    assert_eq!(
-        listeners.get_name_lookup(listeners.get_last_vanilla_listener()),
-        Some(&VanillaServerListeners::functions())
+        listeners.get_last_vanilla_listener(),
+        VanillaServerListeners::functions()
     );
     assert_eq!(
-        listeners
-            .get_registry()
-            .map(|(name, _)| name.clone())
-            .collect::<Vec<_>>(),
+        listeners.get_registry(),
         [
             VanillaServerListeners::first(),
             VanillaServerListeners::functions(),
@@ -45,7 +37,7 @@ fn registry_views_and_explicit_order_before_vanilla() {
     assert!(
         listeners
             .get_graph()
-            .any(|edge| edge == (&id("test_mod:second"), &VanillaServerListeners::functions()))
+            .contains(&(id("test_mod:second"), VanillaServerListeners::functions()))
     );
     let sorted = listeners.finish().unwrap().listeners;
     assert_eq!(
@@ -62,7 +54,7 @@ fn registry_views_and_explicit_order_before_vanilla() {
 
 #[test]
 fn failed_registration_is_not_silenced_by_ignoring_the_result() {
-    let mut listeners = ServerReloadListeners::new();
+    let mut listeners = ServerListenerRegistry::new();
     assert_eq!(
         listeners
             .add_dependency(id("mistyped:listener"), VanillaServerListeners::functions())
@@ -79,7 +71,7 @@ fn failed_registration_is_not_silenced_by_ignoring_the_result() {
 
 #[test]
 fn duplicate_objects_cannot_make_the_reverse_lookup_ambiguous() {
-    let mut listeners = ServerReloadListeners::new();
+    let mut listeners = ServerListenerRegistry::new();
     let listener = Arc::new(Boundary);
     listeners
         .add_listener(id("one:listener"), files(), listener.clone())
@@ -97,29 +89,34 @@ fn duplicate_objects_cannot_make_the_reverse_lookup_ambiguous() {
 fn retained_listeners_read_back_typed_from_the_resources() {
     struct OtherListener;
     impl ServerReloadListener for OtherListener {
-        fn prepare(&self, _: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
-            Ok(ReloadApply::new(|| {}))
+        fn prepare(
+            &self,
+            _: &ServerReloadContext,
+        ) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
+            Ok(<dyn ReloadApply>::new(|| {}))
         }
     }
-    let mut listeners = ServerReloadListeners::new();
+    let mut listeners = ServerListenerRegistry::new();
     let original = Arc::new(Boundary);
     let key = ListenerKey::new(id("test_mod:kept"));
-    listeners
+    (&mut listeners as &mut dyn ServerReloadListeners)
         .add_retained_listener(&key, files(), original.clone())
         .unwrap();
     assert_eq!(key.id(), &id("test_mod:kept"));
     let ordered = listeners.finish().unwrap();
-    let mut resources = ServerReloadResources::default();
+    let mut resources = RetainedListeners::default();
     resources.install(ordered.retained);
-    let kept = resources.listener(&key).unwrap();
+    let kept = (&resources as &dyn ServerReloadResources)
+        .listener(&key)
+        .unwrap();
     assert!(Arc::ptr_eq(&original, &kept));
     assert!(
-        resources
+        (&resources as &dyn ServerReloadResources)
             .listener(&ListenerKey::<OtherListener>::new(id("test_mod:kept")))
             .is_none()
     );
     assert!(
-        resources
+        (&resources as &dyn ServerReloadResources)
             .listener(&ListenerKey::<Boundary>::new(id("test_mod:absent")))
             .is_none()
     );
@@ -127,40 +124,52 @@ fn retained_listeners_read_back_typed_from_the_resources() {
 
 #[test]
 fn reload_replaces_the_retained_store_whole() {
-    let mut listeners = ServerReloadListeners::new();
+    let mut listeners = ServerListenerRegistry::new();
     let first = ListenerKey::<Boundary>::new(id("test_mod:first"));
-    listeners
+    (&mut listeners as &mut dyn ServerReloadListeners)
         .add_retained_listener(&first, files(), Arc::new(Boundary))
         .unwrap();
-    let mut resources = ServerReloadResources::default();
+    let mut resources = RetainedListeners::default();
     resources.install(listeners.finish().unwrap().retained);
-    assert!(resources.listener(&first).is_some());
+    assert!(
+        (&resources as &dyn ServerReloadResources)
+            .listener(&first)
+            .is_some()
+    );
 
-    let later = ServerReloadListeners::new().finish().unwrap();
+    let later = ServerListenerRegistry::new().finish().unwrap();
     resources.install(later.retained);
-    assert!(resources.listener(&first).is_none());
+    assert!(
+        (&resources as &dyn ServerReloadResources)
+            .listener(&first)
+            .is_none()
+    );
 }
 
 #[test]
 fn retained_registration_follows_the_same_rules_as_plain_listeners() {
-    let mut listeners = ServerReloadListeners::new();
+    let mut listeners = ServerListenerRegistry::new();
     let listener = Arc::new(Boundary);
     listeners
         .add_listener(id("one:listener"), files(), listener.clone())
         .unwrap();
     assert_eq!(
-        listeners.add_retained_listener(&ListenerKey::new(id("two:listener")), files(), listener),
+        (&mut listeners as &mut dyn ServerReloadListeners).add_retained_listener(
+            &ListenerKey::new(id("two:listener")),
+            files(),
+            listener
+        ),
         Err(ReloadOrderError::DuplicateObject {
             id: id("two:listener"),
             registered_as: id("one:listener"),
         })
     );
     let key = ListenerKey::<Boundary>::new(id("one:kept"));
-    listeners
+    (&mut listeners as &mut dyn ServerReloadListeners)
         .add_retained_listener(&key, files(), Arc::new(Boundary))
         .unwrap();
     assert!(
-        listeners
+        (&mut listeners as &mut dyn ServerReloadListeners)
             .add_retained_listener(
                 &ListenerKey::<Boundary>::new(id("one:kept")),
                 files(),
@@ -179,8 +188,11 @@ fn retained_registration_follows_the_same_rules_as_plain_listeners() {
 fn add_listener_attributes_its_calls_to_the_registering_mod() {
     struct Noop;
     impl ServerReloadListener for Noop {
-        fn prepare(&self, _: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
-            Ok(ReloadApply::new(|| {}))
+        fn prepare(
+            &self,
+            _: &ServerReloadContext,
+        ) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
+            Ok(<dyn ReloadApply>::new(|| {}))
         }
     }
     let guard = crate::crash::enter_native_mod(crate::crash::NativeModCall {
@@ -188,12 +200,12 @@ fn add_listener_attributes_its_calls_to_the_registering_mod() {
         hook: "add_server_reload_listeners",
         part: None,
     });
-    let mut owned = ServerReloadListeners::new();
+    let mut owned = ServerListenerRegistry::new();
     owned
         .add_listener(id("test_mod:data"), files(), Arc::new(Noop))
         .unwrap();
     drop(guard);
-    let mut unowned = ServerReloadListeners::new();
+    let mut unowned = ServerListenerRegistry::new();
     unowned
         .add_listener(id("game:data"), files(), Arc::new(Noop))
         .unwrap();
