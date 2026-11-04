@@ -1,4 +1,4 @@
-//! Mods in the game (`docs/mods.md`): content mods' blocks, items, data and
+//! Mods in the game (`docs/modding/src/how-to/content-mods.md`): content mods' blocks, items, data and
 //! assets (`content_root`), and the Mods page's rows. Code mods are native
 //! (`native_hooks.rs`); executable components in content packages are refused.
 use super::{Game, execution_role::ExecutionRole};
@@ -70,7 +70,11 @@ pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client
         types.extend(horizon_protocol::item::custom::entries().map(|(_, name)| name.to_owned()));
     }
     let inputs = LoadInputs::new(registries, Game::mod_data_root());
-    let context = LoadContext::new(role.data_load_origin(), Arc::new(inputs));
+    let context = LoadContext::new(
+        role.data_load_origin(),
+        Arc::new(inputs),
+        mod_api::__private::loaded_mods().ids(),
+    );
     Ok(ItemData::load(root, context)?)
 }
 

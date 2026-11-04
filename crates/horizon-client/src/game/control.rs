@@ -301,6 +301,7 @@ impl Game<'_> {
         // command handler returns an error: a lost release keeps Shift down.
         let released = released_modifier(line);
         let result = self.control_command_inner(line, reply, event_loop);
+        self.settle_title_mode();
         if let Some(key) = released {
             self.press_modifier_key(key, false);
         }

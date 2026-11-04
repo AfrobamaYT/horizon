@@ -31,9 +31,11 @@ pub trait ConfigFiles {
 /// `..` part, no `\`, `:` or NUL. Checked once here; the service checks only
 /// that it is the calling mod's.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ConfigPath(String);
 
 impl ConfigPath {
+    /// Checks `path` and makes a `ConfigPath` of it, or refuses with `ConfigFileError::InvalidPath`.
     pub fn new(path: &str) -> Result<Self, ConfigFileError> {
         let valid = path
             .split('/')
@@ -43,6 +45,7 @@ impl ConfigPath {
             .ok_or(ConfigFileError::InvalidPath)
     }
 
+    /// The path as written, `/`-separated.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -65,7 +68,9 @@ impl ConfigPath {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ConfigEntryKind {
+    /// A file.
     File,
+    /// A folder.
     Folder,
 }
 
@@ -73,6 +78,7 @@ pub enum ConfigEntryKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ConfigStat {
+    /// Whether the path is a file or a folder.
     pub kind: ConfigEntryKind,
     /// Bytes, for a file; 0 for a folder.
     pub len: u64,
@@ -84,7 +90,9 @@ pub struct ConfigStat {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ConfigEntry {
+    /// The entry's name, without its folder.
     pub name: String,
+    /// The entry's size and age.
     pub stat: ConfigStat,
 }
 
@@ -101,6 +109,7 @@ pub enum ConfigFileError {
     /// More than `CONFIG_FILE_MAX` bytes, or a folder of more than
     /// `CONFIG_LIST_MAX` entries.
     TooLarge,
+    /// Nothing is at that path.
     NotFound,
     /// A folder where a file was asked for.
     NotAFile,
@@ -170,6 +179,7 @@ mod tests {
 pub(crate) mod built {
     #[allow(unused_imports)]
     use super::*;
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct ConfigStat {
         pub kind: ConfigEntryKind,
         pub len: u64,
@@ -189,6 +199,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct ConfigEntry {
         pub name: String,
         pub stat: super::ConfigStat,

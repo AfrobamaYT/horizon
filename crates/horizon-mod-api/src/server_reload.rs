@@ -16,6 +16,7 @@ use std::{
 };
 
 /// Horizon's vanilla server reload listeners and ordering boundaries.
+#[non_exhaustive]
 pub struct VanillaServerListeners;
 impl VanillaServerListeners {
     /// Boundary before every reload listener.
@@ -42,6 +43,7 @@ impl VanillaServerListeners {
 /// Selected server data files for one converter, with pack overrides resolved.
 /// Keys have their directory and extension removed. This cannot read assets or
 /// filesystem paths. Its fields are private so the view can grow.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ServerReloadContext {
     files: ReloadFiles,
 }
@@ -84,6 +86,7 @@ impl ServerReloadListener for Boundary {
 
 /// A read-only registry/graph view with registration methods, rebuilt on each
 /// server reload. Listener names need not belong to the registering mod.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ServerReloadListeners {
     core: super::reload::ReloadCore<dyn ServerReloadListener>,
     retained: Vec<RetainedEntry>,
@@ -165,13 +168,17 @@ impl ServerReloadListeners {
 }
 
 /// The ordered listeners and retained entries of one completed registration.
+#[non_exhaustive]
 pub struct OrderedServerReload {
+    /// The listeners in dependency order.
     pub listeners: Vec<super::reload::RegisteredListener<dyn ServerReloadListener>>,
+    /// The entries the reload keeps.
     pub retained: Vec<RetainedEntry>,
 }
 
 /// One listener retained in the reload resources, as NeoForge's
 /// `ReloadableServerResources` keeps a manager.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct RetainedEntry {
     pub(crate) id: Identifier,
     pub(crate) any: Arc<dyn Any + Send + Sync>,
@@ -181,11 +188,13 @@ pub struct RetainedEntry {
 /// and read back through `ReloadResources`. `ListenerKey::new` accepts any
 /// id; a key whose id does not match a registration, or whose type differs
 /// from the registered object, reads back as `None`.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ListenerKey<T: ?Sized> {
     id: Identifier,
     marker: PhantomData<fn() -> T>,
 }
 impl<T: ?Sized> ListenerKey<T> {
+    /// Names a listener key.
     pub fn new(id: Identifier) -> Self {
         Self {
             id,
@@ -221,6 +230,7 @@ impl<T: ?Sized> Eq for ListenerKey<T> {}
 /// NeoForge's `ReloadableServerResources`, reached from
 /// `ServerHost::reload_resources`. A new reload replaces the whole store.
 #[derive(Default)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ServerReloadResources {
     entries: BTreeMap<Identifier, Arc<dyn Any + Send + Sync>>,
 }

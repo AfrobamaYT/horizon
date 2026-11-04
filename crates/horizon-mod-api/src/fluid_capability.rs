@@ -12,9 +12,13 @@ use std::{fmt, marker::PhantomData, sync::Arc};
 /// millibuckets, and its data components, kept as an item stack's are (a potion fluid's
 /// `minecraft:potion_contents`). Water and lava have none.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct FluidStack {
+    /// The fluid.
     pub fluid: Arc<str>,
+    /// The amount.
     pub amount: u32,
+    /// The components.
     pub components: Option<Box<StackData>>,
 }
 
@@ -53,6 +57,7 @@ impl FluidStack {
 /// A fluid and its components, without an amount, as NeoForge's `FluidResource`: what a tank
 /// holds. An empty tank holds none.
 #[derive(Clone)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct FluidResource(FluidStack);
 
 impl FluidResource {

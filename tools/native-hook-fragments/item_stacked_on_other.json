@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "item_stacked_on_other",
+      "doc": "NeoForge's `ItemStackedOnOtherEvent`, before either item override.",
       "target": "horizon_client_lib::menu::native_item_stacked_on_other",
       "neoforge": "ItemStackedOnOtherEvent",
       "side": "both",

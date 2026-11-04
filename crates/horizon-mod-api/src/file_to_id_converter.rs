@@ -5,7 +5,9 @@ use super::Identifier;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FileToIdConverterError {
+    /// Directory.
     Directory,
+    /// Extension.
     Extension,
 }
 impl std::fmt::Display for FileToIdConverterError {
@@ -21,6 +23,7 @@ impl std::error::Error for FileToIdConverterError {}
 /// Maps `data/<namespace>/<directory>/<path><extension>` to `namespace:path`,
 /// preserving subdirectories. Any namespace may add entries for a listener.
 /// The same converter can be used for client assets.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct FileToIdConverter {
     directory: String,
     prefix: String,

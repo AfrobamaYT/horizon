@@ -14,6 +14,6 @@ pub(crate) fn item_data(
     let inputs = LoadInputs::new(BTreeMap::new(), root.join("settings"));
     Ok(Arc::new(ItemData::load(
         root,
-        LoadContext::new(origin, Arc::new(inputs)),
+        LoadContext::new(origin, Arc::new(inputs), []),
     )?))
 }

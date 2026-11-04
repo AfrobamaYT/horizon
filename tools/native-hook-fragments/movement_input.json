@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "movement_input",
+      "doc": "Local player movement input, after reading it and before applying it.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_movement_input",
       "neoforge": "MovementInputUpdateEvent",
       "side": "client",

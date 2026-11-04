@@ -1,59 +1,85 @@
 //! Trait mods implement `Hooks` and link into the game executable.
 //! The executable passes the ordered `Mods` to `entry::main_with`.
 //! Trait mods are process-wide, like mixin module statics.
-//! Hooks use `&self + Send + Sync` for shared and reentrant calls; see `docs/native-mods.md`.
+//! Hooks use `&self + Send + Sync` for shared and reentrant calls; see `docs/modding/src/how-to/native-mods.md`.
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
+#![deny(missing_docs)]
 extern crate self as mod_api;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod biome;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod block_sprites;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod camera;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod containers;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod crafting;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod crash;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod extras;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod extras_hud;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod first_person;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod fog;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod game;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod health;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod hud_layout;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod item_tooltip;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod menu;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod merchant;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod mesher;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod mobs;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod mod_chunk_tickets;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod music;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod particles;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod recipe_book;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod render;
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod stations;
 use std::sync::{Arc, OnceLock};
 
+// hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod __private;
 mod phase;
@@ -166,6 +192,7 @@ pub use serde_json;
 ///     let _: &mut ModBlockEntity = event.entity.entity;
 /// }
 /// ```
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ModBlockEntityView<'a> {
     entity: &'a mut ModBlockEntity,
 }
@@ -173,6 +200,7 @@ impl<'a> ModBlockEntityView<'a> {
     pub(crate) fn new(entity: &'a mut ModBlockEntity) -> Self {
         Self { entity }
     }
+    /// Id.
     pub fn id(&self) -> &str {
         self.entity.id()
     }
@@ -193,9 +221,13 @@ use serde_json::{Map, Value};
 use std::time::Duration;
 /// What a key did in an `input_key` event (GLFW's `action`: release 0, press 1, repeat 2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: a closed set the game matches without a wildcard
 pub enum KeyAction {
+    /// The key was let go.
     Release,
+    /// The key went down.
     Press,
+    /// The key is held and the operating system repeats it.
     Repeat,
 }
 
@@ -204,28 +236,43 @@ pub enum KeyAction {
 /// takes (`new_damage`, starts equal; a mod may change it, below 1 for none; the
 /// game casts it to a whole number as vanilla does).
 #[derive(Clone, Debug)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeArmorHurt {
+    /// The equipment slot the armor piece sits in.
     pub slot: EquipmentSlot,
+    /// The armor piece being damaged.
     pub stack: ItemStack,
+    /// The durability damage vanilla computed.
     pub damage: f32,
+    /// The durability damage to apply instead; starts equal to `damage`.
     pub new_damage: f32,
 }
 
 /// Camera values from the most recently extracted world frame.
 #[derive(Clone, Debug)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeCamera {
+    /// The camera position in blocks (x, y, z).
     pub position: [f64; 3],
+    /// The eye height above the position, in blocks.
     pub eye_height: f32,
+    /// The fraction of the current tick elapsed, 0 to 1.
     pub partial_tick: f32,
+    /// The horizontal rotation in degrees.
     pub yaw: f32,
+    /// The vertical rotation in degrees; negative looks up.
     pub pitch: f32,
+    /// The vertical field of view in degrees.
     pub fov_degrees: f32,
+    /// The near clip distance in blocks.
     pub near: f32,
+    /// The far clip distance in blocks.
     pub far: f32,
     /// Camera-relative view matrix in column-major order.
     pub view: [f32; 16],
     /// Reversed-Z projection matrix in column-major order.
     pub projection: [f32; 16],
+    /// The id of the dimension drawn, such as `minecraft:overworld`.
     pub dimension: String,
 }
 
@@ -233,19 +280,31 @@ pub struct NativeCamera {
 ///
 /// Translation is in blocks and rotation is in degrees (pitch, yaw, roll).
 /// The renderer applies the transform before the ordinary hand and item poses.
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeHandRender<'a> {
+    /// The UUID of the player whose hand is drawn.
     pub player: u128,
+    /// The network id of that player.
     pub player_entity_id: i32,
+    /// Which hand is drawn.
     pub hand: Hand,
+    /// The stack shown in the hand; `None` for the empty main-hand arm.
     pub stack: Option<&'a ItemStack>,
+    /// The fraction of the current tick elapsed, 0 to 1.
     pub partial: f32,
+    /// The player pitch interpolated for this frame, in degrees.
     pub interpolated_pitch: f32,
+    /// The swing progress, 0 to 1.
     pub swing: f32,
+    /// The inverse equip height, including the swap animation scale.
     pub equip: f32,
     /// Vanilla packed light at the eyes (`LightCoordsUtil.pack`: block << 4 | sky << 20).
     pub packed_light: u32,
+    /// A mod-set offset in blocks; applied before the hand is drawn.
     pub translation: [f32; 3],
+    /// A mod-set rotation as pitch, yaw and roll in degrees.
     pub rotation: [f32; 3],
+    /// A mod-set uniform scale; 1 leaves the size alone.
     pub scale: f32,
 }
 
@@ -255,8 +314,11 @@ pub type NativeDispensed = (Option<ItemStack>, i32);
 
 /// Context for a player tuning a note block.
 #[derive(Clone, Copy, Debug)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeNoteBlockChange {
+    /// The level the note block is in.
     pub dimension: LevelDimension,
+    /// The note block's position.
     pub pos: BlockPos,
     /// The block's instrument before tuning.
     pub instrument: NativeNoteInstrument,
@@ -307,8 +369,9 @@ pub struct NativeLootDrops<'a> {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct NativeItemDrop {
+    /// The dropped stack.
     pub stack: ItemStack,
-    /// Where the item entity appears.
+    /// Where the item entity appears, in blocks.
     pub position: [f64; 3],
     /// Its motion in blocks per tick, as vanilla's constructor drew it.
     pub velocity: [f64; 3],
@@ -381,32 +444,59 @@ impl NativeStatType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeNoteInstrument {
+    /// The harp, over most blocks.
     Harp,
+    /// The bass drum, over stone.
     Basedrum,
+    /// The snare drum, over sand and gravel.
     Snare,
+    /// The clicks, over glass.
     Hat,
+    /// The double bass, over wood.
     Bass,
+    /// The flute, over clay.
     Flute,
+    /// The bell, over a gold block.
     Bell,
+    /// The guitar, over wool.
     Guitar,
+    /// The chime, over packed ice.
     Chime,
+    /// The xylophone, over a bone block.
     Xylophone,
+    /// The iron xylophone, over an iron block.
     IronXylophone,
+    /// The cow bell, over soul sand.
     CowBell,
+    /// The didgeridoo, over a pumpkin.
     Didgeridoo,
+    /// The bit, over an emerald block.
     Bit,
+    /// The banjo, over hay.
     Banjo,
+    /// The pling, over glowstone.
     Pling,
+    /// The trumpet, over a copper block.
     Trumpet,
+    /// The trumpet, over an exposed copper block.
     TrumpetExposed,
+    /// The trumpet, over an oxidized copper block.
     TrumpetOxidized,
+    /// The trumpet, over a weathered copper block.
     TrumpetWeathered,
+    /// A zombie's sound, over a zombie head.
     Zombie,
+    /// A skeleton's sound, over a skeleton skull.
     Skeleton,
+    /// A creeper's sound, over a creeper head.
     Creeper,
+    /// The ender dragon's sound, over a dragon head.
     Dragon,
+    /// A wither skeleton's sound, over its skull.
     WitherSkeleton,
+    /// A piglin's sound, over a piglin head.
     Piglin,
+    /// The sound set by a player head's own note block sound.
     CustomHead,
 }
 
@@ -459,7 +549,9 @@ pub struct NativePortalShape {
     pub x_axis: bool,
     /// Its bottom-left inside block.
     pub bottom_left: [i32; 3],
+    /// The portal frame's inner width in blocks.
     pub width: i32,
+    /// The portal frame's inner height in blocks.
     pub height: i32,
 }
 
@@ -470,10 +562,13 @@ pub struct NativePortalShape {
 pub struct NativeExplosionStart<'a> {
     /// The level it happens in (`minecraft:overworld`).
     pub dimension: &'a str,
+    /// The explosion's center in blocks.
     pub center: [f64; 3],
+    /// The explosion's radius in blocks.
     pub radius: f32,
     /// It sets fires (`createFire`).
     pub fire: bool,
+    /// What the explosion does to blocks.
     pub interaction: NativeBlockInteraction,
     /// The damage type of its damage source (`minecraft:explosion`,
     /// `minecraft:player_explosion`, `minecraft:bad_respawn_point`).
@@ -491,8 +586,11 @@ pub struct NativeExplosionStart<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeBlockInteraction {
+    /// Blocks are left alone.
     Keep,
+    /// Blocks are destroyed and drop everything.
     Destroy,
+    /// Blocks are destroyed and their drops may decay.
     DestroyWithDecay,
     /// A wind burst: it pushes, and triggers doors, buttons, bells and the like.
     TriggerBlock,
@@ -504,6 +602,7 @@ pub enum NativeBlockInteraction {
 pub struct NativeItemFished<'a> {
     /// The bobber's entity id and position.
     pub hook: u32,
+    /// The position.
     pub position: [f64; 3],
     /// The items the fishing loot table rolled, which the player receives
     /// (`getDrops`: they can't be changed here; loot tables change them).
@@ -515,7 +614,9 @@ pub struct NativeItemFished<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Answered<T> {
+    /// The replace hook's answer.
     pub answer: T,
+    /// The `[mod] id` of the mod that answered.
     pub mod_id: &'static str,
 }
 
@@ -583,18 +684,27 @@ pub struct NativeScreenView<'a> {
 
 /// A depth-tested outline of the client's block selection shape.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct NativeBlockRim {
+    /// The block whose outline is drawn.
     pub pos: [i32; 3],
+    /// The outline colour as `0xAARRGGBB`.
     pub argb: u32,
+    /// The line width in pixels.
     pub width: f32,
 }
 
 /// A camera-local visual light, with no gameplay light or shadow writes.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct NativeColoredLight {
+    /// The light's position in blocks.
     pub at: [f64; 3],
+    /// The colour as `0xRRGGBB`.
     pub rgb: u32,
+    /// How far it reaches, in blocks.
     pub radius: f32,
+    /// The light's strength.
     pub intensity: f32,
 }
 
@@ -602,11 +712,17 @@ pub struct NativeColoredLight {
 /// minimap: its corner, its side in GUI pixels, blocks per map pixel,
 /// turning with the player or north up, round or square.
 #[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeMinimap {
+    /// The screen corner the map sits in.
     pub corner: Corner,
+    /// The map's side length in GUI pixels.
     pub size: f32,
+    /// How many blocks one pixel covers; larger zooms out.
     pub blocks_per_pixel: f32,
+    /// Turn the map with the player's facing instead of keeping north up.
     pub rotate: bool,
+    /// Draw the map as a circle instead of a square.
     pub round: bool,
 }
 
@@ -617,11 +733,15 @@ pub struct NativeMinimap {
 /// row (vanilla's is 84; the hotbar is 58 below it) and left column, from
 /// its top left.
 #[derive(Clone, Debug, Default, PartialEq)]
+// exhaustive: mods build it with a literal and the game reads every field
 pub struct NativeScreen {
     /// Vanilla's container screens are 176 wide.
     pub width: f32,
+    /// The screen's height in GUI pixels; vanilla's is 166.
     pub height: f32,
+    /// Each menu slot's top-left (x, y), or `None` to hide it.
     pub slots: Vec<Option<[f32; 2]>>,
+    /// The y of the player inventory's first row; vanilla's is 84.
     pub inventory_y: f32,
     /// The inventory's left column (vanilla's is 8).
     pub inventory_x: f32,
@@ -636,6 +756,7 @@ pub struct NativeScreen {
 /// Key definitions for a compiled mod's Options > Mods page (`native_mods`).
 /// Its display metadata comes from its validated runtime package.
 #[derive(Clone, Debug, Default, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeMod {
     /// Its id: its settings folder and its keys' lines.
     pub id: String,
@@ -648,9 +769,13 @@ pub struct NativeMod {
 /// (`minecraft:diamond`), a count (1 draws none) and its components beyond
 /// the item's own, in vanilla's item syntax, or "".
 #[derive(Clone, Debug, Default, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeStack {
+    /// The item id, such as `minecraft:stick`.
     pub item: String,
+    /// How many are in the stack.
     pub count: u32,
+    /// The stack's data components, as the game's JSON form.
     pub components: String,
 }
 
@@ -660,20 +785,34 @@ pub struct NativeStack {
 pub enum NativePanelEvent {
     /// A click on an item of the panel, by its index in
     /// `native_panel_items`' list.
-    Clicked { index: u32, right: bool },
+    Clicked {
+        /// The item's index in the panel's list.
+        index: u32,
+        /// Whether it was a right click.
+        right: bool,
+    },
     /// The search box's text, each time the player changes it.
     Search(String),
     /// A key (`key.keyboard.r`; compare it with `native_mod_key`) went down
     /// while the pointer was on an item: a slot of the screen's, or the
     /// panel's.
-    Key { key: String, stack: NativeStack },
+    Key {
+        /// The key's name, such as `key.keyboard.r`.
+        key: String,
+        /// The item the pointer was on.
+        stack: NativeStack,
+    },
     /// A click on a slot of a recipe the panel shows: the recipe's index in
     /// `native_panel_recipes`' list and the slot's in it (the results come
     /// after the slots), and the stack it showed then.
     SlotClicked {
+        /// The recipe's index in the panel's list.
         recipe: u32,
+        /// The slot's index in the recipe; results come after the slots.
         slot: u32,
+        /// The stack the slot showed then.
         stack: NativeStack,
+        /// Whether it was a right click.
         right: bool,
     },
     /// The action button of the recipe at this index.
@@ -690,9 +829,13 @@ pub enum NativePanelEvent {
 /// The zoom a native mod asks for (`native_zoom`): the factor (1 is none), eased through the
 /// field of view like the spyglass when `smooth`, and the scale of mouse turning.
 #[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeZoom {
+    /// The zoom as a multiple of the normal view; 1 is no zoom.
     pub factor: f32,
+    /// Whether the camera eases into the zoom.
     pub smooth: bool,
+    /// Scale applied to mouse turning while zoomed.
     pub turn: f32,
 }
 
@@ -700,13 +843,16 @@ pub struct NativeZoom {
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct NativeServerPlayer {
+    /// The player's UUID.
     pub uuid: u128,
+    /// The player's name.
     pub name: String,
     /// The operator level, 0 to 4 (`ops.json`; single player's owner with
     /// cheats on is 4).
     pub permission: u8,
     /// `minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`.
     pub dimension: String,
+    /// The player's position in blocks.
     pub position: [f64; 3],
     /// 0 survival, 1 creative, 2 adventure, 3 spectator.
     pub game_mode: i32,
@@ -715,6 +861,7 @@ pub struct NativeServerPlayer {
     /// Where they look, in degrees (`yRot`, `xRot`), as their last move told
     /// the server.
     pub yaw: f32,
+    /// The player's pitch in degrees.
     pub pitch: f32,
     /// The network entity id the player has this session, the one hooks that only know entity ids
     /// (`living_incoming_damage`, `living_knockback`) give for the player; 0 when not known.
@@ -732,6 +879,7 @@ pub struct NativeServerPlayer {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeCommand {
+    /// The usage.
     pub usage: String,
     /// The operator level a player needs to see and run it (0: everyone).
     pub level: u8,
@@ -758,15 +906,20 @@ impl NativeCommand {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeAuthority {
+    /// A single-player game with no server thread; never fires today.
     LocalAuthoritative,
+    /// The server thread of a single-player or LAN world.
     IntegratedServer,
+    /// A dedicated server.
     DedicatedServer,
+    /// A client of someone else's server; never fires today.
     RemoteClient,
 }
 
 /// Supported vanilla `Block.UPDATE_*` flags for a level block write.
 /// Horizon currently sends all writes to clients regardless of client flags.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct NativeBlockUpdateFlags(i32);
 
 impl NativeBlockUpdateFlags {
@@ -786,6 +939,7 @@ impl NativeBlockUpdateFlags {
     pub const SKIP_BLOCK_ENTITY_SIDE_EFFECTS: Self = Self(256);
     /// Skip the new block's on-place behavior.
     pub const SKIP_ON_PLACE: Self = Self(512);
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn bits(self) -> i32 {
         self.0
@@ -801,10 +955,12 @@ impl std::ops::BitOr for NativeBlockUpdateFlags {
 
 /// One server world open or client level; it rejects a previous world's handles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct NativeWorldEpoch(u64);
 
 impl NativeWorldEpoch {
     /// Create an epoch for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(n: u64) -> Self {
         Self(n)
@@ -825,6 +981,7 @@ impl NativeWorldEpoch {
 /// handle from an event's entity id; `ClientHost::crosshair_target` supplies a
 /// client handle for an entity hit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct EntityRef {
     epoch: NativeWorldEpoch,
     id: u32,
@@ -832,6 +989,7 @@ pub struct EntityRef {
 
 impl EntityRef {
     /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(epoch: NativeWorldEpoch, id: u32) -> Self {
         Self { epoch, id }
@@ -852,10 +1010,12 @@ impl EntityRef {
 /// entity's methods work on it too. Stale handles read as `None`, as an
 /// `EntityRef`'s do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct LivingRef(EntityRef);
 
 impl LivingRef {
     /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(entity: EntityRef) -> Self {
         Self(entity)
@@ -920,10 +1080,12 @@ impl NativeActiveEffect {
 
 /// A vanilla `Mob`, narrowed from an entity with `host.mob(entity)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MobRef(EntityRef);
 
 impl MobRef {
     /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(entity: EntityRef) -> Self {
         Self(entity)
@@ -966,60 +1128,103 @@ pub enum NativeGoal {
     /// `PanicGoal(speed)`, or `TurtlePanicGoal(speed)` with `water_range`
     /// set: always head for water this far away, not only when on fire.
     Panic {
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
         speed: f64,
+        /// Search distance for water in blocks, as `TurtlePanicGoal`'s.
         water_range: Option<i32>,
     },
     /// `RandomStrollGoal(speed, interval)`; `water_avoiding` set to its
     /// probability makes `WaterAvoidingRandomStrollGoal`, `swim`
     /// `RandomSwimmingGoal`, `flying` `WaterAvoidingRandomFlyingGoal`.
     Stroll {
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
         speed: f64,
+        /// Ticks between tries; the goal starts with chance 1 in `interval` each tick.
         interval: i32,
+        /// Probability, 0 to 1, of preferring a spot away from water.
         water_avoiding: Option<f32>,
+        /// Swim around in water instead of walking.
         swim: bool,
+        /// Pick flying destinations.
         flying: bool,
     },
     /// `LookAtPlayerGoal(range, probability, onlyHorizontal)`: the nearest
     /// player, the nearest mob with `mobs`, or only mobs of `only`'s
     /// species.
     LookAtPlayer {
+        /// Distance in blocks the goal looks for something to watch.
         range: f32,
+        /// Chance, 0 to 1, each tick that the goal starts.
         probability: f32,
+        /// Turn the head only sideways, never up or down.
         only_horizontal: bool,
+        /// Also watch the nearest mob, not only the nearest player.
         mobs: bool,
+        /// A mob type id (`minecraft:cow`) that restricts the mobs watched to that species.
         only: Option<String>,
     },
     /// `RandomLookAroundGoal`. Vanilla parameters: none.
     RandomLookAround,
     /// `MeleeAttackGoal(speed, followUnseen)`.
-    MeleeAttack { speed: f64, follow_unseen: bool },
+    MeleeAttack {
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
+        speed: f64,
+        /// Keep chasing a target the mob can no longer see.
+        follow_unseen: bool,
+    },
     /// `LeapAtTargetGoal(leapMotion)`.
-    LeapAtTarget { yd: f32 },
+    LeapAtTarget {
+        /// The upward speed of the leap, in blocks per tick.
+        yd: f32,
+    },
     /// `AvoidEntityGoal(what, maxDist, walk, sprint)`: sprint away from
     /// `what` once it is closer than `max_dist`.
     AvoidEntity {
+        /// Which entities the mob avoids.
         what: NativeMobFilter,
+        /// Distance in blocks within which the mob flees.
         max_dist: f32,
+        /// Speed multiplier while fleeing at a distance.
         walk: f64,
+        /// Speed multiplier while fleeing close by.
         sprint: f64,
     },
     /// `TemptGoal(speed, items, canScare)`: `items` are item ids
     /// (`minecraft:wheat`; a bare id reads as `minecraft:`'s).
     Tempt {
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
         speed: f64,
+        /// Item ids that tempt the mob.
         items: Vec<String>,
+        /// Whether a moving player holding the item scares the mob off.
         can_scare: bool,
     },
     /// `BreedGoal(speed)`. An animal keeps it; other mobs refuse it.
-    Breed { speed: f64 },
+    Breed {
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
+        speed: f64,
+    },
     /// `FollowParentGoal(speed)`. An animal keeps it; other mobs refuse it.
-    FollowParent { speed: f64 },
+    FollowParent {
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
+        speed: f64,
+    },
     /// `FollowMobGoal(speed, stopDistance, areaSize)`.
-    FollowMob { speed: f64, stop: f32, area: f32 },
+    FollowMob {
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
+        speed: f64,
+        /// Distance in blocks at which the mob stops following.
+        stop: f32,
+        /// Radius in blocks searched for a mob to follow.
+        area: f32,
+    },
     /// `RestrictSunGoal`. Vanilla parameters: none.
     RestrictSun,
     /// `FleeSunGoal(speed)`.
-    FleeSun { speed: f64 },
+    FleeSun {
+        /// Movement speed multiplier while the goal runs; 1.0 is the mob's normal speed.
+        speed: f64,
+    },
     /// `EatBlockGoal`. Vanilla parameters: none.
     EatBlock,
     /// `BreathAirGoal`. Vanilla parameters: none.
@@ -1030,13 +1235,20 @@ pub enum NativeGoal {
     /// checking every `interval` ticks, `must_see` (`mustSee`) and
     /// `must_reach` (`mustReach`).
     NearestTarget {
+        /// Which entities the mob hunts.
         prey: NativeMobFilter,
+        /// Only pick a target the mob can see.
         must_see: bool,
+        /// Only pick a target the mob can path to.
         must_reach: bool,
+        /// Ticks between tries; the goal starts with chance 1 in `interval` each tick.
         interval: i32,
     },
     /// `HurtByTargetGoal`, `alert` as its `setAlert()`.
-    HurtByTarget { alert: bool },
+    HurtByTarget {
+        /// Also alert nearby mobs of the same kind, as `setAlert()`.
+        alert: bool,
+    },
 }
 
 impl NativeGoal {
@@ -1072,6 +1284,7 @@ impl NativeGoal {
 
 /// One goal of a mob's selector, as `goals` and `target_goals` read it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeMobGoalEntry {
     /// The goal's priority: a lower number preempts a higher one.
     pub priority: i32,
@@ -1084,10 +1297,12 @@ pub struct NativeMobGoalEntry {
 /// The ender dragon of the open world, narrowed with `host.dragon(entity)`.
 /// It is also a [`MobRef`] and a [`LivingRef`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct DragonRef(EntityRef);
 
 impl DragonRef {
     /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(entity: EntityRef) -> Self {
         Self(entity)
@@ -1106,16 +1321,27 @@ impl DragonRef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeDragonPhase {
+    /// Circling the end island (`DragonPhaseHoldingPattern`).
     HoldingPattern,
+    /// Flying at a player and shooting fireballs.
     StrafePlayer,
+    /// Flying toward the fountain to land.
     LandingApproach,
+    /// Descending onto the fountain.
     Landing,
+    /// Lifting off the fountain.
     Takeoff,
+    /// Perched, breathing fire.
     SittingFlaming,
+    /// Perched, looking for a target.
     SittingScanning,
+    /// Perched, about to breathe.
     SittingAttacking,
+    /// Charging a player in melee.
     ChargingPlayer,
+    /// Dying, flying to the fountain.
     Dying,
+    /// Hovering in place.
     Hover,
 }
 
@@ -1149,10 +1375,12 @@ impl NativeDragonPhase {
 
 /// A dropped item entity of the open world, narrowed with `host.item_entity`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ItemEntityRef(EntityRef);
 
 impl ItemEntityRef {
     /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(entity: EntityRef) -> Self {
         Self(entity)
@@ -1166,10 +1394,12 @@ impl ItemEntityRef {
 /// A display entity of the open world (`block_display`, `item_display` or
 /// `text_display`), narrowed with `host.display`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct DisplayRef(EntityRef);
 
 impl DisplayRef {
     /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(entity: EntityRef) -> Self {
         Self(entity)
@@ -1185,10 +1415,12 @@ impl DisplayRef {
 /// thrown items, fireballs, wind charges, skulls, shulker bullets and mods'
 /// thrown types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ProjectileRef(EntityRef);
 
 impl ProjectileRef {
     /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(entity: EntityRef) -> Self {
         Self(entity)
@@ -1202,10 +1434,12 @@ impl ProjectileRef {
 /// A villager or wandering trader (vanilla's `AbstractVillager`, a `Merchant`),
 /// narrowed from an entity with `host.merchant(entity)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MerchantRef(EntityRef);
 
 impl MerchantRef {
     /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(entity: EntityRef) -> Self {
         Self(entity)
@@ -1220,8 +1454,11 @@ impl MerchantRef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeDisplayKind {
+    /// Block.
     Block,
+    /// Item.
     Item,
+    /// Text.
     Text,
 }
 
@@ -1246,9 +1483,13 @@ impl NativeDisplayKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeBillboard {
+    /// Fixed.
     Fixed,
+    /// Vertical.
     Vertical,
+    /// Horizontal.
     Horizontal,
+    /// Center.
     Center,
 }
 
@@ -1274,15 +1515,25 @@ impl NativeBillboard {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeItemDisplayContext {
+    /// No transform; the model as authored.
     None,
+    /// Held in the left hand, seen from outside.
     ThirdPersonLeftHand,
+    /// Held in the right hand, seen from outside.
     ThirdPersonRightHand,
+    /// Held in the left hand, seen by its owner.
     FirstPersonLeftHand,
+    /// Held in the right hand, seen by its owner.
     FirstPersonRightHand,
+    /// Worn on the head.
     Head,
+    /// Drawn in an inventory slot.
     Gui,
+    /// Dropped as an item entity.
     Ground,
+    /// Hung in an item frame.
     Fixed,
+    /// Standing on a shelf.
     OnShelf,
 }
 
@@ -1325,8 +1576,11 @@ impl NativeItemDisplayContext {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NativeTextAlignment {
+    /// Center.
     Center,
+    /// Left.
     Left,
+    /// Right.
     Right,
 }
 
@@ -1344,10 +1598,15 @@ impl NativeTextAlignment {
 /// A display's `Transformation`: a translation, a left rotation, a scale and a
 /// right rotation. Quaternions are `[x, y, z, w]`.
 #[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeTransformation {
+    /// The offset in blocks.
     pub translation: [f32; 3],
+    /// The rotation applied after the scale, as a quaternion (x, y, z, w).
     pub left_rotation: [f32; 4],
+    /// The scale on each axis.
     pub scale: [f32; 3],
+    /// The rotation applied before the scale, as a quaternion (x, y, z, w).
     pub right_rotation: [f32; 4],
 }
 
@@ -1378,17 +1637,22 @@ pub enum NativeDeflection {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeArrowPickup {
+    /// Disallowed.
     Disallowed,
+    /// Allowed.
     Allowed,
+    /// Creative only.
     CreativeOnly,
 }
 
 /// A vanilla `AbstractMinecart`, narrowed from an entity with `host.minecart(entity)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MinecartRef(EntityRef);
 
 impl MinecartRef {
     /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(entity: EntityRef) -> Self {
         Self(entity)
@@ -1423,6 +1687,7 @@ pub enum NativeMinecartKind {
 /// (`minecraft:the_nether`) and the block. The dimension is data, so it need
 /// not be open; `host.level(&pos.dimension().to_string())` gives its level when it is.
 #[derive(Clone, Debug, PartialEq, Eq)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct GlobalPos {
     dimension: Identifier,
     pos: BlockPos,
@@ -1455,6 +1720,7 @@ impl std::hash::Hash for GlobalPos {
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct LevelRef {
     epoch: NativeWorldEpoch,
     dimension: &'static str,
@@ -1462,6 +1728,7 @@ pub struct LevelRef {
 
 impl LevelRef {
     /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(epoch: NativeWorldEpoch, dimension: &'static str) -> Self {
         Self { epoch, dimension }
@@ -1483,6 +1750,7 @@ impl LevelRef {
 /// for a handle of an earlier open, for a level that is not in place, and on a
 /// client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct RaidRef {
     level: LevelRef,
     id: i32,
@@ -1490,6 +1758,7 @@ pub struct RaidRef {
 
 impl RaidRef {
     /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(level: LevelRef, id: i32) -> Self {
         Self { level, id }
@@ -1521,6 +1790,7 @@ pub enum NativeRaidStatus {
 /// A chunk position in an open level. A handle may be kept after unloading;
 /// reads resolve it again, returning `false` or `None` when it is no longer loaded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ChunkRef {
     pub(crate) level: LevelRef,
     pub(crate) pos: [i32; 2],
@@ -1528,6 +1798,7 @@ pub struct ChunkRef {
 
 impl ChunkRef {
     /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(level: LevelRef, pos: [i32; 2]) -> Self {
         Self { level, pos }
@@ -1552,6 +1823,7 @@ pub enum ChunkStatus {
 
 /// A kind of light (`LightLayer`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: a closed set the game matches without a wildcard
 pub enum LightLayer {
     /// Light from emitting blocks (`BLOCK`).
     Block,
@@ -1564,6 +1836,7 @@ pub enum LightLayer {
 /// A world that names none enables `minecraft:vanilla` alone, as vanilla's default does.
 /// Reading it allocates nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct FeatureFlags<'a>(&'a [String]);
 
 impl<'a> FeatureFlags<'a> {
@@ -1607,19 +1880,27 @@ pub enum NativeExplosionInteraction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeSoundSource {
+    /// The master volume category.
     Master,
+    /// Music.
     Music,
     /// Jukeboxes and note blocks (`RECORDS`).
     Records,
+    /// Rain and thunder.
     Weather,
     /// Blocks (`BLOCKS`).
     Blocks,
+    /// Hostile mobs.
     Hostile,
+    /// Friendly and neutral mobs.
     Neutral,
     /// Players (`PLAYERS`).
     Players,
+    /// Ambient and block sounds.
     Ambient,
+    /// Voice.
     Voice,
+    /// Interface sounds.
     Ui,
 }
 
@@ -1644,8 +1925,11 @@ pub enum NativeBlockShapeKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeChatVisibility {
+    /// All chat.
     Full,
+    /// Only system messages and commands.
     System,
+    /// No chat.
     Hidden,
 }
 
@@ -1687,7 +1971,9 @@ impl NativePermissionLevel {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeMainHand {
+    /// The left hand.
     Left,
+    /// The right hand.
     Right,
 }
 
@@ -1695,8 +1981,11 @@ pub enum NativeMainHand {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeParticleStatus {
+    /// All particles.
     All,
+    /// Fewer particles.
     Decreased,
+    /// Only the essential particles.
     Minimal,
 }
 
@@ -1705,16 +1994,25 @@ pub enum NativeParticleStatus {
 /// visibility and particle status wrap (`floorMod(id, 3)`), the main hand reads an
 /// unknown id as left.
 #[derive(Clone, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeClientInfo {
+    /// The client's language code, such as `en_us`.
     pub language: String,
+    /// The client's view distance in chunks.
     pub view_distance: i8,
+    /// Which chat the client shows.
     pub chat_visibility: NativeChatVisibility,
+    /// Whether the client shows chat colours.
     pub chat_colors: bool,
     /// Skin layer bits (`PlayerModelPart`).
     pub model_customisation: u8,
+    /// The player's main hand.
     pub main_hand: NativeMainHand,
+    /// Whether the client asked for filtered text.
     pub text_filtering: bool,
+    /// Whether the player shows in the server list sample.
     pub allows_listing: bool,
+    /// How many particles the client draws.
     pub particle_status: NativeParticleStatus,
 }
 
@@ -1722,11 +2020,17 @@ pub struct NativeClientInfo {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeBlockFace {
+    /// Facing down (-y).
     Down,
+    /// Facing up (+y).
     Up,
+    /// Facing north (-z).
     North,
+    /// Facing south (+z).
     South,
+    /// Facing west (-x).
     West,
+    /// Facing east (+x).
     East,
 }
 
@@ -1734,8 +2038,11 @@ pub enum NativeBlockFace {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeSupportType {
+    /// Full.
     Full,
+    /// Center.
     Center,
+    /// Rigid.
     Rigid,
 }
 
@@ -1755,7 +2062,9 @@ pub enum NativeRemovalReason {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeClipBlock {
+    /// Collider.
     Collider,
+    /// Outline.
     Outline,
 }
 
@@ -1763,17 +2072,25 @@ pub enum NativeClipBlock {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeClipFluid {
+    /// None.
     None,
 }
 
 /// Result of a block ray, including the vanilla miss result.
 #[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeClipHit {
+    /// Whether the ray hit nothing; the other fields are then the vanilla miss values.
     pub miss: bool,
+    /// The hit block's position.
     pub block: [i32; 3],
+    /// The face the ray entered.
     pub face: NativeBlockFace,
+    /// The exact hit point in blocks.
     pub location: [f64; 3],
+    /// Whether the ray started inside the block.
     pub inside: bool,
+    /// Whether the hit is the world border.
     pub world_border: bool,
 }
 
@@ -1783,19 +2100,27 @@ pub struct NativeClipHit {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum NativeCrosshairTarget {
+    /// The crosshair is on a block.
     Block {
+        /// The block's position.
         pos: BlockPos,
+        /// The block's state.
         state: BlockStateId,
+        /// Where on the block the ray hit.
         hit: BlockHit,
     },
+    /// The crosshair is on an entity.
     Entity {
+        /// The entity under the crosshair.
         entity: EntityRef,
+        /// The hit point in blocks.
         point: [f64; 3],
     },
 }
 
 /// One item cooldown a player waits on (`ItemCooldowns.cooldowns`).
 #[derive(Clone, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeItemCooldown {
     /// The cooldown group: an item id, or the group an item's
     /// `use_cooldown` component names.
@@ -1808,6 +2133,7 @@ pub struct NativeItemCooldown {
 /// A nested guest turn cannot re-enter a player active in an outer turn;
 /// operations requiring that player's swapped state report them unavailable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PlayerRef {
     pub(crate) entity: EntityRef,
     pub(crate) uuid: u128,
@@ -1834,9 +2160,13 @@ impl From<PlayerRef> for EntityRef {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GameMode {
+    /// Survival mode.
     Survival,
+    /// Creative mode.
     Creative,
+    /// Adventure mode.
     Adventure,
+    /// Spectator mode.
     Spectator,
 }
 
@@ -1879,6 +2209,7 @@ impl GameMode {
 /// earlier open reads as `None` and changes nothing. Mob and raid bars are not
 /// custom boss events and have no handle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BossBarRef {
     pub(crate) epoch: NativeWorldEpoch,
     pub(crate) uuid: u128,
@@ -1888,12 +2219,19 @@ pub struct BossBarRef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum BossBarColor {
+    /// A pink bar.
     Pink,
+    /// A blue bar.
     Blue,
+    /// A red bar.
     Red,
+    /// A green bar.
     Green,
+    /// A yellow bar.
     Yellow,
+    /// A purple bar.
     Purple,
+    /// A white bar.
     White,
 }
 
@@ -1931,10 +2269,15 @@ impl BossBarColor {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum BossBarOverlay {
+    /// Progress.
     Progress,
+    /// Notched6.
     Notched6,
+    /// Notched10.
     Notched10,
+    /// Notched12.
     Notched12,
+    /// Notched20.
     Notched20,
 }
 
@@ -1967,6 +2310,7 @@ impl BossBarOverlay {
 /// One player's open menu, invalidated on close, replacement or reconnect.
 /// Client menu handles are also invalidated on respawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MenuRef {
     pub(crate) player: PlayerRef,
     pub(crate) window: i32,
@@ -1977,11 +2321,11 @@ pub struct MenuRef {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct NativePlayerFood {
-    /// Food level.
+    /// The food level, 0 to 20.
     pub level: i32,
-    /// Food saturation.
+    /// The saturation, up to the food level.
     pub saturation: f32,
-    /// Food exhaustion.
+    /// The exhaustion; the game takes a saturation or food point at 4.
     pub exhaustion: f32,
 }
 
@@ -1990,11 +2334,11 @@ pub struct NativePlayerFood {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct NativePlayerExperience {
-    /// Experience level.
+    /// The experience level.
     pub level: i32,
     /// Progress toward the next level, from 0 to 1.
     pub progress: f32,
-    /// Points gained in all.
+    /// The total experience points.
     pub total: i32,
 }
 
@@ -2009,6 +2353,7 @@ pub enum NativeEffectDamage {
 }
 
 /// A change requested by an effect tick, applied after its hooks return.
+// hidden: a game-side type, not part of the mod surface
 #[doc(hidden)]
 #[non_exhaustive]
 pub enum EffectTickChange {
@@ -2046,17 +2391,17 @@ impl ApplyEffectTickEvent<'_> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct NativePlayerAbilities {
-    /// Whether ordinary damage is ignored.
+    /// Takes no damage.
     pub invulnerable: bool,
-    /// Whether the player is flying.
+    /// Is flying now.
     pub flying: bool,
-    /// Whether the player may fly.
+    /// May start flying.
     pub may_fly: bool,
-    /// Whether items are used without consumption.
+    /// Breaks blocks at once and uses no items (creative).
     pub instabuild: bool,
-    /// Whether the player may build.
+    /// May break and place blocks.
     pub may_build: bool,
-    /// Flying speed.
+    /// The flying speed.
     pub fly_speed: f32,
     /// Walking speed (`Abilities.walkingSpeed`, vanilla's 0.1).
     pub walk_speed: f32,
@@ -2066,6 +2411,7 @@ pub struct NativePlayerAbilities {
 /// position resolves to the new entity, unlike vanilla's object identity.
 /// A removed entity or a handle from an earlier world open reads as `None`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityRef {
     pub(crate) level: LevelRef,
     pub(crate) position: [i32; 3],
@@ -2073,10 +2419,12 @@ pub struct BlockEntityRef {
 
 /// Non-paused authoritative server ticks since open (not game or frame time).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct NativeTickId(u64);
 
 impl NativeTickId {
     /// Create a tick ID for the game.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(n: u64) -> Self {
         Self(n)
@@ -2094,9 +2442,11 @@ impl NativeTickId {
 #[allow(clippy::enum_variant_names)]
 #[non_exhaustive]
 pub enum WorldPhase {
+    /// World open ready.
     WorldOpenReady,
     /// The open failed; `error_text` is the engine's own error text.
     WorldOpenFailed,
+    /// World close final.
     WorldCloseFinal,
     /// The server loop or final save failed; `error_text` carries the error.
     WorldCloseFailed,
@@ -2106,8 +2456,16 @@ pub enum WorldPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ServerTickPhase {
-    ServerTickStart { world_running: bool },
-    ServerTickEnd { world_running: bool },
+    /// The server tick is about to begin.
+    ServerTickStart {
+        /// False for a frozen step, when the world does not advance.
+        world_running: bool,
+    },
+    /// The server tick has finished.
+    ServerTickEnd {
+        /// False for a frozen step, when the world does not advance.
+        world_running: bool,
+    },
 }
 
 /// Context for every world lifecycle phase.
@@ -2118,8 +2476,11 @@ pub enum ServerTickPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeLifecycleContext {
+    /// The server role that fired the phase.
     pub authority: NativeAuthority,
+    /// Identifies the open attempt this phase belongs to.
     pub epoch: NativeWorldEpoch,
+    /// Non-paused server ticks since the world opened.
     pub tick: NativeTickId,
 }
 
@@ -2127,16 +2488,23 @@ pub struct NativeLifecycleContext {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ToolAbility {
+    /// An axe strips a log.
     AxeStrip,
+    /// An axe scrapes oxidation off copper.
     AxeScrape,
+    /// An axe removes wax from copper.
     AxeWaxOff,
+    /// A shovel makes a path block.
     ShovelFlatten,
+    /// A shovel puts out a campfire.
     ShovelDouse,
+    /// A hoe tills soil.
     HoeTill,
 }
 
 /// The player responsible for a game rule change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct GameRuleActor<'a> {
     /// Player UUID.
     pub uuid: u128,
@@ -2150,7 +2518,9 @@ pub struct GameRuleActor<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeProgressType {
+    /// Grant.
     Grant,
+    /// Revoke.
     Revoke,
 }
 
@@ -2174,6 +2544,7 @@ pub struct ToolUse {
 }
 
 /// One native mod, with its bundle's `[mod] id` and hook implementation.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ModEntry {
     id: &'static str,
     pub(crate) hooks: Box<dyn Hooks>,
@@ -2188,6 +2559,7 @@ impl ModEntry {
 
     /// Marks the thread as inside this mod's `hook` until the guard drops, so a panic in it
     /// names both. A trait injection's generated dispatch calls it.
+    // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn enter(&self, hook: &'static str) -> crate::crash::NativeModGuard {
         mark_mod(self.id, hook)
@@ -2306,6 +2678,7 @@ pub(crate) fn listened(hook: generated::HookId) -> bool {
 }
 
 /// Whether an installed mod subscribes to an injected hook.
+// hidden: a game-side helper, not part of the mod surface
 #[doc(hidden)]
 pub fn subscribed_by(index: usize, hook: Option<generated::HookId>) -> bool {
     hook.is_some_and(|hook| {
@@ -2403,9 +2776,9 @@ impl<'a> Iterator for Entered<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Flow {
-    /// Later mods and the game continue.
+    /// Go on to the next listener and then the game's own behaviour.
     Continue,
-    /// Set the hook flag and skip later mods.
+    /// Stop here; the game's own behaviour does not run.
     Cancel,
 }
 
@@ -2422,6 +2795,7 @@ pub struct BlockHit {
     pub inside: bool,
 }
 impl BlockHit {
+    /// New.
     pub const fn new(point: [f64; 3], face: [i32; 3], inside: bool) -> Self {
         Self {
             point,
@@ -2453,7 +2827,9 @@ impl BlockHit {
 /// use mod_api::BackendRef;
 /// fn reach(backend: BackendRef<'_>) { let _ = backend.inner; }
 /// ```
+// hidden: a game-side type, not part of the mod surface
 #[doc(hidden)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BackendRef<'a> {
     inner: &'a dyn Backend,
 }
@@ -2466,7 +2842,9 @@ pub struct BackendRef<'a> {
 /// use mod_api::BackendMutRef;
 /// fn reach(backend: BackendMutRef<'_>) { backend.set_loaded(false); }
 /// ```
+// hidden: a game-side type, not part of the mod surface
 #[doc(hidden)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BackendMutRef<'a> {
     inner: &'a mut dyn BackendMut,
 }
@@ -2604,9 +2982,11 @@ pub struct NativeBlockClick<'a> {
     pub hit: BlockHit,
     /// The hand clicking (`getHand`) and what it holds (`getItemStack`).
     pub hand: Hand,
+    /// The stack.
     pub stack: Option<&'a ItemStack>,
     /// The clicking player's UUID and entity id (`getEntity`).
     pub player: u128,
+    /// The player entity id.
     pub player_entity_id: i32,
 }
 
@@ -2626,13 +3006,19 @@ pub enum UsePhase {
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct NativeItemClick<'a> {
+    /// The side the click is handled on.
     pub side: LogicalSide,
+    /// The dimension the player is in.
     pub dimension: LevelDimension,
     /// The block containing the clicking player's feet (`getPos`).
     pub pos: [i32; 3],
+    /// The hand that holds the stack.
     pub hand: Hand,
+    /// The stack in that hand.
     pub stack: &'a ItemStack,
+    /// The clicking player's UUID.
     pub player: u128,
+    /// The clicking player's network id.
     pub player_entity_id: i32,
 }
 
@@ -2668,9 +3054,12 @@ impl NativeInteractionResult {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeTriState {
+    /// Deny.
     False,
     #[default]
+    /// Leave the game's own answer.
     Default,
+    /// Allow.
     True,
 }
 impl NativeTriState {
@@ -2687,6 +3076,7 @@ impl NativeTriState {
 mod generated_host {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated_host.rs"));
 }
+// hidden: a game-side re-export, not part of the mod surface
 #[doc(hidden)]
 pub use generated_host::{Backend, BackendMut};
 pub use generated_host::{
@@ -2949,6 +3339,7 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
 }
 pub use generated::Hooks;
+// hidden: a game-side re-export, not part of the mod surface
 #[doc(hidden)]
 pub use generated::*;
 /// Internal test-fixture attribute for modules with multiple hook sets; mods use `#[mod_api::horizon_mod]`.
@@ -3794,6 +4185,7 @@ mod tests {
 pub(crate) mod built {
     #[allow(unused_imports)]
     use super::*;
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct ToolUse {
         pub player: Option<u32>,
         pub hand: crate::first_person::Hand,
@@ -3825,6 +4217,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativeLootDrops<'a> {
         pub table: &'a str,
         pub dimension: &'a str,
@@ -3862,6 +4255,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativeExplosionStart<'a> {
         pub dimension: &'a str,
         pub center: [f64; 3],
@@ -3896,6 +4290,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativeItemFished<'a> {
         pub hook: u32,
         pub position: [f64; 3],
@@ -3915,6 +4310,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativeScreenView<'a> {
         pub id: &'static str,
         pub menu: Option<&'a str>,
@@ -3946,6 +4342,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativeItemClick<'a> {
         pub side: LogicalSide,
         pub dimension: LevelDimension,
@@ -3977,6 +4374,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativeBlockClick<'a> {
         pub side: LogicalSide,
         pub dimension: LevelDimension,
@@ -4011,6 +4409,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativeLifecycleContext {
         pub authority: NativeAuthority,
         pub epoch: super::NativeWorldEpoch,
@@ -4030,6 +4429,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativeActiveEffect {
         pub id: &'static str,
         pub duration: i32,
@@ -4055,6 +4455,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativePlayerExperience {
         pub level: i32,
         pub progress: f32,
@@ -4074,6 +4475,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativePlayerFood {
         pub level: i32,
         pub saturation: f32,
@@ -4093,6 +4495,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativePlayerAbilities {
         pub invulnerable: bool,
         pub flying: bool,
@@ -4124,6 +4527,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativeServerPlayer {
         pub uuid: u128,
         pub name: String,
@@ -4164,6 +4568,7 @@ pub(crate) mod built {
             }
         }
     }
+    // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativePortalShape {
         pub x_axis: bool,
         pub bottom_left: [i32; 3],

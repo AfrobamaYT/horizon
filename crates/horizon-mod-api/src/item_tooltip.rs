@@ -5,6 +5,7 @@ use horizon_items::items::ItemStack;
 use horizon_world::nbt::Tag;
 /// The `minecraft:tooltip_display` component applied by `ItemStack` while it
 /// builds a hover tooltip.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TooltipDisplay<'a> {
     component: Option<&'a Tag>,
     ominous_banner: bool,

@@ -12,7 +12,9 @@ use std::marker::PhantomData;
 /// lookup passes its providers (NeoForge's `EntityCapability<T, C>`: `()` where NeoForge's is
 /// `Void`, the side asked about where it is `@Nullable Direction`), and the game's own provider,
 /// if the game has one.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct EntityCapabilityKey<T: ?Sized + 'static, C: 'static = ()> {
+    /// The name.
     pub name: &'static str,
     default: Option<fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>>>,
     handler: PhantomData<fn(C) -> Box<T>>,

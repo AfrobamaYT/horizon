@@ -4,6 +4,7 @@ use crate::*;
 /// A sprite: its array (0 for every vanilla texture on most GPUs; past the first array's layers in
 /// 1 to 7) and its layer in that array.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct SpriteRef {
     pub array: u32,
     pub layer: u32,
@@ -14,9 +15,10 @@ pub struct SpriteRef {
 }
 /// One face of a block's model on one of its sides.
 #[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct FaceSprite {
     pub sprite: SpriteRef,
-    /// Where the face lies on the side, in the side's two axes ([`side_axes`]), from 0 to 1 across the block:
+    /// Where the face lies on the side, in the side's two axes (`side_axes`), from 0 to 1 across the block:
     /// `[a0, b0, a1, b1]`. `[0, 0, 1, 1]` for a whole face.
     pub rect: [f32; 4],
     /// How deep into the block the face lies from the side's own plane (0 for a cube's face, 0.5 for a slab's top).
@@ -32,6 +34,7 @@ pub struct FaceSprite {
 }
 /// What a block draws on each side, in [`Direction::ALL`]'s order (down, up, north, south, west, east).
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
 pub struct BlockSprites {
     /// The faces on each side, in the model's order: the one drawn first first (a grass block's side: its dirt
     /// and grass, then the grass overlay tinted over it). A side with none is empty. Faces that do not lie flat

@@ -76,7 +76,7 @@ fn eager_subscribers_are_shared_across_dispatch_threads() {
     struct Listener;
     #[mod_api::__subscriptions]
     impl Hooks for Listener {
-        fn loot_table_load(&self, _: &mut LootTableLoadEvent<'_>) {}
+        fn loot_table_load(&self, _: &DataLoadContext<'_>, _: &mut LootTableLoadEvent<'_>) {}
     }
     let installed = install(
         vec![
@@ -98,13 +98,23 @@ fn eager_subscribers_are_shared_across_dispatch_threads() {
         [1]
     );
     let barrier = Barrier::new(2);
+    let load = horizon_world::native_load_context::LoadContext::new(
+        horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
+        std::sync::Arc::new(horizon_world::native_load_context::LoadInputs::new(
+            Default::default(),
+            std::path::PathBuf::new(),
+        )),
+        [],
+    );
+    let context = <DataLoadContext<'_> as crate::__private::game::DataLoadContextNew>::new(&load);
+    let context = &context;
     std::thread::scope(|scope| {
         for _ in 0..2 {
             let barrier = &barrier;
             scope.spawn(move || {
                 TEST_MODS.set(Some(installed));
                 barrier.wait();
-                dispatch_loot_table_load("test", &mut serde_json::json!([]));
+                dispatch_loot_table_load(context, "test", &mut serde_json::json!([]));
             });
         }
     });

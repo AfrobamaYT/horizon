@@ -33,6 +33,22 @@ impl Game<'_> {
     pub(super) fn native_block_state_default(&self, block: &str) -> Option<BlockStateId> {
         default_state(self.pack.assets.registry, block)
     }
+    /// `Item.getCraftingRemainder`: Horizon currently stores the remainder's
+    /// item id, so the result is a single plain stack.
+    pub(super) fn native_item_crafting_remainder(&self, stack: &ItemStack) -> Option<ItemStack> {
+        let item = self.res.items().get(&stack.item)?;
+        let remainder = item.crafting_remainder.as_deref()?;
+        Some(ItemStack::new(remainder, 1))
+    }
+
+    /// `Block.asItem`: the block's item name, including air for a block with
+    /// no item; None if the block name is unknown.
+    pub(super) fn native_block_item(&self, block: &str) -> Option<String> {
+        let behaviours = self.res.behaviours();
+        let id = behaviours.table.block_by_name(block)?;
+        Some(behaviours.block_data(id).item.to_string())
+    }
+
     /// Whether `stack` is in the item tag `tag` (`minecraft:logs` or `logs`,
     /// no `#`):
     /// `ItemStack.is(TagKey)`, over the world's merged tags, its data packs
@@ -119,6 +135,33 @@ mod tests {
             BlockRegistry::from_facts_json(&facts[..]).unwrap(),
         ));
         (block_registries(registry), registry)
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn item_and_block_registry_facts_use_the_loaded_tables() {
+        use mod_api::Host;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let host: &dyn Host = game;
+            let remainder = host
+                .item_crafting_remainder(&ItemStack::new("minecraft:water_bucket", 1))
+                .unwrap();
+            assert_eq!(&*remainder.item, "minecraft:bucket");
+            assert_eq!(remainder.count, 1);
+            assert!(
+                host.item_crafting_remainder(&ItemStack::new("minecraft:stone", 1))
+                    .is_none()
+            );
+            assert_eq!(
+                host.block_item("minecraft:stone").as_deref(),
+                Some("minecraft:stone")
+            );
+            assert_eq!(
+                host.block_item("minecraft:water").as_deref(),
+                Some("minecraft:air")
+            );
+            assert_eq!(host.block_item("missing:unknown"), None);
+        });
     }
 
     #[test]

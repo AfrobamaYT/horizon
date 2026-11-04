@@ -3,6 +3,7 @@ use std::{fmt, sync::Arc};
 
 /// A block entity type's namespaced registry and save identity.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityTypeKey(pub(super) Arc<str>);
 
 impl BlockEntityTypeKey {
@@ -28,10 +29,15 @@ impl AsRef<str> for BlockEntityTypeKey {
 #[non_exhaustive]
 pub enum BlockEntityPartError {
     /// Vanilla entities do not expose a native Part's payload.
-    VanillaType { kind: BlockEntityTypeKey },
+    VanillaType {
+        /// The block entity type that was refused.
+        kind: BlockEntityTypeKey,
+    },
     /// This Part type is already attached to the entity type.
     Duplicate {
+        /// The block entity type that was refused.
         kind: BlockEntityTypeKey,
+        /// The Part type that is already attached.
         part: &'static str,
     },
 }
@@ -54,6 +60,7 @@ impl fmt::Display for BlockEntityPartError {
 impl std::error::Error for BlockEntityPartError {}
 
 #[derive(Debug)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityTypeLookupError {
     missing: Vec<&'static super::part_table::BlockEntityTypeRequest>,
 }
@@ -77,6 +84,7 @@ impl fmt::Display for BlockEntityTypeLookupError {
 
 impl std::error::Error for BlockEntityTypeLookupError {}
 
+/// Checks that every registered block entity type key names a type the game knows.
 pub fn validate_block_entity_type_keys(
     types: &horizon_client_core::block_entity_types::BlockEntityTypes,
 ) -> Result<(), BlockEntityTypeLookupError> {
@@ -92,6 +100,7 @@ pub fn validate_block_entity_type_keys(
 }
 
 /// Builds one native block entity type during mod registration.
+// exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityTypeBuilder<'a> {
     pub(super) registrar: &'a mut super::Registrar,
     pub(super) id: String,

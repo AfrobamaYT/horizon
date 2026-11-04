@@ -1044,7 +1044,6 @@
     "{mod}: Cargo.toml has no package name.": "{mod}: Cargo.toml nie ma nazwy pakietu.",
     "{mod}: Cargo.toml has no horizon-mod-api dependency.": "{mod}: Cargo.toml nie ma zależności horizon-mod-api.",
     "{mod}: Cargo.toml depends on the game ({key}). A mod depends on horizon-mod-api alone.": "{mod}: Cargo.toml zależy od gry ({key}). Mod zależy wyłącznie od horizon-mod-api.",
-    "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: horizon-client żąda {fields}. Kompilacje serwera działają bez interfejsu; o funkcjach horizon-client decyduje launcher. Usuń features i użyj default-features = false lub go pomiń.",
     "{mod}: {error}": "{mod}: {error}",
     "{mode} · stopped": "{mode} · zatrzymany",
     "{online} of {max}": "{online} z {max}",

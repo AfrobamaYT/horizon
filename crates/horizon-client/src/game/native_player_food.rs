@@ -1,5 +1,5 @@
 //! A player's food and experience for native server mods, through a
-//! `PlayerRef` (docs/native-mods.md): the `FoodData` and `Player` reads the
+//! `PlayerRef` (docs/modding/src/how-to/native-mods.md): the `FoodData` and `Player` reads the
 //! handle's `food()` doesn't give, the writes, and the experience give an
 //! orb hands over (Mending first). Reads return None for a
 //! stale handle or a player who isn't online here, as `food()` does. Writes
@@ -105,7 +105,7 @@ impl Game<'_> {
         &self,
         player: PlayerRef,
     ) -> Option<NativePlayerExperience> {
-        Some(match self.player_handle_read(player)? {
+        Some(match self.player_read_both(player)? {
             super::native_server::PlayerRead::Guest(g) => {
                 NativePlayerExperience::from(mod_api::__private::built::NativePlayerExperience {
                     level: g.xp_level,
