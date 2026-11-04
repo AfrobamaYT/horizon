@@ -69,8 +69,8 @@ use mod_api::{
     EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand,
     NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
     NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
-    PathComputationType, Placement, RecipeBookCategory, ScreenOpening, ServerReloadListeners,
-    ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    PathComputationType, Placement, PlayerRef, RecipeBookCategory, ScreenOpening,
+    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
@@ -8669,18 +8669,15 @@ fn put_block_entity(world: &mut horizon_client::world::World, pos: [i32; 3], ent
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
 impl Game<'_> {
-    /// The local player's main inventory (hotbar and the 27 slots above it,
-    /// `Inventory.items`): the item id and count of each non-empty stack, in
-    /// slot order. Empty outside a world. Client-side.
-    pub(super) fn native_local_player_items(&self) -> Vec<(String, u32)> {
-        if self.player.is_none() {
-            return Vec::new();
-        }
-        self.inventory
-            .iter()
-            .flatten()
-            .map(|s| (s.item.to_string(), s.count))
-            .collect()
+    /// `Inventory.items`: the non-empty main inventory stacks in slot order, including
+    /// their components. None for a stale or unavailable player; on clients only the
+    /// local player's inventory is available.
+    pub(super) fn native_player_inventory(&self, player: PlayerRef) -> Option<Vec<ItemStack>> {
+        let inventory = match self.player_read_both(player)? {
+            super::native_server::PlayerRead::Acting { .. } => &self.inventory,
+            super::native_server::PlayerRead::Guest(guest) => &guest.inventory,
+        };
+        Some(inventory.iter().flatten().cloned().collect())
     }
     /// The id of the item in the slot under the pointer on the open container screen
     /// (`AbstractContainerScreen.getHoveredSlot().getItem()`), None over no slot or an empty one.
