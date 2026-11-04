@@ -8025,7 +8025,7 @@ impl Game<'_> {
     /// The living entity an effect decision names: `Some(id)` a mob's
     /// `Entity.getId`, `None` the acting player. `None` when no native
     /// world runs, and the decision falls back to vanilla's.
-    pub(super) fn native_effect_living(&self, entity: Option<i32>) -> Option<LivingRef> {
+    pub(super) fn effect_living_ref(&self, entity: Option<i32>) -> Option<LivingRef> {
         let epoch = self.native_lifecycle.epoch()?;
         let id = match entity {
             Some(id) => id as u32,

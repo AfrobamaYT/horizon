@@ -1005,7 +1005,7 @@ impl Game<'_> {
         // their countdown); a canceled expiry keeps the effect at no ticks,
         // asking again next tick. Only on the server, where the effects tick.
         let keep_expired: Vec<&'static str> = if self.remote.is_none() {
-            let player = self.native_effect_living(None);
+            let player = self.effect_living_ref(None);
             effects
                 .list
                 .iter()
@@ -1138,7 +1138,7 @@ impl Game<'_> {
         effect: &str,
     ) -> bool {
         let mut answered = None;
-        if let Some(living) = self.native_effect_living(entity) {
+        if let Some(living) = self.effect_living_ref(entity) {
             self.native_mob_effect_applicable(living, effect, &mut answered);
         }
         match answered {
@@ -1186,7 +1186,7 @@ impl Game<'_> {
             // `MobEffectEvent.Remove`: refusing the removal keeps it, and the
             // next one is asked with this one still in place, as in vanilla.
             let mut cancel = false;
-            if let Some(living) = self.native_effect_living(None) {
+            if let Some(living) = self.effect_living_ref(None) {
                 self.native_mob_effect_remove(
                     living,
                     mob_effect_id(id).unwrap_or(id),
@@ -2262,7 +2262,7 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
         keep
     }
     fn effect_expired(&self, mob: u32, effect: &'static str, amplifier: i32, cancel: &mut bool) {
-        if let Some(living) = self.native_effect_living(Some(mob as i32)) {
+        if let Some(living) = self.effect_living_ref(Some(mob as i32)) {
             self.native_mob_effect_expired(living, effect, amplifier, cancel);
         }
     }
