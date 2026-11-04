@@ -97,6 +97,7 @@ impl Game<'_> {
                     id,
                     pos: BlockPos::new(pos[0], pos[1], pos[2]),
                     data: 0,
+                    source: None,
                 });
             } else if self
                 .res
@@ -111,6 +112,7 @@ impl Game<'_> {
                     id: 2001,
                     pos: at,
                     data: block.state.0 as i32,
+                    source: None,
                 });
                 self.level_events.push(LevelEvent::GameEvent {
                     pos: at,
@@ -175,6 +177,7 @@ impl Game<'_> {
                     id,
                     pos: BlockPos::new(pos[0], pos[1], pos[2]),
                     data: 0,
+                    source: None,
                 });
             }
             // FallingBlockEntity.tick: spawnAtLocation, from where the entity

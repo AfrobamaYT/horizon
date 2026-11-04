@@ -36,6 +36,7 @@ impl Game {
         assert_eq!(self.physical_buttons.contains(&button), pressed);
         self.calls.push("post");
     }
+    fn settle_title_mode(&mut self) {}
     fn handle_window_event_inner(&mut self, _: (), _: WindowEvent) {
         self.calls.push("handle");
         if self.early { return; }
