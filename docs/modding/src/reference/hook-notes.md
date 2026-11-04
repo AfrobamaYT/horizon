@@ -105,14 +105,25 @@ requires a farmer at work and `mob_griefing` enabled.
   (`NativeBlockClick`) supplies the dimension, hit, hand, stack and player. Return `Flow::Cancel` to
   skip that phase's Part and template, using `*event.cancellation_result` as the phase's result
   (default `TryWithEmptyHand`); a main-hand block-phase TRY can still run the empty method.
-  `UsePhase::ItemBeforeBlock` is reserved for `on_item_use_first` and has no firing point yet.
+  `UsePhase::ItemBeforeBlock` fires first, before the item's `on_item_use_first` Part and before
+  the block is asked anything (ahead of the sneak gate, unless `right_click_block` denied the item);
+  a cancel there answers for the block and the item. On the client only this broadcast event fires:
+  a Part's claim comes from the server, which corrects the predicted click as it does for the block
+  Part.
+- `ItemPart::on_item_use_first(host, event)` is `IItemExtension.onItemUseFirst`, server side, for the
+  held item (`event.click` is the same `NativeBlockClick`). Return `Some(result)` to end the click:
+  neither the block nor the item's `use_on` runs, and `Success` swings the hand. `None` or `Pass`
+  goes on to the block. It has no global method: NeoForge's bus event for this moment is
+  `use_item_on_block`'s `ItemBeforeBlock` phase.
 
 - `Hooks::right_click_item(host, event)` is NeoForge's `PlayerInteractEvent.RightClickItem`, before
   `Item.use` and the item's `use_item` Part on both sides, only when no block or entity is targeted.
   `event.click` (`NativeItemClick`) contains the dimension, player's feet block position, player,
   hand and stack. `Flow::Cancel` skips the Part/template and returns `*event.cancellation_result`
   (default `Pass`). Only `Success` ends the client's hand loop and predicts a swing; all other
-  canceled results continue to the other hand, including `SuccessServer` and `Consume`.
+  canceled results continue to the other hand, including `SuccessServer` and `Consume`. A block
+  target that `use_item_on_block` was asked about, even one the block passed on, is still a block
+  target: the hook never fires for that click.
 
 - A block's empty-hand behaviour: `BlockPart::use_without_item(host, event)` replaces
   `Block.useWithoutItem` on the server, on the main hand only, after `useItemOn` returns
@@ -1872,7 +1883,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_use_item_on_block(click, phase, cancellation_result, canceled)`**: NeoForge's
   `UseItemOnBlockEvent`, on both sides, immediately before the selected block or item-on-block phase.
   Canceling replaces that phase with `cancellation_result` (default `TryWithEmptyHand`), skipping its
-  Part and template. `UsePhase::Block` and `ItemAfterBlock` fire today; `ItemBeforeBlock` is reserved.
+  Part and template. `UsePhase::ItemBeforeBlock`, `Block` and `ItemAfterBlock` all fire; `ItemBeforeBlock` precedes the item's
+  `on_item_use_first` Part.
 - **`native_right_click_item(click, cancellation_result, canceled)`**: NeoForge's
   `PlayerInteractEvent.RightClickItem`, on both sides, before air `Item.use` and its Part, never for a
   block/entity target. Canceling answers with `cancellation_result` (default `Pass`). On the client,
