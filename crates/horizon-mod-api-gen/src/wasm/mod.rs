@@ -451,7 +451,7 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Wasm, String> 
     let hooks = hook_ids(&mut surface.types)?;
     let servers = servers(&mut surface.types)?;
     surface.types.views = views(&mut surface.types)?;
-    let _ = coverage;
+    coverage(&surface)?;
     let methods: Vec<&Method> = surface.methods.iter().collect();
     let wit = wit::package(&surface.types, &methods, &api_version(root)?)?;
     Ok(Wasm {
