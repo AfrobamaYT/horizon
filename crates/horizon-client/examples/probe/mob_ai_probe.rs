@@ -1494,7 +1494,14 @@ pub fn main() -> horizon_client::Result<()> {
                     created: &mut created,
                     spawning: s.spawning,
                 };
-                creaking_heart::server_tick(h, *at, &w, test_level.random(), &mut host, &mut heart_events);
+                creaking_heart::server_tick(
+                    h,
+                    *at,
+                    &w,
+                    test_level.random(),
+                    &mut host,
+                    &mut heart_events,
+                );
                 added.append(&mut host.added);
             }
             drop(w);
