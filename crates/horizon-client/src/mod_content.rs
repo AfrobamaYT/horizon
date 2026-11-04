@@ -31,7 +31,7 @@ use std::{
 };
 
 /// A content mod to put in the root: its id, its content, and the Java jars
-/// it lists in manifest order — each an asset layer under the mod's own
+/// it lists in manifest order — each an asset/data layer under the mod's own
 /// files, its file found by hash in `jar_store` (`docs/native-mods.md`).
 pub struct ContentMod {
     pub id: String,
@@ -3048,15 +3048,9 @@ fn stamp(base: &Path, jar_store: &Path, mods: &[ContentMod]) -> Result<String> {
     for m in mods {
         parts.push(m.id.clone());
         for jar in &m.jars {
-            // The cache file's state, so a jar the launcher downloads later
-            // rebuilds the root with its layer.
-            let cached = jar_store.join(format!("{}.jar", jar.sha512()));
-            parts.push(format!(
-                "jar {} {} {}",
-                jar.id(),
-                jar.sha512(),
-                meta(&cached).unwrap_or_else(|_| "not cached".into())
-            ));
+            // The complete reference and cache state identify this ordered layer.
+            parts.push(format!("jar {}", serde_json::to_string(jar)?));
+            parts.push(meta(&jar.cache_path(jar_store)).unwrap_or_else(|_| "not cached".into()));
         }
         // What it declares, so blocks and items from code count too.
         parts.push(format!(

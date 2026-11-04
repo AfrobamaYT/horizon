@@ -231,6 +231,18 @@ fn changing_jar_list_or_order_rebuilds_and_missing_after_compose_keeps_the_old_r
     assert_ne!(shortened, reversed);
     assert_eq!(fs::read(shortened.join(path)).unwrap(), b"b");
     check_jars(&shortened, &store).unwrap();
+    let relabeled = JarRef::new(b.id().into(), "2".into(), b.sha512().into()).unwrap();
+    mods[0].jars[0] = relabeled.clone();
+    let versioned = resource_root(&base, &store, &mods, &cache).unwrap();
+    assert_ne!(versioned, shortened);
+    let accepted: Vec<horizon_mods::manifest::JarRequirement> =
+        serde_json::from_slice(&fs::read(versioned.join(JAR_INPUTS)).unwrap()).unwrap();
+    assert_eq!(accepted[0].jar, relabeled);
+    mods[0].jars[0] = b.clone();
+    assert_eq!(
+        resource_root(&base, &store, &mods, &cache).unwrap(),
+        shortened
+    );
     fs::remove_file(b.cache_path(&store)).unwrap();
     let before = fs::read_dir(&cache).unwrap().count();
     let error = resource_root(&base, &store, &mods, &cache).unwrap_err();
