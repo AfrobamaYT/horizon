@@ -3021,8 +3021,6 @@ impl NativeTickId {
 #[allow(clippy::enum_variant_names)]
 #[non_exhaustive]
 pub enum WorldPhase {
-    /// World open ready.
-    WorldOpenReady,
     /// The open failed; `error_text` is the engine's own error text.
     WorldOpenFailed,
     /// World close final.

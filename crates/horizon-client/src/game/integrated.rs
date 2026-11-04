@@ -633,7 +633,7 @@ impl Game<'_> {
             self.native_lifecycle_world_failed(&e.to_string());
             return Err(e);
         }
-        // The server thread's `WorldOpenReady` site, before the tick loop.
+        // The server thread's `server_started` site, before the tick loop.
         self.native_lifecycle_world_ready();
         if let (Some(script), Some(output)) = (
             std::env::var_os("HORIZON_COMMAND_SCRIPT"),

@@ -86,6 +86,7 @@ mod client_player_clone;
 mod client_player_logging_in;
 mod client_player_logging_out;
 mod client_setup;
+mod client_stopping;
 mod client_tick_post;
 mod client_tick_pre;
 mod clone_item_stack;

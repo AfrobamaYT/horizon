@@ -26,15 +26,15 @@ pub trait Hooks {
     /// The world's phases, read-only; `error_text` carries the engine's
     /// own open-failure text, empty otherwise. Server-side. A server loop or final
     /// save failure fires `WorldCloseFailed` with the error text.
-    #[hook(side = "server", contract = "listen")]
+    #[hook(side = "server", contract = "listen", version = 2)]
     fn world_lifecycle();
     /// The server is about to open its worlds: nothing of the world is
     /// loaded yet (NeoForge's `ServerAboutToStartEvent`, "called before the
     /// server begins loading anything"). Vanilla's `MinecraftServer.loadLevel`
     /// start. Server-side: the single player server thread once Play is
     /// pressed, a dedicated server once its settings are read. Each is
-    /// followed by `native_world_lifecycle`'s `WorldOpenReady` or
-    /// `WorldOpenFailed`. `dedicated` tells a dedicated server from the single
+    /// followed by `native_server_started` or
+    /// `native_world_lifecycle`'s `WorldOpenFailed`. `dedicated` tells a dedicated server from the single
     /// player one.
     #[hook(
         side = "server",
@@ -43,6 +43,19 @@ pub trait Hooks {
         cancellable = false
     )]
     fn server_about_to_start();
+    /// The server has opened its worlds and is about to run its tick loop
+    /// (NeoForge's `ServerStartedEvent`): every level is loaded, no player has
+    /// joined, and the first tick has not run. Fired where `WorldOpenReady` was,
+    /// on the single player server thread and on a dedicated server, once per
+    /// open that succeeds (a failed open fires `WorldOpenFailed` instead).
+    /// `dedicated` tells a dedicated server from the single player one.
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "ServerStartedEvent",
+        cancellable = false
+    )]
+    fn server_started();
     /// The server begins an orderly stop (NeoForge's `ServerStoppingEvent`):
     /// the start of vanilla's `MinecraftServer.stopServer`, with the worlds
     /// still loaded and the players still connected and not yet saved, so a
@@ -748,7 +761,7 @@ pub trait Hooks {
     /// memory of what never saved. Its blocks and block entities are there,
     /// but its saved entities join afterwards and its light may not be ready:
     /// change the world from a later tick. The chunks around the spawn come
-    /// before `WorldOpenReady`. Not told of a chunk a client receives.
+    /// before `server_started`. Not told of a chunk a client receives.
     /// Server-side.
     #[hook(side = "server", contract = "listen")]
     fn chunk_load();
@@ -1827,7 +1840,7 @@ pub trait Hooks {
     /// `dimension`'s level opened on the server (NeoForge's `LevelEvent.Load`,
     /// posted in `MinecraftServer.createLevels`): before any of its chunks
     /// (`native_chunk_load`), so a mod sets up what it keeps for the level
-    /// here. The level the world opens in comes before `WorldOpenReady`; the
+    /// here. The level the world opens in comes before `server_started`; the
     /// others open when someone first goes there (a player, a portal, an
     /// `execute in` command), with the level in place. Once for each open:
     /// `native_level_unload` follows. Server-side.
