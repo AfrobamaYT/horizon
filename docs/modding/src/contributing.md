@@ -9,7 +9,7 @@ The book follows [Diátaxis](https://diataxis.fr): a page is one of four kinds, 
 | How-to | One task, steps only | How-to, Injections |
 | Reference | Facts, complete and dry | Reference, and the rustdoc of `horizon-mod-api` |
 
-- **A hook, event or `Host` method:** its `doc` field in the catalog fragment under `tools/native-hook-fragments/`.
+- **A hook, event or `Host` method:** its `///` lines in the declaration under `crates/horizon-mod-api/src/hooks/`.
   The generator writes it as `///` on the generated item; `cargo doc -p horizon-mod-api` shows it. A hook without
   a `doc` fails the build.
 - **A guide page:** `docs/modding/src/`. Code in a page is `{{#include}}`d from `docs/modding/examples`, which

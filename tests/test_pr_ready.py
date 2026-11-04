@@ -102,8 +102,7 @@ class PrReadyTests(unittest.TestCase):
                      "crates/horizon-mod-api-macros/src/lib.rs",
                      "crates/horizon-mod-api/src/lib.rs",
                      "crates/horizon-mod-api/src/part_table.rs",
-                     "native-hooks.json",
-                     "tools/native-hook-fragments/tick.json"]:
+                     "crates/horizon-mod-api/src/hooks/block.rs"]:
             with self.subTest(path=path):
                 by_name = suite_steps(path)
                 for name in ("dispatch tests clippy", "dispatch tests tests"):
@@ -142,7 +141,7 @@ class PrReadyTests(unittest.TestCase):
     def test_mod_api_data_inputs_build_and_test_the_consuming_crates(self):
         packages = {**PACKAGES, "horizon-client-render": "crates/horizon-client-render",
                     "horizon-mod-api-gen": "crates/horizon-mod-api-gen"}
-        for path in ("native-hooks.json", "tools/native-hook-fragments/player.json"):
+        for path in ("crates/horizon-mod-api/src/hooks/player.rs",):
             with self.subTest(path=path), mock.patch.object(pr_ready, "affected_here", return_value=[]):
                 steps = pr_ready.plan(args(quick=True), "origin/main", {path}, packages,
                                       LIBRARIES | {"horizon-client-render", "horizon-mod-api-gen"}, DEPENDENCIES)

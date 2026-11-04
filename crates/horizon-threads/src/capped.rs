@@ -106,9 +106,9 @@ impl<A> Capped<A> {
     }
 }
 
-/// The game's allocator, over mimalloc (`#[global_allocator]` in its `main.rs`).
+/// The game's allocator, over mimalloc (`#[global_allocator]` in `horizon-client`'s library).
 pub type Allocator = Capped<mimalloc::MiMalloc>;
-/// A const instance, so `main.rs` can name it in a `static`.
+/// A const instance, so the game can name it in a `static`.
 pub const ALLOCATOR: Allocator = Capped(mimalloc::MiMalloc);
 
 // SAFETY: every method forwards to the wrapped allocator with the same layout

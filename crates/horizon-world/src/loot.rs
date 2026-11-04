@@ -561,7 +561,7 @@ pub fn shared_tables(root: &Path, overlay: &PackOverlay) -> io::Result<Arc<LootT
     Ok(tables)
 }
 
-/// A native mod's hook point (docs/modding/src/how-to/native-mods.md), listed in `native-hooks.json` with the game's:
+/// A native mod's hook point (docs/modding/src/how-to/native-mods.md), declared in `hooks/` with the game's:
 /// the loot table `id` (`minecraft:chests/simple_dungeon`, `minecraft:blocks/stone`,
 /// `minecraft:entities/zombie`) as it loads, its JSON after the data packs', before anything
 /// rolls it (NeoForge's `LootTableLoadEvent`, Fabric's `LootTableEvents.MODIFY`). Add pools to

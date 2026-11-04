@@ -37,17 +37,11 @@ pub(super) fn prepare(
                     continue;
                 };
                 let target = if let Some(hook) = table.get("hook").and_then(toml::Value::as_str) {
-                    let catalog = source.join("native-hooks.json");
-                    let text = fs::read_to_string(&catalog)
-                        .map_err(|e| format!("{}: {e}", catalog.display()))?;
-                    let catalog: serde_json::Value =
-                        serde_json::from_str(&text).map_err(|e| e.to_string())?;
-                    catalog["hooks"]
-                        .as_array()
-                        .and_then(|hooks| hooks.iter().find(|h| h["name"].as_str() == Some(hook)))
-                        .and_then(|h| h["target"].as_str())
+                    horizon_mod_api_gen::hook_points(source)?
+                        .into_iter()
+                        .find(|point| point.name == hook)
+                        .map(|point| point.target)
                         .ok_or_else(|| format!("unknown catalog hook {hook}"))?
-                        .to_owned()
                 } else {
                     table
                         .get("target")
@@ -581,9 +575,16 @@ mod tests {
             "other-catalog",
             "[[injection]]\nid = 'hook'\nhook = 'loot_table_load'\nkind = 'HEAD'\ntrait_method = 'load'\n",
         );
+        let declarations = root.join(horizon_mod_api_gen::DECLARATIONS);
+        fs::create_dir_all(&declarations).unwrap();
+        fs::write(declarations.join("mod.rs"), "mod loot;").unwrap();
         fs::write(
-            root.join("native-hooks.json"),
-            r#"{"hooks":[{"name":"loot_table_load","target":"horizon_world::loot::load"}]}"#,
+            declarations.join("loot.rs"),
+            r#"pub trait Hooks {
+    /// Loot.
+    #[hook(side = "server", contract = "listen", target = "horizon_world::loot::load")]
+    fn loot_table_load();
+}"#,
         )
         .unwrap();
         let error = prepare(&[bundle], &root).err().unwrap();

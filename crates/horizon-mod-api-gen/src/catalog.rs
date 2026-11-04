@@ -1,6 +1,6 @@
-//! The hook catalog as typed data: `native-hooks.json` and the fragments beside it, read once.
+//! The hook catalog as typed data: the declaration files under `crates/horizon-mod-api/src/hooks`, read once.
 //!
-//! The loader here is the only code that touches the catalog's JSON. Every generated output
+//! The loader here is the only code that reads the declarations. Every generated output
 //! (the `Hooks` dispatch, the Host traits, the game's entry points, the rustdoc, the mixin hook
 //! names) reads these types.
 
@@ -136,29 +136,59 @@ pub struct DrawContext {
 /// Why the catalog was refused.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CatalogError {
-    Read { path: String, error: String },
-    Json { path: String, error: String },
-    NotAnArray(&'static str),
+    Read {
+        path: String,
+        error: String,
+    },
+    Declaration {
+        path: String,
+        error: String,
+    },
     NamelessHook,
     DuplicateHook(String),
     DuplicateHelper(String),
-    InvalidHook { hook: String, error: String },
-    InvalidHelper { helper: String, error: String },
+    InvalidHook {
+        hook: String,
+        error: String,
+    },
+    InvalidHelper {
+        helper: String,
+        error: String,
+    },
     MissingDoc(String),
-    Counterpart { hook: String, key: &'static str },
+    Counterpart {
+        hook: String,
+        key: &'static str,
+    },
     InvalidContract(String),
     AnsweredNeedsGlobalReplace(String),
     ScopeNeedsKey(String),
     ClientTargetNeedsBoth(String),
     NoHooks,
+    Retired(String),
+    ModLines {
+        listed: Vec<String>,
+        files: Vec<String>,
+    },
 }
 
 impl fmt::Display for CatalogError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read { path, error } => write!(f, "{path}: {error}"),
-            Self::Json { path, error } => write!(f, "{path}: {error}"),
-            Self::NotAnArray(what) => write!(f, "{what} must be an array"),
+            Self::Declaration { path, error } => write!(f, "{path}: {error}"),
+            Self::Retired(path) => write!(
+                f,
+                "{path}: hooks are declared in Rust now, in {DECLARATIONS}/<area>.rs; move the entry there as a \
+                 `#[hook(...)]` declaration (the old keys are the attribute's arguments) and delete this file"
+            ),
+            Self::ModLines { listed, files } => write!(
+                f,
+                "{DECLARATIONS}/mod.rs must list exactly the declaration files, in name order (so that the order is \
+                 the directory's): it lists [{}], the directory holds [{}]",
+                listed.join(", "),
+                files.join(", ")
+            ),
             Self::NamelessHook => f.write_str("hook name missing"),
             Self::DuplicateHook(name) => write!(f, "duplicate hook {name}"),
             Self::DuplicateHelper(name) => write!(f, "duplicate helper {name}"),
@@ -166,7 +196,7 @@ impl fmt::Display for CatalogError {
             Self::InvalidHelper { helper, error } => write!(f, "helper {helper}: {error}"),
             Self::MissingDoc(name) => write!(
                 f,
-                "hook {name}: doc missing: add a `doc` field, the rustdoc of its trait method"
+                "hook {name}: doc missing: add `///` lines, the rustdoc of its trait method"
             ),
             Self::Counterpart { hook, key } => {
                 write!(f, "hook {hook}: {key} must be a string or list of strings")
@@ -334,88 +364,247 @@ impl Helper {
 /// Everything the generator reads from the catalog.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Catalog {
-    /// In file order: `native-hooks.json`, then each fragment by file name.
+    /// In declaration order: the files in the order `hooks/mod.rs` lists them, each file's declarations in order.
     pub hooks: Vec<Hook>,
     pub helpers: Vec<Helper>,
     pub draw_contexts: Vec<DrawContext>,
 }
 
-fn read_json(path: &Path) -> Result<serde_json::Value, CatalogError> {
-    let shown = path.display().to_string();
-    let text = fs::read_to_string(path).map_err(|e| CatalogError::Read {
-        path: shown.clone(),
-        error: e.to_string(),
-    })?;
-    serde_json::from_str(&text).map_err(|e| CatalogError::Json {
-        path: shown,
-        error: e.to_string(),
-    })
+/// Where the declarations live, relative to the checkout root.
+pub const DECLARATIONS: &str = "crates/horizon-mod-api/src/hooks";
+
+/// What the catalog was declared in before the declarations: a file here is refused, never ignored.
+pub(crate) const RETIRED: &[&str] = &["native-hooks.json", "tools/native-hook-fragments"];
+
+/// The game function a hook or helper named `name` is called from, when its declaration gives no `target`.
+fn default_target(name: &str) -> String {
+    format!("horizon_client::game::native_hooks::Game<'_>::native_{name}")
 }
 
-/// The array under `key`, taken out of `value`; `what` names it for the error.
-fn entries(
-    value: &mut serde_json::Value,
-    key: &str,
-    what: &'static str,
-) -> Result<Vec<serde_json::Value>, CatalogError> {
-    match value.get_mut(key) {
-        Some(serde_json::Value::Array(entries)) => Ok(std::mem::take(entries)),
-        _ => Err(CatalogError::NotAnArray(what)),
+/// An attribute argument as the entry structs read it.
+fn argument(expr: &syn::Expr) -> Result<serde_json::Value, String> {
+    use serde_json::Value;
+    match expr {
+        syn::Expr::Lit(syn::ExprLit { lit, .. }) => match lit {
+            syn::Lit::Str(text) => Ok(Value::String(text.value())),
+            syn::Lit::Bool(flag) => Ok(Value::Bool(flag.value)),
+            syn::Lit::Int(number) => number
+                .base10_parse::<u64>()
+                .map(Value::from)
+                .map_err(|e| e.to_string()),
+            _ => Err("expected a string, a bool or an integer".into()),
+        },
+        syn::Expr::Array(array) => array.elems.iter().map(argument).collect(),
+        _ => Err("expected a literal or an array of literals".into()),
+    }
+}
+
+/// The `key = value` arguments of the attribute named `attribute` on a declaration, as the JSON
+/// object the entry structs deserialize; `None` when it carries no such attribute.
+fn arguments(
+    attrs: &[syn::Attribute],
+    attribute: &str,
+) -> Result<Option<serde_json::Map<String, serde_json::Value>>, String> {
+    let Some(attr) = attrs.iter().find(|a| a.path().is_ident(attribute)) else {
+        return Ok(None);
+    };
+    let mut map = serde_json::Map::new();
+    attr.parse_nested_meta(|meta| {
+        let key = meta
+            .path
+            .get_ident()
+            .ok_or_else(|| meta.error("expected a key"))?
+            .to_string();
+        let value = argument(&meta.value()?.parse()?).map_err(|e| meta.error(e))?;
+        map.insert(key, value);
+        Ok(())
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(Some(map))
+}
+
+/// The rustdoc of a declaration: its `///` lines, one leading space off each, joined by newlines.
+fn doc(attrs: &[syn::Attribute]) -> Option<String> {
+    let lines: Vec<String> = attrs
+        .iter()
+        .filter_map(|attr| match &attr.meta {
+            syn::Meta::NameValue(syn::MetaNameValue {
+                path,
+                value:
+                    syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(text),
+                        ..
+                    }),
+                ..
+            }) if path.is_ident("doc") => {
+                let text = text.value();
+                Some(text.strip_prefix(' ').unwrap_or(&text).to_owned())
+            }
+            _ => None,
+        })
+        .collect();
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+/// The declarations of the three kinds the files hold, as entry objects in file order.
+#[derive(Default)]
+struct Declared {
+    hooks: Vec<serde_json::Value>,
+    helpers: Vec<serde_json::Value>,
+    draw_contexts: Vec<serde_json::Value>,
+}
+
+impl Declared {
+    /// Reads one declaration file: its `Hooks`, `Helpers` and `DrawContexts` traits.
+    fn read(&mut self, path: &str, text: &str) -> Result<(), CatalogError> {
+        let invalid = |error: String| CatalogError::Declaration {
+            path: path.to_owned(),
+            error,
+        };
+        let file = syn::parse_file(text).map_err(|e| invalid(e.to_string()))?;
+        for item in file.items {
+            let syn::Item::Trait(declarations) = item else {
+                continue;
+            };
+            let kind = declarations.ident.to_string();
+            for member in declarations.items {
+                let syn::TraitItem::Fn(function) = member else {
+                    return Err(invalid(format!(
+                        "{kind} holds only declarations: fn name();"
+                    )));
+                };
+                let name = function.sig.ident.to_string();
+                let attribute = match kind.as_str() {
+                    "Hooks" => "hook",
+                    "Helpers" => "helper",
+                    "DrawContexts" => "draw_context",
+                    _ => continue,
+                };
+                let mut entry = arguments(&function.attrs, attribute)
+                    .map_err(|e| invalid(format!("{name}: {e}")))?
+                    .ok_or_else(|| {
+                        invalid(format!("{name}: needs a #[{attribute}(...)] attribute"))
+                    })?;
+                entry
+                    .entry("target")
+                    .or_insert_with(|| default_target(&name).into());
+                match kind.as_str() {
+                    "Hooks" => {
+                        entry.insert("name".into(), name.into());
+                        if let Some(doc) = doc(&function.attrs) {
+                            entry.insert("doc".into(), doc.into());
+                        }
+                        // The contract's arguments are the entry's `mod_api` object.
+                        let mut api = serde_json::Map::new();
+                        for key in ["contract", "out", "scope", "key", "answered_by"] {
+                            if let Some(value) = entry.remove(key) {
+                                api.insert(key.into(), value);
+                            }
+                        }
+                        entry.insert("mod_api".into(), api.into());
+                        self.hooks.push(entry.into());
+                    }
+                    "Helpers" => {
+                        entry.insert("name".into(), name.into());
+                        self.helpers.push(entry.into());
+                    }
+                    _ => {
+                        entry.remove("target");
+                        if let Some(trait_name) = entry.remove("name") {
+                            entry.insert("trait".into(), trait_name);
+                        }
+                        entry.insert(
+                            "doc".into(),
+                            doc(&function.attrs).unwrap_or_default().into(),
+                        );
+                        self.draw_contexts.push(entry.into());
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
 impl Catalog {
-    /// The catalog of the checkout at `root`: `native-hooks.json` and `tools/native-hook-fragments`.
+    /// The catalog of the checkout at `root`: every file of the declarations directory, `base.rs` first and
+    /// then by name, so the order never depends on a list a PR edits. `mod.rs` only lists the files for rustfmt,
+    /// and must match the directory. The retired JSON catalog is refused wherever it still exists.
     pub fn load(root: &Path) -> Result<Self, CatalogError> {
-        Self::assemble(
-            read_json(&root.join("native-hooks.json"))?,
-            &root.join("tools/native-hook-fragments"),
-        )
-    }
-
-    /// The catalog of `base` (the contents of `native-hooks.json`) and the fragments in `fragments`.
-    pub fn assemble(mut base: serde_json::Value, fragments: &Path) -> Result<Self, CatalogError> {
-        let draw_contexts = match base.get("draw_contexts") {
-            None => Vec::new(),
-            Some(value) => {
-                serde_json::from_value(value.clone()).map_err(|e| CatalogError::Json {
-                    path: "catalog draw_contexts".into(),
-                    error: e.to_string(),
-                })?
+        let read_error = |path: &Path, e: std::io::Error| CatalogError::Read {
+            path: path.display().to_string(),
+            error: e.to_string(),
+        };
+        for retired in RETIRED {
+            let path = root.join(retired);
+            if path.is_file() {
+                return Err(CatalogError::Retired((*retired).to_string()));
             }
-        };
-        let mut raw_hooks = entries(&mut base, "hooks", "catalog hooks")?;
-        let mut raw_helpers = match base.get("helpers") {
-            None => Vec::new(),
-            Some(_) => entries(&mut base, "helpers", "catalog helpers")?,
-        };
-        let mut paths = fs::read_dir(fragments)
-            .map_err(|e| CatalogError::Read {
-                path: fragments.display().to_string(),
-                error: e.to_string(),
-            })?
-            .map(|entry| {
-                entry
-                    .map(|entry| entry.path())
-                    .map_err(|e| CatalogError::Read {
-                        path: fragments.display().to_string(),
-                        error: e.to_string(),
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        paths.sort();
-        for path in paths
-            .into_iter()
-            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
-        {
-            let mut fragment = read_json(&path)?;
-            raw_hooks.extend(entries(&mut fragment, "hooks", "fragment hooks")?);
-            if fragment.get("helpers").is_some() {
-                raw_helpers.extend(entries(&mut fragment, "helpers", "fragment helpers")?);
+            if path.is_dir() {
+                let mut entries = fs::read_dir(&path).map_err(|e| read_error(&path, e))?;
+                if let Some(entry) = entries.next() {
+                    let entry = entry.map_err(|e| read_error(&path, e))?;
+                    return Err(CatalogError::Retired(format!(
+                        "{retired}/{}",
+                        entry.file_name().to_string_lossy()
+                    )));
+                }
             }
         }
+        let dir = root.join(DECLARATIONS);
+        let mut modules = fs::read_dir(&dir)
+            .map_err(|e| read_error(&dir, e))?
+            .map(|entry| entry.map_err(|e| read_error(&dir, e)))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                name.strip_suffix(".rs")
+                    .filter(|module| *module != "mod")
+                    .map(str::to_string)
+            })
+            .collect::<Vec<_>>();
+        modules.sort_by(|a, b| (a != "base", a).cmp(&(b != "base", b)));
+        let index = dir.join("mod.rs");
+        let index_source = fs::read_to_string(&index).map_err(|e| read_error(&index, e))?;
+        let listing = syn::parse_file(&index_source).map_err(|e| CatalogError::Declaration {
+            path: index.display().to_string(),
+            error: e.to_string(),
+        })?;
+        let listed = listing
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                syn::Item::Mod(module) => Some(module.ident.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if listed != modules {
+            return Err(CatalogError::ModLines {
+                listed,
+                files: modules,
+            });
+        }
+        let files = modules
+            .iter()
+            .map(|module| {
+                let path = dir.join(format!("{module}.rs"));
+                let text = fs::read_to_string(&path).map_err(|e| read_error(&path, e))?;
+                Ok((path.display().to_string(), text))
+            })
+            .collect::<Result<Vec<_>, CatalogError>>()?;
+        Self::parse(&files)
+    }
+
+    /// The catalog of declaration files given as (path, source), in the order given.
+    pub fn parse(files: &[(String, String)]) -> Result<Self, CatalogError> {
+        let mut declared = Declared::default();
+        for (path, text) in files {
+            declared.read(path, text)?;
+        }
         let mut seen = HashSet::new();
-        let hooks = raw_hooks
+        let hooks = declared
+            .hooks
             .into_iter()
             .map(|raw| {
                 let hook = Hook::parse(raw)?;
@@ -427,7 +616,8 @@ impl Catalog {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let mut seen = HashSet::new();
-        let helpers = raw_helpers
+        let helpers = declared
+            .helpers
             .into_iter()
             .map(|raw| {
                 let helper = Helper::parse(raw)?;
@@ -436,6 +626,16 @@ impl Catalog {
                 } else {
                     Err(CatalogError::DuplicateHelper(helper.name))
                 }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let draw_contexts = declared
+            .draw_contexts
+            .into_iter()
+            .map(|raw| {
+                serde_json::from_value(raw).map_err(|e| CatalogError::Declaration {
+                    path: "draw context".into(),
+                    error: e.to_string(),
+                })
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
@@ -485,12 +685,6 @@ mod tests {
         hook
     }
 
-    fn empty_fragments(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("catalog-{tag}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     #[test]
     fn the_shipped_catalog_loads_with_typed_contracts() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -508,23 +702,173 @@ mod tests {
         assert!(!catalog.draw_contexts.is_empty());
     }
 
+    fn checkout(files: &[(&str, &str)]) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "catalog-load-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let dir = root.join(DECLARATIONS);
+        fs::create_dir_all(&dir).unwrap();
+        for (name, text) in files {
+            let path = root.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        }
+        root
+    }
+
+    const HOOK: &str = "pub trait Hooks { /// Doc.\n #[hook(side = \"server\", contract = \"listen\")] fn one(); }";
+
     #[test]
-    fn a_fragment_repeating_a_hook_is_refused() {
-        let dir = empty_fragments("duplicate");
-        std::fs::write(dir.join("empty.json"), r#"{"hooks":[]}"#).unwrap();
-        std::fs::write(
-            dir.join("duplicate.json"),
-            json!({"hooks": [hook("same", json!({}))]}).to_string(),
-        )
+    fn the_retired_json_catalog_is_refused_wherever_it_is() {
+        let base = format!("{DECLARATIONS}/base.rs");
+        let index = format!("{DECLARATIONS}/mod.rs");
+        for retired in ["native-hooks.json", "tools/native-hook-fragments/late.json"] {
+            let root = checkout(&[(&base, HOOK), (&index, "mod base;"), (retired, "{}")]);
+            let error = Catalog::load(&root).unwrap_err().to_string();
+            assert!(error.starts_with(retired), "{error}");
+            assert!(error.contains("declared in Rust now"), "{error}");
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_order_comes_from_the_directory_and_mod_rs_must_match_it() {
+        let second = "pub trait Hooks { /// Doc.\n #[hook(side = \"server\", contract = \"listen\")] fn two(); }";
+        let base = format!("{DECLARATIONS}/base.rs");
+        let alpha = format!("{DECLARATIONS}/alpha.rs");
+        let index = format!("{DECLARATIONS}/mod.rs");
+        let root = checkout(&[
+            (&alpha, second),
+            (&base, HOOK),
+            (&index, "mod base;\nmod alpha;"),
+        ]);
+        let catalog = Catalog::load(&root).unwrap();
+        let names = catalog
+            .hooks
+            .iter()
+            .map(|h| h.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["one", "two"], "base.rs first, then by name");
+        fs::write(root.join(&index), "mod base;").unwrap();
+        let error = Catalog::load(&root).unwrap_err().to_string();
+        assert!(
+            error.contains("mod.rs must list exactly the declaration files"),
+            "{error}"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn file(name: &str, source: &str) -> (String, String) {
+        (name.to_owned(), source.to_owned())
+    }
+
+    #[test]
+    fn declarations_become_entries_with_the_defaults_a_declaration_leaves_out() {
+        let catalog = Catalog::parse(&[file(
+            "a.rs",
+            r#"
+            pub trait Hooks {
+                /// First line.
+                ///
+                ///  Indented.
+                #[hook(side = "both", contract = "replace", out = "o", answered_by = "mod",
+                       neoforge = ["One", "Two"], cancellable = true, version = 2)]
+                fn thing();
+                /// Scoped.
+                #[hook(side = "server", contract = "listen", scope = "item", key = "stack",
+                       target = "horizon_world::loot::native_scoped")]
+                fn scoped();
+            }
+            pub trait Helpers {
+                #[helper(side = "both", client_target = "c", backend = true)]
+                fn help();
+            }
+            pub trait DrawContexts {
+                /// Draws.
+                #[draw_context(surface = "crate::s::S", name = "Draw", prefix = "d_")]
+                fn draw();
+            }
+            "#,
+        )])
         .unwrap();
-        let base = json!({"hooks": [hook("same", json!({}))]});
+        let thing = &catalog.hooks[0];
+        assert_eq!(thing.doc, "First line.\n\n Indented.");
         assert_eq!(
-            Catalog::assemble(base.clone(), &dir).unwrap_err(),
+            thing.target,
+            "horizon_client::game::native_hooks::Game<'_>::native_thing"
+        );
+        assert!(thing.answered_by_mod && thing.cancellable == Some(true));
+        assert_eq!((thing.version, thing.counterparts.neoforge.len()), (2, 2));
+        assert_eq!(
+            catalog.hooks[1].target,
+            "horizon_world::loot::native_scoped"
+        );
+        assert_eq!(
+            catalog.hooks[1].scope.as_ref().unwrap().kind,
+            PartKind::Item
+        );
+        let help = &catalog.helpers[0];
+        assert!(help.backend && help.client_target.as_deref() == Some("c"));
+        assert_eq!(
+            (
+                catalog.draw_contexts[0].trait_name.as_str(),
+                catalog.draw_contexts[0].prefix.as_str()
+            ),
+            ("Draw", "d_")
+        );
+    }
+
+    #[test]
+    fn a_declaration_repeating_a_hook_is_refused_even_across_files() {
+        let declared = |name: &str| {
+            format!(
+                "pub trait Hooks {{ /// Doc.\n #[hook(side = \"server\", contract = \"listen\")] fn {name}(); }}"
+            )
+        };
+        assert_eq!(
+            Catalog::parse(&[
+                file("a.rs", &declared("same")),
+                file("b.rs", &declared("same"))
+            ])
+            .unwrap_err(),
             CatalogError::DuplicateHook("same".into())
         );
-        std::fs::remove_file(dir.join("duplicate.json")).unwrap();
-        assert_eq!(Catalog::assemble(base, &dir).unwrap().hooks.len(), 1);
-        std::fs::remove_dir_all(dir).unwrap();
+        assert_eq!(
+            Catalog::parse(&[
+                file("a.rs", &declared("one")),
+                file("b.rs", &declared("two"))
+            ])
+            .unwrap()
+            .hooks
+            .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn a_declaration_needs_its_attribute_and_its_doc() {
+        let parse = |source: &str| {
+            Catalog::parse(&[file("a.rs", source)])
+                .unwrap_err()
+                .to_string()
+        };
+        assert!(
+            parse("pub trait Hooks { fn bare(); }")
+                .contains("bare: needs a #[hook(...)] attribute")
+        );
+        assert_eq!(
+            parse(
+                "pub trait Hooks { #[hook(side = \"server\", contract = \"listen\")] fn bare(); }"
+            ),
+            "hook bare: doc missing: add `///` lines, the rustdoc of its trait method"
+        );
+        assert!(
+            parse("pub trait Hooks { /// Doc.\n #[hook(side = \"server\", contract = \"listen\", unknown = 1)] fn bare(); }")
+                .contains("unknown field `unknown`")
+        );
     }
 
     #[test]
@@ -534,7 +878,7 @@ mod tests {
                 Hook::parse(hook("bare", json!({"doc": doc})))
                     .unwrap_err()
                     .to_string(),
-                "hook bare: doc missing: add a `doc` field, the rustdoc of its trait method"
+                "hook bare: doc missing: add `///` lines, the rustdoc of its trait method"
             );
         }
     }

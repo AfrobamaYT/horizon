@@ -1,7 +1,7 @@
 # The mod API (rustdoc)
 
 The reference for every hook, event, handle and `Host` method is the rustdoc of the `horizon-mod-api` crate
-(lib name `mod_api`), generated from the catalog fragments' `doc` fields:
+(lib name `mod_api`), generated from the `///` docs of the declarations in `hooks/*.rs`:
 
 ```sh
 cargo doc -p horizon-mod-api --no-deps --open
