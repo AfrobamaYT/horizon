@@ -299,7 +299,7 @@ namespace or an empty name stops the game at startup with a message naming the m
 ```rust,ignore
 #[mod_api::horizon_mod]
 impl Hooks for MyMod {
-    fn register(&self, r: &mut Registrar, _: &RegistrationContext<'_>) {
+    fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
         r.register_structure_type("tower", Tower);
     }
 }
@@ -310,12 +310,14 @@ so the type and its pieces see only two small contexts, `Send + Sync` and determ
 seed gives the same pieces, and a type keeps no mutable state, because two workers can build
 neighbouring chunks at once.
 
-`StructureType::find_generation_point(&self, context: &mut GenerationContext)` answers
-`FoundStructure { position, pieces }` or `None` for "no start in this chunk". The
+`StructureType::find_generation_point(&self, context: &mut dyn GenerationContext)` answers
+`FoundStructure { position, pieces }` (each piece an `Arc<dyn StructurePiece>`) or `None` for "no start in this chunk". The
 `GenerationContext` is vanilla's `GenerationContext` over one chunk: the seed, the chunk, the
 random seeded as vanilla seeds it for the chunk (`setLargeFeatureSeed`), the height and
 base-column queries, the noise biomes and the valid-biome test, and the structure's own JSON
-config (`context.config()`). Everything around the type stays the game's: the structure set's
+config (`context.config()`, shared). Both contexts are traits and the random is a
+`StructureRandom` (`next_int_bound`, `next_long`, `next_float`, `next_double`, `next_boolean`),
+so a type built to `mod.wasm` runs the same code. Everything around the type stays the game's: the structure set's
 spacing, the structure's `biomes` and `terrain_adaptation` are placed by the engine, exactly as
 for a fortress.
 
@@ -325,7 +327,7 @@ first piece once per chunk, with every piece's current box) defaults to doing no
 `PieceContext` of `post_process` and `after_place` is the chunk being placed: `set_block` writes a
 block and drops a position outside the writable box silently, as vanilla's
 `StructurePiece.placeBlock` skips it; `block` and `height` read, `state`/`state_with` resolve a
-block by name and properties, `random` is the piece's `RandomSource`, `solid_render` asks whether
+block by name and properties, `random` is the piece's `RandomSource` as a `StructureRandom`, `name` gives the block's name, `solid_render` asks whether
 a state draws as a solid block, and `entity` queues an entity from its saved NBT — its `id`, `Pos`
 and fields — which the generating chunk holds and the game finishes as a structure mob's
 (`Mob.finalizeSpawn` with `STRUCTURE` when the NBT keeps the `"horizon:finalize"` byte a structure

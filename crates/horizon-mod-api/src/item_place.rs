@@ -291,7 +291,8 @@ impl ItemPlace {
                 Some(resource.to_stack(handler.amount(host, *slot)))
             }
             ItemPlace::Mod { provider, key } => {
-                super::place_provider(provider)?.1.stack(host, *key)
+                let (provider, _) = host.capability_providers().place_provider(provider)?;
+                provider.stack(host, *key)
             }
             ItemPlace::MenuSlot { menu, slot } => menu.slot(host, *slot)?,
             _ => backend_mut_of(host).and_then(|backend| backend.game_stack(self)),
@@ -461,7 +462,10 @@ impl ItemPlace {
                 through(handler.ok_or(())?, host, tx, index, false)
             }
             ItemPlace::Mod { provider, key } => {
-                let (owner, provider) = super::place_provider(provider).ok_or(())?;
+                let (provider, owner) = host
+                    .capability_providers()
+                    .place_provider(provider)
+                    .ok_or(())?;
                 let moved = match insert {
                     true => provider.insert(host, tx, *key, resource, amount),
                     false => provider.extract(host, tx, *key, resource, amount),
@@ -542,14 +546,18 @@ impl ItemPlace {
     ) -> Option<Capability<T>> {
         let stack = self.stack(host)?;
         let mut game = None;
-        let parts = super::providers(super::ProvidedBy::Item, key.name, host, |_| {
-            Some(&*stack.item)
-        });
+        let table = host.capability_providers();
+        let provided = table.provided(super::ProvidedBy::Item, key.name);
         super::answered(
-            super::ask_providers::<super::ItemProvider<T>, T>(
-                parts,
+            super::ask_providers(
                 host,
-                |provider, host| provider(host, self),
+                |index| {
+                    provided
+                        .then(|| table.item_provider(key.name, &stack.item, index))
+                        .flatten()
+                },
+                super::ItemProviderOf::get::<T>,
+                |provider, host| provider.provide(host, self),
                 |host| {
                     game = key.default.and_then(|default| default(host, self, &stack));
                     game.is_some()

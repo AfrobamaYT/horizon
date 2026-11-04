@@ -23,11 +23,26 @@ impl std::error::Error for FileToIdConverterError {}
 /// Maps `data/<namespace>/<directory>/<path><extension>` to `namespace:path`,
 /// preserving subdirectories. Any namespace may add entries for a listener.
 /// The same converter can be used for client assets.
+#[horizon_mod_api_macros::wasm(via = (String, String))]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct FileToIdConverter {
     directory: String,
     prefix: String,
     extension: String,
+}
+/// The converter as its directory and extension, the form it crosses a wasm mod's boundary in.
+impl From<&FileToIdConverter> for (String, String) {
+    fn from(converter: &FileToIdConverter) -> Self {
+        (converter.directory.clone(), converter.extension.clone())
+    }
+}
+/// A converter from its directory and extension, checked as [`FileToIdConverter::new`] checks
+/// them.
+impl TryFrom<(String, String)> for FileToIdConverter {
+    type Error = FileToIdConverterError;
+    fn try_from((directory, extension): (String, String)) -> Result<Self, Self::Error> {
+        Self::new(&directory, &extension)
+    }
 }
 impl FileToIdConverter {
     /// A relative directory without trailing `/`, and a suffix such as `.json`.

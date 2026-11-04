@@ -12,7 +12,7 @@ static HEARD: Mutex<Vec<String>> = Mutex::new(Vec::new());
 struct Gardener;
 #[mod_api::__subscriptions]
 impl Hooks for Gardener {
-    fn register(&self, _: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {}
+    fn register(&self, _: &mut dyn Registrar, _: &mod_api::RegistrationContext) {}
     fn crop_grow_pre(&self, _: &mut dyn LevelRandomHost, event: &mut CropGrowPreEvent<'_>) {
         let BlockPos { x, y, z } = event.pos;
         HEARD

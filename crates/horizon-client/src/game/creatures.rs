@@ -946,7 +946,8 @@ impl Game<'_> {
                 None
             },
             mob_hooks: (self.native_authoritative()
-                && mod_api::__private::listened(mod_api::HookId::EndermanAnger))
+                && (mod_api::__private::listened(mod_api::HookId::EndermanAnger)
+                    || mod_api::__private::listened(mod_api::HookId::EntityMobGriefing)))
             .then_some(self as &dyn horizon_client::mobs::MobHooks),
             asks_animal_tame: self.remote.is_none()
                 && mod_api::__private::listened(mod_api::HookId::AnimalTame),
@@ -1420,7 +1421,7 @@ impl Game<'_> {
             self.set_bed_occupied(bed, false);
         }
         // The killing blow for the drop hooks, before the player's hit is forgotten.
-        let source = (!mod_api::mods().is_empty()).then(|| self.mob_damage_source(m));
+        let source = (!mod_api::__private::mods().is_empty()).then(|| self.mob_damage_source(m));
         let killer = self
             .last_hurt_by_player
             .remove(&m.id)
@@ -2477,9 +2478,9 @@ impl Game<'_> {
                     // The creeper is already gone from the list, so the event
                     // carries its kind.
                     let result = if matches!(species, Species::Creeper | Species::Wither) {
-                        self.with_hive_emptying_blast(|g| g.explode(at, radius))
+                        self.with_hive_emptying_blast(|g| g.explode(source_mob, at, radius))
                     } else {
-                        self.explode(at, radius)
+                        self.explode(source_mob, at, radius)
                     };
                     self.combat.explosion_source = None;
                     self.combat.explosion_source_named = false;
@@ -3021,7 +3022,7 @@ impl Game<'_> {
                             &mut self.world.random,
                             Some((&mut self.rand_sequences, self.level.seed)),
                         );
-                        self.native_block_drops(pos, old, None, None, None, &mut drops);
+                        self.native_block_loot(pos, old, None, None, None, &mut drops);
                         for d in drops {
                             self.pop_resource(pos, d);
                         }
@@ -4733,6 +4734,9 @@ impl Game<'_> {
             raining: rain,
             mob_griefing: self.ui.rules.bool("mob_griefing"),
             tnt_explodes: self.ui.rules.bool("tnt_explodes"),
+            mob_hooks: self
+                .grief_hooked()
+                .then_some(self as &dyn horizon_client::mobs::MobHooks),
         }
     }
     /// The rest of the tick of an arrow that hit an entity
@@ -5437,12 +5441,16 @@ impl Game<'_> {
                     }
                 },
                 Hit::Block { pos, face, .. } => {
-                    // SmallFireball.onHitBlock: a mob's only with mobGriefing;
+                    // SmallFireball.onHitBlock: a mob's only with mobGriefing
+                    // (NeoForge: `canEntityGrief` for the owner);
                     // BaseFireBlock.getState placed with updates (the fire
                     // ticks, ages and goes out where it can't stay).
                     let fire = [pos[0] + face[0], pos[1] + face[1], pos[2] + face[2]];
-                    let mob = matches!(p.owner, Some(Who::Mob(_)));
-                    if (!mob || self.ui.rules.bool("mob_griefing"))
+                    let may = match p.owner {
+                        Some(Who::Mob(owner)) => self.can_entity_grief(Some(owner)),
+                        _ => true,
+                    };
+                    if may
                         && self
                             .res
                             .facts()
@@ -5493,7 +5501,7 @@ impl Game<'_> {
                 // The blast's source names the owner, so a dragon it kills
                 // remembers the player who shot it.
                 self.set_blast_by_player(p.owner == Some(Who::Player));
-                let result = self.explode(atp, *power as f32);
+                let result = self.explode(Some(p.id), atp, *power as f32);
                 self.set_blast_by_player(false);
                 self.combat.explosion_owner = None;
                 self.combat.explosion_in_water = false;
@@ -7957,6 +7965,9 @@ fn mob_effect_instance(
 
 impl horizon_client::mobs::MobHooks for Game<'_> {
     fn enderman_anger_suppressed(&self, enderman: u32, player: &PlayerView) -> bool {
+        if !mod_api::__private::listened(mod_api::HookId::EndermanAnger) {
+            return false;
+        }
         let Some(epoch) = self.native_lifecycle.epoch() else {
             return false;
         };
@@ -7971,6 +7982,95 @@ impl horizon_client::mobs::MobHooks for Game<'_> {
             &mut cancel,
         );
         cancel
+    }
+    fn can_grief(&self, mob: u32, rule: bool) -> bool {
+        self.entity_grief(mob, rule)
+    }
+}
+
+impl Game<'_> {
+    /// `EventHooks.canEntityGrief(level, entity)`: the `mob_griefing` rule,
+    /// which a mod may change for `entity` (`EntityMobGriefingEvent`). No
+    /// entity: the rule alone, as NeoForge.
+    pub(super) fn can_entity_grief(&self, entity: Option<u32>) -> bool {
+        let rule = self.ui.rules.bool("mob_griefing");
+        entity.map_or(rule, |entity| self.entity_grief(entity, rule))
+    }
+    /// Whether a mod may answer `can_entity_grief` differently from the rule:
+    /// the sites that skip their whole work while griefing is off skip it only
+    /// when no mod listens.
+    pub(super) fn grief_hooked(&self) -> bool {
+        self.native_authoritative()
+            && mod_api::__private::listened(mod_api::HookId::EntityMobGriefing)
+    }
+    /// [`Self::can_entity_grief`] for `entity`, with the rule already read.
+    pub(super) fn entity_grief(&self, entity: u32, rule: bool) -> bool {
+        if !self.grief_hooked() {
+            return rule;
+        }
+        let Some(epoch) = self.native_lifecycle.epoch() else {
+            return rule;
+        };
+        let mut can_grief = rule;
+        self.native_entity_mob_griefing(mod_api::EntityRef::new(epoch, entity), &mut can_grief);
+        can_grief
+    }
+}
+
+#[cfg(test)]
+mod mob_griefing_tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use std::sync::{Arc, Mutex};
+
+    /// Denies griefing to entity `self.0`, and logs who was asked.
+    struct Deny(u32, Arc<Mutex<Vec<(u32, bool)>>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Deny {
+        fn entity_mob_griefing(
+            &self,
+            _: &dyn mod_api::Host,
+            event: &mut mod_api::EntityMobGriefingEvent,
+        ) {
+            self.1
+                .lock()
+                .unwrap()
+                .push((event.entity.id(), event.can_grief));
+            if event.entity.id() == self.0 {
+                event.can_grief = false;
+            }
+        }
+    }
+
+    /// `EntityMobGriefingEvent`: the mod's answer for one entity reaches the
+    /// game's checks and the mob AI's; another entity keeps the rule, and a
+    /// check with no entity reads the rule without asking.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_mod_denies_one_entity_griefing() {
+        let heard = Arc::default();
+        let (denied, other) = (900, 901);
+        let mods = vec![mod_api::ModEntry::new(
+            "deny",
+            Box::new(Deny(denied, Arc::clone(&heard))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                assert!(game.ui.rules.bool("mob_griefing"));
+                assert!(!game.can_entity_grief(Some(denied)));
+                assert!(game.can_entity_grief(Some(other)));
+                assert!(game.can_entity_grief(None));
+                let world = game.mob_world_base(&[]);
+                assert!(!world.can_grief(denied));
+                assert!(world.can_grief(other));
+                let asked = heard.lock().unwrap().clone();
+                assert_eq!(
+                    asked,
+                    [(denied, true), (other, true), (denied, true), (other, true)]
+                );
+            });
+        });
     }
 }
 

@@ -16,13 +16,19 @@ impl Game<'_> {
     pub(super) fn create_wither_rose(&mut self, m: &horizon_client::mobs::Mob) {
         // getKillCredit: the player who last hurt it, else the last mob (kept
         // for 100 ticks).
-        let by_wither = m.ai.last_hurt_by_player <= 0
-            && m.age as i32 - m.ai.last_hurt_by_time <= 100
-            && matches!(m.ai.last_hurt_by, Some(Who::Mob(id))
-                if self.mobs.iter().any(|o| o.id == id && o.alive() && o.species() == Species::Wither));
-        if !by_wither {
-            return;
-        }
+        let wither = match m.ai.last_hurt_by {
+            Some(Who::Mob(id))
+                if m.ai.last_hurt_by_player <= 0
+                    && m.age as i32 - m.ai.last_hurt_by_time <= 100
+                    && self
+                        .mobs
+                        .iter()
+                        .any(|o| o.id == id && o.alive() && o.species() == Species::Wither) =>
+            {
+                id
+            }
+            _ => return,
+        };
         let pos = [
             m.position.x.floor() as i32,
             m.position.y.floor() as i32,
@@ -30,7 +36,8 @@ impl Game<'_> {
         ];
         let registry = self.pack.assets.registry;
         let rose = registry.default_state("minecraft:wither_rose");
-        if self.ui.rules.bool("mob_griefing")
+        // NeoForge: `canEntityGrief` for the wither.
+        if self.can_entity_grief(Some(wither))
             && let Some(rose) = rose
             && self
                 .res
@@ -237,7 +244,7 @@ impl Game<'_> {
         ) {
             self.combat.blast_resistance_cap = Some(0.8);
         }
-        let result = self.with_hive_emptying_blast(|g| g.explode(at, 1.0));
+        let result = self.with_hive_emptying_blast(|g| g.explode(Some(p.id), at, 1.0));
         self.combat.blast_resistance_cap = None;
         self.set_blast_by_player(false);
         self.combat.explosion_owner = None;

@@ -98,7 +98,7 @@ impl Goal for RaidGarden {
             self.block.next_start -= 1;
             return false;
         }
-        if !cx.w.mob_griefing {
+        if !cx.w.can_grief(m.id) {
             return false;
         }
         self.can_raid = false;

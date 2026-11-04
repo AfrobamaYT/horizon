@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Run the #[ignore]d library tests that need the prepared vanilla data, against a list of known failures.
+"""Run every library test, ignored or not, with the prepared vanilla data, against a list of known failures.
 
 Usage: ignored_tests.py PACKAGE...  (HORIZON_TEST_RESOURCES points at the prepared 26.3 data)
 
-Each package's library tests run with `--ignored`. The job fails when a test fails that
+Each package's library tests run with `--include-ignored`: the #[ignore]d ones that need the data, and the
+ones that return early without it, which `verify` (no data) passes without checking anything. The packages
+in INTEGRATION_TESTS also run their `tests/` integration tests. The job fails when a test fails that
 tools/ci/ignored-tests-known-failures.txt doesn't list, when a listed test passes (take it off the
 list: the list only shrinks), and when a listed test no longer exists. A test marked `flaky` there
 may pass or fail; one marked `harness` is a parity harness's step, run by its harness with the
@@ -24,6 +26,8 @@ KNOWN = Path(__file__).with_name("ignored-tests-known-failures.txt")
 RESULT = re.compile(r"^test (\S+) \.\.\. (ok|FAILED)$")
 SUMMARY = re.compile(r"^test result: ")
 PANIC = re.compile(r"^thread '([^']+)'.* panicked at (\S+):$")
+# Packages whose integration tests (`tests/*.rs`) run too, beside their library tests.
+INTEGRATION_TESTS = {"horizon-client"}
 ICD_DIRS = ("/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d")
 
 
@@ -51,7 +55,10 @@ def run(package, skip):
     """Each test's result in `package`'s ignored library tests but `skip`, or None if they didn't build."""
     skips = [arg for test in skip for arg in ("--skip", test)]
     process = subprocess.run(
-        ["cargo", "test", "-p", package, "--lib", "--", "--ignored", "--exact", "--test-threads=4", *skips],
+        [
+            "cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []),
+            "--", "--include-ignored", "--exact", "--test-threads=4", *skips,
+        ],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
     )
     results = {}

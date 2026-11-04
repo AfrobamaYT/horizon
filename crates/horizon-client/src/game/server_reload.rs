@@ -10,7 +10,7 @@ use horizon_client::datapack::DataStore;
 use mod_api::{
     __private::reload::{ReloadStageError, apply_listeners, prepare_listeners},
     FileToIdConverter, Identifier, ServerReloadContext, ServerReloadListener,
-    ServerReloadListeners, ServerReloadResources, VanillaServerListeners,
+    ServerReloadResources, VanillaServerListeners,
 };
 
 pub(super) type PreparedReload = PreparedStep<Box<DataStore>>;
@@ -21,7 +21,7 @@ use mod_api::__private::reload::PreparedStep;
 /// retained listeners' store.
 pub(super) struct PreparedServerReload {
     pub(super) steps: Vec<PreparedReload>,
-    pub(super) resources: ServerReloadResources,
+    pub(super) resources: mod_api::RetainedListeners,
 }
 
 /// Loads the vanilla function library from `stack`, logging per-file failures.
@@ -59,12 +59,12 @@ impl Game<'_> {
         if !mod_api::__private::listened(mod_api::HookId::AddServerReloadListeners) {
             return Ok(PreparedServerReload {
                 steps: vec![PreparedStep::Vanilla(Box::new(functions_store(stack)))],
-                resources: ServerReloadResources::default(),
+                resources: mod_api::RetainedListeners::default(),
             });
         }
-        let mut listeners = ServerReloadListeners::new();
+        let mut listeners = <mod_api::ServerListenerRegistry as mod_api::__private::game::ServerReloadListenersOrder>::new();
         self.native_add_server_reload_listeners(&mut listeners);
-        let mut resources = ServerReloadResources::default();
+        let mut resources = mod_api::RetainedListeners::default();
         let ordered = listeners.finish().map_err(ReloadStageError::Order)?;
         resources.install(ordered.retained);
         let steps = prepare_listeners(
@@ -91,7 +91,7 @@ impl Game<'_> {
         self.reload_resources = prepared.resources;
     }
     /// The retained server reload listeners of the last successful reload.
-    pub(super) fn native_reload_resources(&self) -> &ServerReloadResources {
+    pub(super) fn native_reload_resources(&self) -> &dyn ServerReloadResources {
         &self.reload_resources
     }
 }

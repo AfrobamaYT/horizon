@@ -588,7 +588,7 @@ mod tests {
     }
     #[test]
     fn attachments_follow_block_entity_lifetime() {
-        use horizon_world::attachments::AttachmentType;
+        use horizon_world::attachments::{AttachmentType, Holder};
         let ty = AttachmentType {
             namespace: "test",
             name: "value",
@@ -601,12 +601,19 @@ mod tests {
         let mut entities = level();
         assert!(entities.attachments_mut(p).is_none());
         entities.insert(p, hopper());
-        entities.attachments_mut(p).unwrap().set(&ty, 4).unwrap();
+        ty.set(entities.attachments_mut(p).unwrap(), Holder::Level, 4)
+            .unwrap();
         let held = entities.take(&p).unwrap();
         entities.put(p, held);
-        assert_eq!(entities.attachments_mut(p).unwrap().get(&ty), Ok(4));
+        assert_eq!(
+            ty.get(entities.attachments_mut(p).unwrap(), Holder::Level),
+            Ok(4)
+        );
         entities.insert(p, hopper());
-        assert_eq!(entities.attachments_mut(p).unwrap().get(&ty), Ok(4));
+        assert_eq!(
+            ty.get(entities.attachments_mut(p).unwrap(), Holder::Level),
+            Ok(4)
+        );
         let machine = |id: &str| {
             BlockEntity::Mod(Box::new(crate::chunk::block_entity::ModBlockEntity::new(
                 id.into(),
@@ -614,20 +621,38 @@ mod tests {
             )))
         };
         entities.insert(p, machine("test:a"));
-        assert_eq!(entities.attachments_mut(p).unwrap().get(&ty), Ok(0));
-        entities.attachments_mut(p).unwrap().set(&ty, 4).unwrap();
+        assert_eq!(
+            ty.get(entities.attachments_mut(p).unwrap(), Holder::Level),
+            Ok(0)
+        );
+        ty.set(entities.attachments_mut(p).unwrap(), Holder::Level, 4)
+            .unwrap();
         entities.insert(p, machine("test:a"));
-        assert_eq!(entities.attachments_mut(p).unwrap().get(&ty), Ok(4));
+        assert_eq!(
+            ty.get(entities.attachments_mut(p).unwrap(), Holder::Level),
+            Ok(4)
+        );
         entities.insert(p, machine("test:b"));
-        assert_eq!(entities.attachments_mut(p).unwrap().get(&ty), Ok(0));
-        entities.attachments_mut(p).unwrap().set(&ty, 4).unwrap();
+        assert_eq!(
+            ty.get(entities.attachments_mut(p).unwrap(), Holder::Level),
+            Ok(0)
+        );
+        ty.set(entities.attachments_mut(p).unwrap(), Holder::Level, 4)
+            .unwrap();
         entities.remove(&p);
         entities.insert(p, hopper());
-        assert_eq!(entities.attachments_mut(p).unwrap().get(&ty), Ok(0));
-        entities.attachments_mut(p).unwrap().set(&ty, 5).unwrap();
+        assert_eq!(
+            ty.get(entities.attachments_mut(p).unwrap(), Holder::Level),
+            Ok(0)
+        );
+        ty.set(entities.attachments_mut(p).unwrap(), Holder::Level, 5)
+            .unwrap();
         entities.retain(|_, _| false);
         entities.insert(p, hopper());
-        assert_eq!(entities.attachments_mut(p).unwrap().get(&ty), Ok(0));
+        assert_eq!(
+            ty.get(entities.attachments_mut(p).unwrap(), Holder::Level),
+            Ok(0)
+        );
     }
 
     #[test]

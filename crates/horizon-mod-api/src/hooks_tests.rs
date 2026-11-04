@@ -76,7 +76,7 @@ fn eager_subscribers_are_shared_across_dispatch_threads() {
     struct Listener;
     #[mod_api::__subscriptions]
     impl Hooks for Listener {
-        fn loot_table_load(&self, _: &DataLoadContext<'_>, _: &mut LootTableLoadEvent<'_>) {}
+        fn loot_table_load(&self, _: &dyn DataLoadContext, _: &mut LootTableLoadEvent<'_>) {}
     }
     let installed = install(
         vec![
@@ -106,7 +106,7 @@ fn eager_subscribers_are_shared_across_dispatch_threads() {
         )),
         [],
     );
-    let context = <DataLoadContext<'_> as crate::__private::game::DataLoadContextNew>::new(&load);
+    let context = crate::OwningLoad::new(&load);
     let context = &context;
     std::thread::scope(|scope| {
         for _ in 0..2 {

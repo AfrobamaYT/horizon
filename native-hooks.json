@@ -270,6 +270,10 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_set_block_property_with", "side": "server"
     },
     {
+      "name": "is_loaded",
+      "target": "horizon_client::game::native_config_files::Game<'_>::native_is_loaded", "side": "both"
+    },
+    {
       "name": "config_files",
       "target": "horizon_client::game::native_config_files::Game<'_>::native_config_files", "side": "both"
     },
@@ -2295,17 +2299,6 @@
       }
     },
     {
-      "name": "block_exp",
-      "doc": "A broken block is about to drop `experience` points at `pos`. The\nvanilla block drop rule has been checked; change the amount before its\norbs are awarded. Server-side.",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_exp",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "block_fade",
       "doc": "A block at `pos` is about to fade from `from` to `to` because of\nmelting or coral death. Set `cancel` to keep it. Server-side.",
       "version": 1,
@@ -3305,7 +3298,7 @@
     },
     {
       "name": "player_load_from_file",
-      "doc": "A player was loaded from the world's save (NeoForge's\n`PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`): their `.dat`\nhas been read and applied, and they are not placed in a level yet.\n`directory` is the world's player directory (`players/data`): a mod\nreads its own file there, named `<uuid>.<suffix>` as\n`getPlayerFile(suffix)` names it. Heard once for each join, for the\nowner of an integrated server as for anyone else, on a server, with no\nplayer's state swapped in. Not cancellable.",
+      "doc": "A player was loaded from the world's save (NeoForge's\n`PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`): their `.dat`\nhas been read and applied, and they are not placed in a level yet.\n`directory` is the world's player directory (`players/data`): a mod\nreads its own file there, named `<uuid>.<suffix>` as\n`getPlayerFile(suffix)` names it. Heard once for each join, for the\nowner of an integrated server as for anyone else, on a server, with no\nplayer's state swapped in. Not cancellable.\n\nNot on wasm: it gives a path in the game's file system, which a wasm mod has none of; a wasm mod keeps a player's data in attachments.",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_load_from_file",
       "neoforge": "PlayerEvent.LoadFromFile (not cancellable)",
@@ -3330,7 +3323,7 @@
     },
     {
       "name": "player_save_to_file",
-      "doc": "A player was saved to the world's store (NeoForge's\n`PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the\nworld closes, when a dedicated or integrated server saves its guests,\nand for an integrated server's owner when the world saves them.\nOnce for each save. `directory`\nis the world's player directory (`players/data`): write your own file\nthere, named `<uuid>.<suffix>`, never the player's `.dat`. The player\nmay be leaving, so no player's state is swapped in. Not cancellable.\nAutosave snapshots are written asynchronously: this notification runs\non a later server tick after a successful write, possibly after WorldSaved.\nLive state may have advanced beyond the saved snapshot; a process exit\nbefore completions are drained can prevent notification delivery.",
+      "doc": "A player was saved to the world's store (NeoForge's\n`PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the\nworld closes, when a dedicated or integrated server saves its guests,\nand for an integrated server's owner when the world saves them.\nOnce for each save. `directory`\nis the world's player directory (`players/data`): write your own file\nthere, named `<uuid>.<suffix>`, never the player's `.dat`. The player\nmay be leaving, so no player's state is swapped in. Not cancellable.\nAutosave snapshots are written asynchronously: this notification runs\non a later server tick after a successful write, possibly after WorldSaved.\nLive state may have advanced beyond the saved snapshot; a process exit\nbefore completions are drained can prevent notification delivery.\n\nNot on wasm: it gives a path in the game's file system, which a wasm mod has none of; a wasm mod keeps a player's data in attachments.",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_save_to_file",
       "neoforge": "PlayerEvent.SaveToFile (not cancellable)",

@@ -36,11 +36,12 @@ impl Game<'_> {
             return;
         };
         let mut stack = inventory[slot].clone();
-        let crop = self.bonemeal(pos, false, &mut stack);
-        let grown = crop
-            .unwrap_or_else(|| self.with_level(|b, level, ticks| b.grow_crop(level, ticks, pos)));
+        let ask = self.bonemeal(pos, false, &mut stack);
+        let grown = ask.crop.unwrap_or_else(|| {
+            self.with_level(|b, level, ticks| b.grow_crop(level, ticks, pos, ask.check))
+        });
         // A canceled `BonemealEvent` that succeeded uses none of the meal.
-        if grown && crop != Some(true) {
+        if grown && ask.crop != Some(true) {
             stack.count = stack.count.saturating_sub(1);
         }
         // The event's host may have moved the villager in `mobs`.
@@ -352,7 +353,8 @@ impl Game<'_> {
     /// `Mob.aiStep` item pickup for villagers (`InventoryCarrier`): food,
     /// seeds and what their profession wants, from within a block.
     pub(super) fn villager_pickups(&mut self) {
-        if self.dropped.is_empty() || !self.ui.rules.bool("mob_griefing") {
+        let griefing = self.ui.rules.bool("mob_griefing");
+        if self.dropped.is_empty() || (!griefing && !self.grief_hooked()) {
             return;
         }
         let picks_up = self
@@ -363,7 +365,8 @@ impl Game<'_> {
             .cloned();
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
-            if m.species() != Species::Villager || !m.alive() {
+            if m.species() != Species::Villager || !m.alive() || !self.entity_grief(m.id, griefing)
+            {
                 continue;
             }
             let (pos, half) = (m.position, f64::from(m.width()) / 2.0 + 1.0);

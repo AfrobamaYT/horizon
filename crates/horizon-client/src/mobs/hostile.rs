@@ -141,7 +141,7 @@ impl Goal for SilverfishWakeUpFriends {
                     {
                         continue;
                     }
-                    if cx.w.mob_griefing {
+                    if cx.w.can_grief(m.id) {
                         cx.events.push(MobEvent::BreakBlock {
                             pos,
                             drop: true,
@@ -189,7 +189,7 @@ impl Goal for SilverfishMergeWithStone {
         if m.ai.target.is_some() || !m.ai.nav.is_done() {
             return false;
         }
-        if cx.w.mob_griefing
+        if cx.w.can_grief(m.id)
             && m.random
                 .next_int_bound(super::goals::reduced(10))
                 .unwrap_or(1)

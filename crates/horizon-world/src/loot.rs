@@ -16,7 +16,6 @@ use std::{
     collections::HashMap,
     fs, io,
     path::Path,
-    rc::Rc,
     sync::{Arc, Mutex, Weak},
 };
 
@@ -126,7 +125,7 @@ pub struct NativeLootContext<'a> {
     /// Where the roll happens: the origin, the block entity and the level,
     /// when the game rolled the table at a place (a broken block's drops,
     /// a mob's death loot); None for the other rolls. Either engine fills it.
-    pub place: Option<Rc<NativeLootPlace>>,
+    pub place: Option<Arc<NativeLootPlace>>,
 }
 
 /// Where a loot roll happens, as a mod's own loot kinds see it:
@@ -163,26 +162,26 @@ pub struct NativeLootLevel {
 }
 
 thread_local! {
-    static NATIVE_LOOT_PLACE: RefCell<Option<Rc<NativeLootPlace>>> = const { RefCell::new(None) };
+    static NATIVE_LOOT_PLACE: RefCell<Option<Arc<NativeLootPlace>>> = const { RefCell::new(None) };
 }
 
 /// Runs `roll` with `place` as where its loot rolls happen: every
 /// [`NativeLootContext`] made inside it, by either engine, carries it. The
 /// place before is back when `roll` returns, so these nest.
 pub fn with_native_loot_place<T>(place: NativeLootPlace, roll: impl FnOnce() -> T) -> T {
-    struct Restore(Option<Rc<NativeLootPlace>>);
+    struct Restore(Option<Arc<NativeLootPlace>>);
     impl Drop for Restore {
         fn drop(&mut self) {
             let before = self.0.take();
             NATIVE_LOOT_PLACE.with(|p| *p.borrow_mut() = before);
         }
     }
-    let _restore = Restore(NATIVE_LOOT_PLACE.with(|p| p.replace(Some(Rc::new(place)))));
+    let _restore = Restore(NATIVE_LOOT_PLACE.with(|p| p.replace(Some(Arc::new(place)))));
     roll()
 }
 
 /// The place [`with_native_loot_place`] set for the rolls now running, if any.
-pub fn current_native_loot_place() -> Option<Rc<NativeLootPlace>> {
+pub fn current_native_loot_place() -> Option<Arc<NativeLootPlace>> {
     NATIVE_LOOT_PLACE.with(|p| p.borrow().clone())
 }
 

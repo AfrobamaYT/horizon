@@ -27,7 +27,7 @@ impl Game<'_> {
         id: u32,
         action: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        if mod_api::mods().is_empty() {
+        if mod_api::__private::mods().is_empty() {
             return action(self);
         }
         self.held_out.push(id);
@@ -1627,13 +1627,19 @@ pub(super) mod tests {
             let holder = horizon_world::attachments::Holder::Player(2345);
             game.options.dedicated = Some(Vec::new());
             let real_holder = horizon_world::attachments::Holder::Player(1);
-            game.attachment_map_quiet(real_holder)
-                .unwrap()
-                .set(&attachment, 17)
+            attachment
+                .set(
+                    game.attachment_map_quiet(real_holder).unwrap(),
+                    horizon_world::attachments::Holder::Level,
+                    17,
+                )
                 .unwrap();
-            game.attachment_map_quiet(holder)
-                .unwrap()
-                .set(&attachment, 3)
+            attachment
+                .set(
+                    game.attachment_map_quiet(holder).unwrap(),
+                    horizon_world::attachments::Holder::Level,
+                    3,
+                )
                 .unwrap();
             assert!(
                 game.enter_command_level(super::super::Dim::Nether)
@@ -1642,14 +1648,19 @@ pub(super) mod tests {
             let nether = game.native_level("minecraft:the_nether").unwrap();
             assert!(game.native_fake_player(level, 3456, "other").is_none());
             let nether_actor = game.native_fake_player(nether, 2345, "parked").unwrap();
-            game.attachment_map_quiet(holder)
-                .unwrap()
-                .set(&attachment, 8)
+            attachment
+                .set(
+                    game.attachment_map_quiet(holder).unwrap(),
+                    horizon_world::attachments::Holder::Level,
+                    8,
+                )
                 .unwrap();
             assert_eq!(
-                game.attachment_map_quiet(holder)
-                    .unwrap()
-                    .get(&attachment)
+                attachment
+                    .get(
+                        game.attachment_map_quiet(holder).unwrap(),
+                        horizon_world::attachments::Holder::Level
+                    )
                     .unwrap(),
                 8
             );
@@ -1661,9 +1672,11 @@ pub(super) mod tests {
             });
             assert!(aborted.is_err());
             assert_eq!(
-                game.attachment_map_quiet(holder)
-                    .unwrap()
-                    .get(&attachment)
+                attachment
+                    .get(
+                        game.attachment_map_quiet(holder).unwrap(),
+                        horizon_world::attachments::Holder::Level
+                    )
                     .unwrap(),
                 8
             );
@@ -1721,25 +1734,31 @@ pub(super) mod tests {
                     .is_some()
             );
             assert_eq!(
-                game.attachment_map_quiet(holder)
-                    .unwrap()
-                    .get(&attachment)
+                attachment
+                    .get(
+                        game.attachment_map_quiet(holder).unwrap(),
+                        horizon_world::attachments::Holder::Level
+                    )
                     .unwrap(),
                 3
             );
             assert!(game.native_player_remove_fake(overworld_actor));
             assert_eq!(
-                game.attachment_map_quiet(real_holder)
-                    .unwrap()
-                    .get(&attachment)
+                attachment
+                    .get(
+                        game.attachment_map_quiet(real_holder).unwrap(),
+                        horizon_world::attachments::Holder::Level
+                    )
                     .unwrap(),
                 17
             );
             game.enter_command_level(super::super::Dim::Nether).unwrap();
             assert_eq!(
-                game.attachment_map_quiet(holder)
-                    .unwrap()
-                    .get(&attachment)
+                attachment
+                    .get(
+                        game.attachment_map_quiet(holder).unwrap(),
+                        horizon_world::attachments::Holder::Level
+                    )
                     .unwrap(),
                 8
             );

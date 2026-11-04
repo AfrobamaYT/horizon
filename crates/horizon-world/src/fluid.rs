@@ -320,3 +320,17 @@ impl FluidBlockBindings {
         }
     }
 }
+
+/// A fluid state as its parts: kind, amount and falling.
+impl From<&FluidState> for (FluidKind, u8, bool) {
+    fn from(state: &FluidState) -> Self {
+        (state.kind, state.amount, state.falling)
+    }
+}
+
+/// A fluid state from its parts (`FluidState::new`).
+impl From<(FluidKind, u8, bool)> for FluidState {
+    fn from((kind, amount, falling): (FluidKind, u8, bool)) -> Self {
+        Self::new(kind, amount, falling)
+    }
+}

@@ -124,7 +124,7 @@ impl TraitInjection {
         };
         quote! {
             fn horizon_trait_dispatch(#(#params),*) #output {
-                let Some(owner) = mod_api::mods().get(#owner) else {
+                let Some(owner) = mod_api::__private::mods().get(#owner) else {
                     return #absent;
                 };
                 if !mod_api::subscribed_by(#owner, mod_api::hook_ids::#name) {

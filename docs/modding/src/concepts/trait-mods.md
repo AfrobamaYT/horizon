@@ -50,8 +50,17 @@ An absent optional dependency is permitted; an installed optional dependency mus
 
 The launcher adds a path dependency using the mod ID as the Cargo alias and the target's actual Cargo
 package name. Optional dependencies also get a Cargo feature named exactly as their mod ID, enabled
-only when that mod is installed. Guard calls with
-`#[cfg(feature = "extra_mod")]`. Do not define these dependencies or features yourself in Cargo.toml.
+only when that mod is installed. Guard calls with `if_installed!`, which builds the block only with
+that feature and runs it only when the mod is installed, so the same source works when built to
+`mod.wasm`, where the library is linked at load and an absent one's functions trap:
+
+```rust,ignore
+mod_api::if_installed!(host, extra_mod, {
+    extra_mod::register_extra(host);
+});
+```
+
+Do not define these dependencies or features yourself in Cargo.toml.
 Public statics must use appropriate synchronization for shared and reentrant hooks; private state in
 another mod's hook object is not exposed.
 
@@ -185,7 +194,7 @@ impl BlockPart for Gauge {
 
 #[mod_api::horizon_mod]
 impl Hooks for MyMod {
-    fn register(&self, r: &mut Registrar, _: &RegistrationContext<'_>) {
+    fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
         r.block_part("minecraft:stone", Gauge);
     }
 }
@@ -291,6 +300,11 @@ into wherever `to` takes it, each move all or nothing: what `to` won't take stay
 `Overanswered` (below). Hoppers use a mod's handler
 where one is registered, each move in a transaction of its own. A mod's own capability is a
 `CapabilityKey::new("mymod:chemicals")`, answered only by parts.
+
+A `Capability` may be held for the tick: look a neighbour's up once per tick and reuse it for
+every move that tick, as pipes and machines do. Ask again on the next tick, since the block
+entity behind it may be gone by then. For a wasm mod each lookup crosses the sandbox (about
+2.5 µs, see [Building a mod to `mod.wasm`](../how-to/wasm-mods.md)), so holding it matters more there.
 
 An item's own capability is reached where its stack lives, an `ItemPlace`: a player's slot, hand or cursor, a
 block entity's slot, an item entity, a stack inside another item (`ItemPlace::Nested`) or a mod's own place
@@ -598,6 +612,10 @@ keeps a copy for any holder it is asked about (see the sync paragraph below).
 `AttachmentError` distinguishes `MissingHolder`, `TypeMismatch`, `Decode`, `Encode`,
 `InvalidNamespace` (a malformed saved compound), `InvalidCopyPolicy` (death-copy
 without a codec) and `InvalidSyncPolicy` (sync without a codec).
+Every host is an `AttachmentStore` (and `host.attachments()` gives it): the typed methods
+stand on its few erased ones, so they work the same in a native mod and a wasm mod. A
+value keeps its own Rust type, shared: reading one clones it out, and copying a holder's
+data copies no value.
 
 ```rust
 use mod_api::{AttachmentCodec, AttachmentError, AttachmentType, Compound, Holder, Tag};

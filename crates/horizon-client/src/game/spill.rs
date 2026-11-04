@@ -22,6 +22,7 @@ use horizon_world::{
     nbt::{Compound, JavaString, Tag},
     registry::BlockStateId,
 };
+use mod_api::NativeItemDrop;
 use std::collections::HashMap;
 
 /// What a broken block's entity gives its own dropped item (`copy_components`
@@ -211,6 +212,16 @@ pub(super) struct Spawn {
     pub(super) pos: [f64; 3],
     pub(super) motion: Option<[f64; 3]>,
     pub(super) delay: u32,
+}
+
+/// What a broken block spawns (`GameLevel::block_dropped`).
+pub(super) struct BlockDrops {
+    /// The item entities to add, as the mods left them.
+    pub(super) items: Vec<NativeItemDrop>,
+    /// The experience points to award at the block's centre.
+    pub(super) experience: u32,
+    /// A mod canceled the break's drops: `spawnAfterBreak` doesn't run.
+    pub(super) canceled: bool,
 }
 
 #[derive(Default)]
@@ -424,27 +435,80 @@ impl GameLevel<'_> {
                 &mut self.world.random,
             ),
         };
-        for stack in drops {
-            if &*stack.item != "minecraft:air" && stack.count > 0 {
-                self.pop_resource(at, stack);
-            }
+        let dropped = self.block_dropped(pos, state, None, None, drops);
+        for item in dropped.items {
+            self.spill.spawns.push(Spawn {
+                stack: item.stack,
+                pos: item.position,
+                motion: Some(item.velocity),
+                delay: item.pickup_delay,
+            });
         }
         self.pending.clear(at);
-        // BlockBehaviour.spawnAfterBreak with no tool: ores, sculk and spawners
-        // award experience at the block's centre.
-        let name = self.facts.get(state).name.clone();
-        if let Some(mut xp) = removal::break_experience(&mut self.world.random, &name)
-            && self.rules.block_drops
-        {
-            if self.native_authoritative {
-                self.native_block_exp(self.dimension, pos, &name, &mut xp);
-            }
+        if dropped.experience > 0 {
             let centre = [
                 f64::from(pos.x) + 0.5,
                 f64::from(pos.y) + 0.5,
                 f64::from(pos.z) + 0.5,
             ];
-            self.award_orbs(centre, xp);
+            self.award_orbs(centre, dropped.experience);
+        }
+    }
+    /// What `Block.dropResources` does with the loot it rolled for the block
+    /// `state` at `pos`: `Block.popResource` builds an item entity for each
+    /// stack (its position drawn from the level random, its motion from the
+    /// item's own), then `spawnAfterBreak` samples the block's experience,
+    /// in that order. The mods then see the list (`block_drops`, NeoForge's
+    /// `BlockDropsEvent`). Nothing is spawned here: the caller adds the
+    /// entities and orbs, and a canceled break leaves both empty. The random
+    /// draws happen with or without a listener, in vanilla's order.
+    pub(super) fn block_dropped(
+        &mut self,
+        pos: BlockPos,
+        state: BlockStateId,
+        breaker: Option<u128>,
+        tool: Option<&ItemStack>,
+        stacks: Vec<ItemStack>,
+    ) -> BlockDrops {
+        let at = [pos.x, pos.y, pos.z];
+        let mut items: Vec<NativeItemDrop> = stacks
+            .into_iter()
+            .filter(|stack| &*stack.item != "minecraft:air" && stack.count > 0)
+            .map(|mut stack| {
+                self.pending.attach(at, &mut stack);
+                let position = pop_position(&mut self.world.random, at);
+                NativeItemDrop::new(stack, position, new_item_motion(), 10)
+            })
+            .collect();
+        // `tryDropExperience` samples before the silk touch effect zeroes the
+        // amount; a spawner's experience ignores the tool.
+        let name = self.facts.get(state).name.clone();
+        let silk = tool.is_some_and(|tool| tool.enchantment_level("minecraft:silk_touch") > 0);
+        let mut experience = removal::break_experience(&mut self.world.random, &name)
+            .filter(|_| !silk || &*name == "minecraft:spawner")
+            .unwrap_or(0);
+        let mut canceled = false;
+        if self.native_authoritative {
+            self.native_block_drops(
+                self.dimension,
+                pos,
+                state,
+                breaker,
+                tool,
+                &mut items,
+                &mut experience,
+                &mut canceled,
+            );
+            items.retain(|item| &*item.stack.item != "minecraft:air" && item.stack.count > 0);
+        }
+        if canceled || !self.rules.block_drops {
+            items.clear();
+            experience = 0;
+        }
+        BlockDrops {
+            items,
+            experience,
+            canceled,
         }
     }
     /// `ExperienceOrb.award`: orbs of the largest sizes, each drawing the id
@@ -766,6 +830,72 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Listens to `block_drops`: takes any break of dirt, adds 2 points to the rest.
+    struct DropsMod;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for DropsMod {
+        fn block_drops(
+            &self,
+            _: &dyn mod_api::LevelHost,
+            event: &mut mod_api::BlockDropsEvent<'_>,
+        ) -> mod_api::Flow {
+            if event
+                .drops
+                .iter()
+                .any(|d| &*d.stack.item == "minecraft:dirt")
+            {
+                return mod_api::Flow::Cancel;
+            }
+            event.experience += 2;
+            mod_api::Flow::Continue
+        }
+    }
+
+    /// `Block.dropResources` builds its item entities (and samples the experience) before
+    /// `BlockDropsEvent`, so the level random ends where it does without a listener; a mod that
+    /// cancels gets no entities and no experience but the draws still happened; a mod that
+    /// edits the amount changes only the amount.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    fn block_drops_draws_before_the_event_and_cancel_empties_the_break() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_core::random::LegacyRandom;
+        use std::sync::Arc;
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let dirt = registry.default_state("minecraft:dirt").unwrap();
+            let ore = registry.default_state("minecraft:diamond_ore").unwrap();
+            let pos = BlockPos::new(1, 64, 2);
+            let break_of = |game: &mut Game<'_>, state, item| {
+                game.world.random = LegacyRandom::new(7);
+                let dropped = game.with_level(|_, level, _| {
+                    level.block_dropped(pos, state, None, None, vec![ItemStack::new(item, 1)])
+                });
+                (dropped, game.world.random.next_int())
+            };
+            let (plain_ore, ore_after) = break_of(game, ore, "minecraft:diamond");
+            let (plain_dirt, dirt_after) = break_of(game, dirt, "minecraft:dirt");
+            assert_eq!(plain_dirt.items.len(), 1);
+            let mods: mod_api::Mods =
+                vec![mod_api::ModEntry::new("block-drops", Box::new(DropsMod))].into();
+            mod_api::testing::with_mods(mods, || {
+                let (heard, after) = break_of(game, ore, "minecraft:diamond");
+                assert_eq!(after, ore_after);
+                assert_eq!(heard.items.len(), 1);
+                assert_eq!(heard.items[0].position, plain_ore.items[0].position);
+                assert_eq!(heard.experience, plain_ore.experience + 2);
+                assert!(!heard.canceled);
+                let (taken, after) = break_of(game, dirt, "minecraft:dirt");
+                assert_eq!(after, dirt_after);
+                assert!(taken.canceled && taken.items.is_empty() && taken.experience == 0);
+            });
+        });
+    }
 
     /// A mod block entity's part answers its removal as vanilla's `preRemoveSideEffects`
     /// override does: found by the entity's type, not its block, reading its attachments in

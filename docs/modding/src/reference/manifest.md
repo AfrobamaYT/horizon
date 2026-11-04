@@ -21,13 +21,17 @@ my_mod.hmod
 ├── assets/my_mod/
 ├── data/my_mod/
 ├── Cargo.toml              # code mods only
-└── src/lib.rs              # code mods only
+├── src/lib.rs              # code mods only
+└── mod.wasm                # wasm mods only
 ```
 
 - **Content only:** no `Cargo.toml` or `[native]`. Nothing compiles.
 - **Native code:** root `Cargo.toml` and `src/`, with `[native]` in the same manifest. The launcher builds it
   into the game. Its resources load through the same content reader as a content mod's.
-- Inconsistent native/source declarations refuse the package. `mod.wasm` is unsupported.
+- **Wasm code:** `mod.wasm` at the top, declared by `[wasm]`, with the `Cargo.toml` and `src/` it was built from
+  (a converted mod records `built_with` instead and carries no source). The game runs it with no rebuild.
+- Inconsistent code declarations and files refuse the package. `mod.wasm` anywhere else, undeclared, or
+  declared but missing, refuses it; so does any other executable file.
 
 There is no mod-id directory level inside the archive. `horizon-mod.toml` is the only manifest and the only
 source of the mod's id and version; Cargo's package name and version are not mod identity. IDs are plain
@@ -47,11 +51,31 @@ refuse the manifest. Code adds `[native]`:
 | `horizon` | string | the exact Horizon commit, 40 lowercase hex characters |
 | `mixins` | string | the exact horizon-mixins commit, 40 lowercase hex characters |
 | `injection` | array of tables | optional raw injections, written as `[[native.injection]]` |
+| `module` | array of tables | optional support modules, written as `[[native.module]]` |
 
 An injection has a unique, nonempty `id` and a `kind`; it selects exactly one of `hook` or `target`, and
 exactly one of `helper` or `trait_method`. A helper is a selected `.rs` file under `src/`, or `build.rs`.
 See [Injections](../injections.md) for the fields, bindings and trait injections, and
 [Native mods](../how-to/native-mods.md#named-hook-points) for the named hook contracts.
+
+A module has a unique, nonempty `id` (one id space with the injections), a `file` naming the game source
+file that receives it, a `name` that is a Rust module identifier, and a `source` payload file under
+`src/`, holding the module's items without an outer wrapper. An optional `visibility` is exactly
+`"pub"` or `"pub(crate)"`, the default. It is forwarded to horizon-mixins as `[[module]]`; see
+[Support modules](../injections.md#support-modules).
+
+A wasm mod adds `[wasm]` instead, written by `cargo horizon-mod build --wasm`
+([Building to `mod.wasm`](../how-to/wasm-mods.md)):
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `sha512` | string | `mod.wasm`'s SHA-512, 128 lowercase hex characters |
+| `toolchain` | string | not empty, the Rust toolchain it was built with |
+| `linked` | table | optional, dependency id → the SHA-512 of the `mod.wasm` it was linked against |
+| `built_with` | string | optional, not empty: the converter that made it, for a package with no source |
+
+At load `mod.wasm` must start with `\0asm`, be at most 64 MiB and match `sha512`; each failure refuses the
+package with its reason.
 
 Top-level `[dependencies]` declares other code mods by id: a semver requirement string, or
 `{ version = "^1", optional = true }`. These versions refer to `horizon-mod.toml`, not Cargo metadata.

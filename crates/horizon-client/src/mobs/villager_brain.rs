@@ -1769,7 +1769,7 @@ impl B {
                 {
                     return false;
                 }
-                if !cx.w.mob_griefing || !super::villager::is_farmer(m) {
+                if !cx.w.can_grief(m.id) || !super::villager::is_farmer(m) {
                     return false;
                 }
                 *valid = farmland_around(m, cx.w);

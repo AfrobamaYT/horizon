@@ -233,6 +233,62 @@ mod tests {
     }
 
     #[test]
+    fn a_module_stages_with_a_helper_that_calls_into_it() {
+        let (root, _bundle) = fixture(
+            "module",
+            "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\nhelper = 'src/lib.rs'\nbindings = []\n",
+        );
+        // The helper calls into the module; both must reach the tool together.
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn tick_hook() { crate::runtime::bump(&mut 0); }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("src/runtime.rs"),
+            "pub(crate) fn bump(value: &mut i32) { *value += 1; }\n",
+        )
+        .unwrap();
+        let path = root.join(horizon_mods::manifest::MANIFEST);
+        let text = fs::read_to_string(&path).unwrap()
+            + "[[native.module]]\nid = 'runtime'\nfile = 'crates/horizon-client/src/game.rs'\nname = 'runtime'\nsource = 'src/runtime.rs'\n";
+        fs::write(&path, text).unwrap();
+        let bundle = super::super::bundle_in(&root).unwrap().unwrap();
+        let mixin_input = root.with_extension("mixins");
+        let tool_mods =
+            super::super::stage_mixins(std::slice::from_ref(&bundle), &mixin_input).unwrap();
+        assert_eq!(tool_mods.len(), 1);
+        let staged = &tool_mods[0].dir;
+        let manifest = fs::read_to_string(staged.join(MANIFEST)).unwrap();
+        assert!(manifest.contains("[[module]]"));
+        assert!(manifest.contains("name = \"runtime\""));
+        assert!(manifest.contains("source = \"src/runtime.rs\""));
+        // `visibility` stays out of the tool manifest until a package sets it.
+        assert!(!manifest.contains("visibility"));
+        assert_eq!(
+            fs::read_to_string(staged.join("src/runtime.rs")).unwrap(),
+            "pub(crate) fn bump(value: &mut i32) { *value += 1; }\n"
+        );
+        assert!(staged.join("src/lib.rs").is_file());
+    }
+
+    #[test]
+    fn a_module_only_bundle_still_needs_the_tool() {
+        let root = super::super::tests::dir("inject-module-only");
+        super::super::tests::write_bundle(&root, "example", "");
+        let path = root.join(horizon_mods::manifest::MANIFEST);
+        let text = fs::read_to_string(&path).unwrap()
+            + "[[native.module]]\nid = 'runtime'\nfile = 'crates/horizon-client/src/game.rs'\nname = 'runtime'\nsource = 'src/lib.rs'\n";
+        fs::write(&path, text).unwrap();
+        let bundle = super::super::bundle_in(&root).unwrap().unwrap();
+        let mixin_input = root.with_extension("mixins");
+        let tool_mods =
+            super::super::stage_mixins(std::slice::from_ref(&bundle), &mixin_input).unwrap();
+        assert_eq!(tool_mods.len(), 1);
+        assert!(tool_mods[0].dir.join(MANIFEST).is_file());
+    }
+
+    #[test]
     fn owner_dispatch_and_cancel_use_full_order_after_tool_filtering() {
         let (root, bundle) = fixture(
             "cancel",
@@ -321,6 +377,7 @@ mod tests {
                     static MODS: OnceLock<Vec<ModEntry>> = OnceLock::new();
                     MODS.get_or_init(|| vec![ModEntry {{ id: "plain", hooks: Box::new(Other) }}, ModEntry {{ id: "example", hooks: Box::new(Owner) }}, ModEntry {{ id: "other", hooks: Box::new(Other) }}])
                 }}
+                pub mod __private {{ pub use super::mods; }}
             }}
             {helper}
             fn main() {{
@@ -386,6 +443,7 @@ mod tests {
                     }}
                     MODS.get_or_init(|| vec![ModEntry {{ id: "owner", hooks: Box::new(Owner) }}, ModEntry {{ id: "other", hooks: Box::new(Other) }}])
                 }}
+                pub mod __private {{ pub use super::mods; }}
             }}
             {helper}
             fn main() {{

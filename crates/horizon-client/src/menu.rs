@@ -3711,7 +3711,7 @@ pub(crate) mod tests {
     impl mod_api::Hooks for AppleSets {
         fn recipe_property_sets(
             &self,
-            _: &mod_api::DataLoadContext<'_>,
+            _: &dyn mod_api::DataLoadContext,
             event: &mut mod_api::RecipePropertySetsEvent<'_>,
         ) {
             for set in ["furnace_input", "brewing_reagent", "smithing_addition"] {

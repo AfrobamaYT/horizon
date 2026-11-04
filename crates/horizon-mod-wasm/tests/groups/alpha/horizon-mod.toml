@@ -1,0 +1,17 @@
+id = "alpha"
+name = "alpha"
+version = "1.0.0"
+description = "A dependent of counter_lib."
+api = "0.2"
+side = "both"
+capabilities = ["registries"]
+
+[dependencies]
+counter_lib = "^1"
+
+[wasm]
+sha512 = "7e4292a990102d1c403bec74aadd91a62c112671184b320c7612cf66c0e6d9b397a2eaa0adc71667a3b0b94fc9119581f87be91bb830869c171ffa833120b835"
+toolchain = "1.99.1 58cf8f9c35b355199727627d07ae34a4e2846d67"
+
+[wasm.linked]
+counter_lib = "cb13422661917dd2d91767ec8c95198d028b37db382613ca3b22886eb044649edd919a5ca0b9649472728ba77a95f31c2bbc69fbd4132e7e5758160b836583fa"

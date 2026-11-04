@@ -1134,7 +1134,7 @@ pub struct Recipes {
     pub cooking: Vec<Cooking>,
     /// Every effective recipe's file, by recipe type (`minecraft:smelting`,
     /// `mymod:crusher`), in file order: data packs merged, load conditions held.
-    pub by_type: HashMap<String, Vec<mod_api::Recipe>>,
+    pub by_type: HashMap<String, std::sync::Arc<[mod_api::Recipe]>>,
     /// `category` and `group` of each crafting recipe, by file name.
     pub meta: HashMap<String, (String, String)>,
     facts: HashMap<Arc<str>, Facts>,
@@ -1720,7 +1720,10 @@ impl Recipes {
         Ok(Self {
             crafting,
             cooking,
-            by_type,
+            by_type: by_type
+                .into_iter()
+                .map(|(kind, files)| (kind, files.into()))
+                .collect(),
             meta,
             facts,
             curses,
