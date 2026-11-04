@@ -6563,6 +6563,18 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_use_item_on(self, state, click, answer);
     }
+    /// `IItemExtension.onItemUseFirst`: the held item's first say on a click
+    /// on a block, after `use_item_on_block` (`ItemBeforeBlock`) passed and
+    /// before the block's `useItemOn`. An answer ends the click; `Pass` goes
+    /// on to the block.
+    pub(super) fn native_on_item_use_first(
+        &mut self,
+        stack: &ItemStack,
+        click: &NativeBlockClick<'_>,
+        answer: &mut Option<NativeInteractionResult>,
+    ) {
+        mod_api::dispatch_on_item_use_first(self, stack, click, answer);
+    }
     /// `BlockBehaviour.useWithoutItem`: the captured state's empty-hand method,
     /// after useItemOn asks for it, on the server and main hand only.
     pub(super) fn native_use_without_item(
@@ -10188,6 +10200,28 @@ impl Game<'_> {
             });
         }
         Some(result)
+    }
+    /// `ItemStack.onItemUseFirst` for a click on a block: the broadcast
+    /// event's `ItemBeforeBlock` phase, then the held item's Part. The first
+    /// to answer ends the click; a `Pass` goes on to the block.
+    pub(super) fn item_use_first(
+        &mut self,
+        hit: &super::Hit,
+        hand: Hand,
+        stack: &ItemStack,
+    ) -> Option<NativeInteractionResult> {
+        if let Some(answer) =
+            self.use_item_on_block(hit, hand, Some(stack), UsePhase::ItemBeforeBlock)
+        {
+            return Some(answer);
+        }
+        if !mod_api::__private::has_part_hook(mod_api::HookId::OnItemUseFirst) {
+            return None;
+        }
+        let click = self.block_click(hit, hand, Some(stack));
+        let mut answer = None;
+        self.native_on_item_use_first(stack, &click, &mut answer);
+        answer.filter(|answer| *answer != NativeInteractionResult::Pass)
     }
     /// Air use only: a passing block or entity keeps its target, rather than
     /// becoming a `RightClickItem` interaction.
