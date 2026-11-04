@@ -25,8 +25,8 @@ use horizon_client::mod_api::{
     self, Answered, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor,
     LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
     NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
-    NativeServerPlayer, RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase,
-    TicketController, ToolUse, WorldPhase,
+    NativeServerPlayer, PathComputationType, RecipeBookCategory, ScreenOpening,
+    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
@@ -5982,6 +5982,18 @@ impl Game<'_> {
             time_left,
             used,
         );
+    }
+    /// `BlockBehaviour.isPathfindable`: set `pathfindable` to change whether a path of `kind`
+    /// may go through `state`. It starts with the block's own answer and depends on the state
+    /// and the type alone, so the game asks once per state when the parts resolve (at load and on
+    /// every `/reload`) and path finding and spawning read the answers. Server-side.
+    pub(super) fn native_is_pathfindable(
+        &self,
+        state: BlockStateId,
+        kind: PathComputationType,
+        pathfindable: &mut bool,
+    ) {
+        mod_api::dispatch_is_pathfindable(self, state, kind, pathfindable);
     }
     /// `BlockBehaviour.getCloneItemStack`, asked by
     /// `ServerGamePacketListenerImpl.handlePickItemFromBlock`. `include_data`

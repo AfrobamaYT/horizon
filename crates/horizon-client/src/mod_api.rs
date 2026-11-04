@@ -66,6 +66,7 @@ pub use crate::items::ItemStack;
 pub use crate::menu::{LogicalSide, StackedOnOther};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
+pub use crate::mobs::data::PathComputationType;
 pub use crate::mod_chunk_tickets::TicketOwner as NativeTicketOwner;
 pub use crate::mod_chunk_tickets::{TicketSet, TicketValidation};
 pub use crate::music::{Music, MusicLayer};

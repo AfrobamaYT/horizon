@@ -20395,7 +20395,21 @@ impl Game<'_> {
                 state_block: &|state| &registry.state(BlockStateId(state as u32)).unwrap().name,
             },
         )
-        .map_err(|refused| format!("Mod parts refused:\n{}", refused.join("\n")).into())
+        .map_err(|refused| format!("Mod parts refused:\n{}", refused.join("\n")))?;
+        self.resolve_pathfindable();
+        Ok(())
+    }
+    /// Ask the parts of each block `isPathfindable` once per state and type: the answer depends
+    /// on nothing else, so path finding and spawning read it with no dispatch.
+    fn resolve_pathfindable(&self) {
+        let asked = horizon_client::mod_api::has_scoped_hook(
+            horizon_client::mod_api::HookId::IsPathfindable,
+        );
+        let data = &self.res.rest().mob_data;
+        data.set_pathfindable(asked, |state, kind, mut pathfindable| {
+            self.native_is_pathfindable(state, kind, &mut pathfindable);
+            pathfindable
+        });
     }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).
