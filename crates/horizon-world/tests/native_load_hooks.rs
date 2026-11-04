@@ -50,7 +50,10 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
     std::fs::write(root.join("items.json"), r#"{"probe:token":{}}"#).unwrap();
     std::fs::write(dir.join("test.json"), "[]").unwrap();
     let item_data = item_defaults::ItemData::load(&root, context).unwrap();
-    assert_eq!(item_data.defaults().entries()["probe:token"]["item"], "probe:token");
+    assert_eq!(
+        item_data.defaults().entries()["probe:token"]["item"],
+        "probe:token"
+    );
     let raw = loot::shared_tables(&root, &loot::PackOverlay::NONE).unwrap();
     assert_eq!(raw["minecraft:test"], json!([]));
     for _ in 0..2 {

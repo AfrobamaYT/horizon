@@ -20,8 +20,8 @@ use horizon_assets::{
     animation::AnimationMetadata,
     item_bake::{BakedItemModel, SpriteLookup, SpriteMask, bake_item_model},
     item_model::{
-        ClientItem, Context, DisplayContext, FoilType, ItemEnv, ItemModels,
-        LayerContent, LevelState, OwnerState, SpecialModel, StackView,
+        ClientItem, Context, DisplayContext, FoilType, ItemEnv, ItemModels, LayerContent,
+        LevelState, OwnerState, SpecialModel, StackView,
     },
     model::Direction,
     palette::PalettedPermutations,

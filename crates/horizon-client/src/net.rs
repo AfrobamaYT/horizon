@@ -932,8 +932,11 @@ fn configure(
         {
             cfg::Clientbound::KeepAlive(k) => reply(cfg::Serverbound::KeepAlive(k))?,
             cfg::Clientbound::CustomPayload(p) if p.channel == crate::content_identity::CHANNEL => {
-                let hash = crate::content_identity::identity(resources.root(), resources.defaults())
-                    .map_err(|_| Reason::plain(crate::content_identity::MISMATCH.to_string()))?;
+                let hash =
+                    crate::content_identity::identity(resources.root(), resources.defaults())
+                        .map_err(|_| {
+                            Reason::plain(crate::content_identity::MISMATCH.to_string())
+                        })?;
                 content_verified = p.data == hash;
                 reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
                     channel: crate::content_identity::CHANNEL.into(),
@@ -1241,10 +1244,8 @@ mod tests {
     use horizon_world::native_load_context::DataLoadOrigin;
 
     fn empty_item_data(name: &str) -> (PathBuf, Arc<ItemData>) {
-        let root = std::env::temp_dir().join(format!(
-            "horizon-net-data-{name}-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("horizon-net-data-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("items.json"), "{}").unwrap();
         let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload).unwrap();

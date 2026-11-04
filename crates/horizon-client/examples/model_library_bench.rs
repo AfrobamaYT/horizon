@@ -5,8 +5,8 @@
 extern crate horizon_client_lib as horizon_client;
 #[path = "../src/test_resources.rs"]
 mod test_resources;
-use horizon_world::native_load_context::DataLoadOrigin;
 use horizon_client::{assets::Assets, item_render::ItemRenderer};
+use horizon_world::native_load_context::DataLoadOrigin;
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     hash::{Hash, Hasher},

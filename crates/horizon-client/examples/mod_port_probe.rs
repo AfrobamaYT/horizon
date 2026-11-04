@@ -100,8 +100,8 @@ fn main() -> Result<()> {
     let assets = Assets::load(&root).map_err(step("assets"))?;
     let registry = assets.registry;
     let facts = BlockFacts::load(&root, registry).map_err(step("block facts"))?;
-    let defaults = horizon_world::item_defaults::read(&root)
-        .map_err(|error| format!("items: {error}"))?;
+    let defaults =
+        horizon_world::item_defaults::read(&root).map_err(|error| format!("items: {error}"))?;
     let items = Items::load(&root, registry, &facts, &PackOverlay::NONE, &defaults)
         .map_err(step("items"))?;
     let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).map_err(step("recipes"))?;

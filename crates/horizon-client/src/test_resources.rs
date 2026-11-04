@@ -7,7 +7,10 @@ use horizon_world::{
     native_load_context::{DataLoadOrigin, LoadContext, LoadInputs},
 };
 
-pub(crate) fn item_data(root: &Path, origin: DataLoadOrigin) -> horizon_client_core::Result<Arc<ItemData>> {
+pub(crate) fn item_data(
+    root: &Path,
+    origin: DataLoadOrigin,
+) -> horizon_client_core::Result<Arc<ItemData>> {
     let inputs = LoadInputs::new(BTreeMap::new(), root.join("settings"));
     Ok(Arc::new(ItemData::load(
         root,

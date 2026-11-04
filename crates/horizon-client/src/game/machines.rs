@@ -1999,7 +1999,8 @@ mod capacity_tests {
         let facts = horizon_client::blocks::BlockFacts::load(&root, registry).unwrap();
         let overlay = &horizon_world::loot::PackOverlay::NONE;
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let items = horizon_client::items::Items::load(&root, registry, &facts, overlay, &defaults).unwrap();
+        let items = horizon_client::items::Items::load(&root, registry, &facts, overlay, &defaults)
+            .unwrap();
         let behaviours = horizon_world::level::Behaviours::load(registry, &root).unwrap();
         let brewing = Brewing {
             recipes: Vec::new(),

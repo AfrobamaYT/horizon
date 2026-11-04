@@ -20686,15 +20686,11 @@ fn load_core(
                 let item_renderer = startup::time("core.item_models", || {
                     if headless {
                         horizon_client::item_render::ItemRenderer::load_for_server(
-                            root,
-                            library,
-                            item_data,
+                            root, library, item_data,
                         )
                     } else {
                         horizon_client::item_render::ItemRenderer::load_with_library(
-                            root,
-                            library,
-                            item_data,
+                            root, library, item_data,
                         )
                     }
                 })

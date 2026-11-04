@@ -12,13 +12,13 @@
 extern crate horizon_client_lib as horizon_client;
 #[path = "../src/test_resources.rs"]
 mod test_resources;
-use horizon_world::native_load_context::DataLoadOrigin;
 use horizon_client::{
     assets::Assets, biome::Biomes, blocks::BlockFacts, collisions, crafting::Recipes, items::Items,
     light::LightTables, mesher::MeshTables, models, motion::MotionResources,
     vanillagen::VanillaTerrain,
 };
 use horizon_world::loot::PackOverlay;
+use horizon_world::native_load_context::DataLoadOrigin;
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     sync::atomic::{AtomicUsize, Ordering::Relaxed},

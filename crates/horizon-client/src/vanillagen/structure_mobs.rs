@@ -311,8 +311,8 @@ impl StructureMobFinalizer {
 
 #[cfg(test)]
 mod tests {
-    use horizon_world::native_load_context::DataLoadOrigin;
     use super::*;
+    use horizon_world::native_load_context::DataLoadOrigin;
 
     /// The bastion's crossbow piglin keeps its crossbow (STRUCTURE skips
     /// createSpawnWeapon) and saves what Piglin.addAdditionalSaveData writes.
@@ -340,8 +340,8 @@ mod tests {
             panic!("no nbt");
         };
         nbt.remove(&"UUID".into());
-        let item_data = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)
-            .unwrap();
+        let item_data =
+            crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
         let hook = StructureMobFinalizer::new(root, "minecraft:the_nether", item_data);
         let mut random = LegacyRandom::new(12345);
         hook.finalize(&mut nbt, "minecraft:nether_wastes", &[], &mut random);
@@ -454,19 +454,17 @@ mod tests {
         use crate::streaming::{ChunkGenerator, Proto};
         let assets = crate::assets::Assets::load(root).unwrap();
         let biomes = crate::biome::Biomes::load(root).unwrap();
-        let item_data = crate::test_resources::item_data(root, DataLoadOrigin::ServerDataLoad).unwrap();
+        let item_data =
+            crate::test_resources::item_data(root, DataLoadOrigin::ServerDataLoad).unwrap();
         let terrain_resources = crate::vanillagen::TerrainResources {
             dir: &root.join("worldgen"),
             registry: assets.registry,
             biomes: &biomes,
             item_data: &item_data,
         };
-        let terrain = super::super::VanillaTerrain::for_dimension(
-            terrain_resources,
-            seed,
-            dimension,
-        )
-        .unwrap();
+        let terrain =
+            super::super::VanillaTerrain::for_dimension(terrain_resources, seed, dimension)
+                .unwrap();
         let mut worker = terrain.worker();
         let mut region: [Proto; 9] = std::array::from_fn(|i| {
             terrain.proto(&mut worker, x + i as i32 % 3 - 1, z + i as i32 / 3 - 1)

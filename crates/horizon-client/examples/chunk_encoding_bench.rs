@@ -66,8 +66,11 @@ fn main() -> horizon_client::Result<()> {
     let biomes = horizon_client::biome::Biomes::load(root)?;
     let biome_names: Vec<String> = biomes.list.iter().map(|b| b.name.clone()).collect();
     let defaults = horizon_world::item_defaults::read(root)?;
-    let sync =
-        horizon_client::lan::data::SyncData::load(root, &horizon_world::loot::PackOverlay::NONE, &defaults)?;
+    let sync = horizon_client::lan::data::SyncData::load(
+        root,
+        &horizon_world::loot::PackOverlay::NONE,
+        &defaults,
+    )?;
     let biome_registry: Vec<String> = sync
         .dynamic
         .registries

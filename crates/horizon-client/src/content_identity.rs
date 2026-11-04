@@ -315,7 +315,10 @@ mod tests {
         .unwrap();
         std::fs::write(root.join("items.json"), "{}").unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        assert_eq!(identity(&root, &defaults).unwrap(), hash_facts(facts).unwrap());
+        assert_eq!(
+            identity(&root, &defaults).unwrap(),
+            hash_facts(facts).unwrap()
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 

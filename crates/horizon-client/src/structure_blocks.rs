@@ -505,8 +505,8 @@ mod tests {
         std::fs::write(root.join("items.json"), "{}").unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let mut slot = None;
-        let first = reuse_or_load(&mut slot, &root, &PackOverlay::NONE, &defaults)
-            .expect("loot data");
+        let first =
+            reuse_or_load(&mut slot, &root, &PackOverlay::NONE, &defaults).expect("loot data");
         let again = reuse_or_load(&mut slot, &root, &PackOverlay::NONE, &defaults).unwrap();
         assert!(Arc::ptr_eq(&first, &again));
         let files = [(

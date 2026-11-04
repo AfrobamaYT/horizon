@@ -368,8 +368,14 @@ mod tests {
         let assets = crate::assets::Assets::load(&root).unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let items =
-            crate::items::Items::load(&root, assets.registry, &facts, &PackOverlay::NONE, &defaults).unwrap();
+        let items = crate::items::Items::load(
+            &root,
+            assets.registry,
+            &facts,
+            &PackOverlay::NONE,
+            &defaults,
+        )
+        .unwrap();
 
         let apple = items.get("minecraft:golden_apple").expect("golden apple");
         assert!(apple.can_always_eat);

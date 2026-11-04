@@ -8803,7 +8803,8 @@ mod dye_mix_tests {
         let facts = crate::blocks::BlockFacts::load(&root, &registry).unwrap();
         let overlay = horizon_world::loot::PackOverlay::NONE;
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let items = crate::items::Items::load(&root, &registry, &facts, &overlay, &defaults).unwrap();
+        let items =
+            crate::items::Items::load(&root, &registry, &facts, &overlay, &defaults).unwrap();
         let recipes = Recipes::load(&root, &items, &overlay).unwrap();
         let dye = |name: &str| {
             u8::try_from(

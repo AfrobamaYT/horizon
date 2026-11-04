@@ -687,7 +687,8 @@ mod tests {
     /// the client's `RecipeBookEntry::read` reads it.
     fn entry(root: &std::path::Path, id: &str) -> (SyncData, RecipeBookEntry) {
         let defaults = horizon_world::item_defaults::read(root).unwrap();
-        let sync = SyncData::load(root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
+        let sync =
+            SyncData::load(root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
         let entries = sync
             .advancements
             .book_entries(id, &sync, NOTIFY_AND_HIGHLIGHT);
@@ -841,7 +842,8 @@ mod tests {
             )],
         );
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
+        let sync =
+            SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
         assert!(
             !sync
                 .advancements
@@ -879,7 +881,8 @@ mod tests {
             ],
         );
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
+        let sync =
+            SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
         let item = |n: &str| sync.id("minecraft:item", n).unwrap();
         let raw = item("minecraft:raw_copper");
         let redstone = item("minecraft:redstone");
@@ -934,7 +937,8 @@ mod tests {
             ],
         );
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
+        let sync =
+            SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
         assert_eq!(
             sync.advancements.recipe_of_display(0),
             Some("minecraft:aaa_shaped")

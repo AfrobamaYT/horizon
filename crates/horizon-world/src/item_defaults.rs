@@ -63,7 +63,8 @@ impl ItemData {
             .entries()
             .iter()
             .map(|(item, components)| {
-                serde_json::from_value(components.clone()).map(|components| (item.clone(), components))
+                serde_json::from_value(components.clone())
+                    .map(|components| (item.clone(), components))
             })
             .collect::<serde_json::Result<Prototypes>>()
             .map(Arc::new)

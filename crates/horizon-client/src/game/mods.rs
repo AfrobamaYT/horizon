@@ -552,8 +552,14 @@ mod tests {
             .into(),
             || {
                 crate::mod_api::with_test_packages(&["registration_test"], || {
-                    assert_eq!(collect_standalone_models(ExecutionRole::IntegratedServer), None);
-                    assert_eq!(collect_standalone_models(ExecutionRole::DedicatedServer), None);
+                    assert_eq!(
+                        collect_standalone_models(ExecutionRole::IntegratedServer),
+                        None
+                    );
+                    assert_eq!(
+                        collect_standalone_models(ExecutionRole::DedicatedServer),
+                        None
+                    );
                     assert_eq!(calls.load(Ordering::Relaxed), 0);
                     let models = collect_standalone_models(ExecutionRole::Client).unwrap();
                     assert_eq!(calls.load(Ordering::Relaxed), 1);

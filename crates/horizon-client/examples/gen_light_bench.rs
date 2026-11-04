@@ -26,7 +26,6 @@
 extern crate horizon_client_lib as horizon_client;
 #[path = "../src/test_resources.rs"]
 mod test_resources;
-use horizon_world::native_load_context::DataLoadOrigin;
 use horizon_client::{
     assets::Assets,
     biome::Biomes,
@@ -40,6 +39,7 @@ use horizon_client::{
     vanillagen::VanillaTerrain,
     world::World,
 };
+use horizon_world::native_load_context::DataLoadOrigin;
 use horizon_world::registry::BlockStateId;
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
