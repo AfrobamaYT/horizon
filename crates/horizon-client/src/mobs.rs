@@ -5570,13 +5570,15 @@ mod effect_refusal_tests {
             return;
         }
         let types = MobTypes::load_for_server(&root).unwrap();
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut burned = mob(&types, "minecraft:glow_squid");
         burned.health = 10.0;
-        assert!(burned.damage(1.0, Damage::of(DamageKind::Campfire)));
+        assert!(burned.damage(level, 1.0, Damage::of(DamageKind::Campfire)));
         assert_eq!(aquatic::dark_ticks(&burned), 0);
         let mut struck = mob(&types, "minecraft:glow_squid");
         struck.health = 10.0;
-        assert!(struck.damage(1.0, Damage::mob(2, [0.0, 64.0, 0.0])));
+        assert!(struck.damage(level, 1.0, Damage::mob(2, [0.0, 64.0, 0.0])));
         assert_eq!(aquatic::dark_ticks(&struck), 100);
     }
 }
