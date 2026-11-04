@@ -448,6 +448,16 @@ pub(crate) fn answered<T: ?Sized>(
     }
 }
 
+/// Whether any mod registered a provider of entity capability `key`, for any entity type: one
+/// table lookup, no allocation, so the game's own lookups skip all their work where none did.
+pub fn has_entity_providers<T: ?Sized + 'static, C: 'static>(
+    key: &EntityCapabilityKey<T, C>,
+) -> bool {
+    installed()
+        .and_then(|installed| installed.keys.entity_capabilities.get(key.name))
+        .is_some_and(|by_kind| !by_kind.is_empty())
+}
+
 /// The providers mods registered for capability `name`, of the things `by` names, for the id
 /// `id` works out, in registration order. With none registered for `name`, `id` isn't asked.
 pub(crate) fn providers<'h, S: AsRef<str>>(

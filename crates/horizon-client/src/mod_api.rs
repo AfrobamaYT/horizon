@@ -2828,7 +2828,7 @@ pub use ticket_controller::TicketController;
 mod part_table;
 pub use part_table::{
     Attached, BlockEntityProviders, BlockProvider, EntityProvider, EntityProviders, ItemProvider,
-    Parts, Registrar, block_entity_providers, entity_providers,
+    Parts, Registrar, block_entity_providers, entity_providers, has_entity_providers,
 };
 pub(crate) use part_table::{
     KnownIds, ProvidedBy, answered, ask_providers, block_entity_types, has_part_hook,

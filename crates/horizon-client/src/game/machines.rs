@@ -1338,13 +1338,14 @@ impl Game<'_> {
         Some(pick as usize)
     }
     /// The entity a hopper reaches around `at` from `side`, through `ENTITY_AUTOMATION`: one of
-    /// the container entities the game has there, and, with a mod loaded, the entities whose
-    /// mod provider answers it, picked at random as `getEntityContainer` picks, the one draw.
+    /// the container entities the game has there, and, once a mod registered a provider for it,
+    /// the entities whose mod provider answers it, picked at random as `getEntityContainer` picks, the one draw.
     /// A game container entity a mod provider answers ahead of the game is reached through
-    /// that answer. With no mod loaded this is `entity_container_at`.
+    /// that answer. With no mod providing `ENTITY_AUTOMATION` this is `entity_container_at`:
+    /// nothing more is looked up.
     fn automation_entity_at(&mut self, at: [f64; 3], side: Direction) -> Option<AutomationEntity> {
         let vanilla = self.container_entities_at(at);
-        if mod_api::mods().is_empty() {
+        if !mod_api::has_entity_providers(&ENTITY_AUTOMATION) {
             let pick = self.pick_index(vanilla.len())?;
             return Some(AutomationEntity::Container(vanilla[pick]));
         }

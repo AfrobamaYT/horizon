@@ -1507,4 +1507,39 @@ mod tests {
             assert!(sides.iter().all(|side| *side == Some(Direction::Up)));
         });
     }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_without_an_automation_provider_leaves_hoppers_on_the_vanilla_path() {
+        use horizon_client::mod_api::{
+            self, ENTITY_ENERGY, Hooks, ModEntry, Mods, Registrar, has_entity_providers,
+        };
+        use horizon_core::random::RandomSource as _;
+        struct Energy;
+        #[mod_api::__subscriptions]
+        impl Hooks for Energy {
+            fn register(&self, r: &mut Registrar) {
+                r.entity_capability(&ENTITY_ENERGY, "minecraft:pig", |_, _, _| None);
+            }
+        }
+        let mods: Mods = vec![ModEntry::new("energy", Box::new(Energy))].into();
+        mod_api::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            assert!(!has_entity_providers(&ENTITY_AUTOMATION));
+            with_game(|game| {
+                hopper_with(game, "down", Some(ItemStack::new("minecraft:stick", 3)));
+                pig(game, 700, 63.0);
+                let mut before = game.world.random.clone();
+                game.hopper_try_move_items((0, 64, 0));
+                // Nothing to reach, and no draw made: no container entity was a candidate.
+                assert_eq!(
+                    hopper_slot(game),
+                    Some(ItemStack::new("minecraft:stick", 3))
+                );
+                assert_eq!(
+                    game.world.random.clone().next_int_bound(1 << 30),
+                    before.next_int_bound(1 << 30)
+                );
+            });
+        });
+    }
 }
