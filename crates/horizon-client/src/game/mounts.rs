@@ -128,26 +128,18 @@ impl Game<'_> {
         if self.mobs[i].species() != species || !equine::boost(&mut self.mobs[i]) {
             return false;
         }
-        if !self.creative
-            && let Some(stack) = self.inventory[self.selected].clone()
-        {
-            self.trigger_item_durability(&stack, (stack.damage as i32).wrapping_add(wear as i32));
-            if let Some(stack) = self.inventory[self.selected].as_mut() {
-                stack.damage += wear;
-                let max = self
-                    .res
-                    .items()
-                    .get(&stack.item)
-                    .map_or(25, |i| i.max_damage);
-                if stack.damage >= max {
-                    let broken = stack.clone();
-                    self.inventory[self.selected] =
-                        Some(ItemStack::new("minecraft:fishing_rod", 1));
-                    // ItemStack.hurtAndBreak: onEquippedItemBroken, then the replacement.
+        if let Some(stack) = self.inventory[self.selected].clone() {
+            let (updated, broken) = self.damage_stack(&stack, wear, true);
+            if self.inventory[self.selected].as_ref() == Some(&stack) {
+                self.inventory[self.selected] = updated;
+                if let Some(broken) = broken {
                     self.player_equipment_broke(
                         horizon_world::player_inventory::EquipmentSlot::MainHand,
                         &broken,
                     );
+                    self.award_stat("broken", &broken.item, 1);
+                    self.inventory[self.selected] =
+                        Some(ItemStack::new("minecraft:fishing_rod", 1));
                 }
             }
         }
@@ -997,6 +989,28 @@ pub(super) fn start_riding_jump(
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn steering_stick_break_converts_to_fishing_rod() {
+        use horizon_client::mobs::Mob;
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(Mob::new(21, kind, Vec3::ZERO, 0.0));
+            game.riding = Some(21);
+            let mut stick = ItemStack::new("minecraft:carrot_on_a_stick", 1);
+            stick.damage = game.items().get(&stick.item).unwrap().max_damage - 1;
+            game.inventory[game.selected] = Some(stick);
+            assert!(game.use_steering_stick("minecraft:carrot_on_a_stick"));
+            assert_eq!(
+                &*game.inventory[game.selected].as_ref().unwrap().item,
+                "minecraft:fishing_rod"
+            );
+        });
+    }
 
     #[test]
     fn the_mounts_that_throw_a_swimmer_off_are_the_dismounts_underwater_tag() {

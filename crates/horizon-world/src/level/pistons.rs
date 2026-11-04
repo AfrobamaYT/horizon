@@ -568,10 +568,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         else {
             return Some(false);
         };
-        if !self
-            .level
-            .allow_piston_move(piston_pos, push_direction, &to_push, &to_destroy)
-        {
+        if !self.level.allow_piston_move(
+            piston_pos,
+            push_direction,
+            extending,
+            &to_push,
+            &to_destroy,
+        ) {
             return None;
         }
         let mut delete_after: JavaHashMap<PosKey, BlockStateId> = JavaHashMap::default();
@@ -680,6 +683,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if extending {
             self.update_neighbors_at_oriented(arm, b.named.piston_head, orientation);
         }
+        self.level.observe_piston_moved(
+            piston_pos,
+            push_direction,
+            extending,
+            &to_push,
+            &to_destroy,
+        );
         Some(true)
     }
     /// `PistonBaseBlock.triggerEvent`.

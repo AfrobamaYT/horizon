@@ -1444,6 +1444,9 @@ impl<'a> Plan<'a> {
         if let Some(ticks) = &p.random_ticks {
             row.set("random_ticks", J::Bool(ticks.applies(combo)));
         }
+        if p.destroy_overlay == Some(false) {
+            row.set("no_destroy_overlay", J::Bool(true));
+        }
         if let Some(shape) = p.render_shape {
             row.set("render_shape", J::Str(shape.name().into()));
         }
@@ -1607,6 +1610,21 @@ impl<'a> Plan<'a> {
                             && let Some(name) = v.at("fields/type/name")
                         {
                             *name = J::Str(wood.clone());
+                        }
+                        // `createDefaultSignText`: the colour and glow a new sign's text starts with.
+                        if (b.decl.sign_text_color.is_some() || b.decl.sign_text_glow.is_some())
+                            && let Some(fields) = v.at("fields")
+                        {
+                            let color = b.decl.sign_text_color.as_deref().unwrap_or("black");
+                            let id = horizon_mods::content::DYE_COLORS
+                                .iter()
+                                .position(|name| *name == color)
+                                .unwrap_or_default();
+                            fields.set("sign_text_color", J::Num((id as u64).into()));
+                            fields.set(
+                                "sign_text_glow",
+                                J::Bool(b.decl.sign_text_glow.unwrap_or(false)),
+                            );
                         }
                         if let Some(base) = &b.base_block {
                             let field = v

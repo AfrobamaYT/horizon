@@ -70,7 +70,11 @@ fn main() -> horizon_client::Result<()> {
         root,
         &horizon_world::loot::PackOverlay::NONE,
         &defaults,
-        &server_load(),
+        &horizon_client::crafting::ResolvedSources::load_or_empty(
+            root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &server_load(),
+        ),
     )?;
     let biome_registry: Vec<String> = sync
         .dynamic
