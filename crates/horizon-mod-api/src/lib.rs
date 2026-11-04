@@ -3324,6 +3324,62 @@ pub enum Flow {
     Cancel,
 }
 
+/// A block state's sounds (`BlockState.getSoundType()`, vanilla's `SoundType`): the sound
+/// events, as `LevelRef::play_sound` names them, and the volume and pitch they play at.
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct BlockSoundType {
+    /// `SoundType.getVolume`.
+    pub volume: f32,
+    /// `SoundType.getPitch`.
+    pub pitch: f32,
+    /// `getBreakSound`: the block broken.
+    pub break_sound: std::sync::Arc<str>,
+    /// `getStepSound`: walked on.
+    pub step: std::sync::Arc<str>,
+    /// `getPlaceSound`: placed.
+    pub place: std::sync::Arc<str>,
+    /// `getHitSound`: hit while being mined.
+    pub hit: std::sync::Arc<str>,
+    /// `getFallSound`: landed on.
+    pub fall: std::sync::Arc<str>,
+}
+
+/// The states of one block (`StateDefinition.getPossibleStates`): consecutive ids, as the
+/// registry numbers a block's states.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with `new`; mods read it
+pub struct BlockStateRange {
+    first: BlockStateId,
+    count: u32,
+}
+impl BlockStateRange {
+    /// `count` states from `first`.
+    pub const fn new(first: BlockStateId, count: u32) -> Self {
+        Self { first, count }
+    }
+    /// The first state's id.
+    pub const fn first(self) -> BlockStateId {
+        self.first
+    }
+    /// How many states the block has.
+    pub const fn len(self) -> u32 {
+        self.count
+    }
+    /// Never true: a block has at least one state.
+    pub const fn is_empty(self) -> bool {
+        self.count == 0
+    }
+    /// Whether `state` is one of them.
+    pub const fn contains(self, state: BlockStateId) -> bool {
+        state.0 >= self.first.0 && state.0 - self.first.0 < self.count
+    }
+    /// Each state, in id order.
+    pub fn iter(self) -> impl Iterator<Item = BlockStateId> {
+        (self.first.0..self.first.0 + self.count).map(BlockStateId)
+    }
+}
+
 /// What a fake player does in `PlayerRef::perform_action`: a player's own action, run through
 /// the game's path for it, as a client's packet is. Its answer is an [`ActionOutcome`], or an
 /// [`ActionRefused`] when none of it ran.
@@ -4045,6 +4101,8 @@ mod entity_capability;
 pub use entity_capability::{
     ENTITY_AUTOMATION, ENTITY_ENERGY, ENTITY_FLUIDS, ENTITY_ITEMS, EntityCapabilityKey,
 };
+mod block_states;
+pub use block_states::{BlockStates, HostBlockStates};
 mod energy_capability;
 pub use energy_capability::{ENERGY, EnergyHandler, ITEM_ENERGY, move_energy};
 mod fluid_capability;
