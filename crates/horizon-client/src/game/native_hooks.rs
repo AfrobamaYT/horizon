@@ -2748,17 +2748,6 @@ impl Game<'_> {
             image.height as f32,
         ]
     }
-    /// The id of the item in the slot under the pointer on the open container screen
-    /// (`AbstractContainerScreen.getHoveredSlot().getItem()`), None over no slot or an empty one.
-    pub(super) fn native_screen_hovered_item(&self) -> Option<String> {
-        let size = self
-            .renderer
-            .as_ref()
-            .map(|r| [r.config.width, r.config.height])?;
-        let batch = HudBatch::new(size);
-        let slot = self.slot_at(&batch, self.cursor.0, self.cursor.1)?;
-        Some(self.slot_view(slot)?.item.to_string())
-    }
     pub(super) fn track_drag_button(&mut self, button: MouseButton, pressed: bool) {
         // Any release ends the drag, as vanilla's `MouseHandler.onButton` clears `activeButton`:
         // left down, right down, left up sends no drag while right is still held.
@@ -7628,6 +7617,18 @@ impl GameLevel<'_> {
             entity: None,
         });
         true
+    }
+
+    /// The id of the item in the slot under the pointer on the open container screen
+    /// (`AbstractContainerScreen.getHoveredSlot().getItem()`), None over no slot or an empty one.
+    pub(super) fn native_screen_hovered_item(&self) -> Option<String> {
+        let size = self
+            .renderer
+            .as_ref()
+            .map(|r| [r.config.width, r.config.height])?;
+        let batch = HudBatch::new(size);
+        let slot = self.slot_at(&batch, self.cursor.0, self.cursor.1)?;
+        Some(self.slot_view(slot)?.item.to_string())
     }
 
     /// Queue particles in this authoritative level. A zero count sends one
