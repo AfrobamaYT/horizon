@@ -13,7 +13,7 @@ use super::potions::mob_can_be_affected;
 use horizon_client::brewing;
 use horizon_client::effects::{EffectInstance, PlayerEffects};
 use horizon_client::mobs::Mob;
-use mod_api::{LivingRef, NativeActiveEffect};
+use mod_api::{ItemStack, LivingRef, NativeActiveEffect};
 
 /// A player's effect as the API's: the id namespaced as the registry has it.
 fn active_effect(e: &EffectInstance) -> NativeActiveEffect {
@@ -39,6 +39,31 @@ fn mob_effect(m: &Mob, e: &(&'static str, i32, i32)) -> NativeActiveEffect {
 }
 
 impl Game<'_> {
+    /// Apply one loaded consumable effect without consuming the item.
+    pub(super) fn native_living_apply_consume_effect(
+        &mut self,
+        living: LivingRef,
+        stack: &ItemStack,
+        index: usize,
+    ) -> Option<bool> {
+        let target = self.native_living_target(living)?;
+        let effect = self
+            .items()
+            .get(&stack.item)?
+            .consumable
+            .as_ref()?
+            .effects
+            .get(index)?
+            .clone();
+        match target {
+            t @ (Target::Player | Target::Guest(_)) => self
+                .for_player(t, |g| g.apply_consume_effect(&effect, None, false))
+                .flatten(),
+            Target::Mob(_) => self.apply_consume_effect(&effect, Some(living), false),
+            _ => None,
+        }
+    }
+
     /// Where a player's or a guest's effects are: the acting player's own
     /// are the game's (swapped in by `enter_guest`; a player handle names
     /// the acting player, and a game without a hub keeps its single
@@ -239,6 +264,72 @@ mod tests {
             ambient: false,
             visible: true,
         })
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn indexed_consumable_effects_apply_to_a_mob() {
+        use horizon_core::random::RandomSource;
+        use mod_api::ItemStack;
+        with_game(|game| {
+            let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            let cow = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            let item = |id| ItemStack::new(id, 1);
+            let mut expected = game.world.random.clone();
+            expected.next_float();
+            assert_eq!(
+                game.native_living_apply_consume_effect(cow, &item("minecraft:pufferfish"), 0),
+                Some(true)
+            );
+            assert_eq!(game.world.random.next_float(), expected.next_float());
+            assert!(game.native_living_potion_affected(cow, "minecraft:poison"));
+            assert_eq!(
+                game.native_living_apply_consume_effect(cow, &item("minecraft:honey_bottle"), 0),
+                Some(true)
+            );
+            assert_eq!(
+                game.native_living_apply_consume_effect(cow, &item("minecraft:honey_bottle"), 0),
+                Some(false)
+            );
+            assert_eq!(
+                game.native_living_apply_consume_effect(cow, &item("minecraft:milk_bucket"), 0),
+                Some(true)
+            );
+            assert_eq!(
+                game.native_living_apply_consume_effect(cow, &item("minecraft:milk_bucket"), 0),
+                Some(false)
+            );
+            // This fixture has no server sound hub; a sound cannot be queued.
+            assert_eq!(
+                game.native_living_apply_consume_effect(cow, &item("minecraft:ominous_bottle"), 0),
+                None
+            );
+            assert_eq!(
+                game.native_living_apply_consume_effect(cow, &item("minecraft:chorus_fruit"), 0),
+                None
+            );
+            assert_eq!(
+                game.native_living_apply_consume_effect(cow, &item("minecraft:pufferfish"), 1),
+                None
+            );
+            assert_eq!(
+                game.native_living_apply_consume_effect(cow, &item("minecraft:stone"), 0),
+                None
+            );
+            assert_eq!(
+                game.native_living_apply_consume_effect(cow, &item("missing:unknown"), 0),
+                None
+            );
+            let stale = LivingRef::new(EntityRef::new(
+                NativeWorldEpoch::new(cow.entity().epoch().get() + 1),
+                12,
+            ));
+            assert_eq!(
+                game.native_living_apply_consume_effect(stale, &item("minecraft:pufferfish"), 0),
+                None
+            );
+        });
     }
 
     #[test]
