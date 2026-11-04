@@ -2370,8 +2370,14 @@ impl Game<'_> {
         }
         let name;
         if self.res.mob_types().contains_key(&kind) {
-            self.spawn_mob_spawned(&short, pos)
-                .ok_or_else(|| err("commands.summon.failed.uuid", &[]))?;
+            self.spawn_mob_spawned(
+                &short,
+                pos,
+                super::creatures::SpawnSite::Finalizing(
+                    horizon_client::mobs::spawn_rules::Reason::Command,
+                ),
+            )
+            .ok_or_else(|| err("commands.summon.failed.uuid", &[]))?;
             name = Text::translate(&entity_name_key(&kind), &[]);
         } else {
             match short.as_str() {

@@ -46,6 +46,24 @@ pub struct LocalDifficulty {
     /// `Difficulty.getId`: 0 peaceful to 3 hard.
     pub id: u8,
 }
+impl From<LocalDifficulty> for mod_api::NativeDifficulty {
+    fn from(d: LocalDifficulty) -> Self {
+        Self::new(d.base, d.effective)
+    }
+}
+impl From<mod_api::NativeDifficulty> for LocalDifficulty {
+    /// A mod's difficulty; a base past hard is hard.
+    fn from(d: mod_api::NativeDifficulty) -> Self {
+        let base = d.base.min(3);
+        Self {
+            base,
+            effective: d.effective,
+            normal: base == 2,
+            hard: base == 3,
+            id: base,
+        }
+    }
+}
 /// `DimensionType.MOON_BRIGHTNESS_PER_PHASE`.
 pub const MOON_BRIGHTNESS: [f32; 8] = [1.0, 0.75, 0.5, 0.25, 0.0, 0.25, 0.5, 0.75];
 impl LocalDifficulty {

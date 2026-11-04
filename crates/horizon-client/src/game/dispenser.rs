@@ -810,10 +810,22 @@ impl Game<'_> {
             f64::from(p.1) + y_off,
             f64::from(p.2) + 0.5,
         ];
-        let id = self.spawn_mob(&name, at, true)?;
+        let id = self.spawn_mob(
+            &name,
+            at,
+            true,
+            super::creatures::SpawnSite::Finalizing(
+                horizon_client::mobs::spawn_rules::Reason::Dispenser,
+            ),
+        )?;
         // finalizeSpawn's riders (chicken jockeys, spider jockeys...) come
         // with a dispensed mob as with any spawn that is not natural.
-        self.spawn_jockeys(id, false);
+        self.spawn_jockeys(
+            id,
+            super::creatures::SpawnSite::Finalizing(
+                horizon_client::mobs::spawn_rules::Reason::Dispenser,
+            ),
+        );
         Some(id)
     }
     /// `EquipmentDispenseItemBehavior.dispenseEquipment`: the first living

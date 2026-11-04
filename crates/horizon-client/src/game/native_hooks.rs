@@ -85,7 +85,10 @@ pub(crate) use mod_api::{
     NativeMinimap, NativeMod, NativeNoteInstrument, NativePanelEvent, NativePortalShape,
     NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
-use mod_api::{NativeDespawn, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason, Recipe};
+use mod_api::{
+    NativeDespawn, NativeDifficulty, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason,
+    NativeSpawner, Recipe,
+};
 use std::{
     collections::HashMap,
     fs,
@@ -5949,6 +5952,34 @@ impl Game<'_> {
         mod_api::dispatch_mob_despawn(self, dimension, kind, entity, pos, result);
     }
 
+    /// `FinalizeSpawnEvent`: the mob of type `kind` at `pos` is about to be
+    /// finalized (`Mob.finalizeSpawn`) for `reason`. `cancel` skips the
+    /// finalization (the mob still spawns, uninitialised); `spawn_cancelled`
+    /// stops the spawn. `difficulty` is what finalization will read.
+    /// Server-side.
+    pub(super) fn native_finalize_spawn(
+        &self,
+        dimension: &str,
+        kind: &str,
+        reason: NativeSpawnReason,
+        pos: [f64; 3],
+        spawner: Option<NativeSpawner>,
+        difficulty: &mut NativeDifficulty,
+        spawn_cancelled: &mut bool,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_finalize_spawn(
+            self,
+            dimension,
+            kind,
+            reason,
+            pos,
+            spawner,
+            difficulty,
+            spawn_cancelled,
+            cancel,
+        );
+    }
     /// The world's spawn point changed to `pos` and `angle`.
     pub(super) fn native_spawn_change(&mut self, pos: [i32; 3], angle: [f32; 2]) {
         mod_api::dispatch_spawn_change(self, pos, angle);
