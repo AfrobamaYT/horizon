@@ -9,8 +9,8 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     track(root)?;
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
-        Target::Render => vec![("native_render_generated.rs", generated.render)],
-        Target::Client => {
+        Target::Client => vec![("mod_api_host_generated.rs", generated.implementation)],
+        Target::Api => {
             println!("cargo:rerun-if-env-changed=HORIZON_MOD_API_INJECTIONS");
             let hooks = if let Some(path) = std::env::var_os("HORIZON_MOD_API_INJECTIONS") {
                 let path = Path::new(&path);
@@ -24,7 +24,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             vec![
                 ("mod_api_generated.rs", hooks),
                 ("mod_api_generated_host.rs", generated.host),
-                ("mod_api_host_generated.rs", generated.implementation),
+                ("native_render_generated.rs", generated.render),
             ]
         }
     };

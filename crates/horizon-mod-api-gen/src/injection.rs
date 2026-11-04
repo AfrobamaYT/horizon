@@ -182,12 +182,9 @@ impl TraitInjection {
             (false, false) => quote!(),
         };
         let names = self.parameters.iter().map(|(n, _)| n);
-        let doc = format!(
-            " What [`Hooks::{name}`] is told. Fields may be added: the struct is `#[non_exhaustive]`."
-        );
+        let doc = format!(" What [`Hooks::{name}`] is told.");
         quote! {
             #[doc = #doc]
-            #[non_exhaustive]
             pub struct #event #generics { #(pub #names: #types),* }
         }
         .to_string()

@@ -39,7 +39,7 @@ pub(super) fn emit(
             .ok_or_else(|| format!("hook {name} has no mod_api entry: add one"))?;
         let native = format!("native_{name}");
         let target = hook["target"].as_str().ok_or("target missing")?;
-        let is_render = target.starts_with("horizon_client_render::");
+        let is_render = target.starts_with("mod_api::render::");
         let external = free_function_source(target);
         let in_game = external.is_none();
         let (method, call) = if let Some((krate, path)) = external {
@@ -67,7 +67,9 @@ pub(super) fn emit(
                 .collect();
             (
                 one_function(functions.iter(), &native)?.clone(),
-                if is_render {
+                // A hook in the mod API crate calls its dispatch directly; one below it calls
+                // the callback the game installs.
+                if krate == "horizon-mod-api" {
                     format!("dispatch_{name}")
                 } else {
                     name.to_owned()
@@ -375,7 +377,7 @@ pub(super) fn emit(
             .as_ref()
             .map_or(trait_name, |(part_trait, _)| part_trait);
         dispatch.push_str(&format!(
-            "/// What [`{trait_name}::{name}`] is told. Fields may be added: the struct is `#[non_exhaustive]`.\n#[non_exhaustive]\npub struct {event_type}{generics} {{\n{fields}}}\n"
+            "/// What [`{trait_name}::{name}`] is told.\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
         let build = format!("let mut {event} = {event_type} {{ {} }};", inits.join(", "));
         // A trait mod's call is marked with the mod for a panic to name; render hooks are called bare.

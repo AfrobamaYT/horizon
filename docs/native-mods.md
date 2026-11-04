@@ -3369,7 +3369,7 @@ fn living_incoming_damage(
 }
 ```
 
-The event is a generated `#[non_exhaustive]` struct named after the catalog hook, in CamelCase plus `Event`, with
+The event is a generated struct named after the catalog hook, in CamelCase plus `Event`, with
 the hook point's arguments as public fields: values as values and borrowed ones as references (`event.kind`). A
 number or `bool` a mod may change is a plain field, written back once every mod has run, even after a `Cancel`;
 anything else a mod may change, a game struct or a list, is a `&mut` field. A cancellation or replacement is still

@@ -2515,11 +2515,11 @@ pub(crate) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
 /// }
 /// ```
 ///
-/// Side enums are non-exhaustive: external matches must include a wildcard.
-/// ```compile_fail
+/// A hook that fires on both sides matches on the two:
+/// ```
 /// use mod_api::HostSide;
-/// fn side(host: HostSide<'_>) {
-///     match host { HostSide::Server(_) => (), HostSide::Client(_) => () }
+/// fn side(host: HostSide<'_>) -> &'static str {
+///     match host { HostSide::Server(_) => "server", HostSide::Client(_) => "client" }
 /// }
 /// ```
 ///

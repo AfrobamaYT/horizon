@@ -159,7 +159,7 @@ pub(super) fn generate(
     }
     let side_enum = |name: &str, server: &str, client: &str| {
         format!(
-            "/// The logical side of a hook's host.\n#[non_exhaustive]\npub enum {name}<'a> {{ Server({server}), Client({client}) }}\n"
+            "/// The logical side of a hook's host.\npub enum {name}<'a> {{ Server({server}), Client({client}) }}\n"
         )
     };
     let sides = format!(
