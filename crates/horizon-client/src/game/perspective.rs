@@ -448,10 +448,14 @@ impl Game<'_> {
         let using_off_hand = self
             .using
             .is_some_and(|(slot, _)| slot == super::shield::OFFHAND_SLOT);
-        let blocking = self
+        let use_animation = self
             .using
             .and_then(|(slot, _)| self.stack_in(slot))
-            .is_some_and(|stack| self.blocks_attacks(stack).is_some());
+            .and_then(|stack| self.items().get(&stack.item))
+            .map_or_else(
+                Default::default,
+                horizon_client::first_person::item_use_animation,
+            );
         let charged = self.inventory[self.selected]
             .as_ref()
             .is_some_and(|s| s.data().is_some_and(|d| !d.charged.is_empty()));
@@ -562,7 +566,7 @@ impl Game<'_> {
         m.extra.spectator = spectator;
         m.extra.using_item = using;
         m.extra.using_off_hand = using_off_hand;
-        m.extra.blocking = blocking;
+        m.extra.use_animation = use_animation;
         m.extra.charged = charged;
         m.extra.ints[5] = charge_duration;
         m.extra.elytra.tick(fall_flying, crouching, velocity);

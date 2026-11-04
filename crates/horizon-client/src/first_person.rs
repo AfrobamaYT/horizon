@@ -599,6 +599,31 @@ impl UseResult {
     }
 }
 pub use horizon_items::use_animation::consumable_animation;
+
+/// `Item.getUseAnimation` of an item: the `consumable`'s, else `blocks_attacks`
+/// blocks and a kinetic weapon spears, then what the item's own class answers
+/// (`BowItem`, `CrossbowItem`, `TridentItem`, `SpyglassItem`, `InstrumentItem`,
+/// `BrushItem`, `BundleItem`).
+pub fn item_use_animation(
+    info: &crate::items::ItemInfo,
+) -> horizon_world::consumable::UseAnimation {
+    use horizon_world::consumable::UseAnimation;
+    if let Some(consumable) = &info.consumable {
+        return consumable.animation;
+    }
+    match &*info.id {
+        "minecraft:bow" => UseAnimation::Bow,
+        "minecraft:crossbow" => UseAnimation::Crossbow,
+        "minecraft:trident" => UseAnimation::Trident,
+        "minecraft:spyglass" => UseAnimation::Spyglass,
+        "minecraft:goat_horn" => UseAnimation::TootHorn,
+        "minecraft:brush" => UseAnimation::Brush,
+        _ if info.bundle => UseAnimation::Bundle,
+        _ if info.blocks_attacks.is_some() => UseAnimation::Block,
+        id if crate::spear::Kinetic::of(id).is_some() => UseAnimation::Spear,
+        _ => UseAnimation::None,
+    }
+}
 /// What the click handling reads and does in the world.
 pub trait HandWorld {
     fn hit(&mut self) -> Hit;
@@ -1384,18 +1409,56 @@ mod action_result_tests {
         assert!(!UseResult::Success { swing: true }.should_swing(2, 3));
     }
     #[test]
-    fn consumption_pose_requires_eat_or_drink_animation() {
+    fn a_consumable_names_its_use_animation() {
         use horizon_world::consumable::UseAnimation::*;
         assert_eq!(consumable_animation(&serde_json::json!({})), Eat);
-        assert_eq!(
-            consumable_animation(&serde_json::json!({"animation":"drink"})),
-            Drink
-        );
-        for animation in ["none", "block", "bow", "brush"] {
+        for (name, expected) in [
+            ("drink", Drink),
+            ("block", Block),
+            ("bow", Bow),
+            ("trident", Trident),
+            ("crossbow", Crossbow),
+            ("spyglass", Spyglass),
+            ("toot_horn", TootHorn),
+            ("brush", Brush),
+            ("bundle", Bundle),
+            ("spear", Spear),
+            ("none", None),
+        ] {
             assert_eq!(
-                consumable_animation(&serde_json::json!({"animation":animation})),
-                None
+                consumable_animation(&serde_json::json!({"animation":name})),
+                expected,
+                "{name}"
             );
+        }
+    }
+
+    #[test]
+    #[ignore = "requires prepared items in HORIZON_TEST_RESOURCES"]
+    fn an_item_answers_its_use_animation() {
+        use horizon_world::consumable::UseAnimation::*;
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
+        );
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items =
+            crate::items::Items::catalog(&root, &crate::items::PackOverlay::NONE, &defaults)
+                .unwrap();
+        for (id, expected) in [
+            ("minecraft:bread", Eat),
+            ("minecraft:milk_bucket", Drink),
+            ("minecraft:shield", Block),
+            ("minecraft:bow", Bow),
+            ("minecraft:crossbow", Crossbow),
+            ("minecraft:trident", Trident),
+            ("minecraft:spyglass", Spyglass),
+            ("minecraft:goat_horn", TootHorn),
+            ("minecraft:brush", Brush),
+            ("minecraft:bundle", Bundle),
+            ("minecraft:iron_spear", Spear),
+            ("minecraft:stick", None),
+        ] {
+            assert_eq!(item_use_animation(items.get(id).unwrap()), expected, "{id}");
         }
     }
 
