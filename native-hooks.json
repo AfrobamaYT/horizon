@@ -2763,10 +2763,10 @@
       }
     },
     {
-      "name": "experience_orb_pickup_listened",
-      "doc": "Whether a mod hears `native_experience_orb_pickup`: set `listened`\n(a HEAD injection), or the server skips swapping the player in for it,\nand with this empty the pickup costs nothing more without mods.\nServer-side.",
+      "name": "pickup_xp_listened",
+      "doc": "Whether a mod hears `native_pickup_xp`: set `listened`\n(a HEAD injection), or the server skips swapping the player in for it,\nand with this empty the pickup costs nothing more without mods.\nServer-side.",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_experience_orb_pickup_listened",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_pickup_xp_listened",
       "side": "server",
       "mod_api": {
         "contract": "collect",
@@ -2774,10 +2774,11 @@
       }
     },
     {
-      "name": "experience_orb_pickup",
-      "doc": "Before `player` picks up orb `orb` in `dimension`. Mutations to `value`\nand `count` take effect only when not canceled; value is clamped to\n1..=i32::MAX and count to at least one.\nCanceling leaves the orb and pickup delay unchanged. Server-side.",
+      "name": "pickup_xp",
+      "doc": "Before `player` picks up orb `orb` in `dimension`. Mutations to `value`\nand `count` take effect only when not canceled; value is clamped to\n1..=i32::MAX and count to at least one.\nCanceling leaves the orb and pickup delay unchanged. Server-side. Diverges from upstream: renamed from `experience_orb_pickup`, to NeoForge's `PlayerXpEvent.PickupXp`.",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_experience_orb_pickup",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_pickup_xp",
+      "neoforge": "PlayerXpEvent.PickupXp",
       "side": "server",
       "cancellable": true,
       "mod_api": {
