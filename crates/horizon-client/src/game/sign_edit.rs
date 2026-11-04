@@ -319,24 +319,26 @@ impl Game<'_> {
     }
     /// `SignBlock.openTextEdit` for the front side after placement.
     pub(super) fn open_sign_editor(&mut self, pos: (i32, i32, i32), front: bool) {
-        // Minecraft.setScreen: the editor already open is removed first.
-        self.close_sign_editor();
-        let lines = match self.world.block_entities.get(&pos) {
-            Some(BlockEntity::Sign(sign)) if front => sign.front.lines.clone(),
-            Some(BlockEntity::Sign(sign)) => sign.back.lines.clone(),
-            _ => Default::default(),
-        };
-        self.sign_edit = Some(SignEditor {
-            pos,
-            front,
-            line: 0,
-            edit: sign_box(),
-            lines,
+        self.open_screen_overlay("sign_editor", |game| {
+            // Minecraft.setScreen: the editor already open is removed first.
+            game.close_sign_editor();
+            let lines = match game.world.block_entities.get(&pos) {
+                Some(BlockEntity::Sign(sign)) if front => sign.front.lines.clone(),
+                Some(BlockEntity::Sign(sign)) => sign.back.lines.clone(),
+                _ => Default::default(),
+            };
+            game.sign_edit = Some(SignEditor {
+                pos,
+                front,
+                line: 0,
+                edit: sign_box(),
+                lines,
+            });
+            game.sign_load();
+            game.keys.clear();
+            game.right = false;
+            game.capture(false);
         });
-        self.sign_load();
-        self.keys.clear();
-        self.right = false;
-        self.capture(false);
         if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
             self.native_player_open_sign(player, &name, [pos.0, pos.1, pos.2], front);
         }

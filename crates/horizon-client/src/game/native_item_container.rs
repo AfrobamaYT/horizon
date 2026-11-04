@@ -1,4 +1,4 @@
-//! Items held by item stacks for native mods (docs/native-mods.md): a mod's
+//! Items held by item stacks for native mods (docs/modding/src/how-to/native-mods.md): a mod's
 //! backpacks, storage cells and toolboxes (`native_item_container`), read,
 //! filled and emptied. NeoForge's `Capabilities.Item.ITEM` is a
 //! `ResourceHandler<ItemResource>` reached through an `ItemAccess`: it acts on

@@ -16,6 +16,8 @@ mod tests {
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub(super) struct BlockStateId;
         #[derive(Clone, Copy)]
+        pub(super) struct LevelRef;
+        #[derive(Clone, Copy)]
         pub(super) struct FluidState;
         pub(super) struct PlacementContext;
         #[derive(Clone, Copy)]

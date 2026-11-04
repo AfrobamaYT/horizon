@@ -1,5 +1,5 @@
 //! Events, explosions and lightning in a level for native server mods,
-//! through a `LevelRef` (docs/native-mods.md, "Entity and level handles"):
+//! through a `LevelRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles"):
 //! `Level.levelEvent`, `Level.gameEvent`, `Level.explode` and a summoned
 //! lightning bolt. Like the level's block writes, they act on the level in
 //! place, the one the hook runs in; a parked level, a stale handle or a

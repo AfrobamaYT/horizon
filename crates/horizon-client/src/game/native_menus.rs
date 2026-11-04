@@ -1,4 +1,4 @@
-//! Server menus for native mods (docs/native-mods.md, "Server menus"): a vanilla chest menu (`generic_9x1` to `generic_9x6`) a mod opens
+//! Server menus for native mods (docs/modding/src/how-to/native-mods.md, "Server menus"): a vanilla chest menu (`generic_9x1` to `generic_9x6`) a mod opens
 //! for a player and fills with items to look at. No click moves anything:
 //! each reaches the mod (`native_menu_clicked`), as does the menu's closing
 //! (`native_menu_closed`), and the client shows the menu as the server sends

@@ -432,7 +432,7 @@ Every Nightly ships its exact source. Its notes name the commit; `horizon-source
 commit's `git archive`, signed with the builds in `SHA256SUMS`; and `nightly.py keep-source` tags the commit
 `nightly-source/<date>-<short>`. That tag is never pruned, unlike the `nightly-<date>` release and the
 `nightly/build-*` branch (7 days each), because native mods pin a Nightly's commit and the launcher downloads that
-commit's source to build them ([native-mods.md](native-mods.md)).
+commit's source to build them ([modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md)).
 
 ### Trusted reviewers
 

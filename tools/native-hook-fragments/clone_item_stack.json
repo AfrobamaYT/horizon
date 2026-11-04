@@ -2,6 +2,7 @@
   "hooks": [
     {
       "name": "clone_item_stack",
+      "doc": "`BlockBehaviour.getCloneItemStack`, asked by\n`ServerGamePacketListenerImpl.handlePickItemFromBlock`. `include_data`\nis true for a creative player picking with Ctrl. Leave `stack` unset to\nkeep the game's item. Creative breaking, such as a beehive's\n`playerWillDestroy`, does not ask this query. Server-side.",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_clone_item_stack",
       "side": "server",
       "host": "read",

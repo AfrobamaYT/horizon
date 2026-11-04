@@ -1468,7 +1468,7 @@ impl LootContext<'_> {
     /// The context a mod's own loot kind sees in this engine: the block and
     /// the tool it has, and a seed from the roll's random. The entity, the
     /// damage, the player and the biome belong to the main loot engine's
-    /// rolls; they are None here (docs/native-mods.md).
+    /// rolls; they are None here (docs/modding/src/how-to/native-mods.md).
     fn native_loot_context<R: RandomSource>(
         &self,
         random: &mut R,

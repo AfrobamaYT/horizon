@@ -1,5 +1,5 @@
 //! `cargo horizon-mod check <file>`: what the registry checks of a submission,
-//! run anywhere: its kind's own checks (docs/api/mod-index.md), its signature
+//! run anywhere: its kind's own checks (docs/modding/src/reference/registry-index.md), its signature
 //! when given a key, and for a `.hmod` that it is content only.
 use horizon_mods::index::{self, Facts, Kind};
 use serde_json::{Value, json};
