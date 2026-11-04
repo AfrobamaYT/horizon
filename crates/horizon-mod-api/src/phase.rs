@@ -53,7 +53,6 @@ thread_local! {
     static TEST_PACKAGES: std::cell::Cell<Option<&'static [PackageInfo]>> = const { std::cell::Cell::new(None) };
 }
 /// Runs `f` with only the packages `ids` installed, for tests.
-
 #[cfg(any(test, feature = "testing"))]
 pub fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
     let packages: Vec<_> = ids
