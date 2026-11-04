@@ -3415,6 +3415,21 @@ pub enum PlayerAction {
         /// The hand whose item is used.
         hand: Hand,
     },
+    /// Attack `target` with the main hand (`ServerGamePacketListenerImpl.handleInteract`'s
+    /// ATTACK, then `Player.attack`): a player, a mob or another entity, or a fireball, a wind
+    /// charge or a shulker bullet turned back. Mobs don't take the fake as the player to answer.
+    Attack {
+        /// What is hit, in the fake's level.
+        target: EntityRef,
+    },
+    /// Break the block at `pos` at once (`ServerPlayerGameMode.destroyBlock`), with the game
+    /// mode's and the held tool's rules, the tool's wear and the drops, and no digging time:
+    /// a mod that digs over time counts the progress itself. Outside creative, a block no
+    /// digging breaks (destroy time -1, such as bedrock) stays.
+    BreakBlock {
+        /// The block broken.
+        pos: [i32; 3],
+    },
 }
 
 /// Why a fake player's `perform_action` did nothing at all: it was refused before any of the
@@ -3428,12 +3443,16 @@ pub enum ActionRefused {
     Stale,
     /// Another player's turn, an open transaction, or another `perform_action` is running.
     Busy,
-    /// The block is out of the player's reach, or the hit isn't on it
-    /// (`ServerGamePacketListenerImpl.handleUseItemOn`'s checks).
+    /// The block or entity is out of the player's reach, or the hit isn't on the block
+    /// (`ServerGamePacketListenerImpl`'s `handleUseItemOn`, `handleInteract` and
+    /// `handleBlockBreakAction` checks).
     OutOfReach,
-    /// The block is above or below the world, under spawn protection or outside the world
-    /// border (`ServerLevel.mayInteract`): nothing is used there.
+    /// The block or entity is above or below the world, under spawn protection or outside the
+    /// world border (`ServerLevel.mayInteract`): nothing is done there.
     Protected,
+    /// The attack's target isn't an entity in the fake's level, or is the fake itself
+    /// (`handleInteract`'s "Attempting to attack an invalid entity").
+    InvalidTarget,
 }
 
 /// An error a handle method answers when its host has no game behind it (a mod's test double):

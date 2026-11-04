@@ -135,6 +135,7 @@ mod explosion;
 mod extras;
 mod falling_damage;
 mod fangs;
+mod finalize_spawn;
 mod fireworks;
 mod fishing;
 mod fov;
@@ -592,6 +593,11 @@ struct Options {
     session_stdin: bool,
 }
 impl Options {
+    /// Whether this `Game` is the process's client start: not a dedicated server, and not
+    /// a splitscreen guest, whose `run` is another local player joining the same process.
+    fn is_client_start(&self) -> bool {
+        self.execution_role.is_client() && !self.split_guest
+    }
     /// The name to join servers with: the one given, else the offline name kept
     /// next to options.txt (created on first use).
     fn player_name(&self) -> String {
@@ -2252,6 +2258,7 @@ struct WorldCore {
     environment: Environment,
     collision: BlockCollisionRegistry<'static>,
     motion: MotionResources,
+    spawn_registries: horizon_client::mobs::finalize::SpawnRegistries,
     threads: usize,
 }
 
@@ -2361,6 +2368,11 @@ impl Resources {
     }
     fn motion(&self) -> &MotionResources {
         &self.core.motion
+    }
+    /// The variant registries finalizeSpawn selects from
+    /// (`data/minecraft/<registry>`), shared with world generation.
+    pub fn spawn_registries(&self) -> &horizon_client::mobs::finalize::SpawnRegistries {
+        &self.core.spawn_registries
     }
     fn threads(&self) -> usize {
         self.core.threads
@@ -3526,6 +3538,8 @@ struct Game<'a> {
     /// pitch): `level.playSound(player, ...)` leaves the guest out, whose
     /// own client plays it.
     guest_player_sounds: Vec<(String, [f64; 3], f32, f32)>,
+    /// Sounds bound to an entity this tick, for the players (`game/level_sounds.rs`).
+    bound_sounds: Vec<level_sounds::BoundSound>,
     /// `broadcastToAdmins` lines a guest's command queued, sent once it
     /// returns: the line, whether operators get it and whether the console
     /// logs it.
@@ -4712,6 +4726,7 @@ impl Game<'_> {
                 self.res.facts(),
                 self.collision,
                 &self.res.motion().fluids,
+                &self.loop_context,
                 no_physics,
                 &nearby,
                 Some(self.border.geometry()),
@@ -4725,6 +4740,7 @@ impl Game<'_> {
                 &self.world,
                 self.res.facts(),
                 &self.res.motion().fluids,
+                &self.loop_context,
                 no_physics,
                 step,
                 &mut |splash| entered.push(splash),
@@ -20361,6 +20377,7 @@ impl<'a> Game<'a> {
             guest_entity_events: Vec::new(),
             guest_equipment_breaks: Vec::new(),
             guest_player_sounds: Vec::new(),
+            bound_sounds: Vec::new(),
             lan_acting_name: None,
             lan_acting_uuid: None,
             tnt_refused: None,
@@ -21407,6 +21424,7 @@ fn load_resources(
             environment,
             collision,
             motion,
+            spawn_registries: horizon_client::mobs::finalize::SpawnRegistries::load(&root),
             threads,
         },
         rest: std::sync::OnceLock::new(),
@@ -22095,6 +22113,12 @@ fn start_game<'a>(
     if game.options.execution_role == execution_role::ExecutionRole::DedicatedServer {
         game.run_dedicated()?;
         return Ok(None);
+    }
+    // FMLClientSetupEvent: once per process, here in `run`, after the initial load applied.
+    // A dedicated server has no client and returned above; a splitscreen guest's `run` is
+    // another local player of the same process.
+    if game.options.is_client_start() {
+        game.native_client_setup();
     }
     match game.options.world.clone() {
         _ if game.options.server.is_some() => {

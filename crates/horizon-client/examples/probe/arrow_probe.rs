@@ -109,6 +109,7 @@ pub fn main() -> Result<()> {
                             facts: &facts,
                             collision: &binding,
                             fluids: &motion.fluids,
+                            loop_context: crate::test_resources::server_loop_context(),
                             raining: &no_rain,
                             mob_griefing: true,
                             tnt_explodes: true,

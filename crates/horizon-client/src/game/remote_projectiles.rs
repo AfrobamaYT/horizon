@@ -673,7 +673,15 @@ impl Game<'_> {
         );
         self.tnts.retain_mut(|t| {
             // A fluid lookup that fails leaves it where its move put it.
-            let _ = t.tick(world, collision, assets, facts, fluids, border);
+            let _ = t.tick(
+                world,
+                collision,
+                assets,
+                facts,
+                fluids,
+                &self.loop_context,
+                border,
+            );
             t.fuse > 0
         });
         // PrimedTnt.tick: while the fuse is still lit, a client adds one SMOKE

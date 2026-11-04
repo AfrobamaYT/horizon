@@ -50,6 +50,19 @@ impl<'a> LevelSound<'a> {
     }
 }
 
+/// A sound bound to an entity (`level.playSound(except, entity, ...)`),
+/// waiting for the end of the tick to be asked of the mods and sent.
+pub(super) struct BoundSound {
+    pub name: String,
+    pub at: [f64; 3],
+    pub volume: f32,
+    pub pitch: f32,
+    pub source: SoundSource,
+    pub emitter: u32,
+    /// The connection of the player vanilla leaves out, who played it already.
+    pub except: Option<u32>,
+}
+
 /// A sound after the mods: what goes in the packet.
 pub(super) struct HeardSound<'a> {
     pub name: Cow<'a, str>,
@@ -65,6 +78,50 @@ fn listened() -> bool {
 }
 
 impl Game<'_> {
+    /// `ServerLevel.playSeededSound`'s entity overload, `playSound(except,
+    /// emitter, ...)`: `sound` plays here and, while the level's sounds are
+    /// captured for others, joins the tick's bound sounds. `lan_broadcast_effects` asks
+    /// them of the mods (`play_level_sound_at_entity`) after the tick's
+    /// other sounds, and sends them to the players around but the one on
+    /// connection `except`.
+    pub(super) fn play_bound_sound(
+        &mut self,
+        sound: LevelSound<'_>,
+        emitter: u32,
+        except: Option<u32>,
+    ) {
+        self.audio
+            .play_unshared(sound.name, Some(sound.at), sound.volume, sound.pitch);
+        // Kept while the level's sounds are captured for others, as
+        // `Audio.play` keeps the rest.
+        if self.audio.capture.is_some() {
+            self.bound_sounds.push(BoundSound {
+                name: sound.name.to_owned(),
+                at: sound.at,
+                volume: sound.volume,
+                pitch: sound.pitch,
+                source: sound.source,
+                emitter,
+                except,
+            });
+        }
+    }
+
+    /// The tick's bound sounds, in the order they played, for the players.
+    pub(super) fn send_bound_sounds(&mut self) {
+        for s in std::mem::take(&mut self.bound_sounds) {
+            let sound = LevelSound {
+                name: &s.name,
+                at: s.at,
+                volume: s.volume,
+                pitch: s.pitch,
+                source: s.source,
+                emitter: Some(s.emitter),
+            };
+            self.send_level_sound(sound, s.except);
+        }
+    }
+
     /// `Level.playSound`'s packet for the players near the sound's position in
     /// the level in place, but the player on connection `except`, once the
     /// mods allowed it.
@@ -168,7 +225,7 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use super::super::native_sound_refs::tests::{guest, packets};
     use horizon_client::lan::{NetConfig, hub::HubConfig};
-    use horizon_client::mobs::Mob;
+    use horizon_client::mobs::{Mob, MobEvent};
     use horizon_core::geometry::Vec3;
     use horizon_protocol::packets::play::Clientbound;
     use mod_api::{NativeSoundSource, ServerHost, SoundSource};
@@ -210,6 +267,116 @@ mod tests {
             *e.sound = mod_api::Identifier::parse("minecraft:entity.cow.ambient").unwrap();
             mod_api::Flow::Continue
         }
+    }
+
+    /// Opens the world to the network in place, with no one joined yet.
+    fn host(game: &mut super::Game<'_>) {
+        let net = NetConfig {
+            listen: false,
+            announce: false,
+            lod_distance: 0,
+            ..NetConfig::lan(0, String::new(), 3)
+        };
+        let config = HubConfig {
+            default_game_mode: 0,
+            guest_commands: false,
+            force_game_mode: false,
+            hardcore: false,
+            view_distance: 2,
+            simulation_distance: 2,
+            dimension: game.dim.id().to_owned(),
+            allow_flight: true,
+            seed: 0,
+            max_players: 3,
+            integrated: true,
+            levels: game.level_shapes,
+        };
+        let settings = LanSettings {
+            port: 0,
+            guest_commands: false,
+            force_game_mode: false,
+        };
+        game.lan_host(settings, net, config).unwrap();
+    }
+
+    /// Vanilla's `playSound(except, entity, ...)` sites ask
+    /// `play_level_sound_at_entity` with their entity, at the end of the
+    /// tick, in vanilla's source: a goat's ram (the mobs' `BoundSound`) and
+    /// a dispenser shearing a snow golem. Each reaches the players once.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn entity_bound_sites_ask_at_their_entity() {
+        let heard = Arc::default();
+        let mods = vec![mod_api::ModEntry::new(
+            "sounds",
+            Box::new(Sounds(Arc::clone(&heard))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                host(game);
+                let (a, rx) = guest(21, 21, [1.0, 64.0, 2.0]);
+                game.lan.as_mut().unwrap().hub.guests.push(a);
+                let mob = |game: &mut super::Game<'_>, id, kind: &str, x| {
+                    let kind = game.res.mob_types().get(kind).unwrap().clone();
+                    game.mobs
+                        .push(Mob::new(id, kind, Vec3::new(x, 64.0, 2.0), 0.0));
+                };
+                mob(game, 50, "minecraft:goat", 2.0);
+                mob(game, 51, "minecraft:snow_golem", 4.0);
+
+                // RamTarget: level.playSound(null, goat, RAM_IMPACT, NEUTRAL, 1, 1).
+                let goat = game.mobs.iter().find(|m| m.id == 50).unwrap();
+                let ram = MobEvent::bound_sound(
+                    goat,
+                    "entity.goat.ram_impact",
+                    SoundSource::Neutral,
+                    1.0,
+                    1.0,
+                );
+                game.handle_mob_events(vec![ram]).unwrap();
+                // SnowGolem.shear from a dispenser: BLOCKS.
+                assert!(game.shear_entity((4, 64, 2)).unwrap());
+                assert!(
+                    heard.lock().unwrap().is_empty(),
+                    "asked at the end of the tick"
+                );
+                assert!(
+                    game.audio.capture.as_ref().unwrap().is_empty(),
+                    "not also sent as a positional sound"
+                );
+
+                game.lan_broadcast_effects();
+                assert_eq!(
+                    *heard.lock().unwrap(),
+                    [
+                        (
+                            "entity",
+                            "minecraft:entity.goat.ram_impact".into(),
+                            Some(50)
+                        ),
+                        (
+                            "entity",
+                            "minecraft:entity.snow_golem.shear".into(),
+                            Some(51)
+                        ),
+                    ]
+                );
+                // The mod made both a cow's; the sources stay vanilla's.
+                let sources: Vec<_> = packets(&rx)
+                    .into_iter()
+                    .filter_map(|p| match p {
+                        Clientbound::Sound(p) => Some(p.source),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    sources,
+                    [SoundSource::Neutral as i32, SoundSource::Blocks as i32]
+                );
+                assert!(game.bound_sounds.is_empty());
+            });
+        });
     }
 
     /// `PlayLevelSoundEvent`: the tick's sounds are asked at a position, a

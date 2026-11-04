@@ -570,16 +570,25 @@ that player's packet would run it:
   `useOn`, which is how a block item is placed;
 - `PlayerAction::UseItem { hand }` is a use in the air (`ServerPlayerGameMode.useItem`), by the item's own ray from
   the player's eyes and look: a bucket clicked on a block passes, as vanilla's does, and empties when used.
+- `PlayerAction::Attack { target }` is a hit with the main hand (`handleInteract`'s ATTACK, then `Player.attack`):
+  the border and the attack range, the native mods' `attack_entity`, then the blow on a player, a mob or another
+  entity, or a fireball, wind charge or shulker bullet turned back. The blow is scaled by the attack strength, as a
+  player's is, so a fake that hits every tick does a fraction of a full blow. A mob doesn't take the fake as the
+  player to answer;
+- `PlayerAction::BreakBlock { pos }` breaks the block at once (`ServerPlayerGameMode.destroyBlock`): reach, the build
+  height, spawn protection and the border, then the game mode's and the held tool's rules (adventure mode can't, a
+  sword in creative can't, and outside creative a block no digging breaks, destroy time -1 such as bedrock, stays), the native mods' `break_block`, the tool's wear and the drops. There is no digging time:
+  a machine that digs over time counts its own progress and breaks the block when it is done.
 
 Its items are its own inventory: set the stack in its hand first (through `ENTITY_ITEMS` or an `ItemPlace`), and
 read what is left after. The answer says what happened:
 
 | Answer | Meaning |
 |---|---|
-| `Ok(ActionOutcome::Consumed)` | Vanilla's `InteractionResult` consumed (a success or a consume) |
-| `Ok(ActionOutcome::Passed)` | Nothing used the click |
+| `Ok(ActionOutcome::Consumed)` | Vanilla's `InteractionResult` consumed (a success or a consume), the blow landed, or the block broke |
+| `Ok(ActionOutcome::Passed)` | Nothing used the click, a mod or the game stopped the blow, or the block stayed |
 | `Ok(ActionOutcome::EffectBlocked(effect))` | The click ran, but what it would start was stopped: a menu or screen, sleeping, riding, or going to another dimension (`FakeEffect`). The click's own side effects have still happened then: the swing seen by others, the hooks that run before the use, vanilla's `Success` |
-| `Err(ActionRefused::…)` | Nothing ran: `NotFake` (a real player's handle), `Stale`, `Busy` (another player's turn, an open transaction, or a hook inside another `perform_action`), `OutOfReach` or `Protected` |
+| `Err(ActionRefused::…)` | Nothing ran: `NotFake` (a real player's handle), `Stale`, `Busy` (another player's turn, an open transaction, or a hook inside another `perform_action`), `OutOfReach`, `Protected`, or `InvalidTarget` (an attack on the fake itself or an entity not in its level) |
 
 What a machine does beyond a player's action stays in the mod: a deployer's reach and eye height, its own mining
 progress, catching its drops.
