@@ -9148,7 +9148,7 @@ impl Game<'_> {
         &self,
         call: mod_api::__private::ApplyEffectTickCall<'_>,
     ) {
-        mod_api::dispatch_apply_effect_tick(self, call);
+        self.fire_apply_effect_tick(call);
     }
     /// `MobEffect.onEffectAdded`: `LivingEntity.addEffect` gave `entity`
     /// (as in `native_apply_effect_tick`) the content mod's effect `effect`,
@@ -9512,14 +9512,14 @@ impl HitLevel<'_> {
     /// fall-immune entity is told with zero damage and keeps its immunity. Players and mobs
     /// land here; dropped items, projectiles and the other entities do not yet.
     pub(super) fn native_fall_on(&mut self, call: mod_api::__private::FallOnCall<'_>) {
-        mod_api::dispatch_fall_on(self, call);
+        self.fire_fall_on(call);
     }
     /// `Block.bounceOn`: entity `entity` of type `kind` bounced off `state` at `pos` and fell
     /// `fall_distance` blocks. `movement` is the movement the bounce leaves it, before
     /// vanilla sets it: change it to change what the entity keeps. Players and mobs bounce
     /// here; dropped items and the other entities do not yet.
     pub(super) fn native_bounce_on(&mut self, call: mod_api::__private::BounceOnCall<'_>) {
-        mod_api::dispatch_bounce_on(self, call);
+        self.fire_bounce_on(call);
     }
     /// NeoForge's `LivingIncomingDamageEvent`: `LivingEntity.hurtServer`, past its guards (an
     /// invulnerable or dead entity, fire on a fire-resistant one), is about to hurt entity
@@ -9539,7 +9539,7 @@ impl HitLevel<'_> {
         &mut self,
         call: mod_api::__private::LivingIncomingDamageCall<'_>,
     ) {
-        mod_api::dispatch_living_incoming_damage(self, call);
+        self.fire_living_incoming_damage(call);
     }
     /// NeoForge's `LivingKnockBackEvent`: `LivingEntity.knockback` is about to push entity
     /// `entity` of type `kind` (`minecraft:zombie`, `minecraft:player`) `strength` away from the
@@ -9565,7 +9565,7 @@ impl HitLevel<'_> {
         &mut self,
         call: mod_api::__private::LivingKnockbackCall<'_>,
     ) {
-        mod_api::dispatch_living_knockback(self, call);
+        self.fire_living_knockback(call);
     }
     /// NeoForge's `LivingDamageEvent.Pre`: `LivingEntity.actuallyHurt` of entity `entity` of
     /// type `kind` (`minecraft:player`, `minecraft:zombie`) by `source` (named as
