@@ -4048,11 +4048,11 @@ mod teleport_pitch_tests {
         ] {
             game.yaw = 10.0;
             game.pitch = 20.0;
-            game.teleport_to_in_level(Target::Player, [0.0; 3], Some(rotation));
+            game.teleport_to_in_level(Target::Player, [0.0; 3], Some(rotation), [false; 3]);
             assert_eq!([game.yaw, game.pitch], expected);
             game.mobs[0].yaw = 10.0;
             game.mobs[0].head_pitch = 20.0;
-            game.teleport_to_in_level(Target::Mob(42), [0.0; 3], Some(rotation));
+            game.teleport_to_in_level(Target::Mob(42), [0.0; 3], Some(rotation), [false; 3]);
             assert_eq!([game.mobs[0].yaw, game.mobs[0].head_pitch], expected);
         }
         game.build_registries();
