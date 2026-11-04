@@ -235,12 +235,7 @@ impl Game<'_> {
                             created: Vec::new(),
                             jockey_rider: None,
                         };
-                        horizon_client::mobs::finalize::finalize(
-                            &mut cx,
-                            &mut mob,
-                            reason.into(),
-                            None,
-                        );
+                        horizon_client::mobs::finalize::finalize(&mut cx, &mut mob, reason, None);
                         for m in cx.created {
                             let bounds = m.bounds();
                             l.pending.borrow_mut().push(bounds);

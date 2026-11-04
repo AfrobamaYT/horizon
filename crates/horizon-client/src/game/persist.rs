@@ -832,7 +832,7 @@ impl Game<'_> {
             self.finalize_plain(
                 &mut m,
                 &difficulty,
-                horizon_client::mobs::finalize::Reason::Structure,
+                horizon_client::mobs::spawn_rules::Reason::Structure,
             );
         }
         let id = m.id;

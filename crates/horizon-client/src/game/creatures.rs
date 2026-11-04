@@ -526,7 +526,7 @@ impl Game<'_> {
                 self.finalize_plain(
                     &mut mob,
                     &difficulty,
-                    horizon_client::mobs::finalize::Reason::MobSummoned,
+                    horizon_client::mobs::spawn_rules::Reason::MobSummoned,
                 );
             }
         }
@@ -742,7 +742,7 @@ impl Game<'_> {
             horizon_client::mobs::finalize::zombie_attributes(
                 &mut mob,
                 special,
-                horizon_client::mobs::finalize::Reason::Conversion,
+                horizon_client::mobs::spawn_rules::Reason::Conversion,
             );
         }
         match (from.species(), kind) {
@@ -985,7 +985,7 @@ impl Game<'_> {
     ) -> Finalized {
         let (outcome, difficulty) = self.finalize_spawn_event(mob, reason, spawner);
         if outcome == Finalized::Done {
-            self.finalize_plain(mob, &difficulty, reason.into());
+            self.finalize_plain(mob, &difficulty, reason);
         }
         outcome
     }

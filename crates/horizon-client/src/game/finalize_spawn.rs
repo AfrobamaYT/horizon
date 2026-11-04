@@ -11,7 +11,7 @@
 
 use super::Game;
 use horizon_client::collisions::{SceneCollisions, no_collision_empty};
-use horizon_client::mobs::{Mob, Species, finalize, spawning};
+use horizon_client::mobs::{Mob, Species, finalize, spawn_rules::Reason, spawning};
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::food::Difficulty;
 
@@ -88,10 +88,10 @@ impl finalize::FinalizeLevel for FinalizeGame<'_, '_> {
     }
     /// `EntityType.create(level, reason)` over the live level: a new id and
     /// the type's own table entry, or None where the type cannot exist.
-    fn spawn_event(&mut self, mob: &mut Mob, reason: finalize::Reason) -> finalize::SpawnEvent {
+    fn spawn_event(&mut self, mob: &mut Mob, reason: Reason) -> finalize::SpawnEvent {
         self.game.finalize_spawn_event_result(mob, reason)
     }
-    fn create(&mut self, kind: &str, _: finalize::Reason) -> Option<Mob> {
+    fn create(&mut self, kind: &str, _: Reason) -> Option<Mob> {
         if self.game.world.health_rules.difficulty == Difficulty::Peaceful
             && !finalize::allowed_in_peaceful(kind)
         {
@@ -155,9 +155,9 @@ impl Game<'_> {
     pub(super) fn finalize_spawn_event_result(
         &self,
         mob: &Mob,
-        reason: finalize::Reason,
+        reason: Reason,
     ) -> finalize::SpawnEvent {
-        let (outcome, _) = self.finalize_spawn_event(mob, reason.into(), None);
+        let (outcome, _) = self.finalize_spawn_event(mob, reason, None);
         match outcome {
             super::creatures::Finalized::Cancelled => finalize::SpawnEvent::Cancelled,
             super::creatures::Finalized::Skipped => finalize::SpawnEvent::Skip,
@@ -172,7 +172,7 @@ impl Game<'_> {
         &mut self,
         mob: &mut Mob,
         difficulty: &spawning::LocalDifficulty,
-        reason: finalize::Reason,
+        reason: Reason,
     ) {
         let mut random = self.world.random.clone();
         let mut level = FinalizeGame { game: self };
@@ -261,7 +261,7 @@ mod tests {
             let seed = 0xC0FFEE_i64;
             game.world.random = LegacyRandom::new(seed);
             let difficulty = game.local_difficulty([8.0, 65.0, 8.0]);
-            game.finalize_plain(&mut mob, &difficulty, finalize::Reason::Natural);
+            game.finalize_plain(&mut mob, &difficulty, Reason::Natural);
 
             let mut shadow = LegacyRandom::new(seed);
             let draws = vanilla_draws(&mut shadow, difficulty.special());
@@ -291,15 +291,11 @@ mod tests {
             let mut plain = zombie(game);
             let difficulty = game.local_difficulty([8.0, 65.0, 8.0]);
             game.world.random = LegacyRandom::new(42_i64);
-            let outcome = game.finalize_with(
-                &mut with,
-                horizon_client::mobs::spawn_rules::Reason::Natural,
-                None,
-            );
+            let outcome = game.finalize_with(&mut with, Reason::Natural, None);
             assert_eq!(outcome, super::super::creatures::Finalized::Done);
             // The same stream for the plain path: same seed, same draws.
             game.world.random = LegacyRandom::new(42_i64);
-            game.finalize_plain(&mut plain, &difficulty, finalize::Reason::Natural);
+            game.finalize_plain(&mut plain, &difficulty, Reason::Natural);
 
             assert_eq!(with.extra.left_handed, plain.extra.left_handed);
             assert_eq!(with.extra.pick_up_loot, plain.extra.pick_up_loot);
@@ -323,7 +319,7 @@ mod tests {
         crate::game::native_guest_turn_tests::with_guests(|game| {
             let mut w = mob_of(game, 1, "minecraft:wither_skeleton");
             let difficulty = game.local_difficulty([8.0, 65.0, 8.0]);
-            game.finalize_plain(&mut w, &difficulty, finalize::Reason::MobSummoned);
+            game.finalize_plain(&mut w, &difficulty, Reason::MobSummoned);
             assert_eq!(finalize::value(&w, finalize::Attr::AttackDamage), 4.0);
             assert_eq!(w.attrs.attack_damage, 4.0);
         });
@@ -339,7 +335,7 @@ mod tests {
             let mut left = 0;
             for id in 1..=400u32 {
                 let mut m = mob_of(game, id, "minecraft:skeleton");
-                game.finalize_plain(&mut m, &difficulty, finalize::Reason::MobSummoned);
+                game.finalize_plain(&mut m, &difficulty, Reason::MobSummoned);
                 assert!(finalize::has_modifier(
                     &m,
                     finalize::Attr::FollowRange,
@@ -351,7 +347,7 @@ mod tests {
             assert!((5..=40).contains(&left), "{left} of 400 left-handed");
             // A bred baby never ran it.
             let mut cow = mob_of(game, 1, "minecraft:cow");
-            game.finalize_plain(&mut cow, &difficulty, finalize::Reason::MobSummoned);
+            game.finalize_plain(&mut cow, &difficulty, Reason::MobSummoned);
             cow.extra.left_handed = true;
             spawning::bred_offspring(&mut cow);
             assert!(!finalize::has_modifier(
@@ -366,7 +362,7 @@ mod tests {
             );
             // CaveSpider.finalizeSpawn does not call super.
             let mut c = mob_of(game, 1, "minecraft:cave_spider");
-            game.finalize_plain(&mut c, &difficulty, finalize::Reason::MobSummoned);
+            game.finalize_plain(&mut c, &difficulty, Reason::MobSummoned);
             assert!(!finalize::has_modifier(
                 &c,
                 finalize::Attr::FollowRange,
@@ -440,7 +436,7 @@ mod tests {
             };
             for id in 1..=400u32 {
                 let mut s = mob_of(game, id, "minecraft:strider");
-                game.finalize_plain(&mut s, &difficulty, finalize::Reason::Natural);
+                game.finalize_plain(&mut s, &difficulty, Reason::Natural);
             }
             assert!(piglins(game) > 0, "riders with the rules on");
             // `spawn_monsters` off: no rider, though the difficulty allows it.
@@ -448,7 +444,7 @@ mod tests {
             let before = piglins(game);
             for id in 1000..=1400u32 {
                 let mut s = mob_of(game, id, "minecraft:strider");
-                game.finalize_plain(&mut s, &difficulty, finalize::Reason::Natural);
+                game.finalize_plain(&mut s, &difficulty, Reason::Natural);
             }
             assert_eq!(piglins(game), before);
         });

@@ -438,7 +438,7 @@ impl GameLevel<'_, '_> {
                     created: Vec::new(),
                     jockey_rider: None,
                 };
-                horizon_client::mobs::finalize::finalize(&mut cx, &mut mob, r.reason.into(), None);
+                horizon_client::mobs::finalize::finalize(&mut cx, &mut mob, r.reason, None);
                 for m in cx.created {
                     let bounds = m.bounds();
                     self.pending.borrow_mut().push(bounds);
@@ -473,7 +473,7 @@ impl horizon_client::mobs::finalize::FinalizeLevel for PassLevel<'_, '_, '_> {
     fn spawn_event(
         &mut self,
         mob: &mut horizon_client::mobs::Mob,
-        reason: horizon_client::mobs::finalize::Reason,
+        reason: horizon_client::mobs::spawn_rules::Reason,
     ) -> horizon_client::mobs::finalize::SpawnEvent {
         self.l.game.finalize_spawn_event_result(mob, reason)
     }
@@ -531,7 +531,7 @@ impl horizon_client::mobs::finalize::FinalizeLevel for PassLevel<'_, '_, '_> {
     fn halloween(&self) -> bool {
         self.l.game.finalize_halloween()
     }
-    fn create(&mut self, kind: &str, _: horizon_client::mobs::finalize::Reason) -> Option<Mob> {
+    fn create(&mut self, kind: &str, _: horizon_client::mobs::spawn_rules::Reason) -> Option<Mob> {
         use horizon_world::food::Difficulty;
         if self.l.game.world.health_rules.difficulty == Difficulty::Peaceful
             && !horizon_client::mobs::finalize::allowed_in_peaceful(kind)
