@@ -1,0 +1,12 @@
+{
+  "hooks": [
+    {
+      "name": "is_pathfindable",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_is_pathfindable",
+      "side": "server",
+      "host": "read",
+      "neoforge": "IBlockExtension.isPathfindable",
+      "mod_api": {"contract": "collect", "out": "pathfindable", "scope": "block", "key": "state"}
+    }
+  ]
+}

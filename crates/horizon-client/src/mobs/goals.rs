@@ -1126,7 +1126,7 @@ impl Goal for Stroll {
                         q[1].floor() as i32,
                         q[2].floor() as i32,
                     );
-                    if cx.w.data.state(s).flags & super::data::WATER != 0 || count >= 10 {
+                    if cx.w.data.pathfindable(s, super::data::PathComputationType::Water) || count >= 10 {
                         break;
                     }
                     count += 1;
@@ -2705,7 +2705,7 @@ impl BreathAir {
             let s = cx.w.world.block(x, yy, z);
             let f = cx.w.facts.get(s);
             if (f.fluid == crate::blocks::Fluid::None || &*f.name == "minecraft:bubble_column")
-                && cx.w.data.state(s).flags & super::data::LAND != 0
+                && cx.w.data.pathfindable(s, super::data::PathComputationType::Land)
             {
                 dest = Some([x, yy, z]);
                 break;

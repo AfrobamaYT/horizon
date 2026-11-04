@@ -2,7 +2,10 @@
 //! the walking, swimming, flying and amphibious node evaluators
 //! (`WalkNodeEvaluator`, `SwimNodeEvaluator`, `FlyNodeEvaluator`,
 //! `AmphibiousNodeEvaluator`), ported rule for rule.
-use super::{MobWorld, data};
+use super::{
+    MobWorld,
+    data::{self, PathComputationType},
+};
 use crate::blocks::Fluid;
 use crate::fast_hash::FxHashMap;
 use horizon_core::geometry::{Aabb, Vec3};
@@ -369,6 +372,9 @@ impl<'a, 'w> Finder<'a, 'w> {
     fn state(&self, x: i32, y: i32, z: i32) -> data::StateData {
         self.w.data.state(self.w.world.block(x, y, z))
     }
+    fn pathfindable(&self, x: i32, y: i32, z: i32, kind: PathComputationType) -> bool {
+        self.w.data.pathfindable(self.w.world.block(x, y, z), kind)
+    }
     fn type_from_state(&self, x: i32, y: i32, z: i32) -> PathType {
         self.w.path_type_from_state(x, y, z)
     }
@@ -554,9 +560,8 @@ impl<'a, 'w> Finder<'a, 'w> {
             for yy in y..y + self.entity_height {
                 for zz in z..z + self.entity_depth {
                     let fluid = self.fluid(xx, yy, zz);
-                    let below = self.state(xx, yy - 1, zz);
                     if fluid == Fluid::None
-                        && below.flags & data::WATER != 0
+                        && self.pathfindable(xx, yy - 1, zz, PathComputationType::Water)
                         && self.is_air(xx, yy, zz)
                     {
                         return PathType::Breach;
@@ -568,7 +573,7 @@ impl<'a, 'w> Finder<'a, 'w> {
                 }
             }
         }
-        if self.state(last.0, last.1, last.2).flags & data::WATER != 0 {
+        if self.pathfindable(last.0, last.1, last.2, PathComputationType::Water) {
             PathType::Water
         } else {
             PathType::Blocked
@@ -672,7 +677,7 @@ impl<'a, 'w> Finder<'a, 'w> {
                     start_y = y;
                     y -= 1;
                     let s = self.w.world.block(bx, y, bz);
-                    if !self.w.facts.is_air(s) && self.w.data.state(s).flags & data::LAND == 0 {
+                    if !self.w.facts.is_air(s) && !self.w.data.pathfindable(s, PathComputationType::Land) {
                         break;
                     }
                 }

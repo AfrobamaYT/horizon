@@ -4,14 +4,17 @@
 //! pathfindability, spawn-surface predicates, collision tops, each entity
 //! type's spawn placement and the client's keyframe animation definitions.
 use super::keyframes::Animation;
+use horizon_world::registry::BlockStateId;
 use super::path::PathType;
 use crate::blocks::{BlockFacts, Fluid};
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, fs, path::Path, sync::atomic::{AtomicU8, Ordering}};
 
-pub const LAND: u16 = 1;
-pub const WATER: u16 = 2;
-pub const AIR: u16 = 4;
+const LAND: u16 = 1;
+const WATER: u16 = 2;
+const AIR: u16 = 4;
+/// Set in a state's override byte once a mod part answered `isPathfindable` for it.
+const OVERRIDDEN: u8 = 0x80;
 /// `isValidSpawn` for a typical monster (zombie).
 pub const VALID_SPAWN: u16 = 8;
 /// `isValidSpawn` for ocelots/parrots (leaves allowed).
@@ -25,6 +28,24 @@ pub const STURDY_TOP: u16 = 256;
 /// BlockState.isSolid
 pub const SOLID: u16 = 512;
 pub const SOLID_RENDER: u16 = 1024;
+
+/// `PathComputationType`: what a path is computed for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PathComputationType {
+    Land,
+    Water,
+    Air,
+}
+impl PathComputationType {
+    pub const ALL: [Self; 3] = [Self::Land, Self::Water, Self::Air];
+    fn bit(self) -> u16 {
+        match self {
+            Self::Land => LAND,
+            Self::Water => WATER,
+            Self::Air => AIR,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct StateData {
@@ -40,8 +61,14 @@ pub enum Placement {
     InLava,
     NoRestrictions,
 }
+fn no_overrides(states: &[StateData]) -> Vec<AtomicU8> {
+    states.iter().map(|_| AtomicU8::new(0)).collect()
+}
 pub struct MobData {
     pub states: Vec<StateData>,
+    /// Each state's `isPathfindable` answers a mod part gave (see [`MobData::set_pathfindable`]),
+    /// by state: [`OVERRIDDEN`] plus one bit per [`PathComputationType`]. Zero for the rest.
+    pathfindable_overrides: Vec<AtomicU8>,
     pub placements: HashMap<String, Placement>,
     /// Each entity type's `SpawnPlacements.getHeightmapType`.
     pub heightmaps: HashMap<String, String>,
@@ -109,6 +136,39 @@ impl MobData {
             .map(|v| Self::from_json(&v).animations)
             .unwrap_or_default()
     }
+    /// `BlockState.isPathfindable(type)`: the block's own answer, or the one a mod part gave.
+    pub fn pathfindable(&self, state: BlockStateId, kind: PathComputationType) -> bool {
+        let given = self
+            .pathfindable_overrides
+            .get(state.0 as usize)
+            .map_or(0, |slot| slot.load(Ordering::Relaxed));
+        if given & OVERRIDDEN != 0 {
+            u16::from(given) & kind.bit() != 0
+        } else {
+            self.state(state).flags & kind.bit() != 0
+        }
+    }
+    /// Replace the answers mod parts gave. With `asked`, `answer` is called once per state and
+    /// type with the block's own answer, so the answers depend on the state and the type alone;
+    /// without it, every state answers as its block does.
+    pub fn set_pathfindable(
+        &self,
+        asked: bool,
+        answer: impl Fn(BlockStateId, PathComputationType, bool) -> bool,
+    ) {
+        for (i, slot) in self.pathfindable_overrides.iter().enumerate() {
+            let state = BlockStateId(i as u32);
+            let given = if asked {
+                PathComputationType::ALL
+                    .into_iter()
+                    .filter(|&kind| answer(state, kind, self.state(state).flags & kind.bit() != 0))
+                    .fold(OVERRIDDEN, |bits, kind| bits | kind.bit() as u8)
+            } else {
+                0
+            };
+            slot.store(given, Ordering::Relaxed);
+        }
+    }
     pub fn entity_has(&self, tag: &str, entity: &str) -> bool {
         self.entity_tags
             .get(tag)
@@ -118,7 +178,7 @@ impl MobData {
         self.biome_tags.get(tag).is_some_and(|s| s.contains(biome))
     }
     fn from_json(v: &Value) -> Self {
-        let states = v["states"]
+        let states: Vec<StateData> = v["states"]
             .as_array()
             .into_iter()
             .flatten()
@@ -155,6 +215,7 @@ impl MobData {
             .map(|(k, a)| (k.clone(), Animation::parse(a)))
             .collect();
         Self {
+            pathfindable_overrides: no_overrides(&states),
             states,
             placements,
             heightmaps,
@@ -172,7 +233,7 @@ impl MobData {
     }
     /// Without the export, approximate path types from the gameplay facts.
     pub fn fallback(facts: &BlockFacts) -> Self {
-        let states = facts
+        let states: Vec<StateData> = facts
             .states
             .iter()
             .map(|f| {
@@ -216,6 +277,7 @@ impl MobData {
             })
             .collect();
         Self {
+            pathfindable_overrides: no_overrides(&states),
             states,
             placements: HashMap::new(),
             heightmaps: HashMap::new(),
@@ -231,7 +293,7 @@ impl MobData {
             species_placements: Default::default(),
         }
     }
-    pub fn state(&self, id: horizon_world::registry::BlockStateId) -> StateData {
+    pub fn state(&self, id: BlockStateId) -> StateData {
         self.states
             .get(id.0 as usize)
             .copied()
