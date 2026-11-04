@@ -2841,6 +2841,9 @@ impl Game<'_> {
                 // `Level.setBlockAndUpdate`: neighbour and shape updates, so a crop
                 // above trampled farmland breaks and drops.
                 MobEvent::SetBlock { pos, state } => self.level_set(pos, state)?,
+                MobEvent::PlaceBlock { mob, pos, state } => {
+                    self.mob_place_block(mob, pos, state)?
+                }
                 MobEvent::CropRaided {
                     pos,
                     state,

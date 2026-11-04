@@ -54,6 +54,7 @@ use horizon_core::{
     position::BlockPos,
     ticks::{ScheduleResult, TickPriority},
 };
+use horizon_world::level::PlaceContext;
 use horizon_world::{
     consumable::UseAnimation,
     fluid::{FluidKind, FluidState},
@@ -64,12 +65,12 @@ use horizon_world::{
 use mod_api::NativePermissionLevel;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, ClientReloadListeners, EffectTickChange, EntityRef, EquipmentSlot,
-    GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
-    NativeHandRender, NativeItemDrop, NativeLifecycleContext, NativeNoteBlockChange,
-    NativePlayerFood, NativeProgressType, NativeServerPlayer, PathComputationType,
-    RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase, TicketController,
-    ToolUse, WorldPhase,
+    self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EntityRef,
+    EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand,
+    NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
+    NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
+    PathComputationType, Placement, RecipeBookCategory, ScreenOpening, ServerReloadListeners,
+    ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
@@ -6598,17 +6599,31 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_destroy_block(self, pos, state, canceled);
     }
-    /// A player placed `stack` as the block `state` at `pos`: where
-    /// `BlockItem.place` set it, before the stack shrinks. It only hears; a
-    /// mod stops a placement by claiming `native_use_on`, which runs
-    /// before it. Server-side, for every player of the world.
-    pub(super) fn native_place_block(
+    /// `BlockEvent.EntityPlaceEvent` (and `EntityMultiPlaceEvent`, which
+    /// extends it): `placer` is about to set the block `state` at `pos`
+    /// against `placed_against`, as a player placing an item
+    /// (`BlockItem.place`, before the stack shrinks), an enderman putting its
+    /// block down or a snow golem's trail. `placement` is `Multi` when the
+    /// placement writes more blocks (bed, door, tall plant). Cancel stops
+    /// the whole placement. Server-side.
+    pub(super) fn native_entity_place(
         &mut self,
-        stack: &ItemStack,
-        pos: [i32; 3],
+        placer: Option<EntityRef>,
+        pos: BlockPos,
         state: BlockStateId,
+        placed_against: BlockStateId,
+        placement: Placement,
+        canceled: &mut bool,
     ) {
-        mod_api::dispatch_place_block(self, stack, pos, state);
+        mod_api::dispatch_entity_place(
+            self,
+            placer,
+            pos,
+            state,
+            placed_against,
+            placement,
+            canceled,
+        );
     }
     /// A player right clicks a block (NeoForge's
     /// `PlayerInteractEvent.RightClickBlock`): once per hand, where
@@ -9579,6 +9594,90 @@ impl Game<'_> {
         );
         canceled.then_some(successful)
     }
+    /// Whether a mod canceled `placer` writing `state` at `pos` (`entity_place`):
+    /// `placer` is an entity id, `placed_against` the block it goes against and
+    /// `companion` the second half of a bed, door or tall plant.
+    pub(super) fn place_canceled(
+        &mut self,
+        placer: u32,
+        pos: BlockPos,
+        state: BlockStateId,
+        placed_against: BlockStateId,
+        companion: Option<(BlockPos, BlockStateId)>,
+    ) -> bool {
+        if !mod_api::__private::listened(mod_api::HookId::EntityPlace) {
+            return false;
+        }
+        let placement = match companion {
+            None => Placement::Single,
+            Some((at, extra)) => Placement::Multi(Vec::from([
+                BlockPlacement::new(pos, state),
+                BlockPlacement::new(at, extra),
+            ])),
+        };
+        let placer = self.native_entity(placer);
+        let mut canceled = false;
+        self.native_entity_place(placer, pos, state, placed_against, placement, &mut canceled);
+        canceled
+    }
+    /// Whether a mod canceled the block the player's `ctx` would place
+    /// (`entity_place`): nothing is previewed unless a mod listens.
+    pub(super) fn player_place_canceled(&mut self, ctx: &PlaceContext) -> bool {
+        if !mod_api::__private::listened(mod_api::HookId::EntityPlace) {
+            return false;
+        }
+        let Some(preview) =
+            self.with_level(|b, level, ticks| b.placement_preview(level, ticks, ctx))
+        else {
+            return false;
+        };
+        let against = self
+            .world
+            .block(ctx.clicked_pos.x, ctx.clicked_pos.y, ctx.clicked_pos.z);
+        let (_, entity) = self.native_clicker();
+        self.place_canceled(
+            entity.cast_unsigned(),
+            preview.pos,
+            preview.state,
+            against,
+            preview.companion,
+        )
+    }
+    /// `MobEvent::PlaceBlock`: a mob sets `state` at `pos` unless a mod
+    /// cancels `entity_place`; a refused enderman keeps carrying it.
+    pub(super) fn mob_place_block(
+        &mut self,
+        mob: u32,
+        pos: [i32; 3],
+        state: BlockStateId,
+    ) -> crate::Result<()> {
+        let at = BlockPos::new(pos[0], pos[1], pos[2]);
+        let against = self.world.block(pos[0], pos[1] - 1, pos[2]);
+        let kind = self
+            .mobs
+            .iter()
+            .find(|m| m.id == mob)
+            .map(|m| m.kind.id.clone());
+        if self.place_canceled(mob, at, state, against, None) {
+            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob)
+                && &*m.kind.id == "minecraft:enderman"
+            {
+                m.extra.carried = Some(state);
+            }
+            return Ok(());
+        }
+        let facts = self.res.facts();
+        let from = facts
+            .get(self.world.block(pos[0], pos[1], pos[2]))
+            .name
+            .clone();
+        let to = facts.get(state).name.clone();
+        self.level_set(pos, state)?;
+        if let Some(kind) = kind {
+            self.native_entity_change_block(mob, &kind, pos, &from, &to);
+        }
+        Ok(())
+    }
     /// The player clicking, as the block-use hooks name them: the acting
     /// player's UUID and entity id on a server, this client's own player on
     /// a client.
@@ -12408,6 +12507,66 @@ mod entity_inside_tests {
                     2,
                     "a drain empties the queue"
                 );
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod entity_place_tests {
+    use super::*;
+    use mod_api::{EntityPlaceEvent, Flow, Hooks, ModEntry, ServerHost, testing::with_mods};
+    use std::sync::{Arc, Mutex};
+
+    /// Records what `entity_place` is told and answers with `cancel`.
+    struct Placer {
+        seen: Arc<Mutex<Vec<(BlockPos, Placement)>>>,
+        cancel: bool,
+    }
+    #[mod_api::__subscriptions]
+    impl Hooks for Placer {
+        fn entity_place(&self, _host: &mut dyn ServerHost, event: &mut EntityPlaceEvent) -> Flow {
+            self.seen
+                .lock()
+                .unwrap()
+                .push((event.pos, event.placement.clone()));
+            if self.cancel {
+                Flow::Cancel
+            } else {
+                Flow::Continue
+            }
+        }
+    }
+
+    /// A bed placement reaches the hook as one `Multi` of both halves, a
+    /// cancel is reported, and with no listener nothing is asked.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_multi_placement_reaches_the_hook_once_and_cancels() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new(
+            "place_probe",
+            Box::new(Placer {
+                seen: seen.clone(),
+                cancel: true,
+            }),
+        )];
+        with_mods(mods.into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let (foot, head) = (BlockPos::new(1, 64, 1), BlockPos::new(1, 64, 2));
+                let state = game.world.block(0, 0, 0);
+                assert!(game.place_canceled(1, foot, state, state, Some((head, state))));
+            });
+        });
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, BlockPos::new(1, 64, 1));
+        assert!(matches!(&seen[0].1, Placement::Multi(blocks) if blocks.len() == 2));
+        with_mods(Vec::new().into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let at = BlockPos::new(1, 64, 1);
+                let state = game.world.block(0, 0, 0);
+                assert!(!game.place_canceled(1, at, state, state, None));
             });
         });
     }
