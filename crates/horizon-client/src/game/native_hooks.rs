@@ -22,8 +22,8 @@ use super::{
 use horizon_assets::item_model::StackView;
 use horizon_client::creative::Creative;
 use horizon_client::mod_api::{
-    self, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef,
-    NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
+    self, ClientReloadListeners, EffectTickChange, EquipmentSlot, GameRuleActor, InteractionKey,
+    LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop,
     NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
     NativeServerPlayer, RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase,
     TicketController, ToolUse, WorldPhase,
@@ -1950,24 +1950,22 @@ impl Game<'_> {
         );
     }
     /// An interaction key acts on what the crosshair points at
-    /// (`InputEvent.InteractionKeyMappingTriggered`), while playing: `button` 0 is
-    /// the attack key (`key_mapping` `key.attack`), 1 the use key (`key.use`, once
-    /// for each hand it tries, the main hand first), 2 pick block (`key.pickItem`,
-    /// only with something aimed at). The attack fires when an attack is allowed
-    /// and again each tick a held attack key keeps digging a block. Set `canceled`
+    /// (`InputEvent.InteractionKeyMappingTriggered`), while playing: `key` says which.
+    /// The attack fires when an attack is allowed and again each tick a held attack
+    /// key keeps digging a block; the use key fires once for each hand it tries, the
+    /// main hand first; pick block fires only with something aimed at. Set `canceled`
     /// to skip the action: a cancelled use also skips the other hand. A cancelled
     /// attack or use still swings `hand` unless the mod clears `swing_hand` (it
     /// starts true). A server's player and a single player's window only; a mod
     /// that claims an item's use (`mod_use_start`) sees the event first.
-    pub(super) fn native_interaction_key(
+    pub(super) fn native_interaction_key_mapping_triggered(
         &mut self,
-        button: i32,
-        key_mapping: &str,
+        key: InteractionKey,
         hand: horizon_client::first_person::Hand,
         swing_hand: &mut bool,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_interaction_key(self, button, key_mapping, hand, swing_hand, canceled);
+        mod_api::dispatch_interaction_key_mapping_triggered(self, key, hand, swing_hand, canceled);
     }
     /// A command typed or clicked in chat, without its slash, before the
     /// server and Horizon's commands see it: set `ran` when the mod ran it.
@@ -9790,21 +9788,16 @@ impl Game<'_> {
             self.native_panel_key(name);
         }
     }
-    /// `ClientHooks.onClickInput`: tells `native_interaction_key` that `button`
-    /// (0 attack, 1 use, 2 pick) is about to act with `hand`. `None` when the
-    /// action goes on; when a mod cancelled it, `Some` of whether the hand swings.
+    /// `ClientHooks.onClickInput`: tells `native_interaction_key_mapping_triggered` that
+    /// `key` is about to act with `hand`. `None` when the action goes on; when a mod
+    /// cancelled it, `Some` of whether the hand swings.
     pub(super) fn native_interaction(
         &mut self,
-        button: i32,
+        key: InteractionKey,
         hand: horizon_client::first_person::Hand,
     ) -> Option<bool> {
-        let key_mapping = match button {
-            0 => "key.attack",
-            1 => "key.use",
-            _ => "key.pickItem",
-        };
         let (mut swing_hand, mut canceled) = (true, false);
-        self.native_interaction_key(button, key_mapping, hand, &mut swing_hand, &mut canceled);
+        self.native_interaction_key_mapping_triggered(key, hand, &mut swing_hand, &mut canceled);
         canceled.then_some(swing_hand)
     }
     /// A native mod's command.
@@ -11122,7 +11115,8 @@ mod tests {
 mod screen_open_tests {
     use super::*;
     use crate::mod_api::{
-        ClientHost, Hooks, ModEntry, ScreenClosingEvent, ScreenOpeningEvent, testing::with_mods,
+        ClientHost, Flow, Hooks, InteractionKeyMappingTriggeredEvent, ModEntry, ScreenClosingEvent,
+        ScreenOpeningEvent, testing::with_mods,
     };
     use std::sync::{Arc, Mutex};
 
@@ -11143,6 +11137,54 @@ mod screen_open_tests {
                 assert_eq!(areas[1], [x, y + 136.0, 195.0, 28.0]);
             });
         });
+    }
+
+    struct KeyProbe(Arc<Mutex<Vec<String>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for KeyProbe {
+        fn interaction_key_mapping_triggered(
+            &self,
+            _host: &mut dyn ClientHost,
+            event: &mut InteractionKeyMappingTriggeredEvent,
+        ) -> Flow {
+            self.0.lock().unwrap().push(format!("{:?}", event.key));
+            match event.key {
+                InteractionKey::Attack => {
+                    event.swing_hand = false;
+                    Flow::Cancel
+                }
+                InteractionKey::Use => Flow::Cancel,
+                _ => Flow::Continue,
+            }
+        }
+    }
+
+    /// Each key reaches a listener as its own kind; a cancelled attack that clears
+    /// `swing_hand` reports no swing, a cancelled use keeps its swing, and an
+    /// uncancelled pick goes on.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn an_interaction_key_reaches_a_mod_as_its_kind_and_can_be_cancelled() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new("keys", Box::new(KeyProbe(log.clone())))].into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let hand = horizon_client::first_person::Hand::Main;
+                assert_eq!(
+                    game.native_interaction(InteractionKey::Attack, hand),
+                    Some(false)
+                );
+                assert_eq!(
+                    game.native_interaction(InteractionKey::Use, hand),
+                    Some(true)
+                );
+                assert_eq!(
+                    game.native_interaction(InteractionKey::PickBlock, hand),
+                    None
+                );
+            });
+        });
+        assert_eq!(take(&log), ["Attack", "Use", "PickBlock"]);
     }
 
     struct Probe {

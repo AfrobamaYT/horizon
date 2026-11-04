@@ -1859,10 +1859,11 @@
       }
     },
     {
-      "name": "interaction_key",
+      "name": "interaction_key_mapping_triggered",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_interaction_key",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_interaction_key_mapping_triggered",
       "neoforge": "InputEvent.InteractionKeyMappingTriggered",
+      "doc": "A player's click is about to act on what the crosshair points at. `event.key` says which: `Attack` (when an attack is allowed, and each tick a held key keeps digging a block), `Use` (once for each hand tried, main hand first, before the hand's target and item) or `PickBlock` (only with a block or entity aimed at). Cancel to skip the action; a cancelled use also gives the other hand no turn. A cancelled attack or use still swings `event.hand` unless the listener clears `event.swing_hand`. Client side: a single player's window and a server's player.",
       "side": "client",
       "cancellable": true,
       "mod_api": {

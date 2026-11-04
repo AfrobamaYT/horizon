@@ -72,6 +72,12 @@ mod tests {
         pub(super) struct NativeBlockClick<'a>(pub &'a ());
         pub(super) struct NativeItemClick<'a>(pub &'a ());
         #[derive(Clone, Copy)]
+        pub(super) enum InteractionKey {
+            Attack,
+            Use,
+            PickBlock,
+        }
+        #[derive(Clone, Copy)]
         pub(super) enum UsePhase {
             ItemBeforeBlock,
             Block,
