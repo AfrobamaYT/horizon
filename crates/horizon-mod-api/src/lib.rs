@@ -1036,6 +1036,58 @@ impl From<LivingRef> for EntityRef {
     }
 }
 
+/// How an attribute modifier changes its attribute
+/// (`AttributeModifier.Operation`). The value is the base plus every
+/// `AddValue`, then grows by that sum times each `AddMultipliedBase`, then is
+/// multiplied by one plus each `AddMultipliedTotal`.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AttributeOperation {
+    /// `add_value`: adds the amount.
+    AddValue,
+    /// `add_multiplied_base`: adds the amount times the base.
+    AddMultipliedBase,
+    /// `add_multiplied_total`: multiplies by one plus the amount.
+    AddMultipliedTotal,
+}
+
+/// An attribute modifier (vanilla's `AttributeModifier`): its id, which is
+/// unique on one attribute of one entity, the amount and the operation.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttributeModifier {
+    /// The modifier's id (`mymod:sprint_boost`).
+    pub id: Identifier,
+    /// The amount the operation applies.
+    pub amount: f64,
+    /// How it applies.
+    pub operation: AttributeOperation,
+}
+
+impl AttributeModifier {
+    /// A modifier with id `id`.
+    pub fn new(id: Identifier, amount: f64, operation: AttributeOperation) -> Self {
+        Self {
+            id,
+            amount,
+            operation,
+        }
+    }
+}
+
+/// Whether an attribute modifier is saved with its entity
+/// (`AttributeInstance.addPermanentModifier`) or lasts until the entity
+/// unloads (`addTransientModifier`), as the modifiers of worn items and
+/// effects do.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ModifierLifetime {
+    /// Not saved: gone when the entity is saved and loaded again.
+    Transient,
+    /// Saved with the entity.
+    Permanent,
+}
+
 /// A living entity's active effect (vanilla's `MobEffectInstance`), as
 /// [`LivingRef`] reads its effects and as `add_effect` gives one: the
 /// effect's id namespaced as the registry has it (`minecraft:speed`, a

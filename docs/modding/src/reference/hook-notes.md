@@ -2177,6 +2177,24 @@ handle, an entity the client doesn't track and a level it doesn't show:
   `LivingEntity.collectEquipmentChanges` does (transient: never saved). The map is built when first needed. Mob
   behavior still reads the type's defaults, so a modifier does not yet change how a mob moves or hits, and an item's
   own `attribute_modifiers` component is not read yet, only the item type's.
+- The writes take players, guests (in their own turn), mobs and armor stands, and answer false for an attribute the
+  type lacks, the dragon (`/attribute` refuses it, and nothing reads its attributes yet), a stale handle, or on a
+  client. `living.add_attribute_modifier(host, id, modifier, lifetime)` is `AttributeInstance.addTransientModifier`
+  or `addPermanentModifier` (`ModifierLifetime`), refused when the attribute already has a modifier with that id
+  (vanilla throws) or the amount is not finite. `replace_attribute_modifier` puts the new one in place of the old
+  (`addOrUpdateTransientModifier`, `addOrReplacePermanentModifier`), and the new lifetime wins.
+  `remove_attribute_modifier(host, id, modifier_id)` is `removeModifier` (false when there was none), and
+  `set_attribute_base(host, id, base)` is `setBaseValue`. `AttributeModifier` holds the modifier's id, amount and
+  `AttributeOperation`. A permanent modifier and a base are saved with the entity; a transient modifier lasts until it
+  unloads. The writes take the one path `/attribute` takes, so they go where the game and the attribute sync read:
+  - a player's own attribute map;
+  - for a mob, the store of the nine attributes its behavior uses (max health, movement and flying speed, follow
+    range, attack damage, knockback resistance, jump strength, burning time, reinforcements), so it moves and hits by
+    them at once; its armor map for armor and toughness, which its damage reads; and for its other attributes, as
+    for an armor stand, the generic map `/attribute` reads and the sync sends.
+
+  The live map behind `attribute_value` takes the same write, so the reads agree with `/attribute`, and the entity's
+  save keeps it. A lower max health cuts a mob's health (`LivingEntity.onAttributeUpdated`).
 - `living.set_health(host, health)` is `LivingEntity.setHealth` (Paper's `Damageable#setHealth`), cut to the
   range from zero to the maximum, with no hook; a non-finite value is refused. This raw write can set zero
   or change a dead entity's health without running the death pipeline.
