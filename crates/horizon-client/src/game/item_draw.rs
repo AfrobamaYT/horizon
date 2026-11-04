@@ -24,7 +24,7 @@ pub(super) struct Env<'a, 'g> {
 }
 impl ItemEnv for Env<'_, '_> {
     fn item_model_property(&self, property: &str, stack: &StackView) -> bool {
-        if !horizon_client::mod_api::listened(horizon_client::mod_api::HookId::ItemModelProperty) {
+        if !mod_api::__private::listened(mod_api::HookId::ItemModelProperty) {
             return false;
         }
         let mut value = false;
@@ -656,7 +656,7 @@ fn item_hdr_light(state: &ItemRenderState, light: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mod_api::ClientHost;
+    use mod_api::ClientHost;
     use serde_json::json;
 
     /// The resolver skips a mod that leaves `item_model_property` at its default;
@@ -664,7 +664,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn item_model_property_is_asked_only_while_a_mod_answers() {
-        use crate::mod_api::{self, HookId, Hooks, ItemModelPropertyEvent, ModEntry};
+        use mod_api::{self, HookId, Hooks, ItemModelPropertyEvent, ModEntry};
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
@@ -691,9 +691,9 @@ mod tests {
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let env = Env { game };
-                assert!(!mod_api::listened(HookId::ItemModelProperty));
+                assert!(!mod_api::__private::listened(HookId::ItemModelProperty));
                 assert!(!env.item_model_property("example:charged", &stack));
-                assert!(!mod_api::listened(HookId::ItemModelProperty));
+                assert!(!mod_api::__private::listened(HookId::ItemModelProperty));
                 assert!(!env.item_model_property("example:charged", &stack));
             });
         });
@@ -707,7 +707,7 @@ mod tests {
                 for _ in 0..3 {
                     assert!(env.item_model_property("example:charged", &stack));
                 }
-                assert!(mod_api::listened(HookId::ItemModelProperty));
+                assert!(mod_api::__private::listened(HookId::ItemModelProperty));
             });
         });
         assert_eq!(calls.load(Ordering::Relaxed), 3);

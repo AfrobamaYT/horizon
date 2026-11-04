@@ -40,15 +40,14 @@ impl ExecutionRole {
 }
 
 use super::Game;
-use crate::mod_api::HostSide;
+use mod_api::HostSide;
 
-impl<'a> HostSide<'a> {
-    pub(super) fn of(game: &'a mut Game<'_>) -> Self {
-        if game.is_logical_server() {
-            Self::Server(game)
-        } else {
-            Self::Client(game)
-        }
+/// The hook host of `game`'s side.
+pub(super) fn host_side<'a>(game: &'a mut Game<'_>) -> HostSide<'a> {
+    if game.is_logical_server() {
+        HostSide::Server(game)
+    } else {
+        HostSide::Client(game)
     }
 }
 

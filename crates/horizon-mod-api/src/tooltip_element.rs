@@ -1,5 +1,5 @@
-use crate::items::ItemStack;
-use crate::text::Text;
+use horizon_client_core::text::Text;
+use horizon_items::items::ItemStack;
 
 /// One element of an item's tooltip as `render_tooltip_gather_components`
 /// hands it over, before any wrapping

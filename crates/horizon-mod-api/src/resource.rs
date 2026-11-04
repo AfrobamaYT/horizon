@@ -82,7 +82,7 @@ impl ItemResource {
     /// This item's own value of component `id` in its patch, as saved (`minecraft:damage` on a
     /// worn sword); none where it keeps the item's default or has the component removed.
     pub fn component(&self, id: &ComponentId) -> Option<Tag> {
-        crate::item_data::encode_components(&self.0)?
+        horizon_items::item_data::encode_components(&self.0)?
             .get(id.as_str())
             .cloned()
     }
@@ -90,7 +90,7 @@ impl ItemResource {
     /// (`host.item_default_component`), none where it has the component removed or the item
     /// hasn't one.
     pub fn value(&self, host: &dyn Host, id: &ComponentId) -> Option<Tag> {
-        if let Some(patch) = crate::item_data::encode_components(&self.0) {
+        if let Some(patch) = horizon_items::item_data::encode_components(&self.0) {
             if let Some(own) = patch.get(id.as_str()) {
                 return Some(own.clone());
             }
@@ -135,7 +135,7 @@ impl ItemResource {
     }
     /// This item with its patch's entries for `id`, a value or a removal, replaced by `entry`.
     fn patched(&self, id: &ComponentId, entry: Option<(JavaString, Tag)>) -> Self {
-        let mut components = match crate::item_data::encode_components(&self.0) {
+        let mut components = match horizon_items::item_data::encode_components(&self.0) {
             Some(Tag::Compound(components)) => components,
             _ => Compound::new(),
         };
@@ -144,7 +144,8 @@ impl ItemResource {
         if let Some((key, value)) = entry {
             components.insert(key, value);
         }
-        let (damage, extra) = crate::item_data::decode_components(Some(&Tag::Compound(components)));
+        let (damage, extra) =
+            horizon_items::item_data::decode_components(Some(&Tag::Compound(components)));
         Self(ItemStack {
             item: self.0.item.clone(),
             count: 1,

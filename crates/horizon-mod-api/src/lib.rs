@@ -3,13 +3,61 @@
 //! Trait mods are process-wide, like mixin module statics.
 //! Hooks use `&self + Send + Sync` for shared and reentrant calls; see `docs/native-mods.md`.
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
+extern crate self as mod_api;
+#[doc(hidden)]
+pub mod biome;
+#[doc(hidden)]
+pub mod block_sprites;
+#[doc(hidden)]
+pub mod camera;
+#[doc(hidden)]
+pub mod containers;
+#[doc(hidden)]
+pub mod crafting;
+#[doc(hidden)]
+pub mod crash;
+#[doc(hidden)]
+pub mod extras;
+#[doc(hidden)]
+pub mod extras_hud;
+#[doc(hidden)]
+pub mod first_person;
+#[doc(hidden)]
+pub mod fog;
+#[doc(hidden)]
+pub mod game;
+#[doc(hidden)]
+pub mod health;
+#[doc(hidden)]
+pub mod hud_layout;
+#[doc(hidden)]
+pub mod item_tooltip;
+#[doc(hidden)]
+pub mod menu;
+#[doc(hidden)]
+pub mod merchant;
+#[doc(hidden)]
+pub mod mesher;
+#[doc(hidden)]
+pub mod mobs;
+#[doc(hidden)]
+pub mod mod_chunk_tickets;
+#[doc(hidden)]
+pub mod music;
+#[doc(hidden)]
+pub mod particles;
+#[doc(hidden)]
+pub mod recipe_book;
+#[doc(hidden)]
+pub mod render;
+#[doc(hidden)]
+pub mod stations;
 use std::sync::{Arc, OnceLock};
 
+#[doc(hidden)]
+pub mod __private;
 mod phase;
 pub use horizon_mods::Side;
-pub(crate) use phase::install_packages;
-#[cfg(test)]
-pub(crate) use phase::with_test_packages;
 pub use phase::{
     DataLoadContext, DataLoadOrigin, LoadedMods, PackageInfo, PackageKind, RegistrationContext,
 };
@@ -40,47 +88,46 @@ pub use server_reload::{
 pub use crate::biome::{BiomeColors, SpawnEntry};
 pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
-pub use crate::command::Suggestion;
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
 pub use crate::crafting::{Ingredient, RecipeFile};
 pub use crate::extras::Corner;
 pub use crate::extras_hud::Corners;
 pub use crate::first_person::Hand;
 pub use crate::fog::{FogData, FogType};
-pub use crate::game::native_block_entity_draw::{BlockEntityDraw, CubeFace};
 pub use crate::game::{
-    NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeConfig,
+    CubeFace, NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeConfig,
     NativeConfigFile, NativeConfigKind, NativeDataMapType, NativeExperienceOrb, NativeFalling,
     NativeHeightmap, NativeHeldItem, NativeHit, NativeMapDecoration, NativeMapInfo,
     NativeMobRender, NativeModEvent, NativePlayerRender, NativeShake, PhantomSpawnResult,
     SleepProblem,
 };
-pub use crate::gamerules::Value as GameRuleValue;
-pub use crate::gfx::native_render::{
-    BlockSpriteArrays, RenderHookId, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn,
-    WorldDrawnEvent, render_hook_ids, wgpu,
-};
 pub use crate::health::{DamageContainer, HurtSource, Reduction, ShieldBlock, Victim};
-pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::item_tooltip::TooltipDisplay;
-pub use crate::items::ItemStack;
 pub use crate::menu::{LogicalSide, StackedOnOther};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
-pub use crate::mobs::data::PathComputationType;
+pub use crate::mobs::PathComputationType;
 pub use crate::mod_chunk_tickets::TicketOwner as NativeTicketOwner;
 pub use crate::mod_chunk_tickets::{TicketSet, TicketValidation};
 pub use crate::music::{Music, MusicLayer};
-pub use crate::particles::{ParticleOptions, ParticleType};
+pub use crate::particles::ParticleOptions;
 pub use crate::recipe_book::RecipeBookCategory;
-pub use crate::text::Text;
+pub use crate::render::{
+    BlockSpriteArrays, RenderHookId, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn,
+    WorldDrawnEvent, render_hook_ids, wgpu,
+};
 pub use horizon_assets::item_model::{DisplayContext, StackView};
+pub use horizon_client_core::gamerules::Value as GameRuleValue;
+pub use horizon_client_core::particle_type::ParticleType;
+pub use horizon_client_core::suggestion::Suggestion;
+pub use horizon_client_core::text::Text;
 pub use horizon_core::{
     geometry::Direction,
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
+pub use horizon_items::items::ItemStack;
 pub use horizon_items::items::TagRegistry;
 pub use horizon_world::consumable::UseAnimation;
 pub use horizon_world::player_inventory::EquipmentSlot;
@@ -100,21 +147,21 @@ pub use serde_json;
 /// The private handle cannot be constructed or taken out by a mod.
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::{BlockEntityTickEvent, ModBlockEntity};
+/// use mod_api::{BlockEntityTickEvent, ModBlockEntity};
 /// fn replace(event: &mut BlockEntityTickEvent<'_>) {
 ///     *event.entity = ModBlockEntity::default();
 /// }
 /// ```
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::BlockEntityTickEvent;
+/// use mod_api::BlockEntityTickEvent;
 /// fn take(event: &mut BlockEntityTickEvent<'_>) {
 ///     let _ = std::mem::take(&mut event.entity);
 /// }
 /// ```
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::{BlockEntityTickEvent, ModBlockEntity};
+/// use mod_api::{BlockEntityTickEvent, ModBlockEntity};
 /// fn access(event: &mut BlockEntityTickEvent<'_>) {
 ///     let _: &mut ModBlockEntity = event.entity.entity;
 /// }
@@ -144,8 +191,13 @@ impl std::ops::DerefMut for ModBlockEntityView<'_> {
 
 use serde_json::{Map, Value};
 use std::time::Duration;
-/// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
-pub use winit;
+/// What a key did in an `input_key` event (GLFW's `action`: release 0, press 1, repeat 2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyAction {
+    Release,
+    Press,
+    Repeat,
+}
 
 /// One armor slot of an `ArmorHurtEvent`: the piece in `slot`, the durability
 /// damage vanilla works out for it (`damage`, `max(1, hit / 4)`) and the damage it
@@ -1666,34 +1718,6 @@ pub struct NativeClientInfo {
     pub particle_status: NativeParticleStatus,
 }
 
-impl From<&horizon_protocol::packets::configuration::ClientInformation> for NativeClientInfo {
-    fn from(i: &horizon_protocol::packets::configuration::ClientInformation) -> Self {
-        Self {
-            language: i.language.clone(),
-            view_distance: i.view_distance,
-            chat_visibility: match i.chat_visibility.rem_euclid(3) {
-                0 => NativeChatVisibility::Full,
-                1 => NativeChatVisibility::System,
-                _ => NativeChatVisibility::Hidden,
-            },
-            chat_colors: i.chat_colors,
-            model_customisation: i.model_customisation,
-            main_hand: if i.main_hand == 1 {
-                NativeMainHand::Right
-            } else {
-                NativeMainHand::Left
-            },
-            text_filtering: i.text_filtering,
-            allows_listing: i.allows_listing,
-            particle_status: match i.particle_status.rem_euclid(3) {
-                0 => NativeParticleStatus::All,
-                1 => NativeParticleStatus::Decreased,
-                _ => NativeParticleStatus::Minimal,
-            },
-        }
-    }
-}
-
 /// A block face for a level support query.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1983,14 +2007,6 @@ pub enum NativeEffectDamage {
     /// The Wither effect's damage.
     Wither,
 }
-impl NativeEffectDamage {
-    pub(crate) fn mob_kind(self) -> crate::mobs::DamageKind {
-        match self {
-            Self::Magic => crate::mobs::DamageKind::Magic,
-            Self::Wither => crate::mobs::DamageKind::Wither,
-        }
-    }
-}
 
 /// A change requested by an effect tick, applied after its hooks return.
 #[doc(hidden)]
@@ -2261,14 +2277,14 @@ pub mod testing {
 /// Install the process-wide ordered list of mods.
 pub(crate) fn install(mods: Mods) -> &'static Installed {
     let installed = Installed::new(mods);
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     {
         // Tests can replace the list; mods() keeps its static slice lifetime.
         let installed = Box::leak(Box::new(installed));
         TEST_MODS.set(Some(installed));
         installed
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "testing")))]
     {
         assert!(MODS.set(installed).is_ok(), "trait mods are installed once");
         MODS.get().unwrap()
@@ -2427,22 +2443,15 @@ impl BlockHit {
 /// Opening one is reserved for this API:
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::{Backend, BackendRef};
+/// use mod_api::{Backend, BackendRef};
 /// fn reach(backend: BackendRef<'_>) { let _: &dyn Backend = backend.open(); }
 /// ```
 ///
 /// So is reading the backend it holds:
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::BackendRef;
+/// use mod_api::BackendRef;
 /// fn reach(backend: BackendRef<'_>) { let _ = backend.inner; }
-/// ```
-///
-/// And building one:
-///
-/// ```compile_fail
-/// use horizon_client::mod_api::BackendRef;
-/// fn build() { let _ = BackendRef::of; }
 /// ```
 #[doc(hidden)]
 pub struct BackendRef<'a> {
@@ -2454,7 +2463,7 @@ pub struct BackendRef<'a> {
 /// method of its own:
 ///
 /// ```compile_fail
-/// use horizon_client::mod_api::BackendMutRef;
+/// use mod_api::BackendMutRef;
 /// fn reach(backend: BackendMutRef<'_>) { backend.set_loaded(false); }
 /// ```
 #[doc(hidden)]
@@ -2491,7 +2500,7 @@ impl<'a> BackendMutRef<'a> {
 
 /// The read backend behind `host`, or `None` where the host has none; the
 /// caller answers its typed refusal instead of running on.
-pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
+pub(crate) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
     host.backend().map(|wrapper| wrapper.open())
 }
 
@@ -2499,7 +2508,7 @@ pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
 ///
 /// A mutable client hook can use client services:
 /// ```
-/// use horizon_client::mod_api::{self, ClientHost, Hooks, InputKeyEvent};
+/// use mod_api::{self, ClientHost, Hooks, InputKeyEvent};
 /// #[derive(Default)]
 /// struct ScreenMod;
 /// #[mod_api::horizon_mod]
@@ -2510,42 +2519,38 @@ pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
 /// }
 /// ```
 ///
-/// Side enums are non-exhaustive: external matches must include a wildcard.
-/// ```compile_fail
-/// use horizon_client::mod_api::HostSide;
-/// fn side(host: HostSide<'_>) {
-///     match host { HostSide::Server(_) => (), HostSide::Client(_) => () }
+/// A hook that fires on both sides matches on the two:
+/// ```
+/// use mod_api::HostSide;
+/// fn side(host: HostSide<'_>) -> &'static str {
+///     match host { HostSide::Server(_) => "server", HostSide::Client(_) => "client" }
 /// }
 /// ```
 ///
 /// Wrong-side services do not compile:
 /// ```compile_fail
-/// use horizon_client::mod_api::ClientHost;
+/// use mod_api::ClientHost;
 /// fn wrong(host: &mut dyn ClientHost) { host.action_bar(0, todo!()); }
 /// ```
 /// ```compile_fail
-/// use horizon_client::mod_api::ServerHost;
+/// use mod_api::ServerHost;
 /// fn wrong(host: &mut dyn ServerHost) { host.mod_screen_open("example"); }
 /// ```
 ///
 /// A read-only hook receives only the base host, which cannot be used for a
 /// server or client operation, or opened as a backend by a mod:
 /// ```compile_fail
-/// use horizon_client::mod_api::{Host, ServerHost};
+/// use mod_api::{Host, ServerHost};
 /// fn server(_: &mut dyn ServerHost) {}
 /// fn read(host: &dyn Host) { server(host); }
 /// ```
 /// ```compile_fail
-/// use horizon_client::mod_api::{ClientHost, Host};
+/// use mod_api::{ClientHost, Host};
 /// fn client(_: &dyn ClientHost) {}
 /// fn read(host: &dyn Host) { client(host); }
 /// ```
 /// ```compile_fail
-/// use horizon_client::mod_api::{backend_of, Host};
-/// fn read(host: &dyn Host) { let _ = backend_of(host); }
-/// ```
-/// ```compile_fail
-/// use horizon_client::mod_api::{Host, ServerHost};
+/// use mod_api::{Host, ServerHost};
 /// fn read(host: &dyn Host) { let _ = host.downcast_ref::<dyn ServerHost>(); }
 /// ```
 impl HostSide<'_> {
@@ -2568,7 +2573,7 @@ impl LevelSide<'_> {
 
 /// The write backend behind `host`, or `None` where the host has none; the
 /// caller answers its typed refusal instead of running on.
-pub(in crate::mod_api) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&mut dyn BackendMut> {
+pub(crate) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&mut dyn BackendMut> {
     host.backend_mut().map(|wrapper| wrapper.open())
 }
 
@@ -2684,7 +2689,9 @@ mod generated_host {
 }
 #[doc(hidden)]
 pub use generated_host::{Backend, BackendMut};
-pub use generated_host::{ClientHost, Host, HostSide, LevelSide, ServerHost};
+pub use generated_host::{
+    BlockEntityDrawContext, ClientHost, DrawContext, Host, HostSide, LevelSide, ServerHost,
+};
 
 /// Result of accessing or decoding an attachment.
 pub type AttachmentResult<T> = std::result::Result<T, AttachmentError>;
@@ -2704,19 +2711,19 @@ host_attachment_host!(Host, ServerHost, ClientHost);
 ///
 /// A level host cannot be used as a game host:
 /// ```compile_fail
-/// use horizon_client::mod_api::{Host, LevelHost};
+/// use mod_api::{Host, LevelHost};
 /// fn game(_: &dyn Host) {}
 /// fn level(host: &dyn LevelHost) { game(host); }
 /// ```
 /// ```compile_fail
-/// use horizon_client::mod_api::{ClientHost, LevelHost, ServerHost};
+/// use mod_api::{ClientHost, LevelHost, ServerHost};
 /// fn server(_: &mut dyn ServerHost) {}
 /// fn client(_: &dyn ClientHost) {}
 /// fn level(host: &mut dyn LevelHost) { server(host); client(host); }
 /// ```
 /// A client-side level cannot write:
 /// ```compile_fail
-/// use horizon_client::mod_api::LevelSide;
+/// use mod_api::LevelSide;
 /// fn write(side: LevelSide<'_>) {
 ///     if let LevelSide::Client(level) = side { level.set_block_property([0, 0, 0], "a", "b", 0); }
 /// }
@@ -2922,19 +2929,20 @@ pub use resource::{
 };
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
 mod block_entity_type;
-pub(crate) use block_entity_type::validate_block_entity_type_keys;
 pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
 mod part_table;
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use part_table::install_parts;
+#[cfg(test)]
+pub(crate) use part_table::mark_game_thread;
 pub use part_table::{
     Attached, BlockEntityProviders, BlockProvider, EntityProvider, EntityProviders, ItemProvider,
     Parts, Registrar, block_entity_providers, entity_providers, has_entity_providers,
 };
 pub(crate) use part_table::{
-    KnownIds, ProvidedBy, answered, ask_providers, block_entity_types, block_listens,
-    has_part_hook, has_scoped_hook, install_parts, mark_game_thread, parts, place_provider,
-    providers, resolve_parts,
+    ProvidedBy, answered, ask_providers, has_part_hook, parts, place_provider, providers,
 };
 
 mod generated {
@@ -2954,13 +2962,13 @@ pub use horizon_mod_api_macros::__subscriptions;
 ///
 /// An implementation without the attribute does not compile:
 /// ```compile_fail
-/// use horizon_client::mod_api::Hooks;
+/// use mod_api::Hooks;
 /// struct Mod;
 /// impl Hooks for Mod {}
 /// ```
 /// Rustc rejects a misspelled trait method (E0407):
 /// ```compile_fail,E0407
-/// use horizon_client::mod_api::{self, Hooks};
+/// use mod_api::{self, Hooks};
 /// #[derive(Default)]
 /// struct Mod;
 /// #[mod_api::horizon_mod]
@@ -2970,7 +2978,7 @@ pub use horizon_mod_api_macros::__subscriptions;
 /// ```
 /// Two mod markers in one module define the same export:
 /// ```compile_fail,E0428
-/// use horizon_client::mod_api::{self, Hooks};
+/// use mod_api::{self, Hooks};
 /// #[derive(Default)] struct A;
 /// #[derive(Default)] struct B;
 /// #[mod_api::horizon_mod] impl Hooks for A {}
@@ -2979,15 +2987,11 @@ pub use horizon_mod_api_macros::__subscriptions;
 pub use horizon_mod_api_macros::{horizon_mod, horizon_part};
 
 #[cfg(test)]
-pub(crate) use part_table::tests as part_tests;
-
-#[cfg(test)]
 mod hooks_tests;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mod_api;
     use std::sync::Mutex;
 
     #[test]
@@ -3017,18 +3021,6 @@ mod tests {
     struct Quiet;
     #[mod_api::__subscriptions]
     impl Hooks for Quiet {}
-
-    struct Broken;
-    #[mod_api::__subscriptions]
-    impl Hooks for Broken {
-        fn component_types(
-            &self,
-            _context: &RegistrationContext<'_>,
-            _event: &mut ComponentTypesEvent<'_>,
-        ) {
-            panic!("a broken mod");
-        }
-    }
 
     /// A double with the `Host` methods the probe calls.
     struct Reader {
@@ -3148,7 +3140,7 @@ mod tests {
         struct StickMod<P>(P);
         #[mod_api::__subscriptions]
         impl<P: ItemPart + Clone> Hooks for StickMod<P> {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
                 r.item_part("minecraft:stick", self.0.clone());
             }
         }
@@ -3318,50 +3310,6 @@ mod tests {
     }
 
     #[test]
-    fn a_panic_in_a_hook_names_the_mod_and_the_hook() {
-        let mods: Vec<ModEntry> = vec![
-            ModEntry::new("quiet", Box::new(Quiet)),
-            ModEntry::new("broken", Box::new(Broken)),
-        ];
-        install(mods.into());
-        let caught = Arc::new(Mutex::new(Vec::new()));
-        let sink = caught.clone();
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            let error = crate::crash::panic_report(info, "client").error;
-            if error.contains("a broken mod") {
-                sink.lock().unwrap().push(error);
-            }
-        }));
-        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            dispatch_component_types(&RegistrationContext::new(), &mut Vec::new())
-        }));
-        // Once the dispatch has unwound, the thread is in no mod.
-        let _ = std::panic::catch_unwind(|| panic!("a broken mod's caller"));
-        std::panic::set_hook(previous);
-        // The game stops as before: the panic goes on to the dispatch's caller.
-        assert!(unwound.is_err());
-        let errors = caught.lock().unwrap();
-        assert_eq!(errors.len(), 2);
-        assert!(
-            errors[0].ends_with("\nin native mod broken, hook component_types"),
-            "{}",
-            errors[0]
-        );
-        assert!(!errors[1].contains("in native mod"), "{}", errors[1]);
-    }
-
-    #[test]
-    fn entering_a_mod_names_it_until_the_guard_drops() {
-        let entry = ModEntry::new("injector", Box::new(Quiet));
-        assert_eq!(crate::crash::current_native_mod(), None);
-        let guard = entry.enter("inject_injector_stop");
-        assert_eq!(crate::crash::current_native_mod(), Some("injector"));
-        drop(guard);
-        assert_eq!(crate::crash::current_native_mod(), None);
-    }
-
-    #[test]
     fn player_turn_mods_receive_identity_and_chain_changes() {
         struct Turn;
         #[mod_api::__subscriptions]
@@ -3430,7 +3378,7 @@ mod tests {
         impl Hooks for MiningProbe {
             fn player_harvest_check(
                 &self,
-                _host: crate::mod_api::HostSide,
+                _host: crate::HostSide,
                 event: &mut PlayerHarvestCheckEvent,
             ) {
                 self.0.lock().unwrap().push(event.player);
@@ -3438,7 +3386,7 @@ mod tests {
             }
             fn player_break_speed(
                 &self,
-                _host: crate::mod_api::HostSide,
+                _host: crate::HostSide,
                 event: &mut PlayerBreakSpeedEvent,
             ) -> Flow {
                 self.0.lock().unwrap().push(event.player);
@@ -3526,15 +3474,11 @@ mod tests {
 
     #[mod_api::__subscriptions]
     impl Hooks for OffHandTop {
-        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+        fn register(&self, r: &mut Registrar, _: &crate::RegistrationContext<'_>) {
             r.item_part("minecraft:stick", HeardStick);
         }
 
-        fn right_click_block(
-            &self,
-            _: crate::mod_api::HostSide,
-            event: &mut RightClickBlockEvent,
-        ) -> Flow {
+        fn right_click_block(&self, _: crate::HostSide, event: &mut RightClickBlockEvent) -> Flow {
             let click = event.click;
             let top_half = click.hit.point[1] - f64::from(click.pos[1]) >= 0.5;
             if click.hand == Hand::Off
@@ -3637,125 +3581,6 @@ mod tests {
         }
     }
 
-    /// Cancels every brew and leaves its own slots; records what it saw.
-    struct BrewSwapper(Arc<Mutex<Vec<String>>>);
-
-    #[mod_api::__subscriptions]
-    impl Hooks for BrewSwapper {
-        fn potion_brew_pre(
-            &self,
-            _host: &mut dyn ServerHost,
-            event: &mut PotionBrewPreEvent<'_>,
-        ) -> Flow {
-            self.0.lock().unwrap().push("pre".into());
-            event.stacks[0] = Some(ItemStack::new("minecraft:diamond", 1));
-            Flow::Cancel
-        }
-        fn potion_brew_post(
-            &self,
-            _host: &mut dyn ServerHost,
-            event: &mut PotionBrewPostEvent<'_>,
-        ) {
-            let first = event.stacks[0].as_ref().map_or("", |s| &s.item);
-            self.0.lock().unwrap().push(format!("post {first}"));
-            event.stacks[1] = Some(ItemStack::new("minecraft:emerald", 1));
-        }
-    }
-
-    /// Edits the slots in `PotionBrewEvent.Pre` without cancelling.
-    struct BrewEditor;
-
-    #[mod_api::__subscriptions]
-    impl Hooks for BrewEditor {
-        fn potion_brew_pre(
-            &self,
-            _host: &mut dyn ServerHost,
-            event: &mut PotionBrewPreEvent<'_>,
-        ) -> Flow {
-            event.stacks[0] = Some(ItemStack::new("minecraft:diamond", 1));
-            Flow::Continue
-        }
-        fn potion_brew_post(
-            &self,
-            _host: &mut dyn ServerHost,
-            event: &mut PotionBrewPostEvent<'_>,
-        ) {
-            event.stacks[1] = Some(ItemStack::new("minecraft:emerald", 1));
-        }
-    }
-
-    /// `PotionBrewEvent.Pre` and `.Post` around `doBrew`: a cancelling mod's
-    /// slots replace the brew, with no ingredient used, and Post fires once
-    /// with them; a mod that doesn't cancel has its Pre edits dropped,
-    /// vanilla brews, and its Post edits stay.
-    #[test]
-    fn a_cancelled_brew_takes_the_mods_slots_and_an_uncancelled_one_brews() {
-        use crate::brewing::{Brewing, BrewingRecipe, BrewingStand, PotionIngredient};
-        let set = |ids: &[&str]| ids.iter().map(|s| (*s).to_owned()).collect();
-        let brewing = Brewing {
-            reagents: set(&["minecraft:nether_wart"]),
-            inputs: Default::default(),
-            recipes: vec![BrewingRecipe {
-                id: "awkward".into(),
-                input: PotionIngredient {
-                    items: set(&["minecraft:potion"]),
-                    potions: Some(set(&["minecraft:water"])),
-                },
-                reagent: PotionIngredient {
-                    items: set(&["minecraft:nether_wart"]),
-                    potions: None,
-                },
-                output: ItemStack::new("minecraft:potion", 1).with_potion("minecraft:awkward"),
-            }],
-        };
-        let items = crate::items::Items::for_tests(Default::default());
-        let water = ItemStack::new("minecraft:potion", 1).with_potion("minecraft:water");
-        let awkward = ItemStack::new("minecraft:potion", 1).with_potion("minecraft:awkward");
-        let fresh = || {
-            let mut stand = BrewingStand::new();
-            stand.items[0] = Some(water.clone());
-            stand.items[3] = Some(ItemStack::new("minecraft:nether_wart", 2));
-            stand
-        };
-        let mut host = Reader {
-            block: "minecraft:brewing_stand",
-            lines: Vec::new(),
-        };
-        // What `tick_brewing_stand` does once the brew is due.
-        let brew = |host: &mut Reader, stand: &mut BrewingStand| {
-            let mut stacks = stand.items.clone();
-            let mut cancel = false;
-            dispatch_potion_brew_pre(host, [1, 2, 3], &mut stacks, &mut cancel);
-            let mut out = crate::brewing::BrewTick::default();
-            stand.brew_after_pre(Some((stacks, cancel)), &brewing, &items, &mut out);
-            if out.brewed || cancel {
-                dispatch_potion_brew_post(host, [1, 2, 3], &mut stand.items);
-            }
-            out.brewed
-        };
-
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let mods: Vec<ModEntry> = vec![ModEntry::new(
-            "brew-swapper",
-            Box::new(BrewSwapper(seen.clone())),
-        )];
-        install(mods.into());
-        let mut stand = fresh();
-        assert!(!brew(&mut host, &mut stand));
-        assert_eq!(*seen.lock().unwrap(), ["pre", "post minecraft:diamond"]);
-        assert_eq!(&*stand.items[0].as_ref().unwrap().item, "minecraft:diamond");
-        assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
-        assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(2));
-
-        let mods: Vec<ModEntry> = vec![ModEntry::new("brew-editor", Box::new(BrewEditor))];
-        install(mods.into());
-        let mut stand = fresh();
-        assert!(brew(&mut host, &mut stand));
-        assert_eq!(stand.items[0], Some(awkward));
-        assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
-        assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(1));
-    }
-
     /// Writes down every game rule change and level save it hears.
     struct Recorder(Arc<Mutex<Vec<String>>>);
 
@@ -3843,7 +3668,7 @@ mod tests {
             block: "minecraft:air",
             lines: Vec::new(),
         };
-        let mut rules = crate::gamerules::GameRules::default();
+        let mut rules = horizon_client_core::gamerules::GameRules::default();
         // What `set_game_rule` and the other setters do.
         let mut set = |name: &str, value: GameRuleValue| {
             if rules.set(name, value) {
@@ -3963,86 +3788,402 @@ mod tests {
         dispatch_item_fished(&mut host, 7, 3, &fished, &mut rod_damage, &mut cancel);
         assert_eq!((rod_damage, cancel), (4, false));
     }
+}
 
-    /// Records what `player_brewed_potion` told it.
-    struct BrewWatcher(Arc<Mutex<Vec<(u128, i32, ItemStack)>>>);
-
-    #[mod_api::__subscriptions]
-    impl Hooks for BrewWatcher {
-        fn player_brewed_potion(
-            &self,
-            _host: &mut dyn ServerHost,
-            event: &mut PlayerBrewedPotionEvent<'_>,
-        ) {
-            let seen = (event.player, event.player_entity_id, event.stack.clone());
-            self.0.lock().unwrap().push(seen);
-        }
+#[doc(hidden)]
+pub(crate) mod built {
+    #[allow(unused_imports)]
+    use super::*;
+    pub struct ToolUse {
+        pub player: Option<u32>,
+        pub hand: crate::first_person::Hand,
+        pub pos: [i32; 3],
+        pub face: [i32; 3],
+        pub click: [f64; 3],
+        pub ability: ToolAbility,
+        pub simulated: bool,
     }
-
-    /// `BrewingStandMenu.PotionSlot.onTake`: a pickup and a shift-click on a
-    /// bottle slot each tell a listening mod once, with the taken stack and
-    /// the player's UUID and entity id; with no listener nothing is kept.
-    #[test]
-    fn a_bottle_slot_take_tells_the_listener_once_with_the_player() {
-        use crate::menu::{Env, Input, Kind, LogicalSide, Menu};
-        let root = std::env::temp_dir().join(format!("horizon-brewed-{}", std::process::id()));
-        std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
-        let items = crate::items::Items::for_tests(Default::default());
-        let overlay = &horizon_world::loot::PackOverlay::NONE;
-        let recipes = crate::crafting::Recipes::load(&root, &items, overlay).unwrap();
-        let brewing = crate::brewing::Brewing::load(&root, &items, overlay);
-        let _ = std::fs::remove_dir_all(&root);
-        let (banners, station_recipes) = (Default::default(), Default::default());
-        let (enchantments, names) = (Default::default(), Default::default());
-        let env = &Env {
-            player: Some(7),
-            player_entity_id: Some(41),
-            side: LogicalSide::Server,
-            items: &items,
-            recipes: &recipes,
-            brewing: &brewing,
-            banners: &banners,
-            station_recipes: &station_recipes,
-            enchantments: &enchantments,
-            names: &names,
-            trade: None,
-            maps: None,
-            limited_crafting: false,
-            known_recipes: None,
-        };
-        let potion = ItemStack::new("minecraft:potion", 1);
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let mods: Vec<ModEntry> = vec![ModEntry::new(
-            "brew-watcher",
-            Box::new(BrewWatcher(seen.clone())),
-        )];
-        install(mods.into());
-        let mut host = Reader {
-            block: "minecraft:air",
-            lines: Vec::new(),
-        };
-        for input in [Input::Pickup, Input::QuickMove] {
-            let mut menu = Menu::new(Kind::Brewing);
-            menu.set_slot(env, 0, Some(potion.clone()));
-            menu.click(env, 0, 0, input).unwrap();
-            // Without a listener the take is only the advancement's.
-            assert!(menu.brewed_potion_takes.is_empty(), "{input:?}");
-            assert_eq!(menu.brewed, std::slice::from_ref(&potion), "{input:?}");
-
-            let mut menu = Menu::new(Kind::Brewing);
-            menu.brewed_potion_hook = true;
-            menu.set_slot(env, 0, Some(potion.clone()));
-            menu.click(env, 0, 0, input).unwrap();
-            assert_eq!(
-                menu.brewed_potion_takes,
-                std::slice::from_ref(&potion),
-                "{input:?}"
-            );
-            for stack in &menu.brewed_potion_takes {
-                dispatch_player_brewed_potion(&mut host, 7, 41, stack);
+    impl From<ToolUse> for super::ToolUse {
+        fn from(v: ToolUse) -> Self {
+            let ToolUse {
+                player,
+                hand,
+                pos,
+                face,
+                click,
+                ability,
+                simulated,
+            } = v;
+            Self {
+                player,
+                hand,
+                pos,
+                face,
+                click,
+                ability,
+                simulated,
             }
         }
-        let told = (7, 41, potion);
-        assert_eq!(*seen.lock().unwrap(), [told.clone(), told]);
+    }
+    pub struct NativeLootDrops<'a> {
+        pub table: &'a str,
+        pub dimension: &'a str,
+        pub origin: [f64; 3],
+        pub block: Option<([i32; 3], BlockStateId)>,
+        pub entity: Option<(u32, &'a str)>,
+        pub player: Option<u128>,
+        pub tool: Option<&'a ItemStack>,
+        pub explosion: Option<f32>,
+        pub used: bool,
+    }
+    impl<'a> From<NativeLootDrops<'a>> for super::NativeLootDrops<'a> {
+        fn from(v: NativeLootDrops<'a>) -> Self {
+            let NativeLootDrops {
+                table,
+                dimension,
+                origin,
+                block,
+                entity,
+                player,
+                tool,
+                explosion,
+                used,
+            } = v;
+            Self {
+                table,
+                dimension,
+                origin,
+                block,
+                entity,
+                player,
+                tool,
+                explosion,
+                used,
+            }
+        }
+    }
+    pub struct NativeExplosionStart<'a> {
+        pub dimension: &'a str,
+        pub center: [f64; 3],
+        pub radius: f32,
+        pub fire: bool,
+        pub interaction: NativeBlockInteraction,
+        pub damage_type: &'a str,
+        pub source: Option<u32>,
+        pub owner: Option<u32>,
+    }
+    impl<'a> From<NativeExplosionStart<'a>> for super::NativeExplosionStart<'a> {
+        fn from(v: NativeExplosionStart<'a>) -> Self {
+            let NativeExplosionStart {
+                dimension,
+                center,
+                radius,
+                fire,
+                interaction,
+                damage_type,
+                source,
+                owner,
+            } = v;
+            Self {
+                dimension,
+                center,
+                radius,
+                fire,
+                interaction,
+                damage_type,
+                source,
+                owner,
+            }
+        }
+    }
+    pub struct NativeItemFished<'a> {
+        pub hook: u32,
+        pub position: [f64; 3],
+        pub drops: &'a [ItemStack],
+    }
+    impl<'a> From<NativeItemFished<'a>> for super::NativeItemFished<'a> {
+        fn from(v: NativeItemFished<'a>) -> Self {
+            let NativeItemFished {
+                hook,
+                position,
+                drops,
+            } = v;
+            Self {
+                hook,
+                position,
+                drops,
+            }
+        }
+    }
+    pub struct NativeScreenView<'a> {
+        pub id: &'static str,
+        pub menu: Option<&'a str>,
+        pub title: Option<&'a Text>,
+        pub rect: [f32; 4],
+        pub slots: usize,
+        pub mouse: [f32; 2],
+        pub partial_tick: f32,
+    }
+    impl<'a> From<NativeScreenView<'a>> for super::NativeScreenView<'a> {
+        fn from(v: NativeScreenView<'a>) -> Self {
+            let NativeScreenView {
+                id,
+                menu,
+                title,
+                rect,
+                slots,
+                mouse,
+                partial_tick,
+            } = v;
+            Self {
+                id,
+                menu,
+                title,
+                rect,
+                slots,
+                mouse,
+                partial_tick,
+            }
+        }
+    }
+    pub struct NativeItemClick<'a> {
+        pub side: LogicalSide,
+        pub dimension: LevelDimension,
+        pub pos: [i32; 3],
+        pub hand: Hand,
+        pub stack: &'a ItemStack,
+        pub player: u128,
+        pub player_entity_id: i32,
+    }
+    impl<'a> From<NativeItemClick<'a>> for super::NativeItemClick<'a> {
+        fn from(v: NativeItemClick<'a>) -> Self {
+            let NativeItemClick {
+                side,
+                dimension,
+                pos,
+                hand,
+                stack,
+                player,
+                player_entity_id,
+            } = v;
+            Self {
+                side,
+                dimension,
+                pos,
+                hand,
+                stack,
+                player,
+                player_entity_id,
+            }
+        }
+    }
+    pub struct NativeBlockClick<'a> {
+        pub side: LogicalSide,
+        pub dimension: LevelDimension,
+        pub pos: [i32; 3],
+        pub hit: super::BlockHit,
+        pub hand: Hand,
+        pub stack: Option<&'a ItemStack>,
+        pub player: u128,
+        pub player_entity_id: i32,
+    }
+    impl<'a> From<NativeBlockClick<'a>> for super::NativeBlockClick<'a> {
+        fn from(v: NativeBlockClick<'a>) -> Self {
+            let NativeBlockClick {
+                side,
+                dimension,
+                pos,
+                hit,
+                hand,
+                stack,
+                player,
+                player_entity_id,
+            } = v;
+            Self {
+                side,
+                dimension,
+                pos,
+                hit,
+                hand,
+                stack,
+                player,
+                player_entity_id,
+            }
+        }
+    }
+    pub struct NativeLifecycleContext {
+        pub authority: NativeAuthority,
+        pub epoch: super::NativeWorldEpoch,
+        pub tick: super::NativeTickId,
+    }
+    impl From<NativeLifecycleContext> for super::NativeLifecycleContext {
+        fn from(v: NativeLifecycleContext) -> Self {
+            let NativeLifecycleContext {
+                authority,
+                epoch,
+                tick,
+            } = v;
+            Self {
+                authority,
+                epoch,
+                tick,
+            }
+        }
+    }
+    pub struct NativeActiveEffect {
+        pub id: &'static str,
+        pub duration: i32,
+        pub amplifier: i32,
+        pub ambient: bool,
+        pub visible: bool,
+    }
+    impl From<NativeActiveEffect> for super::NativeActiveEffect {
+        fn from(v: NativeActiveEffect) -> Self {
+            let NativeActiveEffect {
+                id,
+                duration,
+                amplifier,
+                ambient,
+                visible,
+            } = v;
+            Self {
+                id,
+                duration,
+                amplifier,
+                ambient,
+                visible,
+            }
+        }
+    }
+    pub struct NativePlayerExperience {
+        pub level: i32,
+        pub progress: f32,
+        pub total: i32,
+    }
+    impl From<NativePlayerExperience> for super::NativePlayerExperience {
+        fn from(v: NativePlayerExperience) -> Self {
+            let NativePlayerExperience {
+                level,
+                progress,
+                total,
+            } = v;
+            Self {
+                level,
+                progress,
+                total,
+            }
+        }
+    }
+    pub struct NativePlayerFood {
+        pub level: i32,
+        pub saturation: f32,
+        pub exhaustion: f32,
+    }
+    impl From<NativePlayerFood> for super::NativePlayerFood {
+        fn from(v: NativePlayerFood) -> Self {
+            let NativePlayerFood {
+                level,
+                saturation,
+                exhaustion,
+            } = v;
+            Self {
+                level,
+                saturation,
+                exhaustion,
+            }
+        }
+    }
+    pub struct NativePlayerAbilities {
+        pub invulnerable: bool,
+        pub flying: bool,
+        pub may_fly: bool,
+        pub instabuild: bool,
+        pub may_build: bool,
+        pub fly_speed: f32,
+        pub walk_speed: f32,
+    }
+    impl From<NativePlayerAbilities> for super::NativePlayerAbilities {
+        fn from(v: NativePlayerAbilities) -> Self {
+            let NativePlayerAbilities {
+                invulnerable,
+                flying,
+                may_fly,
+                instabuild,
+                may_build,
+                fly_speed,
+                walk_speed,
+            } = v;
+            Self {
+                invulnerable,
+                flying,
+                may_fly,
+                instabuild,
+                may_build,
+                fly_speed,
+                walk_speed,
+            }
+        }
+    }
+    pub struct NativeServerPlayer {
+        pub uuid: u128,
+        pub name: String,
+        pub permission: u8,
+        pub dimension: String,
+        pub position: [f64; 3],
+        pub game_mode: i32,
+        pub health: f32,
+        pub yaw: f32,
+        pub pitch: f32,
+        pub entity_id: i32,
+    }
+    impl From<NativeServerPlayer> for super::NativeServerPlayer {
+        fn from(v: NativeServerPlayer) -> Self {
+            let NativeServerPlayer {
+                uuid,
+                name,
+                permission,
+                dimension,
+                position,
+                game_mode,
+                health,
+                yaw,
+                pitch,
+                entity_id,
+            } = v;
+            Self {
+                uuid,
+                name,
+                permission,
+                dimension,
+                position,
+                game_mode,
+                health,
+                yaw,
+                pitch,
+                entity_id,
+            }
+        }
+    }
+    pub struct NativePortalShape {
+        pub x_axis: bool,
+        pub bottom_left: [i32; 3],
+        pub width: i32,
+        pub height: i32,
+    }
+    impl From<NativePortalShape> for super::NativePortalShape {
+        fn from(v: NativePortalShape) -> Self {
+            let NativePortalShape {
+                x_axis,
+                bottom_left,
+                width,
+                height,
+            } = v;
+            Self {
+                x_axis,
+                bottom_left,
+                width,
+                height,
+            }
+        }
     }
 }

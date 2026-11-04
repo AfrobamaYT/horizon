@@ -16,7 +16,7 @@ pub struct Transaction(());
 /// Transactions are available only on the logical server and preserve the receiver type.
 ///
 /// ```
-/// use horizon_client::mod_api::{BlockEntityRef, HostTransaction, ServerHost};
+/// use mod_api::{BlockEntityRef, HostTransaction, ServerHost};
 /// fn write(host: &mut dyn ServerHost, block: BlockEntityRef) {
 ///     let _: Result<(), ()> = host.transaction(|host, _tx| {
 ///         block.set_changed(host);
@@ -25,7 +25,7 @@ pub struct Transaction(());
 /// }
 /// ```
 /// ```compile_fail
-/// use horizon_client::mod_api::{BlockEntityRef, Host, HostTransaction};
+/// use mod_api::{BlockEntityRef, Host, HostTransaction};
 /// fn write(host: &mut dyn Host, block: BlockEntityRef) {
 ///     let _: Result<(), ()> = host.transaction(|host, _tx| {
 ///         block.set_changed(host);
@@ -34,7 +34,7 @@ pub struct Transaction(());
 /// }
 /// ```
 /// ```compile_fail
-/// use horizon_client::mod_api::{ClientHost, HostTransaction};
+/// use mod_api::{ClientHost, HostTransaction};
 /// fn client(host: &mut dyn ClientHost) {
 ///     let _: Result<(), ()> = host.transaction(|_, _| Ok(()));
 /// }
@@ -96,7 +96,7 @@ pub fn run_transaction<H: ServerHost + ?Sized, T, E>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mod_api::Host;
+    use crate::Host;
 
     /// Records the transactions it is asked to open and close.
     #[derive(Default)]

@@ -9,28 +9,8 @@ use crate::{
     environment::Sky,
     world::World,
 };
+pub use mod_api::fog::{FogData, FogType};
 use std::path::Path;
-
-/// `FogType` of the camera position.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FogType {
-    Atmospheric,
-    Water,
-    Lava,
-    PowderSnow,
-}
-
-/// The fog uniform (`FogData`).
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct FogData {
-    pub color: [f32; 4],
-    pub environmental_start: f32,
-    pub environmental_end: f32,
-    pub render_distance_start: f32,
-    pub render_distance_end: f32,
-    pub sky_end: f32,
-    pub cloud_end: f32,
-}
 
 /// Per-biome water fog end multipliers (`visual/water_fog_end_distance`).
 #[derive(Default)]

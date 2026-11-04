@@ -830,7 +830,7 @@ impl Game<'_> {
                 p.guest = Some(conn);
             }
         }
-        let listening = crate::mod_api::listened(crate::mod_api::HookId::PlayerLaunchProjectile);
+        let listening = mod_api::__private::listened(mod_api::HookId::PlayerLaunchProjectile);
         for projectile in projectiles..self.creatures.projectiles.len() {
             if !listening {
                 break;
@@ -2095,9 +2095,7 @@ impl Game<'_> {
                         }),
                         Some(conn),
                     );
-                    if horizon_client::mod_api::listened(
-                        horizon_client::mod_api::HookId::BlockDamageAbort,
-                    ) {
+                    if mod_api::__private::listened(mod_api::HookId::BlockDamageAbort) {
                         let guest = &host.hub.guests[gi];
                         let (uuid, name) = (guest.uuid, guest.name.clone());
                         self.native_block_damage_abort(uuid, &name, a.pos);
@@ -2111,7 +2109,7 @@ impl Game<'_> {
                 // RELEASE_USE_ITEM: ServerPlayer.releaseUsingItem, with the
                 // hand of the item in use acting.
                 6 => {
-                    let listening = !horizon_client::mod_api::mods().is_empty();
+                    let listening = !mod_api::mods().is_empty();
                     let (uuid, name) = if listening {
                         let Some(host) = self.lan.as_ref() else {
                             return;
@@ -2188,9 +2186,7 @@ impl Game<'_> {
                         g.player_on_equip("offhand", main.as_ref(), offhand.as_ref());
                         g.player_on_equip("mainhand", offhand.as_ref(), main.as_ref());
                     });
-                    if horizon_client::mod_api::listened(
-                        horizon_client::mod_api::HookId::PlayerSwapWithEquipmentSlot,
-                    ) {
+                    if mod_api::__private::listened(mod_api::HookId::PlayerSwapWithEquipmentSlot) {
                         let Some(host) = self.lan.as_ref() else {
                             return;
                         };
@@ -2666,9 +2662,7 @@ impl Game<'_> {
                     };
                     host.hub
                         .select_bundle_item(conn, slot, p.index, &mut self.world);
-                    if horizon_client::mod_api::listened(
-                        horizon_client::mod_api::HookId::PlayerBundleItemSelect,
-                    ) {
+                    if mod_api::__private::listened(mod_api::HookId::PlayerBundleItemSelect) {
                         let Some(host) = self.lan.as_ref() else {
                             return;
                         };
@@ -2839,7 +2833,7 @@ impl Game<'_> {
                             let guest = &host.hub.guests[gi];
                             let (uuid, entity_id, name) =
                                 (guest.uuid, guest.entity_id, guest.name.clone());
-                            let actor = crate::mod_api::GameRuleActor {
+                            let actor = mod_api::GameRuleActor {
                                 uuid,
                                 entity_id,
                                 name: &name,
@@ -4372,8 +4366,7 @@ impl Game<'_> {
         };
         let dying = host.hub.guests[gi].health <= 0.0 && !host.hub.guests[gi].dead;
         // The killing blow, for the death hooks.
-        let blow = (dying && !horizon_client::mod_api::mods().is_empty())
-            .then(|| self.guest_damage_source(conn));
+        let blow = (dying && !mod_api::mods().is_empty()).then(|| self.guest_damage_source(conn));
         if let Some((damage_type, attacker)) = &blow {
             // LivingDeathEvent: a canceled death keeps the player at 1 health.
             let entity = host.hub.guests[gi].entity_id;
@@ -4524,7 +4517,7 @@ impl Game<'_> {
             if drops.is_some() {
                 // LivingEntity.dropExperience: Player.isAlwaysExperienceDropper.
                 let now = self.world.game_time;
-                let attacker = if horizon_client::mod_api::mods().is_empty() {
+                let attacker = if mod_api::mods().is_empty() {
                     None
                 } else {
                     self.guest_combat
@@ -4781,7 +4774,7 @@ impl Game<'_> {
         if let Some(head) = bed {
             let block = self.world.block(head[0], head[1], head[2]);
             let bed_exists = self.res.facts().get(block).name.ends_with("_bed");
-            let modded = !horizon_client::mod_api::mods().is_empty();
+            let modded = !mod_api::mods().is_empty();
             let name = if modded && !gone {
                 self.lan
                     .as_ref()
@@ -5214,7 +5207,7 @@ impl Game<'_> {
             return;
         };
         if jumps > 0
-            && crate::mod_api::listened(crate::mod_api::HookId::PlayerJump)
+            && mod_api::__private::listened(mod_api::HookId::PlayerJump)
             && let Some((uuid, name)) = self
                 .lan
                 .as_ref()
@@ -5371,7 +5364,7 @@ impl Game<'_> {
             }
         }
         if let Some(v) = marked {
-            if horizon_client::mod_api::listened(horizon_client::mod_api::HookId::PlayerVelocity)
+            if mod_api::__private::listened(mod_api::HookId::PlayerVelocity)
                 && let Some((uuid, name)) = self
                     .lan
                     .as_ref()
@@ -5643,9 +5636,7 @@ impl Game<'_> {
             play.last_progress = progress;
             let guest = &host.hub.guests[gi];
             let id = guest.entity_id;
-            if horizon_client::mod_api::listened(
-                horizon_client::mod_api::HookId::BlockBreakProgressUpdate,
-            ) {
+            if mod_api::__private::listened(mod_api::HookId::BlockBreakProgressUpdate) {
                 let (uuid, name) = (guest.uuid, guest.name.clone());
                 self.native_block_break_progress_update(uuid, &name, pos, progress);
             }
@@ -6219,9 +6210,8 @@ mod tests {
     #[test]
     #[ignore = "requires prepared game resources"]
     fn block_menu_click_keeps_spent_action_on_cancellation() {
-        use horizon_client::{
-            chunk::Chunk, lan::guest::GuestKind, mod_api::NativeBlockUpdateFlags,
-        };
+        use horizon_client::{chunk::Chunk, lan::guest::GuestKind};
+        use mod_api::NativeBlockUpdateFlags;
         use std::sync::Arc;
         super::super::native_guest_turn_tests::with_guests(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -6255,16 +6245,16 @@ mod tests {
     #[ignore = "requires prepared game resources"]
     fn block_parts_pick_and_use_on_the_server_and_for_a_guest() {
         use super::super::{lan::LanSettings, native_entity_refs::tests::with_game};
-        use crate::mod_api::{
-            self, BlockPart, CloneItemStackEvent, Flow, Hooks, Host, ItemPart, ItemStack,
-            NativeInteractionResult as Answer, Registrar, ServerHost, UseItemOnEvent, UseOnEvent,
-            UseWithoutItemEvent,
-        };
         use horizon_client::{
             chunk::Chunk,
             lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
         };
         use horizon_protocol::packets::{configuration::ClientInformation, play};
+        use mod_api::{
+            self, BlockPart, CloneItemStackEvent, Flow, Hooks, Host, ItemPart, ItemStack,
+            NativeInteractionResult as Answer, Registrar, ServerHost, UseItemOnEvent, UseOnEvent,
+            UseWithoutItemEvent,
+        };
         use std::sync::{
             Arc, Mutex,
             atomic::{AtomicI32, AtomicUsize},
@@ -6291,7 +6281,7 @@ mod tests {
             empty_answer: Arc<Mutex<Option<Answer>>>,
             empty_food: Arc<Mutex<Option<i32>>>,
             empty_clicks: Arc<Mutex<Vec<(horizon_world::registry::BlockStateId, u128)>>>,
-            clicks: Arc<Mutex<Vec<(u128, crate::first_person::Hand)>>>,
+            clicks: Arc<Mutex<Vec<(u128, mod_api::first_person::Hand)>>>,
             item_uses: Arc<AtomicUsize>,
         }
         #[mod_api::horizon_part]
@@ -6322,7 +6312,7 @@ mod tests {
                 host: &mut dyn ServerHost,
                 event: &mut UseWithoutItemEvent<'_>,
             ) -> Option<Answer> {
-                assert_eq!(event.click.hand, crate::first_person::Hand::Main);
+                assert_eq!(event.click.hand, mod_api::first_person::Hand::Main);
                 if let Some(level) = self.empty_food.lock().unwrap().take() {
                     let player = host.player(event.click.player).unwrap();
                     assert!(player.set_food_level(host, level));
@@ -6349,7 +6339,7 @@ mod tests {
         }
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 r.block_part("minecraft:stone", Picker(self.picks.clone()));
                 r.block_part("minecraft:beehive", Picker(self.picks.clone()));
                 r.block_part("minecraft:chest", Picker(self.picks.clone()));
@@ -6383,7 +6373,7 @@ mod tests {
             }),
         )]
         .into();
-        mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
@@ -6445,7 +6435,7 @@ mod tests {
 
                 // BlockState.useItemOn replaces the template. Only TryWithEmptyHand
                 // reaches useWithoutItem, which toggles this lever on the main hand.
-                use crate::first_person::Hand;
+                use mod_api::first_person::Hand;
                 use std::sync::atomic::Ordering::SeqCst;
                 let lever = game
                     .pack
@@ -6891,11 +6881,11 @@ mod tests {
     #[ignore = "requires prepared game resources"]
     fn block_part_use_item_on_consumes_once() {
         use super::super::native_entity_refs::tests::with_game;
-        use crate::mod_api::{
+        use horizon_client::chunk::Chunk;
+        use mod_api::{
             self, BlockPart, Hooks, NativeInteractionResult as Answer, Registrar, ServerHost,
             UseItemOnEvent,
         };
-        use horizon_client::chunk::Chunk;
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering::SeqCst},
@@ -6916,7 +6906,7 @@ mod tests {
         }
         #[mod_api::__subscriptions]
         impl Hooks for BlockUse {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 r.block_part("minecraft:lever", self.clone());
             }
         }
@@ -6926,7 +6916,7 @@ mod tests {
             Box::new(BlockUse(calls.clone())),
         )]
         .into();
-        mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
@@ -6960,11 +6950,11 @@ mod tests {
     #[ignore = "requires prepared game resources"]
     fn replacing_empty_note_block_use_does_not_award_vanilla_stats() {
         use super::super::native_entity_refs::tests::with_game;
-        use crate::mod_api::{
+        use horizon_client::chunk::Chunk;
+        use mod_api::{
             self, BlockPart, Hooks, NativeInteractionResult as Answer, Registrar, ServerHost,
             UseWithoutItemEvent,
         };
-        use horizon_client::chunk::Chunk;
         use std::sync::{
             Arc,
             atomic::{AtomicBool, Ordering::SeqCst},
@@ -6984,7 +6974,7 @@ mod tests {
         }
         #[mod_api::__subscriptions]
         impl Hooks for Replacement {
-            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
+            fn register(&self, r: &mut Registrar, _: &mod_api::RegistrationContext<'_>) {
                 r.block_part("minecraft:note_block", self.clone());
             }
         }
@@ -6994,7 +6984,7 @@ mod tests {
             Box::new(Replacement(replace.clone())),
         )]
         .into();
-        mod_api::install_parts(&mods).unwrap();
+        mod_api::__private::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
                 game.options.dedicated = Some(Vec::new());

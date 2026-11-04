@@ -541,7 +541,7 @@ impl Game<'_> {
                     x: xd,
                     z: zd,
                 };
-                let source = horizon_client::health::HurtSource {
+                let source = mod_api::health::HurtSource {
                     damage_type: "minecraft:player_attack",
                     causing: horizon_client::health::knockback_attacker(),
                     direct: horizon_client::health::knockback_attacker(),

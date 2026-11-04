@@ -1,5 +1,5 @@
 use super::*;
-use horizon_client::mod_api::{
+use mod_api::{
     ClientReloadContext, ClientReloadListener, ClientReloadListeners, FileToIdConverter,
     Identifier, ReloadApply, ReloadResourceError,
 };
@@ -132,9 +132,9 @@ fn a_converted_file_outside_the_pack_is_absent_not_empty() {
 #[ignore = "needs prepared resources"]
 fn initial_load_stages_and_applies_client_reload_listeners() {
     use crate::game::{Progress, load_resources, native_entity_refs::tests::with_game};
-    use crate::mod_api::testing::with_mods;
-    use crate::mod_api::{self, ModEntry};
-    use horizon_client::mod_api::{AddClientReloadListenersEvent, ClientHost, Hooks};
+    use mod_api::testing::with_mods;
+    use mod_api::{self, ModEntry};
+    use mod_api::{AddClientReloadListenersEvent, ClientHost, Hooks};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     /// Counts the real root's own `post_effect` assets, like a mod reading
@@ -241,9 +241,9 @@ fn initial_load_stages_and_applies_client_reload_listeners() {
 #[ignore = "needs prepared resources"]
 fn client_reload_reads_real_assets_with_pack_overrides() {
     use crate::game::native_entity_refs::tests::with_game;
-    use crate::mod_api::testing::with_mods;
-    use crate::mod_api::{self, ModEntry};
-    use horizon_client::mod_api::{AddClientReloadListenersEvent, ClientHost, Hooks};
+    use mod_api::testing::with_mods;
+    use mod_api::{self, ModEntry};
+    use mod_api::{AddClientReloadListenersEvent, ClientHost, Hooks};
     use std::{
         collections::BTreeSet,
         sync::Mutex,

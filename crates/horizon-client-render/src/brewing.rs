@@ -528,4 +528,130 @@ mod tests {
         assert!(lines[0].0.starts_with("Замедление IV ("), "{lines:?}");
         assert!(lines[1].0.starts_with("Сопротивление III ("), "{lines:?}");
     }
+
+    use mod_api::Flow;
+    use std::sync::{Arc, Mutex};
+
+    /// A server host that answers nothing: the hooks here don't call it.
+    struct NoHost;
+    impl mod_api::Host for NoHost {}
+    impl mod_api::ServerHost for NoHost {}
+
+    /// Cancels every brew and leaves its own slots; records what it saw.
+    struct BrewSwapper(Arc<Mutex<Vec<String>>>);
+
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for BrewSwapper {
+        fn potion_brew_pre(
+            &self,
+            _host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::PotionBrewPreEvent<'_>,
+        ) -> Flow {
+            self.0.lock().unwrap().push("pre".into());
+            event.stacks[0] = Some(ItemStack::new("minecraft:diamond", 1));
+            Flow::Cancel
+        }
+        fn potion_brew_post(
+            &self,
+            _host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::PotionBrewPostEvent<'_>,
+        ) {
+            let first = event.stacks[0].as_ref().map_or("", |s| &s.item);
+            self.0.lock().unwrap().push(format!("post {first}"));
+            event.stacks[1] = Some(ItemStack::new("minecraft:emerald", 1));
+        }
+    }
+
+    /// Edits the slots in `PotionBrewEvent.Pre` without cancelling.
+    struct BrewEditor;
+
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for BrewEditor {
+        fn potion_brew_pre(
+            &self,
+            _host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::PotionBrewPreEvent<'_>,
+        ) -> Flow {
+            event.stacks[0] = Some(ItemStack::new("minecraft:diamond", 1));
+            Flow::Continue
+        }
+        fn potion_brew_post(
+            &self,
+            _host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::PotionBrewPostEvent<'_>,
+        ) {
+            event.stacks[1] = Some(ItemStack::new("minecraft:emerald", 1));
+        }
+    }
+
+    /// `PotionBrewEvent.Pre` and `.Post` around `doBrew`: a cancelling mod's
+    /// slots replace the brew, with no ingredient used, and Post fires once
+    /// with them; a mod that doesn't cancel has its Pre edits dropped,
+    /// vanilla brews, and its Post edits stay.
+    #[test]
+    fn a_cancelled_brew_takes_the_mods_slots_and_an_uncancelled_one_brews() {
+        let set = |ids: &[&str]| ids.iter().map(|s| (*s).to_owned()).collect();
+        let brewing = Brewing {
+            reagents: set(&["minecraft:nether_wart"]),
+            inputs: Default::default(),
+            recipes: vec![BrewingRecipe {
+                id: "awkward".into(),
+                input: PotionIngredient {
+                    items: set(&["minecraft:potion"]),
+                    potions: Some(set(&["minecraft:water"])),
+                },
+                reagent: PotionIngredient {
+                    items: set(&["minecraft:nether_wart"]),
+                    potions: None,
+                },
+                output: ItemStack::new("minecraft:potion", 1).with_potion("minecraft:awkward"),
+            }],
+        };
+        let items = horizon_items::items::Items::for_tests(Default::default());
+        let water = ItemStack::new("minecraft:potion", 1).with_potion("minecraft:water");
+        let awkward = ItemStack::new("minecraft:potion", 1).with_potion("minecraft:awkward");
+        let fresh = || {
+            let mut stand = BrewingStand::new();
+            stand.items[0] = Some(water.clone());
+            stand.items[3] = Some(ItemStack::new("minecraft:nether_wart", 2));
+            stand
+        };
+        let mut host = NoHost;
+        // What `tick_brewing_stand` does once the brew is due.
+        let brew = |host: &mut NoHost, stand: &mut BrewingStand| {
+            let mut stacks = stand.items.clone();
+            let mut cancel = false;
+            mod_api::dispatch_potion_brew_pre(host, [1, 2, 3], &mut stacks, &mut cancel);
+            let mut out = BrewTick::default();
+            stand.brew_after_pre(Some((stacks, cancel)), &brewing, &items, &mut out);
+            if out.brewed || cancel {
+                mod_api::dispatch_potion_brew_post(host, [1, 2, 3], &mut stand.items);
+            }
+            out.brewed
+        };
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<mod_api::ModEntry> = vec![mod_api::ModEntry::new(
+            "brew-swapper",
+            Box::new(BrewSwapper(seen.clone())),
+        )];
+        let mut stand = fresh();
+        assert!(!mod_api::testing::with_mods(mods.into(), || brew(
+            &mut host, &mut stand
+        )));
+        assert_eq!(*seen.lock().unwrap(), ["pre", "post minecraft:diamond"]);
+        assert_eq!(&*stand.items[0].as_ref().unwrap().item, "minecraft:diamond");
+        assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
+        assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(2));
+
+        let mods: Vec<mod_api::ModEntry> =
+            vec![mod_api::ModEntry::new("brew-editor", Box::new(BrewEditor))];
+        let mut stand = fresh();
+        assert!(mod_api::testing::with_mods(mods.into(), || brew(
+            &mut host, &mut stand
+        )));
+        assert_eq!(stand.items[0], Some(awkward));
+        assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
+        assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(1));
+    }
 }
