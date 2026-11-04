@@ -2712,6 +2712,18 @@ pub trait LevelHost {
     fn state_block(&self, _state: BlockStateId) -> Option<&str> {
         unimplemented!("LevelHost::state_block")
     }
+    /// The full block state name and properties, as `BlockStateParser.serialize`; None for an unknown id.
+    fn state_string(&self, _state: BlockStateId) -> Option<String> {
+        unimplemented!("LevelHost::state_string")
+    }
+    /// Lowest build Y (`LevelHeightAccessor.getMinY`).
+    fn min_y(&self) -> i32 {
+        unimplemented!("LevelHost::min_y")
+    }
+    /// Build height (`LevelHeightAccessor.getHeight`).
+    fn height(&self) -> i32 {
+        unimplemented!("LevelHost::height")
+    }
     /// `BlockState.is(TagKey)`: the block of `state` is in the block tag `tag` (`minecraft:logs`
     /// or `logs`, no `#`), over the world's merged tags, its data packs and content mods
     /// included. False for an unknown tag or state. None on a client level, whose tags are not

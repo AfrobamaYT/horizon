@@ -399,10 +399,7 @@ mod tests {
             let sign = game.native_block_entity_ref(level, [4, 64, 0]).unwrap();
             use super::super::lan_actions::MenuOpen;
             assert!(!player.open_menu(game, sign));
-            assert_eq!(
-                game.open_block_menu(999, (0, 64, 0)),
-                MenuOpen::NotAProvider
-            );
+            assert_eq!(game.open_block_menu(999, (0, 64, 0)), MenuOpen::Refused);
             game.world
                 .block_entities
                 .insert((0, 64, 0), BlockEntity::Chest(vec![None; 2]));
@@ -417,7 +414,7 @@ mod tests {
             game.lan.as_mut().unwrap().hub.guests[0].dimension = dimension;
             let host = game.lan.take();
             assert!(!player.open_menu(game, chest));
-            assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::NotAProvider);
+            assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::Refused);
             game.lan = host;
             game.lan.as_mut().unwrap().hub.guests[0].kind =
                 horizon_client::lan::guest::GuestKind::Fake;

@@ -37,7 +37,7 @@ use winit::keyboard::KeyCode;
 pub(super) enum MenuOpen {
     Opened,
     Cancelled,
-    NotAProvider,
+    Refused,
 }
 
 /// Per-guest state of the gameplay code that lives outside `Guest`.
@@ -1302,7 +1302,7 @@ impl Game<'_> {
         if pos.1 == super::minecarts::CART_KEY_Y {
             return self.lan_open_vehicle_container(conn, pos);
         }
-        !matches!(self.open_block_menu(conn, pos), MenuOpen::NotAProvider)
+        !matches!(self.open_block_menu(conn, pos), MenuOpen::Refused)
     }
 
     pub(super) fn open_block_menu(&mut self, conn: u32, pos: (i32, i32, i32)) -> MenuOpen {
@@ -1340,13 +1340,13 @@ impl Game<'_> {
             (menu, Slots::Block(pos))
         } else {
             let Some(BlockEntity::Chest(items)) = self.world.block_entities.get(&pos) else {
-                return MenuOpen::NotAProvider;
+                return MenuOpen::Refused;
             };
             let menu = match items.len() {
                 27 => "minecraft:generic_9x3",
                 9 => "minecraft:generic_3x3",
                 5 => "minecraft:hopper",
-                _ => return MenuOpen::NotAProvider,
+                _ => return MenuOpen::Refused,
             };
             (menu, Slots::Block(pos))
         };
@@ -1366,22 +1366,22 @@ impl Game<'_> {
                     None if self.mod_menu_at(k).is_some() => {
                         format!("block.{}", name.replace(':', "."))
                     }
-                    None => return MenuOpen::NotAProvider,
+                    None => return MenuOpen::Refused,
                 };
                 horizon_client::containers::display_name(custom(k), &key)
             }
             // Opened by a mod (`native_open_menu`), never here.
-            Slots::Native => return MenuOpen::NotAProvider,
+            Slots::Native => return MenuOpen::Refused,
         };
         let Some(host) = self.lan.as_ref() else {
-            return MenuOpen::NotAProvider;
+            return MenuOpen::Refused;
         };
         let Some(items) = host
             .hub
             .guest(conn)
             .and_then(|g| slots.read(&self.world, g))
         else {
-            return MenuOpen::NotAProvider;
+            return MenuOpen::Refused;
         };
         // The block entity's createMenu: a shulker box opens a ShulkerBoxMenu
         // (not a 9x3 ChestMenu), whose slots refuse shulker boxes.
@@ -1405,7 +1405,7 @@ impl Game<'_> {
             _ => [None, None],
         };
         let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
-            return MenuOpen::NotAProvider;
+            return MenuOpen::Refused;
         };
         let mut locked = false;
         for key in halves.iter().flatten().copied() {
@@ -1415,7 +1415,7 @@ impl Game<'_> {
         }
         if locked {
             let Some(host) = self.lan.as_mut() else {
-                return MenuOpen::NotAProvider;
+                return MenuOpen::Refused;
             };
             host.hub.send_to(
                 conn,
@@ -1448,16 +1448,16 @@ impl Game<'_> {
                 source as i32,
                 None,
             );
-            return MenuOpen::NotAProvider;
+            return MenuOpen::Refused;
         }
         // A mod menu type only for a client that has it: as
         // `ServerPlayer.openMenu` with no menu, nothing opens.
         let Some(host) = self.lan.as_ref() else {
-            return MenuOpen::NotAProvider;
+            return MenuOpen::Refused;
         };
         let brand = host.hub.guest(conn).map_or("", |g| g.brand.as_str());
         if !horizon_client::containers::menu_reaches(brand, menu) {
-            return MenuOpen::NotAProvider;
+            return MenuOpen::Refused;
         }
         // The mods may stop the menu; the click is spent.
         if !self.guest_may_open(conn, menu, Some([pos.0, pos.1, pos.2])) {
@@ -1466,7 +1466,7 @@ impl Game<'_> {
         let mut cancel = false;
         self.native_inventory_block_start(uuid, &name, [pos.0, pos.1, pos.2], &mut cancel);
         if cancel {
-            return MenuOpen::NotAProvider;
+            return MenuOpen::Refused;
         }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(conn);
@@ -1475,7 +1475,7 @@ impl Game<'_> {
         let counts_openers = matches!(slots, Slots::Block(_) | Slots::Double(_, _));
         let hidden = self.native_hidden_slots(pos, items.len());
         let Some(host) = self.lan.as_mut() else {
-            return MenuOpen::NotAProvider;
+            return MenuOpen::Refused;
         };
         host.hub
             .open_container(conn, menu, title, pos, slots, items);

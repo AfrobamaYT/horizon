@@ -1101,5 +1101,6 @@
   "{mod}: Cargo.toml has no horizon-client dependency.": "{mod}: a Cargo.toml fájlból hiányzik a horizon-client függőség.",
   "{mod}: Cargo.toml has no package name.": "{mod}: a Cargo.toml fájlból hiányzik a csomagnév.",
   "{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.": "{mod}: a horizon-client a következőket kéri: {fields}. A szerver-összeállítások grafikus felület nélkül futnak; a horizon-client funkcióit az indító kezeli. Távolítsd el a features mezőt, és használd a default-features = false beállítást, vagy hagyd el ezt a beállítást.",
-  "{mod}: {error}": "{mod}: {error}"
+  "{mod}: {error}": "{mod}: {error}",
+  "Jar metadata lookup failed: {reason}. Put the original files at these exact cache paths, then retry:\n": "A JAR-metaadatok lekérdezése sikertelen: {reason}. Helyezd az eredeti fájlokat pontosan ezekre a gyorsítótárbeli elérési utakra, majd próbáld újra:\n"
 }
