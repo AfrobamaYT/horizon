@@ -97,6 +97,16 @@ impl Game<'_> {
         Some(members.map(<[String]>::to_vec).unwrap_or_default())
     }
 
+    /// The outline of `state` as `BlockState.getShape` answers it with an empty getter at the
+    /// origin (`EmptyBlockGetter.INSTANCE`, `BlockPos.ZERO`): its boxes, each `[min x, y, z,
+    /// max x, y, z]` in the block's own space, with no random offset and none of a world's
+    /// context (a state that reads its neighbours or block entity answers what its state alone
+    /// gives). Empty for a state with no outline, such as air. None for an id no state has.
+    pub(super) fn native_state_outline(&self, state: BlockStateId) -> Option<Vec<[f64; 6]>> {
+        self.pack.assets.registry.state(state)?;
+        Some(self.res.facts().get(state).outline.to_vec())
+    }
+
     /// The fluid state `state` holds (`BlockState.getFluidState`): water for a waterlogged state,
     /// the empty fluid for most. None for an id no state has.
     pub(super) fn native_state_fluid_state(&self, state: BlockStateId) -> Option<FluidState> {
@@ -260,6 +270,20 @@ mod tests {
                 game.native_tag_members(TagRegistry::Item, "nope:missing"),
                 Some(Vec::new())
             );
+
+            // A full block is one unit box, a bottom slab half of it, air none, and an id no
+            // state has is unknown.
+            assert_eq!(
+                game.native_state_outline(stone),
+                Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]])
+            );
+            assert_eq!(
+                game.native_state_outline(dry_slab),
+                Some(vec![[0.0, 0.0, 0.0, 1.0, 0.5, 1.0]])
+            );
+            let air = registry.default_state("minecraft:air").unwrap();
+            assert_eq!(game.native_state_outline(air), Some(Vec::new()));
+            assert_eq!(game.native_state_outline(BlockStateId(u32::MAX)), None);
 
             assert_eq!(
                 game.native_block_state_in_tag(stone, "minecraft:base_stone_overworld"),

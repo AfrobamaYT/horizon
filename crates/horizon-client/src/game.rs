@@ -563,8 +563,9 @@ struct Options {
     /// `--fullscreen` (vanilla's): the window opens fullscreen whatever options.txt says,
     /// as vanilla's DisplayData does, without saving it there.
     fullscreen: bool,
-    /// `--game-dir DIR`: the folder `read` makes the working directory (saves, options.txt...).
-    game_dir: PathBuf,
+    /// `--game-dir DIR`: the folder `read` makes the working directory (saves, options.txt...);
+    /// none for a splitscreen player's game, which shares P1's working directory.
+    game_dir: Option<PathBuf>,
     /// `--quickPlaySingleplayer`, checked once the game folder is known.
     quick_play: Option<String>,
     session_file: Option<String>,
@@ -619,13 +620,16 @@ impl Options {
             Ok(None) => {}
             Err(e) => eprintln!("Horizon: not signed in: {e}"),
         }
-        // Paths given on the command line stay relative to where the game was started.
-        o.resources = std::path::absolute(&o.resources)?;
-        o.report = o.report.map(std::path::absolute).transpose()?;
-        o.control = o.control.map(std::path::absolute).transpose()?;
-        std::fs::create_dir_all(&o.game_dir)
-            .and_then(|()| std::env::set_current_dir(&o.game_dir))
-            .map_err(|e| format!("game folder {}: {e}", o.game_dir.display()))?;
+        split::launcher::read_now();
+        if let Some(dir) = o.game_dir.take() {
+            // Paths given on the command line stay relative to where the game was started.
+            o.resources = std::path::absolute(&o.resources)?;
+            o.report = o.report.map(std::path::absolute).transpose()?;
+            o.control = o.control.map(std::path::absolute).transpose()?;
+            std::fs::create_dir_all(&dir)
+                .and_then(|()| std::env::set_current_dir(&dir))
+                .map_err(|e| format!("game folder {}: {e}", dir.display()))?;
+        }
         // Vanilla's quick play (Main, QuickPlay.joinSingleplayerWorld): only a
         // world that exists opens; else the title screen. --world also creates one.
         if let Some(world) = o.quick_play.take() {
@@ -703,7 +707,7 @@ impl Options {
             },
             execution_role: execution_role::ExecutionRole::Client,
             fullscreen: false,
-            game_dir: context.game_dir,
+            game_dir: Some(context.game_dir),
             quick_play: None,
             session_file: std::env::var("HORIZON_SESSION_FILE").ok(),
             session_stdin: false,
@@ -2681,6 +2685,9 @@ struct Game<'a> {
     view_at: [u32; 2],
     /// Splitscreen: what it draws over this player's view (its badge, questions, notices).
     split_hud: split::Hud,
+    /// Splitscreen: this player's own Microsoft account session (one of the launcher's other
+    /// accounts), in place of the process's (P1's) for its connections and skin.
+    split_auth: Option<std::sync::Arc<horizon_client::auth::AuthSession>>,
     focused: bool,
     /// Whether the window currently accepts input method events.
     ime_allowed: bool,
@@ -19522,6 +19529,7 @@ impl<'a> Game<'a> {
             split_window: false,
             view_at: [0, 0],
             split_hud: Default::default(),
+            split_auth: None,
             focused: true,
             ime_allowed: false,
             ime_area: None,
