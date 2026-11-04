@@ -269,21 +269,20 @@ pub static KNOCKBACK: OnceLock<fn(DamageLevel<'_>, Hurting<'_>, &mut Knock) -> b
 pub static USE_TOTEM: OnceLock<fn(Hurting<'_>, bool) -> bool> = OnceLock::new();
 /// The game's native shield hook (`native_living_shield_block`), set once by the game:
 /// `LivingEntity.applyItemBlocking` of a hit with damage, for what it hurts, the damage
-/// and whether vanilla blocks. It may change the [`ShieldBlock`]; true cancels the block.
-pub static SHIELD_BLOCK: OnceLock<fn(Hurting<'_>, f32, bool, &mut ShieldBlock) -> bool> =
-    OnceLock::new();
+/// and whether vanilla blocks. It may change the [`ShieldBlock`].
+pub static SHIELD_BLOCK: OnceLock<fn(Hurting<'_>, f32, bool, &mut ShieldBlock)> = OnceLock::new();
 /// What `applyItemBlocking` stops of `damage` (above 0) once [`SHIELD_BLOCK`] had its say
-/// on `vanilla`, the block vanilla resolved: none when the hook cancels or unblocks it.
+/// on `vanilla`, the block vanilla resolved: none when the hook unblocks it.
 pub fn shield_block(
     hurting: Hurting<'_>,
     damage: f32,
     vanilla: ShieldBlock,
 ) -> Option<ShieldBlock> {
     let mut block = vanilla;
-    let canceled = SHIELD_BLOCK
-        .get()
-        .is_some_and(|hook| hook(hurting, damage, vanilla.blocked, &mut block));
-    if canceled || !block.blocked {
+    if let Some(hook) = SHIELD_BLOCK.get() {
+        hook(hurting, damage, vanilla.blocked, &mut block);
+    }
+    if !block.blocked {
         return None;
     }
     // A value a mod leaves that is not a number stops nothing.

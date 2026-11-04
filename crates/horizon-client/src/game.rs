@@ -4395,12 +4395,12 @@ impl Game<'_> {
         // LivingEntity.drop: every drop swings the main hand, a menu's
         // THROW and a creative tab's drop included.
         self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
-        // Player.drop: the drop statistics.
-        self.award_stat("dropped", &thrown.item, thrown.count as i32);
+        // ServerPlayer.drop: the drop statistics, only when an item entity came of it.
+        let (item, count) = (thrown.item.clone(), thrown.count as i32);
+        let dropped = self.throw_from_eyes(thrown, eye, false, true)?;
+        self.award_stat("dropped", &item, count);
         self.award_custom_stat("drop", 1);
-        let player = self.native_acting_id();
-        self.native_item_dropped(player, &thrown.item, thrown.count);
-        self.throw_from_eyes(thrown, eye, false, true)
+        Some(dropped)
     }
     /// `Player.drop(stack, false)`, as `ItemUtils.createFilledResult` drops what no longer fits
     /// in the inventory: thrown from the eyes, with no thrower, statistic or drop hook.
@@ -4428,6 +4428,13 @@ impl Game<'_> {
         let r = &mut self.world.random;
         let v = horizon_client::entities::drop_motion(r, self.yaw, self.pitch, randomly);
         let y = eye[1] - f64::from(0.3f32);
+        // ItemTossEvent: a canceled toss never enters the world; what was thrown is gone.
+        let player = self.native_acting_id();
+        let mut canceled = false;
+        self.native_item_toss(player, &thrown.item, thrown.count, &mut canceled);
+        if canceled {
+            return None;
+        }
         self.spawn_item(thrown, [eye[0], y, eye[2]], v, 40);
         let uuid = thrown_from_hand.then(|| self.acting_player_uuid());
         let item = self.just_spawned_item()?;
@@ -15467,12 +15474,15 @@ impl Game<'_> {
                 // SleepFinishedTimeEvent: the mods may move the wake-up time,
                 // never before now (`setTimeAddition` refuses a lower one).
                 let mut asked = target;
-                self.native_sleep_finished_time(self.dim.id(), t, &mut asked);
+                let mut cancel = false;
+                self.native_sleep_finished_time(self.dim.id(), t, &mut asked, &mut cancel);
                 if asked >= t {
                     target = asked;
                 }
-                let mut cancel = false;
-                self.native_time_skip(self.dim.id(), t, target, "sleep", &mut cancel);
+                // A canceled event leaves the clock alone, so `native_time_skip` is not asked.
+                if !cancel {
+                    self.native_time_skip(self.dim.id(), t, target, "sleep", &mut cancel);
+                }
                 if !cancel {
                     self.world.day_time = target;
                 }

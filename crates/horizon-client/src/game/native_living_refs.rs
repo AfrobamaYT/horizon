@@ -676,7 +676,7 @@ impl Game<'_> {
     /// `ServerPlayer.drop`), never through a slot: along the view with a
     /// main-hand swing, or with `throw_randomly` scattered with none, as a
     /// death's drops. `include_thrower_name` sets the thrower, and a player's
-    /// throw along the view then counts in its stats and fires `item_dropped`.
+    /// throw along the view then counts in its stats and fires `item_toss`.
     /// None for an empty stack, a stand or the dragon, a stale handle, or an
     /// item a mod kept out. API @API:living_refs@.
     pub(super) fn native_living_drop(

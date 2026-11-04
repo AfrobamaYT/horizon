@@ -862,14 +862,6 @@
       }
     },
     {
-      "name": "item_dropped", "doc": "`player` threw `count` of `item` (`Player.drop`: the drop key, a\nmenu's throw...), not what scatters when they die. It only hears.\nServer-side.", "side": "server",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_dropped",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "item_picked_up", "doc": "`player` is about to take `count` of `item` from the ground\n(`ItemEntity.playerTouch`). Set `canceled` to leave it there: the\nstack isn't offered again for 10 ticks. Server-side.", "side": "server",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_item_picked_up",
@@ -4164,14 +4156,15 @@
     },
     {
       "name": "sleep_finished_time",
-      "doc": "Enough players have slept through the night in level `dimension`\nand the clock is about to move to the morning (NeoForge's\n`SleepFinishedTimeEvent`, vanilla's `ServerLevel.tick` when it moves\nthe clock to `wake_up_from_sleep`): `new_time` comes in as the next\nmorning's day time and may be changed to wake everyone at another\ntime. A time before `current` (the day time now) is refused, as\n`setTimeAddition` refuses one, and the morning stays. Unlike\nNeoForge, which refuses a bad value as it is set, the check runs once\nafter every mod, so a later mod sees the value an earlier one left.\nOn the server, only when the `advance_time` rule is on;\n`native_time_skip` then hears the jump to the time chosen here and\nmay still cancel it. The players wake and the weather resets as\nusual either way.",
+      "doc": "Enough players have slept through the night in level `dimension`\nand the clock is about to move to the morning (NeoForge's\n`SleepFinishedTimeEvent`, vanilla's `ServerLevel.tick` when it moves\nthe clock to `wake_up_from_sleep`): `new_time` comes in as the next\nmorning's day time and may be changed to wake everyone at another\ntime. A time before `current` (the day time now) is refused, as\n`setTimeAddition` refuses one, and the morning stays. Unlike\nNeoForge, which refuses a bad value as it is set, the check runs once\nafter every mod, so a later mod sees the value an earlier one left.\nOn the server, only when the `advance_time` rule is on;\n`native_time_skip` then hears the jump to the time chosen here and\nmay still cancel it. The players wake and the weather resets as\nusual either way. Set `canceled` and the clock is left where it is, as NeoForge's cancel leaves it:\n`native_time_skip` is not asked either.",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_sleep_finished_time",
       "neoforge": "SleepFinishedTimeEvent",
       "side": "server",
-      "cancellable": false,
+      "cancellable": true,
       "mod_api": {
-        "contract": "listen"
+        "contract": "cancel",
+        "out": "canceled"
       }
     },
     {

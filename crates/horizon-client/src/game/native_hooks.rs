@@ -5503,14 +5503,16 @@ impl Game<'_> {
     /// On the server, only when the `advance_time` rule is on;
     /// `native_time_skip` then hears the jump to the time chosen here and
     /// may still cancel it. The players wake and the weather resets as
-    /// usual either way.
+    /// usual either way. Set `canceled` and the clock is left where it is, as
+    /// NeoForge's cancel leaves it: `native_time_skip` is not asked either.
     pub(super) fn native_sleep_finished_time(
         &mut self,
         dimension: &str,
         current: i64,
         new_time: &mut i64,
+        canceled: &mut bool,
     ) {
-        mod_api::dispatch_sleep_finished_time(self, dimension, current, new_time);
+        mod_api::dispatch_sleep_finished_time(self, dimension, current, new_time, canceled);
     }
 
     /// A slime, magma cube or sulfur cube is dying and about to split into
@@ -7349,11 +7351,19 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_item_damaged(self, player, name, item, amount, cancel);
     }
-    /// `player` threw `count` of `item` (`Player.drop`: the drop key, a
-    /// menu's throw...), not what scatters when they die. It only hears.
+    /// `player` tosses `count` of `item` (`ItemTossEvent`, from
+    /// `Player.drop`: the drop key, a menu's throw, what no longer fits),
+    /// not what scatters when they die. Set `canceled` and no item entity
+    /// is made; the items are already out of the inventory and are lost.
     /// Server-side.
-    pub(super) fn native_item_dropped(&mut self, player: u128, item: &str, count: u32) {
-        mod_api::dispatch_item_dropped(self, player, item, count);
+    pub(super) fn native_item_toss(
+        &mut self,
+        player: u128,
+        item: &str,
+        count: u32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_item_toss(self, player, item, count, canceled);
     }
     /// `player` is about to take `count` of `item` from the ground
     /// (`ItemEntity.playerTouch`). Set `canceled` to leave it there: the
@@ -7555,7 +7565,7 @@ impl Game<'_> {
     /// player raises one). Change `block`: `blocked` makes the entity block or not (a block
     /// forced on a hit vanilla lets through stops all of it), `blocked_damage` what is
     /// stopped (kept within 0 and `damage`) and `shield_damage` the durability a raised
-    /// item loses (below 0: vanilla's `itemDamage` of what is stopped). Set `canceled` and nothing is blocked. No `self`, as
+    /// item loses (below 0: vanilla's `itemDamage` of what is stopped). Set `blocked` to false and nothing is blocked; the event has no cancel. No `self`, as
     /// `native_living_incoming_damage`: the game is in the middle of the hit.
     pub(super) fn native_living_shield_block(
         entity: i32,
@@ -7564,7 +7574,6 @@ impl Game<'_> {
         damage: f32,
         original_blocked: bool,
         block: &mut ShieldBlock,
-        canceled: &mut bool,
     ) {
         mod_api::dispatch_living_shield_block(
             entity,
@@ -7573,7 +7582,6 @@ impl Game<'_> {
             damage,
             original_blocked,
             block,
-            canceled,
         );
     }
     /// NeoForge's `LivingUseTotemEvent`: a killing blow on entity `entity` of type `kind`
@@ -7964,27 +7972,16 @@ pub(super) fn damage_post(
     HitLevel(level).native_living_damage_post(entity, kind, &source, container);
 }
 
-/// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`): whether it
-/// canceled the block. Its one caller. The hurt entity and the source are named as the
-/// damage hook names them.
+/// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`). Its one
+/// caller. The hurt entity and the source are named as the damage hook names them.
 pub(super) fn shield_block(
     hurting: Hurting<'_>,
     damage: f32,
     original_blocked: bool,
     block: &mut ShieldBlock,
-) -> bool {
+) {
     let (entity, kind, source) = hurt_server_args(hurting);
-    let mut canceled = false;
-    Game::native_living_shield_block(
-        entity,
-        kind,
-        &source,
-        damage,
-        original_blocked,
-        block,
-        &mut canceled,
-    );
-    canceled
+    Game::native_living_shield_block(entity, kind, &source, damage, original_blocked, block);
 }
 
 impl Game<'_> {
