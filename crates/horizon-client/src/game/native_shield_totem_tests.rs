@@ -42,7 +42,7 @@ impl Hooks for Probe {
             event.block.blocked_damage = damage;
         }
         if heard.random_draw {
-            level.random().unwrap().next_int();
+            level.with_random(|random| random.next_int());
         }
     }
     fn living_damage_post(&self, _: &mut dyn LevelRandomHost, _: &mut LivingDamagePostEvent<'_>) {
