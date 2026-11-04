@@ -956,11 +956,14 @@
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
 
+mod fire;
+
 use super::native_data_maps::NativeDataMapType;
 use super::{
     Game, GameLevel, LevelDimension, Screen,
-    execution_role::ExecutionRole,
+    execution_role::{self, ExecutionRole},
     maps::{NativeMapDecoration, NativeMapInfo},
+    mod_api_host,
     native_block_entity_draw::BlockEntityDraw,
     native_configs::{NativeConfig, NativeConfigFile},
     native_mob_draw::{NativeMobRender, NativePlayerRender},
