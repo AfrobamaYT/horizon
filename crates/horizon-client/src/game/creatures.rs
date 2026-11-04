@@ -38,7 +38,7 @@ pub(super) type SpawnReason = horizon_client::mobs::spawn_rules::Reason;
 
 /// Whether vanilla calls `finalizeSpawn` for a mob a spawn site makes, and with
 /// which reason. The reason is vanilla's `EntitySpawnReason` at that site.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum SpawnSite {
     /// Vanilla calls `finalizeSpawn` with this reason: `finalize_spawn` is told.
     Finalizing(SpawnReason),
@@ -500,22 +500,8 @@ impl Game<'_> {
         scripted: bool,
         site: SpawnSite,
     ) -> Option<u32> {
-        self.spawn_mob_reason(kind, at, persistent, scripted, !persistent, site)
-    }
-    /// `spawn_mob_for` with the spawn reason's NATURAL flag explicit: only a
-    /// natural spawn rolls the jockey mounts of zombie horses, husks and
-    /// drowned (`reinforcement` and spawner spawns pass `false`).
-    pub(super) fn spawn_mob_reason(
-        &mut self,
-        kind: &str,
-        at: [f64; 3],
-        persistent: bool,
-        scripted: bool,
-        natural: bool,
-        site: SpawnSite,
-    ) -> Option<u32> {
         let mob = self.create_mob_reason(kind, at, persistent, scripted, site)?;
-        self.insert_spawned_mob(mob, persistent, scripted, natural)
+        self.insert_spawned_mob(mob, persistent, scripted, site)
     }
 
     fn create_mob_reason(
@@ -564,7 +550,7 @@ impl Game<'_> {
         mob: Mob,
         persistent: bool,
         scripted: bool,
-        natural: bool,
+        site: SpawnSite,
     ) -> Option<u32> {
         let id = mob.id;
         self.mobs.push(mob);
@@ -575,7 +561,7 @@ impl Game<'_> {
         self.enchant_spawn_equipment(id);
         self.halloween_spawn_head(id);
         if !persistent && !scripted {
-            self.spawn_jockeys(id, natural);
+            self.spawn_jockeys(id, site);
         }
         Some(id)
     }
@@ -846,7 +832,7 @@ impl Game<'_> {
                 -24000
             };
         }
-        self.spawn_jockeys(id, false);
+        self.spawn_jockeys(id, SpawnSite::Finalizing(SpawnReason::Command));
         Ok(id)
     }
     /// The `mobs` command: nearby mobs with position, health and running goals.
@@ -3888,14 +3874,14 @@ impl Game<'_> {
         let at = [p.position.x, p.position.y, p.position.z];
         match order {
             OrbOrder::AfterChild => {
-                let joined = self.insert_spawned_mob(child, true, false, false);
+                let joined = self.insert_spawned_mob(child, true, false, SpawnSite::Plain);
                 self.mob_event_particles(parent, 18);
                 self.breeding_orb(parent, at, experience);
                 joined
             }
             OrbOrder::BeforeChild => {
                 self.breeding_orb(parent, at, experience);
-                self.insert_spawned_mob(child, true, false, false)
+                self.insert_spawned_mob(child, true, false, SpawnSite::Plain)
             }
         }
     }

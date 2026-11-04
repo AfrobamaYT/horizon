@@ -724,7 +724,12 @@ impl<'a> Game<'a> {
             self.enchant_spawn_equipment(id);
             self.halloween_spawn_head(id);
             if !persistent {
-                self.spawn_jockeys(id, true);
+                self.spawn_jockeys(
+                    id,
+                    super::creatures::SpawnSite::Finalizing(
+                        horizon_client::mobs::spawn_rules::Reason::Natural,
+                    ),
+                );
             }
         }
     }
@@ -1374,6 +1379,61 @@ mod tests {
                     .is_some()
                 );
                 assert_eq!(count(), 1, "a finalizing site is told once");
+            });
+        });
+    }
+
+    /// Records the kind and reason of every `finalize_spawn` event.
+    struct RecordFinalize(
+        std::sync::Arc<std::sync::Mutex<Vec<(String, mod_api::NativeSpawnReason)>>>,
+    );
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for RecordFinalize {
+        fn finalize_spawn(
+            &self,
+            _: &dyn mod_api::Host,
+            event: &mut mod_api::FinalizeSpawnEvent<'_>,
+        ) -> mod_api::Flow {
+            self.0
+                .lock()
+                .unwrap()
+                .push((event.kind.to_owned(), event.reason));
+            mod_api::Flow::Continue
+        }
+    }
+
+    /// `ZombieHorse.finalizeSpawn` finalizes its rider with the horse's own
+    /// `spawnReason`, a baby zombie's chicken with `JOCKEY`.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    fn jockeys_finalize_with_the_parents_reason() {
+        use super::super::creatures::SpawnSite;
+        use super::super::native_entity_refs::tests::with_game;
+        let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "record-finalize",
+            Box::new(RecordFinalize(heard.clone())),
+        )];
+        mod_api::testing::with_mods(mods.into(), || {
+            with_game(|game| {
+                game.ui.difficulty = 2;
+                let at = [8.5, 64.0, 8.5];
+                game.spawn_mob(
+                    "minecraft:zombie_horse",
+                    at,
+                    false,
+                    SpawnSite::Finalizing(Reason::Natural),
+                )
+                .unwrap();
+                let heard = heard.lock().unwrap();
+                let natural = mod_api::NativeSpawnReason::from(Reason::Natural);
+                assert_eq!(
+                    *heard,
+                    [
+                        ("minecraft:zombie_horse".to_owned(), natural),
+                        ("minecraft:zombie".to_owned(), natural)
+                    ]
+                );
             });
         });
     }
