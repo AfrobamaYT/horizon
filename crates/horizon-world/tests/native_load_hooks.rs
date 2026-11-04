@@ -15,13 +15,16 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
     );
     let mut table = json!([]);
     let mut components = Map::new();
-    loot::native_loot_table_load("table", &mut table);
+    loot::native_loot_table_load(&context, "table", &mut table);
     item_defaults::native_modify_default_components(&context, "item", &mut components);
     assert_eq!(table, json!([]));
     assert!(components.is_empty());
 
     let hooks = || NativeLoadHooks {
-        loot_table_load: |id, table| table.as_array_mut().unwrap().push(id.into()),
+        loot_table_load: |context, id, table| {
+            assert_eq!(context.origin(), DataLoadOrigin::ServerDataLoad);
+            table.as_array_mut().unwrap().push(id.into());
+        },
         modify_default_components: |context, item, components| {
             assert_eq!(context.origin(), DataLoadOrigin::ServerDataLoad);
             components.insert("item".into(), Value::String(item.into()));
@@ -32,14 +35,14 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
     assert!(native_load_hooks::install(hooks()).is_ok());
     assert!(
         native_load_hooks::install(NativeLoadHooks {
-            loot_table_load: |_, table| *table = json!("second"),
+            loot_table_load: |_, _, table| *table = json!("second"),
             modify_default_components: |_, _, components| components.clear(),
             loot_function: |_, _, _, stack| stack.count = 0,
             loot_condition: |_, _, _, holds| *holds = false,
         })
         .is_err()
     );
-    loot::native_loot_table_load("table", &mut table);
+    loot::native_loot_table_load(&context, "table", &mut table);
     item_defaults::native_modify_default_components(&context, "item", &mut components);
     assert_eq!(table, json!(["table"]));
     assert_eq!(components["item"], json!("item"));
@@ -60,7 +63,7 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
     for _ in 0..2 {
         let mut server =
             loot::LootData::load(&root, &loot::PackOverlay::NONE, item_data.defaults()).unwrap();
-        server.apply_native_table_loads();
+        server.apply_native_table_loads(item_data.context());
         assert_eq!(server.tables()["minecraft:test"], json!(["minecraft:test"]));
         assert_eq!(raw["minecraft:test"], json!([]));
     }

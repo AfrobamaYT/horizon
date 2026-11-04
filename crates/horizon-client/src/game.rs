@@ -20384,7 +20384,7 @@ impl Game<'_> {
                 self.res.item_defaults(),
             ) {
                 Ok(mut loot) => {
-                    loot.apply_native_table_loads();
+                    loot.apply_native_table_loads(self.res.core.item_data.context());
                     Some(Arc::new(loot))
                 }
                 Err(e) => {
