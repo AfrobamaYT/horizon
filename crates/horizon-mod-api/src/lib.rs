@@ -1497,6 +1497,19 @@ impl NativeActiveEffect {
     }
 }
 
+/// The answer to `mob_effect_applicable`: whether an effect can land on an
+/// entity. An unanswered hook defers to the vanilla tag check; `Allow` and
+/// `Deny` override it, as NeoForge's `MobEffectEvent.Applicable.Result`
+/// does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EffectApplicable {
+    /// The effect lands, whatever the tags say.
+    Allow,
+    /// The effect is refused, whatever the tags say.
+    Deny,
+}
+
 /// A vanilla `Mob`, narrowed from an entity with `host.mob(entity)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
@@ -3362,6 +3375,90 @@ impl BlockStateRange {
     pub fn iter(self) -> impl Iterator<Item = BlockStateId> {
         (self.first.0..self.first.0 + self.count).map(BlockStateId)
     }
+}
+
+/// What a fake player does in `PlayerRef::perform_action`: a player's own action, run through
+/// the game's path for it, as a client's packet is. Its answer is an [`ActionOutcome`], or an
+/// [`ActionRefused`] when none of it ran.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: mods build one; the game runs every kind, so a new kind must be handled there
+pub enum PlayerAction {
+    /// Use the item in `hand` on the block at `pos`, clicked at `hit`
+    /// (`ServerPlayerGameMode.useItemOn`): the block's use, then the item's `useOn`, which
+    /// places a block item.
+    UseOn {
+        /// The hand whose item is used.
+        hand: Hand,
+        /// The block clicked (`BlockHitResult.getBlockPos`).
+        pos: [i32; 3],
+        /// Where on it.
+        hit: BlockHit,
+    },
+    /// Use the item in `hand` in the air (`ServerPlayerGameMode.useItem`).
+    UseItem {
+        /// The hand whose item is used.
+        hand: Hand,
+    },
+}
+
+/// Why a fake player's `perform_action` did nothing at all: it was refused before any of the
+/// action ran.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ActionRefused {
+    /// The handle is a real player's.
+    NotFake,
+    /// The handle is stale, or its fake is gone.
+    Stale,
+    /// Another player's turn, an open transaction, or another `perform_action` is running.
+    Busy,
+    /// The block is out of the player's reach, or the hit isn't on it
+    /// (`ServerGamePacketListenerImpl.handleUseItemOn`'s checks).
+    OutOfReach,
+    /// The block is above or below the world, under spawn protection or outside the world
+    /// border (`ServerLevel.mayInteract`): nothing is used there.
+    Protected,
+}
+
+/// An error a handle method answers when its host has no game behind it (a mod's test double):
+/// what a `Result`-returning helper refuses with, as `None` and `false` are for the others.
+pub trait NoBackend {
+    /// The error for a host without a game.
+    fn no_backend() -> Self;
+}
+impl NoBackend for ActionRefused {
+    /// No game: as for a handle whose fake is gone.
+    fn no_backend() -> Self {
+        Self::Stale
+    }
+}
+
+/// What a fake player's action did once it ran.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ActionOutcome {
+    /// Vanilla's `InteractionResult` consumed (a success or a consume), and no effect was
+    /// blocked.
+    Consumed,
+    /// Vanilla's result passed: nothing used the click.
+    Passed,
+    /// The click ran (the swing, the hooks before the use, vanilla's `Success`), but the effect
+    /// it would start was stopped, as a fake can't take part in it.
+    EffectBlocked(FakeEffect),
+}
+
+/// An effect a fake player's action is stopped from starting. Kinds may be added.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FakeEffect {
+    /// A menu or screen: a container, a station, a sign's editor.
+    Menu,
+    /// Sleeping in a bed.
+    Sleep,
+    /// Riding an entity or a vehicle.
+    Ride,
+    /// Going to another dimension.
+    ChangeDimension,
 }
 
 /// Where a block use clicked, as vanilla's `BlockHitResult` says it. Fields

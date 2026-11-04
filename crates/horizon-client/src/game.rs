@@ -3503,6 +3503,8 @@ struct Game<'a> {
     lan_acting_entity: Option<u32>,
     /// Whether the player currently swapped into the game is connectionless.
     lan_acting_fake: bool,
+    /// A fake player's `perform_action` in progress, and what it refused.
+    fake_action: std::sync::Arc<native_server::FakeAction>,
     /// Command feedback to forward to a guest.
     chat_capture: Option<Vec<horizon_client::text::Text>>,
     /// Packets for the guest acting now, sent once its action returns.
@@ -6171,7 +6173,7 @@ impl Game<'_> {
     }
     /// Menus opened by PlayerEffect::OpenMenu.
     fn open_menu(&mut self, pos: [i32; 3]) {
-        if self.lan_acting_fake {
+        if self.fake_blocks(mod_api::FakeEffect::Menu) {
             return;
         }
         let name = self
@@ -12621,7 +12623,7 @@ impl Game<'_> {
     /// `Player.attack` on a mob: the damage, knockback, sweep, particles and
     /// sounds.
     pub(super) fn attack_mob(&mut self, index: usize) {
-        let _attacker = self.knockback_scope(self.player.as_ref().map_or(0, |p| p.entity_id));
+        let attack = self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id));
         let target_kind = self.mobs[index].kind.id.clone();
         let target_kind = format!("minecraft:{}", target_kind.trim_start_matches("minecraft:"));
         let (amount, scale, crit, magic) = self.melee_damage(&target_kind, true);
@@ -12673,7 +12675,7 @@ impl Game<'_> {
         if landed {
             if knockback > 0.0 {
                 let (xd, zd) = self.extra_knockback_direction();
-                let level = crate::game::entity::damage_level_of!(self);
+                let level = crate::game::entity::damage_level_of!(self, &attack);
                 self.mobs[index].knockback_effect(
                     level,
                     f64::from(knockback),
@@ -15411,7 +15413,7 @@ impl Game<'_> {
     /// and (outside creative) no monsters within 8 blocks; the bed becomes the
     /// respawn point either way.
     fn try_sleep(&mut self, pos: [i32; 3]) {
-        if self.lan_acting_fake {
+        if self.fake_blocks(mod_api::FakeEffect::Sleep) {
             return;
         }
         let Some((position, yaw)) = self.player.as_ref().map(|p| (p.position, p.yaw)) else {
@@ -20320,6 +20322,7 @@ impl<'a> Game<'a> {
             lan_acting_permission: None,
             lan_acting_entity: None,
             lan_acting_fake: false,
+            fake_action: Default::default(),
             chat_capture: None,
             admin_feedback: Vec::new(),
             console_broadcast: None,

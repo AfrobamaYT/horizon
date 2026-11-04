@@ -139,10 +139,14 @@ impl Game<'_> {
         ) else {
             return;
         };
+        // The villager's `addEffect(CONFUSION, 200)` asks `canBeAffected`
+        // first, as in vanilla, on the fresh villager.
+        let nausea =
+            self.can_be_affected(Some(vid as i32), "minecraft:villager", "minecraft:nausea");
         let Some(v) = self.mobs.iter_mut().find(|m| m.id == vid) else {
             return;
         };
-        convert_to_villager(&old, v);
+        convert_to_villager(&old, v, nausea);
         // `level.getPlayerByUUID(conversionStarter)`: the player who fed the
         // apple, if still in this level (the host or a server's guest).
         let starter = zombie_villager::cure(&old).and_then(|c| c.starter);
@@ -256,11 +260,14 @@ pub(super) fn convert_to_zombie_villager(from: &Mob, to: &mut Mob) {
     carry_over(from, to);
     to.extra.age = if from.is_baby() { i32::MIN / 2 } else { 0 };
 }
-/// A cured zombie villager becomes a villager again, queasy for 10 seconds.
-pub(super) fn convert_to_villager(from: &Mob, to: &mut Mob) {
+/// A cured zombie villager becomes a villager again, queasy for 10 seconds
+/// when `nausea` (the `canBeAffected` ask on the fresh villager) allows it.
+pub(super) fn convert_to_villager(from: &Mob, to: &mut Mob, nausea: bool) {
     carry_over(from, to);
     to.extra.age = if from.is_baby() { -24000 } else { 0 };
-    to.add_effect("minecraft:nausea", 200, 0);
+    if nausea {
+        to.add_effect("minecraft:nausea", 200, 0);
+    }
 }
 
 #[cfg(test)]
@@ -293,7 +300,7 @@ mod tests {
         assert_eq!(zombie.extra.body_damage(), 7);
         assert_eq!(zombie.extra.body_stack(), source.extra.body_stack());
         let mut cured = mob(3, "minecraft:villager");
-        convert_to_villager(&zombie, &mut cured);
+        convert_to_villager(&zombie, &mut cured, true);
         assert_eq!(cured.extra.body_id(), Some("minecraft:wolf_armor"));
         assert_eq!(cured.extra.body_damage(), 7);
         assert_eq!(cured.extra.body_stack(), source.extra.body_stack());

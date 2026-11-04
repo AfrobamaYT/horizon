@@ -19,9 +19,16 @@ use horizon_client::{
 };
 use horizon_protocol::packets::play::{self, Clientbound as C};
 use mod_api::LevelRef;
-use mod_api::{GameMode, NativePlayerAbilities, NativePlayerFood, PlayerRef};
+use mod_api::{
+    ActionOutcome, ActionRefused, FakeEffect, GameMode, NativePlayerAbilities, NativePlayerFood,
+    PlayerAction, PlayerRef,
+};
 pub(crate) use mod_api::{NativeCommand, NativeServerPlayer};
 use serde_json::{Map, Value, json};
+use std::sync::{
+    Mutex, PoisonError,
+    atomic::{AtomicBool, Ordering},
+};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 /// A sidebar a server mod shows one player (`native_sidebar`): its title and
@@ -488,6 +495,72 @@ impl Game<'_> {
         };
         self.lan = Some(host);
         removed
+    }
+
+    /// A fake player acts as a player does, through the game's own path for the action
+    /// (`ServerGamePacketListenerImpl.handleUseItemOn` / `handleUseItem`), as its packet would
+    /// run it: reach, protection and the border, then `ServerPlayerGameMode`. Once the click
+    /// runs, an effect a fake can't take part in (a menu, sleep, a ride, another dimension) is
+    /// stopped where it would start, and the answer says which; the click's own side effects
+    /// (the swing, the hooks before the use, vanilla's result) have still happened then.
+    pub(super) fn native_player_perform_action(
+        &mut self,
+        player: PlayerRef,
+        action: PlayerAction,
+    ) -> Result<ActionOutcome, ActionRefused> {
+        match self.native_player_is_fake(player) {
+            None => return Err(ActionRefused::Stale),
+            Some(false) => return Err(ActionRefused::NotFake),
+            Some(true) => {}
+        }
+        if !self.lan_guest_swaps.is_empty()
+            || !self.transactions.is_empty()
+            || self.fake_action.acting()
+        {
+            return Err(ActionRefused::Busy);
+        }
+        let (gi, conn) = self
+            .lan
+            .as_ref()
+            .and_then(|host| {
+                host.hub.guests.iter().enumerate().find(|(_, g)| {
+                    g.placed
+                        && !g.participates_online()
+                        && g.uuid == player.fields().uuid
+                        && g.entity_id as u32 == player.fields().entity.id()
+                })
+            })
+            .map(|(gi, g)| (gi, g.conn))
+            .ok_or(ActionRefused::Stale)?;
+        let acting = Acting::start(&self.fake_action);
+        let consumed = match action {
+            PlayerAction::UseOn { hand, pos, hit } => {
+                let hit = super::Hit {
+                    pos,
+                    face: hit.face,
+                    point: hit.point,
+                    inside: hit.inside,
+                };
+                self.guest_use_item_on(conn, gi, hit, hand)?
+            }
+            PlayerAction::UseItem { hand } => self.guest_use_item(conn, gi, hand, None)?,
+        };
+        Ok(match acting.blocked() {
+            Some(effect) => ActionOutcome::EffectBlocked(effect),
+            None if consumed => ActionOutcome::Consumed,
+            None => ActionOutcome::Passed,
+        })
+    }
+
+    /// Whether `effect` must not start because the player acting is a fake one: true stops it,
+    /// and, inside `perform_action`, records it for the action's answer. The one check every
+    /// effect a fake can't take part in makes where it starts.
+    pub(super) fn fake_blocks(&self, effect: FakeEffect) -> bool {
+        if !self.lan_acting_fake {
+            return false;
+        }
+        self.fake_action.block(effect);
+        true
     }
 
     /// Drop the fake players belonging to a level as it closes.
@@ -1404,6 +1477,54 @@ impl Game<'_> {
     }
 }
 
+/// A fake player's `perform_action` in progress: set for its length by [`Acting`], whose drop
+/// clears it on every exit, an early return or a panic unwinding through a mod's hook, and the
+/// effect it stopped, cleared as each action starts.
+#[derive(Default)]
+pub(super) struct FakeAction {
+    acting: AtomicBool,
+    /// The first effect stopped since the action started.
+    blocked: Mutex<Option<FakeEffect>>,
+}
+impl FakeAction {
+    /// Whether a fake player's action is running.
+    pub(super) fn acting(&self) -> bool {
+        self.acting.load(Ordering::Relaxed)
+    }
+    fn block(&self, effect: FakeEffect) {
+        // The first effect stopped is the one the action answers.
+        self.blocked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_or_insert(effect);
+    }
+}
+/// Marks a fake player's action as running until it drops.
+struct Acting(Arc<FakeAction>);
+impl Acting {
+    fn start(action: &Arc<FakeAction>) -> Self {
+        *action
+            .blocked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = None;
+        action.acting.store(true, Ordering::Relaxed);
+        Self(Arc::clone(action))
+    }
+    /// The effect this action stopped, if any.
+    fn blocked(&self) -> Option<FakeEffect> {
+        *self
+            .0
+            .blocked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+}
+impl Drop for Acting {
+    fn drop(&mut self) {
+        self.0.acting.store(false, Ordering::Relaxed);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1784,5 +1905,366 @@ mod tests {
         );
         let (none, levels, _) = tree(&[]);
         assert!(none.is_null() && levels.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod fake_action_tests {
+    use super::super::Game;
+    use super::{Acting, ActionOutcome, ActionRefused, FakeEffect, PlayerAction};
+    use horizon_client::items::ItemStack;
+    use mod_api::{BlockHit, Hand, PlayerRef};
+
+    /// A server with a real guest (uuid 1) and a fake (uuid 2) standing at (0.5, 64, 0.5) on
+    /// a stone floor, holding `item`, in game mode `mode`: the fake's handle and both conns.
+    fn fake(game: &mut Game<'_>, item: Option<&str>, mode: i32) -> (PlayerRef, u32, u32) {
+        super::super::bossbars::audience_tests::add_real_and_fake(game);
+        game.options.dedicated = Some(Vec::new());
+        for (x, z) in (-1..=1).flat_map(|x| (-1..=1).map(move |z| (x, z))) {
+            let mut chunk = horizon_client::chunk::Chunk::empty(x, z);
+            chunk.lit = true;
+            game.world.chunks.insert((x, z), std::sync::Arc::new(chunk));
+        }
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
+        for x in -3..=3 {
+            for z in -3..=3 {
+                game.world.set(x, 63, z, stone).unwrap();
+            }
+        }
+        let level = game.native_level(game.dim.id()).unwrap();
+        let player = game.native_fake_player(level, 2, "fake").unwrap();
+        let host = game.lan.as_mut().unwrap();
+        let conn = |uuid| {
+            host.hub
+                .guests
+                .iter()
+                .find(|g| g.uuid == uuid)
+                .unwrap()
+                .conn
+        };
+        let (fake, real) = (conn(2), conn(1));
+        for g in host.hub.guests.iter_mut() {
+            g.position = [0.5, 64.0, 0.5];
+            g.game_mode = mode;
+            g.inventory[g.selected] = item.map(|i| ItemStack::new(i, 1));
+        }
+        (player, fake, real)
+    }
+
+    fn place(game: &mut Game<'_>, pos: [i32; 3], state: &str) {
+        // `name[key=value,...]`, as a command writes a state.
+        let (name, props) = state.split_once('[').unwrap_or((state, "]"));
+        let properties = props
+            .trim_end_matches(']')
+            .split(',')
+            .filter_map(|kv| kv.split_once('='))
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect();
+        let state = horizon_world::chunk::BlockState {
+            name: name.into(),
+            properties,
+        };
+        let id = game.pack.assets.registry.resolve(&state).unwrap();
+        game.world.set(pos[0], pos[1], pos[2], id).unwrap();
+    }
+
+    /// A click on the top of the block at `pos`.
+    fn on_top(pos: [i32; 3]) -> PlayerAction {
+        let [x, y, z] = pos.map(f64::from);
+        PlayerAction::UseOn {
+            hand: Hand::Main,
+            pos,
+            hit: BlockHit::new([x + 0.5, y + 1.0, z + 0.5], [0, 1, 0], false),
+        }
+    }
+
+    fn held(game: &Game<'_>, uuid: u128) -> Option<ItemStack> {
+        let host = game.lan.as_ref().unwrap();
+        let g = host.hub.guests.iter().find(|g| g.uuid == uuid).unwrap();
+        g.inventory[g.selected].clone()
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_fake_uses_items_through_the_players_own_path() {
+        use super::super::native_entity_refs::tests::with_game;
+        // A log on stone: placed, one used up.
+        with_game(|game| {
+            let (player, ..) = fake(game, Some("minecraft:oak_log"), 0);
+            assert_eq!(
+                game.native_player_perform_action(player, on_top([1, 63, 0])),
+                Ok(ActionOutcome::Consumed)
+            );
+            let level = game.native_level(game.dim.id()).unwrap();
+            let log = game.native_level_block_property(level, [1, 64, 0], "axis");
+            assert_eq!(log.as_deref(), Some("y"), "placed on a top face, standing");
+            assert_eq!(held(game, 2), None);
+        });
+        // A bucket clicked on a block passes, as vanilla's does (BucketItem has no useOn), and
+        // empties when used, by its ray from the eyes (looking straight down here).
+        with_game(|game| {
+            let (player, ..) = fake(game, Some("minecraft:water_bucket"), 0);
+            for g in game.lan.as_mut().unwrap().hub.guests.iter_mut() {
+                g.pitch = 90.0;
+            }
+            assert_eq!(
+                game.native_player_perform_action(player, on_top([1, 63, 0])),
+                Ok(ActionOutcome::Passed)
+            );
+            let water = PlayerAction::UseItem { hand: Hand::Main };
+            assert_eq!(
+                game.native_player_perform_action(player, water),
+                Ok(ActionOutcome::Consumed)
+            );
+            let level = game.native_level(game.dim.id()).unwrap();
+            assert_eq!(
+                game.native_level_block(level, [0, 64, 0]).as_deref(),
+                Some("minecraft:water")
+            );
+            assert_eq!(
+                held(game, 2).map(|s| s.item.to_string()).as_deref(),
+                Some("minecraft:bucket")
+            );
+        });
+        // A pearl thrown into the air: one used up.
+        with_game(|game| {
+            let (player, ..) = fake(game, Some("minecraft:ender_pearl"), 0);
+            let pearl = PlayerAction::UseItem { hand: Hand::Main };
+            assert_eq!(
+                game.native_player_perform_action(player, pearl),
+                Ok(ActionOutcome::Consumed)
+            );
+            assert_eq!(held(game, 2), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_fakes_effects_are_stopped_where_they_start() {
+        use super::super::native_entity_refs::tests::with_game;
+        // A chest's menu (Game::open_menu).
+        with_game(|game| {
+            let (player, ..) = fake(game, None, 0);
+            place(game, [1, 64, 0], "minecraft:chest");
+            assert_eq!(
+                game.native_player_perform_action(player, on_top([1, 64, 0])),
+                Ok(ActionOutcome::EffectBlocked(FakeEffect::Menu))
+            );
+        });
+        // A bed (Game::try_sleep).
+        with_game(|game| {
+            let (player, ..) = fake(game, None, 0);
+            place(
+                game,
+                [1, 64, 0],
+                "minecraft:red_bed[facing=north,part=foot]",
+            );
+            place(
+                game,
+                [1, 64, -1],
+                "minecraft:red_bed[facing=north,part=head]",
+            );
+            assert_eq!(
+                game.native_player_perform_action(player, on_top([1, 64, 0])),
+                Ok(ActionOutcome::EffectBlocked(FakeEffect::Sleep))
+            );
+        });
+        // A spectator's chest, the menu that bypasses Game::open_menu (spectator_open_menu).
+        with_game(|game| {
+            let (player, ..) = fake(game, None, 3);
+            place(game, [1, 64, 0], "minecraft:chest");
+            assert_eq!(
+                game.native_player_perform_action(player, on_top([1, 64, 0])),
+                Ok(ActionOutcome::EffectBlocked(FakeEffect::Menu))
+            );
+        });
+        // A sign placed opens no editor (open_sign_editor), but the sign is placed.
+        with_game(|game| {
+            let (player, ..) = fake(game, Some("minecraft:oak_sign"), 0);
+            assert_eq!(
+                game.native_player_perform_action(player, on_top([1, 63, 0])),
+                Ok(ActionOutcome::EffectBlocked(FakeEffect::Menu))
+            );
+            let level = game.native_level(game.dim.id()).unwrap();
+            assert_eq!(
+                game.native_level_block(level, [1, 64, 0]).as_deref(),
+                Some("minecraft:oak_sign")
+            );
+        });
+        // Boarding (native_may_board, every boarding path's gate): refused for the fake only.
+        with_game(|game| {
+            let (_, fake_conn, real_conn) = fake(game, None, 0);
+            assert_eq!(
+                game.as_guest(fake_conn, |g| g.native_may_board(99)),
+                Some(false)
+            );
+            assert_eq!(
+                game.as_guest(real_conn, |g| g.native_may_board(99)),
+                Some(true)
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_fakes_action_is_refused_before_anything_runs() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, ..) = fake(game, Some("minecraft:water_bucket"), 0);
+            // Out of reach: nothing used, the bucket still full.
+            let far = PlayerAction::UseOn {
+                hand: Hand::Main,
+                pos: [40, 63, 0],
+                hit: BlockHit::new([40.5, 64.0, 0.5], [0, 1, 0], false),
+            };
+            assert_eq!(
+                game.native_player_perform_action(player, far),
+                Err(ActionRefused::OutOfReach)
+            );
+            assert_eq!(
+                held(game, 2).map(|s| s.item.to_string()).as_deref(),
+                Some("minecraft:water_bucket")
+            );
+            // A real player's handle.
+            let real = game.native_player_ref(1).unwrap();
+            assert_eq!(
+                game.native_player_perform_action(real, on_top([1, 63, 0])),
+                Err(ActionRefused::NotFake)
+            );
+            // Inside another action, as a hook running during it would ask.
+            let acting = Acting::start(&game.fake_action);
+            assert_eq!(
+                game.native_player_perform_action(player, on_top([1, 63, 0])),
+                Err(ActionRefused::Busy)
+            );
+            drop(acting);
+            assert!(!game.fake_action.acting());
+        });
+    }
+
+    /// 1, 64 and 256 fakes each clicking the stone floor with an empty hand every tick, the full
+    /// admission and use path (vanilla passes). Run with `-- --ignored --nocapture`, in release.
+    #[test]
+    #[ignore = "timing"]
+    fn fakes_acting_each_tick_cost() {
+        for count in [1u128, 64, 256] {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let (first, ..) = fake(game, None, 0);
+                let level = game.native_level(game.dim.id()).unwrap();
+                let mut players = vec![first];
+                for i in 1..count {
+                    players.push(
+                        game.native_fake_player(level, 100 + i, &format!("fake{i}"))
+                            .unwrap(),
+                    );
+                }
+                for g in game.lan.as_mut().unwrap().hub.guests.iter_mut() {
+                    g.position = [0.5, 64.0, 0.5];
+                }
+                let ticks = 200;
+                let start = std::time::Instant::now();
+                for _ in 0..ticks {
+                    for &player in &players {
+                        let outcome = game.native_player_perform_action(player, on_top([1, 63, 0]));
+                        assert_eq!(outcome, Ok(ActionOutcome::Passed));
+                    }
+                }
+                let per_tick = start.elapsed() / ticks;
+                let per_action = per_tick / count as u32;
+                println!("{count} fakes: {per_tick:?} a tick, {per_action:?} an action");
+            });
+        }
+    }
+
+    #[test]
+    fn the_acting_mark_clears_on_a_panic_and_each_action_starts_unblocked() {
+        let action = std::sync::Arc::new(super::FakeAction::default());
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _acting = Acting::start(&action);
+            panic!("a mod's hook panics");
+        }));
+        assert!(unwound.is_err());
+        assert!(!action.acting());
+        {
+            let acting = Acting::start(&action);
+            action.block(FakeEffect::Sleep);
+            action.block(FakeEffect::Menu);
+            // The first effect stopped is the answer.
+            assert_eq!(acting.blocked(), Some(FakeEffect::Sleep));
+        }
+        assert_eq!(Acting::start(&action).blocked(), None);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_fakes_action_leaves_the_per_action_state_as_it_was() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, ..) = fake(game, Some("minecraft:oak_log"), 0);
+            let before = super::super::Hit {
+                pos: [7, 7, 7],
+                face: [1, 0, 0],
+                point: [7.0, 7.5, 7.5],
+                inside: true,
+            };
+            game.forced_hit = Some(before);
+            assert_eq!(
+                game.native_player_perform_action(player, on_top([1, 63, 0])),
+                Ok(ActionOutcome::Consumed)
+            );
+            let after = game.forced_hit.expect("the forced hit is put back");
+            assert_eq!(
+                (after.pos, after.face, after.point, after.inside),
+                (before.pos, before.face, before.point, before.inside)
+            );
+            assert!(game.guest_use.is_none());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_real_player_is_unaffected_at_every_effect_site() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (_, _, real_conn) = fake(game, None, 0);
+            for effect in [
+                FakeEffect::Menu,
+                FakeEffect::Sleep,
+                FakeEffect::Ride,
+                FakeEffect::ChangeDimension,
+            ] {
+                assert_eq!(
+                    game.as_guest(real_conn, |g| g.fake_blocks(effect)),
+                    Some(false)
+                );
+            }
+            // A real guest's click on a chest is the vanilla click, nothing stopped.
+            place(game, [1, 64, 0], "minecraft:chest");
+            let gi = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .position(|g| g.conn == real_conn)
+                .unwrap();
+            let hit = super::super::Hit {
+                pos: [1, 64, 0],
+                face: [0, 1, 0],
+                point: [1.5, 65.0, 0.5],
+                inside: false,
+            };
+            assert_eq!(
+                game.guest_use_item_on(real_conn, gi, hit, Hand::Main),
+                Ok(true)
+            );
+            assert_eq!(
+                game.as_guest(real_conn, |g| g.native_may_board(99)),
+                Some(true)
+            );
+        });
     }
 }

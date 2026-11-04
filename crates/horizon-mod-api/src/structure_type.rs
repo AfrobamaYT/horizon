@@ -56,6 +56,16 @@ pub trait StructureType: Send + Sync + 'static {
     /// (`StructurePieceType.load`), exactly as it was saved. Required: every
     /// piece type has its loader, and a saved piece is never regenerated.
     fn load_piece(&self, tag: &Compound) -> Option<Arc<dyn StructurePiece>>;
+    /// `Structure.afterPlace`, run once per chunk after all pieces were
+    /// placed, with every piece's current box. Optional: most types place
+    /// nothing here.
+    fn after_place(
+        &self,
+        _context: &mut dyn PieceContext,
+        _pieces: &[BoundingBox],
+    ) -> Result<(), StructureError> {
+        Ok(())
+    }
 }
 
 /// One piece of a mod's structure: vanilla's `StructurePiece`. Its `save` is
@@ -71,16 +81,6 @@ pub trait StructurePiece: std::fmt::Debug + Send + Sync {
     /// `StructurePiece.addAdditionalSaveData`: the piece's own fields, saved
     /// beside `BB`/`O`/`GD` and read back by the type's `load_piece`.
     fn add_additional_save_data(&self, tag: &mut Compound);
-    /// `Structure.afterPlace`, run on the first piece once per chunk after all
-    /// pieces were placed, with every piece's current box. Optional: most
-    /// pieces place nothing here.
-    fn after_place(
-        &self,
-        _context: &mut dyn PieceContext,
-        _pieces: &[BoundingBox],
-    ) -> Result<(), StructureError> {
-        Ok(())
-    }
 }
 
 /// The random a structure type or piece draws from, in vanilla's order: the
@@ -232,8 +232,8 @@ use horizon_world::worldgen::structure::{legacy::PieceRandom, processor::Process
 pub use horizon_world::{heightmap::HeightmapType, worldgen::biome::BiomeId};
 
 /// The placement context a piece's
-/// [`post_process`](StructurePiece::post_process) and
-/// [`after_place`](StructurePiece::after_place) see: the blocks and entities of
+/// [`post_process`](StructurePiece::post_process) and a type's
+/// [`after_place`](StructureType::after_place) see: the blocks and entities of
 /// one chunk, the piece's random and what the blocks around it are made of.
 pub trait PieceContext {
     /// The chunk being placed.
@@ -409,11 +409,17 @@ impl ModStructureType for Adapter {
             config,
         };
         let found = self.inner.find_generation_point(&mut context)?;
+        let ty = self.inner.clone();
+        let id = self.id;
         let pieces = found
             .pieces
             .into_iter()
             .map(|piece| {
-                Box::new(ModPiece { piece, id: self.id })
+                Box::new(ModPiece {
+                    piece,
+                    ty: ty.clone(),
+                    id,
+                })
                     as Box<dyn horizon_world::worldgen::structure::legacy::LegacyPiece>
             })
             .collect();
@@ -424,7 +430,11 @@ impl ModStructureType for Adapter {
         tag: &Compound,
     ) -> Option<Box<dyn horizon_world::worldgen::structure::legacy::LegacyPiece>> {
         let piece = self.inner.load_piece(tag)?;
-        Some(Box::new(ModPiece { piece, id: self.id }))
+        Some(Box::new(ModPiece {
+            piece,
+            ty: self.inner.clone(),
+            id: self.id,
+        }))
     }
 }
 
@@ -432,6 +442,8 @@ impl ModStructureType for Adapter {
 /// and the piece's box around the piece's own save data.
 struct ModPiece {
     piece: Arc<dyn StructurePiece>,
+    /// The type the piece belongs to, whose `after_place` runs for the start.
+    ty: Arc<dyn StructureType>,
     id: &'static str,
 }
 impl horizon_world::worldgen::structure::legacy::LegacyPiece for ModPiece {
@@ -460,13 +472,16 @@ impl horizon_world::worldgen::structure::legacy::LegacyPiece for ModPiece {
             .post_process(&mut context)
             .map_err(|e| PlacementQueryError::Failed(e.0))
     }
+    /// The engine runs the first piece's `afterPlace`; it is the type's
+    /// [`StructureType::after_place`] the call reaches, with every piece's
+    /// box — the piece itself has no `after_place`.
     fn after_place(
         &self,
         context: &mut horizon_world::worldgen::structure::legacy::PieceContext<'_>,
         pieces: &[BoundingBox],
     ) -> std::result::Result<(), PlacementQueryError> {
         let mut context = Placing::new(context);
-        self.piece
+        self.ty
             .after_place(&mut context, pieces)
             .map_err(|e| PlacementQueryError::Failed(e.0))
     }
@@ -624,6 +639,94 @@ mod tests {
         );
     }
 
+    /// The engine's once-per-chunk `afterPlace`, which it runs over the first
+    /// piece, reaches the type's `after_place` — the piece has none — with
+    /// every piece's box.
+    #[test]
+    fn the_engines_after_place_call_reaches_the_type() {
+        use horizon_world::worldgen::structure::legacy::{
+            PieceContext as EngineContext, SolidRender,
+        };
+        struct Counting {
+            calls: std::sync::Arc<std::sync::Mutex<Vec<usize>>>,
+        }
+        impl StructureType for Counting {
+            fn find_generation_point(
+                &self,
+                context: &mut dyn GenerationContext,
+            ) -> Option<FoundStructure> {
+                let chunk = context.chunk();
+                let height = context.base_height(
+                    chunk.x * 16 + 8,
+                    chunk.z * 16 + 8,
+                    HeightmapType::WorldSurfaceWg,
+                );
+                let min = [chunk.x * 16, height - 1, chunk.z * 16];
+                Some(FoundStructure {
+                    position: min,
+                    pieces: vec![Arc::new(BoxPiece {
+                        min,
+                        max: [min[0] + 8, min[1] + 5, min[2] + 8],
+                    })],
+                })
+            }
+            fn load_piece(&self, _: &Compound) -> Option<Arc<dyn StructurePiece>> {
+                None
+            }
+            fn after_place(
+                &self,
+                _: &mut dyn PieceContext,
+                pieces: &[BoundingBox],
+            ) -> Result<(), StructureError> {
+                self.calls.lock().unwrap().push(pieces.len());
+                Ok(())
+            }
+        }
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let adapter = Adapter::new(
+            "testmod:counting",
+            Arc::new(Counting {
+                calls: calls.clone(),
+            }),
+        );
+        let mut random = WorldgenRandom::new(LegacyRandom::new(0));
+        random.set_large_feature_seed(2, 1, 1);
+        let (_, pieces) = adapter
+            .find_generation_point(
+                &mut StubContext,
+                ChunkPos::new(1, 1),
+                &Arc::new(serde_json::json!({})),
+                &mut random,
+            )
+            .unwrap();
+        let boxes: Vec<BoundingBox> = pieces.iter().map(|p| p.bounding_box()).collect();
+        let resources = test_resources();
+        struct NoSolid;
+        impl SolidRender for NoSolid {
+            fn solid_render(&self, _: horizon_world::registry::BlockStateId) -> bool {
+                false
+            }
+        }
+        let air = resources.registry.default_state("minecraft:air").unwrap();
+        let mut world = RecordingWorld {
+            air,
+            writes: Vec::new(),
+        };
+        let mut piece_random = LegacyRandom::new(3);
+        let mut engine = EngineContext {
+            world: &mut world,
+            resources,
+            blocks: &NoSolid,
+            random: &mut piece_random,
+            chunk_box: BoundingBox::new([0, -64, 0], [15, 320, 15]),
+            chunk: ChunkPos::new(0, 0),
+            reference: [8, 64, 8],
+        };
+        // What the engine does once per chunk: the first piece's call.
+        pieces[0].after_place(&mut engine, &boxes).unwrap();
+        assert_eq!(*calls.lock().unwrap(), vec![boxes.len()]);
+    }
+
     /// The start context the stub answers: heights from a flat 64.
     struct StubContext;
     impl horizon_world::worldgen::structure::jigsaw::JigsawContext for StubContext {
@@ -777,6 +880,39 @@ mod tests {
         }
     }
 
+    /// The engine's own placement tests build their registry this way
+    /// (`legacy::tests::registry`): two facts rows, held once for the
+    /// `&'static` the engine's resources take — no game resources needed.
+    fn test_resources() -> &'static horizon_world::worldgen::structure::StructureResources {
+        static RESOURCES: std::sync::OnceLock<
+            horizon_world::worldgen::structure::StructureResources,
+        > = std::sync::OnceLock::new();
+        RESOURCES.get_or_init(|| {
+            let rows: Vec<_> = ["minecraft:air", "minecraft:stone"]
+                .into_iter()
+                .map(|name| {
+                    serde_json::json!([name, name.ends_with("air"), false, "",
+                        {"id": name, "properties": {}}])
+                })
+                .collect();
+            let facts = serde_json::json!({
+                "states": rows,
+                "defaults": {"minecraft:air": 0, "minecraft:stone": 1}
+            });
+            let registry = horizon_world::registry::BlockRegistry::from_facts_json(
+                facts.to_string().as_bytes(),
+            )
+            .unwrap();
+            horizon_world::worldgen::structure::StructureResources::new(
+                Box::leak(Box::new(registry)),
+                horizon_world::worldgen::structure::StateTransforms::default(),
+                std::path::Path::new("/nonexistent"),
+                std::collections::BTreeMap::new(),
+                &std::collections::BTreeMap::new(),
+            )
+        })
+    }
+
     /// `placeBlock`'s clipping: a write outside `chunk_box` answers `false`
     /// and touches nothing, silently, as vanilla's `placeBlock` skips it; one
     /// inside writes.
@@ -785,25 +921,14 @@ mod tests {
         use horizon_world::worldgen::structure::legacy::{
             PieceContext as EngineContext, SolidRender,
         };
-        let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") else {
-            return;
-        };
-        let assets =
-            horizon_client_render::assets::Assets::load(&std::path::PathBuf::from(root)).unwrap();
-        let resources = horizon_world::worldgen::structure::StructureResources::new(
-            assets.registry,
-            horizon_world::worldgen::structure::StateTransforms::default(),
-            std::path::Path::new("/nonexistent"),
-            std::collections::BTreeMap::new(),
-            &std::collections::BTreeMap::new(),
-        );
+        let resources = test_resources();
         struct Air;
         impl SolidRender for Air {
             fn solid_render(&self, _: horizon_world::registry::BlockStateId) -> bool {
                 false
             }
         }
-        let air = assets.registry.default_state("minecraft:air").unwrap();
+        let air = resources.registry.default_state("minecraft:air").unwrap();
         let mut world = RecordingWorld {
             air,
             writes: Vec::new(),
@@ -812,7 +937,7 @@ mod tests {
         {
             let mut engine = EngineContext {
                 world: &mut world,
-                resources: &resources,
+                resources,
                 blocks: &Air,
                 random: &mut random,
                 // Chunk (0, 0)'s writable box.

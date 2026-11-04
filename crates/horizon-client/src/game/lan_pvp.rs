@@ -80,6 +80,28 @@ const PVP_SOURCE: HurtSource<'static> = HurtSource {
     position: None,
 };
 
+#[cfg(test)]
+impl Strike {
+    /// A plain blow by guest `attacker`, for the tests that land one.
+    pub(super) fn test_blow(attacker: u32) -> Self {
+        Self {
+            attacker: Some(attacker),
+            amount: 1.0,
+            scale: 1.0,
+            crit: false,
+            magic: false,
+            from: [3.0, 64.0, 5.0],
+            disable_blocking: 0.0,
+            sweep: None,
+            knockback: (0.5, 1.0, 0.0),
+            knockback_attack: false,
+            team: None,
+            item: None,
+            ignite: 0.0,
+        }
+    }
+}
+
 /// A sweep attack's reach to the other players (`Player.doSweepAttack`),
 /// worked out as the attacker.
 #[derive(Clone)]
@@ -313,30 +335,37 @@ impl Game<'_> {
                 .map(|a| (a.entity_id, self.player_text(&a.name, a.uuid)))
         });
         let attacker_id = self.player.as_ref().map_or(0, |p| p.entity_id);
+        // Taken here, before the victim is swapped in, so the attacker's hands are found.
+        let attack = self.attack_of(attacker_note.as_ref().map_or(attacker_id, |(id, _)| *id));
         let land = |g: &mut Self| {
-            let _attacker =
-                g.knockback_scope(attacker_note.as_ref().map_or(attacker_id, |(id, _)| *id));
-            g.combat.player_attacker = Some((s.from, s.disable_blocking));
-            if let Some((id, name)) = attacker_note.clone() {
-                g.note_player_attacker("minecraft:player_attack", id as u32, name, s.item.clone());
-            }
-            let hurt = g.mob_hits_player(s.amount, s.from, "minecraft:player_attack");
-            g.combat.player_attacker = None;
-            let (strength, xd, zd) = s.knockback;
-            if hurt && strength > 0.0 {
-                g.knock_back_player(f64::from(strength), xd, zd, PVP_SOURCE);
-            }
-            // Entity.igniteForSeconds on the victim: the fire timer only
-            // rises, and a fire-immune victim (no player is by type) is spared.
-            if hurt
-                && s.ignite > 0.0
-                && let Some(p) = g.player.as_mut()
-            {
-                let _ = p.ignite_for_ticks((s.ignite * 20.0) as i32);
-            }
-            // The victim's thorns, dealt to the attacker below.
-            let thorns = if hurt { g.thorns_damage() } else { Vec::new() };
-            (hurt, thorns)
+            g.with_attack(attack.clone(), |g| {
+                g.combat.player_attacker = Some((s.from, s.disable_blocking));
+                if let Some((id, name)) = attacker_note.clone() {
+                    g.note_player_attacker(
+                        "minecraft:player_attack",
+                        id as u32,
+                        name,
+                        s.item.clone(),
+                    );
+                }
+                let hurt = g.mob_hits_player(s.amount, s.from, "minecraft:player_attack");
+                g.combat.player_attacker = None;
+                let (strength, xd, zd) = s.knockback;
+                if hurt && strength > 0.0 {
+                    g.knock_back_player(f64::from(strength), xd, zd, PVP_SOURCE, &attack);
+                }
+                // Entity.igniteForSeconds on the victim: the fire timer only
+                // rises, and a fire-immune victim (no player is by type) is spared.
+                if hurt
+                    && s.ignite > 0.0
+                    && let Some(p) = g.player.as_mut()
+                {
+                    let _ = p.ignite_for_ticks((s.ignite * 20.0) as i32);
+                }
+                // The victim's thorns, dealt to the attacker below.
+                let thorns = if hurt { g.thorns_damage() } else { Vec::new() };
+                (hurt, thorns)
+            })
         };
         let (hurt, thorns) = if self.ui.rules.bool("pvp") && harm {
             match victim {
@@ -513,15 +542,16 @@ impl Game<'_> {
         let (xd, zd) = sweep.knockback;
         let attacker = self.player_attacker(sweep.attacker);
         let attacker_id = self.player.as_ref().map_or(0, |p| p.entity_id);
+        let attack = self.attack_of(attacker.as_ref().map_or(attacker_id, |(id, _)| *id as i32));
         let land = |g: &mut Self| {
-            let _attacker =
-                g.knockback_scope(attacker.as_ref().map_or(attacker_id, |(id, _)| *id as i32));
-            if let Some((id, name)) = &attacker {
-                g.note_named_attacker("minecraft:player_attack", *id, name.clone());
-            }
-            if g.mob_hits_player(sweep.damage, sweep.from, "minecraft:player_attack") {
-                g.knock_back_player(0.4, xd, zd, PVP_SOURCE);
-            }
+            g.with_attack(attack.clone(), |g| {
+                if let Some((id, name)) = &attacker {
+                    g.note_named_attacker("minecraft:player_attack", *id, name.clone());
+                }
+                if g.mob_hits_player(sweep.damage, sweep.from, "minecraft:player_attack") {
+                    g.knock_back_player(0.4, xd, zd, PVP_SOURCE, &attack);
+                }
+            })
         };
         for (victim, id, team) in victims {
             if sweep.skip == Some(id)
