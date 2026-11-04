@@ -8144,7 +8144,7 @@ impl Game<'_> {
     }
 }
 
-/// `native_living_use_totem` for the damage code (`health::USE_TOTEM`): whether it
+/// `native_living_use_totem` for the damage code: whether it
 /// canceled the totem. The entity and the source are named as the damage hook names them.
 pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
     if !mod_api::__private::listened(mod_api::HookId::LivingUseTotem) {
@@ -8327,7 +8327,7 @@ impl HitLevel<'_> {
     }
 }
 
-/// `native_living_incoming_damage` for the damage code (`health::HURT_SERVER`): whether it
+/// `native_living_incoming_damage` for the damage code: whether it
 /// canceled the hit.
 pub(super) fn incoming_damage(
     level: DamageLevel<'_>,
@@ -8354,7 +8354,7 @@ pub(super) fn incoming_damage(
     canceled
 }
 
-/// `native_living_damage_pre` for the damage code (`health::DAMAGE_PRE`).
+/// `native_living_damage_pre` for the damage code.
 pub(super) fn damage_pre(
     level: DamageLevel<'_>,
     hurting: Hurting<'_>,
@@ -8367,7 +8367,7 @@ pub(super) fn damage_pre(
     HitLevel(level).native_living_damage_pre(entity, kind, &source, container);
 }
 
-/// `native_living_damage_post` for the damage code (`health::DAMAGE_POST`).
+/// `native_living_damage_post` for the damage code.
 pub(super) fn damage_post(
     level: DamageLevel<'_>,
     hurting: Hurting<'_>,
@@ -8380,7 +8380,7 @@ pub(super) fn damage_post(
     HitLevel(level).native_living_damage_post(entity, kind, &source, container);
 }
 
-/// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`). Its one
+/// `native_living_shield_block` for the damage code. Its one
 /// caller. The hurt entity and the source are named as the damage hook names them.
 pub(super) fn shield_block(
     hurting: Hurting<'_>,
@@ -8427,7 +8427,7 @@ impl Game<'_> {
     }
 }
 
-/// `native_living_knockback` for the knockback code (`health::KNOCKBACK`): whether it
+/// `native_living_knockback` for the knockback code: whether it
 /// canceled the push. Its one caller. The pushed entity and the source are named as the
 /// damage hook names them.
 pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut Knock) -> bool {
