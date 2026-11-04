@@ -34,7 +34,7 @@ impl Game<'_> {
             "minecraft:sniffer",
             at,
             true,
-            horizon_client::mobs::spawn_rules::Reason::Breeding,
+            super::creatures::SpawnSite::Plain,
         ) && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
         {
             m.extra.age = sniffer::BABY_START_AGE;

@@ -371,7 +371,9 @@ impl Game<'_> {
                         "minecraft:chicken",
                         at,
                         false,
-                        horizon_client::mobs::spawn_rules::Reason::Jockey,
+                        super::creatures::SpawnSite::Finalizing(
+                            horizon_client::mobs::spawn_rules::Reason::Jockey,
+                        ),
                     )
                 {
                     self.make_chicken_jockey(chicken);
@@ -384,7 +386,9 @@ impl Game<'_> {
                     "minecraft:skeleton",
                     at,
                     false,
-                    horizon_client::mobs::spawn_rules::Reason::Jockey,
+                    super::creatures::SpawnSite::Finalizing(
+                        horizon_client::mobs::spawn_rules::Reason::Jockey,
+                    ),
                 ) {
                     self.mount_mob(skeleton, id);
                 }
@@ -404,7 +408,9 @@ impl Game<'_> {
                     "minecraft:zombie",
                     at,
                     false,
-                    horizon_client::mobs::spawn_rules::Reason::Jockey,
+                    super::creatures::SpawnSite::Finalizing(
+                        horizon_client::mobs::spawn_rules::Reason::Natural,
+                    ),
                 ) {
                     if let Some(z) = self.mobs.iter_mut().find(|m| m.id == zombie) {
                         z.extra.set_main_hand(Some("minecraft:iron_spear".into()));
@@ -443,7 +449,9 @@ impl Game<'_> {
             "minecraft:camel_husk",
             at,
             false,
-            horizon_client::mobs::spawn_rules::Reason::Jockey,
+            super::creatures::SpawnSite::Finalizing(
+                horizon_client::mobs::spawn_rules::Reason::Natural,
+            ),
         ) else {
             return;
         };
@@ -452,7 +460,9 @@ impl Game<'_> {
             "minecraft:parched",
             at,
             false,
-            horizon_client::mobs::spawn_rules::Reason::Jockey,
+            super::creatures::SpawnSite::Finalizing(
+                horizon_client::mobs::spawn_rules::Reason::Natural,
+            ),
         );
     }
     /// `Drowned.finalizeSpawn`: half the natural drowned holding a trident,
@@ -485,7 +495,9 @@ impl Game<'_> {
             "minecraft:zombie_nautilus",
             at,
             false,
-            horizon_client::mobs::spawn_rules::Reason::Jockey,
+            super::creatures::SpawnSite::Finalizing(
+                horizon_client::mobs::spawn_rules::Reason::Jockey,
+            ),
         ) {
             self.mount_mob(id, n);
         }
@@ -521,7 +533,9 @@ impl Game<'_> {
                 "minecraft:zombified_piglin",
                 at,
                 false,
-                horizon_client::mobs::spawn_rules::Reason::Jockey,
+                super::creatures::SpawnSite::Finalizing(
+                    horizon_client::mobs::spawn_rules::Reason::Jockey,
+                ),
             ) {
                 let baby = self.world.random.next_float() < CHICKEN_JOCKEY_ODDS;
                 if let Some(p) = self.mobs.iter_mut().find(|m| m.id == piglin) {
@@ -539,7 +553,9 @@ impl Game<'_> {
                 "minecraft:strider",
                 at,
                 false,
-                horizon_client::mobs::spawn_rules::Reason::Jockey,
+                super::creatures::SpawnSite::Finalizing(
+                    horizon_client::mobs::spawn_rules::Reason::Jockey,
+                ),
             )
         {
             if let Some(b) = self.mobs.iter_mut().find(|m| m.id == baby) {
@@ -601,7 +617,9 @@ impl Game<'_> {
                 "minecraft:skeleton_horse",
                 at,
                 true,
-                horizon_client::mobs::spawn_rules::Reason::Triggered,
+                super::creatures::SpawnSite::Finalizing(
+                    horizon_client::mobs::spawn_rules::Reason::Triggered,
+                ),
             ) else {
                 continue;
             };
@@ -627,7 +645,9 @@ impl Game<'_> {
             "minecraft:skeleton",
             at,
             true,
-            horizon_client::mobs::spawn_rules::Reason::Triggered,
+            super::creatures::SpawnSite::Finalizing(
+                horizon_client::mobs::spawn_rules::Reason::Triggered,
+            ),
         )?;
         let m = self.mobs.iter_mut().find(|m| m.id == id)?;
         m.invulnerable = TRAP_INVULNERABLE;

@@ -36,6 +36,17 @@ use std::sync::Arc;
 
 pub(super) type SpawnReason = horizon_client::mobs::spawn_rules::Reason;
 
+/// Whether vanilla calls `finalizeSpawn` for a mob a spawn site makes, and with
+/// which reason. The reason is vanilla's `EntitySpawnReason` at that site.
+#[derive(Clone, Copy)]
+pub(super) enum SpawnSite {
+    /// Vanilla calls `finalizeSpawn` with this reason: `finalize_spawn` is told.
+    Finalizing(SpawnReason),
+    /// Vanilla creates the mob without `finalizeSpawn` (a breeding, a block's or
+    /// an item's mob): the game finalizes it as before, and no mod is told.
+    Plain,
+}
+
 /// What a spawn site does with a mob after `finalize_spawn` was heard.
 pub(super) enum Finalized {
     /// Finalized as vanilla does; the site goes on to the class's follow-ups.
@@ -457,18 +468,23 @@ impl Game<'_> {
         kind: &str,
         at: [f64; 3],
         persistent: bool,
-        reason: SpawnReason,
+        site: SpawnSite,
     ) -> Option<u32> {
-        self.spawn_mob_for(kind, at, persistent, false, reason)
+        self.spawn_mob_for(kind, at, persistent, false, site)
     }
     /// `SummonCommand` and `SpawnEggItem`: vanilla spawns the mob, but it
     /// never calls `Mob.setPersistenceRequired` for it, so the mob is not
     /// persistent: the despawn rule holds it like any other mob, and only
     /// its NBT can make it persistent.
-    pub(super) fn spawn_mob_spawned(&mut self, kind: &str, at: [f64; 3]) -> Option<u32> {
+    pub(super) fn spawn_mob_spawned(
+        &mut self,
+        kind: &str,
+        at: [f64; 3],
+        site: SpawnSite,
+    ) -> Option<u32> {
         // The spawn is not a natural one (no jockeys, the patrol leader roll
         // stays), but the mob is not persistent.
-        let id = self.spawn_mob_for(kind, at, true, false, SpawnReason::Command)?;
+        let id = self.spawn_mob_for(kind, at, true, false, site)?;
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
             m.persistent = false;
         }
@@ -482,9 +498,9 @@ impl Game<'_> {
         at: [f64; 3],
         persistent: bool,
         scripted: bool,
-        reason: SpawnReason,
+        site: SpawnSite,
     ) -> Option<u32> {
-        self.spawn_mob_reason(kind, at, persistent, scripted, !persistent, reason)
+        self.spawn_mob_reason(kind, at, persistent, scripted, !persistent, site)
     }
     /// `spawn_mob_for` with the spawn reason's NATURAL flag explicit: only a
     /// natural spawn rolls the jockey mounts of zombie horses, husks and
@@ -496,9 +512,9 @@ impl Game<'_> {
         persistent: bool,
         scripted: bool,
         natural: bool,
-        reason: SpawnReason,
+        site: SpawnSite,
     ) -> Option<u32> {
-        let mob = self.create_mob_reason(kind, at, persistent, scripted, reason)?;
+        let mob = self.create_mob_reason(kind, at, persistent, scripted, site)?;
         self.insert_spawned_mob(mob, persistent, scripted, natural)
     }
 
@@ -508,7 +524,7 @@ impl Game<'_> {
         at: [f64; 3],
         persistent: bool,
         scripted: bool,
-        reason: SpawnReason,
+        site: SpawnSite,
     ) -> Option<Mob> {
         let kind = if kind.contains(':') {
             kind.to_owned()
@@ -520,10 +536,17 @@ impl Game<'_> {
         let yaw = self.world.random.next_float() * 360.0;
         let mut mob = Mob::new(self.next_entity, t, Vec3::new(at[0], at[1], at[2]), yaw);
         mob.persistent = persistent;
-        match self.finalize_with(&mut mob, reason, None) {
-            Finalized::Cancelled => return None,
-            Finalized::Skipped => return Some(mob),
-            Finalized::Done => {}
+        match site {
+            SpawnSite::Finalizing(reason) => match self.finalize_with(&mut mob, reason, None) {
+                Finalized::Cancelled => return None,
+                Finalized::Skipped => return Some(mob),
+                Finalized::Done => {}
+            },
+            SpawnSite::Plain => {
+                let difficulty =
+                    self.local_difficulty([mob.position.x, mob.position.y, mob.position.z]);
+                self.finalize_plain(&mut mob, &difficulty);
+            }
         }
         if !scripted {
             let raider_reason = if persistent {
@@ -814,7 +837,7 @@ impl Game<'_> {
             }
         };
         let id = self
-            .spawn_mob_spawned(kind, at)
+            .spawn_mob_spawned(kind, at, SpawnSite::Finalizing(SpawnReason::Command))
             .ok_or_else(|| format!("unknown or unsupported mob {kind}"))?;
         if baby && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
             m.extra.age = if m.species() == Species::Sniffer {
@@ -988,11 +1011,10 @@ impl Game<'_> {
             terrain.set_spawn_conditions(self.difficulty_id() as u8, self.world.day_time);
         }
     }
-    /// `ServerLevel.getCurrentDifficultyAt`.
     /// `Mob.finalizeSpawn` behind `FinalizeSpawnEvent`: the one fire point for
-    /// the mobs the game spawns. The class's follow-ups (raider flags and the
-    /// like) are part of `finalizeSpawn`, so a site skips them on
-    /// [`Finalized::Skipped`].
+    /// the mobs the game spawns where vanilla calls `finalizeSpawn`. The class's
+    /// follow-ups (raider flags and the like) are part of `finalizeSpawn`, so a
+    /// site skips them on [`Finalized::Skipped`].
     pub(super) fn finalize_with(
         &self,
         mob: &mut Mob,
@@ -1001,10 +1023,7 @@ impl Game<'_> {
     ) -> Finalized {
         let at = [mob.position.x, mob.position.y, mob.position.z];
         let mut difficulty = self.local_difficulty(at);
-        // Vanilla's breeding makes the baby without `finalizeSpawn`.
-        if reason != SpawnReason::Breeding
-            && mod_api::__private::listened(mod_api::HookId::FinalizeSpawn)
-        {
+        if mod_api::__private::listened(mod_api::HookId::FinalizeSpawn) {
             let mut heard = mod_api::NativeDifficulty::from(difficulty);
             let (mut spawn_cancelled, mut skip) = (false, false);
             self.native_finalize_spawn(
@@ -1025,14 +1044,21 @@ impl Game<'_> {
             }
             difficulty = heard.into();
         }
-        let facts = self.biome_facts(
-            at[0].floor() as i32,
-            at[1].floor() as i32,
-            at[2].floor() as i32,
-        );
-        spawning::finalize(mob, &facts, &difficulty);
+        self.finalize_plain(mob, &difficulty);
         Finalized::Done
     }
+    /// The game's own finalization of a mob, with no event: for a mob vanilla
+    /// makes without calling `finalizeSpawn`.
+    fn finalize_plain(&self, mob: &mut Mob, difficulty: &spawning::LocalDifficulty) {
+        let at = mob.position;
+        let facts = self.biome_facts(
+            at.x.floor() as i32,
+            at.y.floor() as i32,
+            at.z.floor() as i32,
+        );
+        spawning::finalize(mob, &facts, difficulty);
+    }
+    /// `ServerLevel.getCurrentDifficultyAt`.
     pub(super) fn local_difficulty(&self, at: [f64; 3]) -> spawning::LocalDifficulty {
         use horizon_world::food::Difficulty;
         let base = match self.world.health_rules.difficulty {
@@ -2828,7 +2854,9 @@ impl Game<'_> {
                         &kind,
                         at,
                         setup.persistent,
-                        horizon_client::mobs::spawn_rules::Reason::Triggered,
+                        SpawnSite::Finalizing(
+                            horizon_client::mobs::spawn_rules::Reason::MobSummoned,
+                        ),
                     ) {
                         self.apply_setup(id, &setup);
                     }
@@ -3089,12 +3117,9 @@ impl Game<'_> {
                             f64::from(pos[1]),
                             f64::from(pos[2]) + 0.5,
                         ];
-                        if let Some(id) = self.spawn_mob(
-                            "minecraft:silverfish",
-                            at,
-                            false,
-                            horizon_client::mobs::spawn_rules::Reason::Triggered,
-                        ) {
+                        if let Some(id) =
+                            self.spawn_mob("minecraft:silverfish", at, false, SpawnSite::Plain)
+                        {
                             self.mob_poof(id);
                         }
                     }
@@ -3423,12 +3448,8 @@ impl Game<'_> {
                 f64::from(pos[1]),
                 f64::from(pos[2]) + 0.3,
             ];
-            if let Some(id) = self.spawn_mob(
-                "minecraft:turtle",
-                at,
-                true,
-                horizon_client::mobs::spawn_rules::Reason::Breeding,
-            ) && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
+            if let Some(id) = self.spawn_mob("minecraft:turtle", at, true, SpawnSite::Plain)
+                && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
             {
                 m.extra.age = -24000;
                 m.extra.home = Some(pos);
@@ -3690,7 +3711,7 @@ impl Game<'_> {
             [p.position.x, p.position.y, p.position.z],
             true,
             false,
-            SpawnReason::Breeding,
+            SpawnSite::Plain,
         )?;
         'offspring: {
             let child = &mut child;
@@ -5410,12 +5431,9 @@ impl Game<'_> {
                         1
                     };
                     for _ in 0..n {
-                        if let Some(id) = self.spawn_mob(
-                            "minecraft:chicken",
-                            atp,
-                            true,
-                            horizon_client::mobs::spawn_rules::Reason::Breeding,
-                        ) && let Some(c) = self.mobs.iter_mut().find(|m| m.id == id)
+                        if let Some(id) =
+                            self.spawn_mob("minecraft:chicken", atp, true, SpawnSite::Plain)
+                            && let Some(c) = self.mobs.iter_mut().find(|m| m.id == id)
                         {
                             c.extra.age = -24000;
                         }
@@ -5493,7 +5511,7 @@ impl Game<'_> {
                             "minecraft:endermite",
                             [from.x, from.y, from.z],
                             false,
-                            horizon_client::mobs::spawn_rules::Reason::Triggered,
+                            SpawnSite::Plain,
                         );
                     }
                     if let Some(pl) = self.player.as_mut() {
@@ -6952,7 +6970,7 @@ impl Game<'_> {
                 .push(Mob::new(id, mob_type, Vec3::new(at[0], at[1], at[2]), 0.0));
             id
         } else {
-            let Some(id) = self.spawn_mob_spawned(&kind, at) else {
+            let Some(id) = self.spawn_mob_spawned(&kind, at, SpawnSite::Plain) else {
                 return false;
             };
             id
@@ -7050,7 +7068,9 @@ impl Game<'_> {
             f64::from(p[1]),
             f64::from(p[2]) + 0.5,
         ];
-        let Some(id) = self.spawn_mob_spawned(&kind, at) else {
+        let Some(id) =
+            self.spawn_mob_spawned(&kind, at, SpawnSite::Finalizing(SpawnReason::SpawnItemUse))
+        else {
             return Ok(false);
         };
         // SpawnEggItem.spawnMob: `EntityType.create` finalizes the mob, then
@@ -8023,7 +8043,7 @@ impl Game<'_> {
             "minecraft:zombified_piglin",
             at,
             false,
-            horizon_client::mobs::spawn_rules::Reason::Natural,
+            SpawnSite::Finalizing(horizon_client::mobs::spawn_rules::Reason::Structure),
         ) {
             self.set_portal_cooldown(id);
         }
@@ -9567,7 +9587,7 @@ mod armor_destroy_tests {
                     "minecraft:ravager",
                     [0.5, 70.0, 0.5],
                     false,
-                    horizon_client::mobs::spawn_rules::Reason::Triggered,
+                    super::SpawnSite::Plain,
                 )
                 .unwrap();
             let jump = |game: &mut super::Game<'_>| {
@@ -9617,7 +9637,7 @@ mod armor_destroy_tests {
                     "minecraft:enderman",
                     [0.5, 70.0, 0.5],
                     false,
-                    horizon_client::mobs::spawn_rules::Reason::Triggered,
+                    super::SpawnSite::Plain,
                 )
                 .unwrap();
             let stone = game

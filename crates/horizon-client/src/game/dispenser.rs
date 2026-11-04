@@ -814,7 +814,9 @@ impl Game<'_> {
             &name,
             at,
             true,
-            horizon_client::mobs::spawn_rules::Reason::Dispenser,
+            super::creatures::SpawnSite::Finalizing(
+                horizon_client::mobs::spawn_rules::Reason::Dispenser,
+            ),
         )?;
         // finalizeSpawn's riders (chicken jockeys, spider jockeys...) come
         // with a dispensed mob as with any spawn that is not natural.

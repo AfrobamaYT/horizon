@@ -254,7 +254,7 @@ impl Game<'_> {
             "minecraft:copper_golem",
             at,
             true,
-            horizon_client::mobs::spawn_rules::Reason::Triggered,
+            super::creatures::SpawnSite::Plain,
         ) else {
             return false;
         };

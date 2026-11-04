@@ -158,7 +158,9 @@ impl Game<'_> {
             "minecraft:wandering_trader",
             at,
             true,
-            horizon_client::mobs::spawn_rules::Reason::Event,
+            super::creatures::SpawnSite::Finalizing(
+                horizon_client::mobs::spawn_rules::Reason::Event,
+            ),
         ) else {
             return false;
         };
@@ -200,7 +202,9 @@ impl Game<'_> {
             "minecraft:trader_llama",
             spot,
             false,
-            horizon_client::mobs::spawn_rules::Reason::Event,
+            super::creatures::SpawnSite::Finalizing(
+                horizon_client::mobs::spawn_rules::Reason::Event,
+            ),
         ) && let Some(l) = self.mobs.iter_mut().find(|m| m.id == id)
         {
             // EntitySpawnReason.EVENT: grown up.

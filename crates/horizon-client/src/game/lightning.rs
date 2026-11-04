@@ -108,7 +108,7 @@ impl Game<'_> {
                     "minecraft:skeleton_horse",
                     at,
                     false,
-                    horizon_client::mobs::spawn_rules::Reason::Triggered,
+                    super::creatures::SpawnSite::Plain,
                 ) && let Some(h) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
                     h.extra.trap = true;

@@ -157,7 +157,7 @@ impl Game<'_> {
             "minecraft:happy_ghast",
             at,
             true,
-            horizon_client::mobs::spawn_rules::Reason::Triggered,
+            super::creatures::SpawnSite::Plain,
         ) && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
         {
             // DriedGhastBlock.spawnGhastling sets the baby age before

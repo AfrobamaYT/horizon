@@ -6066,7 +6066,7 @@ impl Game<'_> {
                             "minecraft:tadpole",
                             spawn,
                             true,
-                            horizon_client::mobs::spawn_rules::Reason::Breeding,
+                            creatures::SpawnSite::Plain,
                         );
                     }
                 }
@@ -6731,7 +6731,7 @@ impl Game<'_> {
                         "minecraft:silverfish",
                         at,
                         false,
-                        horizon_client::mobs::spawn_rules::Reason::Triggered,
+                        creatures::SpawnSite::Plain,
                     ) {
                         self.mob_poof(id);
                     }

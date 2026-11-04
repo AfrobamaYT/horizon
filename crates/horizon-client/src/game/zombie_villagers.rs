@@ -64,7 +64,9 @@ impl Game<'_> {
             "minecraft:zombie_villager",
             at,
             old.persistent,
-            horizon_client::mobs::spawn_rules::Reason::Conversion,
+            super::creatures::SpawnSite::Finalizing(
+                horizon_client::mobs::spawn_rules::Reason::Conversion,
+            ),
         ) else {
             return;
         };
@@ -131,7 +133,9 @@ impl Game<'_> {
             "minecraft:villager",
             at,
             old.persistent,
-            horizon_client::mobs::spawn_rules::Reason::Conversion,
+            super::creatures::SpawnSite::Finalizing(
+                horizon_client::mobs::spawn_rules::Reason::Conversion,
+            ),
         ) else {
             return;
         };

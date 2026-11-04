@@ -192,7 +192,9 @@ impl Game<'_> {
             kind,
             pos,
             true,
-            horizon_client::mobs::spawn_rules::Reason::Command,
+            super::creatures::SpawnSite::Finalizing(
+                horizon_client::mobs::spawn_rules::Reason::Command,
+            ),
         )?;
         // A jockey's other mob comes after it: this one is found by its id.
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {

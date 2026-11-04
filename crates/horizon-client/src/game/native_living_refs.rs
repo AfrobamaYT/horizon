@@ -1923,7 +1923,9 @@ mod tests {
                 "minecraft:wolf",
                 [2.5, 64.0, 2.5],
                 true,
-                horizon_client::mobs::spawn_rules::Reason::Command,
+                super::super::creatures::SpawnSite::Finalizing(
+                    horizon_client::mobs::spawn_rules::Reason::Command,
+                ),
             )
             .unwrap();
         let wolf = game.native_living(game.native_entity(id).unwrap()).unwrap();

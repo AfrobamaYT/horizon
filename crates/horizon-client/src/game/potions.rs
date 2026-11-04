@@ -248,7 +248,7 @@ impl Game<'_> {
                     [feet.x, feet.y + 0.5, feet.z],
                     false,
                     true,
-                    horizon_client::mobs::spawn_rules::Reason::Triggered,
+                    super::creatures::SpawnSite::Plain,
                 ) && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
                     horizon_client::mobs::cube::set_size(m, 2);
@@ -362,7 +362,7 @@ impl Game<'_> {
                 at,
                 false,
                 true,
-                horizon_client::mobs::spawn_rules::Reason::Triggered,
+                super::creatures::SpawnSite::Plain,
             ) && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
             {
                 m.velocity = velocity;

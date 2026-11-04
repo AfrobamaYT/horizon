@@ -1328,4 +1328,53 @@ mod tests {
             assert_eq!(stopped.1, fresh, "a stopped spawn draws nothing");
         });
     }
+
+    /// Counts the `finalize_spawn` events it hears.
+    struct CountFinalize(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for CountFinalize {
+        fn finalize_spawn(
+            &self,
+            _: &dyn mod_api::Host,
+            _: &mut mod_api::FinalizeSpawnEvent<'_>,
+        ) -> mod_api::Flow {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            mod_api::Flow::Continue
+        }
+    }
+
+    /// A site vanilla makes without `finalizeSpawn` (an infested block's silverfish) is not
+    /// told; one it finalizes is.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    fn finalize_spawn_is_told_only_where_vanilla_finalizes() {
+        use super::super::creatures::SpawnSite;
+        use super::super::native_entity_refs::tests::with_game;
+        let heard = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mods = vec![mod_api::ModEntry::new(
+            "count-finalize",
+            Box::new(CountFinalize(heard.clone())),
+        )];
+        mod_api::testing::with_mods(mods.into(), || {
+            with_game(|game| {
+                let at = [8.5, 64.0, 8.5];
+                let count = || heard.load(std::sync::atomic::Ordering::Relaxed);
+                assert!(
+                    game.spawn_mob("minecraft:silverfish", at, false, SpawnSite::Plain)
+                        .is_some()
+                );
+                assert_eq!(count(), 0, "a plain site is not told");
+                assert!(
+                    game.spawn_mob(
+                        "minecraft:silverfish",
+                        at,
+                        false,
+                        SpawnSite::Finalizing(Reason::Spawner)
+                    )
+                    .is_some()
+                );
+                assert_eq!(count(), 1, "a finalizing site is told once");
+            });
+        });
+    }
 }

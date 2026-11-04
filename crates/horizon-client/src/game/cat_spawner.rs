@@ -130,7 +130,9 @@ impl Game<'_> {
             "minecraft:cat",
             at,
             persistent,
-            horizon_client::mobs::spawn_rules::Reason::Natural,
+            super::creatures::SpawnSite::Finalizing(
+                horizon_client::mobs::spawn_rules::Reason::Natural,
+            ),
         ) else {
             return;
         };

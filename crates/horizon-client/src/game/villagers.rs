@@ -215,7 +215,7 @@ impl Game<'_> {
             [from.x, from.y, from.z],
             true,
             true,
-            horizon_client::mobs::spawn_rules::Reason::Breeding,
+            super::creatures::SpawnSite::Plain,
         ) else {
             return;
         };

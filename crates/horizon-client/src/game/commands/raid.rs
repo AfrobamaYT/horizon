@@ -58,7 +58,9 @@ impl Game<'_> {
                     [player.x, player.y, player.z],
                     true,
                     true,
-                    horizon_client::mobs::spawn_rules::Reason::Command,
+                    super::super::creatures::SpawnSite::Finalizing(
+                        horizon_client::mobs::spawn_rules::Reason::Command,
+                    ),
                 ) {
                     Some(id) => {
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {

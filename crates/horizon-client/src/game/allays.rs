@@ -267,7 +267,7 @@ impl Game<'_> {
                 "minecraft:allay",
                 pos,
                 true,
-                horizon_client::mobs::spawn_rules::Reason::Triggered,
+                super::creatures::SpawnSite::Plain,
             ) && let Some(c) = self.mobs.iter_mut().find(|m| m.id == id)
             {
                 c.extra.egg_time = 6000;

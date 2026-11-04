@@ -64,7 +64,9 @@ impl Game<'_> {
             false,
             false,
             false,
-            horizon_client::mobs::spawn_rules::Reason::Reinforcement,
+            super::creatures::SpawnSite::Finalizing(
+                horizon_client::mobs::spawn_rules::Reason::Reinforcement,
+            ),
         ) else {
             return;
         };
