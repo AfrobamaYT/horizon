@@ -2762,8 +2762,8 @@ pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
     /// Replace the block at `pos` with `state` through `Level.setBlock(pos, state, flags)`, as
     /// `LevelRef::set_block` does: the old block's block entity goes and the new block's is
     /// created in the write, its neighbour and shape updates run per `flags`, and its level events
-    /// queue in order with the caller's. A mod block entity starts with empty data
-    /// (`native_block_entity` needs a full `Host`). True when the block changed; false off an
+    /// queue in order with the caller's. A mod block entity starts with the data its
+    /// `block_entity` hook gives, which gets this level. True when the block changed; false off an
     /// authoritative server, for a position that is not loaded or outside the build height, an
     /// invalid state, or the state it already is. It never loads a chunk.
     fn set_block(
