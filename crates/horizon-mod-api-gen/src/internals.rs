@@ -129,10 +129,33 @@ struct Pass {
 // each entry records them: changing visibility doesn't select an OS or feature for the build.
 use crate::points::{conditions, test_only};
 
+fn clean_attrs(attrs: &mut Vec<syn::Attribute>) {
+    attrs.retain(|attr| attr.path().is_ident("cfg") || attr.path().is_ident("cfg_attr"));
+}
+
 fn clean_fields(fields: &Fields) -> Fields {
     let mut fields = fields.clone();
+    match &mut fields {
+        Fields::Named(fields) => {
+            fields.named = fields
+                .named
+                .iter()
+                .filter(|field| !test_only(&field.attrs))
+                .cloned()
+                .collect()
+        }
+        Fields::Unnamed(fields) => {
+            fields.unnamed = fields
+                .unnamed
+                .iter()
+                .filter(|field| !test_only(&field.attrs))
+                .cloned()
+                .collect()
+        }
+        Fields::Unit => {}
+    }
     for field in &mut fields {
-        field.attrs.clear();
+        clean_attrs(&mut field.attrs);
         field.vis = Visibility::Inherited;
     }
     fields
@@ -151,8 +174,14 @@ fn shape_signature(item: &Item) -> Option<Item> {
             let mut value = value.clone();
             value.attrs.clear();
             value.vis = Visibility::Inherited;
+            value.variants = value
+                .variants
+                .iter()
+                .filter(|variant| !test_only(&variant.attrs))
+                .cloned()
+                .collect();
             for variant in &mut value.variants {
-                variant.attrs.clear();
+                clean_attrs(&mut variant.attrs);
                 variant.fields = clean_fields(&variant.fields);
             }
             Some(Item::Enum(value))
@@ -681,10 +710,10 @@ impl Pass {
                 let mut signature = value.clone();
                 signature.attrs.clear();
                 signature.vis = Visibility::Inherited;
-                for field in &mut signature.fields.named {
-                    field.attrs.clear();
-                    field.vis = Visibility::Inherited;
-                }
+                let Fields::Named(fields) = clean_fields(&Fields::Named(signature.fields)) else {
+                    unreachable!()
+                };
+                signature.fields = fields;
                 expose!(value, "struct", value.union_token.span(), signature);
                 if children {
                     self.fields(
@@ -1141,6 +1170,59 @@ pub(crate) struct ItemStack { #[allow(dead_code)] kind: StackKind }
     }
 
     #[test]
+    fn signatures_keep_field_and_variant_configuration() {
+        let fixture = Fixture::new(
+            r#"
+struct Game {
+    #[cfg(windows)] #[cfg_attr(unix, cfg(feature = "extra"))] #[doc = "hidden"] #[serde(default)] windows: u32,
+    #[cfg(test)] test_field: u32,
+}
+enum Choice {
+    #[cfg(windows)] #[doc = "hidden"] #[serde(rename = "x")] Windows,
+    #[cfg(test)] Test,
+}
+union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
+"#,
+        );
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
+        let signature = |name: &str| {
+            &entries
+                .iter()
+                .find(|e| e.path == format!("horizon_client::game::{name}"))
+                .unwrap()
+                .signature
+        };
+        assert!(signature("Game").contains("cfg_attr"));
+        for name in ["Game", "Choice", "Value"] {
+            let signature = signature(name);
+            assert!(signature.contains("cfg (windows)"), "{signature}");
+            assert!(
+                !signature.contains("test_field") && !signature.contains("Test"),
+                "{signature}"
+            );
+            assert!(
+                !signature.contains("doc") && !signature.contains("serde"),
+                "{signature}"
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_entry_resolves_glob_and_std_imports() {
+        let fixture = shapes_fixture(
+            "use horizon_items::kinds::*; use std::cell::Cell; struct Game { kind: Kind, cell: Cell<u32> }\n",
+        );
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
+        let game = entries
+            .iter()
+            .find(|e| e.path == "horizon_client::game::Game")
+            .unwrap();
+        assert!(!game.shape_only);
+        assert_eq!(game.refs["Kind"], "horizon_items::kinds::Kind");
+        assert_eq!(game.refs["Cell"], "std::cell::Cell");
+    }
+
+    #[test]
     fn reachable_lower_shapes_are_transitive_and_do_not_widen_sources() {
         let fixture = shapes_fixture(
             "use std::time::Duration; struct Game { stack: horizon_items::ItemStack, external: Duration }\n",
@@ -1150,7 +1232,7 @@ pub(crate) struct ItemStack { #[allow(dead_code)] kind: StackKind }
             .iter()
             .map(|path| fs::read(fixture.0.join("crates/horizon-items/src").join(path)).unwrap())
             .collect();
-        let result = widen_with(&fixture.0, "").unwrap();
+        let result = widen_with(&fixture.0, &[]).unwrap();
         let shapes: Vec<_> = result
             .entries
             .iter()
@@ -1194,7 +1276,7 @@ pub(crate) struct ItemStack { #[allow(dead_code)] kind: StackKind }
             );
         }
         assert_eq!(result.files, 2); // Only game.rs and entry.rs were widened.
-        let again = widen_with(&fixture.0, "").unwrap();
+        let again = widen_with(&fixture.0, &[]).unwrap();
         assert_eq!(result.entries, again.entries);
         assert!(again.changed.is_empty());
     }
@@ -1203,10 +1285,13 @@ pub(crate) struct ItemStack { #[allow(dead_code)] kind: StackKind }
     fn listed_types_are_not_duplicated_and_shape_hashes_match_exposed_types() {
         let game = "struct Game { stack: horizon_items::ItemStack }\n";
         let fixture = shapes_fixture(game);
-        let shapes = widen_with(&fixture.0, "").unwrap();
+        let shapes = widen_with(&fixture.0, &[]).unwrap();
         let listed = widen_with(
             &shapes_fixture(game).0,
-            "horizon_items::item_stack::ItemStack\nhorizon_items::kinds::Kind\n",
+            &[(
+                "internals.txt",
+                "horizon_items::item_stack::ItemStack\nhorizon_items::kinds::Kind\n".into(),
+            )],
         )
         .unwrap();
         for shape in shapes.entries.iter().filter(|entry| entry.shape_only) {
@@ -1244,7 +1329,7 @@ mod root_lookup { fn take(_: RootStack, _: RootOnly) {} }
             "crates/horizon-client/src/lib.rs",
             "pub use horizon_items::ItemStack as RootOnly; mod game; mod entry;\n",
         );
-        let entries = widen_with(&fixture.0, "").unwrap().entries;
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
         let find = |path: &str| {
             entries
                 .iter()
@@ -1300,7 +1385,7 @@ pub mod second { pub enum Kind { Empty } }
 pub struct ItemStack { a: First, b: Second, c: second::Kind }
 "#,
         );
-        let entries = widen_with(&fixture.0, "").unwrap().entries;
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
         assert!(!entries.iter().any(|entry| entry.path.ends_with("Ignored")));
         let shapes: Vec<_> = entries.iter().filter(|entry| entry.shape_only).collect();
         assert_eq!(shapes.len(), 3);
@@ -1321,9 +1406,12 @@ pub struct ItemStack { a: First, b: Second, c: second::Kind }
             .find(|entry| entry.path == "horizon_items::first::Kind")
             .unwrap();
         assert_eq!(first.cfg, "feature = \"shapes\"");
-        let listed = widen_with(&fixture.0, "horizon_items::first::Kind")
-            .unwrap()
-            .entries;
+        let listed = widen_with(
+            &fixture.0,
+            &[("internals.txt", "horizon_items::first::Kind".into())],
+        )
+        .unwrap()
+        .entries;
         let declared = listed
             .iter()
             .find(|entry| entry.path == first.path)
