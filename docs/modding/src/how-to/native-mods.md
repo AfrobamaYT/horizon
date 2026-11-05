@@ -484,7 +484,7 @@ trusting native code is the player's decision, never an agent's.
    saying which release or Nightly it started from (`base`) and which commit, mods, horizon-mixins and Rust made
    it. Canonical mod projects are copied into `horizon-native-mods/<id>/` beside the executable.
    The game lists its embedded inventory in a crash report's details (`Native Mods: id version, …`;
-   they stay in the local report, not in crash telemetry). The instance the mods are installed in plays it, the default **Horizon** instance included: the build
+   they stay in the local report). The instance the mods are installed in plays it, the default **Horizon** instance included: the build
    pins its version, as picking a version does. Updates of the launcher's version leave a pinned instance where
    it is, and their clean-up never removes a native build. The **Native mods**
    instance keeps its worlds and its build.

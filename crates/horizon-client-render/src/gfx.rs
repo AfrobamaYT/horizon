@@ -1851,7 +1851,7 @@ struct Opened {
     queue: wgpu::Queue,
     device_lost: Arc<std::sync::atomic::AtomicBool>,
 }
-/// Logs the adapter and records it for telemetry and crash reports.
+/// Logs the adapter and records it for crash reports.
 fn describe_adapter(adapter: &wgpu::Adapter) {
     let info = adapter.get_info();
     log::info!(
@@ -1860,15 +1860,6 @@ fn describe_adapter(adapter: &wgpu::Adapter) {
         info.backend,
         info.device_type
     );
-    crate::telemetry::set_gpu(crate::telemetry::Gpu {
-        name: info.name.clone(),
-        vendor: horizon_telemetry::system::gpu_vendor(&info.name, info.vendor).to_owned(),
-        kind: crate::telemetry::gpu_kind(&format!("{:?}", info.device_type)).to_owned(),
-        driver: format!("{} {}", info.driver, info.driver_info)
-            .trim()
-            .to_owned(),
-        backend: format!("{:?}", info.backend),
-    });
     crate::crash::set_detail(
         "Graphics Adapter",
         format!(

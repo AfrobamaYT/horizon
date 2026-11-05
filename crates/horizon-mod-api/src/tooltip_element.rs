@@ -25,3 +25,13 @@ pub struct TooltipImage {
     /// The size.
     pub size: [f32; 2],
 }
+
+/// Where a tooltip hangs from, in GUI pixels: what `render_tooltip_pre` lets a mod move.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods change both fields
+pub struct TooltipPlace {
+    /// The point's x, before the positioner's offset and clamp; set it to move the tooltip.
+    pub x: i32,
+    /// The point's y, before the positioner's offset and clamp; set it to move the tooltip.
+    pub y: i32,
+}

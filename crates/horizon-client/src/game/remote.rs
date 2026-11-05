@@ -856,7 +856,6 @@ impl Game<'_> {
         lan: bool,
     ) -> Result<()> {
         self.reset_tutorial();
-        self.perf.world_opening();
         // A server's own biomes come over the connection; the last local
         // world's packed table must not name its ids. The window's own
         // server thread keeps the one it just set.
@@ -1160,7 +1159,6 @@ impl Game<'_> {
             return self.begin_closing_save(false);
         }
         self.client_logging_out();
-        self.finish_perf();
         if reason.is_none() {
             // Leaving on purpose: nothing for auto-reconnect to retry.
             self.extras_left();
@@ -5993,6 +5991,7 @@ impl Game<'_> {
         self.border.tick();
         self.player_border();
         self.tick_remote_entities(running);
+        self.tick_remote_arm_poses();
         self.tick_random_textures();
         // Breeze.tick's block dust: drawn by each client for the breezes it sees.
         if running {
@@ -6498,6 +6497,24 @@ impl Game<'_> {
             guardian::look_at(&mut self.mobs[i], look);
         }
     }
+    /// Each player model's held arm poses (`held_arm_poses`), once the tick has set its hands.
+    fn tick_remote_arm_poses(&mut self) {
+        for i in 0..self.mobs.len() {
+            let m = &self.mobs[i];
+            if &*m.kind.id != "minecraft:player" {
+                continue;
+            }
+            let poses = self.held_arm_poses(
+                m.id,
+                [
+                    horizon_items::equipment::MAINHAND,
+                    horizon_items::equipment::OFFHAND,
+                ]
+                .map(|slot| m.extra.slot_stack(slot)),
+            );
+            self.mobs[i].extra.held_arm_pose = poses;
+        }
+    }
     fn tick_remote_entities(&mut self, running: bool) {
         if running {
             self.tick_text_displays();
@@ -6807,8 +6824,6 @@ impl Game<'_> {
                         Default::default,
                         horizon_client::first_person::item_use_animation,
                     );
-                m.extra.held_arm_pose = [m.extra.main_hand_id(), m.extra.off_hand_id()]
-                    .map(|held| held.and_then(|i| world_items!(self).get(i)?.arm_pose));
             }
             if m.extra.using_item > 0 {
                 if player {
