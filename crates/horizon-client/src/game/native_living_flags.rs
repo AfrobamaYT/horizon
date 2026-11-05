@@ -896,7 +896,7 @@ mod tests {
                     // name a real bed here, so a wrong-world write is visible.
                     game.as_guest(13, |game| {
                         if sleeping {
-                            assert!(game.native_living_start_sleeping(foreign, [5, 64, 5]));
+                            assert!(game.native_living_set_sleeping_pos(foreign, [5, 64, 5]));
                         }
                         let p = game.player.as_mut().unwrap();
                         p.velocity = Vec3::new(0.25, 0.5, -0.25);
@@ -904,6 +904,9 @@ mod tests {
                         game.sleep_timer = 37;
                     })
                     .unwrap();
+                    // This world's bed is independent of the foreign sleeper;
+                    // no player-bed cleanup is pending from the fixture setup.
+                    game.set_bed_occupied([5, 64, 5], sleeping);
                     game.lan
                         .as_mut()
                         .unwrap()
@@ -922,6 +925,7 @@ mod tests {
                         let outer_guest_before = SleepState::guest(game, 12);
                         let foreign_bed = game.world.block(5, 64, 5);
                         let outer_bed = game.world.block(7, 64, 7);
+                        let player_beds = game.player_beds.clone();
                         for mutation in 0..4 {
                             let changed = match mutation {
                                 0 => game.native_living_start_sleeping(foreign, [5, 64, 5]),
@@ -934,10 +938,9 @@ mod tests {
                                 !changed,
                                 "mutation {mutation}, sleeping {sleeping}, acting {acting}"
                             );
-                            // Include deferred wake/bed cleanup: a refusal must
-                            // not leave a write queued for the current world.
-                            game.wake_woken_guests();
-                            game.free_left_beds();
+                            // No wake marker or bed cleanup may be queued for
+                            // the current world by the refused foreign write.
+                            assert_eq!(game.player_beds, player_beds);
                             assert_eq!(SleepState::guest(game, 13), foreign_before);
                             assert_eq!(SleepState::acting(game), outer_before);
                             assert_eq!(SleepState::guest(game, 12), outer_guest_before);
@@ -960,6 +963,15 @@ mod tests {
                     } else {
                         refuse(game);
                     }
+                    // Level cleanup runs after the actor's turn, not in it.
+                    let foreign_before = SleepState::guest(game, 13);
+                    let foreign_bed = game.world.block(5, 64, 5);
+                    let outer_bed = game.world.block(7, 64, 7);
+                    game.wake_woken_guests();
+                    game.free_left_beds();
+                    assert_eq!(SleepState::guest(game, 13), foreign_before);
+                    assert_eq!(game.world.block(5, 64, 5), foreign_bed);
+                    assert_eq!(game.world.block(7, 64, 7), outer_bed);
                     assert!(game.lan_guest_swaps.is_empty());
                     assert_eq!(game.dim, super::super::Dim::Overworld);
                 });
