@@ -191,6 +191,9 @@ impl Game<'_> {
     /// player does not lie down at all.
     pub(super) fn sleep_height(&self, head: [i32; 3]) -> Option<f64> {
         let state = self.world.block(head[0], head[1], head[2]);
+        if !self.is_bed(state) {
+            return None;
+        }
         let name = self.res.facts().get(state).name.to_owned();
         let part = self.bed_part(state);
         let step = self.bed_forward(state);
