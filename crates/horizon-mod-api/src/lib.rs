@@ -10,11 +10,13 @@ mod registry_keys;
 /// A block requested once through [`Registrar::block_key`]. Its load-owned slot survives reload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so only registration creates a key
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct BlockKey(u32);
 
 /// An effect requested once through [`Registrar::effect_key`]. The registry is fixed until restart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so only registration creates a key
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct EffectKey(u32);
 
 // Never compiled: the generator reads these declarations to build the `Hooks` trait and its dispatch.

@@ -77,6 +77,30 @@ impl Names {
     }
 }
 
+impl BlockKey {
+    /// Validate an incoming slot against declarations, not a world's resolved mappings.
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::part_table::requested_keys()
+            .blocks
+            .id(slot)
+            .ok_or("unknown BlockKey slot")?;
+        Ok(Self(slot))
+    }
+}
+
+impl EffectKey {
+    /// Resolved effects also expose registry entries no mod explicitly requested.
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        let names = crate::part_table::resolved_effects()
+            .get()
+            .map_or(&crate::part_table::requested_keys().effects, |effects| {
+                &effects.names
+            });
+        names.id(slot).ok_or("unknown EffectKey slot")?;
+        Ok(Self(slot))
+    }
+}
+
 /// A block slot's mappings in one game's current tables.
 #[derive(Clone, Copy, Debug)]
 // exhaustive: the game builds this mapping at load; mods receive only BlockKey
@@ -90,7 +114,7 @@ pub struct ResolvedBlock {
 }
 
 thread_local! {
-    static BLOCKS: std::cell::RefCell<Vec<ResolvedBlock>> = const { std::cell::RefCell::new(Vec::new()) };
+    static BLOCKS: std::cell::RefCell<Option<Vec<ResolvedBlock>>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Rebind this game's slots at the owning load/reload boundary. A refused reload clears the
@@ -102,10 +126,10 @@ pub fn resolve_blocks(
         .blocks
         .resolve("block", &mut resolve);
     BLOCKS.with(|blocks| {
-        *blocks.borrow_mut() = Vec::new();
+        *blocks.borrow_mut() = None;
         match result {
             Ok(values) => {
-                *blocks.borrow_mut() = values;
+                *blocks.borrow_mut() = Some(values);
                 Ok(())
             }
             Err(errors) => Err(errors),
@@ -113,9 +137,15 @@ pub fn resolve_blocks(
     })
 }
 
-/// The current numeric mapping; also refuses an out-of-range slot at the owning table boundary.
+/// The current numeric mapping for a trusted key. None means this thread has no resolved
+/// world tables (startup, another owning thread, or a refused reload), not an unknown slot.
 pub fn block(key: BlockKey) -> Option<ResolvedBlock> {
-    BLOCKS.with(|blocks| blocks.borrow().get(key.0 as usize).copied())
+    BLOCKS.with(|blocks| {
+        blocks
+            .borrow()
+            .as_ref()
+            .map(|values| values[key.0 as usize])
+    })
 }
 
 /// The resolved effect slots. Effects remain fixed for the process, as does their registry.
@@ -155,26 +185,23 @@ pub fn resolve_effects() -> Result<(), Vec<String>> {
 
 /// Resolve an effect operation by numeric slot, never by a fresh name scan.
 pub fn effect(key: EffectKey) -> Option<&'static horizon_client_core::potions::EffectDef> {
-    let index = *crate::part_table::resolved_effects()
-        .get()?
-        .indices
-        .get(key.0 as usize)?;
+    let index = crate::part_table::resolved_effects().get()?.indices[key.0 as usize];
     let vanilla = horizon_client_core::potions::EFFECTS;
     if index < vanilla.len() {
-        vanilla.get(index)
+        Some(&vanilla[index])
     } else {
-        horizon_client_core::potions::mod_effects().get(index - vanilla.len())
+        Some(&horizon_client_core::potions::mod_effects()[index - vanilla.len()])
     }
 }
 
-/// Canonical diagnostic name, or refusal for an invalid slot.
+/// Canonical diagnostic name, unavailable until the process effect registry is resolved.
 pub fn effect_id(key: EffectKey) -> Option<&'static str> {
-    crate::part_table::resolved_effects().get()?.names.id(key.0)
+    Some(&crate::part_table::resolved_effects().get()?.names.entries[key.0 as usize].id)
 }
 
-/// Canonical diagnostic name, or refusal for an invalid slot.
+/// Canonical diagnostic name of a trusted, load-owned slot, independent of world resolution.
 pub fn block_id(key: BlockKey) -> Option<&'static str> {
-    crate::part_table::requested_keys().blocks.id(key.0)
+    Some(&crate::part_table::requested_keys().blocks.entries[key.0 as usize].id)
 }
 
 /// The API key for an engine registry index, also for entries not explicitly requested by mods.

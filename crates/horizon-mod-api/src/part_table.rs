@@ -1694,6 +1694,9 @@ pub mod tests {
         install_parts(&mods).unwrap();
         mark_game_thread();
         let keys = requested.lock().unwrap().clone();
+        assert_eq!(BlockKey::from_slot(keys[0].0), Ok(keys[0]));
+        assert!(BlockKey::from_slot(2).is_err());
+        assert!(block(keys[0]).is_none(), "startup has no world mapping");
         // The final registry contains content declared after the requester's registration.
         let states = ["minecraft:stone", "later:machine", "later:machine"];
         resolve_parts(
@@ -1722,6 +1725,17 @@ pub mod tests {
         };
         bind(0).unwrap();
         assert_eq!(block(keys[0]).unwrap().default, BlockStateId(0));
+        let key = keys[0];
+        // Declarations are load-owned, but a mapping belongs to its resolving thread.
+        let installed = super::TEST_PARTS.get();
+        std::thread::spawn(move || {
+            super::TEST_PARTS.set(installed);
+            assert_eq!(BlockKey::from_slot(key.0), Ok(key));
+            assert_eq!(block_id(key), Some("minecraft:stone"));
+            assert!(block(key).is_none());
+        })
+        .join()
+        .unwrap();
         bind(20).unwrap();
         assert_eq!(block(keys[0]).unwrap().default, BlockStateId(20));
         assert_eq!(block(keys[2]).unwrap().default, BlockStateId(21));
@@ -1737,8 +1751,9 @@ pub mod tests {
             block(keys[0]).is_none(),
             "a refused reload must not leave stale state mappings"
         );
-        assert!(block(BlockKey(u32::MAX)).is_none());
-        assert!(block_id(BlockKey(u32::MAX)).is_none());
+        assert!(BlockKey::from_slot(u32::MAX).is_err());
+        assert_eq!(BlockKey::from_slot(keys[0].0), Ok(keys[0]));
+        assert_eq!(block_id(keys[0]), Some("minecraft:stone"));
     }
 
     #[test]
@@ -1759,6 +1774,13 @@ pub mod tests {
             ModEntry::new("second", Box::new(Keys(requested.clone()))),
         ])
         .unwrap();
+        let speed_key = requested.lock().unwrap()[0];
+        assert_eq!(EffectKey::from_slot(speed_key.0), Ok(speed_key));
+        assert!(EffectKey::from_slot(2).is_err());
+        assert!(
+            crate::registry_keys::effect(speed_key).is_none(),
+            "startup has no resolved effects"
+        );
         assert!(horizon_client_core::potions::register_mod_effects([(
             "key_test:later".to_owned(),
             0x123456,
@@ -1783,7 +1805,7 @@ pub mod tests {
             );
         }
 
-        assert!(crate::registry_keys::effect(EffectKey(u32::MAX)).is_none());
+        assert!(EffectKey::from_slot(u32::MAX).is_err());
         struct Table;
         impl Backend for Table {
             fn effect_key_id(&self, key: EffectKey) -> String {
@@ -1799,7 +1821,6 @@ pub mod tests {
         }
         assert_eq!(keys[0].id(&Table), "minecraft:speed");
         assert_eq!(keys[1].id(&Table), "key_test:later");
-        assert!(std::panic::catch_unwind(|| EffectKey(u32::MAX).id(&Table)).is_err());
         struct NoGame;
         impl Host for NoGame {}
         assert!(std::panic::catch_unwind(|| keys[0].id(&NoGame)).is_err());
