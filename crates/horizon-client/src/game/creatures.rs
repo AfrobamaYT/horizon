@@ -163,8 +163,6 @@ pub(super) struct Creatures {
     /// (centre, small, radius, blocks hit, the players it pushed;
     /// game/lan_particles.rs).
     pub lan_explosions: Vec<([f64; 3], bool, f32, usize, Vec<(u32, [f64; 3])>)>,
-    /// Ticks left of the elder guardian's apparition (MobAppearanceParticle).
-    pub elder_apparition: i32,
     /// The wandering trader spawner's clock.
     pub trader: super::wandering_trader::Spawner,
     /// When each player last put a parrot on a shoulder (`timeEntitySatOnShoulder`).
@@ -1486,7 +1484,6 @@ impl Game<'_> {
         self.tick_boarding();
         self.sync_riders();
         self.tick_skeleton_traps();
-        self.tick_apparition();
         self.guardian_bubbles();
         self.villager_reputation_tick();
         self.villager_item_sense();
@@ -4064,7 +4061,7 @@ impl Game<'_> {
                 self.audio
                     .play("minecraft:entity.elder_guardian.curse", Some(at), 1.0, 1.0);
             }
-            self.creatures.elder_apparition = super::mob_blocks::APPARITION_TICKS;
+            self.particles.elder_guardian();
         }
         true
     }
@@ -7795,10 +7792,7 @@ impl Game<'_> {
         }
         // What follows isn't a tracked mob: close the last one's span.
         self.mark_motion(out.len(), 0);
-        self.elder_apparition_geometry(alpha, out);
         self.spawner_geometry(camera, alpha, out);
-        // Projectiles: the baked vanilla arrow model, the rest as item billboards.
-        let (right, up) = thrown_item_axes(self.camera_type, self.yaw, self.pitch);
         let live = self.creatures.projectiles.iter().map(|a| {
             let at = [
                 a.previous.x + (a.position.x - a.previous.x) * alpha,
@@ -7807,14 +7801,35 @@ impl Game<'_> {
             ];
             (a, at)
         });
+        self.projectile_geometry(camera, alpha, live, out);
+    }
+
+    pub(super) fn pickup_arrow_geometry(
+        &self,
+        camera: glam::DVec3,
+        alpha: f64,
+        out: &mut Vec<Vertex>,
+    ) {
         // ItemPickupParticle: a picked-up arrow flying to its collector.
         let taken = self.pickups.live.iter().filter_map(|p| match &p.taken {
             super::pickups::Taken::Arrow(a) => Some((&**a, super::pickups::position(p, alpha))),
             _ => None,
         });
+        self.projectile_geometry(camera, alpha, taken, out);
+    }
+
+    fn projectile_geometry<'a>(
+        &self,
+        camera: glam::DVec3,
+        alpha: f64,
+        projectiles: impl Iterator<Item = (&'a Projectile, [f64; 3])>,
+        out: &mut Vec<Vertex>,
+    ) {
+        let atlas = &self.gui.atlas;
+        let (right, up) = thrown_item_axes(self.camera_type, self.yaw, self.pitch);
         // A glowing projectile's outline: what it drew up to the next one.
         let mut glowing = None;
-        for (a, at) in live.chain(taken) {
+        for (a, at) in projectiles {
             if let Some((start, rgb)) = glowing.take() {
                 self.mark_outline(&out[start..], rgb);
             }
