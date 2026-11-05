@@ -6,3 +6,6 @@ struct Check;
 impl mod_points::Points for Check {
     fn tick(&self, _: mod_api::HostSide<'_>, _: &mut mod_points::TickArgs) {}
 }
+
+#[mod_api::horizon_mod]
+impl mod_api::Hooks for Check {}
