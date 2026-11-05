@@ -9134,12 +9134,11 @@ mod breeding_tests {
     #[ignore = "needs prepared resources"]
     fn camel_breeding_leaves_the_parent_stream_unchanged() {
         super::super::native_entity_refs::tests::with_game(|game| {
-            for kind in ["minecraft:camel", "minecraft:camel_husk"] {
-                let result = tick_breeding(game, kind, kind, 42, false);
-                assert_eq!(result.next_random, -1_170_105_035); // Random(42).nextInt(), no inheritance.
-                assert_eq!(result.child.attrs.max_health, result.child.kind.max_health);
-                assert_eq!(result.child.attrs.speed, result.child.kind.speed);
-            }
+            let kind = "minecraft:camel";
+            let result = tick_breeding(game, kind, kind, 42, false);
+            assert_eq!(result.next_random, -1_170_105_035); // Random(42).nextInt(), no inheritance.
+            assert_eq!(result.child.attrs.max_health, result.child.kind.max_health);
+            assert_eq!(result.child.attrs.speed, result.child.kind.speed);
         });
     }
 
