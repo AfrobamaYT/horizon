@@ -565,3 +565,81 @@ fn a_mounted_guests_turn_publishes_its_teleport_without_dismounting() {
         }
     });
 }
+
+/// A listener sees the newly granted criterion before its recipe reward on
+/// both a player's first tick and a resource reload.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn tick_advancement_notice_precedes_recipe_reward() {
+    use crate::game::native_entity_refs::tests::run_fresh_cases;
+    use mod_api::{Hooks, ModEntry, Mods, PlayerAdvancementProgressEvent, ServerHost};
+    use std::sync::Mutex;
+
+    if run_fresh_cases(
+        "game::native_guest_turn_tests::tick_advancement_notice_precedes_recipe_reward",
+        "HORIZON_ADVANCEMENT_ORDER_CHILD",
+        &["first", "reload"],
+    ) {
+        return;
+    }
+    #[derive(Clone)]
+    struct Observer(Arc<Mutex<Vec<Option<bool>>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Observer {
+        fn player_advancement_progress(
+            &self,
+            host: &mut dyn ServerHost,
+            event: &mut PlayerAdvancementProgressEvent<'_>,
+        ) {
+            if event.advancement == "testmod:tick" {
+                self.0.lock().unwrap().push(
+                    host.player(event.player)
+                        .and_then(|p| p.has_discovered_recipe(host, "testmod:reward")),
+                );
+            }
+        }
+    }
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let mods: Mods = vec![ModEntry::new(
+        "observer",
+        Box::new(Observer(observed.clone())),
+    )]
+    .into();
+    mod_api::__private::install(mods);
+    let scratch =
+        std::env::temp_dir().join(format!("horizon-tick-advancement-{}", std::process::id()));
+    let dir = scratch.join("data/testmod/advancement");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("tick.json"), r#"{"criteria":{"seen":{"trigger":"minecraft:tick"}},"rewards":{"recipes":["testmod:reward"]}}"#).unwrap();
+    with_guests(|game| {
+        let mut sync = horizon_client::lan::data::SyncData::empty();
+        sync.advancements = horizon_client::lan::ServerAdvancements::load(
+            &scratch,
+            &horizon_world::loot::PackOverlay::NONE,
+            Default::default(),
+            Default::default(),
+        );
+        let reload = std::env::var("HORIZON_ADVANCEMENT_ORDER_CHILD").as_deref() == Ok("reload");
+        let host = game.lan.as_mut().unwrap();
+        for guest in &mut host.hub.guests {
+            guest.advancements_loaded = reload;
+        }
+        host.hub.mods_loaded = reload;
+        host.hub.reload_resources(Arc::new(sync));
+        if reload {
+            game.run_native_advancement_grants();
+        } else {
+            game.tick_lan(false);
+        }
+        let host = game.lan.as_ref().unwrap();
+        assert!(
+            host.hub
+                .guest(12)
+                .unwrap()
+                .recipe_book
+                .knows("testmod:reward")
+        );
+        assert_eq!(*observed.lock().unwrap(), vec![Some(false), Some(false)]);
+    });
+    std::fs::remove_dir_all(scratch).unwrap();
+}

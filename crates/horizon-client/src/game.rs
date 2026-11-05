@@ -78,6 +78,7 @@ mod books;
 mod bossbars;
 mod breezes;
 mod brush;
+mod building_players;
 mod bundles;
 mod campfire;
 mod campfire_douse;
@@ -126,35 +127,20 @@ mod durability;
 mod dynamic_lights;
 mod enchant_effects;
 mod end;
+mod enderman;
+#[cfg(test)]
+mod enderman_placement_tests;
 mod entity;
 mod entity_culling;
 mod entity_sounds;
 mod event_loop;
 mod events;
 mod execution_role;
-/// The injection points' slots (#589): one per point's head and return, indexed by
-/// `mod_points::PointId`, set once after the mods are installed where one listens.
+/// The game's side of the injection points (#589), whose slots and listeners live in `mod_points`.
 #[doc(hidden)]
 pub mod points {
-    // `fire` and `host_side` are called only by the `#[point]`s the stage adds to its copy.
-    #[allow(unused_imports, reason = "used by the staged copy's points")]
-    pub(crate) use mod_points::__private::fire;
-    pub(crate) use mod_points::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    pub(crate) static POINTS: [AtomicBool; POINT_COUNT] =
-        [const { AtomicBool::new(false) }; POINT_COUNT];
-
-    /// Seals the listener list and sets each slot a mod listens at, once, after the mods are
-    /// installed and their listeners registered.
-    pub(crate) fn attach_installed() {
-        mod_points::__private::seal();
-        for (index, slot) in POINTS.iter().enumerate() {
-            slot.store(mod_points::__private::listened_at(index), Ordering::Release);
-        }
-    }
-
     /// A `side = "both"` point's host, out of line: each point's listener call stays a few bytes.
+    /// Called only by the `#[point]`s the stage adds to its copy.
     #[inline(never)]
     #[allow(dead_code, reason = "used by the staged copy's points")]
     pub(super) fn host_side<'a>(game: &'a mut super::Game<'_>) -> mod_api::HostSide<'a> {
@@ -292,6 +278,7 @@ mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
 mod native_living_effects;
+mod native_living_flags;
 mod native_living_refs;
 mod native_living_writes;
 mod native_menu_refs;
@@ -391,6 +378,7 @@ mod screen_info;
 mod screens;
 mod sculk;
 mod sculk_fixture;
+mod server_lifecycle;
 mod server_links;
 mod server_packs;
 mod server_reload;
@@ -570,6 +558,8 @@ struct Options {
     seed: i64,
     creative: bool,
     test_terrain: bool,
+    /// `--pregen`: enable the command even when the saved Extras switch is off.
+    pregen: bool,
     frames: Option<u64>,
     /// A splitscreen player: the split window paces every player's frames, not each its own.
     paced_by_split: bool,
@@ -743,6 +733,7 @@ impl Options {
             seed: 0,
             creative: false,
             test_terrain: false,
+            pregen: false,
             frames: None,
             paced_by_split: false,
             split_guest: false,
@@ -814,7 +805,10 @@ impl Options {
                         "Horizon: {arg} was removed: single player runs on its server thread."
                     ),
                     // Horizon's own commands (/pregen), off by default as on vanilla.
-                    "--pregen" => horizon_client::command::vanilla::set_horizon_commands(true),
+                    "--pregen" => {
+                        o.pregen = true;
+                        horizon_client::command::vanilla::set_horizon_commands(true);
+                    }
                     // Read by `entry::main_with` when it loads the wasm mods.
                     "--wasm-interpreter" | "--wasm-fuel" => {}
                     _ => return Err(format!("{arg}: unknown option").into()),
@@ -1090,6 +1084,9 @@ struct GameLevel<'w> {
     player_box: Option<([f64; 3], [f64; 3])>,
     /// The LAN guests in this level who trigger blocks (not spectators).
     guest_boxes: Vec<([f64; 3], [f64; 3])>,
+    /// Other players that block placement during a guest turn, including live
+    /// ancestor bodies; None outside one, where `guest_boxes` are those players.
+    building_player_boxes: Option<Vec<([f64; 3], [f64; 3])>>,
     player_collision: Option<PlayerCollision>,
     /// Minecart boxes (detector rails).
     cart_boxes: Vec<([f64; 3], [f64; 3])>,
@@ -1284,7 +1281,11 @@ impl GameLevel<'_> {
         let b = self.entities;
         self.player_box
             .iter()
-            .chain(&self.guest_boxes)
+            .chain(
+                self.building_player_boxes
+                    .as_ref()
+                    .unwrap_or(&self.guest_boxes),
+            )
             .chain(&self.cart_boxes)
             .map(boxed)
             .chain(b.mobs.iter().filter(|m| !m.removed).map(Mob::bounds))
@@ -2370,15 +2371,20 @@ struct WorldTables {
     /// The values of the data map types native mods registered
     /// (`native_data_map_types`).
     data_maps: native_data_maps::DataMaps,
-    /// The entity type, biome and damage type tags with the packs' over the
-    /// game's own, by registry (`TagLoader.loadTagsForExistingRegistries`):
+    /// The entity type, biome, structure and damage type tags with the packs'
+    /// over the game's own, by registry (`TagLoader.loadTagsForExistingRegistries`):
     /// what the predicates' `#tag`s of those registries read.
     pack_tags: HashMap<&'static str, HashMap<String, HashSet<String>>>,
 }
 
 impl WorldTables {
     /// The registries [`WorldTables::pack_tags`] holds.
-    const PACK_TAG_REGISTRIES: [&'static str; 3] = ["entity_type", "worldgen/biome", "damage_type"];
+    const PACK_TAG_REGISTRIES: [&'static str; 4] = [
+        "entity_type",
+        "worldgen/biome",
+        "worldgen/structure",
+        "damage_type",
+    ];
 }
 
 impl Resources {
@@ -3050,6 +3056,10 @@ struct Game<'a> {
     /// Must precede session_lock: dropping the writer drains writes while the world is locked.
     player_autosaves: horizon_client::lan::playerdata::Autosaves,
     session_lock: Option<horizon_client::save::SessionLock>,
+    /// The prepared world is installed. The session lock is taken earlier so tag
+    /// reads see ready tables, and is not this marker: a final save before the
+    /// prepared `Level` is installed would replace the world with placeholder state.
+    world_adopted: bool,
     audio: Audio,
     /// The side, registries and mod settings of this game's resource generation, which
     /// its menus lend to the hooks they fire inside a loop; rebuilt by `refresh_loop_context`.
@@ -3201,7 +3211,7 @@ struct Game<'a> {
     orbs: horizon_client::join_seq::JoinList<ExperienceOrb>,
     xp_delay: u32,
     ordered: ordered_tick::OrderedTicks,
-    last_level_up: u64,
+    level_up_sound: horizon_client::entities::LevelUpSound,
     /// The arm swing (`LivingEntity.SwingState`) and how many swings started.
     swing: horizon_client::first_person::SwingState,
     swings_started: u32,
@@ -3631,6 +3641,8 @@ struct Game<'a> {
     /// The abilities of the server player whose turn it is (`as_guest`): their record's
     /// copy, which the turn reads and writes and `leave_guest` stores. None outside a turn.
     acting_abilities: Option<horizon_client::lan::abilities::PlayerAbilities>,
+    /// Other players in the current guest turn, including borrowed ancestor bodies.
+    lan_building_boxes: building_players::BuildingPlayers,
     /// A guest's `/save-all`: saved once their turn ends (`run_guest_command`),
     /// when their own state is back in their record.
     save_after_guest_turn: bool,
@@ -5180,6 +5192,10 @@ impl Game<'_> {
             })
             .collect();
         let guest_boxes = self.lan_block_trigger_boxes();
+        let building_player_boxes = self
+            .lan_acting
+            .is_some()
+            .then(|| self.lan_building_boxes.boxes(self.dim));
         let dimension = self.dim.level();
         let rules = self.level_rules();
         let fire_players: Vec<[f64; 3]> = self
@@ -5262,6 +5278,7 @@ impl Game<'_> {
                 .map_or(&self.level.enabled_features, |remote| &remote.features),
             player_box,
             guest_boxes,
+            building_player_boxes,
             player_collision,
             biomes: world_biomes!(self),
             seed: self.level.seed,
@@ -6470,7 +6487,15 @@ impl Game<'_> {
             // EnderChestBlock.useWithoutItem
             self.award_custom_stat("open_enderchest", 1);
             self.anger_piglins(true);
+            // EnderChestBlockEntity.startOpen: the first opener's CONTAINER_OPEN
+            // (ContainerOpenersCounter.incrementOpeners), as for chests below.
             if self.container_opener_event(key, true) {
+                self.post_block_game_event(
+                    "minecraft:container_open",
+                    [key.0, key.1, key.2],
+                    Some(horizon_client::mobs::Who::Player),
+                    None,
+                );
                 self.container_edge_sound(key, true);
             }
         } else if &*name == "minecraft:beacon" && self.open_station(pos, &name) {
@@ -9029,6 +9054,7 @@ impl Game<'_> {
     fn pauses_game(&self) -> bool {
         self.has_singleplayer_server()
             && !self.is_published()
+            && !self.has_split_players()
             && self.title.is_none()
             && (matches!(
                 self.screen,
@@ -11955,7 +11981,6 @@ impl Game<'_> {
         &mut self,
         camera: glam::DVec3,
         alpha: f64,
-        fov_degrees: f32,
         mut out: Vec<Vertex>,
     ) -> (
         Vec<Vertex>,
@@ -12370,81 +12395,16 @@ impl Game<'_> {
             }
         }
         laps.lap("eg_block_entities");
-        // Experience orbs (ExperienceOrbRenderer): pulsing billboards from a 4x4 icon sheet.
         self.mark_entity(out.len(), "minecraft:experience_orb");
-        if let Some(r) = self
-            .gui
-            .atlas
-            .sprites
-            .get("entity/experience/experience_orb")
-            .copied()
-        {
-            let (yaw, pitch) = (self.yaw.to_radians(), self.pitch.to_radians());
-            let forward = glam::Vec3::new(
-                -yaw.sin() * pitch.cos(),
-                -pitch.sin(),
-                yaw.cos() * pitch.cos(),
-            );
-            let right = forward.cross(glam::Vec3::Y).normalize_or_zero();
-            let up = right.cross(forward).normalize_or_zero();
-            let live = self.orbs.iter().map(|o| {
-                let at = [
-                    o.previous.x + (o.position.x - o.previous.x) * alpha,
-                    o.previous.y + (o.position.y - o.previous.y) * alpha,
-                    o.previous.z + (o.position.z - o.previous.z) * alpha,
-                ];
-                (o, at, alpha as f32)
-            });
-            // ItemPickupParticle: the render state extracted at partial tick 1.
-            let taken = self.pickups.live.iter().filter_map(|p| match &p.taken {
-                pickups::Taken::Orb(o) => Some((&**o, pickups::position(p, alpha), 1.0)),
-                _ => None,
-            });
-            for (o, at, partial) in live.chain(taken) {
-                let p = glam::DVec3::new(at[0], at[1] + 0.1, at[2]) - camera;
-                let icon = o.icon();
-                let (du, dv) = ((r.u1 - r.u0) / 4.0, (r.v1 - r.v0) / 4.0);
-                let (u0, v0) = (r.u0 + (icon % 4) as f32 * du, r.v0 + (icon / 4) as f32 * dv);
-                let t = (o.age as f32 + partial) / 2.0;
-                let red = ((t.sin() + 1.0) * 0.5 * 255.0) as u32;
-                let blue = (((t + 4.188_79).sin() + 1.0) * 0.1 * 255.0) as u32;
-                let color = 0x8000_0000 | blue << 16 | 255 << 8 | red;
-                // `ExperienceOrbRenderer.getBlockLightLevel` (the block light
-                // plus 7, clamped) at the block the orb's eye is in.
-                let light = self.world.light(
-                    o.position.x.floor() as i32,
-                    o.light_probe_y().floor() as i32,
-                    o.position.z.floor() as i32,
-                );
-                let packed = o.render_light(i32::from(light));
-                let c = p.as_vec3();
-                // `ExperienceOrbRenderer.submit`: the quad runs from
-                // (-0.5, -0.25) to (0.5, 0.75) and is scaled by 0.3, so the
-                // sprite hangs a quarter of its height below the orb's centre.
-                let s = horizon_client::entities::ORB_QUAD_SCALE;
-                for (k, uv) in horizon_client::entities::ORB_QUAD.iter().zip([
-                    [u0, v0 + dv],
-                    [u0 + du, v0 + dv],
-                    [u0 + du, v0],
-                    [u0, v0],
-                ]) {
-                    let v = c + right * (k[0] * s) + up * (k[1] * s);
-                    out.push(Vertex {
-                        normal: [0; 4],
-                        pos: v.to_array(),
-                        uv,
-                        // ExperienceOrbRenderer: `RenderTypes.entityTranslucent`; in HDR
-                        // output the orbs shine (entity.wgsl fs_hdr_mark).
-                        layer: horizon_client::gfx::OIT_ENTITY
-                            | u32::from(horizon_client::mesher::VERY_BRIGHT) << 16,
-                        color,
-                        light: packed,
-
-                        glint_uv: [0.0, 0.0],
-                    });
-                }
-            }
-        }
+        let live = self.orbs.iter().map(|o| {
+            let at = [
+                o.previous.x + (o.position.x - o.previous.x) * alpha,
+                o.previous.y + (o.position.y - o.previous.y) * alpha,
+                o.previous.z + (o.position.z - o.previous.z) * alpha,
+            ];
+            (o, at, alpha as f32)
+        });
+        self.orb_geometry(camera, live, &mut out);
         laps.lap("eg_orbs");
         // Falling blocks use their baked model, including non-cubic shapes.
         self.mark_entity(out.len(), "minecraft:falling_block");
@@ -12511,47 +12471,6 @@ impl Game<'_> {
         self.mark_entity(out.len(), "minecraft:splash_potion");
         self.thrown_potion_geometry(camera, alpha, &mut out);
         laps.lap("eg_objects");
-        // Particles (ParticleEngine.extract): camera-facing quads.
-        self.mark_stage(out.len(), "PARTICLES");
-        let world = &self.world;
-        let particle_mode = self.settings.horizon.particle_culling;
-        if particle_mode == horizon_client::graphics::ParticleCullingMode::Off {
-            self.particles.render(
-                camera,
-                self.yaw,
-                self.pitch,
-                alpha as f32,
-                &|b| world.light(b[0], b[1], b[2]),
-                &mut out,
-            );
-        } else {
-            let frustum = self.view_frustum;
-            let pixel_focal_length = self.renderer.as_ref().map_or(0.0, |renderer| {
-                let tangent = (f64::from(fov_degrees).to_radians() * 0.5).tan();
-                if tangent.is_finite() && tangent > 0.0 {
-                    (f64::from(renderer.config.height.max(1)) / (2.0 * tangent)) as f32
-                } else {
-                    0.0
-                }
-            });
-            {
-                let mut particle_culling = self.particle_occlusion_context(camera);
-                self.particles.render_culled(
-                    camera,
-                    self.yaw,
-                    self.pitch,
-                    alpha as f32,
-                    pixel_focal_length,
-                    true,
-                    frustum.as_ref(),
-                    &mut |min, max| particle_culling.hidden(min, max),
-                    &|b| world.light(b[0], b[1], b[2]),
-                    &mut out,
-                );
-            }
-            self.finish_async_particle_culling();
-        }
-        laps.lap("eg_particles");
         // Breaking progress overlays (destroy_stage_0..9): ours and the other players'.
         self.mark_stage(out.len(), "DESTROY");
         for &(pos, stage) in &cracks {
@@ -12591,6 +12510,170 @@ impl Game<'_> {
             visible_static_block_entity_sections,
             static_block_entity_stats,
         )
+    }
+
+    fn orb_geometry<'a>(
+        &self,
+        camera: glam::DVec3,
+        orbs: impl Iterator<Item = (&'a horizon_client::entities::ExperienceOrb, [f64; 3], f32)>,
+        out: &mut Vec<Vertex>,
+    ) {
+        if let Some(r) = self
+            .gui
+            .atlas
+            .sprites
+            .get("entity/experience/experience_orb")
+            .copied()
+        {
+            let (yaw, pitch) = (self.yaw.to_radians(), self.pitch.to_radians());
+            let forward = glam::Vec3::new(
+                -yaw.sin() * pitch.cos(),
+                -pitch.sin(),
+                yaw.cos() * pitch.cos(),
+            );
+            let right = forward.cross(glam::Vec3::Y).normalize_or_zero();
+            let up = right.cross(forward).normalize_or_zero();
+            for (o, at, partial) in orbs {
+                let p = glam::DVec3::new(at[0], at[1] + 0.1, at[2]) - camera;
+                let icon = o.icon();
+                let (du, dv) = ((r.u1 - r.u0) / 4.0, (r.v1 - r.v0) / 4.0);
+                let (u0, v0) = (r.u0 + (icon % 4) as f32 * du, r.v0 + (icon / 4) as f32 * dv);
+                let t = (o.age as f32 + partial) / 2.0;
+                let red = ((t.sin() + 1.0) * 0.5 * 255.0) as u32;
+                let blue = (((t + 4.188_79).sin() + 1.0) * 0.1 * 255.0) as u32;
+                let color = 0x8000_0000 | blue << 16 | 255 << 8 | red;
+                // `ExperienceOrbRenderer.getBlockLightLevel` (the block light
+                // plus 7, clamped) at the block the orb's eye is in.
+                let light = self.world.light(
+                    o.position.x.floor() as i32,
+                    o.light_probe_y().floor() as i32,
+                    o.position.z.floor() as i32,
+                );
+                let packed = o.render_light(i32::from(light));
+                let c = p.as_vec3();
+                // `ExperienceOrbRenderer.submit`: the quad runs from
+                // (-0.5, -0.25) to (0.5, 0.75) and is scaled by 0.3, so the
+                // sprite hangs a quarter of its height below the orb's centre.
+                let s = horizon_client::entities::ORB_QUAD_SCALE;
+                for (k, uv) in horizon_client::entities::ORB_QUAD.iter().zip([
+                    [u0, v0 + dv],
+                    [u0 + du, v0 + dv],
+                    [u0 + du, v0],
+                    [u0, v0],
+                ]) {
+                    let v = c + right * (k[0] * s) + up * (k[1] * s);
+                    out.push(Vertex {
+                        normal: [0; 4],
+                        pos: v.to_array(),
+                        uv,
+                        // ExperienceOrbRenderer: `RenderTypes.entityTranslucent`; in HDR
+                        // output the orbs shine (entity.wgsl fs_hdr_mark).
+                        layer: horizon_client::gfx::OIT_ENTITY
+                            | u32::from(horizon_client::mesher::VERY_BRIGHT) << 16,
+                        color,
+                        light: packed,
+
+                        glint_uv: [0.0, 0.0],
+                    });
+                }
+            }
+        }
+    }
+
+    /// Extract every particle group after the frame's entity, screen and hand callbacks.
+    /// Item model callbacks can clear during extraction too: roll back only this tail of
+    /// geometry (including GPU jobs and outlines), never the frame's ordinary entities.
+    fn client_particle_geometry(
+        &mut self,
+        camera: glam::DVec3,
+        alpha: f64,
+        fov_degrees: f32,
+        out: &mut Vec<Vertex>,
+    ) {
+        self.apply_mod_particle_clear();
+        if self.client_particle_count() == 0 {
+            return;
+        }
+        let first = out.len();
+        let skin = self.skin_frame.borrow().mark();
+        let outline_jobs = self.skin_frame.borrow().outline_jobs.len();
+        let outline_vertices = self.skin_frame.borrow().outline_vertices;
+        let spans = self.entity_spans.borrow().len();
+        let motion = self.entity_motion.borrow().len();
+        let glowing = self.glowing_vertices.borrow().len();
+        self.mark_motion(out.len(), 0);
+        // Particles (ParticleEngine.extract): camera-facing quads.
+        self.mark_stage(out.len(), "PARTICLES");
+        let world = &self.world;
+        let particle_mode = self.settings.horizon.particle_culling;
+        if particle_mode == horizon_client::graphics::ParticleCullingMode::Off {
+            self.particles.render(
+                camera,
+                self.yaw,
+                self.pitch,
+                alpha as f32,
+                &|b| world.light(b[0], b[1], b[2]),
+                out,
+            );
+        } else {
+            let frustum = self.view_frustum;
+            let pixel_focal_length = self.renderer.as_ref().map_or(0.0, |renderer| {
+                let tangent = (f64::from(fov_degrees).to_radians() * 0.5).tan();
+                if tangent.is_finite() && tangent > 0.0 {
+                    (f64::from(renderer.config.height.max(1)) / (2.0 * tangent)) as f32
+                } else {
+                    0.0
+                }
+            });
+            {
+                let mut particle_culling = self.particle_occlusion_context(camera);
+                self.particles.render_culled(
+                    camera,
+                    self.yaw,
+                    self.pitch,
+                    alpha as f32,
+                    pixel_focal_length,
+                    true,
+                    frustum.as_ref(),
+                    &mut |min, max| particle_culling.hidden(min, max),
+                    &|b| world.light(b[0], b[1], b[2]),
+                    out,
+                );
+            }
+            self.finish_async_particle_culling();
+        }
+        self.mark_entity(out.len(), "minecraft:item");
+        self.pickup_item_geometry(camera, alpha, out);
+        self.mark_motion(out.len(), 0);
+        self.mark_entity(out.len(), "minecraft:arrow");
+        self.pickup_arrow_geometry(camera, alpha, out);
+        self.mark_entity(out.len(), "minecraft:trident");
+        self.pickup_trident_geometry(camera, alpha, out);
+        self.mark_entity(out.len(), "minecraft:experience_orb");
+        // ItemPickupParticle: the render state extracted at partial tick 1.
+        let taken = self.pickups.live.iter().filter_map(|p| match &p.taken {
+            pickups::Taken::Orb(o) => Some((&**o, pickups::position(p, alpha), 1.0)),
+            _ => None,
+        });
+        self.orb_geometry(camera, taken, out);
+        self.mark_entity(out.len(), "minecraft:elder_guardian");
+        self.elder_apparition_geometry(alpha, out);
+        if self.mod_clear_particles.get() {
+            self.apply_mod_particle_clear();
+            out.truncate(first);
+            {
+                let mut frame = self.skin_frame.borrow_mut();
+                frame.truncate(skin);
+                frame.outline_jobs.truncate(outline_jobs);
+                frame.outline_vertices = outline_vertices;
+            }
+            self.entity_spans.borrow_mut().truncate(spans);
+            self.entity_motion.borrow_mut().truncate(motion);
+            self.glowing_vertices.borrow_mut().truncate(glowing);
+            return;
+        }
+        self.mark_motion(out.len(), 0);
+        self.mark_stage(out.len(), "NONE");
     }
 
     /// `LevelRenderer.destroyBlockProgress`: a player's crack on a block (0..=9), or none
@@ -13481,6 +13564,9 @@ impl Game<'_> {
         let dim = Dim::from_id(&level.dimension);
         self.level_shapes = shapes;
         self.world_root = save_root.clone();
+        // The root moves before the prepared level is installed. Until then a
+        // final save must not run: the lock below only marks tag tables.
+        self.world_adopted = false;
         // The world's packs over the game's biomes (`Biomes::with_packs`),
         // the table its chunks were built with.
         self.world_biomes = self.packed_biomes();
@@ -13565,6 +13651,7 @@ impl Game<'_> {
         // The ride the player's file names, once the vehicle is in the world.
         self.pending_vehicle = level.root_vehicle;
         self.level = level;
+        self.world_adopted = true;
         // ServerRecipeBook.loadUntrusted: recipes the manager does not have are dropped.
         let index = &world_stations!(self).recipe_index;
         let book = &mut self.level.recipe_book;
@@ -13814,6 +13901,7 @@ impl Game<'_> {
         self.server_loot.set(None);
         self.server_items = None;
         self.session_lock = None;
+        self.world_adopted = false;
         self.world_icon = None;
         horizon_client::crash::clear_detail("World");
         self.debug_charts.reset();
@@ -16011,12 +16099,22 @@ impl Game<'_> {
                 return;
             }
         }
-        // LivingEntity.startSleeping: the shape the bed gives the player to
-        // lie on (`getSleepHeight`). A straw bed's head answers with its
-        // foot's shape, and with no foot of its own there is none, so the
-        // player stays up as `startSleeping` returning false leaves them.
+        if self.lie_in_bed(head) {
+            self.award_custom_stat("sleep_in_bed", 1);
+            self.trigger_player("minecraft:slept_in_bed");
+            self.stats.reset("custom", "minecraft:time_since_rest");
+        }
+    }
+    /// `LivingEntity.startSleeping`: the player takes the bed whose head
+    /// `head` names, moved onto it and asleep from now on. False when the
+    /// bed gives no shape to lie on.
+    fn lie_in_bed(&mut self, head: [i32; 3]) -> bool {
+        // The shape the bed gives the player to lie on (`getSleepHeight`).
+        // A straw bed's head answers with its foot's shape, and with no foot
+        // of its own there is none, so the player stays up as
+        // `startSleeping` returning false leaves them.
         let Some(at) = self.sleeping_position(head) else {
-            return;
+            return false;
         };
         // LivingEntity.startSleeping: stopRiding once the bed is valid.
         self.stop_riding();
@@ -16041,9 +16139,7 @@ impl Game<'_> {
             self.snap_player_model_pitch();
         }
         self.occupy_bed(head);
-        self.award_custom_stat("sleep_in_bed", 1);
-        self.trigger_player("minecraft:slept_in_bed");
-        self.stats.reset("custom", "minecraft:time_since_rest");
+        true
     }
     fn wake_up(&mut self) {
         if self.remote.is_some() {
@@ -16930,6 +17026,17 @@ impl Game<'_> {
         });
     }
     fn render(&mut self) -> Result<bool> {
+        self.render_with(|renderer, frame| {
+            horizon_client::spans::time("renderer", || renderer.render(frame))
+        })
+    }
+
+    /// Build the complete frame before handing its borrowed geometry and lighting to
+    /// the consumer. Tests use the same boundary as GPU submission.
+    fn render_with(
+        &mut self,
+        consume: impl FnOnce(&mut Renderer, &Frame<'_>) -> Result<bool>,
+    ) -> Result<bool> {
         // The window's GPU holds the atlas: its copy in memory is kept
         // compressed (a no-op once it is).
         if self.renderer.is_some() {
@@ -17165,10 +17272,10 @@ impl Game<'_> {
         let g = self.debug_gizmos(alpha as f32, camera.to_array());
         lines.extend(g.lines);
         let on_top = g.on_top;
-        let colored_lights = if self.title.is_none() {
-            self.native_frame_visuals(camera, alpha, &mut lines)
+        let visuals = if self.title.is_none() {
+            self.native_frame_visuals(alpha, &mut lines)
         } else {
-            Vec::new()
+            native_visuals::FrameVisuals::default()
         };
         let emissive_layers = if self.title.is_none() {
             let mut requests = Vec::new();
@@ -17345,7 +17452,7 @@ impl Game<'_> {
         if !title {
             let (built, static_sections, visible_static_sections, static_stats) =
                 spans::time("entity_geometry", || {
-                    self.entity_geometry(camera, alpha, fov_degrees, entities)
+                    self.entity_geometry(camera, alpha, entities)
                 });
             entities = built;
             static_block_entities = static_sections;
@@ -17430,6 +17537,17 @@ impl Game<'_> {
         } else {
             self.shader_pack_inputs(camera, alpha as f32, &sky)
         };
+        // Fog hooks may clear particles too. They must run before the final clear
+        // boundary, not while constructing Frame after geometry has been extracted.
+        let fog = self.frame_fog(camera, &sky, biome, water_fog);
+        if !title {
+            self.client_particle_geometry(camera, alpha, fov_degrees, &mut entities);
+        }
+        let colored_lights = if self.title.is_none() {
+            visuals.finish(self, camera)
+        } else {
+            Vec::new()
+        };
         // Map textures and font glyphs changed while building this frame's
         // geometry (game/maps.rs, world text) upload with this batch; draining
         // map_patches any earlier leaves them a frame behind.
@@ -17493,7 +17611,7 @@ impl Game<'_> {
             environment_fog: (self.dim == Dim::Nether).then_some((sky.fog_start, sky.fog_end)),
             cave_culling,
             water_fog,
-            fog: Some(self.frame_fog(camera, &sky, biome, water_fog)),
+            fog: Some(fog),
             dark_disc: self.dark_disc(camera),
             outline,
             outline_after_terrain,
@@ -17599,7 +17717,7 @@ impl Game<'_> {
         let result = match self.renderer.as_mut() {
             Some(renderer) => {
                 renderer.set_pass_timing(self.debug || self.gpu_passes);
-                horizon_client::spans::time("renderer", || renderer.render(&frame))
+                consume(renderer, &frame)
             }
             None => Err("renderer".into()),
         };
@@ -17988,6 +18106,9 @@ impl Game<'_> {
     }
     /// A mouse button while playing (window or control socket).
     fn play_mouse(&mut self, button: MouseButton, pressed: bool) -> Result<()> {
+        if pressed {
+            self.pvp_click(button);
+        }
         if self.sleeping.is_some() {
             return Ok(());
         }
@@ -20533,6 +20654,7 @@ impl<'a> Game<'a> {
             level,
             player_autosaves: Default::default(),
             session_lock: None,
+            world_adopted: false,
             audio,
             loop_context: Arc::new(res.core.item_data.context().loop_context(loop_side, [])),
             damage_hooks: native_hooks::DAMAGE_HOOKS,
@@ -20621,7 +20743,7 @@ impl<'a> Game<'a> {
             orbs: Default::default(),
             xp_delay: 0,
             ordered: Default::default(),
-            last_level_up: 0,
+            level_up_sound: Default::default(),
             swing: Default::default(),
             swings_started: 0,
             heights: Default::default(),
@@ -20856,6 +20978,7 @@ impl<'a> Game<'a> {
             lid_openers: HashMap::new(),
             lan_acting: None,
             acting_abilities: None,
+            lan_building_boxes: Default::default(),
             save_after_guest_turn: false,
             lan_guest_swaps: Vec::new(),
             player_attachments: Default::default(),

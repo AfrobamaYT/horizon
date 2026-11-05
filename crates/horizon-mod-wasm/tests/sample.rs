@@ -101,9 +101,10 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
         listening.register().unwrap();
     }
     mod_points::__private::seal();
-    assert!(mod_points::__private::listened_at(
-        mod_points::PointId::Tick as usize
-    ));
+    assert!(
+        mod_points::__private::POINTS[mod_points::PointId::Tick as usize]
+            .load(std::sync::atomic::Ordering::Acquire)
+    );
     let mut server = Server::default();
     for _ in 0..400 {
         let mut args = mod_points::TickArgs::__new();

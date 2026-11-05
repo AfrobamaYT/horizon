@@ -83,6 +83,7 @@ mod tests {
         pub(super) struct NativeExplosionStart<'a>(pub &'a ());
         pub(super) struct NativeItemFished<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
+        pub(super) struct NativeActiveEffect;
         #[derive(Debug, PartialEq)]
         pub(super) enum ScreenOpening {
             Cancel,
