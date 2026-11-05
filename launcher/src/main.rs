@@ -2887,20 +2887,21 @@ impl Launcher {
                 soft: shell::c(n.muted),
                 accent: gpui::rgb(0x6b4bff).into(),
             },
+            &self.theme,
         )));
-        foot = foot
-            .child(link(
-                "roadmap",
-                tr("Roadmap"),
-                "map",
-                self.links.roadmap.clone(),
-            ))
-            .child(link(
+        for (id, label, icon, url) in [
+            ("roadmap", tr("Roadmap"), "map", &self.links.roadmap),
+            (
                 "documentation",
                 tr("Documentation"),
-                "book",
-                self.links.docs.clone(),
-            ));
+                "book-open",
+                &self.links.docs,
+            ),
+        ] {
+            if !url.is_empty() {
+                foot = foot.child(link(id, label, icon, url.clone()));
+            }
+        }
         foot = foot.child(
             shell::text(theme::night::CAPTION, shell::c(n.muted))
                 .id("launcher-version")

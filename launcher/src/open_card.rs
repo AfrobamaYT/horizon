@@ -16,7 +16,12 @@ pub struct Palette {
 
 /// The card: a short accent rule, the headline (its second line in the accent), a line of
 /// small print and an underlined link to `TASKS_URL`. `font` is the sidebar's face.
-pub fn card(id: &'static str, font: &'static str, p: Palette) -> Stateful<Div> {
+pub fn card(
+    id: &'static str,
+    font: &'static str,
+    p: Palette,
+    t: &crate::theme::Theme,
+) -> Stateful<Div> {
     let headline = |size: f32, color: Hsla, text: &'static str| {
         div()
             .text_size(px(size))
@@ -47,7 +52,7 @@ pub fn card(id: &'static str, font: &'static str, p: Palette) -> Stateful<Div> {
                 .text_color(p.soft)
                 .child(tr("MIT licensed. No ads, no telemetry.")),
         )
-        .child(
+        .child(crate::keyboard(
             div()
                 .id(SharedString::from(format!("{id}-link")))
                 .mt(px(18.))
@@ -64,5 +69,6 @@ pub fn card(id: &'static str, font: &'static str, p: Palette) -> Stateful<Div> {
                 .child(tr("Help build the mod API"))
                 .child(crate::glass_ui::icon("arrow-right-01", 14., p.ink))
                 .on_click(|_: &ClickEvent, _, cx| cx.open_url(TASKS_URL)),
-        )
+            t,
+        ))
 }

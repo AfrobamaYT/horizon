@@ -1054,5 +1054,8 @@
   "MIT licensed. No ads, no telemetry.": "MIT licensed. No ads, no telemetry.",
   "Roadmap": "Roadmap",
   "So is the game.": "So is the game.",
-  "This launcher is open.": "This launcher is open."
+  "This launcher is open.": "This launcher is open.",
+  "Report on GitHub": "Report on GitHub",
+  "When you report it on GitHub, attach the crash report file (or paste it with Copy report) and say what you were doing.": "When you report it on GitHub, attach the crash report file (or paste it with Copy report) and say what you were doing.",
+  "The game ended without a crash report. When you report it on GitHub, attach latest.log from the logs folder and say what you were doing.": "The game ended without a crash report. When you report it on GitHub, attach latest.log from the logs folder and say what you were doing."
 }

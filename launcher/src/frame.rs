@@ -458,6 +458,7 @@ impl Launcher {
                 soft: white(ink::SOFT),
                 accent: gpui::rgb(0xb9a9ff).into(),
             },
+            &self.theme,
         )));
         let link = |id: &'static str, label: &'static str, icon: &'static str, url: String| {
             let id = SharedString::from(id);
@@ -490,22 +491,21 @@ impl Launcher {
                 &t,
             )
         };
-        let links = div()
-            .flex()
-            .flex_col()
-            .mt(px(8.))
-            .child(link(
-                "roadmap",
-                tr("Roadmap"),
-                "map",
-                self.links.roadmap.clone(),
-            ))
-            .child(link(
+        let links = [
+            ("roadmap", tr("Roadmap"), "map", &self.links.roadmap),
+            (
                 "documentation",
                 tr("Documentation"),
                 "book",
-                self.links.docs.clone(),
-            ));
+                &self.links.docs,
+            ),
+        ]
+        .into_iter()
+        .filter(|(_, _, _, url)| !url.is_empty())
+        .fold(
+            div().flex().flex_col().mt(px(8.)),
+            |col, (id, label, icon, url)| col.child(link(id, label, icon, url.clone())),
+        );
         foot = foot.child(links).child(
             ui::text(12., FontWeight::NORMAL, ink::DIM)
                 .id("launcher-version")

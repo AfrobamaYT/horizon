@@ -138,6 +138,7 @@ pub mod icons {
         "home",
         "image",
         "info-box",
+        "map",
         "message",
         "monitor",
         "notes",
