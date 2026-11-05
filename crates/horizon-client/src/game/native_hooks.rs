@@ -9104,7 +9104,11 @@ impl Game<'_> {
         } else {
             [None, None]
         };
-        Attack { attacker, held }
+        Attack {
+            attacker,
+            projectile: None,
+            held,
+        }
     }
     /// [`Self::attack_of`] for the attacker a damage source names: the player, a mob, or (none)
     /// the attack the enclosing [`Self::with_attack`] lends.
@@ -9246,7 +9250,11 @@ fn mob_source(damage: &Damage, attack: &Attack) -> HurtSource<'static> {
     HurtSource {
         damage_type: super::creatures::source_damage_type(*damage),
         causing,
-        direct: if melee { causing } else { 0 },
+        direct: if melee {
+            causing
+        } else {
+            attack.projectile.unwrap_or(0)
+        },
         position: damage.from,
     }
 }
@@ -13265,6 +13273,7 @@ mod tests {
                 },
                 &Attack {
                     attacker: 7,
+                    projectile: None,
                     held: Default::default(),
                 },
             );

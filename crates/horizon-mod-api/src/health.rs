@@ -11,6 +11,8 @@ pub use horizon_world::living_damage::{DamageContainer, Reduction};
 pub struct HurtSource<'a> {
     pub damage_type: &'a str,
     pub causing: i32,
+    /// The projectile's entity id for projectile hits on players, mobs and the dragon;
+    /// the attacker itself for melee when known, or 0 when no direct entity is known.
     pub direct: i32,
     pub position: Option<[f64; 3]>,
 }
