@@ -2378,7 +2378,7 @@ mod tests {
         let mods: mod_api::Mods = vec![ModEntry::new("toasts", Box::new(Listener))].into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
-                game.options.execution_role = super::super::ExecutionRole::Client;
+                game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
                 game.adv.toasts.clear();
                 let advancement = |name: &str| Toast {
                     icon: "minecraft:stone".into(),
