@@ -328,6 +328,16 @@ fn translate(
                 uniforms.remove(name);
             }
         }
+        // A compatibility-profile stage keeps reading the frame's `normalMatrix`.
+        let normal = "normalMatrix";
+        if uniforms.get(normal).is_some_and(|ty| ty == "mat3")
+            && [&v, &f].into_iter().all(|stage| {
+                stage.core_matrix(normal).is_some()
+                    || !stage.uniforms.iter().any(|(name, ..)| name == normal)
+            })
+        {
+            uniforms.remove(normal);
+        }
     }
     // `alphaTestRef` is the program's alpha test reference: a constant of the program.
     let alpha_test_ref = gbuffers
@@ -1598,6 +1608,31 @@ mod tests {
                     assert!(p.interface.uniforms.iter().any(|u| u.name == name));
                 }
             }
+        }
+    }
+
+    /// `normalMatrix` follows the geometry's transform in a core-profile gbuffers stage and stays
+    /// a uniform of the frame (zero) in a compatibility-profile one, as our #9136 probe's Iris
+    /// 1.11.7 pictures show at these four `#version` lines.
+    #[test]
+    fn core_normal_matrix_uses_frame_state_in_the_core_profile_only() {
+        for (profile, core) in [
+            ("330 core", true),
+            ("330", true),
+            ("150", true),
+            ("330 compatibility", false),
+        ] {
+            let source = format!(
+                "#version {profile}\nuniform mat3 normalMatrix;\nin vec3 vaNormal;\nout vec3 n;\n\
+                 void main() {{ n = normalMatrix * vaNormal; gl_Position = vec4(n, 1.0); }}\n"
+            );
+            let p = core_matrix_program(&source, false).unwrap();
+            let uniform = p
+                .interface
+                .uniforms
+                .iter()
+                .any(|u| u.name == "normalMatrix");
+            assert_eq!(uniform, !core, "{profile}");
         }
     }
 
@@ -2916,6 +2951,69 @@ in VertexData {{ {member} }} vIn;
             Target::Buffers,
         )
         .unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
+    /// Outputs with `component` qualifiers share one location (GLSL 4.60, 4.4.2): one target
+    /// at that location. The shapes glslangValidator rejects stay errors.
+    #[test]
+    fn outputs_sharing_a_location_by_component_are_one_target() {
+        let fsh = "#version 440\nlayout(location = 0, component = 0) out float r;\n\
+                   layout(location = 0, component = 1) out vec3 gba;\n\
+                   layout(location = 1, component = 1) out uvec3 words;\n\
+                   void main() { r = 0.0; gba = vec3(1.0, 0.0, 1.0); words = uvec3(1u); }\n";
+        let p = program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+        assert_eq!(p.interface.outputs, [0, 1]);
+        let result = p.fragment.entry_points[0].function.result.as_ref().unwrap();
+        let naga::TypeInner::Struct { members, .. } = &p.fragment.types[result.ty].inner else {
+            panic!("two outputs are a struct");
+        };
+        let targets: Vec<_> = members
+            .iter()
+            .map(|m| (m.binding.clone(), p.fragment.types[m.ty].inner.clone()))
+            .collect();
+        assert_eq!(targets.len(), 2, "{targets:?}");
+        for (location, scalar) in [(0, naga::Scalar::F32), (1, naga::Scalar::U32)] {
+            assert!(
+                targets.iter().any(|(binding, ty)| matches!(
+                    binding,
+                    Some(naga::Binding::Location { location: l, .. }) if *l == location
+                ) && *ty
+                    == naga::TypeInner::Vector {
+                        size: naga::VectorSize::Quad,
+                        scalar
+                    }),
+                "{targets:?}"
+            );
+        }
+        for (outputs, name) in [
+            (
+                "layout(location = 0) out vec2 a; layout(location = 0, component = 1) out float b;",
+                "b",
+            ),
+            (
+                "layout(location = 0) out uint a; layout(location = 0, component = 1) out vec3 b;",
+                "b",
+            ),
+            ("layout(location = 0, component = 2) out vec3 a;", "a"),
+        ] {
+            let fsh = format!("#version 440\n{outputs}\nvoid main() {{}}\n");
+            let errors = program(
+                &[("composite.vsh", VSH_120), ("composite.fsh", &fsh)],
+                Target::Buffers,
+            )
+            .err()
+            .unwrap_or_else(|| panic!("{outputs} translated"));
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| e.message.contains(&format!("`{name}`"))),
+                "{outputs}: {errors:?}"
+            );
+        }
     }
 
     #[test]
