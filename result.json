@@ -1,1 +1,0 @@
-{"status":"pr_opened","pr":1048,"branch":"bulk-batch1-g80qpv-6619e8fbbbaf","head":"c9eb568f3e06fe1205b00c40ff270fc5a513c839","notes":"Focused dispatch test, client all-targets check and wasm API check passed. No in-game proof or OS-event duplicate-suppression test; PR discloses this limitation."}
