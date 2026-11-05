@@ -1,6 +1,7 @@
 //! Data packs (`<world>/datapacks`: folders and zips with `pack.mcmeta`) and
 //! the parts of them commands use: `.mcfunction` functions (with macros and
 //! line continuation), function tags and predicates.
+use crate::resource_source::ResourceSource;
 use crate::zip::Zip;
 use horizon_world::{
     nbt::Tag,
@@ -15,49 +16,18 @@ use std::{
 pub struct DataPack {
     /// `file/<name>` in `/datapack` and level.dat.
     pub id: String,
-    source: Source,
-}
-enum Source {
-    Dir(PathBuf),
-    Zip(Box<Zip>),
+    source: ResourceSource,
 }
 impl DataPack {
     /// Every file path under `prefix` (relative to the pack root).
     pub fn list(&self, prefix: &str) -> Vec<String> {
-        match &self.source {
-            Source::Zip(z) => z
-                .names()
-                .filter(|n| n.starts_with(prefix) && crate::packs::stays_inside(n))
-                .map(str::to_owned)
-                .collect(),
-            Source::Dir(root) => {
-                let mut out = Vec::new();
-                walk(root, &root.join(prefix), &mut out);
-                out.retain(|name| crate::packs::stays_inside(name));
-                out
-            }
-        }
+        self.source.list(prefix)
     }
     /// The files of `<top>/<namespace>/<kind>/` for each kind, in the order
     /// `list("<top>/")` gives them. A folder pack walks only those folders:
     /// the built-in pack holds about 10,000 other data files.
     pub fn list_under(&self, top: &str, kinds: &[&str]) -> Vec<String> {
-        debug_assert!(kinds.is_sorted(), "kinds in walk order");
-        let Source::Dir(root) = &self.source else {
-            return self.list(&format!("{top}/"));
-        };
-        let Ok(entries) = std::fs::read_dir(root.join(top)) else {
-            return Vec::new();
-        };
-        let mut namespaces: Vec<_> = entries.flatten().map(|e| e.path()).collect();
-        namespaces.sort();
-        let mut out = Vec::new();
-        for ns in namespaces {
-            for kind in kinds {
-                walk(root, &ns.join(kind), &mut out);
-            }
-        }
-        out
+        self.source.list_under(top, kinds)
     }
     /// The files of `data/<namespace>/<kind>/` for each kind.
     pub fn list_kinds(&self, kinds: &[&str]) -> Vec<String> {
@@ -67,26 +37,10 @@ impl DataPack {
     /// The files of `data/<namespace>/<folder>/` in every namespace, as
     /// `list` names them; a folder pack walks only those folders.
     pub fn list_folder(&self, folder: &str) -> Vec<String> {
-        let files = self.list_kinds(&[folder]);
-        let Source::Zip(_) = &self.source else {
-            return files;
-        };
-        files
-            .into_iter()
-            .filter(|f| {
-                f.strip_prefix("data/")
-                    .and_then(|r| r.split_once('/'))
-                    .is_some_and(|(_, r)| {
-                        r.strip_prefix(folder).is_some_and(|r| r.starts_with('/'))
-                    })
-            })
-            .collect()
+        self.list_kinds(&[folder])
     }
     pub fn read(&self, path: &str) -> Option<Vec<u8>> {
-        match &self.source {
-            Source::Zip(z) => z.read(path).ok(),
-            Source::Dir(root) => std::fs::read(root.join(path)).ok(),
-        }
+        self.source.read(path).ok()
     }
 
     /// The `description` of `pack.mcmeta`, as text.
@@ -119,37 +73,19 @@ impl DataPack {
             .unwrap_or_default()
     }
 }
-fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.flatten().collect();
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-    for e in entries {
-        let p = e.path();
-        if p.is_dir() {
-            walk(root, &p, out);
-        } else if let Ok(rel) = p.strip_prefix(root) {
-            out.push(rel.to_string_lossy().replace('\\', "/"));
-        }
-    }
-}
 impl DataPack {
     /// A mod's passive data layer, without reading the archive's pack metadata.
     pub fn mod_layer(id: String, source: &crate::packs::Source) -> std::io::Result<Self> {
         Ok(Self {
             id,
-            source: match source {
-                crate::packs::Source::Dir(root) => Source::Dir(root.clone()),
-                crate::packs::Source::Zip(path) => Source::Zip(Box::new(Zip::open(path)?)),
-            },
+            source: source.open()?,
         })
     }
     /// The built-in `vanilla` pack: the game's own data directory.
     pub fn builtin(root: &Path) -> Self {
         DataPack {
             id: "vanilla".into(),
-            source: Source::Dir(root.to_path_buf()),
+            source: ResourceSource::directory(root.to_path_buf()),
         }
     }
 }
@@ -169,7 +105,7 @@ pub fn discover_folder(dir: &Path) -> Vec<DataPack> {
         if path.is_dir() && path.join("pack.mcmeta").exists() {
             packs.push(DataPack {
                 id: format!("file/{name}"),
-                source: Source::Dir(path),
+                source: ResourceSource::directory(path),
             });
         } else if name.ends_with(".zip")
             && let Ok(z) = Zip::open(&path)
@@ -177,7 +113,7 @@ pub fn discover_folder(dir: &Path) -> Vec<DataPack> {
         {
             packs.push(DataPack {
                 id: format!("file/{name}"),
-                source: Source::Zip(Box::new(z)),
+                source: ResourceSource::opened_archive(z),
             });
         }
     }
@@ -199,7 +135,7 @@ pub fn feature_packs(resources: &Path) -> Vec<DataPack> {
         if path.join("pack.mcmeta").exists() {
             packs.push(DataPack {
                 id: e.file_name().to_string_lossy().into_owned(),
-                source: Source::Dir(path),
+                source: ResourceSource::directory(path),
             });
         }
     }
