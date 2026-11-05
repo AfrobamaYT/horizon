@@ -1,8 +1,6 @@
 //! The shape of an injection point (#589): what a `#[point]` function hands its listeners. Shared
 //! by the `#[point]` attribute (the check at the function's head) and the mod API generator (the
-//! slot statics and `points.json`, which `#[path]`s this file in), so the two always agree.
-// Each of the two uses its own part of the shape.
-#![allow(dead_code)]
+//! records, `PointId` and `points.json`), so the two always agree.
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::{FnArg, Pat, Type};

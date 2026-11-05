@@ -7,6 +7,7 @@ publish = false
 description = "Build-time typed native mod API generation"
 
 [dependencies]
+horizon-mod-point-shape = { path = "../horizon-mod-point-shape" }
 heck = "0.5"
 syn = { version = "2", features = ["full", "visit", "visit-mut"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }

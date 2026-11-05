@@ -6,8 +6,6 @@ use syn::{
     punctuated::Punctuated,
 };
 
-mod point_shape;
-
 /// Keep only attributes that can gate a method, including nested `cfg_attr`s.
 fn cfg_meta(meta: &Meta) -> Option<Meta> {
     if meta.path().is_ident("cfg") {
