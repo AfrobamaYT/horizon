@@ -1449,10 +1449,18 @@ impl Game<'_> {
         if pos.1 == super::minecarts::CART_KEY_Y {
             return self.lan_open_vehicle_container(conn, pos);
         }
-        !matches!(
-            self.open_block_menu_with_opener(conn, pos, true),
-            MenuOpen::Refused
-        )
+        let opened = self.open_block_menu_with_opener(conn, pos, true);
+        if opened == MenuOpen::Cancelled
+            && self
+                .lan
+                .as_ref()
+                .and_then(|host| host.hub.guest(conn))
+                .is_some_and(|guest| !guest.spectator())
+        {
+            // The click is spent, but no menu took ownership of the use's opener.
+            self.container_openers_changed(pos, false);
+        }
+        !matches!(opened, MenuOpen::Refused)
     }
 
     pub(super) fn open_block_menu(&mut self, conn: u32, pos: (i32, i32, i32)) -> MenuOpen {
@@ -6968,11 +6976,56 @@ mod tests {
             assert_eq!(game.lid_openers.get(&pos), Some(&1));
             game.guest_close_all(12);
             assert!(!game.lid_openers.contains_key(&pos));
+            struct StopMenu;
+            #[mod_api::__subscriptions]
+            impl mod_api::Hooks for StopMenu {
+                fn container_opened(
+                    &self,
+                    _: &mut dyn mod_api::ServerHost,
+                    _: &mut mod_api::ContainerOpenedEvent<'_>,
+                ) -> mod_api::Flow {
+                    mod_api::Flow::Cancel
+                }
+            }
+            mod_api::testing::with_mods(
+                vec![mod_api::ModEntry::new("stop_menu", Box::new(StopMenu))].into(),
+                || {
+                    assert!(
+                        game.as_guest(12, |game| game.open_menu([pos.0, pos.1, pos.2]))
+                            .is_some()
+                    );
+                    assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_none());
+                    assert!(!game.lid_openers.contains_key(&pos));
+                },
+            );
             game.lan.as_mut().unwrap().hub.guests[0].game_mode = 3;
             assert_eq!(game.open_block_menu(12, pos), super::MenuOpen::Opened);
             assert!(!game.lid_openers.contains_key(&pos));
             game.guest_close_all(12);
             assert!(!game.lid_openers.contains_key(&pos));
+            // The incoming double-count bug kept a shulker open after its last close.
+            game.lan.as_mut().unwrap().hub.guests[0].game_mode = 0;
+            let shulker = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:shulker_box")
+                .unwrap();
+            let at = [pos.0, pos.1, pos.2];
+            assert!(game.native_level_set_block(
+                level,
+                at,
+                shulker,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            assert!(game.as_guest(12, |game| game.open_menu(at)).is_some());
+            assert_eq!(game.be_anims.shulkers[&at].open_count, 1);
+            game.guest_close_all(12);
+            assert_eq!(game.be_anims.shulkers[&at].open_count, 0);
+            assert_eq!(game.open_block_menu(12, pos), super::MenuOpen::Opened);
+            assert_eq!(game.be_anims.shulkers[&at].open_count, 1);
+            game.guest_close_all(12);
+            assert_eq!(game.be_anims.shulkers[&at].open_count, 0);
         });
     }
 
