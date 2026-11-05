@@ -2290,9 +2290,10 @@ impl Game<'_> {
     fn effect_tooltip(
         &self,
         batch: &HudBatch,
-        panel: &inventory_effects::EffectPanel<'_>,
+        hovered: inventory_effects::HoveredEffectPanel<'_, '_>,
     ) -> Vec<(Text, u32)> {
-        let mut lines = inventory_effects::tooltip(panel);
+        let panel = hovered.panel;
+        let mut lines = inventory_effects::tooltip(hovered);
         if mod_api::__private::listened(mod_api::HookId::GatherEffectScreenTooltips) {
             let view = self.screen_view(batch, self.screen);
             let effect = super::native_living_effects::active_effect(panel.effect);
@@ -2836,14 +2837,31 @@ mod tests {
         assert_eq!(ground_cloud[0].radius, 1.0);
     }
 
-    /// `gather_effect_screen_tooltips` sees the hovered panel's effect and
-    /// its name and duration lines, and a line it adds is drawn; with no mod
-    /// the tooltip is vanilla's two lines.
+    /// Real panel painting/hover selection dispatches even for a fully visible
+    /// widget. Both inventories retain vanilla lines, suppression and layout rules.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mod_adds_a_line_to_an_effect_tooltip() {
         use mod_api::{self, ClientHost, GatherEffectScreenTooltipsEvent, Hooks, ModEntry, Mods};
-        struct Mod;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        #[derive(Clone, Copy)]
+        struct Case {
+            room: i32,
+            id: &'static str,
+            name: &'static str,
+            default_tooltip: bool,
+        }
+        #[derive(Clone)]
+        struct Mod {
+            screen: &'static str,
+            case: Case,
+            suppress: bool,
+            calls: Arc<AtomicUsize>,
+        }
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
             fn gather_effect_screen_tooltips(
@@ -2851,36 +2869,168 @@ mod tests {
                 _: &dyn ClientHost,
                 event: &mut GatherEffectScreenTooltipsEvent<'_>,
             ) {
-                assert_eq!(event.effect.id.to_string(), "minecraft:speed");
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                assert_eq!(
+                    event.effect.id.to_string(),
+                    format!("minecraft:{}", self.case.id)
+                );
                 assert_eq!((event.effect.duration, event.effect.amplifier), (450, 1));
-                assert_eq!(event.screen.id, "inventory");
-                event.tooltip.push((Text::literal("Fast feet"), 0xff55ffff));
+                assert_eq!(event.screen.id, self.screen);
+                let initial: Vec<_> = event
+                    .tooltip
+                    .iter()
+                    .map(|(text, color)| (text.plain(), *color))
+                    .collect();
+                if self.case.default_tooltip {
+                    assert_eq!(
+                        initial,
+                        [
+                            (self.case.name.to_owned(), u32::MAX),
+                            ("00:22".to_owned(), u32::MAX)
+                        ]
+                    );
+                } else {
+                    assert!(initial.is_empty());
+                }
+                if self.suppress {
+                    event.tooltip.clear();
+                } else {
+                    event.tooltip.push((Text::literal("Fast feet"), 0xff55ffff));
+                }
+            }
+        }
+        struct HidePanels;
+        #[mod_api::__subscriptions]
+        impl Hooks for HidePanels {
+            fn screen_render_inventory_mob_effects(
+                &self,
+                _: &dyn ClientHost,
+                _: &mut mod_api::ScreenRenderInventoryMobEffectsEvent<'_>,
+            ) -> mod_api::Flow {
+                mod_api::Flow::Cancel
             }
         }
         super::super::native_entity_refs::tests::with_game(|game| {
-            game.screen = Screen::Inventory;
-            game.potions.effects.list = vec![EffectInstance::new("speed", 450, 1)];
-            let batch = HudBatch::new([854, 480]);
-            let space = Game::effects_space(&batch, [100.0, 50.0], 176.0);
-            let layout = inventory_effects::EffectsLayout::vanilla(space.available());
-            let panels = game.effect_panels(&space, &layout);
-            let plain = |lines: Vec<(Text, u32)>| {
-                lines
-                    .into_iter()
-                    .map(|(text, color)| (text.plain(), color))
-                    .collect::<Vec<_>>()
-            };
-            let vanilla = vec![
-                ("Speed II".to_owned(), u32::MAX),
-                ("00:22".to_owned(), u32::MAX),
-            ];
-            assert_eq!(plain(game.effect_tooltip(&batch, &panels[0])), vanilla);
-            let mods: Mods = vec![ModEntry::new("effect-tips", Box::new(Mod))].into();
-            mod_api::testing::with_mods(mods, || {
-                let mut added = vanilla.clone();
-                added.push(("Fast feet".to_owned(), 0xff55ffff));
-                assert_eq!(plain(game.effect_tooltip(&batch, &panels[0])), added);
-            });
+            for (screen, screen_id, image_width) in [
+                (Screen::Inventory, "inventory", 176),
+                (Screen::Creative, "creative", 195),
+            ] {
+                game.screen = screen;
+                // Fixed panel position; right-side room selects wide or compact.
+                // The longer effect name also clips in the smallest wide layout.
+                for case in [
+                    Case {
+                        room: 200,
+                        id: "speed",
+                        name: "Speed II",
+                        default_tooltip: false,
+                    },
+                    Case {
+                        room: 100,
+                        id: "speed",
+                        name: "Speed II",
+                        default_tooltip: true,
+                    },
+                    Case {
+                        room: 120,
+                        id: "fire_resistance",
+                        name: "Fire Resistance II",
+                        default_tooltip: true,
+                    },
+                ] {
+                    game.potions.effects.list = vec![EffectInstance::new(case.id, 450, 1)];
+                    let left = 102 + image_width;
+                    let origin = (100.0, 50.0);
+                    let mut batch = HudBatch::new([(left + case.room) as u32, 480]);
+                    game.cursor = ((left + 7) as f32, 57.0);
+                    let vanilla = if case.default_tooltip {
+                        vec![
+                            (case.name.to_owned(), u32::MAX),
+                            ("00:22".to_owned(), u32::MAX),
+                        ]
+                    } else {
+                        Vec::new()
+                    };
+                    let lines = game
+                        .draw_inventory_effects(&mut batch, origin, image_width)
+                        .unwrap();
+                    assert_eq!(
+                        lines
+                            .iter()
+                            .map(|(text, color)| (text.plain(), *color))
+                            .collect::<Vec<_>>(),
+                        vanilla
+                    );
+                    // The existing shared renderer draws nothing for an unchanged
+                    // empty list, without running other tooltip hooks.
+                    let painted = batch.vertices.len();
+                    game.draw_tooltip_lines(&mut batch, &lines, game.cursor.0, game.cursor.1);
+                    assert_eq!(batch.vertices.len() > painted, case.default_tooltip);
+
+                    for suppress in [false, true] {
+                        let calls = Arc::new(AtomicUsize::new(0));
+                        let listener = Mod {
+                            screen: screen_id,
+                            case,
+                            suppress,
+                            calls: calls.clone(),
+                        };
+                        let mods: Mods =
+                            vec![ModEntry::new("effect-tips", Box::new(listener.clone()))].into();
+                        mod_api::testing::with_mods(mods, || {
+                            let lines = game
+                                .draw_inventory_effects(&mut batch, origin, image_width)
+                                .unwrap();
+                            let plain: Vec<_> = lines
+                                .iter()
+                                .map(|(text, color)| (text.plain(), *color))
+                                .collect();
+                            let mut expected = vanilla.clone();
+                            if suppress {
+                                expected.clear();
+                            } else {
+                                expected.push(("Fast feet".to_owned(), 0xff55ffff));
+                            }
+                            assert_eq!(plain, expected);
+                            assert_eq!(calls.load(Ordering::Relaxed), 1);
+                            let painted = batch.vertices.len();
+                            game.draw_tooltip_lines(
+                                &mut batch,
+                                &lines,
+                                game.cursor.0,
+                                game.cursor.1,
+                            );
+                            assert_eq!(batch.vertices.len() > painted, !suppress);
+
+                            // A miss, a hidden layout and too little room must
+                            // never gather tooltips, even with a subscriber.
+                            game.cursor = (0.0, 0.0);
+                            assert!(
+                                game.draw_inventory_effects(&mut batch, origin, image_width)
+                                    .is_none()
+                            );
+                            game.cursor = ((left + 7) as f32, 57.0);
+                            let hidden: Mods = vec![
+                                ModEntry::new("effect-tips", Box::new(listener.clone())),
+                                ModEntry::new("hide-panels", Box::new(HidePanels)),
+                            ]
+                            .into();
+                            mod_api::testing::with_mods(hidden, || {
+                                assert!(
+                                    game.draw_inventory_effects(&mut batch, origin, image_width)
+                                        .is_none()
+                                );
+                            });
+                            let mut narrow = HudBatch::new([(left + 31) as u32, 480]);
+                            assert!(
+                                game.draw_inventory_effects(&mut narrow, origin, image_width)
+                                    .is_none()
+                            );
+                            assert_eq!(calls.load(Ordering::Relaxed), 1);
+                        });
+                    }
+                }
+            }
         });
     }
 }
