@@ -207,19 +207,36 @@ the state flags sit where vanilla keeps them: the ones `LivingEntity` owns read 
 `Mob` owns through `MobRef`. Reads take the shared host, writes the server one; a stale handle or a kind the game keeps
 no such state for reads `None` and writes `false`, as every handle does.
 
-Through `LivingRef`: the glide (`is_gliding`, `gliding_ticks`, `stop_gliding`), the sleep of the player in place or a
+Through `LivingRef`: the glide (`is_gliding`, `gliding_ticks`, `stop_gliding`), the sleep of a server player or a
 villager (`is_sleeping`, `sleeping_pos`, `start_sleeping`, `stop_sleeping`, `set_sleeping_pos`, `clear_sleeping_pos`),
 the jump of the player in place (`is_jumping`, `set_is_jumping`), climbing (`is_climbing`, the same `onClimbable`
-movement uses) and the baby read (`baby`). The sleep writes are the local player's own: a guest's client tucks itself
-in, so a guest's window refuses, and on a dedicated server every turn is a guest's. The wake stands the sleeper up
-beside the bed, exactly as the game's own waking does, and `set_sleeping_pos` moves nothing - it names the bed, the
-next entity sync tells the players around.
+movement uses, including the gliding exclusion for vines) and the baby read (`baby`). Server player sleep writes
+work for the integrated owner, LAN guests and dedicated-server guests in the level in place, both inside and
+outside their own turn; guests in another dimension and fake players refuse all four sleep writes without
+mutation. A suspended outer actor is unavailable during a nested turn. Glide counters and stops follow the
+same authoritative body across turns. These reads do not add client tracked-entity coverage.
 
-Through `MobRef`: `no_ai`/`set_no_ai` (`Mob.isNoAi` and `setNoAi`: the mob stands, saved as `NoAI`),
-`set_baby` (`Mob.setBaby`: a full day of growing up, saved as `Age` where the kind saves an age), and the persistence
-pair `persistence_required`/`set_persistence_required` plus `requires_custom_persistence`
-(`Mob.isPersistenceRequired` and kin: vanilla gives the setter no way back). A `/summon` and a spawn egg set their
-flags before the entity-join hook runs, so a mod's own write in that hook is what stays.
+`start_sleeping` requires a bed with an available sleep shape before changing any state (a villager also refuses an
+occupied bed). It moves the sleeper onto that shape and occupies the bed. `stop_sleeping` stands the sleeper up
+beside the bed with the normal wake animation, teleport and pose sync; the usual level pass frees a player's bed.
+`set_sleeping_pos` and `clear_sleeping_pos` only change a player's sleeping position/pose, without moving them,
+occupying a bed or playing a wake animation. The next entity sync publishes the changed pose and bed to clients.
+Villagers use `start_sleeping`/`stop_sleeping`, not the raw player position setters.
+
+Through `MobRef`: `no_ai`/`set_no_ai` (`Mob.isNoAi` and `setNoAi`: the mob stands, saved as `NoAI`) and
+`set_baby` (`Mob.setBaby` through the canonical species-specific setup). Ageable mobs start at their species'
+baby age (`-48000` for a sniffer, otherwise `-24000`) or become adults at `0`, including the age-boundary
+attribute, navigation and AI changes. Their age is saved as `Age` where the kind saves one. Non-ageable babies,
+such as zombies and piglins, keep their non-growing baby state instead. A species with no baby form refuses
+`set_baby` without changing anything. Neither `set_baby` nor `set_no_ai` changes `PersistenceRequired`.
+
+The persistence pair `persistence_required`/`set_persistence_required` reads and sets `Mob.isPersistenceRequired`;
+vanilla gives that setter no way back. `requires_custom_persistence` is a separate despawn predicate
+(`Mob.requiresCustomPersistence` and its species overrides): passengers, leashes and species-specific reasons
+such as an enderman carrying a block. It is independent of `PersistenceRequired` and `NoAI`, not an alias for
+either flag. The separately modeled dragon has no such predicate and answers `None` to this query, even though
+its persistence flag can be read and set. A `/summon` and a spawn egg set their flags before the entity-join hook
+runs, so a mod's own write in that hook is what stays.
 
 ### Client effect interpolation
 

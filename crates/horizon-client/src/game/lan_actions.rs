@@ -408,7 +408,7 @@ impl Game<'_> {
     }
 
     /// Where guest `conn` is in the hub's list.
-    fn guest_index(&self, conn: u32) -> Option<usize> {
+    pub(super) fn guest_index(&self, conn: u32) -> Option<usize> {
         self.lan
             .as_ref()?
             .hub
@@ -1220,6 +1220,10 @@ impl Game<'_> {
                 g.sprinting = false;
             }
             m.sprinting = false;
+            // The acting body's glide flag is authoritative for this turn.
+            // In a nested turn this is the inner guest, never the suspended
+            // outer actor whose body the swap restores above.
+            g.fall_flying = m.fall_flying;
             // ServerPlayer.indicateDamage: the hit's direction to the player.
             if let Some(yaw) = m.health.indicated_dir.take() {
                 g.send(&C::HurtAnimation(play::HurtAnimation {
@@ -1258,21 +1262,6 @@ impl Game<'_> {
             }
         }
         let g = &mut host.hub.guests[i];
-        if let Some(head) = g.bed.filter(|_| fell_asleep) {
-            // LivingEntity.startSleeping: in the bed, still.
-            let at = [
-                f64::from(head[0]) + 0.5,
-                // setPosToBed: the bed's top (getSleepHeight) and 0.125 above it.
-                f64::from(head[1]) + 0.5625 + 0.125,
-                f64::from(head[2]) + 0.5,
-            ];
-            g.position = at;
-            g.previous_position = at;
-            if let Some(m) = g.motion.as_mut() {
-                m.position = Vec3::new(at[0], at[1], at[2]);
-                m.velocity = Vec3::ZERO;
-            }
-        }
         if new_mode != g.game_mode {
             let conn = g.conn;
             host.hub
