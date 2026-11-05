@@ -931,6 +931,7 @@
   "Use the Microsoft account for {name}.": "{name} のMicrosoftアカウントを使用します。",
   "Use these jars": "これらのJARを使用",
   "Used from the next start.": "次回起動時から適用されます。",
+  "Uses game internals ({count})": "Uses game internals ({count})",
   "Vanilla": "バニラ",
   "Verified": "検証済み",
   "Version": "バージョン",

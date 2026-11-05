@@ -163,12 +163,28 @@ pub fn pinning(home: &Path, revision: &str) -> Vec<String> {
         .collect()
 }
 
+/// Paths declared by a native package, in manifest order.
+pub fn declared_internals(manifest: &horizon_mods::Manifest) -> Vec<String> {
+    manifest
+        .native
+        .as_ref()
+        .map(|native| {
+            native
+                .internals
+                .iter()
+                .map(|entry| entry.path.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// A native file not tracked by the registry/browser, including GitHub installs.
 #[derive(Clone)]
 pub struct Installed {
     pub file: String,
     pub id: String,
     pub version: String,
+    pub internals: Vec<String>,
     pub origin: Option<crate::github_mods::Origin>,
     /// The validated package icon, or the package error (the file remains removable).
     pub icon: Result<Option<Arc<horizon_mods::icon::Icon>>, String>,
@@ -192,10 +208,15 @@ pub fn untracked(home: &Path) -> Vec<Installed> {
             let origin = (path.file_stem()?.to_str()? == id)
                 .then(|| crate::github_mods::origin(home, &id))
                 .flatten();
+            let internals = package
+                .as_ref()
+                .map(|p| declared_internals(&p.manifest))
+                .unwrap_or_default();
             Some(Installed {
                 file,
                 id,
                 version,
+                internals,
                 origin,
                 icon: package.map(|p| p.icon.map(Arc::new)),
             })
