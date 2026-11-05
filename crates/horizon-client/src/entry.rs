@@ -20,9 +20,9 @@ pub type NativePoints = (
     fn(&'static dyn mod_api::Hooks) -> &'static dyn mod_points::Points,
 );
 
-/// A native mod's raw listener (#589): its id, the place, and the function, erased after the
-/// generated `main`'s typed `let` checked it against the place's listener type.
-pub type NativeRaw = (&'static str, PointId, *const ());
+/// A native mod's raw listener (#589), which the generated `main` makes after its typed `let`
+/// checked the function against the place's listener type.
+pub use mod_points::__private::RawListener as NativeRaw;
 
 /// The places raw listeners register at, named by the generated `main`.
 #[doc(hidden)]
@@ -101,9 +101,9 @@ pub fn main_with(
             std::process::exit(game::exit_code::ERROR);
         }
     }
-    for &(id, place, function) in raw {
-        if let Err(error) = mod_points::__private::register_raw(id, place, function) {
-            eprintln!("Horizon: {id}: {error}");
+    for listener in raw {
+        if let Err(error) = mod_points::__private::register_raw(listener) {
+            eprintln!("Horizon: {}: {error}", listener.id());
             std::process::exit(game::exit_code::ERROR);
         }
     }

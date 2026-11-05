@@ -1,6 +1,6 @@
 //! The registry's lifecycle, registering, sealing and stopping, on the real points: an integration
 //! test, so the generated points compile once for the tests.
-use mod_points::__private::{POINTS, register_raw, seal};
+use mod_points::__private::{POINTS, RawListener, register_raw, seal};
 use mod_points::{PointId, Points, RegisterError, register, stop};
 use std::sync::atomic::Ordering;
 
@@ -21,6 +21,12 @@ impl Points for Quiet {
 }
 
 fn raw_listener() {}
+
+/// `raw_listener` at `place`: the test's slots never call it.
+fn raw_at(id: &'static str, place: PointId) -> RawListener {
+    // SAFETY: nothing fires a raw place here with a call into the function.
+    unsafe { RawListener::new(id, place, raw_listener as *const ()) }
+}
 
 /// Stops its own mod, and tries to register another, from inside the seal.
 struct SelfStop;
@@ -44,10 +50,7 @@ fn one_list_registered_sealed_and_stopped() {
     assert_eq!(register("self_stopping", &SelfStop), Ok(()));
     let raw = PointId::Tick as usize + 2;
     let place = PointId::Tick;
-    assert_eq!(
-        register_raw("raw_mod", place, raw_listener as *const ()),
-        Ok(())
-    );
+    assert_eq!(register_raw(&raw_at("raw_mod", place)), Ok(()));
     assert!(
         !POINTS[PointId::Tick as usize].load(Ordering::Acquire),
         "nothing listens before the seal"
@@ -55,7 +58,7 @@ fn one_list_registered_sealed_and_stopped() {
     seal();
     assert_eq!(register("late", &Quiet), Err(RegisterError::Sealed));
     assert_eq!(
-        register_raw("late", place, raw_listener as *const ()),
+        register_raw(&raw_at("late", place)),
         Err(RegisterError::Sealed)
     );
     assert!(POINTS[PointId::Tick as usize].load(Ordering::Acquire));

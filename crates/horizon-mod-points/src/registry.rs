@@ -122,17 +122,48 @@ pub fn register(id: &'static str, points: &'static dyn Points) -> Result<(), Reg
     Ok(())
 }
 
-/// Registers one of mod `id`'s raw listeners at `place`: a function of the place's listener type,
-/// erased. Only the launcher's generated `main` calls it, after a typed `let` checked the type; the
-/// place's slot casts it back to that type.
-pub fn register_raw(
+/// A native mod's raw listener at one place: a function of the place's listener type, erased.
+/// Only [`RawListener::new`], which is `unsafe`, makes one, so safe code can't hand a slot a
+/// pointer it would call as a listener.
+pub struct RawListener {
     id: &'static str,
     place: PointId,
     function: *const (),
-) -> Result<(), RegisterError> {
+}
+
+impl RawListener {
+    /// Mod `id`'s listener `function` at `place`.
+    ///
+    /// # Safety
+    ///
+    /// `function` is a function of `place`'s raw listener type: `__<Point>Listener` at a head,
+    /// `__<Point>ReturnListener` at a return. The place's slot casts it back to that type and calls
+    /// it. The launcher's generated `main` checks the type with a typed `let` before erasing it.
+    pub const unsafe fn new(id: &'static str, place: PointId, function: *const ()) -> Self {
+        Self {
+            id,
+            place,
+            function,
+        }
+    }
+
+    /// The mod's id.
+    pub fn id(&self) -> &'static str {
+        self.id
+    }
+}
+
+/// Registers a native mod's raw listener.
+pub fn register_raw(raw: &RawListener) -> Result<(), RegisterError> {
     let mut open = open()?;
-    let listener = listener(&mut open, id) as u32;
-    open.raw.push((place, Raw { listener, function }));
+    let listener = listener(&mut open, raw.id) as u32;
+    open.raw.push((
+        raw.place,
+        Raw {
+            listener,
+            function: raw.function,
+        },
+    ));
     Ok(())
 }
 

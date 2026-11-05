@@ -238,9 +238,10 @@ each one there is measured first, since a slot on a hot function costs on every 
 - `const`, `async` and `unsafe` functions, and methods that take `self` by value;
 - `impl Trait` or `!` in the signature, `#[inline(always)]`, and a parameter named `cancel` or `result`.
 
-A `Game` method's point is named after the method (`tick`). Any other is named by its full path, snake-cased
+A `Game` method that takes `self` has a point named after the method (`tick`). Any other is named by its full path, snake-cased
 without `horizon_client::`: `game_levels_levels_parked_dims` for `Levels::parked_dims`, and for a lower
-crate without `horizon_`: `client_render_chunk_chunk_get`. `Game` points get a host; the others have none.
+crate without `horizon_`: `client_render_chunk_chunk_get`, and `Game::new` is `game_game_new`. `Game` methods'
+points get a host; the others have none.
 
 A method whose return value borrows the game (`-> &T`, `-> Option<&mut T>`) has a head and no return; a
 `'static` return (`-> Option<&'static str>`) borrows nothing and has both. A `usize` or `isize` crosses
