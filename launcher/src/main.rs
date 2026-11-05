@@ -6,6 +6,7 @@
 mod agents_page;
 mod art;
 mod blocks;
+mod build_mode;
 mod cli;
 mod cli_tools;
 mod console;
@@ -254,6 +255,8 @@ struct Launcher {
     /// Native mods (`native_mods`, on the Mods page): the build's step while it runs, why it
     /// failed, and the warning before a build while it is open, with the mods it names.
     native_step: Option<String>,
+    /// Where the build under way is, for the card's stages and bar.
+    native_progress: Option<native_mods::Progress>,
     /// When the running native build started, and the whole seconds last drawn (the status shows
     /// the time it has taken).
     native_started: Option<(Instant, u64)>,
@@ -549,6 +552,7 @@ impl Launcher {
             importing_build: false,
             import_error: None,
             native_step: None,
+            native_progress: None,
             native_started: None,
             native_done: None,
             native_error: None,
@@ -718,6 +722,17 @@ impl Launcher {
         if let Some(kind) = kind {
             this.open_instance_dialog(None);
             this.pick_kind(kind, cx);
+        }
+        // `HORIZON_LAUNCHER_PAGE=instance-mods-building`: the Mods tab with a build shown at about 65%
+        // in its Compile stage, for screenshots; nothing builds and Cancel has nothing to stop.
+        if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("instance-mods-building") {
+            this.native_step = Some(tr("Starting the build").into());
+            this.native_progress = Some(native_mods::Progress {
+                stage: native_mods::Stage::Compile,
+                fraction: Some(0.62),
+            });
+            this.native_started = Some((Instant::now(), 0));
+            this.native_for = this.selected_instance().map(|i| i.id.clone());
         }
         if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("edit-instance") {
             this.open_instance_dialog(this.selected_instance().cloned());
@@ -920,13 +935,14 @@ impl Launcher {
             }
         };
         self.native_step = Some(tr("Starting the build").into());
+        self.native_progress = None;
         self.native_started = Some((Instant::now(), 0));
         self.native_done = None;
         let profile = native_mods::Profile::chosen(&self.settings);
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = native_mods::build(&base, &folder, &instance, profile, |step| {
-                let _ = tx.send(Msg::NativeProgress(step.label()));
+                let _ = tx.send(Msg::NativeProgress(step.label(), step.progress()));
             });
             let _ = tx.send(Msg::Native(result));
         });
@@ -1253,17 +1269,26 @@ impl Launcher {
                     }
                 }
                 Msg::Updates(Err(e)) => self.update_error = Some(e),
-                Msg::NativeProgress(step) => self.native_step = Some(step),
+                Msg::NativeProgress(step, progress) => {
+                    self.native_step = Some(step);
+                    self.native_progress = Some(progress);
+                }
                 Msg::Native(result) => {
                     // The last step of a build that worked says how it went.
                     let last = self.native_step.take();
+                    self.native_progress = None;
                     self.native_started = None;
-                    self.native_done = result.is_ok().then_some(last).flatten();
+                    let cancelled = matches!(&result, Err(e) if e == native_mods::CANCELLED);
+                    self.native_done = match (&result, cancelled) {
+                        (Ok(_), _) => last,
+                        (Err(_), true) => Some(tr(native_mods::CANCELLED).into()),
+                        (Err(_), false) => None,
+                    };
                     self.installed = backend::installed();
                     self.reload_instances();
                     // A build attempt ended: an open panel reads the log it left.
                     self.native_log.stale = true;
-                    if let Err(e) = result {
+                    if let (Err(e), false) = (result, cancelled) {
                         self.native_error = Some(e);
                     }
                 }

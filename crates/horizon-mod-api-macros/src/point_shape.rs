@@ -55,6 +55,20 @@ pub enum Receiver {
     Mut,
 }
 
+/// A point's items in `mod_points` ([`Shape::api_items`]), each list one entry per place (its head,
+/// then its return).
+#[derive(Default)]
+pub struct ApiItems {
+    /// Its `Points` methods.
+    pub methods: TokenStream,
+    /// Its `PointId` variants.
+    pub variants: TokenStream,
+    /// The `Option<PointId>` consts `#[horizon_mod]` subscribes a mod by.
+    pub consts: TokenStream,
+    /// Its methods in the game's forwarding `Points` for wasm mods (`wire::Forwarded`).
+    pub forwards: TokenStream,
+}
+
 /// A `#[point]` function's point.
 pub struct Shape {
     /// Unique among the game's points: the attribute's `name`, or the function's own.
@@ -288,7 +302,7 @@ pub fn wide(ty: &Type) -> Option<Type> {
 }
 
 /// `tick_return` as `TickReturn`.
-fn camel(name: &str) -> String {
+pub fn camel(name: &str) -> String {
     name.split('_')
         .map(|word| {
             let mut chars = word.chars();
@@ -400,7 +414,9 @@ impl Shape {
             "The `{}` point's record: what its listeners get from `{target}`, a slot filled at load.",
             self.name
         );
+        let wire = self.wire_items(&record, &lifetime);
         quote! {
+            #wire
             #[doc = #doc]
             #[non_exhaustive]
             pub struct #record #lifetime {
@@ -421,19 +437,28 @@ impl Shape {
     /// The `Points` methods for this point (its head, then its return when it has one), their
     /// `PointId` variants, and the `Option<PointId>` consts `#[horizon_mod]` subscribes a mod by:
     /// generated into `mod_points`.
-    pub fn api_items(&self, target: &str) -> (TokenStream, TokenStream, TokenStream) {
+    pub fn api_items(&self, target: &str) -> ApiItems {
         let record = self.record();
         let record = if self.borrows() {
             quote!(#record<'_>)
         } else {
             quote!(#record)
         };
-        let host = match (self.receiver, self.side) {
-            (_, None) => quote!(),
-            (Receiver::Mut, Some(Side::Server)) => quote!(host: &mut dyn ::mod_api::ServerHost,),
-            (Receiver::Mut, Some(Side::Client)) => quote!(host: &mut dyn ::mod_api::ClientHost,),
-            (Receiver::Mut, Some(Side::Both)) => quote!(host: ::mod_api::HostSide<'_>,),
-            (_, Some(_)) => quote!(host: &dyn ::mod_api::Host,),
+        // The host the API listeners get, and how the wasm forwarding passes it on.
+        let (host, forwarded) = match (self.receiver, self.side) {
+            (_, None) => (quote!(), quote!(None)),
+            (Receiver::Mut, Some(Side::Server)) => (
+                quote!(host: &mut dyn ::mod_api::ServerHost,),
+                quote!(Server(host)),
+            ),
+            (Receiver::Mut, Some(Side::Client)) => (
+                quote!(host: &mut dyn ::mod_api::ClientHost,),
+                quote!(Client(host)),
+            ),
+            (Receiver::Mut, Some(Side::Both)) => {
+                (quote!(host: ::mod_api::HostSide<'_>,), quote!(Side(host)))
+            }
+            (_, Some(_)) => (quote!(host: &dyn ::mod_api::Host,), quote!(Read(host))),
         };
         let unused = if self.side.is_some() {
             quote!(let _ = (host, args);)
@@ -450,19 +475,24 @@ impl Shape {
                 "return: after its body, with the value it returns",
             ));
         }
-        let (mut methods, mut variants, mut consts) = (quote!(), quote!(), quote!());
+        let mut items = ApiItems::default();
         for (method, place) in places {
             let method = syn::Ident::new(&method, Span::call_site());
             let variant = syn::Ident::new(&camel(&method.to_string()), Span::call_site());
             let doc = format!("`{target}`'s {place}.");
-            methods.extend(quote! {
+            items.methods.extend(quote! {
                 #[doc = #doc]
                 fn #method(&self, #host args: &mut #record) {
                     #unused
                 }
             });
-            variants.extend(quote!(#variant,));
-            consts.extend(quote! {
+            items.forwards.extend(quote! {
+                fn #method(&self, #host args: &mut #record) {
+                    self.0.forward(PointId::#variant, crate::wire::PointHost::#forwarded, args)
+                }
+            });
+            items.variants.extend(quote!(#variant,));
+            items.consts.extend(quote! {
                 #[doc(hidden)]
                 #[allow(non_upper_case_globals)]
                 pub const #method: Option<PointId> = Some(PointId::#variant);
@@ -470,9 +500,101 @@ impl Shape {
         }
         if self.raw && !self.has_return() {
             let variant = self.return_variant();
-            variants.extend(quote!(#variant,));
+            items.variants.extend(quote!(#variant,));
         }
-        (methods, variants, consts)
+        items
+    }
+
+    /// Every field of its record, in order: the arguments, then `cancel` or `result`.
+    fn fields(&self) -> Vec<syn::Ident> {
+        let extra = match self.returns {
+            Returns::Unit | Returns::UnitResult => Some("cancel"),
+            Returns::Value(_) => Some("result"),
+            Returns::Opaque => None,
+        };
+        self.args
+            .iter()
+            .map(|arg| arg.name.clone())
+            .chain(extra.map(|name| syn::Ident::new(name, Span::call_site())))
+            .collect()
+    }
+
+    /// Its listener's contract, which a wasm mod's listener and the game check against each other
+    /// at load: the host it gets, then its record's field names and types,
+    /// `side|yaw:f64,text:str,cancel:bool`.
+    pub fn wire_shape(&self) -> String {
+        let host = match (self.receiver, self.side) {
+            (_, None) => "none",
+            (Receiver::Mut, Some(Side::Server)) => "server",
+            (Receiver::Mut, Some(Side::Client)) => "client",
+            (Receiver::Mut, Some(Side::Both)) => "side",
+            (_, Some(_)) => "read",
+        };
+        // The record's own field types: a native-width integer as it crosses (`wide`).
+        let spelled = |ty: &Type| {
+            let ty = wide(ty).unwrap_or_else(|| ty.clone());
+            quote!(#ty).to_string().replace(' ', "")
+        };
+        let types = self.args.iter().map(|arg| match &arg.ty {
+            Type::Reference(_) => "str".to_owned(),
+            ty => spelled(ty),
+        });
+        let extra = match &self.returns {
+            Returns::Unit | Returns::UnitResult => Some("bool".to_owned()),
+            Returns::Value(ty) => Some(format!("Option<{}>", spelled(ty))),
+            Returns::Opaque => None,
+        };
+        let fields = self
+            .fields()
+            .iter()
+            .zip(types.chain(extra))
+            .map(|(name, ty)| format!("{name}:{ty}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("{host}|{fields}")
+    }
+
+    /// How the record crosses to a wasm mod (`mod_points::wire`): its fields lowered in order and
+    /// written back, and, in the mod, lifted. Compiled only for wasm mods and the game's wasm
+    /// runtime: a native mod builds none of it.
+    fn wire_items(&self, record: &syn::Ident, lifetime: &TokenStream) -> TokenStream {
+        let fields = self.fields();
+        let shape = self.wire_shape();
+        let lifted = if self.borrows() {
+            quote!(#record<'v>)
+        } else {
+            quote!(#record)
+        };
+        quote! {
+            #[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+            impl #lifetime crate::wire::Record for #record #lifetime {
+                fn lower(&self) -> ::std::vec::Vec<crate::wire::Value> {
+                    ::std::vec![#(crate::wire::Wire::lower(&self.#fields)),*]
+                }
+                fn write_back(
+                    &mut self,
+                    fields: ::std::vec::Vec<crate::wire::Value>,
+                ) -> ::std::result::Result<(), crate::wire::Mismatch> {
+                    let mut fields = fields.into_iter();
+                    let taken = (#(crate::wire::taken(&self.#fields, &mut fields)?,)*);
+                    crate::wire::end(&mut fields)?;
+                    (#(self.#fields,)*) = taken;
+                    ::std::result::Result::Ok(())
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            impl<'v> crate::wire::Lift<'v> for #lifted {
+                const SHAPE: &'static str = #shape;
+                fn lift(
+                    fields: &'v [crate::wire::Value],
+                ) -> ::std::result::Result<Self, crate::wire::Mismatch> {
+                    let mut fields = fields.iter();
+                    let record = Self { #(#fields: crate::wire::field(&mut fields)?,)* };
+                    crate::wire::end(&mut fields)?;
+                    ::std::result::Result::Ok(record)
+                }
+            }
+        }
     }
 
     /// Whether its API listeners also run after the body: not when the value borrows.

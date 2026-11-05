@@ -69,6 +69,7 @@ pub fn main_with(
     // Wasm mods join the native ones after them, in dependency order, from the same selection
     // as content mods. Then the mods are installed, before anything below (logging, the crash
     // handler) that a trait injection may call into.
+    let mut wasm_listening = Vec::new();
     if let Ok(exe) = &exe {
         let switch = |name: &str| {
             launch
@@ -86,12 +87,10 @@ pub fn main_with(
             budgets,
         };
         let game_dir = &launch.context.game_dir;
-        mods.extend(horizon_mod_wasm::load_installed(
-            exe,
-            game_dir,
-            &launch.context.dev_mods,
-            &config,
-        ));
+        let (wasm, listening) =
+            horizon_mod_wasm::load_installed(exe, game_dir, &launch.context.dev_mods, &config);
+        mods.extend(wasm);
+        wasm_listening = listening;
     }
     mod_api::__private::install(mods.into());
     for (id, listeners) in points {
@@ -105,6 +104,13 @@ pub fn main_with(
     for &(id, place, function) in raw {
         if let Err(error) = mod_points::__private::register_raw(id, place, function) {
             eprintln!("Horizon: {id}: {error}");
+            std::process::exit(game::exit_code::ERROR);
+        }
+    }
+    // Wasm mods' listeners after the native ones', as their hooks are.
+    for listening in wasm_listening {
+        if let Err(error) = listening.register() {
+            eprintln!("Horizon: {error}");
             std::process::exit(game::exit_code::ERROR);
         }
     }

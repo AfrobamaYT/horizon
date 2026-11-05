@@ -6805,7 +6805,8 @@ impl Game<'_> {
         // Native mods, once the game allowed the break: a canceled one keeps
         // the block, and a guest's acknowledgement puts it back in its world.
         let mut canceled = false;
-        self.native_break_block(pos, state, &mut canceled);
+        let mut exp_to_drop = None;
+        self.native_break_block(pos, state, &mut canceled, &mut exp_to_drop);
         if canceled {
             return Ok(());
         }
@@ -6931,6 +6932,7 @@ impl Game<'_> {
                         breaker,
                         held.as_ref(),
                         stacks,
+                        exp_to_drop,
                     )
                 });
                 for item in dropped.items {

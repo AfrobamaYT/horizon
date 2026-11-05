@@ -11,9 +11,17 @@
 //! `mod_api`.
 #![deny(missing_docs)]
 
+// The guest glue names this crate by its path, here as in the mods it is expanded into.
+#[cfg(target_arch = "wasm32")]
+extern crate self as mod_points;
+
 include!(concat!(env!("OUT_DIR"), "/points_generated.rs"));
 
 mod registry;
+// hidden: how records cross to wasm mods, the runtime's and the guest glue's, not the API's
+#[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+#[doc(hidden)]
+pub mod wire;
 
 pub use registry::{RegisterError, register, stop};
 
@@ -21,6 +29,8 @@ pub use registry::{RegisterError, register, stop};
 #[doc(hidden)]
 pub mod __private {
     pub use crate::registry::{POINTS, register_raw, seal};
+    #[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+    pub use crate::wire;
     use crate::{PointId, Points};
 
     /// Runs the `impl Points` listeners at `place` (the `Points` method `name`), each through
