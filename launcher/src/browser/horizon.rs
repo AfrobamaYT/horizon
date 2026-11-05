@@ -680,8 +680,12 @@ fn install_version(
         fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     fs::rename(&path, &target).map_err(|e| format!("{}: {e}", target.display()))?;
-    if let Some(old) = old.as_ref().filter(|o| o.file != relative) {
-        let _ = fs::remove_file(home.join(&old.file));
+    if let Some(old) = old
+        .as_ref()
+        .filter(|o| o.file != relative)
+        .and_then(|o| o.path(home))
+    {
+        let _ = fs::remove_file(old);
     }
     if project.kind == Kind::Mod {
         java::set_enabled(home, &p.id, true)?;

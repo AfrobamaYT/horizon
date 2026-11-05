@@ -1,5 +1,32 @@
 # Hook notes
 
+## Foreground GUI and client lifecycle
+
+`Hooks::gui_render_post` runs after the frame's GUI, including menus and the
+F1-hidden HUD. Its `batch` is a `DrawContext`, not an engine `HudBatch`; use
+its drawing methods and `size()` to place overlays. `gui_hidden` and `focused`
+let a listener choose whether to draw. The GUI paint, nine-slice, and tooltip
+operations also use this drawing context and the window's existing atlas.
+`Hooks::menu_background` can adjust the requested blur radius or set it to
+`None` before the game validates it.
+
+`Hooks::entity_outline` receives the entity id, kind, and mutable optional RGB
+outline for the current client render. Leave the existing value unchanged to
+preserve vanilla glowing; `None` disables it. These read-only client hooks
+receive `&dyn ClientHost`. They do not grant server writes.
+
+`Hooks::client_disconnecting` runs before an actual connection is discarded,
+not for a dimension change. Initialization and final shutdown still use the
+existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
+
+## Sending a map image
+
+`PlayerRef::send_map` sends a complete 128-by-128 map image through a
+`&mut dyn ServerHost`. It validates the live player handle and refuses fake
+players; a connectionless actor never produces a protocol packet. The image
+uses map colour bytes and is not saved in the world's map storage. Send it
+again after a player reconnects if no saved map owns that id.
+
 ## Decoded client packets
 
 `Hooks::client_packet` receives `&mut dyn ClientHost` and a read-only
@@ -678,6 +705,8 @@ or transactions. Declarations still go on each event or registrar.
 `native_screen_opening(current, new, outcome)` (`ScreenEvent.Opening`), `native_screen_closing(screen)` (`ScreenEvent.Closing`) and `native_screen_init_post(screen)` (`ScreenEvent.Init.Post`) take a `NativeScreenView`. Every change of the game's screen (all of the game's screen assignments) goes through `Game::set_screen`, which mirrors `Gui.setScreen`: when a different screen would open, `screen_opening` fires first with the screen that is open (`current`) and the one about to open (`new`; the id `playing` is vanilla's null, no screen), and answers `ScreenOpening::Cancel` (the current screen stays) or `ScreenOpening::ModScreen` (the answering mod's own screen opens instead, if it can open there; the replacement fires nothing again); the first mod to answer wins, and the dispatch records its id, so a mod can open only its own screen. Then `screen_closing` fires for the screen being left (never for `playing`), and the new screen opens. The same screen again fires nothing, and a game where no mod listens to `screen_opening` or `screen_closing` assigns the screen with no event. `screen_init_post` is still observed once per frame (an open or a resize). The screens of the game's `Screen` list (inventory, containers, pause, options, chat, creative, stats, advancements, mod screens, dead, win…) announce themselves in `set_screen`, before they change, and honour `Cancel` and `ModScreen`. The overlays drawn over gameplay (sign editors, book edit/sign/view and lectern screens, dialogs, and the command, link, code-of-conduct and server-pack prompts) open through `Game::open_screen_overlay`, which fires `screen_opening` before the overlay is set and honours `Cancel` and `ModScreen` in the same way (a canceled server-pack prompt leaves its packs unanswered, a canceled code of conduct leaves the server waiting, as in NeoForge), then `screen_closing` for an overlay it replaces. The title's own screens (`world_select`, `world_create`, `world_edit`, `multiplayer`, `onboarding`…) open in the same way: `Title::set_mode` asks for the screen while a mod listens to `screen_opening` or `screen_closing`, and the game fires `screen_opening` (from the title screen shown) and `screen_closing` for the one left before it applies it, after the window event or control command that asked; `Cancel` keeps the screen shown, and `ModScreen` opens the screen asked for, since a mod's own screen can't open over the title. The multiplayer list's own steps (`add_server`, `edit_server`, `direct_connect`, `server_delete`, `friends_join`, and back to `multiplayer`) are title screens too and go the same way. The title appearing as a whole (at startup, when a world closes, after a disconnect or a failed join) and going (when a world opens) goes through `Game::show_title` and `Game::hide_title`: `screen_opening` (from no screen to the title's screen, or back) and `screen_closing` for what it leaves fire before the change, and `screen_init_post` follows an appearance; a `Cancel` doesn't keep the title shut when there is no world to show instead, nor keep it open over a world that opens. Still announced by the per-frame observer, through the same function and in the same order but after the change, so a mod's answer can't keep it shut: an overlay's closing. Overlay views use the full window as their rectangle and have no menu or title; anvil rename remains part of its inventory screen. Dialog states share the `dialog` id. A menu swapped inside the open inventory screen is not a change of screen.
 
 - `native_client_resources_reloaded()` fires on the render thread after successful client resource-pack application: the atlas, models, renderer and client caches already use the new resources. It covers selection/F3+T and server-pack reloads. Failed staging or application and initial startup do not fire it. This is a completion notification, not a reload-listener registration or staging API.
+
+- `client_stopped` fires after the client shutdown finishes. `game_shutting_down` fires after that on clients and after the dedicated server stops, with a side-typed host. Both fire once on orderly process exit; neither fires for a splitscreen guest. There is no separate `client_started`: `client_setup` covers that moment.
 
 - `native_client_stopping()` (Fabric's `ClientLifecycleEvents.CLIENT_STOPPING`; NeoForge has no event for it) fires once per game process, on the render thread, when the game shuts down: after the world the player was in is left and saved, with the settings and resources still held, so a listener can read them through the `ClientHost` and save its own client state. Closing the window, a quit shortcut and the stop signals reach it; a crash does not. A dedicated server and a splitscreen guest never fire it, as they never fire `client_setup`. Listeners are pure functions of the `ClientHost` reads and the mod's own state. Tick-time effect: none, it fires once at exit. Diverges from upstream: new hook.
 

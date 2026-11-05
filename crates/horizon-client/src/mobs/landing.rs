@@ -148,7 +148,7 @@ impl BlockLandingWorld for MobLanding<'_, '_, '_> {
         match sound {
             LandingSound::HoneySlide => Some("block.honey_block.slide"),
             LandingSound::HoneyFall => Some("block.honey_block.fall"),
-            LandingSound::TurtleEggBreak => Some("block.turtle_egg.break"),
+            LandingSound::TurtleEggBreak => Some("entity.turtle.egg_break"),
             LandingSound::ShelfMushroomBounce => None,
         }
     }
