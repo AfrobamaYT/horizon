@@ -20,14 +20,9 @@ pub(super) struct HookSources {
 /// with more declares its parameters in `hooks/*.rs` and its target takes one `<Name>Call`.
 const MAX_TARGET_PARAMETERS: usize = 7;
 
-/// The hooks whose flat targets already take more than [`MAX_TARGET_PARAMETERS`]. This list only
-/// shrinks and takes no new entries: convert a hook to a carrier and delete its line. A PR that
-/// adds a hook never edits it, so no two PRs collide on it.
-const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[];
-
-/// Refuses a flat target of a new hook that takes more than [`MAX_TARGET_PARAMETERS`].
+/// Refuses a flat target that takes more than [`MAX_TARGET_PARAMETERS`].
 fn target_parameters(name: &str, native: &str, count: usize, carrier: &str) -> Result<(), String> {
-    if count > MAX_TARGET_PARAMETERS && !FLAT_TARGETS_OVER_THE_LIMIT.contains(&name) {
+    if count > MAX_TARGET_PARAMETERS {
         return Err(format!(
             "{name}: {native} takes {count} parameters, more than {MAX_TARGET_PARAMETERS}: declare them on the hook in hooks/*.rs so it takes one {carrier}"
         ));
