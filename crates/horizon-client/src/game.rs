@@ -9504,8 +9504,8 @@ impl Game<'_> {
             self.draw_split_hud(&mut batch, true);
             return batch;
         }
+        self.settle_title_toasts();
         if let Some(title) = &mut self.title {
-            title.poll_backup();
             if std::mem::take(&mut title.onboarding_finished) {
                 // Options.onboardingAccessibilityFinished.
                 self.settings.file.set(
