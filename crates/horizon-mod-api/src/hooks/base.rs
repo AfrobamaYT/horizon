@@ -4661,8 +4661,9 @@ pub trait Helpers {
     /// (`ParticleEngine.clearParticles`), item pickups, firework starters and the elder guardian
     /// apparition included. It takes `&self`, so a screen or render hook can ask: the clear
     /// lands before the next frame is drawn or the next particle tick, whichever comes first,
-    /// paused or not. HUD, screen and geometry callbacks clear before that frame's particle
-    /// draws; a request during particle extraction discards that extraction too. False on a server.
+    /// paused or not. HUD, screen, fog and geometry callbacks clear before that frame's particle
+    /// draws and colored particle lights; a request during particle extraction discards that
+    /// extraction too. Unrelated entity geometry and item/mod lights stay. False on a server.
     #[helper(side = "client")]
     fn clear_particles();
     #[helper(side = "client")]

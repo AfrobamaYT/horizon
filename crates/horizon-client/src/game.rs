@@ -12651,6 +12651,7 @@ impl Game<'_> {
             self.entity_spans.borrow_mut().truncate(spans);
             self.entity_motion.borrow_mut().truncate(motion);
             self.glowing_vertices.borrow_mut().truncate(glowing);
+            return;
         }
         self.mark_motion(out.len(), 0);
         self.mark_stage(out.len(), "NONE");
@@ -16993,6 +16994,17 @@ impl Game<'_> {
         });
     }
     fn render(&mut self) -> Result<bool> {
+        self.render_with(|renderer, frame| {
+            horizon_client::spans::time("renderer", || renderer.render(frame))
+        })
+    }
+
+    /// Build the complete frame before handing its borrowed geometry and lighting to
+    /// the consumer. Tests use the same boundary as GPU submission.
+    fn render_with(
+        &mut self,
+        consume: impl FnOnce(&mut Renderer, &Frame<'_>) -> Result<bool>,
+    ) -> Result<bool> {
         // The window's GPU holds the atlas: its copy in memory is kept
         // compressed (a no-op once it is).
         if self.renderer.is_some() {
@@ -17228,10 +17240,10 @@ impl Game<'_> {
         let g = self.debug_gizmos(alpha as f32, camera.to_array());
         lines.extend(g.lines);
         let on_top = g.on_top;
-        let colored_lights = if self.title.is_none() {
-            self.native_frame_visuals(camera, alpha, &mut lines)
+        let visuals = if self.title.is_none() {
+            self.native_frame_visuals(alpha, &mut lines)
         } else {
-            Vec::new()
+            native_visuals::FrameVisuals::default()
         };
         let emissive_layers = if self.title.is_none() {
             let mut requests = Vec::new();
@@ -17493,9 +17505,17 @@ impl Game<'_> {
         } else {
             self.shader_pack_inputs(camera, alpha as f32, &sky)
         };
+        // Fog hooks may clear particles too. They must run before the final clear
+        // boundary, not while constructing Frame after geometry has been extracted.
+        let fog = self.frame_fog(camera, &sky, biome, water_fog);
         if !title {
             self.client_particle_geometry(camera, alpha, fov_degrees, &mut entities);
         }
+        let colored_lights = if self.title.is_none() {
+            visuals.finish(self, camera)
+        } else {
+            Vec::new()
+        };
         // Map textures and font glyphs changed while building this frame's
         // geometry (game/maps.rs, world text) upload with this batch; draining
         // map_patches any earlier leaves them a frame behind.
@@ -17559,7 +17579,7 @@ impl Game<'_> {
             environment_fog: (self.dim == Dim::Nether).then_some((sky.fog_start, sky.fog_end)),
             cave_culling,
             water_fog,
-            fog: Some(self.frame_fog(camera, &sky, biome, water_fog)),
+            fog: Some(fog),
             dark_disc: self.dark_disc(camera),
             outline,
             outline_after_terrain,
@@ -17665,7 +17685,7 @@ impl Game<'_> {
         let result = match self.renderer.as_mut() {
             Some(renderer) => {
                 renderer.set_pass_timing(self.debug || self.gpu_passes);
-                horizon_client::spans::time("renderer", || renderer.render(&frame))
+                consume(renderer, &frame)
             }
             None => Err("renderer".into()),
         };
