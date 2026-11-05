@@ -1002,8 +1002,7 @@ impl Game<'_> {
         self.clear_remote_projectiles();
         self.creatures.projectiles.clear();
         self.dropped.clear();
-        self.particles.clear();
-        self.pickups.clear();
+        self.clear_client_particles();
         self.falling.clear();
         self.mining = None;
         self.container = None;
@@ -1385,7 +1384,10 @@ impl Game<'_> {
         let list = &mut self.potions.effects.list;
         match list.iter_mut().find(|x| x.id == id) {
             // forceAddEffect's copyBlendState: an updated effect keeps its fade.
-            Some(existing) => *existing = e,
+            Some(existing) => {
+                e.client_blend = existing.client_blend;
+                *existing = e;
+            }
             None => {
                 // ClientboundUpdateMobEffectPacket.shouldBlend (flag 8).
                 let blend = p.flags & 8 != 0;
@@ -1395,6 +1397,9 @@ impl Game<'_> {
                     let (o_nausea, nausea) = screen_effects::nausea_blend_added(&e, blend);
                     self.screen_fx.o_nausea = o_nausea;
                     self.screen_fx.nausea = nausea;
+                } else if !blend {
+                    let has_effect = !e.ends_within(0);
+                    e.client_blend = (has_effect, has_effect);
                 }
                 list.push(e);
             }
@@ -2326,8 +2331,7 @@ impl Game<'_> {
             self.clear_remote_objects();
             self.clear_remote_projectiles();
             self.dropped.clear();
-            self.particles.clear();
-            self.pickups.clear();
+            self.clear_client_particles();
             if let Some(r) = self.remote.as_mut() {
                 r.entities.clear();
                 r.lerps.clear();
@@ -4552,7 +4556,7 @@ impl Game<'_> {
                 // GUARDIAN_ELDER_EFFECT: the apparition, and the curse sound
                 // unless the elder guardian is silent.
                 10 => {
-                    self.creatures.elder_apparition = super::mob_blocks::APPARITION_TICKS;
+                    self.particles.elder_guardian();
                     if p.param == 1.0
                         && let Some(at) = self.player.as_ref().map(|m| m.position)
                     {
@@ -9347,7 +9351,7 @@ impl Game<'_> {
                     self.mobs[i].kind.id.trim_start_matches("minecraft:")
                 );
                 self.remote_sweep_event(&kind, true);
-                self.pvp_attacked(self.mobs[i].id as i32);
+                self.pvp_attacked(self.mobs[i].id as i32, distance);
                 self.remote_player_attack(i);
                 self.reset_attack_strength();
             }
@@ -11335,6 +11339,9 @@ mod interaction_event_tests;
 mod native_entity_tests;
 
 #[cfg(test)]
+mod effect_blend_tests;
+
+#[cfg(test)]
 mod tests {
     /// `ClientChatReceivedEvent`: a mod's replacement is the line the chat
     /// shows, a cancelled system line never shows, and a cancelled message
@@ -12361,6 +12368,52 @@ mod tests {
             assert_ne!(game.native_lifecycle.epoch(), Some(replaced));
             game.client_logging_out();
             assert!(game.native_lifecycle.epoch().is_none());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn connection_and_dimension_replacement_clear_every_particle_group() {
+        use super::super::{
+            execution_role::ExecutionRole, native_entity_refs::tests::with_game,
+            native_hooks::particle_count_tests::fill,
+        };
+        use horizon_client::level_loading::Reason;
+        use horizon_protocol::{connection::Pipe, packets::play::SpawnInfo};
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            fill(game);
+            // Include pending particles as well as live groups before replacing the connection.
+            game.particles.elder_guardian();
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "ParticleReset").unwrap();
+            assert_eq!(game.client_particle_count(), 0);
+            assert!(game.pickups.live.is_empty());
+            game.tick_particles();
+            assert_eq!(game.client_particle_count(), 0);
+            let spawn = SpawnInfo {
+                dimension_type: 0,
+                dimension: "minecraft:overworld".into(),
+                seed: 0,
+                game_type: 1,
+                previous_game_type: None,
+                debug: false,
+                flat: true,
+                last_death: None,
+                portal_cooldown: 0,
+                sea_level: 63,
+            };
+            fill(game);
+            game.particles.elder_guardian();
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            assert_eq!(game.client_particle_count(), 0);
+            assert!(game.pickups.live.is_empty());
+            game.tick_particles();
+            assert_eq!(
+                game.client_particle_count(),
+                0,
+                "pending groups cannot return in the new level"
+            );
         });
     }
 

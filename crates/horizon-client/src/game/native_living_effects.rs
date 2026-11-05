@@ -208,9 +208,11 @@ impl Game<'_> {
     /// how far the effect has faded in, from 0 to 1, between the last tick
     /// and the next at `partial`. Darkness fades in and out over 22 ticks and
     /// nausea in over 150 and out over 20 (`MobEffect.setBlendDuration`), the
-    /// fades the fog, lightmap and screen spin draw; any other effect has no
-    /// fade and reads 1 while it lasts (vanilla's reaches 1 over the first
-    /// tick after a blended add). A bare vanilla id reads as `minecraft:`'s.
+    /// fades the fog, lightmap and screen spin draw. Other effects start at
+    /// 0 after a blended add and interpolate to their post-countdown target
+    /// during each client tick: 1 while active, 0 once expired. An unblended
+    /// add starts at its target immediately; an update preserves the old blend.
+    /// `partial` is not clamped. A bare vanilla id reads as `minecraft:`'s.
     /// 0 when the entity lacks the effect. None for an unknown id, a stale
     /// handle, or an entity other than the local player: the client keeps no
     /// other entity's effects.
@@ -230,9 +232,12 @@ impl Game<'_> {
         Some(match def.id {
             "darkness" => self.darkness_blend(partial),
             "nausea" => self.nausea_blend(partial),
-            // `BlendState.tick` with no blend duration: on until its last tick.
-            _ if e.ends_within(0) => 0.0,
-            _ => 1.0,
+            _ => {
+                let (previous, current) = e.client_blend;
+                let previous = u8::from(previous) as f32;
+                let current = u8::from(current) as f32;
+                previous + partial * (current - previous)
+            }
         })
     }
 
@@ -437,8 +442,9 @@ mod tests {
 
     /// `LivingEntity.getEffectBlendFactor` on a client: the local player's
     /// darkness fades in a 22nd a tick and nausea a 150th
-    /// (`MobEffect.setBlendDuration` in `MobEffects`), an effect with no fade
-    /// is on at once, a missing one reads 0, and no other entity reads.
+    /// (`MobEffect.setBlendDuration` in `MobEffects`), an ordinary effect
+    /// interpolates during its first tick, a missing one reads 0, and no other
+    /// entity reads.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_client_reads_the_local_players_effect_blend_factors() {
@@ -493,14 +499,19 @@ mod tests {
                 0.5 / 150.0
             ));
 
-            // Speed has no fade: it is on while it lasts.
+            // Speed starts at 0 and interpolates to 1 over its first tick.
             game.potions
                 .effects
                 .list
                 .push(EffectInstance::new("speed", 100, 0));
             assert_eq!(
                 me.effect_blend_factor(game, "minecraft:speed", 0.0),
-                Some(1.0)
+                Some(0.0)
+            );
+            game.tick_client_effects();
+            assert_eq!(
+                me.effect_blend_factor(game, "minecraft:speed", 0.5),
+                Some(0.5)
             );
 
             // Gone, darkness reads 0 though its fade had not reached 0.

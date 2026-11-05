@@ -163,8 +163,6 @@ pub(super) struct Creatures {
     /// (centre, small, radius, blocks hit, the players it pushed;
     /// game/lan_particles.rs).
     pub lan_explosions: Vec<([f64; 3], bool, f32, usize, Vec<(u32, [f64; 3])>)>,
-    /// Ticks left of the elder guardian's apparition (MobAppearanceParticle).
-    pub elder_apparition: i32,
     /// The wandering trader spawner's clock.
     pub trader: super::wandering_trader::Spawner,
     /// When each player last put a parrot on a shoulder (`timeEntitySatOnShoulder`).
@@ -1486,7 +1484,6 @@ impl Game<'_> {
         self.tick_boarding();
         self.sync_riders();
         self.tick_skeleton_traps();
-        self.tick_apparition();
         self.guardian_bubbles();
         self.villager_reputation_tick();
         self.villager_item_sense();
@@ -3039,6 +3036,14 @@ impl Game<'_> {
                 // `Level.setBlockAndUpdate`: neighbour and shape updates, so a crop
                 // above trampled farmland breaks and drops.
                 MobEvent::SetBlock { pos, state } => self.level_set(pos, state)?,
+                MobEvent::EndermanPlaceBlock {
+                    mob,
+                    pos,
+                    carried,
+                    occupants,
+                } => {
+                    self.enderman_place_block(mob, pos, carried, &occupants)?;
+                }
                 MobEvent::PlaceBlock { mob, pos, state } => {
                     self.mob_place_block(mob, pos, state)?
                 }
@@ -3424,9 +3429,12 @@ impl Game<'_> {
                         horizon_client::mobs::happy_ghast::notify_leash_holder(m);
                     }
                 }
-                MobEvent::Vibration { from, to, ticks } => {
-                    self.mob_vibration_particle(from, to, ticks)
-                }
+                MobEvent::Vibration {
+                    from,
+                    to,
+                    ticks,
+                    source,
+                } => self.mob_vibration_particle(source, from, to, ticks),
                 MobEvent::DigParticles { at } => self.warden_dig_particles(at),
                 MobEvent::BlockBreakEffect { pos, block } => {
                     // Turtle.aiStep broadcasts LevelEvent 2001, not the
@@ -4053,7 +4061,7 @@ impl Game<'_> {
                 self.audio
                     .play("minecraft:entity.elder_guardian.curse", Some(at), 1.0, 1.0);
             }
-            self.creatures.elder_apparition = super::mob_blocks::APPARITION_TICKS;
+            self.particles.elder_guardian();
         }
         true
     }
@@ -6053,7 +6061,13 @@ impl Game<'_> {
                 return Ok(false);
             }
         }
+        // PlayerInteractTrigger: the name tag as it was before it named the mob.
+        let used = self.held().cloned();
         if self.name_mob(index) {
+            if let Some(stack) = &used {
+                let target = self.mob_entity(&self.mobs[index]);
+                self.trigger_item_entity("minecraft:player_interacted_with_entity", stack, &target);
+            }
             return Ok(true);
         }
         if self
@@ -6188,6 +6202,11 @@ impl Game<'_> {
         if !self.mobs[index].kind.food.contains(&item)
             && self.interact_sheep_dye(index, self.hand, false)
         {
+            // PlayerInteractTrigger: the dye as it was before it coloured the sheep.
+            if let Some(stack) = &held {
+                let target = self.mob_entity(&self.mobs[index]);
+                self.trigger_item_entity("minecraft:player_interacted_with_entity", stack, &target);
+            }
             self.swing_arm();
             return Ok(true);
         }
@@ -7773,10 +7792,7 @@ impl Game<'_> {
         }
         // What follows isn't a tracked mob: close the last one's span.
         self.mark_motion(out.len(), 0);
-        self.elder_apparition_geometry(alpha, out);
         self.spawner_geometry(camera, alpha, out);
-        // Projectiles: the baked vanilla arrow model, the rest as item billboards.
-        let (right, up) = thrown_item_axes(self.camera_type, self.yaw, self.pitch);
         let live = self.creatures.projectiles.iter().map(|a| {
             let at = [
                 a.previous.x + (a.position.x - a.previous.x) * alpha,
@@ -7785,14 +7801,35 @@ impl Game<'_> {
             ];
             (a, at)
         });
+        self.projectile_geometry(camera, alpha, live, out);
+    }
+
+    pub(super) fn pickup_arrow_geometry(
+        &self,
+        camera: glam::DVec3,
+        alpha: f64,
+        out: &mut Vec<Vertex>,
+    ) {
         // ItemPickupParticle: a picked-up arrow flying to its collector.
         let taken = self.pickups.live.iter().filter_map(|p| match &p.taken {
             super::pickups::Taken::Arrow(a) => Some((&**a, super::pickups::position(p, alpha))),
             _ => None,
         });
+        self.projectile_geometry(camera, alpha, taken, out);
+    }
+
+    fn projectile_geometry<'a>(
+        &self,
+        camera: glam::DVec3,
+        alpha: f64,
+        projectiles: impl Iterator<Item = (&'a Projectile, [f64; 3])>,
+        out: &mut Vec<Vertex>,
+    ) {
+        let atlas = &self.gui.atlas;
+        let (right, up) = thrown_item_axes(self.camera_type, self.yaw, self.pitch);
         // A glowing projectile's outline: what it drew up to the next one.
         let mut glowing = None;
-        for (a, at) in live.chain(taken) {
+        for (a, at) in projectiles {
             if let Some((start, rgb)) = glowing.take() {
                 self.mark_outline(&out[start..], rgb);
             }
