@@ -12363,6 +12363,16 @@ mod tests {
             assert_eq!(fresh.day_time(game), Some(0));
             game.handle_packet(C::SetTime(play::SetTime {
                 game_time: 1,
+                clocks: vec![],
+            }))
+            .unwrap();
+            assert_eq!(
+                fresh.day_time(game),
+                Some(1),
+                "the new clock anchor and rate are fresh too"
+            );
+            game.handle_packet(C::SetTime(play::SetTime {
+                game_time: 1,
                 clocks: vec![state(0, 7_000, 0.0, 1.0)],
             }))
             .unwrap();
