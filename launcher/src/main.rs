@@ -723,6 +723,17 @@ impl Launcher {
             this.open_instance_dialog(None);
             this.pick_kind(kind, cx);
         }
+        // `HORIZON_LAUNCHER_PAGE=instance-mods-building`: the Mods tab with a build shown at about 65%
+        // in its Compile stage, for screenshots; nothing builds and Cancel has nothing to stop.
+        if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("instance-mods-building") {
+            this.native_step = Some(tr("Starting the build").into());
+            this.native_progress = Some(native_mods::Progress {
+                stage: native_mods::Stage::Compile,
+                fraction: Some(0.62),
+            });
+            this.native_started = Some((Instant::now(), 0));
+            this.native_for = this.selected_instance().map(|i| i.id.clone());
+        }
         if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("edit-instance") {
             this.open_instance_dialog(this.selected_instance().cloned());
         }
