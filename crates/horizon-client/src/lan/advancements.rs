@@ -64,6 +64,11 @@ impl ServerAdvancements {
         }
     }
 
+    /// Whether the current tree has any advancements.
+    pub fn is_empty(&self) -> bool {
+        self.tree.list.is_empty()
+    }
+
     /// The unconditional tick criteria in tree order. A caller grants these one
     /// at a time so it can notify mods before applying each completion's rewards.
     pub fn tick_candidates(&self, progress: &Progress) -> Vec<CriterionGrant> {

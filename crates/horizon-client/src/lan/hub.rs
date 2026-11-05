@@ -3524,7 +3524,18 @@ impl Hub {
         if let Some(i) = self.guests.iter().position(|g| {
             g.conn == task.conn && g.uuid == task.player && g.entity_id == task.entity_id
         }) {
-            self.flush_advancements(i, true);
+            if task.sync.advancements.is_empty() {
+                // Even an empty tree sends the initial reset packet.
+                let mut writer = horizon_protocol::buf::Writer::new();
+                writer.bool(true);
+                writer.varint(0);
+                writer.varint(0);
+                writer.varint(0);
+                writer.bool(true);
+                self.guests[i].send(&raw(ids::UPDATE_ADVANCEMENTS, writer.data));
+            } else {
+                self.flush_advancements(i, true);
+            }
         }
     }
 
@@ -4938,6 +4949,32 @@ mod tests {
         bob.dimension = "minecraft:overworld".into();
         hub.guests.push(bob);
         (hub, rx)
+    }
+
+    #[test]
+    fn an_empty_advancement_tree_still_sends_a_first_reset_after_staging() {
+        let (mut hub, rx) = hub_with_a_guest();
+        hub.mods_loaded = true;
+        hub.sync_player_state(0);
+        let task = hub.native_advancement_grants.pop().unwrap();
+        assert!(task.grants.is_empty());
+        let before: Vec<_> = rx.try_iter().collect();
+        assert!(!before.iter().any(|out| match out {
+            crate::lan::Out::Packet(body) =>
+                horizon_protocol::buf::Reader::new(body).varint().ok()
+                    == Some(ids::UPDATE_ADVANCEMENTS),
+            _ => false,
+        }));
+        hub.finish_native_first_tick(&task);
+        let found = rx.try_iter().any(|out| match out {
+            crate::lan::Out::Packet(body) => {
+                let mut reader = horizon_protocol::buf::Reader::new(&body);
+                reader.varint().ok() == Some(ids::UPDATE_ADVANCEMENTS)
+                    && reader.bool().ok() == Some(true)
+            }
+            _ => false,
+        });
+        assert!(found, "the first packet resets the client's empty tree");
     }
 
     /// `onGameRuleChanged`: a changed `reduced_debug_info` reaches each player
