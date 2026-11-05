@@ -3760,9 +3760,8 @@ pub trait Hooks {
     )]
     fn player_advancement_done();
     /// A criterion of a server player's advancement was granted or revoked, after its progress changed
-    /// and before any completion rewards, except the `minecraft:tick` criteria granted on a network
-    /// player's first tick or a reload, which are heard after that tick's rewards and packets (tracked
-    /// on #29). A grant or revoke that changes nothing is not heard. The full advancement progress is
+    /// and before any completion rewards. A grant or revoke that changes nothing is not heard.
+    /// The full advancement progress is
     /// not yet exposed (tracked on #29).
     #[hook(
         side = "server",
@@ -4616,8 +4615,6 @@ pub trait Helpers {
         target = "horizon_client::game::native_biome_colors::Game<'_>::native_refresh_biome_colors"
     )]
     fn refresh_biome_colors();
-    #[helper(side = "both")]
-    fn day_time();
     #[helper(side = "both")]
     fn max_stack_size();
     #[helper(side = "client")]

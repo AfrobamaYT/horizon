@@ -110,10 +110,7 @@ fn updates_forward_on_the_same_game_only() {
         None,
         "a version the index no longer lists"
     );
-    let in_pack = Context {
-        in_pack: true,
-        ..PLAY
-    };
+    let in_pack = Context { in_pack: true };
     assert_eq!(to(&entry("1.0.0"), &in_pack), None, "a modpack's profile");
     let native = installed::Entry {
         file: "horizon-native-mods/ruby.hmod".into(),

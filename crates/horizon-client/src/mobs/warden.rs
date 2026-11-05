@@ -522,7 +522,7 @@ pub fn listen(
     // isValidVibration: the warden can trigger avoid vibration.
     let listens = sculk::warden_can_listen(event);
     if listens
-        && ctx.source == Some(Who::Player)
+        && ctx.source == Some(Who::Player.into())
         && !ctx.spectator
         && ctx.stepping_carefully
         && sculk::ignored_when_sneaking(event)
@@ -567,7 +567,7 @@ pub fn hear_mob_events(mobs: &mut [Mob], events: &[MobEvent], from: usize, w: &M
         let who = mobs.iter().find(|m| m.id == source);
         let name = &w.facts.get(state).name;
         let ctx = Context {
-            source: Some(Who::Mob(source)),
+            source: Some(Who::Mob(source).into()),
             affected_state: Some(state),
             dampening_state: w.has_tag("minecraft:dampens_vibrations", name),
             dampens: who.is_some_and(|m| m.species() == Species::Warden),
@@ -630,7 +630,14 @@ fn receive_vibration(m: &mut Mob, w: &MobWorld, info: Info, events: &mut Vec<Mob
         }
         warden_brain::mem(m).recent_projectile.set_ttl((), 100);
     } else {
-        increase_anger(m, w, info.source, DEFAULT_ANGER, true, events);
+        increase_anger(
+            m,
+            w,
+            info.source.and_then(|s| s.actor()),
+            DEFAULT_ANGER,
+            true,
+            events,
+        );
     }
     if !anger_level(m).is_angry() {
         let active = m
@@ -638,7 +645,8 @@ fn receive_vibration(m: &mut Mob, w: &MobWorld, info: Info, events: &mut Vec<Mob
             .warden
             .as_ref()
             .and_then(|st| st.anger.active_entity(|e| can_target(w, e)));
-        if info.owner.is_some() || active.is_none() || active == info.source {
+        if info.owner.is_some() || active.is_none() || active == info.source.and_then(|s| s.actor())
+        {
             warden_brain::set_disturbance(m, w, suspicious);
         }
     }

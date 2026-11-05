@@ -790,7 +790,7 @@ or transactions. Declarations still go on each event or registrar.
 
 - Redstone signals as a block reads them, on a level handle (`LevelRef`) on a server, through the game's own `SignalGetter`, mods' `block_signal` and `should_check_weak_power` parts included: `level.signal(host, pos, direction)` (`getSignal`, how strongly the block at `pos` powers its neighbour on the `direction` side, conducted power included), `level.direct_signal(host, pos, direction)` (`getDirectSignal`, the strong power alone), `level.direct_signal_to(host, pos)` (`getDirectSignalTo`), `level.best_neighbor_signal(host, pos)` (`getBestNeighborSignal`, the strongest power reaching `pos`, as a dispenser or a piston reads it) and `level.has_neighbor_signal(host, pos)` (`hasNeighborSignal`, stopping at the first powered side). Each costs what the game's own call does. They take `&mut dyn ServerHost`, not `&dyn Host`: the signal path asks mods' parts, which get the level as their host, and only a write borrow of the game builds it. They read the level in place: None (or false) for another level, a stale handle or a client.
 
-- `level.weather(host)` (rain and thunder levels, 0 in the Nether and the End), `native_day_time()`, `level.height(host)` (min y and height) and `native_max_stack_size(item)`, with `level.brightness(host, layer, pos)` for light and `level.is_raining_at(host, pos)` for rain at a position: what a mod's solar panel, wind turbine, quarry or own container needs without reaching into Horizon's internals.
+- `level.weather(host)` (rain and thunder levels, 0 in the Nether and the End), `level.day_time(host)` (the time of day), `level.height(host)` (min y and height) and `native_max_stack_size(item)`, with `level.brightness(host, layer, pos)` for light and `level.is_raining_at(host, pos)` for rain at a position: what a mod's solar panel, wind turbine, quarry or own container needs without reaching into Horizon's internals.
 
 - Giving a whole stack (damage, name, enchantments kept) to any player from a server hook: `insert_any` into
   the player's [`ENTITY_ITEMS`](../concepts/trait-mods.md#an-entitys-items) handler places it as `Inventory.add` does, and answers how many went.
@@ -2267,6 +2267,8 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `entity.name(host)`: the synced custom name or type name, and a player's profile name, from either side's host.
 - `level.block_state(host, pos)`, `block`, `block_property` and `is_loaded`: blocks of the chunks the client holds.
   A chunk it doesn't hold reads as unloaded; no read loads one.
+- `level.day_time(host)`: the time of day in ticks (counting past 24000) of the level the client shows, as the
+  server's clock last set it.
 - `living.equipment(host, slot)`, `hand_item`, `effect`, `effects`, `health` and `max_health`, for the local player.
   Another entity's equipment, effects and health stay server reads, and so does every write.
 - `player.last_death_location(host)`, for the local player: the position the login and respawn packets carried.
@@ -2312,7 +2314,8 @@ handle, an entity the client doesn't track and a level it doesn't show:
   weather. A server can read any open level, including parked levels; a client reads only its current synchronized
   level after login. Stale handles and unavailable levels return `None`; the read never loads a level.
 - `level.seed(host)`, `difficulty` (`"normal"`, as `/difficulty` names it), `game_rule(host, "keep_inventory")` (a
-  `GameRuleValue`, `Bool` or `Int`; None for an unknown rule), `is_raining` and `is_thundering` read its server settings.
+  `GameRuleValue`, `Bool` or `Int`; None for an unknown rule), `game_rules` (every rule as a `minecraft:` id and its
+  value), `is_raining` and `is_thundering` read its server settings.
   `level.is_raining_at(host, pos)` (`Level.isRainingAt`) asks about one position of any open level: it rains there, the
   position has full sky light with nothing motion-blocking or fluid above it, and its biome's precipitation at that
   height is rain (not snow or none). It is `None` where the block read is, an unloaded chunk or a `y` outside the

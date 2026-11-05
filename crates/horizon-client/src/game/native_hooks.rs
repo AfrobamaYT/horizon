@@ -645,7 +645,7 @@
 //!
 //! API 98 adds giving a whole stack to any player from a server hook (`native_give_stack`).
 //!
-//! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (light, weather and height now through `LevelRef`, with `native_day_time`, `native_max_stack_size`).
+//! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (light, weather, time of day and height now through `LevelRef`, with `native_max_stack_size`).
 //!
 //! API 96 adds reading redstone from a server mod's block (`native_neighbor_signal`).
 //!
@@ -5399,9 +5399,8 @@ impl Game<'_> {
         self.fire_player_advancement_done(player, name, advancement);
     }
     /// A criterion of a server player's advancement was granted or revoked, after its progress changed
-    /// and before any completion rewards, except the `minecraft:tick` criteria granted on a network
-    /// player's first tick or a reload, which are heard after that tick's rewards and packets (tracked
-    /// on #29). A grant or revoke that changes nothing is not heard. The full advancement progress is
+    /// and before any completion rewards. A grant or revoke that changes nothing is not heard.
+    /// The full advancement progress is
     /// not yet exposed (tracked on #29).
     pub(super) fn native_player_advancement_progress(
         &mut self,
@@ -6757,8 +6756,8 @@ impl Game<'_> {
     /// `value` (`GameRuleChangedEvent`, from `GameRules.set` with a server:
     /// `/gamerule`, the game rules screen, the management protocol, a test
     /// environment, `server.properties`). `actor` is present when a player
-    /// caused the change. The server and complete game rules are not exposed
-    /// by this event (tracked on #29). Server-side.
+    /// caused the change. `level.game_rules(host)` of any of the server's
+    /// levels reads every rule, the new value included. Server-side.
     pub(super) fn native_game_rule_changed(
         &mut self,
         rule: &str,
@@ -9888,12 +9887,6 @@ impl Game<'_> {
             self.with_level(|_, level, ticks| level.native_set_block(ticks, pos, state, flags));
         let _ = self.process_level_events();
         changed
-    }
-    /// The world's time of day in ticks (`Level.getOverworldClockTime`), the
-    /// same as `native_clock`'s `day_time`; it keeps counting past 24000, so
-    /// take it modulo 24000 for the hour.
-    pub(super) fn native_day_time(&self) -> i64 {
-        self.world.day_time
     }
     /// The most of the item `item` one slot holds (`Item.getDefaultMaxStackSize`),
     /// or `None` for an unknown item: for a mod's container that fills or

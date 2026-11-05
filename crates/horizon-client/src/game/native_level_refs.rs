@@ -413,9 +413,10 @@ impl Game<'_> {
         Some(self.world.game_time)
     }
     /// The time of day in ticks (`Level.getOverworldClockTime`), shared by
-    /// every level; it keeps counting past 24000. API 381.
+    /// every level; it keeps counting past 24000. On a client, the time of
+    /// the level it shows, as the server's clock last set it. API 381.
     pub(super) fn native_level_day_time(&self, level: LevelRef) -> Option<i64> {
-        self.native_level_world(level)?;
+        self.native_level_read_world(level)?;
         Some(self.world.day_time)
     }
 }

@@ -10,6 +10,7 @@ use horizon_client::motion::{LAVA, WATER};
 use horizon_client::particles::{ParticleEngine, ParticleOptions, ParticleType};
 use horizon_client::pose::Pose;
 use horizon_core::{geometry::Vec3, random::RandomSource};
+use mod_api::EntityRef;
 
 impl Game<'_> {
     pub(super) fn tick_client_ambient(&mut self) {
@@ -140,6 +141,59 @@ impl Game<'_> {
                 Some((r.next_double(), r.next_double()))
             });
         }
+    }
+
+    /// Spawn sprint particles when called explicitly by a client mod. A
+    /// valid entity returns true even if the block beneath it is invisible.
+    /// Returns false for stale, untracked, server-side, or unsupported entities.
+    pub(super) fn native_entity_sprint_particles(&mut self, entity: EntityRef) -> bool {
+        use super::commands::Target;
+        if self.is_logical_server() {
+            return false;
+        }
+        let Some(target) = self.native_client_entity_target(entity) else {
+            return false;
+        };
+        let Some([x, y, z]) = self.native_entity_position(entity) else {
+            return false;
+        };
+        let Some([vx, vy, vz]) = self.native_entity_velocity(entity) else {
+            return false;
+        };
+        let Some([min, max]) = self.native_entity_bounding_box(entity) else {
+            return false;
+        };
+        let support = match target {
+            Target::Player => self
+                .player
+                .as_ref()
+                .and_then(|p| p.ground.supporting_block)
+                .map(|p| [p.x, p.y, p.z]),
+            Target::Mob(id) => self
+                .mobs
+                .iter()
+                .find(|m| m.id == id)
+                .and_then(|m| m.supporting),
+            _ => None,
+        };
+        let mob = match target {
+            Target::Mob(id) => Some(id),
+            _ => None,
+        };
+        self.sprint_particle(
+            Vec3::new(x, y, z),
+            Vec3::new(vx, vy, vz),
+            support,
+            max[0] - min[0],
+            |game| {
+                let random = match mob {
+                    Some(id) => &mut game.mob_index.get_mut(&mut game.mobs, id)?.random,
+                    None => game.particles.random(),
+                };
+                Some((random.next_double(), random.next_double()))
+            },
+        );
+        true
     }
 
     /// `Entity.spawnSprintParticle`: one dust crumb of the block under the
@@ -311,4 +365,71 @@ fn swirl(
     let y = feet.y + size.1 * r.next_double();
     let z = feet.z + size.0 * (2.0 * r.next_double() - 1.0) * 0.5;
     particles.add(&list[pick], [x, y, z], [1.0; 3]);
+}
+
+#[cfg(test)]
+mod sprint_handle_tests {
+    use horizon_client::{chunk::Chunk, motion::PlayerMotion};
+    use horizon_core::geometry::Vec3;
+    use horizon_protocol::connection::Pipe;
+    use mod_api::{ClientHost, EntityRef, Host, NativeWorldEpoch};
+    use std::sync::Arc;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_entity_sprint_particles_use_the_local_block_and_reject_stale_handles() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
+            game.options.dedicated = None;
+            let root =
+                std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+            let client_resources = super::super::load_resources(
+                root.clone(),
+                None,
+                &root,
+                &super::super::Settings::default(),
+                std::time::Instant::now(),
+                false,
+                super::super::execution_role::ExecutionRole::Client,
+                &super::super::Progress::new(),
+                &mut |_, _| unreachable!(),
+            )
+            .unwrap();
+            game.pack = client_resources.pack;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "SprintParticleTest").unwrap();
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(0, 63, 0, stone).unwrap();
+            assert_eq!(game.world.block(0, 63, 0), stone);
+            assert!(
+                game.particle_sprite(stone, [0, 63, 0]).is_some(),
+                "stone sprite missing"
+            );
+            game.particles.requested = Some(Vec::new());
+            let entity = game.entity(7).unwrap();
+            let host: &mut dyn ClientHost = game;
+            assert!(entity.sprint_particles(host));
+            let requests = game.particles.requested.as_ref().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].1[1], 64.1);
+            let stale = EntityRef::new(NativeWorldEpoch::new(0), 7);
+            assert!(!stale.sprint_particles(game));
+            game.remote.as_mut().unwrap().logged_in = false;
+            assert!(!entity.sprint_particles(game));
+            assert_eq!(game.particles.requested.as_ref().unwrap().len(), 1);
+        });
+    }
 }
