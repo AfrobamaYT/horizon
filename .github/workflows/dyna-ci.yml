@@ -36,6 +36,9 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
       self_hosted: ${{ steps.runner.outputs.self_hosted }}
       # The ignored-tests shard matrix: every shard on main, the affected ones on a pull request (empty: none).
@@ -47,13 +50,20 @@ jobs:
         with:
           # ignored_shards.py diffs the pull request's full range, like the shard jobs do.
           fetch-depth: 0
+      # The pool's switch and lease are read live: `vars` is fixed when the run is created, and a main run
+      # that waits in the concurrency group would otherwise see a lease that expired while it waited.
+      # A fork's pull request gets no token to read them and stays on GitHub's runners.
       - id: runner
         env:
-          ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
-          LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
+          GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-        run: bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
+        run: |
+          if [ "$SAME_REPO" = true ]; then
+            ENABLED=$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/DYNA_CI_SELF_HOSTED" -q .value 2>/dev/null || true)
+            LEASE=$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/DYNA_CI_POOL_UNTIL" -q .value 2>/dev/null || true)
+          fi
+          ENABLED=${ENABLED:-} LEASE=${LEASE:-} bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
       - name: The ignored-tests shard matrix
         id: matrix
         env:
