@@ -828,7 +828,6 @@
   "These mods will run with full access to your computer": "ستعمل هذه التعديلات بصلاحيات كاملة على جهاز الكمبيوتر الخاص بك",
   "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "يمكنها قراءة أو تعديل أو حذف ملفاتك، واستخدام حساباتك وشبكتك، مثل أي برنامج تشغله. قم ببنائها فقط إذا كنت تثق بمؤلفيها: تعرض صفحة التعديلات أسمائهم.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "هذا الإصدار من المشغل لا يحتوي على ميزة تسجيل دخول مايكروسوفت (HORIZON_MSA_CLIENT_ID)، لذا لا يمكنه بدء اللعبة.",
-  "This copy of the launcher can't replace itself. Download it again once; it updates itself after that.": "لا تستطيع هذه النسخة من المشغّل استبدال نفسها. نزّله مرة أخرى مرة واحدة؛ بعد ذلك يحدّث نفسه بنفسه.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "لا يحتوي مصدر اللعبة هذا على قالب إدخال جرد المودات الأصلية. حدّث Horizon وأعد بناء المودات مقابل هذه اللعبة.",
   "This launcher is open.": "This launcher is open.",
   "This server's Horizon": "إصدار هورايزون لهذا الخادم",
@@ -1096,5 +1095,7 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+  "Update this launcher with your package manager.": "حدّث هذا المشغّل باستخدام مدير الحزم.",
+  "Close this launcher, move it to {folder}, and open it there to enable updates.": "أغلق هذا المشغّل، وانقله إلى {folder}، ثم افتحه من هناك لتمكين التحديثات."
 }

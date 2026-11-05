@@ -828,7 +828,6 @@
   "These mods will run with full access to your computer": "Hesar mods koyra við fullari atgongd til tína teldu",
   "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "Tey kunnu lesa, broyta ella strika tínar fílur, og brúka tínar kontur og netverk, eins og øll forrit tú koyrir. Bygg tey bert um tú hevur álit á teirra høvundum: Mods síðan nevnir tey.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Hendan byggingin av sjósetaranum hevur onga Microsoft innritan (HORIZON_MSA_KUNDA_ID), so hon kann ikki byrja spælið.",
-  "This copy of the launcher can't replace itself. Download it again once; it updates itself after that.": "Hetta avritið av byrjaranum kann ikki skifta seg sjálvt út. Tak tað niður aftur eina ferð; eftir tað dagførir tað seg sjálvt.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
   "This launcher is open.": "This launcher is open.",
   "This server's Horizon": "Hesin ambætarin er Horizon",
@@ -1096,5 +1095,7 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+  "Update this launcher with your package manager.": "Update this launcher with your package manager.",
+  "Close this launcher, move it to {folder}, and open it there to enable updates.": "Close this launcher, move it to {folder}, and open it there to enable updates."
 }

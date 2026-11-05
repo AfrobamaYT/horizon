@@ -828,7 +828,6 @@
   "These mods will run with full access to your computer": "Dizze mods sille rinne mei folsleine tagong ta jo kompjûter",
   "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "Se kinne jo bestannen lêze, feroarje of wiskje, en jo akkounts en netwurk brûke, lykas elk programma dat jo útfiere. Bou se allinich as jo har auteurs fertrouwe: de Mods-side neamt se.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Dizze build fan 'e launcher hat gjin Microsoft-oanmelding (HORIZON_MSA_CLIENT_ID), dus it kin it spultsje net starte.",
-  "This copy of the launcher can't replace itself. Download it again once; it updates itself after that.": "Dizze kopy fan de launcher kin himsels net ferfange. Download him ien kear opnij; dêrnei wurdt er sels bywurke.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
   "This launcher is open.": "This launcher is open.",
   "This server's Horizon": "Dizze tsjinner is Horizon",
@@ -1096,5 +1095,7 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+  "Update this launcher with your package manager.": "Update this launcher with your package manager.",
+  "Close this launcher, move it to {folder}, and open it there to enable updates.": "Close this launcher, move it to {folder}, and open it there to enable updates."
 }

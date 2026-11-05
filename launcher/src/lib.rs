@@ -53,4 +53,5 @@ pub mod tailscale;
 pub mod themes;
 pub mod uninstall_aside;
 pub mod update_handoff;
+pub mod update_recovery;
 pub mod worlds;

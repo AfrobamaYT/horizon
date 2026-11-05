@@ -828,7 +828,6 @@
   "These mods will run with full access to your computer": "இந்த மோட்கள் உங்கள் கணினிக்கான முழு அணுகலுடன் இயங்கும்",
   "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "அவர்கள் உங்கள் கோப்புகளைப் படிக்கலாம், மாற்றலாம் அல்லது நீக்கலாம் மற்றும் நீங்கள் இயக்கும் எந்த நிரலைப் போலவே உங்கள் கணக்குகளையும் நெட்வொர்க்கையும் பயன்படுத்தலாம். அவற்றின் ஆசிரியர்களை நீங்கள் நம்பினால் மட்டுமே அவற்றை உருவாக்கவும்: மோட்ஸ் பக்கம் அவர்களுக்குப் பெயரிடுகிறது.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "துவக்கியின் இந்தப் பதிப்பில் Microsoft உள்நுழைவு (HORIZON_MSA_CLIENT_ID) இல்லை, எனவே அது கேமைத் தொடங்க முடியாது.",
-  "This copy of the launcher can't replace itself. Download it again once; it updates itself after that.": "லாஞ்சரின் இந்த நகல் தன்னைத் தானே மாற்ற முடியாது. இதை ஒருமுறை மீண்டும் பதிவிறக்கவும்; அதன் பிறகு அது தானாகவே புதுப்பித்துக்கொள்ளும்.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
   "This launcher is open.": "This launcher is open.",
   "This server's Horizon": "இந்த சேவையகத்தின் Horizon",
@@ -1096,5 +1095,7 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+  "Update this launcher with your package manager.": "Update this launcher with your package manager.",
+  "Close this launcher, move it to {folder}, and open it there to enable updates.": "Close this launcher, move it to {folder}, and open it there to enable updates."
 }

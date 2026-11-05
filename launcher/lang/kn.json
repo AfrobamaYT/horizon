@@ -828,7 +828,6 @@
   "These mods will run with full access to your computer": "ಈ ಮೋಡ್‌ಗಳು ನಿಮ್ಮ ಕಂಪ್ಯೂಟರ್‌ಗೆ ಪೂರ್ಣ ಪ್ರವೇಶದೊಂದಿಗೆ ರನ್ ಆಗುತ್ತವೆ",
   "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "ಅವರು ನಿಮ್ಮ ಫೈಲ್‌ಗಳನ್ನು ಓದಬಹುದು, ಬದಲಾಯಿಸಬಹುದು ಅಥವಾ ಅಳಿಸಬಹುದು ಮತ್ತು ನೀವು ರನ್ ಮಾಡುವ ಯಾವುದೇ ಪ್ರೋಗ್ರಾಂನಂತೆ ನಿಮ್ಮ ಖಾತೆಗಳು ಮತ್ತು ನೆಟ್‌ವರ್ಕ್ ಅನ್ನು ಬಳಸಬಹುದು. ನೀವು ಅವರ ಲೇಖಕರನ್ನು ನಂಬಿದರೆ ಮಾತ್ರ ಅವುಗಳನ್ನು ನಿರ್ಮಿಸಿ: ಮೋಡ್ಸ್ ಪುಟವು ಅವರನ್ನು ಹೆಸರಿಸುತ್ತದೆ.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "ಲಾಂಚರ್‌ನ ಈ ಬಿಲ್ಡ್ ಯಾವುದೇ Microsoft ಸೈನ್-ಇನ್ (HORIZON_MSA_CLIENT_ID) ಹೊಂದಿಲ್ಲ, ಆದ್ದರಿಂದ ಇದು ಆಟವನ್ನು ಪ್ರಾರಂಭಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.",
-  "This copy of the launcher can't replace itself. Download it again once; it updates itself after that.": "ಲಾಂಚರ್‌ನ ಈ ಪ್ರತಿ ತನ್ನನ್ನು ತಾನೇ ಬದಲಾಯಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ. ಇದನ್ನು ಒಮ್ಮೆ ಮತ್ತೆ ಡೌನ್‌ಲೋಡ್ ಮಾಡಿ; ಅದರ ನಂತರ ಅದು ತಾನೇ ನವೀಕರಿಸಿಕೊಳ್ಳುತ್ತದೆ.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
   "This launcher is open.": "This launcher is open.",
   "This server's Horizon": "ಈ ಸರ್ವರ್‌ನ Horizon",
@@ -1096,5 +1095,7 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+  "Update this launcher with your package manager.": "Update this launcher with your package manager.",
+  "Close this launcher, move it to {folder}, and open it there to enable updates.": "Close this launcher, move it to {folder}, and open it there to enable updates."
 }

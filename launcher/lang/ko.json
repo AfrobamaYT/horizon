@@ -828,7 +828,6 @@
   "These mods will run with full access to your computer": "이 모드는 컴퓨터에 대한 전체 권한을 가지고 실행됩니다.",
   "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "일반 프로그램과 마찬가지로 파일 읽기, 수정, 삭제 및 계정과 네트워크를 사용할 수 있습니다. 신뢰할 수 있는 제작자의 모드만 빌드하세요. 제작자 정보는 모드 페이지에서 확인할 수 있습니다.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "이 런처 빌드에는 Microsoft 로그인 정보(HORIZON_MSA_CLIENT_ID)가 없어 게임을 시작할 수 없습니다.",
-  "This copy of the launcher can't replace itself. Download it again once; it updates itself after that.": "이 런처 사본은 스스로를 교체할 수 없습니다. 한 번만 다시 다운로드하세요. 그 후에는 스스로 업데이트됩니다.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "이 게임 소스에는 네이티브 인벤토리 진입 템플릿이 없습니다. Horizon을 업데이트하고 이 게임에 맞게 모드를 다시 빌드하세요.",
   "This launcher is open.": "This launcher is open.",
   "This server's Horizon": "이 서버의 Horizon",
@@ -1096,5 +1095,7 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+  "Update this launcher with your package manager.": "패키지 관리자로 이 런처를 업데이트하세요.",
+  "Close this launcher, move it to {folder}, and open it there to enable updates.": "이 런처를 닫고 {folder}(으)로 옮긴 다음 그곳에서 열어 업데이트를 활성화하세요."
 }
