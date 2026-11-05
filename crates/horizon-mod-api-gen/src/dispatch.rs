@@ -28,9 +28,6 @@ const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[
     "cauldron_level_changed",
     "block_drops",
     "bonemeal",
-    "finalize_spawn",
-    "living_drops",
-    "get_equipment_drop_chance",
     "note_block_play",
 ];
 

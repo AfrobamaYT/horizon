@@ -228,7 +228,7 @@ mod tests {
     use horizon_client::mobs::{Mob, MobEvent};
     use horizon_core::geometry::Vec3;
     use horizon_protocol::packets::play::Clientbound;
-    use mod_api::{NativeSoundSource, ServerHost, SoundSource};
+    use mod_api::{ServerHost, SoundSource};
     use std::sync::{Arc, Mutex};
 
     /// Quietens and moves the locked chest, cancels the pig, and turns a
@@ -447,7 +447,7 @@ mod tests {
                 assert!(game.native_entity_play_bound_sound(
                     cow,
                     "minecraft:entity.player.burp",
-                    NativeSoundSource::Neutral,
+                    SoundSource::Neutral,
                     1.0,
                     1.0
                 ));
