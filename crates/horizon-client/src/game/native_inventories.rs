@@ -12,6 +12,7 @@ use horizon_client::{
     lan::{guest::Guest, playerdata},
     save::{Level, read_dat, write_dat},
 };
+use mod_api::{__private::game::Fields, PlayerRef};
 use std::path::Path;
 
 /// Which of a player's inventories (`native_inventory`).
@@ -312,13 +313,18 @@ impl Game<'_> {
     /// map is never sent again by the game), so send it again after the
     /// player joins. Use ids far from the world's own (they count up from 0).
     /// False for a player not here, or `colors` not 16384 long.
-    pub(super) fn native_send_map(&mut self, uuid: u128, map_id: i32, colors: &[u8]) -> bool {
+    pub(super) fn native_send_map(
+        &mut self,
+        player: PlayerRef,
+        map_id: i32,
+        colors: &[u8],
+    ) -> bool {
         use horizon_protocol::packets::play::{Clientbound, MapItemData, MapPatch};
-        if colors.len() != 128 * 128 {
+        if self.native_player_is_fake(player) != Some(false) || colors.len() != 128 * 128 {
             return false;
         }
         self.native_send(
-            uuid,
+            player.fields().uuid,
             Clientbound::MapItemData(MapItemData {
                 map_id,
                 scale: 0,

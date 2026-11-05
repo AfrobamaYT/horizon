@@ -18,7 +18,6 @@ impl MotionWorld<'_, '_, '_> {
             return Ok(());
         }
         let id = self
-            .resources
             .health
             .damage
             .id(source)
@@ -32,7 +31,7 @@ impl MotionWorld<'_, '_, '_> {
                 self.block_registries,
                 self.damage_hooks,
             ),
-            &self.resources.health,
+            self.health,
             rules,
             id,
             damage,
@@ -145,7 +144,6 @@ impl MotionWorld<'_, '_, '_> {
     pub fn server_hazards_tick(&mut self, in_wall: bool) -> Result<()> {
         if self.player.position.y < f64::from(self.scene.bottom_y() - 64) {
             let id = self
-                .resources
                 .health
                 .damage
                 .id("minecraft:out_of_world")
@@ -159,7 +157,7 @@ impl MotionWorld<'_, '_, '_> {
                     self.block_registries,
                     self.damage_hooks,
                 ),
-                &self.resources.health,
+                self.health,
                 rules,
                 id,
                 4.0,

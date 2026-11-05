@@ -323,7 +323,8 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &
                 m.sound(flop, events);
             }
             if m.species() == S::Pufferfish && m.alive() && m.extra.size > 0 {
-                // Pufferfish.playerTouch / touch: sting with poison.
+                // Preserve the existing AI-side audio path. Player damage
+                // and poison are dispatched by the player tick, not fish AI.
                 if let Some(p) = &w.player
                     && p.alive
                     && !p.creative
@@ -332,15 +333,6 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &
                         .intersects(p.bounds)
                     && m.ai.no_action_time % 10 == 0
                 {
-                    let amount = 1.0 + m.extra.size as f32;
-                    // Only when the sting hurt the player.
-                    events.push(MobEvent::AttackPlayerWithEffect {
-                        amount,
-                        from: [m.position.x, m.position.y, m.position.z],
-                        effect: "minecraft:poison",
-                        ticks: 60 * m.extra.size,
-                        amplifier: 0,
-                    });
                     m.sound("entity.puffer_fish.sting", events);
                 }
             }
