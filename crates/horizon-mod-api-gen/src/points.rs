@@ -745,6 +745,15 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             packages.insert(package.clone());
         }
     }
+    // The two dependencies each lower crate gets, also written into the lock file's entry for
+    // it, so a `--locked` build of the staged copy accepts them.
+    const ADDED: [&str; 2] = ["horizon-mod-points", "horizon-mod-api-macros"];
+    if packages.is_empty() {
+        return Ok(staged);
+    }
+    let lock_path = root.join("Cargo.lock");
+    let mut lock =
+        fs::read_to_string(&lock_path).map_err(|e| format!("{}: {e}", lock_path.display()))?;
     for package in packages {
         let manifest = package.join("Cargo.toml");
         let text =
@@ -756,7 +765,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             .as_table_mut()
             .ok_or("[dependencies] is not a table")?;
         // Every package with points sits in `crates/`, beside these two.
-        for name in ["horizon-mod-points", "horizon-mod-api-macros"] {
+        for name in ADDED {
             dependencies.entry(name).or_insert_with(|| {
                 toml::Value::Table(toml::Table::from_iter([(
                     "path".to_owned(),
@@ -764,13 +773,69 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
                 )]))
             });
         }
+        let name = cargo
+            .get("package")
+            .and_then(|package| package.get("name"))
+            .and_then(toml::Value::as_str)
+            .ok_or_else(|| format!("{}: no package name", manifest.display()))?
+            .to_owned();
+        lock = locked_with(&lock, &name, &ADDED)
+            .ok_or_else(|| format!("Cargo.lock has no entry for {name}"))?;
         fs::write(
             &manifest,
             toml::to_string(&cargo).map_err(|e| e.to_string())?,
         )
         .map_err(|e| format!("{}: {e}", manifest.display()))?;
     }
+    fs::write(&lock_path, lock).map_err(|e| format!("{}: {e}", lock_path.display()))?;
     Ok(staged)
+}
+
+/// `lock` with `added` in the dependency list of the package `name`, kept in the lock file's
+/// sorted order; none when the lock file has no entry for it.
+fn locked_with(lock: &str, name: &str, added: &[&str]) -> Option<String> {
+    let header = format!("[[package]]\nname = \"{name}\"\n");
+    let start = lock.find(&header)?;
+    let end = lock[start + header.len()..]
+        .find("\n\n")
+        .map_or(lock.len(), |at| start + header.len() + at);
+    let entry = &lock[start..end];
+    let mut lines: Vec<String> = entry.lines().map(str::to_owned).collect();
+    let mut dependencies: Vec<String> = Vec::new();
+    let open = lines.iter().position(|line| line == "dependencies = [");
+    if let Some(open) = open {
+        let close = open + lines[open..].iter().position(|line| line == "]")?;
+        dependencies = lines.drain(open + 1..close).collect();
+    }
+    for name in added {
+        let quoted = format!(" \"{name}\",");
+        if !dependencies.contains(&quoted) {
+            dependencies.push(quoted);
+        }
+    }
+    dependencies.sort();
+    let open = match open {
+        Some(open) => open,
+        None => {
+            // `dependencies` follows `version` and `source`, before `checksum`.
+            let at = lines
+                .iter()
+                .position(|line| line.starts_with("checksum"))
+                .unwrap_or(lines.len());
+            lines.insert(at, "dependencies = [".to_owned());
+            lines.insert(at + 1, "]".to_owned());
+            at
+        }
+    };
+    for (offset, dependency) in dependencies.into_iter().enumerate() {
+        lines.insert(open + 1 + offset, dependency);
+    }
+    Some(format!(
+        "{}{}{}",
+        &lock[..start],
+        lines.join("\n"),
+        &lock[end..]
+    ))
 }
 
 /// `mod_points`: each point's record, the type its listeners take, and the `Points` trait a
@@ -1003,6 +1068,10 @@ mod tests {
             "[package]\nname = 'horizon-client-render'\n[dependencies]\nlog = '0.4'\n",
         );
         put(
+            "Cargo.lock",
+            "version = 4\n\n[[package]]\nname = \"horizon-client-render\"\nversion = \"0.1.0\"\ndependencies = [\n \"log\",\n]\n\n[[package]]\nname = \"log\"\nversion = \"0.4.0\"\n",
+        );
+        put(
             "crates/horizon-client-render/src/lib.rs",
             "pub mod mesher;\n",
         );
@@ -1116,6 +1185,12 @@ mod tests {
         assert!(
             manifest.contains("horizon-mod-points") && manifest.contains("../horizon-mod-points"),
             "{manifest}"
+        );
+        // The lock file lists them too, in order, so a `--locked` build accepts the manifest.
+        let lock = std::fs::read_to_string(root.join("Cargo.lock")).unwrap();
+        assert!(
+            lock.contains("name = \"horizon-client-render\"\nversion = \"0.1.0\"\ndependencies = [\n \"horizon-mod-api-macros\",\n \"horizon-mod-points\",\n \"log\",\n]\n\n[[package]]\nname = \"log\""),
+            "{lock}"
         );
         // A second pass finds the attribute and refuses: the source tree never carries one.
         assert!(stage(&root).unwrap_err().contains("already has"));
