@@ -3730,9 +3730,8 @@ impl Game<'_> {
                 }
             }
         } else {
-            // Mooshroom draws its own coin in getOffspringVariant.
-            p.species() != Species::Mooshroom
-                && self.world.random.next_int_bound(2).unwrap_or(0) == 0
+            // Other species either draw their own variants or do not need a coin.
+            false
         };
         // Axolotl.getBreedOffspring: useRareVariant (one in 1200) makes it blue,
         // else either parent's variant. The draws come from the mother's random.
@@ -3835,12 +3834,8 @@ impl Game<'_> {
             }
             if horizon_client::mobs::equine::is_equine(p.species()) {
                 let other = q.clone().unwrap_or_else(|| p.clone());
-                let mut r = self.world.random.clone();
-                horizon_client::mobs::equine::inherit(child, &p, &other, &mut r);
-                if horizon_client::mobs::llama::is_llama(p.species()) {
-                    horizon_client::mobs::llama::offspring(child, &p, &other, &mut r);
-                }
-                // Horse.getBreedOffspring: coat from either parent or new.
+                let r = &mut self.mobs.iter_mut().find(|m| m.id == parent)?.random;
+                // Horse.getBreedOffspring: coat and markings precede attributes.
                 if p.species() == Species::Horse && other.species() == Species::Horse {
                     let c = r.next_int_bound(9).unwrap_or(0);
                     child.extra.variant = if c < 4 {
@@ -3859,7 +3854,10 @@ impl Game<'_> {
                         r.next_int_bound(5).unwrap_or(0) as u8
                     };
                 }
-                self.world.random = r;
+                horizon_client::mobs::equine::inherit(child, &p, &other, r);
+                if horizon_client::mobs::llama::is_llama(p.species()) {
+                    horizon_client::mobs::llama::offspring(child, &p, &other, r);
+                }
                 break 'offspring;
             }
             if p.species() == Species::Cat {
@@ -8878,6 +8876,42 @@ mod shulker_arrow_tests {
 mod breeding_tests {
     use super::*;
     use mod_api::ServerHost;
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn equine_breeding_uses_parent_random() {
+        use horizon_client::mobs::BreedExperience;
+        use horizon_core::random::{LegacyRandom, RandomSource};
+
+        super::super::native_entity_refs::tests::with_game(|game| {
+            for (kind, expected_coat, expected_markings, expected_next) in [
+                ("minecraft:horse", 5, 2, 652_655_727_i32),
+                ("minecraft:donkey", 0, 0, 3_362_537_487_u32 as i32),
+            ] {
+                let mob_type = game.res.mob_types().get(kind).unwrap().clone();
+                let base = game.next_entity;
+                game.next_entity += 2;
+                let mut parent =
+                    Mob::new(base + 1, mob_type.clone(), Vec3::new(0.0, 64.0, 0.0), 0.0);
+                let mut partner = Mob::new(base + 2, mob_type, Vec3::new(1.0, 64.0, 0.0), 0.0);
+                parent.random = LegacyRandom::new(42);
+                parent.extra.variant = 1;
+                parent.extra.variant2 = 1;
+                partner.extra.variant = 2;
+                partner.extra.variant2 = 2;
+                game.mobs.push(parent);
+                game.mobs.push(partner);
+                let child = game
+                    .breed(base + 1, base + 2, None, None, BreedExperience::Drawn(None))
+                    .unwrap();
+                let child = game.mobs.iter().find(|m| m.id == child).unwrap();
+                assert_eq!(child.extra.variant, expected_coat, "{kind}");
+                assert_eq!(child.extra.variant2, expected_markings, "{kind}");
+                let parent = game.mobs.iter_mut().find(|m| m.id == base + 1).unwrap();
+                assert_eq!(parent.random.next_int(), expected_next, "{kind}");
+            }
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources"]
