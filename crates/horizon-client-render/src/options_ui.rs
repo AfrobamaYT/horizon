@@ -1568,6 +1568,9 @@ pub struct OptionsUi {
     pub selected_pad_action: Option<&'static str>,
     /// The glyphs the binds list shows (the setting, else the pad's family).
     pub pad_style: GlyphStyle,
+    /// The pad goes by its letters (`PadSettings::nintendo_letters`) and the glyphs are
+    /// Nintendo's: each part shows the letter of the button playing it.
+    pub pad_by_letter: bool,
     pub languages: Vec<LanguageInfo>,
     language_choice: Option<String>,
     language_search: ui::EditBox,
@@ -1649,6 +1652,7 @@ impl Default for OptionsUi {
             selected_native_key: None,
             selected_pad_action: None,
             pad_style: GlyphStyle::Xbox,
+            pad_by_letter: false,
             languages: Vec::new(),
             language_choice: None,
             language_search: search,
@@ -3260,6 +3264,7 @@ impl OptionsUi {
                     });
                     let mut message = match pad.binding(action) {
                         Some(b) => {
+                            let b = if self.pad_by_letter { b.by_letter() } else { b };
                             let [r, g, bl] = b.color(self.pad_style);
                             Text::literal(b.label(self.pad_style))
                                 .with_color(u32::from(r) << 16 | u32::from(g) << 8 | u32::from(bl))
@@ -3619,9 +3624,10 @@ impl OptionsUi {
                     true,
                 );
             }
-            ui::button(
+            ui::action_button(
                 batch,
                 atlas,
+                crate::widgets::Action::Done,
                 w / 2.0 - 100.0,
                 h - 28.0,
                 200.0,
@@ -3775,9 +3781,24 @@ impl OptionsUi {
                 tooltip_rect = (!pointer_over).then_some([wd.x, wd.y, wd.w, wd.h]);
             }
             match &wd.kind {
-                WKind::Button { label, active, .. } => {
+                WKind::Button { label, active, act } => {
                     let label = fitted.as_ref().map_or(label, |f| &f.0);
-                    ui::button(batch, atlas, wd.x, wd.y, wd.w, wd.h, label, *active, hover);
+                    if matches!(act, Act::Done) {
+                        ui::action_button(
+                            batch,
+                            atlas,
+                            crate::widgets::Action::Done,
+                            wd.x,
+                            wd.y,
+                            wd.w,
+                            wd.h,
+                            label,
+                            *active,
+                            hover,
+                        );
+                    } else {
+                        ui::button(batch, atlas, wd.x, wd.y, wd.w, wd.h, label, *active, hover);
+                    }
                     crate::widgets::last_narratable(|n| {
                         narrate_widget(n, s, wd, hover, list_key, framebuffer);
                     });
