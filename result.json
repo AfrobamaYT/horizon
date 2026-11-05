@@ -1,0 +1,1 @@
+{"ready":true,"audit":"/box/shared/upstream-sync/batch-baa9153c82/locales-resolution.md","summary":"Resolved all 86 locale maps in commit 609d8f7c17deda53dbae2e2e16341e2443f3f38b. Independent three-way reconstruction found no collisions or mismatches; each map gained three upstream keys and preserved fork removals. Diff check passed.","unread":[],"defects":[]}
