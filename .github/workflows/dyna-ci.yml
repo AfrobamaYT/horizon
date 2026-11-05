@@ -142,62 +142,86 @@ jobs:
   wasm-mods:
     # A mod built to mod.wasm and loaded as the game loads it; the mod API's generated WIT as an
     # artifact, and what this change does to it in the job summary (a report, never a failure).
+    needs: changes
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'dyna-large' || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Install Dyna runner dependencies without root
+        if: runner.environment != 'github-hosted'
+        run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust toolchains and the ALSA and udev headers
+        env:
+          HOSTED: ${{ runner.environment == 'github-hosted' }}
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+          if [ "$HOSTED" = true ]; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+          else
+            if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+              curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+            fi
+            export PATH="$CARGO_HOME/bin:$PATH"
+            mkdir -p "$CARGO_TARGET_DIR"
+            ln -s "$CARGO_TARGET_DIR" target
+          fi
           rustup toolchain install stable --profile minimal
           rustup toolchain install 1.99.1 --profile minimal --component rust-src --target wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           shared-key: wasm-mods
-          workspaces: |
-            .
-            docs/modding/examples/wasm-hello -> target/horizon-mod
+          # Every fixture uses this workspace's target, so its std and shared dependencies
+          # are cached once rather than in seven independent target directories.
+          workspaces: .
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: The mod API and the points crate build for wasm32
         run: cargo +1.99.1 check -p horizon-mod-api -p horizon-mod-points --target wasm32-unknown-unknown
-      - name: Build the sample to mod.wasm, and the std member the game ships
+      - name: Build all wasm fixtures and the std member in one shared target
         run: |
           cargo +stable build -p cargo-horizon-mod -p xtask
-          cd docs/modding/examples/wasm-hello
-          ../../../../target/debug/cargo-horizon-mod horizon-mod build --wasm
-          ../../../../target/debug/cargo-horizon-mod horizon-mod wasm-std "$GITHUB_WORKSPACE/target/horizon-wasm-std.wasm"
+          for mod in docs/modding/examples/wasm-hello \
+            crates/horizon-mod-wasm/tests/groups/{counter_lib,alpha,beta,gamma} \
+            crates/horizon-mod-wasm/tests/points/{chat_tail,lib_tail}; do
+            mkdir -p "$mod/target"
+            ln -s "$GITHUB_WORKSPACE/target" "$mod/target/horizon-mod"
+            (cd "$mod" && "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod build --wasm)
+          done
+          (cd docs/modding/examples/wasm-hello && "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod wasm-std "$GITHUB_WORKSPACE/target/horizon-wasm-std.wasm")
+      - name: Build the runtime tests once
+        # Run the resulting binaries below: a separate Cargo invocation can rerun the API's
+        # generator and rebuild its dependents even when no source changed.
+        run: |
+          cargo +stable test -p horizon-mod-wasm --tests --no-run --message-format=json | python3 -c '
+          import json, sys
+          for line in sys.stdin:
+              artifact = json.loads(line)
+              if artifact["reason"] == "compiler-artifact" and artifact["target"]["kind"] == ["test"] and artifact["executable"]:
+                  print("WASM_TEST_" + artifact["target"]["name"].upper() + "=" + artifact["executable"])
+          ' >> "$GITHUB_ENV"
       - name: Load it in the runtime
         env:
           HORIZON_WASM_SAMPLE: ${{ github.workspace }}/docs/modding/examples/wasm-hello/target/horizon-mod/hello_wasm.hmod
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
-        run: cargo +stable test -p horizon-mod-wasm --test sample -- --ignored
+        run: '"$WASM_TEST_SAMPLE" --ignored'
       - name: Mods sharing a library, linked in one group, and a mod of another group
         env:
           HORIZON_WASM_GROUPS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/groups
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
-        run: |
-          for mod in counter_lib alpha beta gamma; do
-            (cd "$HORIZON_WASM_GROUPS/$mod" && "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod build --wasm)
-          done
-          cargo +stable test -p horizon-mod-wasm --test groups -- --ignored
+        run: '"$WASM_TEST_GROUPS" --ignored'
       - name: Native and wasm listeners at one point, in the installed order
         env:
           HORIZON_WASM_POINTS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/points
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
-        run: |
-          (cd "$HORIZON_WASM_POINTS/chat_tail" && "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod build --wasm)
-          cargo +stable test -p horizon-mod-wasm --test points -- --ignored
+        run: '"$WASM_TEST_POINTS" --ignored'
       - name: A listener refused with its library keeps nothing of their group
         env:
           HORIZON_WASM_GROUPS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/groups
           HORIZON_WASM_POINTS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/points
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
-        run: |
-          (cd "$HORIZON_WASM_POINTS/lib_tail" && "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod build --wasm)
-          cargo +stable test -p horizon-mod-wasm --test refused_points -- --ignored
+        run: '"$WASM_TEST_REFUSED_POINTS" --ignored'
       - name: The mod API's WIT, and what this change does to it
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
