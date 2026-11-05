@@ -64,12 +64,10 @@ pub(super) enum Field {
     DeleteServer,
     /// Settings' accent as hex (`themes_page.rs`).
     AccentHex,
-    /// The Shop's gift recipient (`wardrobe_page/shop/basket.rs`).
-    ShopGift,
 }
 
 impl Field {
-    const ALL: [Field; 25] = [
+    const ALL: [Field; 24] = [
         Field::Name,
         Field::Seed,
         Field::Players,
@@ -94,7 +92,6 @@ impl Field {
         Field::OfflineName,
         Field::DeleteServer,
         Field::AccentHex,
-        Field::ShopGift,
     ];
 }
 
@@ -1222,7 +1219,6 @@ impl Launcher {
             }
             Field::MemoryLimit => self.memory_enter(),
             Field::OfflineName => self.offline_name_enter(),
-            Field::ShopGift => self.shop.find_soon = true,
             Field::ServerName | Field::ServerAddress => self.add_server(),
         }
     }
