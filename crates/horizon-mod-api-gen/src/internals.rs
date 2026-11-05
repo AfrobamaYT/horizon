@@ -23,6 +23,9 @@ pub struct Internal {
     /// A reachable lower-crate type's layout, without exposing it to native mods.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub shape_only: bool,
+    /// Why this reachable layout cannot be accessed by the generated game table.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opaque_reason: Option<&'static str>,
     /// Type paths resolved through imports, keyed by their spelling in this signature.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub refs: BTreeMap<String, String>,
@@ -569,6 +572,7 @@ impl Pass {
                 signature,
                 hash,
                 shape_only: false,
+                opaque_reason: None,
                 refs: BTreeMap::new(),
             },
         );
@@ -1045,10 +1049,36 @@ impl Pass {
             })
             .map(|entry| entry.path.clone())
             .collect();
+        let manifest = root.join("crates/horizon-client/Cargo.toml");
+        let text = fs::read_to_string(&manifest).map_err(|e| e.to_string())?;
+        let manifest: toml::Value = toml::from_str(&text).map_err(|e| e.to_string())?;
+        // The table lives in the game crate. A transitive or optional dependency's name is
+        // not available in every game build, even if an unconditional layout was discovered.
+        let dependencies: BTreeSet<String> = manifest
+            .get("dependencies")
+            .and_then(toml::Value::as_table)
+            .into_iter()
+            .flatten()
+            .filter(|(_, dep)| dep.get("optional").and_then(toml::Value::as_bool) != Some(true))
+            .map(|(name, _)| name.replace('-', "_"))
+            .collect();
         self.reaching = true;
         for path in reached {
-            self.lower(root, &path)
-                .map_err(|e| format!("shape {path}: {e}"))?;
+            let krate = path.split("::").next().expect("shape path");
+            let reason = if !dependencies.contains(krate) {
+                Some("not an unconditional game dependency")
+            } else if self.lower(root, &path).is_err() {
+                // A declaration can be discovered through a re-export that lower() cannot
+                // walk. Keep its metadata, but never emit code against an unproven layout.
+                Some("shape module walk failed")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                for entry in self.entries.values_mut().filter(|entry| entry.path == path) {
+                    entry.opaque_reason = Some(reason);
+                }
+            }
         }
         self.reaching = false;
         Ok(())
@@ -1182,6 +1212,10 @@ mod tests {
 
     fn shapes_fixture(game: &str) -> Fixture {
         let fixture = Fixture::new(game);
+        fixture.put(
+            "crates/horizon-client/Cargo.toml",
+            "[package]\nname = 'horizon-client'\nversion = '0.1.0'\n[dependencies]\nhorizon-items = { path = '../horizon-items' }\n",
+        );
         fixture.put(
             "crates/horizon-items/Cargo.toml",
             "[package]\nname = 'horizon-items'\nversion = '0.1.0'\n[lib]\npath = 'src/items.rs'\n",
@@ -1321,6 +1355,67 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
         let again = widen_with(&fixture.0, &[]).unwrap();
         assert_eq!(result.entries, again.entries);
         assert!(again.changed.is_empty());
+    }
+
+    #[test]
+    fn shapes_from_optional_or_transitive_dependencies_stay_opaque() {
+        for dependencies in [
+            "horizon-items = { path = '../horizon-items', optional = true }",
+            "",
+        ] {
+            let fixture = shapes_fixture("struct Game { stack: horizon_items::ItemStack }\n");
+            fixture.put(
+                "crates/horizon-client/Cargo.toml",
+                &format!("[package]\nname = 'horizon-client'\n[dependencies]\n{dependencies}\n"),
+            );
+            let widened = widen_with(&fixture.0, &[]).unwrap();
+            let stack = widened
+                .entries
+                .iter()
+                .find(|entry| entry.path == "horizon_items::item_stack::ItemStack")
+                .unwrap();
+            assert_eq!(
+                stack.opaque_reason,
+                Some("not an unconditional game dependency")
+            );
+            let (_, counts) = crate::internals_table::table(&widened.entries);
+            assert_eq!(
+                counts.skipped_types["not an unconditional game dependency"],
+                1
+            );
+            let source =
+                fs::read_to_string(fixture.0.join("crates/horizon-items/src/item_stack.rs"))
+                    .unwrap();
+            assert!(source.contains("pub(crate) struct ItemStack"));
+        }
+    }
+
+    #[test]
+    fn an_unwalkable_shape_stays_opaque_instead_of_failing_staging() {
+        let fixture = shapes_fixture("");
+        let mut pass = Pass::default();
+        pass.entry(
+            "horizon_items::missing",
+            "horizon_items::missing::Stack",
+            "struct",
+            &[],
+            quote!(
+                struct Stack {
+                    count: u8,
+                }
+            ),
+            TypeUses::default(),
+        );
+        pass.entries.values_mut().next().unwrap().shape_only = true;
+        pass.shapes(&fixture.0).unwrap();
+        let widened = pass.finish().unwrap();
+        assert_eq!(
+            widened.entries[0].opaque_reason,
+            Some("shape module walk failed")
+        );
+        let (_, counts) = crate::internals_table::table(&widened.entries);
+        assert_eq!(counts.types, 0);
+        assert_eq!(counts.skipped_types["shape module walk failed"], 1);
     }
 
     #[test]
