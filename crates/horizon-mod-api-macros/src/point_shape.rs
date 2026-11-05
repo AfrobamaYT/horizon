@@ -44,6 +44,20 @@ pub enum Returns {
     Opaque,
 }
 
+/// A point's items in `mod_points` ([`Shape::api_items`]), each list one entry per place (its head,
+/// then its return).
+#[derive(Default)]
+pub struct ApiItems {
+    /// Its `Points` methods.
+    pub methods: TokenStream,
+    /// Its `PointId` variants.
+    pub variants: TokenStream,
+    /// The `Option<PointId>` consts `#[horizon_mod]` subscribes a mod by.
+    pub consts: TokenStream,
+    /// Its methods in the game's forwarding `Points` for wasm mods (`wire::Forwarded`).
+    pub forwards: TokenStream,
+}
+
 /// A `#[point]` function's point.
 pub struct Shape {
     /// Unique among the game's points: the function's name, or the attribute's `name`.
@@ -51,21 +65,76 @@ pub struct Shape {
     pub side: Side,
     /// The function takes `&mut self`: its listeners get the side's writing host.
     pub mutable: bool,
-    /// Its listeners run per block, per entity or per frame: the docs and build log say so.
-    pub hot: bool,
     /// The parameters with API types, in order. The others aren't passed: an internal type
     /// would become API.
     pub args: Vec<Arg>,
     pub returns: Returns,
+    /// The value it returns borrows from `self` (`-> &T`, `-> Option<&mut T>`): the game is still
+    /// borrowed when the body ends, so the point has a head and no return.
+    pub borrowed_return: bool,
 }
 
-/// The point of the function `sig`, from `#[point(side = "…", name = "…", hot)]`'s arguments.
+/// Whether the staging pass gives an inherent `Game` method with these `attrs` and `sig` a point: one predicate for
+/// the pass and for the generator that lists the points, so the two always agree. Left out:
+/// the hooks' own functions (`native_*`, whose bodies the generator reads), anything compiled only
+/// under a `cfg`, `const`, `async` and `unsafe` functions, methods without a `&self`/`&mut self`
+/// receiver, `impl Trait` in the signature, `-> !`, `#[inline(always)]`, and parameters named
+/// `cancel` or `result`, which the record has its own of.
+pub fn eligible(attrs: &[syn::Attribute], sig: &syn::Signature) -> bool {
+    let impl_trait = |ty: &Type| matches!(ty, Type::ImplTrait(_));
+    !sig.ident.to_string().starts_with("native_")
+        && sig.constness.is_none()
+        && sig.asyncness.is_none()
+        && sig.unsafety.is_none()
+        && sig.abi.is_none()
+        && matches!(sig.inputs.first(), Some(FnArg::Receiver(receiver)) if receiver.reference.is_some())
+        && !matches!(&sig.output, syn::ReturnType::Type(_, ty) if impl_trait(ty) || matches!(**ty, Type::Never(_)))
+        && sig.inputs.iter().all(|input| match input {
+            FnArg::Typed(typed) => {
+                !impl_trait(&typed.ty)
+                    && !matches!(&*typed.pat, Pat::Ident(pat) if pat.ident == "cancel" || pat.ident == "result")
+            }
+            FnArg::Receiver(_) => true,
+        })
+        && !attrs.iter().any(|attr| {
+            let path = attr.path();
+            path.is_ident("cfg")
+                || path.is_ident("cfg_attr")
+                || path.is_ident("test")
+                || (path.is_ident("inline")
+                    && attr
+                        .parse_args::<syn::Ident>()
+                        .is_ok_and(|arg| arg == "always"))
+        })
+}
+
+/// Whether `ty` holds a reference or a lifetime other than `'static`: a value that may borrow.
+fn borrows(ty: &Type) -> bool {
+    struct Find(bool);
+    impl<'ast> syn::visit::Visit<'ast> for Find {
+        fn visit_type_reference(&mut self, reference: &'ast syn::TypeReference) {
+            match &reference.lifetime {
+                Some(lifetime) if lifetime.ident == "static" => {}
+                _ => self.0 = true,
+            }
+            syn::visit::visit_type_reference(self, reference);
+        }
+        fn visit_lifetime(&mut self, lifetime: &'ast syn::Lifetime) {
+            if lifetime.ident != "static" {
+                self.0 = true;
+            }
+        }
+    }
+    let mut find = Find(false);
+    syn::visit::Visit::visit_type(&mut find, ty);
+    find.0
+}
+
+/// The point of the function `sig`, from `#[point(side = "…", name = "…")]`'s arguments.
 pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape> {
-    let (mut name, mut side, mut hot) = (sig.ident.to_string(), None, false);
+    let (mut name, mut side) = (sig.ident.to_string(), None);
     let parser = syn::meta::parser(|meta| {
-        if meta.path.is_ident("hot") {
-            hot = true;
-        } else if meta.path.is_ident("name") {
+        if meta.path.is_ident("name") {
             name = meta.value()?.parse::<syn::LitStr>()?.value();
         } else if meta.path.is_ident("side") {
             let value = meta.value()?.parse::<syn::LitStr>()?;
@@ -81,7 +150,7 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
                 }
             });
         } else {
-            return Err(meta.error("a point takes side = \"…\", name = \"…\" and hot"));
+            return Err(meta.error("a point takes side = \"…\" and name = \"…\""));
         }
         Ok(())
     });
@@ -130,6 +199,7 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
             "a point's record has its own `cancel` and `result`: rename the parameter",
         ));
     }
+    let borrowed_return = matches!(&sig.output, syn::ReturnType::Type(_, ty) if borrows(ty));
     let returns = match &sig.output {
         syn::ReturnType::Default => Returns::Unit,
         syn::ReturnType::Type(_, ty) if unit_result(ty) => Returns::UnitResult,
@@ -140,9 +210,9 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
         name,
         side,
         mutable,
-        hot,
         args,
         returns,
+        borrowed_return,
     })
 }
 
@@ -164,8 +234,21 @@ fn scalar(ty: &Type) -> bool {
     matches!(ty, Type::Path(_)) && api_typed(ty)
 }
 
+/// The type a scalar crosses as in a record: `usize`/`isize` as `u64`/`i64`, one width on every
+/// host and in a wasm guest (whose `usize` is 32-bit); none for a type that crosses as itself.
+pub fn wide(ty: &Type) -> Option<Type> {
+    let Type::Path(path) = ty else { return None };
+    if path.path.is_ident("usize") {
+        Some(syn::parse_quote!(u64))
+    } else if path.path.is_ident("isize") {
+        Some(syn::parse_quote!(i64))
+    } else {
+        None
+    }
+}
+
 /// `tick_return` as `TickReturn`.
-fn camel(name: &str) -> String {
+pub fn camel(name: &str) -> String {
     name.split('_')
         .map(|word| {
             let mut chars = word.chars();
@@ -177,11 +260,12 @@ fn camel(name: &str) -> String {
         .collect()
 }
 
-/// Whether the API can carry `ty` to a listener: a scalar, or `&str`.
+/// Whether the API can carry `ty` to a listener: a scalar, or `&str` with its lifetime elided (a listener
+/// may replace that text with its own, which a named lifetime such as `'static` couldn't hold).
 fn api_typed(ty: &Type) -> bool {
-    const SCALARS: [&str; 15] = [
-        "bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16",
-        "u32", "u64", "usize",
+    const SCALARS: [&str; 14] = [
+        "bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32",
+        "u64", "usize",
     ];
     match ty {
         Type::Path(path) => {
@@ -189,6 +273,7 @@ fn api_typed(ty: &Type) -> bool {
         }
         Type::Reference(reference) => {
             reference.mutability.is_none()
+                && reference.lifetime.is_none()
                 && matches!(&*reference.elem, Type::Path(path) if path.path.is_ident("str"))
         }
         _ => false,
@@ -196,17 +281,17 @@ fn api_typed(ty: &Type) -> bool {
 }
 
 impl Shape {
-    /// The slot's static in the game's generated `points` module.
-    pub fn slot(&self) -> syn::Ident {
-        syn::Ident::new(&self.name.to_uppercase(), Span::call_site())
+    /// The `PointId` variant of its head: `Tick` for `tick`.
+    pub fn variant(&self) -> syn::Ident {
+        syn::Ident::new(&camel(&self.name), Span::call_site())
     }
 
-    /// The slot its return listeners wait in.
-    pub fn return_slot(&self) -> syn::Ident {
-        syn::Ident::new(&format!("{}_RETURN", self.slot()), Span::call_site())
+    /// The `PointId` variant of its return.
+    pub fn return_variant(&self) -> syn::Ident {
+        syn::Ident::new(&camel(&format!("{}_return", self.name)), Span::call_site())
     }
 
-    /// The record its listeners get, in `mod_api::points`: `TickArgs` for `tick`.
+    /// The record its listeners get, in `mod_points`: `TickArgs` for `tick`.
     pub fn record(&self) -> syn::Ident {
         syn::Ident::new(&format!("{}Args", camel(&self.name)), Span::call_site())
     }
@@ -218,7 +303,7 @@ impl Shape {
             .any(|arg| matches!(arg.ty, Type::Reference(_)))
     }
 
-    /// The record's declaration in `mod_api::points`, documented from the function's `target`.
+    /// The record's declaration in `mod_points`, documented from the function's `target`.
     pub fn record_item(&self, target: &str) -> TokenStream {
         let record = self.record();
         let lifetime = if self.borrows() {
@@ -227,14 +312,24 @@ impl Shape {
             quote!()
         };
         let names: Vec<_> = self.args.iter().map(|arg| &arg.name).collect();
-        let types: Vec<_> = self
+        // Text crosses as a `Cow`, so a listener may replace it with an owned `String`.
+        let (types, fields): (Vec<_>, Vec<_>) = self
             .args
             .iter()
-            .map(|arg| match &arg.ty {
-                Type::Reference(_) => quote!(&'a str),
-                ty => quote!(#ty),
+            .map(|arg| match (&arg.ty, wide(&arg.ty)) {
+                (Type::Reference(_), _) => (quote!(&'a str), quote!(::std::borrow::Cow<'a, str>)),
+                (ty, Some(wide)) => (quote!(#ty), quote!(#wide)),
+                (ty, None) => (quote!(#ty), quote!(#ty)),
             })
-            .collect();
+            .unzip();
+        let inits = self.args.iter().map(|arg| {
+            let name = &arg.name;
+            match (&arg.ty, wide(&arg.ty)) {
+                (Type::Reference(_), _) => quote!(#name: ::std::borrow::Cow::Borrowed(#name)),
+                (_, Some(wide)) => quote!(#name: #name as #wide),
+                (_, None) => quote!(#name),
+            }
+        });
         let field_docs = names.iter().map(|name| {
             format!(
                 "`{name}`: a head listener may change it, and the function runs with the change."
@@ -248,109 +343,188 @@ impl Shape {
                 },
                 quote!(cancel: false,),
             ),
-            Returns::Value(ty) => (
-                quote! {
-                    /// Set by a head listener: the function returns this at once, skipping its body.
-                    /// Return listeners find the value it returns here, and may change it.
-                    pub result: Option<#ty>,
-                },
-                quote!(result: None,),
-            ),
+            Returns::Value(ty) => {
+                let ty = wide(ty).unwrap_or_else(|| ty.clone());
+                (
+                    quote! {
+                        /// Set by a head listener: the function returns this at once, skipping its body.
+                        /// Return listeners find the value it returns here, and may change it.
+                        pub result: Option<#ty>,
+                    },
+                    quote!(result: None,),
+                )
+            }
             Returns::Opaque => (quote!(), quote!()),
         };
         let doc = format!(
             "The `{}` point's record: what its listeners get from `{target}`, a slot filled at load.",
             self.name
         );
+        let wire = self.wire_items(&record, &lifetime);
         quote! {
+            #wire
             #[doc = #doc]
             #[non_exhaustive]
             pub struct #record #lifetime {
-                #( #[doc = #field_docs] pub #names: #types, )*
+                #( #[doc = #field_docs] pub #names: #fields, )*
                 #extra
             }
             impl #lifetime #record #lifetime {
                 /// The record of a call, before its listeners run (the game's side of the point).
                 #[doc(hidden)]
+                #[inline]
                 pub fn __new(#(#names: #types),*) -> Self {
-                    Self { #(#names,)* #extra_init }
+                    Self { #(#inits,)* #extra_init }
                 }
             }
         }
     }
 
-    /// The `Points` methods for this point (its head, then its return), their `PointId` variants and
-    /// the dispatchers that run every subscribed mod's method: generated into `mod_api::points`.
-    pub fn api_items(&self, target: &str) -> (TokenStream, TokenStream, TokenStream) {
+    /// The `Points` methods for this point (its head, then its return when it has one), their
+    /// `PointId` variants, and the `Option<PointId>` consts `#[horizon_mod]` subscribes a mod by:
+    /// generated into `mod_points`.
+    pub fn api_items(&self, target: &str) -> ApiItems {
         let record = self.record();
         let record = if self.borrows() {
             quote!(#record<'_>)
         } else {
             quote!(#record)
         };
-        let host = match (self.mutable, self.side) {
-            (false, _) => quote!(&dyn crate::Host),
-            (true, Side::Server) => quote!(&mut dyn crate::ServerHost),
-            (true, Side::Client) => quote!(&mut dyn crate::ClientHost),
-            (true, Side::Both) => quote!(crate::HostSide<'_>),
+        let (host, forwarded) = match (self.mutable, self.side) {
+            (false, _) => (quote!(&dyn ::mod_api::Host), quote!(Read)),
+            (true, Side::Server) => (quote!(&mut dyn ::mod_api::ServerHost), quote!(Server)),
+            (true, Side::Client) => (quote!(&mut dyn ::mod_api::ClientHost), quote!(Client)),
+            (true, Side::Both) => (quote!(::mod_api::HostSide<'_>), quote!(Side)),
         };
-        let (binding, reborrow) = match (self.mutable, self.side) {
-            (false, _) => (quote!(host), quote!(host)),
-            (true, Side::Both) => (quote!(mut host), quote!(host.reborrow())),
-            (true, _) => (quote!(host), quote!(&mut *host)),
-        };
-        let (mut methods, mut variants, mut dispatch) = (quote!(), quote!(), quote!());
-        for (method, place) in [
-            (
-                self.name.clone(),
-                "head: before its body runs, with the arguments it was called with",
-            ),
-            (
+        let mut places = vec![(
+            self.name.clone(),
+            "head: before its body runs, with the arguments it was called with",
+        )];
+        if self.has_return() {
+            places.push((
                 format!("{}_return", self.name),
                 "return: after its body, with the value it returns",
-            ),
-        ] {
+            ));
+        }
+        let mut items = ApiItems::default();
+        for (method, place) in places {
             let method = syn::Ident::new(&method, Span::call_site());
             let variant = syn::Ident::new(&camel(&method.to_string()), Span::call_site());
-            let dispatcher = syn::Ident::new(&format!("dispatch_{method}"), Span::call_site());
             let doc = format!("`{target}`'s {place}.");
-            let name = method.to_string();
-            methods.extend(quote! {
+            items.methods.extend(quote! {
                 #[doc = #doc]
                 fn #method(&self, host: #host, args: &mut #record) {
                     let _ = (host, args);
                 }
             });
-            variants.extend(quote!(#variant,));
-            dispatch.extend(quote! {
-                #[doc(hidden)]
-                pub fn #dispatcher(#binding: #host, args: &mut #record) {
-                    for points in super::entered_points(PointId::#variant, #name) {
-                        points.#method(#reborrow, args);
-                    }
+            items.forwards.extend(quote! {
+                fn #method(&self, host: #host, args: &mut #record) {
+                    self.0.forward(PointId::#variant, crate::wire::PointHost::#forwarded(host), args)
                 }
+            });
+            items.variants.extend(quote!(#variant,));
+            items.consts.extend(quote! {
                 #[doc(hidden)]
                 #[allow(non_upper_case_globals)]
                 pub const #method: Option<PointId> = Some(PointId::#variant);
             });
         }
-        (methods, variants, dispatch)
+        items
     }
 
-    /// The listener's function type.
-    pub fn listener(&self) -> TokenStream {
-        let record = self.record();
-        let record = if self.borrows() {
-            quote!(::mod_api::points::#record<'_>)
-        } else {
-            quote!(::mod_api::points::#record)
+    /// Every field of its record, in order: the arguments, then `cancel` or `result`.
+    fn fields(&self) -> Vec<syn::Ident> {
+        let extra = match self.returns {
+            Returns::Unit | Returns::UnitResult => Some("cancel"),
+            Returns::Value(_) => Some("result"),
+            Returns::Opaque => None,
         };
+        self.args
+            .iter()
+            .map(|arg| arg.name.clone())
+            .chain(extra.map(|name| syn::Ident::new(name, Span::call_site())))
+            .collect()
+    }
+
+    /// Its listener's contract, which a wasm mod's listener and the game check against each other
+    /// at load: the host it gets, then its record's field names and types,
+    /// `side|yaw:f64,text:str,cancel:bool`.
+    pub fn wire_shape(&self) -> String {
         let host = match (self.mutable, self.side) {
-            (false, _) => quote!(&dyn ::mod_api::Host),
-            (true, Side::Server) => quote!(&mut dyn ::mod_api::ServerHost),
-            (true, Side::Client) => quote!(&mut dyn ::mod_api::ClientHost),
-            (true, Side::Both) => quote!(::mod_api::HostSide<'_>),
+            (false, _) => "read",
+            (true, Side::Server) => "server",
+            (true, Side::Client) => "client",
+            (true, Side::Both) => "side",
         };
-        quote!(fn(#host, &mut #record))
+        // The record's own field types: a native-width integer as it crosses (`wide`).
+        let spelled = |ty: &Type| {
+            let ty = wide(ty).unwrap_or_else(|| ty.clone());
+            quote!(#ty).to_string().replace(' ', "")
+        };
+        let types = self.args.iter().map(|arg| match &arg.ty {
+            Type::Reference(_) => "str".to_owned(),
+            ty => spelled(ty),
+        });
+        let extra = match &self.returns {
+            Returns::Unit | Returns::UnitResult => Some("bool".to_owned()),
+            Returns::Value(ty) => Some(format!("Option<{}>", spelled(ty))),
+            Returns::Opaque => None,
+        };
+        let fields = self
+            .fields()
+            .iter()
+            .zip(types.chain(extra))
+            .map(|(name, ty)| format!("{name}:{ty}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("{host}|{fields}")
+    }
+
+    /// How the record crosses to a wasm mod (`mod_points::wire`): its fields lowered in order and
+    /// written back, and, in the mod, lifted. Compiled only for wasm mods and the game's wasm
+    /// runtime: a native mod builds none of it.
+    fn wire_items(&self, record: &syn::Ident, lifetime: &TokenStream) -> TokenStream {
+        let fields = self.fields();
+        let shape = self.wire_shape();
+        let lifted = if self.borrows() {
+            quote!(#record<'v>)
+        } else {
+            quote!(#record)
+        };
+        quote! {
+            #[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
+            impl #lifetime crate::wire::Record for #record #lifetime {
+                fn lower(&self) -> ::std::vec::Vec<crate::wire::Value> {
+                    ::std::vec![#(crate::wire::Wire::lower(&self.#fields)),*]
+                }
+                fn write_back(
+                    &mut self,
+                    fields: ::std::vec::Vec<crate::wire::Value>,
+                ) -> ::std::result::Result<(), crate::wire::Mismatch> {
+                    let mut fields = fields.into_iter();
+                    let taken = (#(crate::wire::taken(&self.#fields, &mut fields)?,)*);
+                    crate::wire::end(&mut fields)?;
+                    (#(self.#fields,)*) = taken;
+                    ::std::result::Result::Ok(())
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            impl<'v> crate::wire::Lift<'v> for #lifted {
+                const SHAPE: &'static str = #shape;
+                fn lift(
+                    fields: &'v [crate::wire::Value],
+                ) -> ::std::result::Result<Self, crate::wire::Mismatch> {
+                    let mut fields = fields.iter();
+                    let record = Self { #(#fields: crate::wire::field(&mut fields)?,)* };
+                    crate::wire::end(&mut fields)?;
+                    ::std::result::Result::Ok(record)
+                }
+            }
+        }
+    }
+
+    /// Whether its listeners also run after the body.
+    pub fn has_return(&self) -> bool {
+        !self.borrowed_return
     }
 }

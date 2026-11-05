@@ -3955,7 +3955,7 @@ pub enum Msg {
     /// A modpack step ended: the pack as it now is.
     PackDone(Result<Box<crate::modpacks::Imported>, String>),
     /// Where the native-mods build is (`native_mods::Step::label`).
-    NativeProgress(String),
+    NativeProgress(String, crate::native_mods::Progress),
     /// The native-mods build ended: the version built, or why not.
     Native(Result<String, String>),
     /// An imported game build is installed (`build_import::import`): its version, or why not.
@@ -4222,6 +4222,12 @@ impl Settings {
                 if fields.get(key).is_some_and(|v| !v.is_number()) {
                     fields.remove(key);
                 }
+            }
+            // A build mode this launcher doesn't know is the default one.
+            if fields.get("native_profile").is_some_and(|p| {
+                serde_json::from_value::<crate::native_mods::Profile>(p.clone()).is_err()
+            }) {
+                fields.remove("native_profile");
             }
             // A language this launcher doesn't have yet follows the system's.
             if fields.get("language").is_some_and(|l| {
