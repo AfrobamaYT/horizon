@@ -325,6 +325,7 @@ mod native_shaders;
 #[cfg(test)]
 mod native_shield_totem_tests;
 mod native_sound_refs;
+mod native_structures;
 mod native_ticks;
 mod native_visuals;
 mod native_world_columns;
