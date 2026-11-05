@@ -890,8 +890,8 @@
 //!
 //! API 20 adds buttons, tooltips and item icons on mod screens
 //! (`native_screen_click`, `native_screen_tooltip`, `native_menu_button`,
-//! and `native_item`, `native_screen_title`, `native_data`, `native_block`,
-//! `native_block_property`, `native_insert_item`, `native_cursor`).
+//! and `native_item`, `native_screen_title`, `native_data`, `LevelRef::block`,
+//! `LevelRef::block_property`, `native_insert_item`, `native_cursor`).
 //!
 //! API 19 adds mod-drawn screens for mod blocks (`native_screen`,
 //! `native_screen_draw`, and the `native_sprite` helpers), with the mod's own
@@ -10220,11 +10220,6 @@ impl Game<'_> {
         }
         fs::read(self.options.resources.join(path)).ok()
     }
-    /// The block at `pos` (`mymod:cable`; air where nothing is loaded).
-    pub(super) fn native_block(&self, pos: [i32; 3]) -> String {
-        let state = self.world.block(pos[0], pos[1], pos[2]);
-        self.res.facts().get(state).name.to_string()
-    }
     /// The most recently extracted world frame's camera, if one exists.
     pub(super) fn native_camera(&self) -> Option<NativeCamera> {
         self.native_camera_frame.clone()
@@ -10247,18 +10242,6 @@ impl Game<'_> {
                 [min.x, min.y, min.z, max.x, max.y, max.z]
             })
             .collect()
-    }
-    /// Property `key` of the block at `pos` (a machine's `facing`), if it
-    /// has one.
-    pub(super) fn native_block_property(&self, pos: [i32; 3], key: &str) -> Option<String> {
-        let state = self.world.block(pos[0], pos[1], pos[2]);
-        self.pack
-            .assets
-            .registry
-            .state(state)?
-            .properties
-            .get(key)
-            .cloned()
     }
     /// The window's width and height in physical pixels, independent of GUI
     /// scale; none on a server or when no window exists.
