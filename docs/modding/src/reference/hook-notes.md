@@ -2310,7 +2310,7 @@ handle, an entity the client doesn't track and a level it doesn't show:
   players in range; a silent mob plays nothing and a player doesn't hear their own), `game_event(host, event)`
   (`Entity.gameEvent`: the entity is the source of a vibration for sculk sensors, wardens and allays),
   `broadcast_event(host, id)` (`Level.broadcastEntityEvent`: entity event `id` to the players near it, for
-  `handleEntityEvent` to act on), `sound_source(host)` (`Entity.getSoundSource`, a `NativeSoundSource`) and
+  `handleEntityEvent` to act on), `sound_source(host)` (`Entity.getSoundSource`, a `SoundSource`) and
   `spectator(host)` (`Entity.isSpectator`) work for every kind. `game_event` and `broadcast_event` act on the level in
   place and return false for a player in a parked level. There is no `sprint_particles`: vanilla spawns those on the
   client only.

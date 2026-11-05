@@ -26,22 +26,14 @@ const MAX_TARGET_PARAMETERS: usize = 7;
 const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[
     "use_on",
     "piston_pre",
-    "living_incoming_damage",
-    "apply_effect_tick",
-    "living_knockback",
     "projectile_impact",
     "entity_mount",
     "sign_changed",
     "cauldron_level_changed",
     "ender_pearl_teleport",
     "block_drops",
-    "fall_on",
-    "bounce_on",
     "bonemeal",
-    "finalize_spawn",
     "item_tooltip",
-    "living_drops",
-    "get_equipment_drop_chance",
     "note_block_play",
     "player_set_spawn",
 ];
@@ -440,13 +432,9 @@ pub(super) fn emit(
                 .join(", ");
             let mut signature = sig.clone();
             signature.ident = syn::Ident::new(&format!("fire_{name}"), signature.ident.span());
-            let receiver = if target.contains("::GameLevel<") {
-                "GameLevel"
-            } else if target.contains("::HitLevel<") {
-                "HitLevel"
-            } else {
-                "Game"
-            };
+            let target_path: syn::Path = syn::parse_str(target)
+                .map_err(|error| format!("invalid target for {name}: {error}"))?;
+            let receiver = &target_path.segments[target_path.segments.len() - 2].ident;
             fire.push_str(&format!("impl {receiver}<'_> {{ #[allow(dead_code)] #[inline] pub(super) {signature} {{ mod_api::{call}({passed}); }} }}\n", signature = signature.to_token_stream()));
             if fill {
                 let passed = sig

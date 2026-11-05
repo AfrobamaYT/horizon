@@ -14,7 +14,7 @@ class MouseButtonEventsTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
     def test_order_cancellation_release_and_synthetic_input(self):
         source = (ROOT / "crates/horizon-client/src/game.rs").read_text(encoding="utf-8")
-        outer = method(source.replace("pub(super) fn", "fn"), "handle_window_event")
+        outer = method(source.replace("pub(super) fn", "fn"), "handle_window_event_as")
         dispatch = outer[outer.index("        if let WindowEvent::MouseInput { state, button, .. } = &event {"):]
         fixture = r"""
 use std::collections::HashSet;

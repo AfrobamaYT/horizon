@@ -1018,12 +1018,12 @@ use horizon_world::{
 use mod_api::__private::game::IngredientTest;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, ClientReloadListeners, EffectTickChange, EnchantmentInfo,
-    EntityRef, EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera,
-    NativeCommand, NativeDispensed, NativeHandRender, NativeItemDrop, NativeKeyMapping,
-    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
-    NativeServerPlayer, PathComputationType, Placement, PlayerRef, RecipeBookCategory,
-    ScreenOpening, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    self, Answered, BlockPlacement, ClientReloadListeners, EnchantmentInfo, EntityRef,
+    GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
+    NativeHandRender, NativeItemDrop, NativeKeyMapping, NativeLifecycleContext,
+    NativeNoteBlockChange, NativeProgressType, NativeServerPlayer, PathComputationType, Placement,
+    PlayerRef, RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase,
+    TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BlockHit, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite,
@@ -1037,8 +1037,8 @@ pub(crate) use mod_api::{
     NativePanelEvent, NativePortalShape, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
 use mod_api::{
-    MobRef, NativeDespawn, NativeDifficulty, NativePermissionLevel, NativeSpawnCheck,
-    NativeSpawnReason, NativeSpawner, Recipe, SoundPlay,
+    MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason, Recipe,
+    SoundPlay,
 };
 use std::{
     collections::HashMap,
@@ -3350,7 +3350,7 @@ impl Game<'_> {
         stack: &ItemStack,
         pose: &mut Option<mod_api::ArmPose>,
     ) {
-        mod_api::dispatch_get_arm_pose(self, entity_id, hand, stack, pose);
+        self.fire_get_arm_pose(entity_id, hand, stack, pose);
     }
     /// Name tag visibility and optional replacement text. API 372.
     pub(super) fn native_render_name_tag(
@@ -5429,17 +5429,8 @@ impl Game<'_> {
     /// (`native_living_experience_drop`); a spectator, who drops nothing,
     /// doesn't call this. Item entity state such as no-gravity, owner and
     /// lifetime isn't in `NativeItemDrop`. Server-side.
-    pub(super) fn native_living_drops(
-        &mut self,
-        entity: u32,
-        kind: &str,
-        player: Option<u128>,
-        source: &HurtSource<'_>,
-        recently_hit: bool,
-        drops: &mut Vec<NativeItemDrop>,
-        cancel: &mut bool,
-    ) {
-        self.fire_living_drops(entity, kind, player, source, recently_hit, drops, cancel);
+    pub(super) fn native_living_drops(&mut self, call: mod_api::__private::LivingDropsCall<'_>) {
+        self.fire_living_drops(call);
     }
     /// A dying mob `entity` of `kind` is about to roll its drop chance for
     /// the item `stack` in `slot` (`Mob.dropCustomDeathLoot`, NeoForge's
@@ -5457,27 +5448,9 @@ impl Game<'_> {
     /// Server-side.
     pub(super) fn native_get_equipment_drop_chance(
         &mut self,
-        entity: u32,
-        kind: &str,
-        slot: EquipmentSlot,
-        source: &HurtSource<'_>,
-        recently_hit: bool,
-        stack: &ItemStack,
-        original_chance: f32,
-        preserved: bool,
-        chance: &mut f32,
+        call: mod_api::__private::GetEquipmentDropChanceCall<'_>,
     ) {
-        self.fire_get_equipment_drop_chance(
-            entity,
-            kind,
-            slot,
-            source,
-            recently_hit,
-            stack,
-            original_chance,
-            preserved,
-            chance,
-        );
+        self.fire_get_equipment_drop_chance(call);
     }
     /// A server player's experience points are about to change through
     /// `Player.giveExperiencePoints` (NeoForge's `PlayerXpEvent.XpChange`): an
@@ -6725,27 +6698,8 @@ impl Game<'_> {
     /// finalization (the mob still spawns, uninitialised); `spawn_cancelled`
     /// stops the spawn. `difficulty` is what finalization will read.
     /// Server-side.
-    pub(super) fn native_finalize_spawn(
-        &self,
-        dimension: &str,
-        kind: &str,
-        reason: NativeSpawnReason,
-        pos: [f64; 3],
-        spawner: Option<NativeSpawner>,
-        difficulty: &mut NativeDifficulty,
-        spawn_cancelled: &mut bool,
-        cancel: &mut bool,
-    ) {
-        self.fire_finalize_spawn(
-            dimension,
-            kind,
-            reason,
-            pos,
-            spawner,
-            difficulty,
-            spawn_cancelled,
-            cancel,
-        );
+    pub(super) fn native_finalize_spawn(&self, call: mod_api::__private::FinalizeSpawnCall<'_>) {
+        self.fire_finalize_spawn(call);
     }
     /// The world's spawn point changed to `pos` and `angle`.
     pub(super) fn native_spawn_change(&mut self, pos: [i32; 3], angle: [f32; 2]) {
@@ -7301,15 +7255,7 @@ impl Game<'_> {
         place: &mut TooltipPlace,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_render_tooltip_pre(
-            self,
-            stack,
-            screen_width,
-            screen_height,
-            elements,
-            place,
-            cancel,
-        );
+        self.fire_render_tooltip_pre(stack, screen_width, screen_height, elements, place, cancel);
     }
     /// Change a tooltip box's background and border gradient colors, as ARGB.
     /// Stack is None for tooltips not associated with an item.
@@ -8751,21 +8697,9 @@ impl Game<'_> {
     /// Server-side.
     pub(super) fn native_apply_effect_tick(
         &self,
-        effect: &str,
-        dimension: &str,
-        entity: Option<i32>,
-        amplifier: i32,
-        holder: LivingRef,
-        health: f32,
-        max_health: f32,
-        food: Option<NativePlayerFood>,
-        changes: &mut Vec<EffectTickChange>,
-        keep: &mut bool,
+        call: mod_api::__private::ApplyEffectTickCall<'_>,
     ) {
-        mod_api::dispatch_apply_effect_tick(
-            self, effect, dimension, entity, amplifier, holder, health, max_health, food, changes,
-            keep,
-        );
+        self.fire_apply_effect_tick(call);
     }
     /// `MobEffect.onEffectAdded`: `LivingEntity.addEffect` gave `entity`
     /// (as in `native_apply_effect_tick`) the content mod's effect `effect`,
@@ -9119,45 +9053,15 @@ impl HitLevel<'_> {
     /// handling and the fall sounds: change it, and zero prevents both. A creative or
     /// fall-immune entity is told with zero damage and keeps its immunity. Players and mobs
     /// land here; dropped items, projectiles and the other entities do not yet.
-    pub(super) fn native_fall_on(
-        &mut self,
-        dimension: &str,
-        entity: i32,
-        kind: &str,
-        state: BlockStateId,
-        pos: BlockPos,
-        distance: f64,
-        damage: &mut f32,
-        writes: &mut Vec<LandingWrite>,
-    ) {
-        mod_api::dispatch_fall_on(
-            self, dimension, entity, kind, state, pos, distance, writes, damage,
-        );
+    pub(super) fn native_fall_on(&mut self, call: mod_api::__private::FallOnCall<'_>) {
+        self.fire_fall_on(call);
     }
     /// `Block.bounceOn`: entity `entity` of type `kind` bounced off `state` at `pos` and fell
     /// `fall_distance` blocks. `movement` is the movement the bounce leaves it, before
     /// vanilla sets it: change it to change what the entity keeps. Players and mobs bounce
     /// here; dropped items and the other entities do not yet.
-    pub(super) fn native_bounce_on(
-        &mut self,
-        dimension: &str,
-        entity: i32,
-        kind: &str,
-        state: BlockStateId,
-        pos: BlockPos,
-        fall_distance: f64,
-        movement: &mut [f64; 3],
-    ) {
-        mod_api::dispatch_bounce_on(
-            self,
-            dimension,
-            entity,
-            kind,
-            state,
-            pos,
-            fall_distance,
-            movement,
-        );
+    pub(super) fn native_bounce_on(&mut self, call: mod_api::__private::BounceOnCall<'_>) {
+        self.fire_bounce_on(call);
     }
     /// NeoForge's `LivingIncomingDamageEvent`: `LivingEntity.hurtServer`, past its guards (an
     /// invulnerable or dead entity, fire on a fire-resistant one), is about to hurt entity
@@ -9175,17 +9079,9 @@ impl HitLevel<'_> {
     /// attachments; the hurt entity is in the middle of its hit.
     pub(super) fn native_living_incoming_damage(
         &mut self,
-        entity: i32,
-        kind: &str,
-        source: &HurtSource<'_>,
-        victim: &Victim,
-        weapon: Option<&ItemStack>,
-        container: &mut DamageContainer,
-        canceled: &mut bool,
+        call: mod_api::__private::LivingIncomingDamageCall<'_>,
     ) {
-        mod_api::dispatch_living_incoming_damage(
-            self, entity, kind, source, victim, weapon, container, canceled,
-        );
+        self.fire_living_incoming_damage(call);
     }
     /// NeoForge's `LivingKnockBackEvent`: `LivingEntity.knockback` is about to push entity
     /// `entity` of type `kind` (`minecraft:zombie`, `minecraft:player`) `strength` away from the
@@ -9209,30 +9105,9 @@ impl HitLevel<'_> {
     /// way (the ender dragon's). The level is the hit's: its blocks, random and own attachments.
     pub(super) fn native_living_knockback(
         &mut self,
-        entity: i32,
-        kind: &str,
-        source: &HurtSource<'_>,
-        attacker: i32,
-        attacker_main: Option<&ItemStack>,
-        attacker_off: Option<&ItemStack>,
-        strength: &mut f64,
-        x: &mut f64,
-        z: &mut f64,
-        canceled: &mut bool,
+        call: mod_api::__private::LivingKnockbackCall<'_>,
     ) {
-        mod_api::dispatch_living_knockback(
-            self,
-            entity,
-            kind,
-            source,
-            attacker,
-            attacker_main,
-            attacker_off,
-            strength,
-            x,
-            z,
-            canceled,
-        );
+        self.fire_living_knockback(call);
     }
     /// NeoForge's `LivingDamageEvent.Pre`: `LivingEntity.actuallyHurt` of entity `entity` of
     /// type `kind` (`minecraft:player`, `minecraft:zombie`) by `source` (named as
@@ -9284,15 +9159,15 @@ pub(super) fn incoming_damage(
     let (entity, kind, source) = hurt_server_args(hurting, level.attack());
     let mut canceled = false;
     let attack = level.attack();
-    HitLevel(level).native_living_incoming_damage(
+    HitLevel(level).native_living_incoming_damage(mod_api::__private::LivingIncomingDamageCall {
         entity,
         kind,
-        &source,
-        &victim,
-        attack.weapon_of(source.direct),
+        source: &source,
+        victim: &victim,
+        weapon: attack.weapon_of(source.direct),
         container,
-        &mut canceled,
-    );
+        canceled: &mut canceled,
+    });
     canceled
 }
 
@@ -9410,18 +9285,18 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
     let (entity, kind, source) = hurt_server_args(pushed, level.attack());
     let mut canceled = false;
     let [main, off] = &attack.held;
-    HitLevel(level).native_living_knockback(
+    HitLevel(level).native_living_knockback(mod_api::__private::LivingKnockbackCall {
         entity,
         kind,
-        &source,
+        source: &source,
         attacker,
-        main.as_ref(),
-        off.as_ref(),
-        &mut knock.strength,
-        &mut knock.x,
-        &mut knock.z,
-        &mut canceled,
-    );
+        attacker_main: main.as_ref(),
+        attacker_off: off.as_ref(),
+        strength: &mut knock.strength,
+        x: &mut knock.x,
+        z: &mut knock.z,
+        canceled: &mut canceled,
+    });
     canceled
 }
 
@@ -9461,21 +9336,28 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
             mod_api::__private::block_listens(mod_api::HookId::BounceOn, "bounce_on", state)
         },
         fall_on: |dimension, level, c, distance, damage, writes| {
-            HitLevel(level.reborrow()).native_fall_on(
-                dimension, c.entity, c.kind, c.state, c.position, distance, damage, writes,
-            );
+            HitLevel(level.reborrow()).native_fall_on(mod_api::__private::FallOnCall {
+                dimension,
+                entity: c.entity,
+                kind: c.kind,
+                state: c.state,
+                pos: c.position,
+                distance,
+                damage,
+                writes,
+            });
         },
         bounce_on: |dimension, level, c, fall_distance, movement| {
             let mut answer = [movement.x, movement.y, movement.z];
-            HitLevel(level.reborrow()).native_bounce_on(
+            HitLevel(level.reborrow()).native_bounce_on(mod_api::__private::BounceOnCall {
                 dimension,
-                c.entity,
-                c.kind,
-                c.state,
-                c.position,
+                entity: c.entity,
+                kind: c.kind,
+                state: c.state,
+                pos: c.position,
                 fall_distance,
-                &mut answer,
-            );
+                movement: &mut answer,
+            });
             *movement = horizon_core::geometry::Vec3::new(answer[0], answer[1], answer[2]);
         },
     };

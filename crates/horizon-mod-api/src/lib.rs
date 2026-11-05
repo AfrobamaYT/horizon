@@ -692,6 +692,10 @@ pub enum SoundSource {
 }
 
 impl SoundSource {
+    /// Its position in vanilla's `SoundSource` order, as the network sends it.
+    pub fn index(self) -> usize {
+        self as usize
+    }
     /// Every source, in vanilla's order (`SoundSource.values()`).
     pub const ALL: [SoundSource; 11] = [
         Self::Master,
@@ -2450,43 +2454,6 @@ pub enum NativeExplosionInteraction {
     Block,
     /// Blocks break and drop by the `tnt_explosion_drop_decay` rule (`TNT`).
     Tnt,
-}
-
-/// Which volume slider a sound is played under (`SoundSource`). A sound source
-/// is the group a client's sound options control: an entity's is
-/// `Entity.getSoundSource`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum NativeSoundSource {
-    /// The master volume category.
-    Master,
-    /// Music.
-    Music,
-    /// Jukeboxes and note blocks (`RECORDS`).
-    Records,
-    /// Rain and thunder.
-    Weather,
-    /// Blocks (`BLOCKS`).
-    Blocks,
-    /// Hostile mobs.
-    Hostile,
-    /// Friendly and neutral mobs.
-    Neutral,
-    /// Players (`PLAYERS`).
-    Players,
-    /// Ambient and block sounds.
-    Ambient,
-    /// Voice.
-    Voice,
-    /// Interface sounds.
-    Ui,
-}
-
-impl NativeSoundSource {
-    /// Its position in vanilla's `SoundSource` order, as the network sends it.
-    pub fn index(self) -> usize {
-        self as usize
-    }
 }
 
 /// The empty-context block shape requested from a level.

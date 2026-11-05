@@ -300,7 +300,14 @@ impl Game<'_> {
         // editor or a screen consumes the key, there is no world, or a
         // command handler returns an error: a lost release keeps Shift down.
         let released = released_modifier(line);
-        let result = self.control_command_inner(line, reply, event_loop);
+        // The socket's own key, mouse and typing commands are input, as the window's events are.
+        let input = matches!(
+            line.split_whitespace().next(),
+            Some("key" | "mouse" | "type")
+        );
+        let result = self.with_user_input(input, |game| {
+            game.control_command_inner(line, reply, event_loop)
+        });
         self.settle_title_mode();
         if let Some(key) = released {
             self.press_modifier_key(key, false);
