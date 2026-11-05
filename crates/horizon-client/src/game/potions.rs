@@ -2272,16 +2272,32 @@ impl Game<'_> {
         batch: &mut HudBatch,
         origin: (f32, f32),
         image_width: i32,
-    ) -> Option<[(String, u32); 2]> {
+    ) -> Option<Vec<(Text, u32)>> {
         let space = Self::effects_space(batch, [origin.0, origin.1], image_width as f32);
         let layout = self.inventory_effects_layout(batch, &space);
         let panels = self.effect_panels(&space, &layout);
-        inventory_effects::paint(
+        let hovered = inventory_effects::paint(
             batch,
             &self.gui.atlas,
             &panels,
             [self.cursor.0 as i32, self.cursor.1 as i32],
-        )
+        )?;
+        Some(self.effect_tooltip(batch, hovered))
+    }
+    /// A hovered panel's tooltip lines, after `GatherEffectScreenTooltipsEvent`
+    /// (fired only while a mod listens).
+    fn effect_tooltip(
+        &self,
+        batch: &HudBatch,
+        panel: &inventory_effects::EffectPanel<'_>,
+    ) -> Vec<(Text, u32)> {
+        let mut lines = inventory_effects::tooltip(panel);
+        if mod_api::__private::listened(mod_api::HookId::GatherEffectScreenTooltips) {
+            let view = self.screen_view(batch, self.screen);
+            let effect = super::native_living_effects::active_effect(panel.effect);
+            self.native_gather_effect_screen_tooltips(&view, &effect, &mut lines);
+        }
+        lines
     }
     /// The rectangle `draw_inventory_effects` covers, none with no effects
     /// or too little room right of the window. It follows the layout the last
@@ -2318,7 +2334,7 @@ impl Game<'_> {
         &self,
         space: &inventory_effects::EffectsSpace,
         layout: &inventory_effects::EffectsLayout,
-    ) -> Vec<inventory_effects::EffectPanel> {
+    ) -> Vec<inventory_effects::EffectPanel<'_>> {
         inventory_effects::panels(
             space,
             layout,
@@ -2817,5 +2833,53 @@ mod tests {
         }];
         assert!(!collect_dragon_breath(high_player, &mut ground_cloud));
         assert_eq!(ground_cloud[0].radius, 1.0);
+    }
+
+    /// `gather_effect_screen_tooltips` sees the hovered panel's effect and
+    /// its name and duration lines, and a line it adds is drawn; with no mod
+    /// the tooltip is vanilla's two lines.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_adds_a_line_to_an_effect_tooltip() {
+        use mod_api::{self, ClientHost, GatherEffectScreenTooltipsEvent, Hooks, ModEntry, Mods};
+        struct Mod;
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn gather_effect_screen_tooltips(
+                &self,
+                _: &dyn ClientHost,
+                event: &mut GatherEffectScreenTooltipsEvent<'_>,
+            ) {
+                assert_eq!(event.effect.id.to_string(), "minecraft:speed");
+                assert_eq!((event.effect.duration, event.effect.amplifier), (450, 1));
+                assert_eq!(event.screen.id, "inventory");
+                event.tooltip.push((Text::literal("Fast feet"), 0xff55ffff));
+            }
+        }
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.screen = Screen::Inventory;
+            game.potions.effects.list = vec![EffectInstance::new("speed", 450, 1)];
+            let batch = HudBatch::new([854, 480]);
+            let space = Game::effects_space(&batch, [100.0, 50.0], 176.0);
+            let layout = inventory_effects::EffectsLayout::vanilla(space.available());
+            let panels = game.effect_panels(&space, &layout);
+            let plain = |lines: Vec<(Text, u32)>| {
+                lines
+                    .into_iter()
+                    .map(|(text, color)| (text.plain(), color))
+                    .collect::<Vec<_>>()
+            };
+            let vanilla = vec![
+                ("Speed II".to_owned(), u32::MAX),
+                ("00:22".to_owned(), u32::MAX),
+            ];
+            assert_eq!(plain(game.effect_tooltip(&batch, &panels[0])), vanilla);
+            let mods: Mods = vec![ModEntry::new("effect-tips", Box::new(Mod))].into();
+            mod_api::testing::with_mods(mods, || {
+                let mut added = vanilla.clone();
+                added.push(("Fast feet".to_owned(), 0xff55ffff));
+                assert_eq!(plain(game.effect_tooltip(&batch, &panels[0])), added);
+            });
+        });
     }
 }

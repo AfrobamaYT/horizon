@@ -2,6 +2,8 @@
 //! inventories, with compact icons when there is little room on the right.
 use std::borrow::Cow;
 
+use horizon_client_core::text::Text;
+
 use crate::{
     effects::EffectInstance,
     hud::{HudAtlas, HudBatch},
@@ -9,7 +11,9 @@ use crate::{
 };
 
 #[derive(Debug, PartialEq)]
-pub struct EffectPanel {
+pub struct EffectPanel<'a> {
+    /// The effect the panel shows.
+    pub effect: &'a EffectInstance,
     pub icon: EffectIcon,
     pub name: String,
     pub duration: String,
@@ -62,14 +66,14 @@ impl EffectsLayout {
 
 /// Lay out panels as `layout` says. Vanilla hides them when fewer than 32 GUI
 /// pixels remain.
-pub fn panels(
+pub fn panels<'a>(
     space: &EffectsSpace,
     layout: &EffectsLayout,
-    effects: &[EffectInstance],
+    effects: &'a [EffectInstance],
     tick_rate: f32,
     translate: &dyn Fn(&str) -> Option<String>,
     text_width: &dyn Fn(&str) -> i32,
-) -> Vec<EffectPanel> {
+) -> Vec<EffectPanel<'a>> {
     let available = space.available();
     if effects.is_empty() || available < 32 || layout.hidden {
         return Vec::new();
@@ -104,6 +108,7 @@ pub fn panels(
             };
             let width = max_width.min(39 + text_width(&name).max(text_width(&duration)));
             EffectPanel {
+                effect,
                 icon,
                 name,
                 duration,
@@ -151,14 +156,14 @@ fn background(batch: &mut HudBatch, atlas: &HudAtlas, panel: &EffectPanel) {
     strip(panel.width - 4, 28, 4);
 }
 
-/// Paint panels and return the full name/duration tooltip for a hovered compact
-/// or clipped panel. Its hover height follows the spacing of overlapping rows.
-pub fn paint(
+/// Paint panels and return the hovered compact or clipped panel, whose
+/// tooltip shows. Its hover height follows the spacing of overlapping rows.
+pub fn paint<'p, 'a>(
     batch: &mut HudBatch,
     atlas: &HudAtlas,
-    panels: &[EffectPanel],
+    panels: &'p [EffectPanel<'a>],
     cursor: [i32; 2],
-) -> Option<[(String, u32); 2]> {
+) -> Option<&'p EffectPanel<'a>> {
     let mut tooltip = None;
     let mut icon = String::new();
     for panel in panels {
@@ -203,20 +208,26 @@ pub fn paint(
             && cursor[1] >= panel.y
             && cursor[1] <= panel.y + panel.spacing
         {
-            tooltip = Some([
-                (panel.name.clone(), u32::MAX),
-                (panel.duration.clone(), u32::MAX),
-            ]);
+            tooltip = Some(panel);
         }
     }
     tooltip
+}
+
+/// A hovered panel's tooltip as vanilla builds it: the full name, then the
+/// duration.
+pub fn tooltip(panel: &EffectPanel<'_>) -> Vec<(Text, u32)> {
+    vec![
+        (Text::literal(&panel.name), u32::MAX),
+        (Text::literal(&panel.duration), u32::MAX),
+    ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn layout(width: i32, effects: &[EffectInstance]) -> Vec<EffectPanel> {
+    fn layout(width: i32, effects: &[EffectInstance]) -> Vec<EffectPanel<'_>> {
         let space = EffectsSpace {
             screen_width: width,
             origin: [72, 37],

@@ -1023,9 +1023,9 @@ use mod_api::{
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
-    LogicalSide, NativeBlockClick, NativeBlockUpdateFlags, NativeInteractionResult,
-    NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion, TooltipElement, TooltipPlace,
-    UsePhase,
+    LogicalSide, NativeActiveEffect, NativeBlockClick, NativeBlockUpdateFlags,
+    NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
+    TooltipElement, TooltipPlace, UsePhase,
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
@@ -3989,6 +3989,22 @@ impl Game<'_> {
             horizontal_offset,
             canceled,
         );
+    }
+    /// `GatherEffectScreenTooltipsEvent`: the tooltip of the effect panel the
+    /// cursor is over beside the survival or creative inventory, shown when
+    /// the panel is compact or its name is cut short. `tooltip` holds the
+    /// effect's full name then its duration, each with a colour as `rgba`
+    /// packs it (`u32::MAX` keeps the text's own); add, change, reorder or
+    /// remove lines, and an empty list draws nothing. `effect` is the effect
+    /// the panel shows, `screen` the inventory. Asked each frame the tooltip
+    /// shows, only while a mod listens. Client-side.
+    pub(super) fn native_gather_effect_screen_tooltips(
+        &self,
+        screen: &NativeScreenView<'_>,
+        effect: &NativeActiveEffect,
+        tooltip: &mut Vec<(Text, u32)>,
+    ) {
+        self.fire_gather_effect_screen_tooltips(screen, effect, tooltip);
     }
     /// Before a screen's preedit handler (`ScreenEvent.Preedit.Pre`, vanilla's
     /// `GuiEventListener.preeditUpdated`): the input method is composing
