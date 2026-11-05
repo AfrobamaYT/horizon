@@ -1,5 +1,32 @@
 # Hook notes
 
+## Foreground GUI and client lifecycle
+
+`Hooks::gui_render_post` runs after the frame's GUI, including menus and the
+F1-hidden HUD. Its `batch` is a `DrawContext`, not an engine `HudBatch`; use
+its drawing methods and `size()` to place overlays. `gui_hidden` and `focused`
+let a listener choose whether to draw. The GUI paint, nine-slice, and tooltip
+operations also use this drawing context and the window's existing atlas.
+`Hooks::menu_background` can adjust the requested blur radius or set it to
+`None` before the game validates it.
+
+`Hooks::entity_outline` receives the entity id, kind, and mutable optional RGB
+outline for the current client render. Leave the existing value unchanged to
+preserve vanilla glowing; `None` disables it. These read-only client hooks
+receive `&dyn ClientHost`. They do not grant server writes.
+
+`Hooks::client_disconnecting` runs before an actual connection is discarded,
+not for a dimension change. Initialization and final shutdown still use the
+existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
+
+## Sending a map image
+
+`PlayerRef::send_map` sends a complete 128-by-128 map image through a
+`&mut dyn ServerHost`. It validates the live player handle and refuses fake
+players; a connectionless actor never produces a protocol packet. The image
+uses map colour bytes and is not saved in the world's map storage. Send it
+again after a player reconnects if no saved map owns that id.
+
 ## Decoded client packets
 
 `Hooks::client_packet` receives `&mut dyn ClientHost` and a read-only
