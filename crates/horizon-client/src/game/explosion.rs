@@ -1400,7 +1400,13 @@ mod tests {
                     assert_eq!(item.position, Vec3::new(7.0, 80.0, 7.0));
                     assert_eq!(item.velocity, Vec3::new(0.1, 0.2, 0.3));
                     assert_eq!(item.pickup_delay, 42);
-                    assert_eq!(game.orbs.iter().map(|orb| orb.value).sum::<u32>(), 5);
+                    assert_eq!(
+                        game.orbs
+                            .iter()
+                            .map(|orb| orb.value * orb.count)
+                            .sum::<u32>(),
+                        5
+                    );
                 };
                 check(game);
                 for (x, state) in [(3, dirt), (4, infested)] {
