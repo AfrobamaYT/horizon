@@ -39,6 +39,7 @@ use winit::{
 /// literal that takes the rest of the line as it was typed, run by
 /// `native_command` (`Dispatcher::with_mod_commands`), so the chat box colours
 /// and completes them as it does the game's own.
+#[cfg(test)]
 pub(super) fn with_native_commands(
     base: &horizon_client::command::Dispatcher,
     names: &[&str],
