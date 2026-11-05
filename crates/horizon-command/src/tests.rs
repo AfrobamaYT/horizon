@@ -94,6 +94,43 @@ fn suggestions(input: &str) -> Vec<String> {
 }
 
 #[test]
+fn execution_requirement_keeps_public_children_reachable() {
+    let mut dispatcher = Dispatcher::new();
+    let root = dispatcher.literal(0, "foo");
+    dispatcher.executes(root, "admin");
+    dispatcher.requires_execution(root, 4);
+    let child = dispatcher.literal(root, "bar");
+    dispatcher.executes(child, "public");
+    let registries = Registries::default();
+    let denied = dispatcher.parse("foo", &registries);
+    assert!(!denied.is_valid());
+    assert!(denied.executable().is_err());
+    assert_eq!(
+        dispatcher
+            .parse("foo bar", &registries)
+            .executable()
+            .unwrap()
+            .1,
+        "public"
+    );
+    let operator = Registries {
+        permission: 4,
+        ..registries
+    };
+    assert_eq!(
+        dispatcher.parse("foo", &operator).executable().unwrap().1,
+        "admin"
+    );
+    dispatcher.requires(root, 4);
+    assert!(
+        dispatcher
+            .parse("foo bar", &Registries::default())
+            .executable()
+            .is_err()
+    );
+}
+
+#[test]
 fn reader_matches_brigadier() {
     let mut r = Reader::new("12 -3.5 abc \"q\\\"x\" true");
     assert_eq!(r.read_int().unwrap(), 12);
