@@ -132,8 +132,11 @@ fn another_guest_and_online_players_are_visible_during_a_turn() {
         game.as_guest(12, |game| {
             assert_eq!(rider.position(game), Some([3.0, 64.0, 5.0]));
             let online = game.native_server_players();
-            assert_eq!(online.iter().map(|p| p.uuid).collect::<Vec<_>>(), [12, 13]);
-            assert_eq!(online[1].position, [3.0, 64.0, 5.0]);
+            assert_eq!(
+                online.iter().map(|p| p.uuid()).collect::<Vec<_>>(),
+                [12, 13]
+            );
+            assert_eq!(online[1].entity().position(game).unwrap(), [3.0, 64.0, 5.0]);
         })
         .unwrap();
     });
@@ -642,4 +645,73 @@ fn tick_advancement_notice_precedes_recipe_reward() {
         assert_eq!(*observed.lock().unwrap(), vec![Some(false), Some(false)]);
     });
     std::fs::remove_dir_all(scratch).unwrap();
+}
+
+/// The split services retain connected identities even while another player's
+/// body is swapped in, and still queue acting-player messages after the hook.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn server_services_preserve_identity_and_message_delivery() {
+    use horizon_protocol::packets::play::Clientbound as C;
+    use mod_api::{ServerHost, Text};
+    with_guests(|game| {
+        game.lan.as_mut().unwrap().hub.guests[0].permission = 3;
+        let players = game.players().server_players();
+        assert_eq!(
+            players.iter().map(|p| p.uuid()).collect::<Vec<_>>(),
+            [12, 13]
+        );
+        let a = players[0];
+        let b = players[1];
+        assert!(game.players().acting_player().is_none());
+        assert_eq!(a.name(game).as_deref(), Some("guest12"));
+        assert_eq!(a.op_level(game), Some(3));
+        assert!(game.commands().run_command("list"));
+        game.chat_capture = Some(Vec::new());
+        game.commands().feedback(Text::literal("command answer"));
+        assert_eq!(
+            game.chat_capture.take().unwrap()[0].plain(),
+            "command answer"
+        );
+        assert_eq!(game.messages().text_allowed("message"), Some(true));
+        game.as_guest(12, |game| {
+            assert_eq!(game.players().acting_player(), Some(a));
+            assert_eq!(game.players().server_players(), players);
+            assert!(a.tell(game, Text::literal("chat")));
+            assert!(a.action_bar(game, Text::literal("overlay")));
+            assert!(a.tab_list(game, &Text::literal("header"), &Text::literal("footer")));
+            let packets = &game.guest_packets;
+            assert!(matches!(&packets[packets.len() - 3], C::SystemChat(p) if !p.overlay));
+            assert!(matches!(&packets[packets.len() - 2], C::SystemChat(p) if p.overlay));
+            assert!(matches!(&packets[packets.len() - 1], C::TabList(_)));
+            assert!(b.tell(game, Text::literal("other player")));
+            assert!(b.set_nickname(game, Some("B")));
+            assert!(b.set_sleep_ignored(game, true));
+            game.as_guest(13, |game| {
+                assert_eq!(game.players().acting_player(), Some(b));
+                assert_eq!(game.players().server_players(), players);
+                assert_eq!(a.name(game).as_deref(), Some("guest12"));
+                assert_eq!(a.op_level(game), Some(3));
+                assert!(a.tell(game, Text::literal("displaced but connected")));
+            })
+            .unwrap();
+        })
+        .unwrap();
+        // Vanish is UUID-persistent, not a live-body operation.
+        game.lan.as_mut().unwrap().hub.guests.clear();
+        assert!(a.hide(game, Some(2)));
+        assert_eq!(game.lan.as_ref().unwrap().hub.hidden.get(&12), Some(&2));
+        assert!(!a.tell(game, Text::literal("offline")));
+        assert!(!a.set_nickname(game, Some("offline")));
+        assert!(!a.set_sleep_ignored(game, true));
+        let stale = mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(
+                mod_api::NativeWorldEpoch::new(a.entity().epoch().get() + 1),
+                a.entity().id(),
+            ),
+            a.uuid(),
+        );
+        assert!(!stale.hide(game, None));
+        assert_eq!(stale.name(game), None);
+    });
 }
