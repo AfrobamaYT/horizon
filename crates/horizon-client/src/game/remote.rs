@@ -11335,6 +11335,9 @@ mod interaction_event_tests;
 mod native_entity_tests;
 
 #[cfg(test)]
+mod effect_blend_tests;
+
+#[cfg(test)]
 mod tests {
     /// `ClientChatReceivedEvent`: a mod's replacement is the line the chat
     /// shows, a cancelled system line never shows, and a cancelled message
