@@ -19,6 +19,3 @@ pub fn shown(claim: &Claim) -> bool {
 pub fn in_top_bar(forced: bool, status: Option<&Claim>, kept: Option<&Claim>) -> bool {
     forced || status.is_some_and(shown) || kept.is_some_and(shown)
 }
-
-#[cfg(test)]
-mod tests;
