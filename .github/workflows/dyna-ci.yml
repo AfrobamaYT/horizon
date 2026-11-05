@@ -154,6 +154,8 @@ jobs:
       - name: Check formatting and lint
         if: steps.rust.outputs.required != 'false'
         id: native-lint
+        # Stop this diagnostic run once Cargo has reported the initial dirty reasons.
+        timeout-minutes: 3
         run: |
           cargo +stable fmt --all -- --check
           cargo +stable clippy --workspace --all-targets -- -D warnings
