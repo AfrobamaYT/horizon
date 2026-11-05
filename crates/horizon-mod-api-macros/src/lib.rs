@@ -267,11 +267,11 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     let fire = |variant: &syn::Ident, method: &syn::Ident| {
         let name = method.to_string();
         quote! {
-            ::mod_points::__private::fire(|| {
-                for __points in crate::game::points::listeners(crate::game::points::PointId::#variant, #name) {
-                    __points.#method(#host, &mut __args);
-                }
-            })
+            crate::game::points::fire(
+                crate::game::points::PointId::#variant,
+                #name,
+                &mut |__points| __points.#method(#host, &mut __args),
+            )
         }
     };
     let listened = |variant: &syn::Ident| quote!(crate::game::points::POINTS[crate::game::points::PointId::#variant as usize].load(::std::sync::atomic::Ordering::Acquire));

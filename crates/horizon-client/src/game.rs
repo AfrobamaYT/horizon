@@ -136,7 +136,7 @@ mod execution_role;
 /// `mod_points::PointId`, set once after the mods are installed where one listens.
 #[doc(hidden)]
 pub mod points {
-    pub(crate) use mod_points::__private::listeners;
+    pub(crate) use mod_points::__private::fire;
     pub(crate) use mod_points::*;
     use std::sync::atomic::{AtomicBool, Ordering};
 

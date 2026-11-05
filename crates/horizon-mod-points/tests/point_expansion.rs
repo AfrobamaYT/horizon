@@ -69,12 +69,10 @@ mod game {
         pub static LISTENER: Mutex<Option<&'static dyn Points>> = Mutex::new(None);
         pub static HEARD: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
-        pub fn listeners(
-            _: PointId,
-            name: &'static str,
-        ) -> impl Iterator<Item = &'static dyn Points> {
+        pub fn fire(_: PointId, name: &'static str, call: &mut dyn FnMut(&'static dyn Points)) {
             HEARD.lock().unwrap().push(name);
-            (*LISTENER.lock().unwrap()).into_iter()
+            let listener = *LISTENER.lock().unwrap();
+            listener.into_iter().for_each(call);
         }
     }
 }
