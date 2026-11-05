@@ -757,7 +757,7 @@ impl Game<'_> {
             ));
         }
         if let Some(guest) = self.lan.as_ref().and_then(|host| {
-            host.hub.guests.iter().find(|guest| {
+            host.hub.guests.simulation_iter().find(|guest| {
                 guest.placed
                     && guest.participates_online()
                     && guest.uuid == uuid
@@ -854,13 +854,12 @@ impl Game<'_> {
         {
             return Some(read);
         }
-        let guest = self.lan.as_ref()?.hub.guests.iter().find(|guest| {
-            guest.placed
-                && guest.is_fake()
-                && guest.uuid == player.fields().uuid
-                && guest.entity_id as u32 == player.fields().entity.id()
-                && !self.lan_guest_swaps.contains(&guest.conn)
-        })?;
+        let guests = &self.lan.as_ref()?.hub.guests;
+        let guest = guests
+            .get(guests.identity_index(player.fields().uuid, player.fields().entity.id())?)?;
+        if !guest.placed || !guest.is_fake() || self.lan_guest_swaps.contains(&guest.conn) {
+            return None;
+        }
         Some(PlayerRead::Guest(guest))
     }
 

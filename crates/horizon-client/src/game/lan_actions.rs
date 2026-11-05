@@ -3525,7 +3525,7 @@ impl Game<'_> {
         if let Some(g) = host
             .hub
             .guests
-            .iter()
+            .simulation_iter()
             .find(|g| g.entity_id == id && g.conn != conn && host.hub.here(g))
         {
             return Some(g.bounds());
