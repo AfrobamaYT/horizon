@@ -4,7 +4,7 @@ native trait mods against it with rustc alone, in seconds, without the game's so
 
     python3 tools/prebuilt_game.py build OUT [--server]   # build and collect the folder, write horizon-prebuilt.json
     python3 tools/prebuilt_game.py smoke OUT              # build the starter mod and the game executable against OUT only
-    python3 tools/prebuilt_game.py exports OUT            # the game DLL's exported names, toward Windows' limit
+    python3 tools/prebuilt_game.py exports OUT            # each DLL's exported names, toward Windows' limit
 
 Each OS's folder is built on that OS: the proc-macro libraries in it run inside the player's own rustc.
 The folder holds only compiler outputs, never vanilla data; `build` refuses any other file.
@@ -75,6 +75,10 @@ def stage(target_dir: Path) -> Path:
     print(run(["cargo", "run", "--locked", "--release", "-q", "-p", "horizon-mod-api-gen", "--bin", "horizon-stage",
                "--", str(staged), str(staged / POINTS), str(staged / INTERNALS)],
               cwd=staged, env={**os.environ, "CARGO_TARGET_DIR": str(target_dir / "tools")}), end="")
+    # Only the prebuilt game splits the wasm runtime out: normal source builds stay static. With
+    # prefer-dynamic, rustc picks this dylib for the game rather than folding its runtime stack into it.
+    with (staged / "crates/horizon-mod-wasm/Cargo.toml").open("a") as manifest:
+        manifest.write('\n[lib]\ncrate-type = ["rlib", "dylib"]\n')
     return staged
 
 
@@ -84,9 +88,12 @@ def build(out: Path, server: bool) -> None:
     # One std for the game, every mod and the executable: the game links std dynamically, as mods will.
     rustflags = "-C prefer-dynamic"
     features = ["--no-default-features"] if server else []
+    # Linux's executable RUNPATH doesn't cover transitive dependencies: the game itself must find
+    # the wasm runtime beside it. macOS resolves its dylib dependencies through the executable's rpath.
+    link = ["--", "-C", "link-arg=-Wl,-rpath,$ORIGIN"] if sys.platform == "linux" else []
     messages = run(
         ["cargo", "rustc", "--locked", "-p", "horizon-client", "--lib", "--crate-type", "dylib",
-         "--profile", PROFILE, "--message-format", "json-render-diagnostics", *features],
+         "--profile", PROFILE, "--message-format", "json-render-diagnostics", *features, *link],
         cwd=staged,
         env={**os.environ, "RUSTFLAGS": rustflags, "CARGO_TARGET_DIR": str(target_dir)},
     )
@@ -99,7 +106,7 @@ def build(out: Path, server: bool) -> None:
     deps = out / "deps"
     deps.mkdir(parents=True)
     for file in sorted((target_dir / PROFILE / "deps").iterdir()):
-        # Metadata, proc macros and the game; the other crates' code is inside the game's dylib.
+        # Metadata, proc macros, the game and the wasm runtime; other code lives inside the two dylibs.
         if file.name.endswith(SUFFIXES):
             shutil.copy2(file, deps / file.name)
     native = out / NATIVE
@@ -141,9 +148,9 @@ def build(out: Path, server: bool) -> None:
     check(out)
 
 
-def game_dylib(deps: Path) -> Path | None:
-    """The game itself: a dylib carries its own metadata, so it has no `.rmeta` beside it."""
-    names = {f"{prefix}horizon_client.{ext}" for prefix in ("lib", "") for ext in ("so", "dll", "dylib")}
+def dylib(deps: Path, crate: str) -> Path | None:
+    """A dylib carries its own metadata, so it has no `.rmeta` beside it."""
+    names = {f"{prefix}{crate}.{ext}" for prefix in ("lib", "") for ext in ("so", "dll", "dylib")}
     return next((path for path in deps.iterdir() if path.name in names), None)
 
 
@@ -157,8 +164,9 @@ def check(out: Path) -> None:
     ]
     if stray:
         sys.exit(f"prebuilt folder holds files that aren't compiler outputs: {stray}")
-    if game_dylib(out / "deps") is None:
-        sys.exit("prebuilt folder has no horizon-client dylib")
+    for crate in ("horizon_client", "horizon_mod_wasm"):
+        if dylib(out / "deps", crate) is None:
+            sys.exit(f"prebuilt folder has no {crate.replace('_', '-')} dylib")
 
 
 def smoke(out: Path) -> None:
@@ -187,7 +195,7 @@ def smoke(out: Path) -> None:
         link_args = json.loads((out / IDENTITY).read_text())["link_args"]
         run(["rustc", *common, "--crate-type", "bin", "--crate-name", "horizon_client_smoke",
              *(flag for arg in link_args for flag in ("-C", f"link-arg={arg}")),
-             "--extern", f"horizon_client={game_dylib(deps)}", *extern("mod_api"), *extern("horizon_mods"),
+             "--extern", f"horizon_client={dylib(deps, 'horizon_client')}", *extern("mod_api"), *extern("horizon_mods"),
              "--extern", f"mod_0={scratch / 'libmod_0.rlib'}", "-L", f"dependency={scratch}",
              "-o", str(scratch / "horizon-client"), str(scratch / "main.rs")])
     print(f"smoke: the starter mod and the game executable built against {out} alone")
@@ -197,13 +205,9 @@ def smoke(out: Path) -> None:
 EXPORT_WARNING = 60_000
 
 
-def exports(out: Path) -> None:
-    """The game dylib's exported names, as Windows counts them toward its 65,535 limit (#589): read from the
-    PE export directory, so it runs on any OS. Prints nothing for a game that isn't a DLL."""
-    game = game_dylib(out / "deps")
-    if game is None or game.suffix != ".dll":
-        return
-    data = game.read_bytes()
+def export_count(library: Path) -> int:
+    """Windows' exported-name count from a DLL's PE export directory, readable on any OS."""
+    data = library.read_bytes()
     pe = int.from_bytes(data[0x3C:0x40], "little")
     optional = pe + 24
     directories = optional + (112 if int.from_bytes(data[optional:optional + 2], "little") == 0x20B else 96)
@@ -215,12 +219,21 @@ def exports(out: Path) -> None:
         if address <= export_rva < address + raw_size:
             directory = raw + export_rva - address
             names = int.from_bytes(data[directory + 24:directory + 28], "little")
-            print(f"{game.name}: {names} exported names (Windows' limit is 65,535)")
-            if names > EXPORT_WARNING:
-                sys.exit(f"{game.name} exports {names} names, past {EXPORT_WARNING:,}: Windows refuses to link a DLL "
-                         "past 65,535, so cut the exported names before adding points or internals (#589)")
-            return
-    sys.exit(f"{game.name} has no export directory")
+            return names
+    sys.exit(f"{library.name} has no export directory")
+
+
+def exports(out: Path) -> None:
+    """Report and guard every DLL's Windows export budget (#589), including the separate wasm runtime."""
+    over = []
+    for library in sorted((out / "deps").glob("*.dll")):
+        names = export_count(library)
+        print(f"{library.name}: {names} exported names (Windows' limit is 65,535)")
+        if names > EXPORT_WARNING:
+            over.append(f"{library.name} exports {names} names")
+    if over:
+        sys.exit(f"{'; '.join(over)}, past {EXPORT_WARNING:,}: Windows refuses to link a DLL "
+                 "past 65,535, so cut the exported names before adding points or internals (#589)")
 
 
 def main() -> None:

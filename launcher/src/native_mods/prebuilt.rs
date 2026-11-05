@@ -307,9 +307,9 @@ fn check_identity(dir: &Path, revision: &str, host: &str, target: Target) -> Res
     }
 }
 
-/// The library file a crate named `krate` left in `deps`: its metadata, or the game's own dylib.
+/// The library file a crate named `krate` left in `deps`: its metadata, or its own dylib.
 fn library(deps: &Path, krate: &str) -> Result<PathBuf, String> {
-    let game = ["so", "dll", "dylib"]
+    let dylibs = ["so", "dll", "dylib"]
         .iter()
         .flat_map(|ext| [format!("lib{krate}.{ext}"), format!("{krate}.{ext}")]);
     let prefix = format!("lib{krate}-");
@@ -320,7 +320,7 @@ fn library(deps: &Path, krate: &str) -> Result<PathBuf, String> {
         .find(|path| {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             (name.starts_with(&prefix) && name.ends_with(".rmeta"))
-                || game.clone().any(|g| g == name)
+                || dylibs.clone().any(|g| g == name)
         })
         .ok_or_else(|| trf("The prebuilt game has no {crate}.", &[("crate", krate)]))
 }
@@ -473,7 +473,14 @@ pub(super) fn compile(
     }
     cmd.arg("-o").arg(&binary).arg(&main);
     super::run(cmd, "Linking the game", |_| {})?;
-    Ok((binary, vec![game_library, standard_library(rust)?]))
+    Ok((
+        binary,
+        vec![
+            game_library,
+            library(&deps, "horizon_mod_wasm")?,
+            standard_library(rust)?,
+        ],
+    ))
 }
 
 #[cfg(test)]
@@ -495,6 +502,22 @@ mod tests {
             &[api::Project::read(&bundle).unwrap()],
             Profile::Performance,
         )
+    }
+
+    #[test]
+    fn runtime_dylib_is_found_for_installation() {
+        let dir = super::super::tests::dir("prebuilt-runtime-dylib");
+        for name in [
+            "libhorizon_mod_wasm.so",
+            "horizon_mod_wasm.dll",
+            "libhorizon_mod_wasm.dylib",
+        ] {
+            let path = dir.join(name);
+            fs::write(&path, []).unwrap();
+            assert_eq!(library(&dir, "horizon_mod_wasm").unwrap(), path);
+            fs::remove_file(path).unwrap();
+        }
+        assert!(library(&dir, "horizon_mod_wasm").is_err());
     }
 
     #[test]
