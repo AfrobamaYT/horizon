@@ -645,7 +645,7 @@
 //!
 //! API 98 adds giving a whole stack to any player from a server hook (`native_give_stack`).
 //!
-//! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (light and weather now through `LevelRef`, with `native_day_time`, `native_world_height`, `native_max_stack_size`).
+//! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (light, weather and height now through `LevelRef`, with `native_day_time`, `native_max_stack_size`).
 //!
 //! API 96 adds reading redstone from a server mod's block (`native_neighbor_signal`).
 //!
@@ -9802,12 +9802,6 @@ impl Game<'_> {
     /// take it modulo 24000 for the hour.
     pub(super) fn native_day_time(&self) -> i64 {
         self.world.day_time
-    }
-    /// The lowest block y and the height of the world in place
-    /// (`LevelHeightAccessor.getMinY` and `getHeight`): how deep a quarry or a
-    /// miner may dig.
-    pub(super) fn native_world_height(&self) -> (i32, i32) {
-        (self.world.shape.min_y, self.world.shape.height)
     }
     /// The most of the item `item` one slot holds (`Item.getDefaultMaxStackSize`),
     /// or `None` for an unknown item: for a mod's container that fills or
