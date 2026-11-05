@@ -3600,10 +3600,10 @@ struct Game<'a> {
     /// the song's network id is only known once the hub is in hand.
     lan_songs: Vec<([i32; 3], Option<String>)>,
     lan_cushion_breaks: Vec<(horizon_world::registry::BlockStateId, [f64; 3])>,
-    /// Block events (position, b0, b1, state) and entity events (id, event,
-    /// position) for the guests.
+    /// Block events (position, b0, b1, state) and entity events (id, event)
+    /// for the guests.
     lan_block_events: Vec<([i32; 3], i32, i32, u32)>,
-    lan_entity_events: Vec<(i32, i8, [f64; 3])>,
+    lan_entity_events: Vec<(i32, i8)>,
     /// Successful crits (attacking guest, hit entity), queued while the hub is taken.
     lan_critical_hits: Vec<(Option<u32>, i32, bool)>,
     /// Spear stabs that landed (the stabbing guest), queued while the hub is
@@ -3662,9 +3662,9 @@ struct Game<'a> {
     /// The acting guest's own entity events (`ServerPlayer.connection.send`),
     /// sent with their entity id, which the guest's turn does not hold.
     guest_entity_events: Vec<i8>,
-    /// The acting guest's equipment breaks (`onEquippedItemBroken`: event and
-    /// position), broadcast with their entity id once their turn ends.
-    guest_equipment_breaks: Vec<(i8, [f64; 3])>,
+    /// The acting guest's equipment breaks (`onEquippedItemBroken`'s entity
+    /// events), broadcast with their entity id once their turn ends.
+    guest_equipment_breaks: Vec<i8>,
     /// `Player.playSound` of the acting guest (event, position, volume,
     /// pitch): `level.playSound(player, ...)` leaves the guest out, whose
     /// own client plays it.

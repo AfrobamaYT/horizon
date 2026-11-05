@@ -2839,8 +2839,8 @@ impl Game<'_> {
                 .into_iter()
                 .partition(|(id, ..)| !entities.iter().any(|e| e.id == *id));
             self.lan_entity_events = later;
-            for (id, event, at) in gone {
-                host.hub.entity_event(id, event, at);
+            for (id, event) in gone {
+                host.hub.entity_event(id, event);
             }
             host.hub.far_level(&self.save);
             let spawn = self.spawn.map_or([0.5, 80.0, 0.5], |s| [s.x, s.y, s.z]);
@@ -3153,7 +3153,7 @@ impl Game<'_> {
     /// `Level.broadcastEntityEvent` for the guests.
     pub(super) fn lan_entity_event(&mut self, id: i32, event: i8, at: [f64; 3]) {
         if self.audio.capture.is_some() {
-            self.lan_entity_events.push((id, event, at));
+            self.lan_entity_events.push((id, event));
         }
         // Event 16: zombie villagers play their cure sound on each client.
         if event == 16 && self.options.execution_role.is_client() {
@@ -3227,7 +3227,7 @@ impl Game<'_> {
         };
         let told = self.lan_acting.is_some();
         if told {
-            self.guest_equipment_breaks.push((event, at));
+            self.guest_equipment_breaks.push(event);
         }
         if told && !self.options.execution_role.is_client() {
             return;
@@ -3327,8 +3327,8 @@ impl Game<'_> {
         for (pos, b0, b1, state) in std::mem::take(&mut self.lan_block_events) {
             host.hub.block_event(pos, b0, b1, state);
         }
-        for (id, event, at) in std::mem::take(&mut self.lan_entity_events) {
-            host.hub.entity_event(id, event, at);
+        for (id, event) in std::mem::take(&mut self.lan_entity_events) {
+            host.hub.entity_event(id, event);
         }
         for (kind, pos, data) in std::mem::take(&mut self.lan_global_events) {
             host.hub.global_level_event(kind, pos, data);
@@ -3381,7 +3381,7 @@ impl Game<'_> {
                 host.hub.damage_event(m.id as i32, kind, cause, direct, at);
             }
             if dead && !old.is_some_and(|o| o.1) {
-                host.hub.entity_event(m.id as i32, 3, at);
+                host.hub.entity_event(m.id as i32, 3);
             }
             // LivingEntity.swing on a server (a melee hit, a thrown potion):
             // ClientboundSwingAnimationPacket for the players around. A swing
@@ -3415,11 +3415,8 @@ impl Game<'_> {
         host.mob_state.insert(self.dim, seen);
         // Level.broadcastEntityEvent(player, 2) of a spear's stab.
         for attacker in kinetic_hits {
-            let hit = attacker
-                .and_then(|conn| host.hub.guest(conn))
-                .map(|g| (g.entity_id, g.position));
-            if let Some((id, at)) = hit {
-                host.hub.entity_event(id, 2, at);
+            if let Some(g) = attacker.and_then(|conn| host.hub.guest(conn)) {
+                host.hub.entity_event(g.entity_id, 2);
             }
         }
         for (attacker, target, magic) in critical_hits {

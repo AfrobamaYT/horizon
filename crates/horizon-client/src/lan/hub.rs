@@ -4865,24 +4865,82 @@ mod tests {
     fn reduced_debug_info_changes_reach_players_as_entity_events() {
         let (mut hub, rx) = hub_with_a_guest();
         let id = hub.guests[0].entity_id;
-        let events = |rx: &std::sync::mpsc::Receiver<crate::lan::Out>| {
-            let mut sent = Vec::new();
-            while let Ok(crate::lan::Out::Packet(body)) = rx.try_recv() {
-                let mut r = horizon_protocol::buf::Reader::new(&body);
-                let pid = r.varint().unwrap();
-                if let Ok(C::EntityEvent(p)) = C::decode(pid, r.rest()) {
-                    sent.push((p.id, p.event));
-                }
-            }
-            sent
+        hub.set_reduced_debug_info(false);
+        assert!(sent_entity_events(&rx).is_empty());
+        hub.set_reduced_debug_info(true);
+        hub.set_reduced_debug_info(true);
+        assert_eq!(sent_entity_events(&rx), vec![(id, 22)]);
+        hub.set_reduced_debug_info(false);
+        assert_eq!(sent_entity_events(&rx), vec![(id, 23)]);
+    }
+
+    /// `ServerLevel.broadcastEntityEvent`: an entity event reaches the guest
+    /// tracking the entity and the guest whose player it is, but not a guest
+    /// that does not track it, even one well within 128 blocks.
+    #[test]
+    fn entity_events_reach_tracking_players_and_self() {
+        let mut sync = SyncData::empty();
+        sync.builtin.registries.insert(
+            "minecraft:entity_type".into(),
+            horizon_protocol::registry::Ids::from_names(vec!["minecraft:mooshroom".into()]),
+        );
+        let (mut hub, rx) = hub_with_sync(sync);
+        let own = hub.guests[0].entity_id;
+        hub.guests[0].sent_chunks.insert((0, 0));
+        let near = EntityState {
+            id: 37,
+            uuid: 37,
+            kind: "minecraft:mooshroom".into(),
+            position: [0.5, 64.0, 0.5],
+            ..EntityState::default()
         };
-        hub.set_reduced_debug_info(false);
-        assert!(events(&rx).is_empty());
-        hub.set_reduced_debug_info(true);
-        hub.set_reduced_debug_info(true);
-        assert_eq!(events(&rx), vec![(id, 22)]);
-        hub.set_reduced_debug_info(false);
-        assert_eq!(events(&rx), vec![(id, 23)]);
+        // In a chunk the guest was not sent, so it is not tracked.
+        let untracked = EntityState {
+            id: 38,
+            uuid: 38,
+            position: [100.5, 64.0, 0.5],
+            ..near.clone()
+        };
+        let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
+        let border = crate::worldborder::WorldBorder::default();
+        let mut next_entity = 39;
+        let entities = [near, untracked];
+        let mut ctx = TickCtx {
+            world: &mut world,
+            entities: &entities,
+            next_entity: &mut next_entity,
+            spawn: [0.5, 64.0, 0.5],
+            difficulty: 2,
+            difficulty_locked: false,
+            clock_rate: 1.0,
+            tick_rate: 20.0,
+            tick_frozen: false,
+            tick_steps: Default::default(),
+            collision: None,
+            border: &border,
+            streaming: None,
+        };
+        hub.track_entities(&mut ctx);
+        assert!(hub.guests[0].tracker.is_tracking(37));
+        assert!(!hub.guests[0].tracker.is_tracking(38));
+        while rx.try_recv().is_ok() {}
+        hub.entity_event(37, 2);
+        hub.entity_event(38, 2);
+        hub.entity_event(own, 35);
+        assert_eq!(sent_entity_events(&rx), vec![(37, 2), (own, 35)]);
+    }
+
+    /// The entity events (id, event) the guest was sent, in order.
+    fn sent_entity_events(rx: &std::sync::mpsc::Receiver<crate::lan::Out>) -> Vec<(i32, i8)> {
+        let mut sent = Vec::new();
+        while let Ok(crate::lan::Out::Packet(body)) = rx.try_recv() {
+            let mut r = horizon_protocol::buf::Reader::new(&body);
+            let pid = r.varint().unwrap();
+            if let Ok(C::EntityEvent(p)) = C::decode(pid, r.rest()) {
+                sent.push((p.id, p.event));
+            }
+        }
+        sent
     }
 
     /// The blocks the guest was sent as `ClientboundBlockUpdatePacket`s, in order, with the

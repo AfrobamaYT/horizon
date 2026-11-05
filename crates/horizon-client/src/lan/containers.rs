@@ -214,13 +214,17 @@ impl Hub {
         );
     }
 
-    pub fn entity_event(&self, id: i32, event: i8, at: [f64; 3]) {
-        self.broadcast_near(
-            at,
-            128.0,
-            &C::EntityEvent(play::EntityEvent { id, event }),
-            None,
-        );
+    /// `ServerLevel.broadcastEntityEvent`: send to the players tracking the
+    /// entity and the entity itself (`sendToTrackingPlayersAndSelf`).
+    pub fn entity_event(&self, id: i32, event: i8) {
+        let body = C::EntityEvent(play::EntityEvent { id, event }).encode();
+        for g in self
+            .guests
+            .iter()
+            .filter(|g| self.here(g) && (g.entity_id == id || g.tracker.is_tracking(id)))
+        {
+            g.sender.send(body.clone());
+        }
     }
 
     /// `ServerPlayer.crit` (`magicCrit` when `magic`): send the victim's

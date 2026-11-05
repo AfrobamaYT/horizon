@@ -78,7 +78,7 @@ pub(super) struct Parked {
     lid_openers: HashMap<(i32, i32, i32), i32>,
     lan_events: Vec<super::QueuedLevelEvent>,
     lan_block_events: Vec<([i32; 3], i32, i32, u32)>,
-    lan_entity_events: Vec<(i32, i8, [f64; 3])>,
+    lan_entity_events: Vec<(i32, i8)>,
     lan_critical_hits: Vec<(Option<u32>, i32, bool)>,
     /// The hub's tracked entities of this level (`LanHost::states`), as its last tick described
     /// them: what its players' moves are checked against before this tick describes them again.

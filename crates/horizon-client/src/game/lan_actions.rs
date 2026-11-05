@@ -249,7 +249,7 @@ pub(super) struct GuestSwap {
     /// The entity events queued for that guest.
     entity_events: Vec<i8>,
     /// The equipment breaks queued for that guest.
-    equipment_breaks: Vec<(i8, [f64; 3])>,
+    equipment_breaks: Vec<i8>,
     /// The cooldown packets queued for that guest.
     cooldown_events: Vec<(std::sync::Arc<str>, i32)>,
     /// The player-source sounds queued for that guest.
@@ -959,8 +959,8 @@ impl Game<'_> {
             }
         }
         // LivingEntity.onEquippedItemBroken: `broadcastEntityEvent`, the guest too.
-        for (event, at) in std::mem::replace(&mut self.guest_equipment_breaks, equipment_breaks) {
-            host.hub.entity_event(entity_id, event, at);
+        for event in std::mem::replace(&mut self.guest_equipment_breaks, equipment_breaks) {
+            host.hub.entity_event(entity_id, event);
         }
         // ServerItemCooldowns.onCooldownStarted: the guest's own cooldown.
         let outgoing_cooldowns = std::mem::replace(&mut self.guest_cooldowns, cooldown_events);
@@ -1219,11 +1219,10 @@ impl Game<'_> {
             g.send(&g.abilities_packet());
         }
         // LivingEntity.checkTotemDeathProtection's entity event, to every
-        // client around, the guest's own included; this window draws it too.
+        // client tracking the guest and its own; this window draws it too.
         if let Some(body) = totem {
             let id = host.hub.guests[i].entity_id;
-            host.hub
-                .entity_event(id, super::totem::TOTEM_EVENT, body.at);
+            host.hub.entity_event(id, super::totem::TOTEM_EVENT);
             if self.player.is_some() {
                 self.totem_event(body, false);
             }
@@ -4707,7 +4706,7 @@ impl Game<'_> {
                 &C::PlayerCombatKill(play::PlayerCombatKill { id, message }),
             );
             // LivingEntity.die: the death animation, the dying player included.
-            host.hub.entity_event(id, 3, at);
+            host.hub.entity_event(id, 3);
             let recently_hit = blow.is_some()
                 && self
                     .guest_combat
@@ -5651,7 +5650,7 @@ impl Game<'_> {
                     if let Some(host) = self.lan.as_ref()
                         && let Some(id) = host.hub.guest(conn).map(|g| g.entity_id)
                     {
-                        host.hub.entity_event(id, event as i8, at);
+                        host.hub.entity_event(id, event as i8);
                     }
                 }
                 MotionEvent::Fall(event) => self.landing_block_updates(&event),
@@ -5667,13 +5666,13 @@ impl Game<'_> {
                     }
                 }
                 // LivingEntity.baseTick's entity event 67, to every client
-                // around, the guest's own included; this window draws it too.
+                // tracking the guest and its own; this window draws it too.
                 MotionEvent::Drown => {
                     if let Some(host) = self.lan.as_ref()
                         && let Some(g) = host.hub.guest(conn)
                     {
                         host.hub
-                            .entity_event(g.entity_id, super::combat::DROWN_EVENT, at);
+                            .entity_event(g.entity_id, super::combat::DROWN_EVENT);
                     }
                     self.drown_particles(at, [0.0; 3]);
                 }
@@ -5704,7 +5703,7 @@ impl Game<'_> {
                     if particles {
                         self.honey_slide_particles(at);
                         if let Some(host) = self.lan.as_ref() {
-                            host.hub.entity_event(id, 53, at);
+                            host.hub.entity_event(id, 53);
                         }
                     }
                 }

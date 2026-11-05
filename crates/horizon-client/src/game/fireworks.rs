@@ -485,8 +485,7 @@ impl Game<'_> {
         if r.id != 0
             && let Some(host) = &self.lan
         {
-            host.hub
-                .entity_event(r.id as i32, FIREWORK_EXPLODE_EVENT, at);
+            host.hub.entity_event(r.id as i32, FIREWORK_EXPLODE_EVENT);
         }
         if !r.explosions.is_empty() {
             let damage = 5.0 + r.explosions.len() as f32 * 2.0;
