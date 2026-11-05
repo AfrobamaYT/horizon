@@ -452,8 +452,8 @@ impl Game<'_> {
         let event_sounds: Vec<String> = log.iter().filter_map(|l| event_sound(l)).collect();
         out.extend(log);
         out.extend(event_sounds);
-        for (sound, at, _, _) in self.audio.capture.take().unwrap_or_default() {
-            out.push(format!("S {} {sound}", floor_pos(at)));
+        for sound in self.audio.capture.take().unwrap_or_default() {
+            out.push(format!("S {} {}", floor_pos(sound.position), sound.event));
         }
         // The sounds bound to an entity (a sheared mob's) are the server's too.
         for s in std::mem::take(&mut self.bound_sounds) {
