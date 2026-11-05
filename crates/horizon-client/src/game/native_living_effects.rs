@@ -85,7 +85,7 @@ impl Game<'_> {
     /// content mod's effect all apply); a mob's goes past `canBeAffected`
     /// (a spider shrugs off poison) into its effects with the same hooks.
     /// The amplifier is cut to 0..=255 and the duration is -1 (infinite) or
-    /// ticks. False for an unknown effect id, a duration below -1, an armor
+    /// ticks. False before effect resolution, for a duration below -1, an armor
     /// stand, the dragon, a stale handle or a client, or when the active
     /// instance did not change, as in vanilla's `addEffect`.
     pub(super) fn native_living_add_effect(
@@ -138,7 +138,7 @@ impl Game<'_> {
     /// The entity's instance of `effect` (`LivingEntity.getEffect`): its id
     /// namespaced as the registry has it, the ticks left (-1 infinite), the
     /// amplifier and the flags. The effect is a registration-slot key resolved at load.
-    /// None when it has the effect not, or for an unknown id, an armor
+    /// None when it has the effect not, before effect resolution, or for an armor
     /// stand, the dragon, a stale handle or a client.
     pub(super) fn native_living_effect(
         &self,
@@ -185,7 +185,7 @@ impl Game<'_> {
     }
 
     /// Whether the entity has `effect` (`LivingEntity.hasEffect`), using its resolved key.
-    /// False for an invalid slot, an armor stand, the dragon,
+    /// False before effect resolution, for an armor stand, the dragon,
     /// a stale handle or a client.
     pub(super) fn native_living_potion_affected(
         &self,
@@ -220,7 +220,7 @@ impl Game<'_> {
     /// fades the fog, lightmap and screen spin draw; any other effect has no
     /// fade and reads 1 while it lasts (vanilla's reaches 1 over the first
     /// tick after a blended add). The effect is a registration-slot key resolved at load.
-    /// 0 when the entity lacks the effect. None for an unknown id, a stale
+    /// 0 when the entity lacks the effect. None before effect resolution, for a stale
     /// handle, or an entity other than the local player: the client keeps no
     /// other entity's effects.
     pub(super) fn native_living_effect_blend_factor(
@@ -251,7 +251,7 @@ impl Game<'_> {
     /// (`apply_effect_status`) and absorption's hearts leave — and a mob's
     /// hidden and ambient lists drop it too, with absorption's hearts
     /// leaving the same way its expiry takes them. False (and nothing
-    /// changes) when the entity has the effect not, or for an unknown id,
+    /// changes) when the entity has the effect not, before effect resolution, or for
     /// an armor stand, the dragon, a stale handle or a client.
     pub(super) fn native_living_remove_effect(
         &mut self,

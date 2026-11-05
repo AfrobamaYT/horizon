@@ -4185,8 +4185,8 @@ pub trait LevelHost {
     fn height(&self) -> i32 {
         unimplemented!("LevelHost::height")
     }
-    /// `BlockState.is(TagKey)`: whether the block registry name is in the merged block tag.
-    /// Unknown names and tags return false; unavailable authoritative tags return None.
+    /// `BlockState.is(TagKey)`: numeric membership of the resolved block in the merged block tag.
+    /// Unknown tags return false; unavailable authoritative tags or block mappings return None.
     fn block_in_tag(&self, _block: BlockKey, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::block_in_tag")
     }
