@@ -1665,7 +1665,7 @@ impl Game<'_> {
         }
         self.post_game_event(event, at, ctx);
     }
-    /// `Projectile.onHit`: retain the projectile as the event source and the
+    /// Retain the projectile as the landing event source and the
     /// shooter as its owner, even when the projectile is held out for ticking.
     pub(super) fn projectile_landed_event(&mut self, id: u32, owner: Option<Who>, at: [f64; 3]) {
         let ctx = Context {
