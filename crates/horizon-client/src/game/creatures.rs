@@ -8454,7 +8454,12 @@ mod mob_griefing_tests {
                 assert!(game.large_fireball_fire(None, None));
                 assert_eq!(
                     *heard.lock().unwrap(),
-                    [(denied, true), (other, true), (denied_player, true), (25, true)]
+                    [
+                        (denied, true),
+                        (other, true),
+                        (denied_player, true),
+                        (25, true)
+                    ]
                 );
             });
         });
