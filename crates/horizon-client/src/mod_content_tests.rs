@@ -3363,7 +3363,7 @@ fn tuple_shapes_follow_final_state_order_and_separate_collision() {
         ),
     ]));
     plan.nbt(&mut tag);
-    plan.collision_shapes(&mut tag).unwrap();
+    plan.declared_shapes(&mut tag, true).unwrap();
     let Some(Tag::List(entries)) = tag.get("shapes") else {
         panic!("shapes")
     };
@@ -3373,6 +3373,98 @@ fn tuple_shapes_follow_final_state_order_and_separate_collision() {
     for (index, shape) in collisions.iter().enumerate() {
         assert_eq!(entries[mapping[2 + index] as usize], encode_shape(shape));
     }
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+/// Declared outline shapes feed gameplay lighting and both occlusion tables,
+/// independently of the optional collision shape.
+#[test]
+fn declared_shapes_drive_lighting_and_occlusion() {
+    for (label, no_occlusion) in [("occluding", false), ("nonoccluding", true)] {
+        let declaration = format!(
+            r#"{{"template":"minecraft:test","item":false,
+          "properties":{{"occludes":{}}},
+          "shapes":{{"properties":["axis"],"values":{{"x":[[0,0,0,1,1,1]],"y":[[0,0,0,0.5,1,1]]}}}},
+          "collision_shapes":{{"default":[]}}}}"#,
+            !no_occlusion
+        );
+        let (base, mods) = block_base(label, &[&declaration]);
+        let plan = Plan::new(&base, &mods).unwrap();
+        let row =
+            r#"{"can_occlude":true,"solid_render":true,"dampening":15,"skylight_down":false}"#;
+        let mut gameplay: J =
+            serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+        plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+        let Some(J::Arr(rows)) = gameplay.get("states") else {
+            panic!("states")
+        };
+        let full = &rows[2];
+        let partial = &rows[3];
+        assert_eq!(full.get("solid_render"), Some(&J::Bool(!no_occlusion)));
+        assert_eq!(
+            full.get("dampening"),
+            Some(&J::Num((if no_occlusion { 1 } else { 15 }).into()))
+        );
+        assert_eq!(partial.get("solid_render"), Some(&J::Bool(false)));
+        assert_eq!(partial.get("skylight_down"), Some(&J::Bool(true)));
+        assert_eq!(partial.get("dampening"), Some(&J::Num(0.into())));
+        let mut shapes = Tag::Compound(Compound::from([
+            (
+                JavaString::from("states"),
+                Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+            ),
+            (JavaString::from("shapes"), Tag::List(Vec::new())),
+            (
+                JavaString::from("cached_shapes"),
+                Tag::IntArray(vec![-1, -1]),
+            ),
+        ]));
+        plan.nbt(&mut shapes);
+        plan.declared_shapes(&mut shapes, false).unwrap();
+        let Some(Tag::List(entries)) = shapes.get("shapes") else {
+            panic!("shapes")
+        };
+        let Some(Tag::IntArray(indices)) = shapes.get("cached_shapes") else {
+            panic!("indices")
+        };
+        let expected = plan.blocks[0].shapes.as_ref().unwrap();
+        for (index, shape) in expected.iter().enumerate() {
+            assert_eq!(entries[indices[2 + index] as usize], encode_shape(shape));
+        }
+        fs::remove_dir_all(base.parent().unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn declared_partial_shapes_observe_waterlogging_and_template_light_overrides() {
+    let declaration = r#"{"template":"minecraft:test","item":false,
+      "shapes":{"default":[[0,0,0,1,0.5,1]]}}"#;
+    let facts = r#"{"states":[
+      ["minecraft:test",false,false,"",{"id":"minecraft:test","properties":{"waterlogged":"false"}}],
+      ["minecraft:test",false,false,"",{"id":"minecraft:test","properties":{"waterlogged":"true"}}]],
+      "defaults":{"minecraft:test":0}}"#;
+    let (base, mods) = block_base_of("shape-light-water", &[declaration], facts);
+    let plan = Plan::new(&base, &mods).unwrap();
+    let row = r#"{"can_occlude":true,"solid_render":true,"dampening":15,"skylight_down":false}"#;
+    let mut gameplay: J = serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    assert_eq!(rows[2].get("skylight_down"), Some(&J::Bool(true)));
+    assert_eq!(rows[2].get("dampening"), Some(&J::Num(0.into())));
+    assert_eq!(rows[3].get("skylight_down"), Some(&J::Bool(false)));
+    assert_eq!(rows[3].get("dampening"), Some(&J::Num(1.into())));
+    drop(plan);
+    fs::write(base.join("block-behaviours.json"), r#"{"blocks":[{"name":"minecraft:test","class":["TintedGlassBlock","TransparentBlock","Block"]}]}"#).unwrap();
+    let plan = Plan::new(&base, &mods).unwrap();
+    let mut gameplay: J = serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    assert_eq!(rows[2].get("skylight_down"), Some(&J::Bool(false)));
+    assert_eq!(rows[2].get("dampening"), Some(&J::Num(15.into())));
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
 }
 
@@ -3897,7 +3989,7 @@ fn a_shape_and_the_state_count_cover_every_combination() {
         ),
     ]));
     plan.nbt(&mut tag);
-    plan.collision_shapes(&mut tag).unwrap();
+    plan.declared_shapes(&mut tag, true).unwrap();
     let Some(Tag::List(entries)) = tag.get("shapes") else {
         panic!("no shapes")
     };
