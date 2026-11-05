@@ -66,7 +66,8 @@ and some are waiting for Ludovic:
   a secret of GitHub's `release` environment, which only real releases from main can use. The job that signs runs
   nothing from the repository but a short script calling OpenSSL, so no pull request can read the key by changing
   the code that gets built. Nobody, Ludovic included, ever needs to see it.
-- **Nightly signatures.** A Nightly carries two signatures over the same `SHA256SUMS`. `SHA256SUMS.sig` is signed
+- **Nightly signatures.** This describes upstream's Nightly channel, not the fork's daily-only prebuilt schedule and publishing policy; this sync enables no new release trigger or keys.
+  A Nightly carries two signatures over the same `SHA256SUMS`. `SHA256SUMS.sig` is signed
   for the channel (`horizon release nightly`), for launchers and servers from before this change, which read only
   that one. `SHA256SUMS.v2.sig` is signed for the Nightly's own version (`horizon release nightly-<date>-<commit>`),
   which its release title names (`Nightly <date> · <commit>`). Current launchers, `horizon-server update` and
