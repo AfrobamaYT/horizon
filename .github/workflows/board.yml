@@ -17,7 +17,8 @@ permissions:
   contents: read
 concurrency:
   group: board
-  cancel-in-progress: true
+  # A running sync finishes; newer events wait as one pending run (GitHub keeps only the latest).
+  cancel-in-progress: false
 jobs:
   sync:
     runs-on: ubuntu-latest
