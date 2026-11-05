@@ -126,6 +126,8 @@ pub struct Extras {
     /// painted texel of a player's outer layer drawn as a slab
     /// (`horizon_client::mobs::skin_layers`).
     pub three_d_skin_layers: bool,
+    /// The PvP & HUD page's options (`pvp`).
+    pub pvp: crate::pvp::Pvp,
 }
 impl Default for Extras {
     fn default() -> Self {
@@ -177,6 +179,7 @@ impl Default for Extras {
             cosmetics_others: horizon_cosmetics::prefs::Others::Shown,
             cosmetics_auras: false,
             three_d_skin_layers: false,
+            pvp: Default::default(),
         }
     }
 }
@@ -280,13 +283,15 @@ impl Extras {
                 }
                 "cosmeticsAuras" => e.cosmetics_auras = flag(e.cosmetics_auras),
                 SKIN_LAYERS_KEY => e.three_d_skin_layers = flag(e.three_d_skin_layers),
-                _ => {}
+                key => {
+                    e.pvp.parse_line(key, value);
+                }
             }
         }
         e
     }
     pub fn serialize(&self) -> String {
-        format!(
+        let mut text = format!(
             "packBrowser:{}\nfullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nlodZoomDetail:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\nmusicOff:{}\nmusicPage:{}\ncosmeticsMine:{}\ncosmeticsOthers:{}\ncosmeticsAuras:{}\n{}:{}\n",
             bool_text(self.pack_browser),
             bool_text(self.fullbright),
@@ -341,7 +346,9 @@ impl Extras {
             bool_text(self.cosmetics_auras),
             SKIN_LAYERS_KEY,
             bool_text(self.three_d_skin_layers),
-        )
+        );
+        self.pvp.serialize(&mut text);
+        text
     }
     /// Adopts the settings `options.txt` held before they moved here, while
     /// this file (`own`) has no line of its own: 3D skin layers was an
@@ -512,6 +519,8 @@ pub enum Item {
     CosmeticsMine,
     CosmeticsOthers,
     CosmeticsAuras,
+    /// On the PvP & HUD page (`pvp::rows`).
+    Pvp(crate::pvp::Opt),
 }
 /// The Extras page: headers (language keys) and items.
 pub fn rows() -> Vec<Result<Item, &'static str>> {
@@ -578,6 +587,7 @@ impl Item {
             Item::CosmeticsMine => "horizon.extras.cosmetics_mine",
             Item::CosmeticsOthers => "horizon.extras.cosmetics_others",
             Item::CosmeticsAuras => "horizon.extras.cosmetics_auras",
+            Item::Pvp(o) => o.caption_key(),
         }
     }
     /// The language key of the description shown as the row's tooltip.
@@ -606,6 +616,7 @@ impl Item {
             Item::CosmeticsMine => "horizon.extras.cosmetics_mine.tooltip",
             Item::CosmeticsOthers => "horizon.extras.cosmetics_others.tooltip",
             Item::CosmeticsAuras => "horizon.extras.cosmetics_auras.tooltip",
+            Item::Pvp(o) => o.description_key(),
         }
     }
     /// The caption in the current language (English when the key is missing).
@@ -643,6 +654,7 @@ impl Item {
             Item::CosmeticsMine => "My cosmetics",
             Item::CosmeticsOthers => "Other players' cosmetics",
             Item::CosmeticsAuras => "Others' auras and trails",
+            Item::Pvp(o) => o.caption(),
         }
     }
     /// The switch this setting belongs to: it does nothing while that is off.
@@ -653,6 +665,7 @@ impl Item {
             MouseTweaksWheel => MouseTweaks,
             SortKey => Sort,
             ChatIndicator => ChatAnimation,
+            Pvp(o) => return o.parent().map(Pvp),
             Fullbright | DynamicLights | OwnNameTag | HideBlockParticles | MouseTweaks | Sort
             | AutoReconnect | NoAi | AgentControl | ReproKeys | DiscordPresence | Splitscreen
             | ChatAnimation | WheelCyclesSettings | MusicPage | PackBrowser | CosmeticsMine
@@ -721,6 +734,7 @@ impl Item {
                 "What other Horizon players wear: everything, only their name tag styles, or nothing. Hidden, the game never asks what they wear."
             }
             Item::CosmeticsAuras => "Auras and trails other players wear. Off by default.",
+            Item::Pvp(o) => o.description(),
             Item::WheelCyclesSettings => {
                 "The scroll wheel over a button in the settings changes its value, as in vanilla. Off, the wheel only scrolls the list."
             }
@@ -773,6 +787,7 @@ impl Item {
             Item::WheelCyclesSettings => e.wheel_cycles_settings,
             Item::PackBrowser => e.pack_browser,
             Item::CosmeticsAuras => e.cosmetics_auras,
+            Item::Pvp(o) => return o.switch(&e.pvp),
             _ => return None,
         })
     }
@@ -780,6 +795,7 @@ impl Item {
     pub fn value(self, e: &Extras) -> String {
         match self {
             Item::SortKey => crate::keybinds::display_name(&e.sort_key).plain(),
+            Item::Pvp(o) if o.switch(&e.pvp).is_none() => o.value(&e.pvp).unwrap_or_default(),
             Item::CosmeticsMine => match e.cosmetics_mine {
                 true => crate::lang::get_or("horizon.extras.cosmetics.shown", "Shown"),
                 false => crate::lang::get_or("horizon.extras.cosmetics.hidden", "Hidden"),
@@ -831,6 +847,7 @@ impl Item {
                 e.cosmetics_others = if back { o.next().next() } else { o.next() };
             }
             Item::CosmeticsAuras => e.cosmetics_auras = !e.cosmetics_auras,
+            Item::Pvp(o) => o.cycle(&mut e.pvp, back),
             Item::SortKey => {}
         }
     }

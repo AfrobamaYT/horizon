@@ -782,6 +782,7 @@ pub struct Damage {
     pub kind: DamageKind,
     pub attacker: Option<Who>,
     pub from: Option<[f64; 3]>,
+    pub attacker_species: Option<Species>,
 }
 impl Damage {
     pub fn fall() -> Self {
@@ -789,6 +790,7 @@ impl Damage {
             kind: DamageKind::Fall,
             attacker: None,
             from: None,
+            attacker_species: None,
         }
     }
     pub fn of(kind: DamageKind) -> Self {
@@ -796,6 +798,7 @@ impl Damage {
             kind,
             attacker: None,
             from: None,
+            attacker_species: None,
         }
     }
     pub fn player(from: [f64; 3]) -> Self {
@@ -803,6 +806,7 @@ impl Damage {
             kind: DamageKind::PlayerAttack,
             attacker: Some(Who::Player),
             from: Some(from),
+            attacker_species: None,
         }
     }
     /// `DamageSources.mace`: a player's smash attack.
@@ -811,6 +815,7 @@ impl Damage {
             kind: DamageKind::MaceSmash,
             attacker: Some(Who::Player),
             from: Some(from),
+            attacker_species: None,
         }
     }
     /// `DamageSources.spear`: a player's stab with a spear.
@@ -819,6 +824,7 @@ impl Damage {
             kind: DamageKind::Spear,
             attacker: Some(Who::Player),
             from: Some(from),
+            attacker_species: None,
         }
     }
     /// `DamageSources.indirectMagic(potion, owner)`: `attacker` is the owner
@@ -829,6 +835,7 @@ impl Damage {
             kind: DamageKind::IndirectMagic,
             attacker,
             from: Some(from),
+            attacker_species: None,
         }
     }
     /// `DamageSources.fireworks(rocket, owner)`: `attacker` is the owner
@@ -839,6 +846,7 @@ impl Damage {
             kind: DamageKind::Fireworks,
             attacker,
             from: Some(from),
+            attacker_species: None,
         }
     }
     pub fn mob(id: u32, from: [f64; 3]) -> Self {
@@ -846,7 +854,12 @@ impl Damage {
             kind: DamageKind::MobAttack,
             attacker: Some(Who::Mob(id)),
             from: Some(from),
+            attacker_species: None,
         }
+    }
+    pub fn with_species(mut self, species: Species) -> Self {
+        self.attacker_species = Some(species);
+        self
     }
     /// DamageTypeTags.PANIC_CAUSES
     pub fn causes_panic(&self) -> bool {
@@ -1776,9 +1789,11 @@ pub enum MobEvent {
         from: [f64; 3],
         kind: &'static str,
     },
-    /// `ElderGuardian`'s curse on players within 50 blocks.
+    /// `ElderGuardian`'s curse on players within 50 blocks; a silent elder's
+    /// shows the apparition without the curse sound.
     ElderCurse {
         at: [f64; 3],
+        silent: bool,
     },
     /// `Entity.setDeltaMovement`: replace a target's velocity.
     SetVelocity {
@@ -2144,6 +2159,14 @@ pub enum MobEvent {
         amplifier: i32,
         /// `MobEffectInstance` ambient flag (the beacon-style translucent icon).
         ambient: bool,
+    },
+    /// Apply an effect to another mob: `IllusionerBlindnessSpellGoal.performSpellCasting`
+    /// blinds whatever `LivingEntity` the illusioner targets, not only a player.
+    EffectMob {
+        target: u32,
+        effect: &'static str,
+        ticks: i32,
+        amplifier: i32,
     },
     /// Set an entity on fire.
     Ignite {
@@ -3264,6 +3287,14 @@ impl Mob {
     #[inline]
     pub fn species(&self) -> Species {
         self.kind.species
+    }
+    /// Entity.getMaxAirSupply and the aquatic species' overrides.
+    pub fn max_air_supply(&self) -> i32 {
+        match self.species() {
+            Species::Axolotl => axolotl::MAX_AIR,
+            Species::Dolphin => 4800,
+            _ => 300,
+        }
     }
     /// `Mob.getMainArm`: the left arm when the mob is left-handed, a player's
     /// `mainHand` option for a player mob.
@@ -5137,6 +5168,7 @@ mod fire_resistance_damage_tests {
             kind: DamageKind::Fireball,
             attacker: Some(Who::Player),
             from: None,
+            attacker_species: None,
         };
         assert!(mob.damage(level, 1.0, source));
         assert_eq!(mob.health, 10.0);
@@ -5314,6 +5346,7 @@ mod magic_absorb_tests {
             kind: DamageKind::IndirectMagic,
             attacker: Some(Who::Mob(m.id)),
             from: None,
+            attacker_species: Some(Species::Witch),
         };
         m.damage(level, 20.0, own);
         assert_eq!(m.health, 10.0);
@@ -5428,6 +5461,7 @@ mod armor_hurt_tests {
             kind: DamageKind::MobAttack,
             attacker: None,
             from: None,
+            attacker_species: None,
         };
         let mut m = horse();
         m.extra

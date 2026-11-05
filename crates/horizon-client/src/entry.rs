@@ -1,5 +1,5 @@
 //! Startup shared by the gameplay library and its executable.
-use crate::{crash, game, logging, ram_limit};
+use crate::{crash, game, logging};
 use horizon_mods::selection::{Argument, LaunchArguments};
 use mod_api::__private::game::*;
 
@@ -99,7 +99,6 @@ pub fn main_with(
         // The log's first line names the build, so a bug report that carries the log says which one it was.
         log::info!("Horizon {}", crash::version());
         crash::install(home.clone(), side);
-        ram_limit::start(&home, side);
     }
     let renderers = mod_api::__private::mods()
         .iter()
