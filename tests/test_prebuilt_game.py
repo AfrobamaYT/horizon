@@ -16,12 +16,12 @@ class PrebuiltContentsTests(unittest.TestCase):
     def test_compiler_outputs_pass(self):
         prebuilt_game.check(self.folder(
             "horizon-prebuilt.json", "Cargo.lock", "native_main.rs.template", "deps/libhorizon_client.so", "deps/libmod_api-1.rmeta",
-            "native/libwindows.0.52.0.a",
+            "native/libwindows.0.52.0.a", "points.json", "internals.json",
             "deps/libserde_derive-2.so", "deps/libhorizon_client.dll.a",
         ))
 
     def test_anything_else_is_refused(self):
-        for stray in ("assets/minecraft/lang/en_us.json", "deps/Cargo.lock", "deps/client.jar", "deps/libmod_api-3.rlib", "native/libfoo.so", "notes.txt"):
+        for stray in ("assets/minecraft/lang/en_us.json", "deps/Cargo.lock", "deps/client.jar", "deps/libmod_api-3.rlib", "native/libfoo.so", "deps/internals.json", "notes.txt"):
             with self.subTest(stray), self.assertRaises(SystemExit):
                 prebuilt_game.check(self.folder("deps/libhorizon_client.so", stray))
 

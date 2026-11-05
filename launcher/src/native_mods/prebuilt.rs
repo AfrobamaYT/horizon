@@ -39,8 +39,6 @@ pub(super) enum SourceReason {
     Host,
     /// The prebuilt game's release couldn't be downloaded.
     Download { why: String },
-    /// A point injection's target isn't a point in the prebuilt game.
-    NotAPoint { why: String },
     /// No prebuilt game was released for this revision and target.
     NoRelease { revision: String },
 }
@@ -73,10 +71,6 @@ impl std::fmt::Display for SourceReason {
             }
             Self::Download { why } => trf(
                 "the prebuilt game couldn't be downloaded ({why}), so the game builds from source",
-                &[("why", why)],
-            ),
-            Self::NotAPoint { why } => trf(
-                "{why}, so the game builds from source and makes it a point",
                 &[("why", why)],
             ),
             Self::NoRelease { revision } => trf(
@@ -127,7 +121,7 @@ pub(super) fn refusal(projects: &[api::Project<'_>], profile: Profile) -> Option
                     .get("package")
                     .and_then(toml::Value::as_str)
                     .unwrap_or(key);
-                if krate != api::API_PACKAGE {
+                if !api::PACKAGES.iter().any(|(package, _)| *package == krate) {
                     return Some(SourceReason::Crate {
                         mod_id: mod_id(),
                         krate: krate.to_owned(),
@@ -147,24 +141,18 @@ pub(super) fn refusal(projects: &[api::Project<'_>], profile: Profile) -> Option
     })
 }
 
-/// Whether the prebuilt `game` has a point at each of `injections`' targets: a target that isn't
-/// one builds from source, which makes it one. A method that isn't its point's is an error on
-/// any route, naming the injection.
+/// Checks `injections` against the prebuilt `game`'s points. A target that isn't a point is an
+/// error on any route, as is a method that isn't its point's: the source route stages the same
+/// points.
 pub(super) fn serves_points(
     game: &Path,
     injections: &[inject::PointInjection],
-) -> Result<Result<(), SourceReason>, String> {
+) -> Result<(), String> {
     if injections.is_empty() {
-        return Ok(Ok(()));
+        return Ok(());
     }
     let points = inject::listed(&game.join(inject::POINTS))?;
-    match inject::check(injections, &points) {
-        Ok(()) => Ok(Ok(())),
-        Err(error @ inject::PointError::NotAPoint { .. }) => Ok(Err(SourceReason::NotAPoint {
-            why: error.to_string(),
-        })),
-        Err(error) => Err(error.to_string()),
-    }
+    inject::check(injections, &points).map_err(|error| error.to_string())
 }
 
 /// The prebuilt game for `revision` and `target`, downloaded and checked once, then kept in the
@@ -394,6 +382,10 @@ pub(super) fn compile(
     fs::create_dir_all(out).map_err(|e| e.to_string())?;
     let deps = game.join("deps");
     let api_library = library(&deps, "mod_api")?;
+    let mut libraries = std::collections::HashMap::new();
+    for (_, name) in api::PACKAGES {
+        libraries.insert(name, library(&deps, name)?);
+    }
     let mut rlibs: std::collections::HashMap<&str, PathBuf> = std::collections::HashMap::new();
     for &index in &resolution.order {
         let project = &projects[index];
@@ -418,9 +410,9 @@ pub(super) fn compile(
         cmd.args(["--crate-type", "rlib", "--crate-name", &krate])
             .arg("-C")
             .arg(format!("metadata={id}"));
-        for api in project.api_dependencies() {
+        for (name, package) in project.api_dependencies() {
             cmd.arg("--extern")
-                .arg(format!("{api}={}", api_library.display()));
+                .arg(format!("{name}={}", libraries[package].display()));
         }
         for dependency in &declared[index] {
             let Some(rlib) = rlibs.get(dependency.id.as_str()) else {
@@ -567,10 +559,10 @@ mod tests {
         let name = native::prebuilt_archive("x86_64-unknown-linux-gnu", true);
         assert_eq!(
             name,
-            "horizon-prebuilt-v2-x86_64-unknown-linux-gnu-server.tar.gz"
+            "horizon-prebuilt-v3-x86_64-unknown-linux-gnu-server.tar.gz"
         );
         let listing =
-            format!("AB12  horizon-prebuilt-v2-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n");
+            format!("AB12  horizon-prebuilt-v3-x86_64-unknown-linux-gnu.tar.gz\ncd34 *{name}\n");
         assert_eq!(expected_sum(&listing, &name).as_deref(), Some("cd34"));
         assert_eq!(expected_sum(&listing, "horizon-prebuilt-x.tar.gz"), None);
     }

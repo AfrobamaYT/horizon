@@ -4,6 +4,7 @@ native trait mods against it with rustc alone, in seconds, without the game's so
 
     python3 tools/prebuilt_game.py build OUT [--server]   # build and collect the folder, write horizon-prebuilt.json
     python3 tools/prebuilt_game.py smoke OUT              # build the starter mod and the game executable against OUT only
+    python3 tools/prebuilt_game.py exports OUT            # the game DLL's exported names, toward Windows' limit
 
 Each OS's folder is built on that OS: the proc-macro libraries in it run inside the player's own rustc.
 The folder holds only compiler outputs, never vanilla data; `build` refuses any other file.
@@ -35,8 +36,10 @@ LINK_ARG = "cargo:rustc-link-arg-bin=horizon-client="
 # cargo passes their folders to rustc, a plain rustc gets them from here (`-L native=OUT/native`).
 NATIVE = "native"
 NATIVE_SUFFIXES = (".a", ".lib")
-# The game's injection points, from its build script's output: the launcher routes mods' point injections by it.
+# The game's injection points, listed by the staging pass: the launcher routes mods' point injections by it.
 POINTS = "points.json"
+# The staged internals signatures, checked against a mod's declared access list.
+INTERNALS = "internals.json"
 
 
 def run(command: list[str], **kwargs) -> str:
@@ -57,15 +60,35 @@ def rustc_host() -> str:
     return next(line.split(": ", 1)[1] for line in verbose.splitlines() if line.startswith("host: "))
 
 
+def stage(target_dir: Path) -> Path:
+    """A copy of the tracked source with the staging pass run over it (#589): every point method gets its
+    `#[point]`, internals become public, and both manifests are written. The working tree is never rewritten."""
+    staged = target_dir / "stage"
+    if staged.exists():
+        shutil.rmtree(staged)
+    tracked = run(["git", "ls-files", "-z"], cwd=ROOT).split("\0")
+    for name in filter(None, tracked):
+        source = ROOT / name
+        if source.is_file():
+            (staged / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, staged / name)
+    print(run(["cargo", "run", "--locked", "--release", "-q", "-p", "horizon-mod-api-gen", "--bin", "horizon-stage",
+               "--", str(staged), str(staged / POINTS), str(staged / INTERNALS)],
+              cwd=staged, env={**os.environ, "CARGO_TARGET_DIR": str(target_dir / "tools")}), end="")
+    return staged
+
+
 def build(out: Path, server: bool) -> None:
-    target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / "prebuilt"
+    # Resolved here: the staging and build steps run from the staged copy.
+    target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
+    staged = stage(target_dir)
     # One std for the game, every mod and the executable: the game links std dynamically, as mods will.
     rustflags = "-C prefer-dynamic"
     features = ["--no-default-features"] if server else []
     messages = run(
         ["cargo", "rustc", "--locked", "-p", "horizon-client", "--lib", "--crate-type", "dylib",
          "--profile", PROFILE, "--message-format", "json-render-diagnostics", *features],
-        cwd=ROOT,
+        cwd=staged,
         env={**os.environ, "RUSTFLAGS": rustflags, "CARGO_TARGET_DIR": str(target_dir)},
     )
     scripts = [
@@ -100,7 +123,8 @@ def build(out: Path, server: bool) -> None:
         if source is not None:
             shutil.copy2(source, out / name)
     game = next(script for script in scripts if script["package_id"].split("#")[0].endswith("/horizon-client"))
-    shutil.copy2(Path(game["out_dir"]) / POINTS, out / POINTS)
+    for manifest in (POINTS, INTERNALS):
+        shutil.copy2(staged / manifest, out / manifest)
     output = Path(game["out_dir"]).parent / "output"
     link_args = [line[len(LINK_ARG):] for line in output.read_text().splitlines() if line.startswith(LINK_ARG)]
     files = {str(path.relative_to(out).as_posix()): sha256(path) for path in sorted(out.rglob("*")) if path.is_file()}
@@ -128,7 +152,7 @@ def check(out: Path) -> None:
     """Only compiler outputs: a stray asset, vanilla file or anything else fails the build."""
     stray = [
         path for path in out.rglob("*")
-        if path.is_file() and not (path.parent == out and (path.name in CARRIED or path.name == POINTS))
+        if path.is_file() and not (path.parent == out and (path.name in CARRIED or path.name in (POINTS, INTERNALS)))
         and not (path.parent == out / "deps" and path.name.endswith(SUFFIXES))
         and not (path.parent == out / NATIVE and path.name.endswith(NATIVE_SUFFIXES))
     ]
@@ -170,6 +194,40 @@ def smoke(out: Path) -> None:
     print(f"smoke: the starter mod and the game executable built against {out} alone")
 
 
+# Warns here, ahead of Windows' hard 65,535 (the linker's own failure), so a growing export list is seen first.
+EXPORT_WARNING = 60_000
+
+
+def exports(out: Path) -> None:
+    """The game dylib's exported names, as Windows counts them toward its 65,535 limit (#589): read from the
+    PE export directory, so it runs on any OS. Prints nothing for a game that isn't a DLL."""
+    game = game_dylib(out / "deps")
+    if game is None or game.suffix != ".dll":
+        return
+    data = game.read_bytes()
+    pe = int.from_bytes(data[0x3C:0x40], "little")
+    optional = pe + 24
+    directories = optional + (112 if int.from_bytes(data[optional:optional + 2], "little") == 0x20B else 96)
+    export_rva = int.from_bytes(data[directories:directories + 4], "little")
+    sections = optional + int.from_bytes(data[pe + 20:pe + 22], "little")
+    for i in range(int.from_bytes(data[pe + 6:pe + 8], "little")):
+        at = sections + 40 * i
+        address, raw_size, raw = (int.from_bytes(data[at + o:at + o + 4], "little") for o in (12, 16, 20))
+        if address <= export_rva < address + raw_size:
+            directory = raw + export_rva - address
+            names = int.from_bytes(data[directory + 24:directory + 28], "little")
+            print(f"{game.name}: {names} exported names (Windows' limit is 65,535)")
+            if names >= EXPORT_WARNING:
+                warning = (f"{game.name} exports {names:,} names, {65_535 - names:,} short of Windows' 65,535: "
+                           "cut exported names before adding points or internals (#589)")
+                print(f"::warning::{warning}")
+                if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+                    with open(summary, "a", encoding="utf-8") as file:
+                        file.write(f"- {warning}\n")
+            return
+    sys.exit(f"{game.name} has no export directory")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -178,9 +236,13 @@ def main() -> None:
     build_parser.add_argument("--server", action="store_true", help="the dedicated server's features")
     smoke_parser = commands.add_parser("smoke")
     smoke_parser.add_argument("out", type=Path)
+    exports_parser = commands.add_parser("exports")
+    exports_parser.add_argument("out", type=Path)
     args = parser.parse_args()
     if args.command == "build":
         build(args.out.resolve(), args.server)
+    elif args.command == "exports":
+        exports(args.out.resolve())
     else:
         smoke(args.out.resolve())
 
