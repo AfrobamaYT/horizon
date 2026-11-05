@@ -82,9 +82,15 @@ enum PhysicalKey { Code(i32), Unidentified(i32) }
 struct KeyEvent { physical_key: PhysicalKey, text: &'static str, state: ElementState, repeat: bool }
 enum WindowEvent { KeyboardInput { event: KeyEvent, is_synthetic: bool }, Other }
 fn glfw_modifiers(bits: u32) -> u32 { bits }
-struct Game { window: Option<Window>, modifiers: u32, early: bool,
+struct Game { window: Option<Window>, modifiers: u32, early: bool, input: bool,
               calls: Vec<&'static str>, observed: Vec<(&'static str, KeyAction, u32)> }
 impl Game {
+    fn with_user_input<R>(&mut self, input: bool, f: impl FnOnce(&mut Self) -> R) -> R {
+        let was = std::mem::replace(&mut self.input, input);
+        let result = f(self);
+        self.input = was;
+        result
+    }
     fn handle_window_event(&mut self, _: &ActiveEventLoop, _: WindowId, mut event: WindowEvent,
                            _: input_trace::InputOrigin) {
         self.calls.push("handle"); self.modifiers = 0;
@@ -93,6 +99,8 @@ impl Game {
         self.calls.push("finish");
     }
     fn native_input_key(&mut self, name: &'static str, action: KeyAction, modifiers: u32) {
+        // The key's hook runs as input: a mod there may reach the clipboard.
+        assert!(self.input);
         self.calls.push("hook"); self.observed.push((name, action, modifiers));
     }
     METHOD
@@ -107,7 +115,7 @@ fn all_actions_consumption_and_window_gates() {
                 let original = KeyEvent { physical_key: physical_key.clone(), text: "z", state, repeat };
                 for (window, id, synthetic, fires) in [(true,7,false,true), (true,8,false,false),
                     (true,7,true,false), (false,7,false,false)] {
-                    let mut game = Game { window: window.then_some(Window), modifiers: 5, early,
+                    let mut game = Game { window: window.then_some(Window), modifiers: 5, early, input: false,
                         calls: vec![], observed: vec![] };
                     game.window_event(&ActiveEventLoop, id, WindowEvent::KeyboardInput { event: original.clone(), is_synthetic: synthetic });
                     let mut expected = vec!["handle"];
@@ -119,7 +127,7 @@ fn all_actions_consumption_and_window_gates() {
             }
         }
     }
-    let mut game = Game { window: Some(Window), modifiers: 5, early: false, calls: vec![], observed: vec![] };
+    let mut game = Game { window: Some(Window), modifiers: 5, early: false, input: false, calls: vec![], observed: vec![] };
     game.window_event(&ActiveEventLoop, 7, WindowEvent::Other);
     assert!(game.observed.is_empty());
 }
