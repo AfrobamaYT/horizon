@@ -1,5 +1,5 @@
 //! Startup shared by the gameplay library and its executable.
-use crate::{crash, game, logging, ram_limit};
+use crate::{crash, game, logging};
 use horizon_mods::selection::{Argument, LaunchArguments};
 use mod_api::__private::game::*;
 

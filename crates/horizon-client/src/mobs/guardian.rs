@@ -417,7 +417,8 @@ mod elder_home_tests {
     fn a_silent_elder_guardian_curses_without_the_sound() {
         with_test_world(&[], |w, types| {
             let kind = Arc::new(types.types["minecraft:elder_guardian"].clone());
-            let mut lr = LegacyRandom::new(0);
+            let mut fixture = crate::health::TestLevel::new(0);
+            let mut level = fixture.level();
             for silent in [false, true] {
                 let mut events = Vec::new();
                 let mut m = Mob::new(1200, kind.clone(), Vec3::new(0.5, 64.0, 0.5), 0.0);
@@ -426,7 +427,7 @@ mod elder_home_tests {
                     &mut m,
                     &mut Cx {
                         w,
-                        lr: &mut lr,
+                        level: &mut level,
                         events: &mut events,
                     },
                 );

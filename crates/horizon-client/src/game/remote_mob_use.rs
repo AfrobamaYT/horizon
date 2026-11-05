@@ -98,9 +98,11 @@ impl Game<'_> {
             // IronGolem.mobInteract.
             Species::IronGolem => iron_golem_takes(item, m.health, m.attrs.max_health),
             // CopperGolem.mobInteract.
-            Species::CopperGolem => {
-                copper_golem_takes(item, m.extra.main_hand.is_some(), self.golem_shearable(i))
-            }
+            Species::CopperGolem => copper_golem_takes(
+                item,
+                m.extra.main_hand_stack().is_some(),
+                self.golem_shearable(i),
+            ),
             // Bucketable.bucketMobPickup.
             Species::Cod
             | Species::Salmon

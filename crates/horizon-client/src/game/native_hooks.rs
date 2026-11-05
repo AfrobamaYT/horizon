@@ -1026,10 +1026,10 @@ use mod_api::{
     ToolUse, WorldPhase,
 };
 use mod_api::{
-    AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite,
-    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeBlockUpdateFlags,
-    NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
-    TooltipElement, TooltipPlace, UsePhase,
+    AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
+    LogicalSide, NativeBlockClick, NativeBlockUpdateFlags, NativeInteractionResult,
+    NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion, TooltipElement, TooltipPlace,
+    UsePhase,
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
@@ -3656,36 +3656,6 @@ impl Game<'_> {
         tag: &mut Option<Compound>,
     ) {
         Self::fire_block_entity_update_tag(pos, entity, tag);
-    }
-    /// May `stack` go into slot `slot` of the mod block entity at `pos`
-    /// (`entity`, read only), put in through `face` (none when no face is
-    /// asked)? NeoForge's `IItemHandler.isItemValid`, vanilla's
-    /// `Container.canPlaceItem`: a millstone takes only what it has a recipe
-    /// for, so a wrong item can't block it. Asked on the server for every
-    /// item a hopper, a dropper or `native_insert_item` would put in, once
-    /// the block's `ModContainer` lets that slot be filled through that face
-    /// (its `inputs` and `faces`). Set `cancel` to refuse the item there; the
-    /// mover tries the next slot. Not asked for a player's clicks in a menu
-    /// (`native_menu_slot_rules`). Bundles need "hooks": @API:container_accepts@.
-    pub(super) fn native_container_accepts(
-        &self,
-        pos: [i32; 3],
-        entity: &ModBlockEntity,
-        slot: usize,
-        stack: &ItemStack,
-        face: Option<Direction>,
-        cancel: &mut bool,
-    ) {
-        mod_api::dispatch_container_accepts(
-            self,
-            mod_api::mods(),
-            pos,
-            entity,
-            slot,
-            stack,
-            face,
-            cancel,
-        );
     }
     /// Draw the mod block entity at `pos`, of block `block`
     /// (`mymod:machine`), on this client: once a frame while it is in view

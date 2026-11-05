@@ -1,5 +1,8 @@
 use super::*;
-use horizon_core::geometry::{Axis, VoxelShape};
+use horizon_core::{
+    geometry::{Axis, VoxelShape},
+    random::LegacyRandom,
+};
 use horizon_world::{collision::CachedCollisionRegistry, nbt::Tag, registry::BlockRegistry};
 use std::{collections::BTreeSet, sync::Arc};
 fn text(value: &str) -> Tag {
@@ -139,6 +142,8 @@ fn run_with(
         facts: &facts,
         collision: &collision,
         fluids: &fluids,
+        loop_context: crate::test_resources::server_loop_context(),
+        mob_hooks: None,
         raining: &|_| false,
         mob_griefing: true,
         tnt_explodes: true,

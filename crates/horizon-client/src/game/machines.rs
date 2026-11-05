@@ -656,29 +656,6 @@ impl Game<'_> {
             });
         }
     }
-    /// `IItemHandler.isItemValid` for a mod's container: the mods' say
-    /// (`native_container_accepts`) on `stack` in `slot`, once its
-    /// `ModContainer` lets the slot be filled. Any other container: true.
-    fn mod_container_accepts(
-        &self,
-        view: &View,
-        slot: usize,
-        stack: &ItemStack,
-        face: Option<Direction>,
-    ) -> bool {
-        if view.kind != Kind::Mod {
-            return true;
-        }
-        let Some((pos, i)) = view.locate(slot) else {
-            return false;
-        };
-        let Some(BlockEntity::Mod(entity)) = self.world.block_entities.get(&pos) else {
-            return false;
-        };
-        let mut cancel = false;
-        self.native_container_accepts([pos.0, pos.1, pos.2], entity, i, stack, face, &mut cancel);
-        !cancel
-    }
     /// `HopperBlockEntity.tryMoveInItem`.
     fn try_move_in_item(
         &mut self,
@@ -686,9 +663,8 @@ impl Game<'_> {
         view: &View,
         stack: ItemStack,
         slot: usize,
-        face: Option<Direction>,
     ) -> Option<ItemStack> {
-        let (rest, moved) = self.move_in_item(from_hopper, view, stack, slot, face);
+        let (rest, moved) = self.move_in_item(from_hopper, view, stack, slot);
         if moved {
             self.view_changed(view);
             // JukeboxBlockEntity.setTheItem through a hopper's or a dropper's
@@ -701,18 +677,16 @@ impl Game<'_> {
         rest
     }
     /// `tryMoveInItem` before its `setChanged`: the remainder, and whether
-    /// anything moved. `face` is the side it goes in by, for a mod's say.
+    /// anything moved.
     fn move_in_item(
         &mut self,
         from_hopper: Option<Pos>,
         view: &View,
         mut stack: ItemStack,
         slot: usize,
-        face: Option<Direction>,
     ) -> (Option<ItemStack>, bool) {
         let c = self.containers();
-        if !c.can_place(view, slot, &stack) || !self.mod_container_accepts(view, slot, &stack, face)
-        {
+        if !c.can_place(view, slot, &stack) {
             return (Some(stack), false);
         }
         let was_empty = c.is_empty(view);
@@ -774,7 +748,7 @@ impl Game<'_> {
         let mut rest = Some(stack);
         for slot in view.slots_to_add(face) {
             let Some(stack) = rest.take() else { break };
-            rest = self.try_move_in_item(from_hopper, view, stack, slot, face);
+            rest = self.try_move_in_item(from_hopper, view, stack, slot);
         }
         rest
     }

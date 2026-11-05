@@ -100,7 +100,7 @@ impl Game<'_> {
         }
         .unwrap_or([0.0; 3]);
         let base = [f64::from(x), f64::from(y), f64::from(z)];
-        let context = self.context_outline(hit.pos, state);
+        let context = self.context_outline(hit.pos, state, true, &self.be_anims);
         let boxes = context.as_slice().iter().chain(match context {
             Some(_) => &[][..],
             None => &facts.outline[..],

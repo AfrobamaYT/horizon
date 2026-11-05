@@ -7,10 +7,11 @@
 //! as a native mod's commands do (`moderation_commands`), and the game runs them itself.
 use super::{Game, chat_filter::Reply, dedicated, lan::LanHost};
 use horizon_chat_filter::{duration_text, now_millis, parse_duration};
-use horizon_client::{mod_api::NativeCommand, text::Text};
+use horizon_client::text::Text;
 use horizon_protocol::packets::play::{self, Clientbound as C};
 use horizon_protocol::text::translatable;
 use horizon_server_files::user_lists::{BanEntry, BanList, NameAndId, format_date};
+use mod_api::NativeCommand;
 
 /// The operator level `/tempban` needs, as `/ban`'s.
 const TEMPBAN_LEVEL: u8 = 3;

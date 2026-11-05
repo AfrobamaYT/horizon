@@ -427,7 +427,7 @@ impl Game<'_> {
     }
     fn block_container_size(&self, p: [i32; 3]) -> Option<usize> {
         let size = match self.world.block_entities.get(&(p[0], p[1], p[2]))? {
-            BlockEntity::Mod(m) if m.id.is_empty() => 0,
+            BlockEntity::Mod(m) if m.id().is_empty() => 0,
             BlockEntity::Mod(_) => self
                 .world
                 .block_entities
@@ -450,7 +450,9 @@ impl Game<'_> {
         });
         let recipes = world_recipes!(self);
         match self.world.block_entities.get_mut(&key) {
-            Some(BlockEntity::Furnace(f)) if i == 0 => f.set_input(recipes, stack),
+            Some(BlockEntity::Furnace(f)) if i == 0 => {
+                f.set_input(&self.loop_context, recipes, stack)
+            }
             Some(BlockEntity::Furnace(f)) => {
                 f.items[i] = stack;
                 self.world.modified.insert((p[0] >> 4, p[2] >> 4));

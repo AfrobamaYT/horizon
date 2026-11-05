@@ -6,13 +6,9 @@
 use super::Game;
 use super::native_block_entity_draw::{BlockEntityDraw, place_turning};
 use glam::{Mat4, Vec3};
-use horizon_client::{
-    block_entity_render::diffuse_lights,
-    hud::HudBatch,
-    mesher::Vertex,
-    mod_api::{NativeSceneBlock, NativeSceneView},
-};
+use horizon_client::{block_entity_render::diffuse_lights, hud::HudBatch, mesher::Vertex};
 use horizon_world::level::data::state_flags;
+use mod_api::{NativeSceneBlock, NativeSceneView};
 
 /// A quad in the scene's blocks, before it is seen: its corners, UVs in the
 /// atlas, ABGR colour, and its outward normal.

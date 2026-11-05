@@ -831,18 +831,20 @@ mod tests {
     /// `isClosed` (raw peek 0). An open shell takes the same arrow.
     #[test]
     fn a_closed_shell_refuses_an_arrow() {
+        let mut fixture = crate::health::TestLevel::new(0);
+        let mut level = fixture.level();
         let source = Damage::of(DamageKind::Arrow);
         let mut closed = shulker();
         closed.extra.counter = 0;
         let health = closed.health;
         assert!(
-            !closed.damage_projectile(2.0, source, None, [0.0, 1.0]),
+            !closed.damage_projectile(&mut level, 2.0, source, None, [0.0, 1.0]),
             "a closed shell rejects the arrow"
         );
         assert_eq!(closed.health, health);
         let mut open = shulker();
         open.extra.counter = 30;
-        assert!(open.damage_projectile(2.0, source, None, [0.0, 1.0]));
+        assert!(open.damage_projectile(&mut level, 2.0, source, None, [0.0, 1.0]));
         assert!(open.health < health);
     }
 

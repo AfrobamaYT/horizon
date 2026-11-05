@@ -295,9 +295,17 @@ mod tests {
         world.set(20, 4, 18, flowing).unwrap();
         // A level-1 flow beside sources: the source is 1/9 higher to the west,
         // the air to the east on stone gives nothing, so the current is +x.
-        assert_eq!(fluid_flow(&world, &fluids, [20, 4, 18]), [1.0, 0.0, 0.0]);
-        for still in [[18, 4, 18], [17, 4, 17], [21, 4, 18]] {
-            assert_eq!(fluid_flow(&world, &fluids, still), [0.0; 3], "{still:?}");
+        let context = crate::test_resources::server_loop_context();
+        assert_eq!(
+            fluid_flow(&world, &fluids, context, BlockPos::new(20, 4, 18)),
+            Vec3::new(1.0, 0.0, 0.0)
+        );
+        for [x, y, z] in [[18, 4, 18], [17, 4, 17], [21, 4, 18]] {
+            assert_eq!(
+                fluid_flow(&world, &fluids, context, BlockPos::new(x, y, z)),
+                Vec3::ZERO,
+                "{x}, {y}, {z}"
+            );
         }
     }
     #[test]

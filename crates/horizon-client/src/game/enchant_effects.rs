@@ -476,6 +476,7 @@ impl Game<'_> {
         let source = Damage {
             kind: DamageKind::Thorns,
             attacker: Some(Who::Player),
+            attacker_species: None,
             from: self
                 .player
                 .as_ref()

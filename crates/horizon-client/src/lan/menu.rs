@@ -1302,6 +1302,9 @@ mod tests {
             fn items(&self) -> &Items {
                 &self.items
             }
+            fn enchantments(&self) -> &Enchantments {
+                enchantments()
+            }
             fn max_stack(&self, item: &str) -> u32 {
                 self.items.get(item).map_or(64, |i| i.max_stack)
             }
@@ -1326,6 +1329,7 @@ mod tests {
             container: Some(&mut chest),
             shulker: false,
             hidden: &[],
+            loop_context: crate::test_resources::server_loop_context(),
         };
         // Left click with stone in hand over the refused bundle: nothing goes in.
         view.guest.carried = Some(ItemStack::new("minecraft:stone", 5));

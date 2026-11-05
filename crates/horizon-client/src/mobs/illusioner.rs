@@ -301,9 +301,12 @@ mod tests {
                 0.0,
             );
             m.extra.counter = 20;
-            let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+            m.random = horizon_core::random::LegacyRandom::new(0);
+            let mut fixture = crate::health::TestLevel::new(0);
+            let mut level = fixture.level();
+            let mut events = Vec::new();
             for _ in 0..5 {
-                crate::mobs::ai::tick(&mut m, w, &mut lr, &mut events);
+                crate::mobs::ai::tick(&mut m, w, &mut level, &mut events);
             }
             left = Some(m.extra.counter);
         });
@@ -333,12 +336,15 @@ mod tests {
                 m.ai.target = Some(target);
                 let mut spell = Spell::new(BLINDNESS_SPELL);
                 spell.warmup = 1;
-                let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+                m.random = horizon_core::random::LegacyRandom::new(0);
+                let mut fixture = crate::health::TestLevel::new(0);
+                let mut level = fixture.level();
+                let mut events = Vec::new();
                 spell.tick(
                     &mut m,
                     &mut Cx {
                         w,
-                        lr: &mut lr,
+                        level: &mut level,
                         events: &mut events,
                     },
                 );

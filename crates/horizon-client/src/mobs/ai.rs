@@ -4196,7 +4196,7 @@ mod feed_tests {
             return;
         }
         let data = MobTypes::load(&root).unwrap();
-        let mut level = LegacyRandom::new(0);
+        let mut level = horizon_core::random::LegacyRandom::new(0);
         let kind = Arc::new(data.types.get("minecraft:turtle").unwrap().clone());
         let mut m = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         m.extra.age = 0;

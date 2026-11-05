@@ -77,14 +77,12 @@ impl Game<'_> {
             }
             keep
         });
-        let (tree, _, problems) = super::native_server::command_tree(&commands, |name| {
-            base.find(name).is_some() || name == horizon_client::ram_limit::COMMAND
-        });
+        let (tree, _, problems) =
+            super::native_server::command_tree(&commands, |name| base.find(name).is_some());
         for problem in problems {
             log::warn!("Horizon: a client command was left out: {problem}");
         }
-        // The window answers `ram_limit` itself, as it does a client mod's.
-        let mut tree_with_mods = with_native_commands(base, &[horizon_client::ram_limit::COMMAND]);
+        let mut tree_with_mods = base.clone();
         super::native_server::register_dispatcher(
             &mut tree_with_mods,
             &tree,
@@ -1877,17 +1875,6 @@ mod tests {
         assert_eq!(once.effects, ["b"]);
         assert!(!Arc::ptr_eq(&once, &command_export(&other, false).unwrap()));
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn the_ram_limit_command_is_known_to_the_chat_box() {
-        let reg = Registries::default();
-        let vanilla = horizon_client::command::vanilla::game_dispatcher();
-        assert!(vanilla.find(horizon_client::ram_limit::COMMAND).is_none());
-        let tree = with_native_commands(vanilla, &[horizon_client::ram_limit::COMMAND]);
-        for typed in ["ramlimit", "ramlimit 2048", "ramlimit off"] {
-            assert!(tree.parse(typed, &reg).executable().is_ok(), "{typed}");
-        }
     }
 
     /// A client command's usage becomes real nodes in the chat tree: its

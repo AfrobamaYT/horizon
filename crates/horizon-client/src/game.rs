@@ -274,7 +274,6 @@ mod native_lifecycle;
 mod native_living_effects;
 mod native_living_refs;
 mod native_living_writes;
-mod native_machines;
 mod native_menu_refs;
 mod native_menus;
 mod native_merchant_refs;
@@ -494,7 +493,6 @@ use horizon_world::{
     },
     registry::BlockStateId,
 };
-pub use machines::native_fluids::NativeFluidTank;
 pub use maps::{NativeMapDecoration, NativeMapInfo};
 pub use native_block_entity_draw::BlockEntityDraw;
 pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
@@ -507,7 +505,6 @@ pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
 pub use native_server::NativeExperienceOrb;
 pub use native_world_columns::NativeColumnBlocks;
 pub use native_world_edit::{NativeBlockEdit, NativeBlockRun, NativeHeightmap};
-pub use native_world_read::NativeBlockReadError;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -23131,9 +23128,6 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         let player_dir = horizon_client::logging::player_dir();
         if let Err(e) = horizon_client::multiplayer::add_official_server(&player_dir) {
             log::warn!("could not add the official server to servers.dat: {e}");
-        }
-        if let Err(e) = horizon_client::multiplayer::add_partner_servers(&player_dir) {
-            log::warn!("could not add the partner servers to servers.dat: {e}");
         }
     }
     let mut early_settings = Settings::load(&Game::options_path());

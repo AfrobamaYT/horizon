@@ -116,8 +116,13 @@ impl PrimedTnt {
         // Entity.move's last step: soul sand and honey slow the TNT's
         // horizontal speed. `blocks` is None only for the isolated unit tests.
         if let Some(blocks) = blocks {
-            let factor =
-                horizon_client::motion::block_speed_factor_at(world, blocks, self.position, None);
+            let factor = horizon_client::motion::block_speed_factor_at(
+                world,
+                blocks,
+                context,
+                self.position,
+                None,
+            );
             self.velocity = horizon_world::entity_move::scale_by_block_speed(self.velocity, factor);
         }
         // Entity.applyEffectsFromBlocks: a bubble column lifts or drags it, and the

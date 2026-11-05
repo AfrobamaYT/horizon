@@ -3,7 +3,7 @@
 //! (`horizon_protocol::mod_net`). Messages wait here: what a guest sent
 //! reaches `native_net_from_client` when the queue runs, and what a mod sends
 //! a player leaves at the tick's end, from whichever hook sent it.
-use super::{Game, lan::LanHost};
+use super::Game;
 use horizon_protocol::{
     mod_net::{self, Message},
     packets::{
