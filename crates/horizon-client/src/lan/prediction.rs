@@ -809,6 +809,7 @@ mod tests {
                 assets: &assets,
                 collision_binding: &binding,
                 resources: &resources,
+                health: &resources.health,
                 tag_items: None,
                 block_registries: None,
                 loop_context: crate::test_resources::server_loop_context(),
