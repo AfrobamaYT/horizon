@@ -152,7 +152,8 @@ pub mod points {
         }
     }
 
-    /// A `side = "both"` point's host.
+    /// A `side = "both"` point's host, out of line: each point's listener call stays a few bytes.
+    #[inline(never)]
     pub(super) fn host_side<'a>(game: &'a mut super::Game<'_>) -> mod_api::HostSide<'a> {
         super::execution_role::host_side(game)
     }
