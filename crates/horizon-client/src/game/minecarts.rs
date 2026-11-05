@@ -195,7 +195,7 @@ pub(super) fn default_display_offset(kind: CartKind) -> f64 {
     }
 }
 /// `AbstractMinecart.getDisplayOffset`: the saved `DisplayOffset`, else the default.
-fn display_offset(c: &Minecart) -> f64 {
+pub(super) fn display_offset(c: &Minecart) -> f64 {
     c.custom_offset
         .map_or_else(|| default_display_offset(c.kind), f64::from)
 }
