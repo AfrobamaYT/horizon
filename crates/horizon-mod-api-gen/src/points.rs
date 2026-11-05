@@ -753,8 +753,10 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
         return Ok(staged);
     }
     let lock_path = root.join("Cargo.lock");
-    let mut lock =
-        fs::read_to_string(&lock_path).map_err(|e| format!("{}: {e}", lock_path.display()))?;
+    // A Windows checkout has CRLF line endings; Cargo reads either, and the entries match on LF.
+    let mut lock = fs::read_to_string(&lock_path)
+        .map_err(|e| format!("{}: {e}", lock_path.display()))?
+        .replace("\r\n", "\n");
     for package in packages {
         let manifest = package.join("Cargo.toml");
         let text =
@@ -1074,7 +1076,9 @@ mod tests {
         );
         put(
             "Cargo.lock",
-            "version = 4\n\n[[package]]\nname = \"horizon-client-render\"\nversion = \"0.1.0\"\ndependencies = [\n \"log\",\n]\n\n[[package]]\nname = \"log\"\nversion = \"0.4.0\"\n",
+            // CRLF, as a Windows checkout writes it.
+            &"version = 4\n\n[[package]]\nname = \"horizon-client-render\"\nversion = \"0.1.0\"\ndependencies = [\n \"log\",\n]\n\n[[package]]\nname = \"log\"\nversion = \"0.4.0\"\n"
+                .replace('\n', "\r\n"),
         );
         put(
             "crates/horizon-client-render/src/lib.rs",
