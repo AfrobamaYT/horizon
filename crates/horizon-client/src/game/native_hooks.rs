@@ -1019,8 +1019,8 @@ use mod_api::__private::game::IngredientTest;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EnchantmentInfo, EntityRef,
-    EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand,
-    NativeDispensed, NativeHandRender, NativeItemDrop, NativeKeyMapping, NativeLifecycleContext,
+    GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
+    NativeHandRender, NativeItemDrop, NativeKeyMapping, NativeLifecycleContext,
     NativeNoteBlockChange, NativeProgressType, NativeServerPlayer, PathComputationType, Placement,
     PlayerRef, RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase,
     TicketController, ToolUse, WorldPhase,
@@ -1037,8 +1037,7 @@ pub(crate) use mod_api::{
     NativePanelEvent, NativePortalShape, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
 use mod_api::{
-    MobRef, NativeDespawn, NativeDifficulty, NativePermissionLevel, NativeSpawnCheck,
-    NativeSpawnReason, NativeSpawner, Recipe,
+    MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason, Recipe,
 };
 use std::{
     collections::HashMap,
