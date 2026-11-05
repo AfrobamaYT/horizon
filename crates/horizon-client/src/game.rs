@@ -2751,6 +2751,22 @@ struct QueuedLevelEvent {
     source: Option<horizon_world::level::LevelEventPlayer>,
 }
 
+/// The inputs of the scaled GUI size, compared so `window_resize` fires once per change.
+#[derive(Clone, Copy, PartialEq)]
+struct ResizeState {
+    size: winit::dpi::PhysicalSize<u32>,
+    gui_scale: u32,
+    fullscreen: bool,
+    force_unicode: bool,
+}
+
+impl ResizeState {
+    /// Records `self` as the last report and says whether it differs from the previous one.
+    fn differs_from(self, last: &mut Option<Self>) -> bool {
+        last.replace(self) != Some(self)
+    }
+}
+
 struct Game<'a> {
     /// Shared with an integrated server; `collision` and `motion` borrow from it.
     res: Arc<Resources>,
@@ -2935,6 +2951,8 @@ struct Game<'a> {
     /// The layout the last frame drew the inventory's effect panels with.
     effects_layout: std::cell::Cell<Option<horizon_client::inventory_effects::EffectsLayout>>,
     window: Option<Arc<Window>>,
+    /// What `window_resize` last reported: the physical size and the GUI settings behind the scaled size.
+    resize_state: Option<ResizeState>,
     renderer: Option<Renderer>,
     /// Avoid an endless rebuild loop if the new device is lost as well.
     last_device_recovery: Option<Instant>,
@@ -15642,10 +15660,6 @@ impl Game<'_> {
         if self.settings.sound_device != self.audio.device() {
             let _ = self.audio.set_device(&self.settings.sound_device);
         }
-        horizon_client::hud::GUI_SCALE.store(
-            self.settings.gui_scale,
-            std::sync::atomic::Ordering::Relaxed,
-        );
         self.apply_ui_settings();
     }
     /// The sprite layers a shader pack draws in the translucent pass: every section is meshed
@@ -18504,6 +18518,7 @@ impl ApplicationHandler for Game<'_> {
                 return;
             }
         }
+        self.resize_state = Some(self.resize_state_of(window.inner_size()));
         self.window = Some(window);
         self.ime_allowed = false;
         self.ime_area = None;
@@ -18662,7 +18677,11 @@ impl Game<'_> {
                 return;
             }
         }
+        let resized = matches!(event, WindowEvent::Resized(_));
         self.handle_window_event_inner(event_loop, event);
+        if resized {
+            self.notify_window_resize();
+        }
         // A title screen the event asked for opens before the next event.
         self.settle_title_mode();
         if let Some((button, pressed, modifiers)) = mouse {
@@ -20432,6 +20451,7 @@ impl<'a> Game<'a> {
             observed_screen: None,
             effects_layout: std::cell::Cell::new(None),
             window: None,
+            resize_state: None,
             renderer: None,
             last_device_recovery: None,
             entity_vertices: Vec::new(),
@@ -23081,6 +23101,7 @@ impl Loading {
         };
         drop(game_step);
         let game_ms = game_at.elapsed().as_millis();
+        game.resize_state = Some(game.resize_state_of(window.inner_size()));
         game.window = Some(window);
         game.renderer = Some(renderer);
         game.world_renderer_ready = true;
@@ -23333,15 +23354,6 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
             return no_resources::show(&vanilla_root, &settings);
         }
         return Err(error.into());
-    }
-    // Someone is playing: the official server in their list (servers.dat in the game folder, the
-    // working directory). Not for a server, a benchmark, a run that quits by itself, a harness's fixture or a run that
-    // horizon-ctl drives: those start in a source checkout and wrote the list there.
-    if !options.offscreen && !synchronous_startup(&options) {
-        let player_dir = horizon_client::logging::player_dir();
-        if let Err(e) = horizon_client::multiplayer::add_official_server(&player_dir) {
-            log::warn!("could not add the official server to servers.dat: {e}");
-        }
     }
     let mut early_settings = Settings::load(&Game::options_path());
     options
