@@ -3273,8 +3273,9 @@ mod tests {
         struct Listener(Arc<AtomicUsize>);
         #[mod_api::__subscriptions]
         impl Hooks for Listener {
-            fn anvil_update(&self, _: HostSide<'_>, _: &mut AnvilUpdateEvent<'_>) -> Flow {
+            fn anvil_update(&self, _: HostSide<'_>, event: &mut AnvilUpdateEvent<'_>) -> Flow {
                 self.0.fetch_add(1, Ordering::Relaxed);
+                event.update.xp_cost = -7;
                 Flow::Continue
             }
         }
@@ -3297,8 +3298,12 @@ mod tests {
                 let mut station = super::Station::new(super::Kind::Anvil, [0; 3]);
                 station.inputs[0] = Some(super::ItemStack::new("minecraft:iron_sword", 1));
                 game.update_anvil_answer(&mut station, "first".into());
+                assert_eq!(station.anvil.cost, -7);
+                station.anvil.cost = 1;
                 game.update_anvil_answer(&mut station, "first".into());
+                assert_eq!(station.anvil.cost, -7, "cached listener answer is signed");
                 game.update_anvil_answer(&mut station, "second".into());
+                assert_eq!(station.anvil.cost, -7);
                 assert_eq!(calls.load(Ordering::Relaxed), 2);
                 assert!(mod_api::__private::listened(HookId::AnvilUpdate));
             });
