@@ -1282,7 +1282,7 @@ impl Goal for AttackTurtleEgg {
                 0.7,
                 1.0,
             ));
-            super::after_break(cx.events, m.id, effects);
+            super::after_break(cx.events, cx.w.asks_living_destroy_block, m.id, effects);
         }
         self.since_reached += 1;
     }
