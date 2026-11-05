@@ -11260,6 +11260,9 @@ fn client_has_level(logged_in: bool, reconfiguring: Option<u64>) -> bool {
 mod interaction_event_tests;
 
 #[cfg(test)]
+mod native_entity_tests;
+
+#[cfg(test)]
 mod tests {
     /// `ClientChatReceivedEvent`: a mod's replacement is the line the chat
     /// shows, a cancelled system line never shows, and a cancelled message
@@ -12389,8 +12392,9 @@ mod tests {
     }
 
     use super::{
-        boat_interact_passes, chat_after_event, hold_server_fire, item_frame_interact_passes,
-        keep_client_state, remote_object_swings, remote_use_swings, synced_local_use,
+        boat_interact_passes, chat_after_event, client_has_level, hold_server_fire,
+        item_frame_interact_passes, keep_client_state, remote_object_swings, remote_use_swings,
+        synced_local_use,
     };
 
     #[test]

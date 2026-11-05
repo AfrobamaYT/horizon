@@ -518,6 +518,7 @@ mod render_bounds_tests {
     #[test]
     fn item_frame_bounds_include_the_full_map_and_held_item_depth() {
         let frame = ItemFrame {
+            join: Default::default(),
             id: 3,
             pos: [0, 0, 0],
             facing: 5,
