@@ -2900,7 +2900,7 @@ mod structure_tag_tests {
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -2956,7 +2956,8 @@ mod structure_tag_tests {
         let settings = json!({"enabled": ["file/mypack"], "disabled": []});
         std::fs::write(dir.join("datapacks.json"), settings.to_string()).unwrap();
         game.world_root = dir.clone();
-        let (tables, _) = game.build_world_tables(false, &[]).unwrap();
+        let stack = crate::game::functions::pack_stack(&dir, &root, false, &[]);
+        let (tables, _) = game.build_world_tables(&stack, false).unwrap();
         game.world_tables = tables;
         assert!(game.world_tables.is_some());
         assert!(holds(&game, "#mypack:village", "minecraft:igloo"));
