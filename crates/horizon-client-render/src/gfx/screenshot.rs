@@ -28,7 +28,7 @@ impl PendingScreenshot {
         let bytes = (image.width as usize)
             .checked_mul(image.height as usize)
             .and_then(|pixels| pixels.checked_mul(4));
-        if bytes != Some(image.rgba.len()) {
+        if image.width == 0 || image.height == 0 || bytes != Some(image.rgba.len()) {
             return Err("screenshot image must be width by height RGBA8 pixels".into());
         }
         Ok(image)
@@ -214,6 +214,24 @@ mod tests {
         pending.image_mut().rgba.pop();
         assert!(pending.save_in(root.path(), "bad.png").is_err());
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn pending_screenshot_refuses_zero_dimensions_without_touching_destinations() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("existing.png");
+        let hdr_path = root.path().join("existing-hdr.png");
+        std::fs::write(&path, b"original SDR").unwrap();
+        std::fs::write(&hdr_path, b"original HDR").unwrap();
+        for (width, height) in [(0, 1), (1, 0), (0, 0)] {
+            let mut pending = frame(path.clone(), true);
+            *pending.image_mut() = mod_api::ScreenshotImage::new(width, height, Vec::new());
+            assert!(pending.save_in(root.path(), "existing.png").is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), b"original SDR");
+            assert_eq!(std::fs::read(&hdr_path).unwrap(), b"original HDR");
+            assert!(pending.save_in(root.path(), "new/invalid.png").is_err());
+            assert!(!root.path().join("new").exists());
+        }
     }
 
     #[test]
