@@ -11,7 +11,7 @@ pub(crate) struct Requests {
 #[derive(Clone, Default)]
 pub(crate) struct Names {
     entries: Vec<Request>,
-    slots: HashMap<String, u32>,
+    pub(crate) slots: HashMap<String, u32>,
 }
 
 #[derive(Clone)]
@@ -122,6 +122,7 @@ pub fn block(key: BlockKey) -> Option<ResolvedBlock> {
 pub(crate) struct Effects {
     pub(crate) names: Names,
     pub(crate) indices: Vec<usize>,
+    keys: Vec<EffectKey>,
 }
 
 /// Resolve requested effects once, after every mod's content has been registered.
@@ -139,7 +140,15 @@ pub fn resolve_effects() -> Result<(), Vec<String>> {
     let indices = names.resolve("effect", |id| {
         all.iter().position(|def| potions::namespaced(def.id) == id)
     })?;
-    let _ = crate::part_table::resolved_effects().set(Effects { names, indices });
+    let mut keys = vec![EffectKey(u32::MAX); all.len()];
+    for (slot, &index) in indices.iter().enumerate() {
+        keys[index] = EffectKey(slot as u32);
+    }
+    let _ = crate::part_table::resolved_effects().set(Effects {
+        names,
+        indices,
+        keys,
+    });
     Ok(())
 }
 
@@ -165,4 +174,13 @@ pub fn effect_id(key: EffectKey) -> Option<&'static str> {
 /// Canonical diagnostic name, or refusal for an invalid slot.
 pub fn block_id(key: BlockKey) -> Option<&'static str> {
     crate::part_table::requested_keys().blocks.id(key.0)
+}
+
+/// The API key for an engine registry index, also for entries not explicitly requested by mods.
+pub fn effect_key(index: usize) -> Option<EffectKey> {
+    crate::part_table::resolved_effects()
+        .get()?
+        .keys
+        .get(index)
+        .copied()
 }

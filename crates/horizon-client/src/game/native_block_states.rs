@@ -152,11 +152,6 @@ pub(super) fn parse(
     registry.resolve(&state).ok()
 }
 
-/// `Block.defaultBlockState` of the block `block` names (`Identifier.parse`).
-pub(super) fn default_state(registry: &BlockRegistry, block: &str) -> Option<BlockStateId> {
-    registry.default_state(&horizon_client::command::args::normalize(block))
-}
-
 /// `BlockStateParser.serialize`: the block, then `[key=value,...]` in the
 /// state definition's (name) order.
 pub(super) fn serialize(state: &BlockState) -> String {
@@ -209,14 +204,19 @@ mod tests {
                     .is_none()
             );
             assert_eq!(
-                host.block_item("minecraft:stone").as_deref(),
+                host.block_item(mod_api::__private::part_tests::block_key("minecraft:stone"))
+                    .as_deref(),
                 Some("minecraft:stone")
             );
             assert_eq!(
-                host.block_item("minecraft:water").as_deref(),
+                host.block_item(mod_api::__private::part_tests::block_key("minecraft:water"))
+                    .as_deref(),
                 Some("minecraft:air")
             );
-            assert_eq!(host.block_item("missing:unknown"), None);
+            assert_eq!(
+                host.block_item(mod_api::__private::part_tests::invalid_block_key()),
+                None
+            );
         });
     }
 
@@ -269,21 +269,36 @@ mod tests {
     }
 
     #[test]
-    fn a_block_has_its_default_state() {
+    fn a_block_key_resolves_its_default_state() {
+        use mod_api::__private::{ResolvedBlock, part_tests, resolve_blocks, resolved_block};
         let (_, registry) = blocks();
-        assert_eq!(default_state(registry, "oak_stairs"), Some(BlockStateId(1)));
+        mod_api::__private::install(Default::default());
+        part_tests::register_game_keys([
+            "minecraft:oak_stairs".to_owned(),
+            "minecraft:wheat".to_owned(),
+        ]);
+        resolve_blocks(|id| {
+            let default = registry.default_state(id)?;
+            Some(ResolvedBlock {
+                default,
+                states: BlockStateRange::new(default, 1),
+                block: horizon_world::level::states::BlockId(0),
+            })
+        })
+        .unwrap();
         assert_eq!(
-            default_state(registry, "minecraft:wheat"),
-            Some(BlockStateId(5))
+            resolved_block(part_tests::block_key("oak_stairs"))
+                .unwrap()
+                .default,
+            BlockStateId(1)
         );
-        for block in [
-            "minecraft:nothing",
-            "oak_stairs[half=top]",
-            "minecraft:",
-            "",
-        ] {
-            assert_eq!(default_state(registry, block), None, "{block:?}");
-        }
+        assert_eq!(
+            resolved_block(part_tests::block_key("minecraft:wheat"))
+                .unwrap()
+                .default,
+            BlockStateId(5)
+        );
+        assert!(resolved_block(part_tests::invalid_block_key()).is_none());
     }
 }
 
@@ -324,7 +339,11 @@ mod facts_tests {
             assert_eq!((sound.volume, sound.pitch), (1.0, 1.0));
             // Oak stairs: facing 4 × half 2 × shape 5 × waterlogged 2 = 80 states, its default
             // among them; stone has one.
-            let range = facts.states_of("minecraft:oak_stairs").unwrap();
+            let range = facts
+                .states_of(mod_api::__private::part_tests::block_key(
+                    "minecraft:oak_stairs",
+                ))
+                .unwrap();
             assert_eq!(range.len(), 80);
             assert!(range.contains(stairs));
             assert!(range.iter().all(
@@ -332,12 +351,15 @@ mod facts_tests {
             ));
             assert_eq!(
                 facts
-                    .states_of("minecraft:stone")
+                    .states_of(mod_api::__private::part_tests::block_key("minecraft:stone"))
                     .map(|r| (r.first(), r.len())),
                 Some((stone, 1))
             );
             // Unknown: None.
-            assert_eq!(facts.states_of("mymod:nothing"), None);
+            assert_eq!(
+                facts.states_of(mod_api::__private::part_tests::block_key("mymod:nothing")),
+                None
+            );
             assert_eq!(facts.destroy_speed(BlockStateId(u32::MAX)), None);
             assert_eq!(facts.sound(BlockStateId(u32::MAX)), None);
         });

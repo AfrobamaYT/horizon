@@ -107,6 +107,25 @@ pub use world::{TargetInfo, visual_clip};
 pub mod dragon_contacts;
 pub mod zombie_villager;
 
+/// A mob's stored active effect with its registry index resolved once at creation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StoredEffect {
+    pub id: &'static str,
+    pub duration: i32,
+    pub amplifier: i32,
+    pub registry_index: Option<usize>,
+}
+impl StoredEffect {
+    pub fn new(id: &'static str, duration: i32, amplifier: i32) -> Self {
+        Self {
+            id,
+            duration,
+            amplifier,
+            registry_index: horizon_client_core::potions::effect(id).map(|def| def.index),
+        }
+    }
+}
+
 use crate::{
     blocks::BlockFacts,
     health::{DamageContainer, DamageLevel, Reduction},
@@ -1209,7 +1228,7 @@ pub struct Extra {
     pub repellent: Option<[i32; 3]>,
     pub vector: [f64; 3],
     /// Active status effects: (effect id, ticks left, amplifier).
-    pub effects: Vec<(&'static str, i32, i32)>,
+    pub effects: Vec<StoredEffect>,
     /// Hidden effect instances behind an active effect, keyed by effect id.
     pub effect_chains: Vec<crate::effects::EffectInstance>,
     /// The effects above given with `hideParticles`: no swirls for them.
@@ -2728,7 +2747,7 @@ impl Mob {
                 .extra
                 .effects
                 .iter()
-                .map(|e| e.0.trim_start_matches("minecraft:"))
+                .map(|e| e.id.trim_start_matches("minecraft:"))
                 .collect(),
             hunted_recently: m.species() == Species::Piglin && m.extra.ints[0] > 0,
             hurt_recently: m.species() == Species::Piglin && m.extra.piglin.hurt,
@@ -3175,7 +3194,7 @@ pub trait ModEffectTicks {
     fn tick_mod_effect(
         &self,
         level: &mut DamageLevel<'_>,
-        effect: &str,
+        effect: usize,
         mob: &mut Mob,
         tick_count: i32,
         amplifier: i32,
@@ -3183,7 +3202,7 @@ pub trait ModEffectTicks {
     /// `MobEffectEvent.Expired`: `mob`'s `effect` (`amplifier` from 0)
     /// counted down to nothing. A mod that cancels refuses the expiry: the
     /// effect stays at no ticks and asks again next tick.
-    fn effect_expired(&self, mob: u32, effect: &'static str, amplifier: i32, cancel: &mut bool);
+    fn effect_expired(&self, mob: u32, effect: usize, amplifier: i32, cancel: &mut bool);
 }
 /// Native mod hooks the mob AI asks while it decides.
 pub trait MobHooks {
@@ -3634,11 +3653,11 @@ impl Mob {
         // (`#bypasses_resistance` and `#bypasses_effects` skip it).
         if !source.kind.bypasses_effects()
             && !source.kind.bypasses_resistance()
-            && let Some(&(_, _, amp)) = self
+            && let Some(&StoredEffect { amplifier: amp, .. }) = self
                 .extra
                 .effects
                 .iter()
-                .find(|e| e.0 == "minecraft:resistance")
+                .find(|e| e.id == "minecraft:resistance")
         {
             let remainder = 25i32.wrapping_sub(amp.wrapping_add(1).wrapping_mul(5));
             amount = (amount * remainder as f32 / 25.0).max(0.0);
@@ -4028,8 +4047,9 @@ impl Mob {
         if self.extra.sprinting {
             v *= 1.0 + f64::from(0.3f32);
         }
-        for (e, _, amp) in &self.extra.effects {
-            match *e {
+        for effect in &self.extra.effects {
+            let amp = effect.amplifier;
+            match effect.id {
                 "minecraft:speed" => v *= 1.0 + 0.2 * f64::from(amp + 1),
                 "minecraft:slowness" => v *= (1.0 - 0.15 * f64::from(amp + 1)).max(0.0),
                 _ => {}
@@ -4038,7 +4058,7 @@ impl Mob {
         v
     }
     pub fn has_effect(&self, effect: &str) -> bool {
-        self.extra.effects.iter().any(|e| e.0 == effect)
+        self.extra.effects.iter().any(|e| e.id == effect)
     }
     /// `LivingEntity.isCurrentlyGlowing`: the Glowing effect or the `Glowing` tag (on a
     /// server's client, `glowing` holds shared flag 6 instead).
@@ -4050,15 +4070,12 @@ impl Mob {
         self.invisible
     }
     /// Removes effects and schedules the effect-status update when needed.
-    pub fn retain_effects(
-        &mut self,
-        mut keep: impl FnMut(&(&'static str, i32, i32)) -> bool,
-    ) -> bool {
+    pub fn retain_effects(&mut self, mut keep: impl FnMut(&StoredEffect) -> bool) -> bool {
         let before = self.extra.effects.len();
         self.extra.effects.retain(|e| {
             let keep = keep(e);
-            if !keep && e.0 == "minecraft:absorption" {
-                self.absorption = (self.absorption - 4.0 * (e.2 + 1) as f32).max(0.0);
+            if !keep && e.id == "minecraft:absorption" {
+                self.absorption = (self.absorption - 4.0 * (e.amplifier + 1) as f32).max(0.0);
             }
             keep
         });
@@ -4067,21 +4084,23 @@ impl Mob {
             let effects = &self.extra.effects;
             self.extra
                 .effect_chains
-                .retain(|e| effects.iter().any(|x| x.0 == e.id));
+                .retain(|e| effects.iter().any(|x| x.id == e.id));
             self.extra
                 .hidden_effects
-                .retain(|e| effects.iter().any(|x| x.0 == *e));
+                .retain(|e| effects.iter().any(|x| x.id == *e));
             self.extra
                 .ambient_effects
-                .retain(|e| effects.iter().any(|x| x.0 == *e));
+                .retain(|e| effects.iter().any(|x| x.id == *e));
         }
         self.effects_dirty |= changed;
         changed
     }
     /// Loads an effect without applying its attribute modifiers a second time.
     pub fn load_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) {
-        self.extra.effects.retain(|e| e.0 != effect);
-        self.extra.effects.push((effect, ticks, amplifier));
+        self.extra.effects.retain(|e| e.id != effect);
+        self.extra
+            .effects
+            .push(StoredEffect::new(effect, ticks, amplifier));
         self.effects_dirty = true;
     }
     /// `LivingEntity.addEffect` of a `MobEffectInstance` with its flags: the effect as
@@ -4101,10 +4120,13 @@ impl Mob {
         let mut incoming = crate::effects::EffectInstance::new(effect, ticks, amplifier);
         incoming.ambient = ambient;
         incoming.visible = visible;
-        let index = self.extra.effects.iter().position(|e| e.0 == effect);
-        let old_amp = index.map(|i| self.extra.effects[i].2);
+        let index = self.extra.effects.iter().position(|e| e.id == effect);
+        let old_amp = index.map(|i| self.extra.effects[i].amplifier);
         let mut active = if let Some(i) = index {
-            let (_, duration, amp) = self.extra.effects[i];
+            let (duration, amp) = (
+                self.extra.effects[i].duration,
+                self.extra.effects[i].amplifier,
+            );
             let mut active = crate::effects::EffectInstance::new(effect, duration, amp);
             active.ambient = self.extra.ambient_effects.contains(&effect);
             active.visible = !self.extra.hidden_effects.contains(&effect);
@@ -4120,11 +4142,11 @@ impl Mob {
             self.extra.effect_chains.push(*hidden);
         }
         if let Some(i) = index {
-            self.extra.effects[i] = (effect, active.duration, active.amplifier);
+            self.extra.effects[i] = StoredEffect::new(effect, active.duration, active.amplifier);
         } else {
             self.extra
                 .effects
-                .push((effect, active.duration, active.amplifier));
+                .push(StoredEffect::new(effect, active.duration, active.amplifier));
         }
         self.extra.ambient_effects.retain(|h| *h != effect);
         if active.ambient {

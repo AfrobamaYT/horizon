@@ -1622,7 +1622,7 @@ impl ItemEnchantments {
 #[non_exhaustive]
 pub struct NativeActiveEffect {
     /// The effect's namespaced id.
-    pub id: Identifier,
+    pub id: EffectKey,
     /// The ticks left; -1 is infinite.
     pub duration: i32,
     /// The amplifier, from 0.
@@ -1635,13 +1635,7 @@ pub struct NativeActiveEffect {
 
 impl NativeActiveEffect {
     /// Construct an effect with its duration, amplifier and visual flags.
-    pub fn new(
-        id: Identifier,
-        duration: i32,
-        amplifier: i32,
-        ambient: bool,
-        visible: bool,
-    ) -> Self {
+    pub fn new(id: EffectKey, duration: i32, amplifier: i32, ambient: bool, visible: bool) -> Self {
         Self {
             id,
             duration,
@@ -5661,7 +5655,7 @@ pub(crate) mod built {
     }
     // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativeActiveEffect {
-        pub id: &'static str,
+        pub id: super::EffectKey,
         pub duration: i32,
         pub amplifier: i32,
         pub ambient: bool,
@@ -5677,8 +5671,7 @@ pub(crate) mod built {
                 visible,
             } = v;
             Self {
-                id: crate::Identifier::parse_namespaced(id)
-                    .expect("the game's effect ids are namespaced"),
+                id,
                 duration,
                 amplifier,
                 ambient,

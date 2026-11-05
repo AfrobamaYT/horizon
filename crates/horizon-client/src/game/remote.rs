@@ -12039,7 +12039,14 @@ mod tests {
                 .id("minecraft:speed")
                 .unwrap();
             assert_eq!(living.effects(game), Some(Vec::new()));
-            assert!(living.effect(game, "minecraft:speed").is_none());
+            assert!(
+                living
+                    .effect(
+                        game,
+                        mod_api::__private::part_tests::effect_key("minecraft:speed")
+                    )
+                    .is_none()
+            );
             game.handle_packet(C::UpdateMobEffect(play::UpdateMobEffect {
                 id: 7,
                 effect: speed,
@@ -12048,7 +12055,12 @@ mod tests {
                 flags: 2,
             }))
             .unwrap();
-            let effect = living.effect(game, "minecraft:speed").unwrap();
+            let effect = living
+                .effect(
+                    game,
+                    mod_api::__private::part_tests::effect_key("minecraft:speed"),
+                )
+                .unwrap();
             assert_eq!((effect.duration, effect.amplifier), (600, 1));
             assert_eq!(living.effects(game).unwrap().len(), 1);
             let stone = Some(horizon_protocol::item::Stack::new(

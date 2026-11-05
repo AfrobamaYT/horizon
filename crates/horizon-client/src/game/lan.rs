@@ -693,8 +693,8 @@ pub(super) fn mob_meta(
     meta.extend(
         hub.effect_meta(
             (m.extra.effects.iter())
-                .filter(|e| !m.extra.hidden_effects.contains(&e.0))
-                .map(|e| (e.0, m.extra.ambient_effects.contains(&e.0))),
+                .filter(|e| !m.extra.hidden_effects.contains(&e.id))
+                .map(|e| (e.id, m.extra.ambient_effects.contains(&e.id))),
         ),
     );
     defaults.push((10, serializer::PARTICLES, Value::Particles(Vec::new())));

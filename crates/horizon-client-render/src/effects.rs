@@ -9,6 +9,8 @@ pub struct EffectInstance {
     /// Effect id: vanilla's without namespace (`speed`, `poison`, ...), a
     /// content mod's `<ns>:<path>`.
     pub id: &'static str,
+    /// The registry index, resolved at the instance boundary; unknown internal fixtures have none.
+    pub registry_index: Option<usize>,
     /// Remaining ticks; -1 is infinite.
     pub duration: i32,
     pub amplifier: i32,
@@ -20,6 +22,7 @@ impl EffectInstance {
     pub fn new(id: &'static str, duration: i32, amplifier: i32) -> Self {
         Self {
             id,
+            registry_index: potions::effect(id).map(|def| def.index),
             duration,
             amplifier: amplifier.clamp(0, 255),
             ambient: false,

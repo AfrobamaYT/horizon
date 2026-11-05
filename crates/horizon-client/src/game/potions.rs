@@ -1060,7 +1060,10 @@ impl Game<'_> {
                     let mut cancel = false;
                     self.native_mob_effect_expired(
                         player,
-                        mob_effect_id(e.id).unwrap_or(e.id),
+                        mod_api::__private::effect_key(
+                            e.registry_index.expect("active effect registry index"),
+                        )
+                        .expect("effects resolved at load"),
                         e.amplifier,
                         &mut cancel,
                     );
@@ -1101,7 +1104,10 @@ impl Game<'_> {
                         },
                     ));
                     let (keep, changes) = self.mod_effect_tick(
-                        e.id,
+                        mod_api::__private::effect_key(
+                            e.registry_index.expect("active effect registry index"),
+                        )
+                        .expect("effects resolved at load"),
                         None,
                         t,
                         e.amplifier,
@@ -1182,7 +1188,11 @@ impl Game<'_> {
     ) -> bool {
         let mut answered = None;
         if let Some(living) = self.effect_living_ref(entity) {
-            self.native_mob_effect_applicable(living, effect, &mut answered);
+            if let Some(key) =
+                brewing::effect(effect).and_then(|def| mod_api::__private::effect_key(def.index))
+            {
+                self.native_mob_effect_applicable(living, key, &mut answered);
+            }
         }
         match answered {
             Some(EffectApplicable::Allow) => true,
@@ -1225,14 +1235,19 @@ impl Game<'_> {
                 index += 1;
                 continue;
             }
-            let (id, amplifier) = (current.id, current.amplifier);
+            let amplifier = current.amplifier;
             // `MobEffectEvent.Remove`: refusing the removal keeps it, and the
             // next one is asked with this one still in place, as in vanilla.
             let mut cancel = false;
             if let Some(living) = self.effect_living_ref(None) {
                 self.native_mob_effect_remove(
                     living,
-                    mob_effect_id(id).unwrap_or(id),
+                    mod_api::__private::effect_key(
+                        current
+                            .registry_index
+                            .expect("active effect registry index"),
+                    )
+                    .expect("effects resolved at load"),
                     amplifier,
                     &mut cancel,
                 );
@@ -1260,6 +1275,11 @@ impl Game<'_> {
         new: bool,
     ) {
         if self.remote.is_none() && brewing::is_mod_effect(effect) {
+            let Some(effect) =
+                brewing::effect(effect).and_then(|def| mod_api::__private::effect_key(def.index))
+            else {
+                return;
+            };
             if new {
                 self.native_on_effect_added(effect, entity, amplifier);
             }
@@ -1271,7 +1291,7 @@ impl Game<'_> {
     /// may end it. Whether it stays.
     fn mod_effect_tick(
         &self,
-        effect: &str,
+        effect: mod_api::EffectKey,
         entity: Option<i32>,
         tick_count: i32,
         amplifier: i32,
@@ -2389,7 +2409,7 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
     fn tick_mod_effect(
         &self,
         level: &mut DamageLevel<'_>,
-        effect: &str,
+        effect: usize,
         mob: &mut Mob,
         tick_count: i32,
         amplifier: i32,
@@ -2398,6 +2418,9 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
             return true;
         };
         let holder = LivingRef::new(EntityRef::new(epoch, mob.id));
+        let Some(effect) = mod_api::__private::effect_key(effect) else {
+            return true;
+        };
         let (keep, changes) = self.mod_effect_tick(
             effect,
             Some(mob.id as i32),
@@ -2419,9 +2442,11 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
         }
         keep
     }
-    fn effect_expired(&self, mob: u32, effect: &'static str, amplifier: i32, cancel: &mut bool) {
+    fn effect_expired(&self, mob: u32, effect: usize, amplifier: i32, cancel: &mut bool) {
         if let Some(living) = self.effect_living_ref(Some(mob as i32)) {
-            self.native_mob_effect_expired(living, effect, amplifier, cancel);
+            if let Some(effect) = mod_api::__private::effect_key(effect) {
+                self.native_mob_effect_expired(living, effect, amplifier, cancel);
+            }
         }
     }
 }
@@ -2451,7 +2476,7 @@ mod tests {
             fn should_apply_effect_tick_this_tick(
                 &self,
                 _: &dyn Host,
-                event: &mut ShouldApplyEffectTickThisTickEvent<'_>,
+                event: &mut ShouldApplyEffectTickThisTickEvent,
             ) {
                 event.apply = true;
             }
@@ -2850,7 +2875,10 @@ mod tests {
                 _: &dyn ClientHost,
                 event: &mut GatherEffectScreenTooltipsEvent<'_>,
             ) {
-                assert_eq!(event.effect.id.to_string(), "minecraft:speed");
+                assert_eq!(
+                    event.effect.id,
+                    mod_api::__private::part_tests::effect_key("minecraft:speed")
+                );
                 assert_eq!((event.effect.duration, event.effect.amplifier), (450, 1));
                 assert_eq!(event.screen.id, "inventory");
                 event.tooltip.push((Text::literal("Fast feet"), 0xff55ffff));

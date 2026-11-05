@@ -7995,10 +7995,8 @@ impl Game<'_> {
                     };
                     if let Some(living) = mob {
                         let effect = mod_api::NativeActiveEffect::new(
-                            mod_api::Identifier::parse_namespaced(
-                                horizon_client::brewing::namespaced(def.id),
-                            )
-                            .expect("the game's effect ids are namespaced"),
+                            mod_api::__private::effect_key(def.index)
+                                .expect("effects resolved at load"),
                             eff.duration,
                             eff.amplifier,
                             eff.ambient,
@@ -8026,7 +8024,9 @@ impl Game<'_> {
                 let mut changed = false;
                 for effect in effects {
                     changed |= match mob {
-                        Some(living) => self.native_living_remove_effect(living, effect),
+                        Some(living) => horizon_client::brewing::effect(effect)
+                            .and_then(|def| mod_api::__private::effect_key(def.index))
+                            .is_some_and(|key| self.native_living_remove_effect(living, key)),
                         None => self
                             .remove_player_effects(Some(effect.trim_start_matches("minecraft:"))),
                     };

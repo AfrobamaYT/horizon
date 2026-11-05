@@ -1448,11 +1448,11 @@ impl Mob {
         }
         let mut y = movement.y;
         // LivingEntity.travelInAir: levitation lifts by its amplifier.
-        if let Some(&(_, _, amp)) = self
+        if let Some(&super::StoredEffect { amplifier: amp, .. }) = self
             .extra
             .effects
             .iter()
-            .find(|e| e.0 == "minecraft:levitation")
+            .find(|e| e.id == "minecraft:levitation")
         {
             y += (0.05 * f64::from(amp + 1) - movement.y) * 0.2;
         } else {
@@ -1680,8 +1680,8 @@ impl Mob {
         self.extra
             .effects
             .iter()
-            .find(|e| e.0 == "minecraft:jump_boost")
-            .map_or(0.0, |e| 0.1 * (e.2 + 1) as f32)
+            .find(|e| e.id == "minecraft:jump_boost")
+            .map_or(0.0, |e| 0.1 * (e.amplifier + 1) as f32)
     }
     /// `Entity.getBlockJumpFactor`: the block the mob stands in, or the one
     /// below that affects movement when the current block has a neutral jump factor of 1.0.

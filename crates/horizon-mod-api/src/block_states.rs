@@ -65,6 +65,6 @@ mod tests {
         assert_eq!(facts.destroy_speed(BlockStateId(1)), None);
         assert_eq!(facts.sound(BlockStateId(1)), None);
         assert_eq!(facts.has_block_entity(BlockStateId(1)), None);
-        assert_eq!(facts.states_of("minecraft:stone"), None);
+        assert_eq!(facts.states_of(crate::BlockKey(0)), None);
     }
 }

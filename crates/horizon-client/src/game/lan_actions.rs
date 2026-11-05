@@ -7053,16 +7053,26 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
             fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-                r.block_part("minecraft:stone", Picker(self.picks.clone()));
-                r.block_part("minecraft:beehive", Picker(self.picks.clone()));
-                r.block_part("minecraft:chest", Picker(self.picks.clone()));
-                r.block_part("minecraft:lever", self.user.clone());
-                r.block_part("minecraft:cauldron", self.user.clone());
-                r.block_part("minecraft:jukebox", self.user.clone());
-                r.block_part("minecraft:decorated_pot", self.user.clone());
-                r.block_part("minecraft:redstone_ore", self.user.clone());
-                r.block_part("minecraft:chiseled_bookshelf", self.user.clone());
-                r.block_part("minecraft:cake", self.user.clone());
+                let block_key = r.block_key("minecraft:stone");
+                r.block_part(block_key, Picker(self.picks.clone()));
+                let block_key = r.block_key("minecraft:beehive");
+                r.block_part(block_key, Picker(self.picks.clone()));
+                let block_key = r.block_key("minecraft:chest");
+                r.block_part(block_key, Picker(self.picks.clone()));
+                let block_key = r.block_key("minecraft:lever");
+                r.block_part(block_key, self.user.clone());
+                let block_key = r.block_key("minecraft:cauldron");
+                r.block_part(block_key, self.user.clone());
+                let block_key = r.block_key("minecraft:jukebox");
+                r.block_part(block_key, self.user.clone());
+                let block_key = r.block_key("minecraft:decorated_pot");
+                r.block_part(block_key, self.user.clone());
+                let block_key = r.block_key("minecraft:redstone_ore");
+                r.block_part(block_key, self.user.clone());
+                let block_key = r.block_key("minecraft:chiseled_bookshelf");
+                r.block_part(block_key, self.user.clone());
+                let block_key = r.block_key("minecraft:cake");
+                r.block_part(block_key, self.user.clone());
                 r.item_part("minecraft:stick", self.user.clone());
                 r.item_part("minecraft:water_bucket", self.user.clone());
                 r.item_part("minecraft:stone", self.user.clone());
@@ -7621,7 +7631,8 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for BlockUse {
             fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-                r.block_part("minecraft:lever", self.clone());
+                let block_key = r.block_key("minecraft:lever");
+                r.block_part(block_key, self.clone());
             }
         }
         let calls = Arc::new(AtomicUsize::new(0));
@@ -7689,7 +7700,8 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Replacement {
             fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-                r.block_part("minecraft:note_block", self.clone());
+                let block_key = r.block_key("minecraft:note_block");
+                r.block_part(block_key, self.clone());
             }
         }
         let replace = Arc::new(AtomicBool::new(true));

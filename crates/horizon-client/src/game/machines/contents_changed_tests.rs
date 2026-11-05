@@ -108,7 +108,8 @@ impl Hooks for Observed {
     fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
         // An unbacked vehicle coordinate would select air if it were dispatched as a block.
         for block in ["minecraft:air", "minecraft:chest", "minecraft:crafter"] {
-            r.block_part(block, self.clone());
+            let block_key = r.block_key(block);
+            r.block_part(block_key, self.clone());
         }
         let kind = r.block_entity_type("depot").blocks(&[DEPOT]).build();
         r.block_entity_part(&kind, self.changes.clone()).unwrap();

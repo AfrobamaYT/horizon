@@ -805,7 +805,7 @@ pub trait Hooks {
     /// Server-side.
     #[hook(side = "server", contract = "listen", host = "read")]
     fn apply_effect_tick(
-        effect: &str,
+        effect: EffectKey,
         dimension: &str,
         entity: Option<i32>,
         amplifier: i32,

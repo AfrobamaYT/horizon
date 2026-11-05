@@ -73,7 +73,8 @@ pub fn common(from: &Mob, to: &mut Mob, preserve_can_pick_up_loot: bool) {
         .unwrap_or(&0.0) as f32;
     to.absorption = from.absorption.clamp(0.0, maximum);
     // addEffect for each: Absorption's onEffectStarted raises it again.
-    for &(effect, ticks, amplifier) in &from.extra.effects {
+    for effect in &from.extra.effects {
+        let (effect, ticks, amplifier) = (effect.id, effect.duration, effect.amplifier);
         to.add_effect(effect, ticks, amplifier);
     }
     to.extra.hidden_effects = from.extra.hidden_effects.clone();

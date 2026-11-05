@@ -356,23 +356,38 @@ mod tests {
             assert_eq!(game.native_state_outline(BlockStateId(u32::MAX)), None);
 
             assert_eq!(
-                game.native_block_in_tag("minecraft:stone", "minecraft:base_stone_overworld"),
+                game.native_block_in_tag(
+                    mod_api::__private::part_tests::block_key("minecraft:stone"),
+                    "minecraft:base_stone_overworld"
+                ),
                 Some(true)
             );
             assert_eq!(
-                game.native_block_in_tag("stone", "base_stone_overworld"),
+                game.native_block_in_tag(
+                    mod_api::__private::part_tests::block_key("stone"),
+                    "base_stone_overworld"
+                ),
                 Some(true)
             );
             assert_eq!(
-                game.native_block_in_tag("minecraft:stone", "minecraft:logs"),
+                game.native_block_in_tag(
+                    mod_api::__private::part_tests::block_key("minecraft:stone"),
+                    "minecraft:logs"
+                ),
                 Some(false)
             );
             assert_eq!(
-                game.native_block_in_tag("minecraft:stone", "nope:missing"),
+                game.native_block_in_tag(
+                    mod_api::__private::part_tests::block_key("minecraft:stone"),
+                    "nope:missing"
+                ),
                 Some(false)
             );
             assert_eq!(
-                game.native_block_in_tag("missing:unknown", "minecraft:logs"),
+                game.native_block_in_tag(
+                    mod_api::__private::part_tests::invalid_block_key(),
+                    "minecraft:logs"
+                ),
                 Some(false)
             );
 
@@ -435,7 +450,10 @@ mod tests {
             game.with_level(|_, host, _| {
                 // Not an authoritative level: tags are not the server's, so they read None.
                 assert_eq!(
-                    host.block_in_tag("minecraft:stone", "minecraft:base_stone_overworld"),
+                    host.block_in_tag(
+                        mod_api::__private::part_tests::block_key("minecraft:stone"),
+                        "minecraft:base_stone_overworld"
+                    ),
                     None
                 );
                 assert_eq!(
@@ -447,15 +465,25 @@ mod tests {
             game.options.dedicated = Some(Vec::new());
             let bounds = game.native_level_height(level).unwrap();
             let parsed = game.native_block_state_id("minecraft:oak_slab[waterlogged=true]");
-            let default = game.native_block_state_default("minecraft:oak_slab");
+            let default = game.native_block_state_default(
+                mod_api::__private::part_tests::block_key("minecraft:oak_slab"),
+            );
             game.with_level(|_, host, ticks| {
                 assert_eq!(
                     host.block_state_id("minecraft:oak_slab[waterlogged=true]"),
                     parsed
                 );
-                assert_eq!(host.block_state_default("minecraft:oak_slab"), default);
+                assert_eq!(
+                    host.block_state_default(mod_api::__private::part_tests::block_key(
+                        "minecraft:oak_slab"
+                    )),
+                    default
+                );
                 assert_eq!(host.block_state_id("minecraft:oak_slab[bad=true]"), None);
-                assert_eq!(host.block_state_default("missing:unknown"), None);
+                assert_eq!(
+                    host.block_state_default(mod_api::__private::part_tests::invalid_block_key()),
+                    None
+                );
                 let wrapped = super::super::mod_api_host::LevelTicks {
                     level: &*host,
                     ticks,
@@ -464,9 +492,18 @@ mod tests {
                     wrapped.block_state_id("minecraft:oak_slab[waterlogged=true]"),
                     parsed
                 );
-                assert_eq!(wrapped.block_state_default("minecraft:oak_slab"), default);
+                assert_eq!(
+                    wrapped.block_state_default(mod_api::__private::part_tests::block_key(
+                        "minecraft:oak_slab"
+                    )),
+                    default
+                );
                 assert_eq!(wrapped.block_state_id("minecraft:oak_slab[bad=true]"), None);
-                assert_eq!(wrapped.block_state_default("missing:unknown"), None);
+                assert_eq!(
+                    wrapped
+                        .block_state_default(mod_api::__private::part_tests::invalid_block_key()),
+                    None
+                );
                 assert_eq!(host.state_string(stone).as_deref(), Some("minecraft:stone"));
                 assert!(
                     host.state_string(slab)
@@ -476,11 +513,17 @@ mod tests {
                 assert_eq!(host.state_string(BlockStateId(u32::MAX)), None);
                 assert_eq!((host.min_y(), host.height()), bounds);
                 assert_eq!(
-                    host.block_in_tag("minecraft:stone", "minecraft:base_stone_overworld"),
+                    host.block_in_tag(
+                        mod_api::__private::part_tests::block_key("minecraft:stone"),
+                        "minecraft:base_stone_overworld"
+                    ),
                     Some(true)
                 );
                 assert_eq!(
-                    host.block_in_tag("minecraft:stone", "minecraft:logs"),
+                    host.block_in_tag(
+                        mod_api::__private::part_tests::block_key("minecraft:stone"),
+                        "minecraft:logs"
+                    ),
                     Some(false)
                 );
                 assert_eq!(host.fluid_state([1, 64, 1]), Some(FluidState::WATER));
@@ -509,15 +552,26 @@ mod tests {
                     hit.block_state_id("minecraft:oak_slab[waterlogged=true]"),
                     parsed
                 );
-                assert_eq!(hit.block_state_default("minecraft:oak_slab"), default);
+                assert_eq!(
+                    hit.block_state_default(mod_api::__private::part_tests::block_key(
+                        "minecraft:oak_slab"
+                    )),
+                    default
+                );
                 assert_eq!(hit.block_state_id("minecraft:oak_slab[bad=true]"), None);
-                assert_eq!(hit.block_state_default("missing:unknown"), None);
+                assert_eq!(
+                    hit.block_state_default(mod_api::__private::part_tests::invalid_block_key()),
+                    None
+                );
                 assert_eq!(hit.state_string(stone).as_deref(), Some("minecraft:stone"));
                 assert!(hit.state_string(slab).unwrap().contains("waterlogged=true"));
                 assert_eq!(hit.state_string(BlockStateId(u32::MAX)), None);
                 assert_eq!((hit.min_y(), hit.height()), bounds);
                 assert_eq!(
-                    hit.block_in_tag("minecraft:stone", "minecraft:base_stone_overworld"),
+                    hit.block_in_tag(
+                        mod_api::__private::part_tests::block_key("minecraft:stone"),
+                        "minecraft:base_stone_overworld"
+                    ),
                     Some(true)
                 );
                 assert_eq!(
@@ -525,7 +579,10 @@ mod tests {
                     Some(true)
                 );
                 assert_eq!(
-                    hit.block_in_tag("missing:unknown", "minecraft:logs"),
+                    hit.block_in_tag(
+                        mod_api::__private::part_tests::invalid_block_key(),
+                        "minecraft:logs"
+                    ),
                     Some(false)
                 );
             }
@@ -540,8 +597,19 @@ mod tests {
                         &game.damage_hooks,
                     ));
                 assert_eq!(hit.block_state_id("minecraft:stone"), None);
-                assert_eq!(hit.block_state_default("minecraft:stone"), None);
-                assert_eq!(hit.block_in_tag("minecraft:stone", "minecraft:logs"), None);
+                assert_eq!(
+                    hit.block_state_default(mod_api::__private::part_tests::block_key(
+                        "minecraft:stone"
+                    )),
+                    None
+                );
+                assert_eq!(
+                    hit.block_in_tag(
+                        mod_api::__private::part_tests::block_key("minecraft:stone"),
+                        "minecraft:logs"
+                    ),
+                    None
+                );
                 assert_eq!(hit.fluid_in_tag("minecraft:water", "minecraft:water"), None);
             }
             assert_eq!(game.world.chunks.len(), chunks, "nothing was loaded");

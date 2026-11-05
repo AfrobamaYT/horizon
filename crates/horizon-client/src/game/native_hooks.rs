@@ -1012,7 +1012,6 @@ use horizon_world::{
     registry::{BlockRegistry, BlockStateId},
 };
 use mod_api::__private::game::IngredientTest;
-use mod_api::BlockKey;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EnchantmentInfo, EntityRef,
@@ -1028,6 +1027,7 @@ use mod_api::{
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, TooltipPlace, UsePhase,
 };
+use mod_api::{BlockKey, EffectKey};
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
     NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativePanelEvent,
@@ -8643,7 +8643,7 @@ impl Game<'_> {
     /// and `native_apply_effect_tick` follows. Server-side.
     pub(super) fn native_should_apply_effect_tick_this_tick(
         &self,
-        effect: &str,
+        effect: EffectKey,
         tick_count: i32,
         amplifier: i32,
         apply: &mut bool,
@@ -8671,7 +8671,7 @@ impl Game<'_> {
     /// which it didn't have. Server-side.
     pub(super) fn native_on_effect_added(
         &mut self,
-        effect: &str,
+        effect: EffectKey,
         entity: Option<i32>,
         amplifier: i32,
     ) {
@@ -8694,7 +8694,7 @@ impl Game<'_> {
     /// Server-side.
     pub(super) fn native_mob_effect_added(
         &mut self,
-        effect: &str,
+        effect: EffectKey,
         entity: Option<i32>,
         amplifier: i32,
     ) {
@@ -8709,7 +8709,7 @@ impl Game<'_> {
     pub(super) fn native_mob_effect_applicable(
         &mut self,
         entity: LivingRef,
-        effect: &str,
+        effect: EffectKey,
         applicable: &mut Option<mod_api::EffectApplicable>,
     ) {
         self.fire_mob_effect_applicable(entity, effect, applicable);
@@ -8764,7 +8764,7 @@ impl Game<'_> {
     pub(super) fn native_mob_effect_expired(
         &self,
         entity: LivingRef,
-        effect: &str,
+        effect: EffectKey,
         amplifier: i32,
         cancel: &mut bool,
     ) {
@@ -8778,7 +8778,7 @@ impl Game<'_> {
     pub(super) fn native_mob_effect_remove(
         &mut self,
         entity: LivingRef,
-        effect: &str,
+        effect: EffectKey,
         amplifier: i32,
         cancel: &mut bool,
     ) {
@@ -14034,7 +14034,8 @@ mod entity_inside_tests {
     #[mod_api::__subscriptions]
     impl Hooks for Mod {
         fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-            r.block_part("minecraft:stone", self.0.clone());
+            let block_key = r.block_key("minecraft:stone");
+            r.block_part(block_key, self.0.clone());
         }
     }
 
@@ -14121,7 +14122,8 @@ mod item_fall_on_tests {
     #[mod_api::__subscriptions]
     impl Hooks for Mod {
         fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-            r.block_part("minecraft:stone", self.0.clone());
+            let block_key = r.block_key("minecraft:stone");
+            r.block_part(block_key, self.0.clone());
         }
     }
 

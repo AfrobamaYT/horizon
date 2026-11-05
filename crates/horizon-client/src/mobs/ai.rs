@@ -158,7 +158,13 @@ impl Mob {
         off_hand: bool,
         animation: crate::first_person::SwingAnimation,
     ) -> bool {
-        let amplifier = |id: &str| self.extra.effects.iter().find(|e| e.0 == id).map(|e| e.2);
+        let amplifier = |id: &str| {
+            self.extra
+                .effects
+                .iter()
+                .find(|e| e.id == id)
+                .map(|e| e.amplifier)
+        };
         let dig_speed = amplifier("minecraft:haste").max(amplifier("minecraft:conduit_power"));
         let fatigue = amplifier("minecraft:mining_fatigue");
         let duration = crate::first_person::swing_duration(animation, dig_speed, fatigue);
@@ -2859,20 +2865,20 @@ pub(crate) fn tick_effects(
     let first = m.extra.effects.len();
     let mut i = 0;
     while i < m.extra.effects.len() && i < first {
-        let (effect, amp) = (m.extra.effects[i].0, m.extra.effects[i].2);
+        let (effect, amp) = (m.extra.effects[i].id, m.extra.effects[i].amplifier);
         // MobEffectInstance.tickServer: an infinite (-1) effect times its
         // ticks by the mob's tickCount and never counts down.
-        let infinite = m.extra.effects[i].1 == -1;
+        let infinite = m.extra.effects[i].duration == -1;
         // MobEffectInstance.tickServer: hasRemainingDuration is false at 0, so the
         // instance ticks nothing; LivingEntity.tickEffects drops it below.
-        if !infinite && m.extra.effects[i].1 == 0 {
+        if !infinite && m.extra.effects[i].duration == 0 {
             i += 1;
             continue;
         }
         let count = if infinite {
             m.age as i32
         } else {
-            m.extra.effects[i].1
+            m.extra.effects[i].duration
         };
         let interval = |base: i32| (base >> amp.max(0)).max(1);
         // A refused mod effect is left at 0 ticks for the retain below.
@@ -2907,12 +2913,13 @@ pub(crate) fn tick_effects(
             }
             id if horizon_client_core::potions::is_mod_effect(id) => {
                 // tickServer: one with no ticks left goes unasked.
-                if !infinite && m.extra.effects[i].1 <= 0 {
+                if !infinite && m.extra.effects[i].duration <= 0 {
                     i += 1;
                     continue;
                 }
                 if let Some(mods) = mods
-                    && !mods.tick_mod_effect(level, id, m, count, amp)
+                    && let Some(index) = m.extra.effects[i].registry_index
+                    && !mods.tick_mod_effect(level, index, m, count, amp)
                 {
                     // Removed before it counts down.
                     expired = true;
@@ -2920,26 +2927,27 @@ pub(crate) fn tick_effects(
             }
             _ => {}
         }
-        if m.extra.effects.get(i).is_some_and(|e| e.0 == effect) {
+        if m.extra.effects.get(i).is_some_and(|e| e.id == effect) {
             if !expired {
                 if let Some(hidden) = m.extra.effect_chains.iter_mut().find(|e| e.id == effect) {
                     hidden.tick_down();
                 }
                 if !infinite {
-                    m.extra.effects[i].1 -= 1;
+                    m.extra.effects[i].duration -= 1;
                 }
             } else {
-                m.extra.effects[i].1 = 0;
+                m.extra.effects[i].duration = 0;
             }
             if !expired
-                && m.extra.effects[i].1 == 0
+                && m.extra.effects[i].duration == 0
                 && let Some(chain) = m.extra.effect_chains.iter().position(|e| e.id == effect)
             {
                 let mut hidden = m.extra.effect_chains.remove(chain);
                 if effect == "minecraft:absorption" {
                     m.absorption = m.absorption.min(4.0 * (hidden.amplifier + 1) as f32);
                 }
-                m.extra.effects[i] = (effect, hidden.duration, hidden.amplifier);
+                m.extra.effects[i] =
+                    super::StoredEffect::new(effect, hidden.duration, hidden.amplifier);
                 m.extra.ambient_effects.retain(|e| *e != effect);
                 if hidden.ambient {
                     m.extra.ambient_effects.push(effect);
@@ -2958,7 +2966,7 @@ pub(crate) fn tick_effects(
         if m.extra
             .effects
             .get(i)
-            .is_some_and(|e| e.0 == effect && e.1 > 0 && e.1 % 600 == 0)
+            .is_some_and(|e| e.id == effect && e.duration > 0 && e.duration % 600 == 0)
         {
             m.effects_dirty = true;
         }
@@ -2966,13 +2974,15 @@ pub(crate) fn tick_effects(
     }
     let mob_id = m.id;
     m.retain_effects(|e| {
-        if e.1 > 0 || e.1 == -1 {
+        if e.duration > 0 || e.duration == -1 {
             return true;
         }
         // `MobEffectEvent.Expired`: canceling the expiry keeps the effect.
         let mut cancel = false;
-        if let Some(mods) = mods {
-            mods.effect_expired(mob_id, e.0, e.2, &mut cancel);
+        if let Some(mods) = mods
+            && let Some(index) = e.registry_index
+        {
+            mods.effect_expired(mob_id, index, e.amplifier, &mut cancel);
         }
         cancel
     });
