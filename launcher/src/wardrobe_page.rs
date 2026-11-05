@@ -158,13 +158,17 @@ fn refresh(service: &Service, account: &account::Account, trip: &mut Trip) -> Re
     };
     trip.items = fetch_items(service, &catalogue);
     trip.saved.catalogue = Some(catalogue);
-    service.sync_with_session(
-        &account.name,
-        &account.uuid,
-        &mut trip.session,
-        &mut trip.saved,
-        |id| account::session::join_server(&account.uuid, id),
-    )
+    let session = Arc::new(service.sign_in(&account.name, |id| {
+        account::session::join_server(&account.uuid, id)
+    })?);
+    trip.session = Some(session.clone());
+    service.sync(&session, &mut trip.saved)?;
+    let mut me = service.me(&session)?;
+    for change in &trip.saved.pending {
+        me.apply(change);
+    }
+    trip.saved.me = Some(me);
+    Ok(())
 }
 
 /// `founder_visor` → "Founder Visor", for the preview's made-up names.
@@ -242,13 +246,11 @@ impl Launcher {
         let keep = self.wardrobe.take().filter(|w| w.uuid == account.uuid);
         let saved = Saved::load(&dir(), &account.uuid);
         let (slot, turn) = keep.as_ref().map_or(("head", 0), |w| (w.slot, w.turn));
-        // A session still live from the last visit is reused by the refresh.
-        let session = keep.as_ref().and_then(|w| w.session.clone());
         self.wardrobe = Some(Wardrobe {
             uuid: account.uuid.clone(),
             saved: saved.clone(),
             items: keep.map(|w| w.items).unwrap_or_default(),
-            session: session.clone(),
+            session: None,
             skin: skin(&account),
             status: Status::Loading,
             busy: true,
@@ -262,7 +264,7 @@ impl Launcher {
             let mut trip = Trip {
                 saved,
                 items: HashMap::new(),
-                session,
+                session: None,
                 result: Ok(()),
             };
             trip.result = refresh(&service, &account, &mut trip);
@@ -355,7 +357,9 @@ impl Launcher {
         if !trip.items.is_empty() {
             w.items = trip.items;
         }
-        w.session = trip.session;
+        if trip.session.is_some() {
+            w.session = trip.session;
+        }
         w.saved = trip.saved;
         if trip.result.is_ok() {
             tell_the_game(&w.uuid, &w.saved);

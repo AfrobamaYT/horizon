@@ -123,6 +123,7 @@ struct GuestInit {
     sender: PlayerSender,
     latency: Arc<AtomicI32>,
     address: std::net::SocketAddr,
+    expected: bool,
 }
 
 pub struct Guest {
@@ -463,6 +464,7 @@ impl Guest {
             sender,
             latency,
             address,
+            expected,
         } = j;
         Self::with_defaults(
             GuestKind::Network,
@@ -476,6 +478,7 @@ impl Guest {
                 sender,
                 latency,
                 address,
+                expected,
             },
             entity_id,
             position,
@@ -501,6 +504,7 @@ impl Guest {
             sender: PlayerSender::disabled(),
             latency: Arc::default(),
             address: ([0, 0, 0, 0], 0).into(),
+            expected: false,
         };
         let mut guest = Self::with_defaults(GuestKind::Fake, init, entity_id, position, 2);
         guest.placed = true;

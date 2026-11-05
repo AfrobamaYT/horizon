@@ -1348,12 +1348,15 @@ impl Audio {
     pub fn play_mod_sound(&mut self, sound: &mod_api::SoundPlay, after: u32) {
         let seed = self.random.next_long();
         if let Some(capture) = self.capture.as_mut().filter(|_| !sound.relative) {
-            capture.push((
-                sound.identifier.clone(),
-                sound.position,
-                sound.volume,
-                sound.pitch,
-            ));
+            capture.push(CapturedSound {
+                event: sound.identifier.clone(),
+                position: sound.position,
+                volume: sound.volume,
+                pitch: sound.pitch,
+                source: sound.source.index(),
+                entity: None,
+                except_entity: None,
+            });
         }
         *self.heard.entry(sound.identifier.clone()).or_default() += 1;
         let mut instance = SoundInstance::from_play(sound, LegacyRandom::new(seed));

@@ -1831,7 +1831,7 @@ impl Game<'_> {
         // A fake player stays in its level. True: the teleport is taken, so no
         // same-level teleport stands in for it.
         if Some(conn) == self.lan_acting && self.fake_blocks(mod_api::FakeEffect::ChangeDimension) {
-            return true;
+            return Ok(true);
         }
         self.level_teleports
             .push(super::server_travel::LevelTeleport {
@@ -1943,14 +1943,10 @@ impl Game<'_> {
                     .unwrap_or_else(Text::empty)
             });
             for &t in &targets {
-<<<<<<< HEAD
                 let Some(pos) = self.teleport_command_target(t, level, pos) else {
                     continue;
                 };
-                if !self.teleport_across(t, level, pos, rotation) {
-=======
                 if !self.teleport_across(t, level, pos, rotation, true)? {
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                     // TeleportCommand.teleportToEntity: the destination's angles,
                     // which the riders turn to as well.
                     self.teleport_to(t, pos, rotation, true);

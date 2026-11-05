@@ -297,7 +297,13 @@ mod tests {
             assert!(before.idle(), "{before:?}");
             let mut after = before.clone();
             let mut drops = Vec::new();
-            let lit = after.tick(&recipes, &items, &providers, &mut drops);
+            let lit = after.tick(
+                crate::test_resources::server_loop_context(),
+                &recipes,
+                &items,
+                &providers,
+                &mut drops,
+            );
             assert_eq!(lit, None, "{before:?}");
             assert!(drops.is_empty(), "{before:?}");
             assert_eq!(format!("{after:?}"), format!("{before:?}"));
@@ -306,7 +312,13 @@ mod tests {
         assert!(!busy.idle());
         let before = format!("{busy:?}");
         assert_eq!(
-            busy.tick(&recipes, &items, &providers, &mut Vec::new()),
+            busy.tick(
+                crate::test_resources::server_loop_context(),
+                &recipes,
+                &items,
+                &providers,
+                &mut Vec::new(),
+            ),
             Some(true)
         );
         assert_ne!(format!("{busy:?}"), before);
@@ -331,7 +343,6 @@ mod tests {
             recipes_used: HashMap::new(),
         };
         let mut drops = Vec::new();
-<<<<<<< HEAD
         let lit = furnace.tick(
             crate::test_resources::server_loop_context(),
             &recipes,
@@ -339,10 +350,6 @@ mod tests {
             &providers,
             &mut drops,
         );
-        let _ = fs::remove_dir_all(&root);
-=======
-        let lit = furnace.tick(&recipes, &items, &providers, &mut drops);
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         assert_eq!(lit, Some(true), "the fuel lit the furnace");
         (furnace, drops)
     }

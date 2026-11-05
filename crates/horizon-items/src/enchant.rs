@@ -181,10 +181,6 @@ fn parse_entry(
 }
 
 impl Enchantments {
-<<<<<<< HEAD
-    pub fn load(root: &Path, defaults: &horizon_world::item_defaults::ItemDefaults) -> Self {
-        Self::load_with(root, &horizon_world::loot::PackOverlay::NONE, defaults)
-=======
     /// Use the same frozen registry and resolved tags as player damage.
     pub fn bind_damage_catalog(&mut self, catalog: &horizon_world::damage_source::Catalog) {
         self.damage_tags = catalog
@@ -197,9 +193,8 @@ impl Enchantments {
             })
             .collect();
     }
-    pub fn load(root: &Path) -> Self {
-        Self::load_with(root, &horizon_world::loot::PackOverlay::NONE)
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
+    pub fn load(root: &Path, defaults: &horizon_world::item_defaults::ItemDefaults) -> Self {
+        Self::load_with(root, &horizon_world::loot::PackOverlay::NONE, defaults)
     }
     /// Load from a resource root; `overlay` (a world's data packs' content
     /// files) joins the game's own enchantment tags in pack order, a

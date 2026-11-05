@@ -68,13 +68,7 @@ impl Game<'_> {
             // TamableAnimal (wolf, cat, parrot) on a client: CONSUME once tame.
             Species::Wolf | Species::Cat | Species::Parrot => m.extra.tame,
             // Allay.mobInteract: gives an item or takes it back.
-<<<<<<< HEAD
-            Species::Allay => {
-                allay_takes(hand, item, m.extra.main_hand_id().is_some(), m.extra.flag)
-            }
-=======
             Species::Allay => self.predict_allay_interaction(i, hand, stack.cloned()),
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
             Species::Cow | Species::Goat => item == "minecraft:bucket" && !baby,
             Species::Mooshroom => {
                 !baby

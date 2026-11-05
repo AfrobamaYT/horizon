@@ -934,14 +934,11 @@ impl Game<'_> {
             }
             "chat" => {
                 let text = line.trim_start().strip_prefix("chat").unwrap_or("").trim();
-<<<<<<< HEAD
                 if self.remote.is_some() {
                     // As typed into the chat screen: history, then the client chat event.
                     self.handle_chat_input(text);
                     return ok();
                 }
-=======
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 self.require_world()?;
                 // As if typed: a client mod's command runs before the line
                 // reaches the server, and the Chat option's restrictions and

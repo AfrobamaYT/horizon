@@ -7,7 +7,7 @@
 //! the pick), so a frog that is not walking croaks in three of four idle
 //! picks: `Croak` takes those, and the frog's stroll then follows at once.
 use super::{
-    Mob, MobEvent, MobWorld, Species, Who,
+    DamageLevel, Mob, MobEvent, MobWorld, Species, Who,
     goals::{
         Breed, Cx, Float, Goal, LOOK, LookAtPlayer, MOVE, Panic, RandomLookAround, Stroll, Tempt,
         goal_clone,
@@ -171,12 +171,18 @@ pub fn tick(m: &mut Mob) {
 /// `Frog.travelInWater`: `moveRelative(getSpeed(), input)`, the move, then
 /// the motion scaled by 0.9. `getSpeed` is the speed the move control stored.
 /// Out of water the usual travel runs.
-pub fn travel(m: &mut Mob, w: &MobWorld, input: Vec3, events: &mut Vec<MobEvent>) -> bool {
+pub fn travel(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    input: Vec3,
+    events: &mut Vec<MobEvent>,
+) -> bool {
     if !m.fluids.in_water {
         return false;
     }
     m.move_relative(m.ai.speed, input);
-    m.do_move(w, events);
+    m.do_move(w, level, events);
     m.velocity = m.velocity.scale(0.9);
     true
 }
@@ -404,18 +410,11 @@ impl LaySpawn {
                 if let Some(state) = cx.w.registry.default_state("minecraft:frogspawn") {
                     cx.events.push(MobEvent::SetBlock { pos: spawn, state });
                 }
-<<<<<<< HEAD
                 // level.playSound(null, body, FROG_LAY_SPAWN, BLOCKS, 1, 1).
                 cx.events.push(MobEvent::bound_sound(
                     m,
                     "entity.frog.lay_spawn",
                     SoundSource::Blocks,
-=======
-                cx.events.push(MobEvent::entity_sound(
-                    m,
-                    "entity.frog.lay_spawn",
-                    6,
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                     1.0,
                     1.0,
                 ));
@@ -572,7 +571,6 @@ impl Goal for ShootTongue {
         match m.extra.frog.phase {
             Phase::MoveToTarget => {
                 if pos.distance_squared(m.position) < EATING_DISTANCE * EATING_DISTANCE {
-<<<<<<< HEAD
                     // level.playSound(null, body, tongueSound, NEUTRAL, 2, 1).
                     cx.events.push(MobEvent::bound_sound(
                         m,
@@ -581,10 +579,6 @@ impl Goal for ShootTongue {
                         2.0,
                         1.0,
                     ));
-=======
-                    cx.events
-                        .push(MobEvent::entity_sound(m, "entity.frog.tongue", 6, 2.0, 1.0));
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                     set_pose(m, sync::USING_TONGUE);
                     // `target.setDeltaMovement(vectorTo(frog).normalize().scale(0.75))`: the
                     // target's own motion is replaced, and it is drawn in.
@@ -609,7 +603,6 @@ impl Goal for ShootTongue {
                 if f.eat_timer > 6 {
                     f.phase = Phase::EatAnimation;
                     // eatEntity.
-<<<<<<< HEAD
                     cx.events.push(MobEvent::bound_sound(
                         m,
                         "entity.frog.eat",
@@ -617,10 +610,6 @@ impl Goal for ShootTongue {
                         2.0,
                         1.0,
                     ));
-=======
-                    cx.events
-                        .push(MobEvent::entity_sound(m, "entity.frog.eat", 6, 2.0, 1.0));
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                     super::ai::do_hurt_target(m, Who::Mob(id), cx);
                     // `if (!target.isAlive()) target.remove(KILLED)`: no death animation.
                     cx.events.push(MobEvent::RemoveKilled { target: id });
@@ -843,8 +832,13 @@ impl LongJump {
                 } else {
                     "entity.frog.step"
                 };
-                cx.events
-                    .push(MobEvent::entity_sound(m, landing, 6, 2.0, 1.0));
+                cx.events.push(MobEvent::bound_sound(
+                    m,
+                    landing,
+                    mod_api::SoundSource::Neutral,
+                    2.0,
+                    1.0,
+                ));
             }
             set_jump_pose(m, cx.w, sync::STANDING);
             sample_cooldown(m, cx.level.random(), 1);
@@ -1009,14 +1003,9 @@ impl Goal for LongJump {
             .map_or(0.0, |e| f64::from(0.1_f32 * (e.2 + 1) as f32));
         m.velocity = jump.scale((len + boost) / len);
         self.mid_jump = true;
-<<<<<<< HEAD
         // level.playSound(null, body, getJumpSound(body), NEUTRAL, 1, 1).
         let sound = MobEvent::bound_sound(m, jump_sound(m), SoundSource::Neutral, 1.0, 1.0);
         cx.events.push(sound);
-=======
-        cx.events
-            .push(MobEvent::entity_sound(m, jump_sound(m), 6, 1.0, 1.0));
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     }
 }
 
@@ -1046,9 +1035,11 @@ mod tests {
             m.yaw = 0.0;
             m.velocity = Vec3::new(1.0, -0.5, 0.125);
             let kept = m.velocity;
+            let mut test_level = crate::health::TestLevel::new(0);
             assert!(!travel(
                 &mut m,
                 w,
+                &mut test_level.level(),
                 Vec3::new(0.0, 0.0, 1.0),
                 &mut Vec::new()
             ));
@@ -1056,7 +1047,12 @@ mod tests {
 
             m.fluids.in_water = true;
             m.position = Vec3::new(0.5, 80.0, 0.5);
-            m.travel(w, Vec3::new(0.0, 0.0, 1.0), &mut Vec::new());
+            m.travel(
+                w,
+                &mut test_level.level(),
+                Vec3::new(0.0, 0.0, 1.0),
+                &mut Vec::new(),
+            );
             // (1, -0.5, 0.125) + (0, 0, getSpeed 0.25) = (1, -0.5, 0.375),
             // then * 0.9 = (0.9, -0.45, 0.3375).
             assert!((m.velocity.x - 0.9).abs() < 1.0e-9, "{}", m.velocity.x);

@@ -415,66 +415,6 @@ impl Game<'_> {
                     *slot = new;
                 }
             }
-<<<<<<< HEAD
-=======
-            Target::Boat(id) => {
-                // AbstractBoat.readAdditionalSaveData over Entity.load: the
-                // position, rotation, motion, NoGravity and a chest boat's items.
-                let (position, velocity, yaw) =
-                    entity_nbt::boat_from_nbt(&tag).ok_or_else(stale)?;
-                let uuid = self.uuid_for(id);
-                let b = self
-                    .boats
-                    .iter_mut()
-                    .find(|b| b.id == id)
-                    .ok_or_else(stale)?;
-                b.position = position;
-                b.previous = position;
-                b.velocity = velocity;
-                b.yaw = yaw;
-                b.previous_yaw = yaw;
-                b.pitch = entity_nbt::rotation(&tag)[1];
-                b.no_gravity = entity_nbt::flag(&tag, "NoGravity");
-                if b.chest {
-                    b.items = save::decode_items(tag.get("Items"), crate::game::boats::CHEST_SLOTS);
-                }
-                set_key(&mut tag, "UUID", Tag::IntArray(uuid.to_vec()));
-            }
-            Target::Cart(id) => {
-                let uuid = self.uuid_for(id);
-                let i = self
-                    .carts
-                    .iter()
-                    .position(|c| c.id == id)
-                    .ok_or_else(stale)?;
-                let mut cart = self.carts[i].clone();
-                cart.load(&tag).ok_or_else(stale)?;
-                crate::game::minecarts::forget_unreadable_display(&mut cart, |t| {
-                    self.state_from_nbt(t).is_some()
-                });
-                self.roll_cart_loot(&mut cart, &tag);
-                self.carts[i] = cart;
-                set_key(&mut tag, "UUID", Tag::IntArray(uuid.to_vec()));
-            }
-            Target::Other(id) => {
-                let uuid = self.uuid_for(id);
-                let marker = self
-                    .others
-                    .iter_mut()
-                    .find(|o| {
-                        o.id == id && matches!(o.kind.as_str(), "minecraft:marker" | "marker")
-                    })
-                    .ok_or_else(stale)?;
-                let position = entity_nbt::position(&tag).ok_or_else(stale)?;
-                let [yaw, pitch] = entity_nbt::rotation(&tag);
-                marker.position = position;
-                marker.yaw = yaw;
-                marker.pitch = pitch;
-                // Keep the existing marker identity even when the input edits UUID or id.
-                set_key(&mut tag, "UUID", Tag::IntArray(uuid.to_vec()));
-                set_key(&mut tag, "id", Tag::String(marker.kind.as_str().into()));
-            }
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
             _ => return Err(stale()),
         }
         if let Target::Mob(id)
@@ -650,7 +590,6 @@ impl Game<'_> {
                 }
                 Ok(tag)
             }
-<<<<<<< HEAD
             DataRef::Block(p) => {
                 if let Some(tag) = self.comparator_data(*p).or_else(|| self.pot_data(*p)) {
                     return Ok(tag);
@@ -674,11 +613,6 @@ impl Game<'_> {
                 Self::restore_loot_table(&self.world, key, &mut tag);
                 Ok(tag)
             }
-=======
-            DataRef::Block(p) => self
-                .block_entity_nbt(*p)
-                .ok_or_else(|| err("commands.data.block.invalid", &[])),
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
             DataRef::Storage(id) => Ok(self.score.storage.get(id)),
         }
     }
@@ -701,7 +635,7 @@ impl Game<'_> {
             map.entry("CustomName".into())
                 .or_insert_with(|| Tag::String(custom.as_str().into()));
         }
-        self.restore_loot_table(key, &mut tag);
+        Self::restore_loot_table(&self.world, key, &mut tag);
         Some(tag)
     }
     pub(in crate::game) fn set_data_of(&mut self, r: &DataRef, tag: Tag) -> R<()> {
@@ -1261,7 +1195,6 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-<<<<<<< HEAD
 mod tests {
     use super::*;
     use crate::game::native_entity_refs::tests::with_game;
@@ -1365,134 +1298,5 @@ mod tests {
                 game.spend_forced_meta();
             }
         });
-=======
-mod loot_table_tests {
-    use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
-    use horizon_client::{
-        chunk::Chunk,
-        containers::BlockEntity,
-        items::ItemStack,
-        save::{self, ChunkExtras, RolledLoot},
-    };
-    use horizon_world::nbt::Tag;
-    use std::sync::Arc;
-
-    const TABLE: &str = "minecraft:chests/simple_dungeon";
-
-    /// The chest as a chunk save writes it, and its slots when that save loads.
-    fn saved_and_reloaded(game: &Game<'_>, pos: (i32, i32, i32)) -> (Tag, Vec<Option<ItemStack>>) {
-        let live = game.world.chunks.get(&(0, 0)).unwrap().clone();
-        let chunk = game.with_entities([&live]).remove(0);
-        let registry = game.pack.assets.registry;
-        let encoded = save::encode(&chunk, registry, game.res.biomes());
-        let Some(Tag::List(list)) = encoded.tag.get("block_entities") else {
-            panic!("no block entities");
-        };
-        let saved = list
-            .iter()
-            .find(|t| save::number(t.get("x")) == Some(i64::from(pos.0)))
-            .unwrap()
-            .clone();
-        let reloaded = save::decode(&encoded, registry, game.res.biomes()).unwrap();
-        let (_, BlockEntity::Chest(slots)) = reloaded
-            .block_entities
-            .iter()
-            .find(|(p, _)| *p == pos)
-            .unwrap()
-        else {
-            panic!("chest");
-        };
-        (saved, slots.clone())
-    }
-
-    /// RandomizableContainer.tryLoadLootTable: a tag without a table loads an
-    /// empty chest that stays so, and one with a table keeps it.
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn data_commands_on_an_unopened_loaded_chest_survive_a_save_and_reload() {
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let settings = Settings::default();
-        let loaded = load_resources(
-            root.clone(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            true,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&root),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        game.set_allow_commands(true);
-
-        // Two chests as a load leaves them: rolled, with the table in their source.
-        let removed = (1, 64, 2);
-        let merged = (2, 64, 2);
-        let chest = game
-            .pack
-            .assets
-            .registry
-            .default_state("minecraft:chest")
-            .unwrap();
-        let mut chunk = Chunk::empty(0, 0);
-        let mut extras = ChunkExtras::default();
-        for pos in [removed, merged] {
-            let mut slots = vec![None; 27];
-            slots[0] = Some(ItemStack::new("minecraft:gold_ingot", 2));
-            chunk.set(pos.0, pos.1, pos.2, chest.0);
-            extras.rolled_loot.push(RolledLoot {
-                pos,
-                table: TABLE.into(),
-                seed: Some(42),
-                items: save::encode_items(&slots),
-            });
-            extras.block_entity_sources.push((
-                pos,
-                Tag::compound([
-                    ("id", Tag::String("minecraft:chest".into())),
-                    ("x", Tag::Int(pos.0)),
-                    ("y", Tag::Int(pos.1)),
-                    ("z", Tag::Int(pos.2)),
-                    ("LootTable", Tag::String(TABLE.into())),
-                    ("LootTableSeed", Tag::Long(42)),
-                ]),
-            ));
-            game.world
-                .block_entities
-                .insert(pos, BlockEntity::Chest(slots));
-        }
-        chunk.saved = Some(Arc::new(extras));
-        game.world.chunks.insert((0, 0), Arc::new(chunk));
-
-        assert!(game.run_command("data remove block 1 64 2 LootTable"));
-        let (saved, slots) = saved_and_reloaded(&game, removed);
-        assert!(
-            saved.get("LootTable").is_none(),
-            "the emptied chest rolls again on load: {saved:?}"
-        );
-        assert!(saved.get("LootTableSeed").is_none());
-        assert!(slots.iter().all(Option::is_none));
-
-        assert!(game.run_command("data merge block 2 64 2 {LootTableSeed:7L}"));
-        let (saved, _) = saved_and_reloaded(&game, merged);
-        assert_eq!(save::text(saved.get("LootTable")).as_deref(), Some(TABLE));
-        assert_eq!(save::number(saved.get("LootTableSeed")), Some(7));
-        assert!(saved.get("Items").is_none());
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     }
 }

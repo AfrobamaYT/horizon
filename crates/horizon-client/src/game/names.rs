@@ -101,33 +101,9 @@ impl Game<'_> {
             .filter_map(|t| t.lines.last().map(|(t, _)| t.plain()))
             .collect()
     }
-    /// Vanilla name bounds for a native render snapshot; never re-enters name hooks.
-    pub(super) fn client_name_tag_widths(
-        &self,
-        camera: glam::DVec3,
-        alpha: f64,
-    ) -> std::collections::HashMap<[u64; 3], f32> {
-        self.name_tags_with_hooks(camera, alpha, false)
-            .into_iter()
-            .map(|tag| {
-                let width = tag
-                    .lines
-                    .iter()
-                    .map(|(text, _)| self.gui.atlas.font.width_text(text) * NAME_TAG_UNIT * 0.5)
-                    .fold(0.0, f32::max);
-                (tag.at.to_array().map(f64::to_bits), width)
-            })
-            .collect()
-    }
     /// Each name tag this frame.
     fn name_tags(&self, camera: glam::DVec3, alpha: f64) -> Vec<NameTag> {
-<<<<<<< HEAD
         let hooks = !mod_api::__private::mods().is_empty();
-=======
-        self.name_tags_with_hooks(camera, alpha, !mod_api::mods().is_empty())
-    }
-    fn name_tags_with_hooks(&self, camera: glam::DVec3, alpha: f64, hooks: bool) -> Vec<NameTag> {
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         let target = self.mob_hit().map(|(i, _)| self.mobs[i].id);
         let viewer = self.player_team();
         let mut tags = Vec::new();

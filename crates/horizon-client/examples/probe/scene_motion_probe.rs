@@ -324,14 +324,11 @@ pub fn main() -> Result<()> {
                 assets: &assets,
                 collision_binding: &binding,
                 resources: &resources,
-<<<<<<< HEAD
+                health: &resources.health,
                 tag_items: None,
                 block_registries: None,
                 loop_context: crate::test_resources::server_loop_context(),
                 damage_hooks: &horizon_client::health::DamageHooks::NONE,
-=======
-                health: &resources.health,
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
             };
             match op["mode"].as_str().unwrap() {
                 "shift" => world.player.shift_key_down = op["value"].as_bool().unwrap(),

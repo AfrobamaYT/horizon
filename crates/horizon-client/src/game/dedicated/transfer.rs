@@ -4,7 +4,7 @@
 //! between two ticks, on the server thread, so the player is never caught half-way through a
 //! tick. The rules are `lan/arrivals.rs`'s. All of them are refused while `server.toml`'s
 //! `[transfer]` is off.
-use crate::game::{Dim, Game, lan::LanHost};
+use crate::game::{Dim, Game};
 use horizon_client::lan::arrivals;
 use horizon_protocol::packets::play::{self, Clientbound as C};
 use serde_json::{Value, json};
@@ -47,19 +47,18 @@ impl Game<'_> {
         if parts.next().is_some() {
             return json!({ "error": "player-export takes a unique id and at most freeze" });
         }
-        let Some(mut host) = self.lan.take() else {
-            return json!({ "error": "the server is not open to players" });
-        };
-        let reply = self.export_from(&mut host, uuid, freeze);
-        self.lan = Some(host);
-        reply
+        self.export_from(uuid, freeze)
     }
 
-    fn export_from(&mut self, host: &mut LanHost, uuid: u128, freeze: bool) -> Value {
+    fn export_from(&mut self, uuid: u128, freeze: bool) -> Value {
+        let host = self.lan.as_ref().expect("server host is present");
         let i = match arrivals::check_exportable(&host.hub, uuid) {
             Ok(i) => i,
             Err(why) => return json!({ "error": why }),
         };
+        if host.hub.guests[i].is_fake() {
+            return json!({ "error": "fake players cannot be exported" });
+        }
         // A repeat while the hand-over lasts: the same record, and nothing touched.
         if let Some(h) = &host.hub.guests[i].handover {
             return arrivals::export_reply(&host.hub, i, h.record.clone());
@@ -70,18 +69,19 @@ impl Game<'_> {
         // every guest): a chest's lid, a villager's trade and a dropped cursor stack belong there.
         let back = self.dim;
         let level = Dim::from_id(&host.hub.guests[i].dimension);
-        if let Err(e) = self.enter_level(Some(host), level) {
+        if let Err(e) = self.enter_level(level) {
             return json!({ "error": format!("the player's level could not be opened: {e}") });
         }
         // Nothing is sent to the client by this: it is for a player who is leaving.
-        self.guest_close_all(host, conn);
+        self.guest_close_all(conn);
         // The inventory's own 2x2 grid too (`InventoryMenu.removed`): `guest_close_all` empties it
         // only with a real `ContainerClose(0)`, and a frozen client's is dropped. Its items are
         // not in the player compound, so they would be lost with `player-release moved`.
-        self.lan_crafting_closed(host, conn, Some(0));
-        if let Err(e) = self.enter_level(Some(host), back) {
+        self.lan_crafting_closed(conn, Some(0));
+        if let Err(e) = self.enter_level(back) {
             log::error!("could not reopen {}: {e}", back.id());
         }
+        let host = self.lan.as_mut().expect("server host is present");
         let Some(i) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return json!({ "error": "that player is not connected to this server" });
         };
@@ -93,7 +93,7 @@ impl Game<'_> {
         }
         host.hub.send_inventory(i);
         // What a mod attached to the player since it joined, as a save writes it.
-        self.guest_attachments_into(&mut host.hub.guests[i]);
+        Self::guest_attachments_into(&self.guest_attachments, &mut host.hub.guests[i]);
         let advancements = if self.adv.tree.list.is_empty() {
             Value::Null
         } else {

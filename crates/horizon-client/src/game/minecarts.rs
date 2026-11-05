@@ -2165,18 +2165,11 @@ impl Game<'_> {
                 {
                     return false;
                 }
-<<<<<<< HEAD
                 self.start_riding_target(
                     super::commands::Target::Player,
                     super::commands::Target::Cart(id),
                     false,
                 );
-=======
-                if !self.native_may_board(id) {
-                    return true;
-                }
-                self.start_riding(id);
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
             }
             // AbstractMinecartContainer.interact: no sneak check.
             CartKind::Chest | CartKind::Hopper => self.open_cart_container(i),

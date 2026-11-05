@@ -247,8 +247,8 @@ impl Game<'_> {
                 return Ok(false);
             }
             // Open the destination before changing or removing any entity.
-            game.enter_level(None, destination)?;
-            game.enter_level(None, source)?;
+            game.enter_level(destination)?;
+            game.enter_level(source)?;
             if game
                 .mobs
                 .iter()
@@ -258,7 +258,7 @@ impl Game<'_> {
                 game.snap_mob_passengers(root);
             }
             game.prepare_vehicle_transition(root);
-            game.teleport_to_in_level(target, at, rotation, turn_riders);
+            game.teleport_to_in_level(target, at, rotation, [false; 3], turn_riders);
             let mounts: Vec<_> = game.mobs.iter().map(|m| (m.id, m.extra.mount)).collect();
             let tree = super::persist::vehicle_tree(root, &mounts);
             let tag = game.vehicle_tree_nbt(root).ok_or("missing vehicle tree")?;
@@ -302,7 +302,7 @@ impl Game<'_> {
                 game.detach_entity(id);
             }
             game.native_leaves_flush();
-            game.enter_level(None, destination)?;
+            game.enter_level(destination)?;
             // restoreFrom reloads saved state into fresh entities, rather than
             // retaining navigation paths or goals from the old level.
             game.load_listed(&kind, uuid, game.level.player_uuid, tag)
@@ -344,7 +344,7 @@ impl Game<'_> {
                     });
             }
             game.native_joins_flush(false, 0);
-            game.enter_level(None, source)?;
+            game.enter_level(source)?;
             Ok(true)
         })
         .unwrap_or(Ok(false))

@@ -3989,50 +3989,8 @@ impl Launcher {
         ))
     }
 
-<<<<<<< HEAD
     /// Settings' Game arguments row: the extra arguments the game starts with, kept in
     /// `settings.json` and appended to the launcher's own (quotes group a word with spaces).
-=======
-    /// Mods made for other Horizon versions: which, and the version the build uses. They often
-    /// still work, so the player may build anyway.
-    fn native_mismatch_panel(&self, list: &str, cx: &mut Context<Self>) -> Div {
-        let t = self.theme;
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .mt(px(8.))
-            .p(px(12.))
-            .bg(t.well)
-            .child(div().text_color(t.danger).child(tr("These mods were made for different Horizon versions").to_string()))
-            .child(list.to_owned())
-            .child(tr("They often still work together. If the build fails, install versions made for the same Nightly.").to_string())
-            .child(
-                div()
-                    .flex()
-                    .gap(px(8.))
-                    .mt(px(4.))
-                    .child(
-                        button("native-anyway", "Build anyway", Kind::Primary, &t).on_click(
-                            cx.listener(|this, _: &ClickEvent, _, cx| {
-                                this.build_native(true);
-                                cx.notify();
-                            }),
-                        ),
-                    )
-                    .child(
-                        button("native-mismatch-cancel", "Cancel", Kind::Secondary, &t).on_click(
-                            cx.listener(|this, _: &ClickEvent, _, cx| {
-                                this.native_mismatch = None;
-                                cx.notify();
-                            }),
-                        ),
-                    ),
-            )
-    }
-
-    /// Settings' Windows ARM game architecture choice; release installation, updates and launch
-    /// use the saved choice, while launcher updates continue to follow this process.
     fn game_architecture_row(&self, n: usize, cx: &mut Context<Self>) -> Div {
         if !backend::can_choose_game_architecture() {
             return div();
@@ -4080,7 +4038,6 @@ impl Launcher {
         )
     }
 
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     fn game_args_row(&self, n: usize, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let focused = self.args_focused;

@@ -180,22 +180,15 @@ fn block_of(p: Vec3) -> [i32; 3] {
     [p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32]
 }
 fn play(m: &Mob, events: &mut Vec<MobEvent>, sound: &'static str, pitch: f32) {
-<<<<<<< HEAD
-    if !m.silent {
-        // level.playSound(null, body, sound, NEUTRAL, 1, pitch).
-        events.push(MobEvent::bound_sound(
-            m,
-            sound,
-            SoundSource::Neutral,
-            1.0,
-            pitch,
-        ));
-    }
-=======
     // PrepareRamNearestTarget / RamTarget use the level overload even when
     // Silent is set; the receiving client's bound instance checks silence.
-    events.push(MobEvent::entity_sound(m, sound, 6, 1.0, pitch));
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
+    events.push(MobEvent::bound_sound(
+        m,
+        sound,
+        SoundSource::Neutral,
+        1.0,
+        pitch,
+    ));
 }
 
 /// `PrepareRamNearestTarget.isWalkableBlock`.
@@ -572,9 +565,9 @@ mod sound_tests {
         let mut events = Vec::new();
         play(&goat, &mut events, "entity.goat.ram_impact", 1.0);
         let [
-            MobEvent::EntitySound {
+            MobEvent::BoundSound {
                 mob,
-                name,
+                sound,
                 at,
                 source,
                 volume,
@@ -584,7 +577,10 @@ mod sound_tests {
         else {
             panic!("the level sound must survive Silent and retain its emitter");
         };
-        assert_eq!((*mob, *name, *source), (37, "entity.goat.ram_impact", 6));
+        assert_eq!(
+            (*mob, *sound, *source),
+            (37, "entity.goat.ram_impact", SoundSource::Neutral)
+        );
         assert_eq!(*at, [0.123456789, 64.0, -3.25]);
         assert_eq!((*volume, *pitch), (1.0, 1.0));
         assert_eq!(goat.random.next_long(), expected.next_long());

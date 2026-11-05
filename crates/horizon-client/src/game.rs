@@ -275,13 +275,8 @@ mod native_level_world;
 mod native_lifecycle;
 mod native_living_effects;
 mod native_living_refs;
-<<<<<<< HEAD
 mod native_living_writes;
 mod native_menu_refs;
-=======
-mod native_machines;
-mod native_menu_stacks;
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 mod native_menus;
 mod native_merchant_refs;
 mod native_minecart_refs;
@@ -315,7 +310,6 @@ mod native_sound_refs;
 mod native_ticks;
 mod native_visuals;
 mod native_world_columns;
-pub mod native_world_draw;
 mod native_world_edit;
 mod native_world_read;
 mod natural_spawning;
@@ -437,11 +431,7 @@ mod win;
 mod wind;
 mod wither;
 mod world_loading;
-<<<<<<< HEAD
 mod xp_orb_targeting;
-=======
-mod world_primitives;
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 mod zombie_reinforcements;
 mod zombie_villagers;
 use event_loop::EventLoopCtl;
@@ -514,16 +504,10 @@ pub use native_components::NativeComponentError;
 pub use native_configs::{NativeConfig, NativeConfigFile, NativeConfigKind};
 pub use native_data_maps::NativeDataMapType;
 pub use native_falling::NativeFalling;
-<<<<<<< HEAD
 pub use native_hooks::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
-=======
-pub use native_hooks::{NativeClock, NativeItemEntity, NativePlayer, NativeShake};
-pub use native_item_energy::ItemEnergyBuffer;
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
 pub use native_server::NativeExperienceOrb;
 pub use native_world_columns::NativeColumnBlocks;
-pub use native_world_draw::NativeWorldDraw;
 pub use native_world_edit::{NativeBlockEdit, NativeBlockRun, NativeHeightmap};
 use std::{
     cell::RefCell,
@@ -776,7 +760,6 @@ impl Options {
             session_file: std::env::var("HORIZON_SESSION_FILE").ok(),
             session_stdin: false,
         };
-<<<<<<< HEAD
         for argument in rest {
             match argument {
                 Argument::Switch(arg) => match arg.as_str() {
@@ -815,24 +798,6 @@ impl Options {
                     _ => return Err(format!("{arg}: unknown option").into()),
                 },
                 Argument::Dedicated(args) => {
-=======
-        while let Some(arg) = args.next() {
-            match arg.as_str() {
-                "--help" | "-h" => {
-                    println!(
-                        "Horizon — Minecraft Java Edition {} in Rust\n\n  --resources PATH        Prepared resources (horizon-prepare)\n  --render-distance N     Chunks, 2..128 (default 12)\n  --world NAME            World folder under saves/ (default \"New World\")\n  --seed N                World seed for new worlds (default 0)\n  --width N, --height N   Window size (default 1280 x 720)\n  --creative              Creative mode (default survival)\n  --test-terrain          Simple test terrain instead of vanilla generation\n  --frames N              Exit after N frames (testing)\n  --world-frames N        Exit after N frames drawn in the world (testing)\n  --smoke-report PATH     Write a JSON report on exit\n  --benchmark SCENARIO    Run a benchmark (standard, village, forest, ocean, mountain), write its report to benchmarks/ and quit\n  --control               Accept horizon-ctl commands on a local socket\n  --control-socket PATH   Control socket path (default $XDG_RUNTIME_DIR/horizon-control.sock)\n  --transfers SETTINGS    A dedicated server takes a proxy's hand-over requests (server.toml [transfer], docs/server.md)\n  --server HOST[:PORT]    Join a multiplayer server (offline mode) at start\n  --quickPlaySingleplayer WORLD  Open this world of saves/ at start, only if it exists (vanilla's)\n  --quickPlayMultiplayer HOST[:PORT]  The same as --server (vanilla's name)\n  --name NAME             Player name for multiplayer (default: generated once, kept in horizon-player.txt)\n  --session-file PATH     Signed-in account from the launcher (read once, then deleted)\n  --session-stdin         The same account as JSON on standard input\n  --game-dir DIR          Game folder: saves, options.txt, packs, mods (default: the working directory)\n  --home DIR              Logs and crash reports (default $HORIZON_HOME, else the platform data folder)\n  --player-dir DIR        This player's own files when several play in one game folder: options.txt, logs, horizon-player.txt, servers.dat, screenshots\n  --fullscreen            Open the window fullscreen\n  --launch-api            Print the Launch API version and options as JSON (docs/api/launch.md)\n  --dev-mod PATH          A content mod (.hmod or folder) to develop: always on\n  --pregen                Add Horizon's /pregen command (docs/pregeneration.md)\n\nControls: mouse look, WASD move, Space jump, Left Shift sneak, Left Ctrl sprint,\nleft click break, right click place/use, 1-9/scroll hotbar, E inventory,\nQ drop, F3 debug, Esc pause.",
-                        horizon_core::VANILLA_VERSION
-                    );
-                    return Ok(None);
-                }
-                "--launch-api" => {
-                    println!("{}", launch_api::reply(&horizon_client::crash::version()));
-                    return Ok(None);
-                }
-                "--fullscreen" => o.fullscreen = true,
-                "--session-stdin" => o.session_stdin = true,
-                "--dedicated" => {
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                     o.execution_role = execution_role::ExecutionRole::DedicatedServer;
                     o.dedicated = Some(args);
                     break;
@@ -1166,20 +1131,12 @@ struct GameLevel<'w> {
     debug: bool,
     native_sounds: &'w mut Vec<creatures::NativeSound>,
     native_particles: &'w mut Vec<lan_particles::QueuedParticle>,
-<<<<<<< HEAD
     /// The server sound-seed source (`Level.soundSeedGenerator`), when this
     /// level's host is up: `native_play_sound` draws its seed there.
     sound_seeds: Option<&'w horizon_client::lan::hub::Hub>,
     /// The tool a mod's machine breaks blocks with (`native_machine_destroy_block`):
     /// `Block.dropResources` rolls the loot with it instead of with none.
     drop_tool: Option<ItemStack>,
-=======
-    /// The block a mod's machine breaks and the tool it breaks it with
-    /// (`native_machine_destroy_block`): `Block.dropResources` rolls that
-    /// block's loot with the tool instead of with none. Neighbours that pop
-    /// off because of the break drop as with no tool, as in vanilla.
-    drop_tool: Option<((i32, i32, i32), Option<ItemStack>)>,
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     /// Where `Block.dropResources` puts the drops instead of popping them,
     /// while a mod's machine breaks a block (`native_machine_destroy_block`).
     drop_into: Option<Vec<ItemStack>>,
@@ -3563,7 +3520,6 @@ struct Game<'a> {
     text_selection: horizon_client::clipboard::AppendSelection,
     /// The world was saved for the application ending (`save_for_exit`).
     saved_for_exit: bool,
-    native_client_stopped: bool,
     pending_save: Option<saving::ClosingSave>,
     /// The last world frame reached the swap chain. A window the compositor
     /// stops showing gets no frames, and the event loop must not spin on it.
@@ -3883,6 +3839,24 @@ fn camera_rotation(camera_type: perspective::CameraType, yaw: f32, pitch: f32) -
     )
 }
 impl Game<'_> {
+    /// The ticks shown by this frame; still mode follows world time.
+    pub(super) fn visual_ticks(&self) -> u64 {
+        if self.clock.still() {
+            self.world.game_time.max(0) as u64
+        } else {
+            self.ticks
+        }
+    }
+
+    /// Frame time in milliseconds, fixed to world time in still mode.
+    pub(super) fn visual_millis(&self) -> i64 {
+        if self.clock.still() {
+            self.visual_ticks() as i64 * 50
+        } else {
+            self.started.elapsed().as_millis() as i64
+        }
+    }
+
     /// `Level.canHaveWeather`, from the level's dimension type (sky light, no
     /// ceiling) and the End, which vanilla names by id. Every rain, thunder
     /// and lightning rule asks this, never the dimension's id.
@@ -8491,29 +8465,7 @@ impl Game<'_> {
         };
         self.with_level(|b, level, ticks| b.notify_written(level, ticks, position, flags));
     }
-<<<<<<< HEAD
     #[horizon_mod_api_macros::point(side = "both")]
-=======
-    /// The ticks the frame shows (animated textures, the HUD, a shader pack's clock): the
-    /// client's, or under `HORIZON_STILL` (`FixedStep::still`) the world's game time, which
-    /// moves only while the world runs.
-    pub(super) fn visual_ticks(&self) -> u64 {
-        if self.clock.still() {
-            self.world.game_time.max(0) as u64
-        } else {
-            self.ticks
-        }
-    }
-    /// `Util.getMillis` for what the frame shows (the world border's scroll, the hearts' blink,
-    /// the glint's under the switch): under `HORIZON_STILL`, the world's ticks in milliseconds.
-    pub(super) fn visual_millis(&self) -> i64 {
-        if self.clock.still() {
-            self.visual_ticks() as i64 * 50
-        } else {
-            self.started.elapsed().as_millis() as i64
-        }
-    }
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     fn tick(&mut self) -> Result<()> {
         if self.agent.hold_server {
             return Ok(());
@@ -12564,7 +12516,6 @@ impl Game<'_> {
         laps.lap("eg_cracks");
         self.finish_async_entity_culling();
         laps.lap("eg_culling_finish");
-        self.native_world_geometry(camera, alpha as f32, &mut out);
         (
             out,
             static_block_entities,
@@ -13473,22 +13424,16 @@ impl Game<'_> {
         self.end.set_locator(locator);
         self.share_spawn_conditions();
         self.score = Default::default();
-<<<<<<< HEAD
         let stack = self.reload_datapacks(false, &level.enabled_features)?;
-        self.world_tables = self.build_world_tables(&stack);
-        self.resolve_parts()?;
-=======
-        self.fns = Default::default();
-        (self.world_tables, self.health_resources) =
-            self.build_world_tables(false, &level.enabled_features)?;
+        (self.world_tables, self.health_resources) = self.build_world_tables(&stack, false)?;
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
+        self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.
         self.session_lock = Some(session_lock);
         // Keep the no-pack preload; a world's packs replace it atomically.
         // A later /reload keeps this session's synchronized registries.
         lan::open_world_sync_data(
-            &self.options.resources,
+            &self.res.core.item_data,
             &pack_files(&self.world_tables),
             &self.health_resources.damage,
         )
@@ -13735,10 +13680,6 @@ impl Game<'_> {
     /// menu items go back (Player.closeContainer), then the world is saved,
     /// once.
     pub(super) fn save_for_exit(&mut self) -> Result<()> {
-        if self.native_window() && !self.native_client_stopped {
-            self.native_client_stopped = true;
-            self.native_client_stopping();
-        }
         // Native application termination can bypass CloseRequested. Finish any
         // save screen synchronously here, before the process can go away.
         while self.pending_save.is_some() {
@@ -17145,11 +17086,7 @@ impl Game<'_> {
             Vec::new()
         };
         let view = horizon_client::camera::view_matrix(view_yaw, view_pitch);
-        let world_primitives = if self.title.is_none() {
-            self.world_primitive_geometry(camera, alpha, view)
-        } else {
-            Default::default()
-        };
+
         let at = camera.to_array();
         // GameRenderer.render3dHud: the debug crosshair, first person with the HUD shown.
         let mut crosshair = horizon_client::gizmos::Gizmos::default();
@@ -17503,7 +17440,7 @@ impl Game<'_> {
             },
             additive: &additive,
             see_through: &see_through,
-            world_primitives: world_primitives.batch(),
+            world_primitives: Default::default(),
             shadow_only: &shadow_only,
             celestial: if self.settings.horizon.sky || title {
                 &celestial
@@ -20331,7 +20268,7 @@ impl<'a> Game<'a> {
             &gui.atlas.sprites,
             &gui.atlas.translucent,
         );
-        let mut game = Game {
+        let game = Game {
             world_biomes: None,
             world_biomes_base: None,
             res: res.clone(),
@@ -20775,7 +20712,6 @@ impl<'a> Game<'a> {
             user_input: Default::default(),
             text_selection: Default::default(),
             saved_for_exit: false,
-            native_client_stopped: false,
             pending_save: None,
             frame_drawn: true,
             world_icon: None,
@@ -20855,9 +20791,6 @@ impl<'a> Game<'a> {
             fangs: Default::default(),
             player_model: None,
         };
-        if game.native_window() {
-            game.native_client_start();
-        }
         Ok(game)
     }
 }
@@ -21206,77 +21139,47 @@ impl Game<'_> {
     /// Load the world's data packs' content tables (`None`: the world has no
     /// packs, and `Resources.rest` stays in use). This re-reads the tables,
     /// so it runs once per world open and on `/reload`.
-<<<<<<< HEAD
-    fn build_world_tables(&mut self, stack: &functions::PackStack) -> Option<WorldTables> {
-=======
     fn build_world_tables(
-        &self,
+        &mut self,
+        stack: &functions::PackStack,
         reload: bool,
-        enabled_features: &[String],
     ) -> Result<(Option<WorldTables>, horizon_client::health::HealthResources)> {
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         // The ask of this load, both here and on `/reload`: a native mod
         // recomputes the pack files it contributes every time.
         let mut contributed = Vec::new();
         self.native_data_pack_files(&mut contributed);
-<<<<<<< HEAD
         let files = functions::overlay_files(stack, contributed);
-        if files.is_empty() {
-            return None;
-        }
         let overlay = horizon_world::loot::PackOverlay { files: &files };
-        let root = &self.options.resources;
-        let items = match Items::load(
-            root,
-            self.pack.assets.registry,
-            self.res.facts(),
-            &overlay,
-            self.res.item_defaults(),
-        ) {
-            Ok(items) => items,
-            Err(e) => {
-                log::warn!("Horizon: the world's data packs are not applied: {e}");
-                return None;
-            }
-=======
-        let files = functions::overlay_files(
-            &self.world_root,
-            &self.options.resources,
-            self.cmds.vanilla_disabled,
-            enabled_features,
-            contributed,
-        );
-        let overlay = horizon_world::loot::PackOverlay { files: &files };
+        let mut data_map_types = Vec::new();
+        self.native_data_map_types(&mut data_map_types);
         let root = &self.options.resources;
         let base = if reload {
             &self.health_resources
         } else {
-            &self.motion.health
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
+            &self.res.motion().health
         };
         let health = base.with_packs(root, &overlay, reload)?;
         if files.is_empty() {
             return Ok((None, health));
         }
-        let mut items = Items::load(root, self.pack.assets.registry, self.res.facts(), &overlay)?;
+        let mut items = Items::load(
+            root,
+            self.pack.assets.registry,
+            self.res.facts(),
+            &overlay,
+            self.res.item_defaults(),
+        )?;
         // Item damage predicates use the same frozen registry as player hurt.
         Arc::make_mut(&mut items.enchantments).bind_damage_catalog(&health.damage);
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
-<<<<<<< HEAD
         let sources = lan::load_sources(
             &self.res.core.item_data,
             self.options.execution_role.data_load_origin(),
             &overlay,
         );
-        let recipes = match Recipes::from_resolved(root, &items, &overlay, &sources) {
-            Ok(recipes) => recipes,
-            Err(e) => {
-                log::warn!("Horizon: the world's data packs are not applied: {e}");
-                return None;
-            }
-        };
+        let recipes = Recipes::from_resolved(root, &items, &overlay, &sources)?;
         let stations = horizon_client::stations::StationData::from_sources(
             root,
             &items,
@@ -21284,12 +21187,6 @@ impl Game<'_> {
             self.res.item_defaults(),
             &sources,
         );
-=======
-        let recipes = Recipes::load(root, &items, &overlay)?;
-        let stations = horizon_client::stations::StationData::load(root, &items, &overlay);
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
-        let mut data_map_types = Vec::new();
-        self.native_data_map_types(&mut data_map_types);
         let data_maps = native_data_maps::DataMaps::load(
             &data_map_types,
             &files,
@@ -21406,14 +21303,11 @@ impl Game<'_> {
         if self.remote.is_some() {
             return;
         }
-<<<<<<< HEAD
         // One pass over the recipes for this reload: the tables built next and
         // the players' copy below share it.
         lan::forget_server_sources();
         self.refresh_loop_context();
-        self.world_tables = self.build_world_tables(stack);
-=======
-        match self.build_world_tables(true, &self.level.enabled_features) {
+        match self.build_world_tables(stack, true) {
             Ok((tables, health)) => {
                 self.world_tables = tables;
                 self.health_resources = health;
@@ -21424,7 +21318,6 @@ impl Game<'_> {
             }
         }
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
         self.load_server_loot();
@@ -21453,7 +21346,7 @@ impl Game<'_> {
             }
             None => {
                 if let Err(e) =
-                    lan::reload_cached_sync_data(&self.options.resources, &self.pack_files())
+                    lan::reload_cached_sync_data(&self.res.core.item_data, &self.pack_files())
                 {
                     log::warn!("Horizon: the cached world data is not reloaded: {e}");
                 }

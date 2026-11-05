@@ -809,7 +809,6 @@ impl Hub {
 
     /// `PlayerList.broadcastAll`: send a packet to every placed player.
     pub fn broadcast(&self, packet: &C) {
-<<<<<<< HEAD
         let mut body = None;
         for g in self
             .guests
@@ -818,17 +817,6 @@ impl Hub {
         {
             g.sender
                 .send(body.get_or_insert_with(|| packet.encode()).clone());
-=======
-        if let C::RemoveEntities(p) = packet {
-            for guest in self.guests.iter().filter(|g| g.placed) {
-                self.send_ordered_removal(guest, &p.ids);
-            }
-            return;
-        }
-        let body = packet.encode();
-        for g in self.guests.iter().filter(|g| g.placed) {
-            g.sender.send(body.clone());
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         }
     }
     /// MinecraftServer.onGameRuleChanged: every player is told when
@@ -5052,6 +5040,7 @@ mod tests {
                 sender: crate::lan::PlayerSender::new(tx, std::sync::Arc::default()),
                 latency: std::sync::Arc::default(),
                 address: "127.0.0.1:25565".parse().unwrap(),
+                expected: false,
             },
             2,
             [32.0, 64.0, 0.0],
@@ -5138,6 +5127,7 @@ mod tests {
                 sender: crate::lan::PlayerSender::new(tx, std::sync::Arc::default()),
                 latency: std::sync::Arc::default(),
                 address: "127.0.0.1:25566".parse().unwrap(),
+                expected: false,
             },
             2,
             [4.5, 64.0, 0.5],

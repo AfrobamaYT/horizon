@@ -543,10 +543,6 @@ pub(super) struct Remote {
     /// The dimension of the client level the mods heard made
     /// (`native_client_level_load`), to be told dropped once.
     heard_level: Option<String>,
-    /// The epoch native mods' entity handles carry on this client
-    /// (`native_entity_refs.rs`): a fresh one for each client level, so a
-    /// handle of the level before reads as None. None before the first.
-    native_epoch: Option<horizon_client::mod_api::NativeWorldEpoch>,
     /// `ClientPacketListener.levelLoadTracker`: the loading screen after a login
     /// or respawn, until the player's section is shown.
     pub(super) level_load: horizon_client::level_loading::LevelLoadTracker,
@@ -1106,7 +1102,6 @@ impl Game<'_> {
             abilities: None,
             loaded_sent: false,
             heard_level: None,
-            native_epoch: None,
             level_load: horizon_client::level_loading::LevelLoadTracker::new(0),
             sent_info: info,
             predictions: HashMap::new(),
@@ -2353,10 +2348,10 @@ impl Game<'_> {
                 renderer.clear_sections(self.world.layout());
             }
             // The new ClientLevel is told before setLevel drops the old one.
-            let old = self.remote.as_mut().and_then(|r| {
-                r.native_epoch = Some(super::native_lifecycle::fresh_epoch());
-                r.heard_level.replace(spawn.dimension.clone())
-            });
+            let old = self
+                .remote
+                .as_mut()
+                .and_then(|r| r.heard_level.replace(spawn.dimension.clone()));
             self.native_client_level_load(&spawn.dimension);
             if let Some(old) = old {
                 self.native_client_level_unload(&old);
@@ -3245,13 +3240,8 @@ impl Game<'_> {
         }
     }
 
-<<<<<<< HEAD
     fn handle_packet(&mut self, packet: C) -> Result<()> {
         self.observe_client_packet(&packet);
-=======
-    pub(super) fn handle_packet(&mut self, packet: C) -> Result<()> {
-        self.native_client_packet(&packet);
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         match packet {
             // ClientCommonPacketListenerImpl.handlePing runs on the game
             // thread, after all preceding packets (especially teleports).
@@ -6341,14 +6331,11 @@ impl Game<'_> {
                 assets: &self.pack.assets,
                 collision_binding: self.collision,
                 resources: self.motion,
-<<<<<<< HEAD
+                health: &self.health_resources,
                 loop_context: &self.loop_context,
                 damage_hooks: &self.damage_hooks,
                 tag_items: None,
                 block_registries: None,
-=======
-                health: &self.health_resources,
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
             }
             .controlled_simulation_tick_with_sprint_window(keys, sprint_window)?;
         } else {
@@ -6365,14 +6352,11 @@ impl Game<'_> {
                     assets: &self.pack.assets,
                     collision_binding: self.collision,
                     resources: self.motion,
-<<<<<<< HEAD
+                    health: &self.health_resources,
                     loop_context: &self.loop_context,
                     damage_hooks: &self.damage_hooks,
                     tag_items: None,
                     block_registries: None,
-=======
-                    health: &self.health_resources,
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 };
                 passenger.passenger_pose_tick()?;
                 // LivingEntity.aiStep: a passenger freezes in powder snow too, and the
@@ -11087,10 +11071,6 @@ impl Remote {
     pub(super) fn has_level(&self) -> bool {
         client_has_level(self.logged_in, self.reconfiguring)
     }
-    /// The epoch of this client level's entity handles (`native_epoch`).
-    pub(super) fn native_epoch(&self) -> Option<horizon_client::mod_api::NativeWorldEpoch> {
-        self.native_epoch
-    }
     /// An entity the server added to this client level: its type
     /// (`minecraft:text_display`) and its position as last sent.
     pub(super) fn tracked_entity(&self, id: i32) -> Option<(&str, [f64; 3])> {
@@ -12410,11 +12390,7 @@ mod tests {
     }
 
     use super::{
-<<<<<<< HEAD
         boat_interact_passes, chat_after_event, hold_server_fire, item_frame_interact_passes,
-=======
-        boat_interact_passes, client_has_level, hold_server_fire, item_frame_interact_passes,
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         keep_client_state, remote_object_swings, remote_use_swings, synced_local_use,
     };
 

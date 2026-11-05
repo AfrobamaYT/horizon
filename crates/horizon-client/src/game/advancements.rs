@@ -635,7 +635,6 @@ impl Game<'_> {
         // mainhand, offhand, head, chest, legs, feet.
         let slot = |i: Option<&str>| i.map(|id| item_view(&ItemStack::new(id, 1)));
         let mut equipment: [Option<ItemView>; 7] = Default::default();
-<<<<<<< HEAD
         equipment[0] = slot(m.extra.main_hand_id());
         equipment[1] = slot(m.extra.off_hand_id());
         equipment[2] = slot(m.extra.head_id());
@@ -643,19 +642,6 @@ impl Game<'_> {
         equipment[4] = slot(m.extra.slot_id(horizon_items::equipment::LEGS));
         equipment[5] = slot(m.extra.slot_id(horizon_items::equipment::FEET));
         equipment[6] = m.extra.body_stack().map(item_view);
-=======
-        equipment[0] = slot(&m.extra.main_hand);
-        equipment[1] = slot(&m.extra.off_hand);
-        equipment[2] = slot(&m.extra.head);
-        equipment[3] = slot(&m.extra.chest);
-        equipment[4] = slot(&m.extra.legs);
-        equipment[5] = slot(&m.extra.feet);
-        // The body slot (a wolf's armor, a horse's), with its durability.
-        equipment[6] = m.extra.body.as_ref().map(|id| {
-            let mut armor = ItemStack::new(id, 1);
-            armor.damage = m.extra.body_damage.max(0) as u32;
-            item_view(&armor)
-        });
         let passengers: Vec<EntityView> = self
             .mobs
             .iter()
@@ -663,8 +649,6 @@ impl Game<'_> {
             .map(|r| self.mob_entity(r))
             .chain(self.rider_entity(m.id))
             .collect();
-        // `NbtPredicate.getEntityTagToCompare`: the mob as saved, with the
-        // mobs riding it under `Passengers`, when a criterion may ask.
         let nbt = self.adv.tree.tests_nbt().then(|| {
             let uuid = self.persist.uuids.get(&m.id).copied().unwrap_or_default();
             let raw = self.persist.raw.get(&m.id);
@@ -674,7 +658,6 @@ impl Game<'_> {
             super::persist::add_passengers(&mut tag, riders);
             tag
         });
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         EntityView {
             kind: m.kind.id.clone(),
             position: [m.position.x, m.position.y, m.position.z],

@@ -994,25 +994,18 @@ impl Game<'_> {
                 None
             };
             let cooldown = host.play.get(&t.conn).map_or(0, |p| p.portal.cooldown);
-<<<<<<< HEAD
             let ctx = server_ctx!(self);
             if let Some(host) = self.lan.as_mut() {
                 host.hub
                     .change_level(i, t.at, yaw, Some(pitch), false, cooldown, &ctx);
+                let g = &mut host.hub.guests[i];
+                g.vehicle = t.vehicle;
+                if let Some(mut body) = passenger_body {
+                    body.position = Vec3::new(t.at[0], t.at[1], t.at[2]);
+                    g.motion = Some(body);
+                }
             }
             self.as_guest(t.conn, |g| {
-=======
-            let ctx = self.server_ctx();
-            host.hub
-                .change_level(i, t.at, yaw, Some(pitch), false, cooldown, &ctx);
-            let g = &mut host.hub.guests[i];
-            g.vehicle = t.vehicle;
-            if let Some(mut body) = passenger_body {
-                body.position = Vec3::new(t.at[0], t.at[1], t.at[2]);
-                g.motion = Some(body);
-            }
-            self.as_guest(host, t.conn, |g| {
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 g.trigger_dimension(source, t.dim, origin);
                 // The mods hear the teleport into another level, with the
                 // player's state swapped in.

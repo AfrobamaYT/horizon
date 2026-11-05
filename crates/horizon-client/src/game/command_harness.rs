@@ -451,9 +451,7 @@ impl Game<'_> {
                                     .map(|guest| guest.conn)
                             })
                             .ok_or("command harness: owner is not connected")?;
-                        let mut host = g.lan.take().ok_or("command harness: no hub")?;
                         g.lan_guest_packet(
-                            &mut host,
                             conn,
                             horizon_protocol::packets::play::Serverbound::UseItem(
                                 horizon_protocol::packets::play::UseItem {
@@ -464,11 +462,11 @@ impl Game<'_> {
                                 },
                             ),
                         );
-                        let ack = host
-                            .hub
-                            .guest(conn)
-                            .is_some_and(|g| g.ack_up_to.get() >= sequence);
-                        g.lan = Some(host);
+                        let ack = g.lan.as_ref().is_some_and(|host| {
+                            host.hub
+                                .guest(conn)
+                                .is_some_and(|guest| guest.ack_up_to.get() >= sequence)
+                        });
                         if !ack {
                             return Err("command harness: UseItem was not acknowledged".into());
                         }

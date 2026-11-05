@@ -21,6 +21,7 @@ use horizon_world::{
     item_defaults::ItemData,
     nbt::{JavaString, Tag},
 };
+use std::path::Path;
 use std::{
     collections::HashMap,
     sync::{
@@ -983,7 +984,7 @@ fn configure(
                 let _ = send.send(Event::Features(p.features));
             }
             cfg::Clientbound::RegistryData(mut r) => {
-                fill_known_entries(&mut r, resources);
+                fill_known_entries(&mut r, resources.root());
                 registries.add(r);
             }
             cfg::Clientbound::UpdateTags(t) => registries.add_tags(&t),

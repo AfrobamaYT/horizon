@@ -845,7 +845,6 @@ impl B {
                 }
                 super::breeze::set_pose(m, super::breeze::INHALING);
                 // level.playSound(null, breeze, BREEZE_CHARGE, HOSTILE, 1, 1)
-<<<<<<< HEAD
                 let charge = MobEvent::bound_sound(
                     m,
                     "entity.breeze.charge",
@@ -854,15 +853,6 @@ impl B {
                     1.0,
                 );
                 cx.events.push(charge);
-=======
-                cx.events.push(MobEvent::entity_sound(
-                    m,
-                    "entity.breeze.charge",
-                    5,
-                    1.0,
-                    1.0,
-                ));
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 if let Some(p) = mem(m).breeze_jump_target.value() {
                     look_at_eyes(
                         m,

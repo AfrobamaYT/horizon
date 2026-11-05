@@ -814,12 +814,8 @@ impl Items {
             };
         let mut items = HashMap::new();
         let mut order = Vec::new();
-<<<<<<< HEAD
-        for (name, c) in defaults.entries() {
-=======
         let mut mob_visibility = HashMap::new();
-        for (name, c) in raw.iter() {
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
+        for (name, c) in defaults.entries() {
             let id: Arc<str> = Arc::from(name.as_str());
             let tool = c["minecraft:tool"]["rules"]
                 .as_array()

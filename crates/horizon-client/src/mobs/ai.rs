@@ -2763,7 +2763,7 @@ pub fn custom_travel(
         return super::turtle::travel(m, w, level, input, events);
     }
     if m.species() == Species::Frog {
-        return super::frog::travel(m, w, input, events);
+        return super::frog::travel(m, w, level, input, events);
     }
     match family(m.species()) {
         Family::Aquatic => aquatic::travel(m, w, level, input, events),
@@ -5183,8 +5183,9 @@ mod air_tests {
             let mut m = Mob::new(1, kind, Vec3::new(2.5, 3.0, 2.5), 0.0);
             m.air = air;
             let mut events = Vec::new();
+            let mut test_level = crate::health::TestLevel::new(0);
             for _ in 0..ticks {
-                base_tick(&mut m, w, &mut events);
+                base_tick(&mut m, w, &mut test_level.level(), &mut events);
             }
             out = Some(m.air);
         });

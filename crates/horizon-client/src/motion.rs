@@ -1011,7 +1011,8 @@ pub struct MotionWorld<'p, 'w, 'r> {
     pub assets: &'r Assets,
     pub collision_binding: &'w BlockCollisionRegistry<'r>,
     pub resources: &'w MotionResources,
-<<<<<<< HEAD
+    /// The owning world's frozen damage registry and reloadable tags.
+    pub health: &'w crate::health::HealthResources,
     /// Authoritative merged tags, absent on client prediction.
     pub tag_items: Option<&'w crate::items::Items>,
     /// What the motion value hooks are given: the side that owns this player's
@@ -1021,10 +1022,6 @@ pub struct MotionWorld<'p, 'w, 'r> {
     pub damage_hooks: &'w crate::health::DamageHooks,
     /// The cached block parser table, when available to level hooks.
     pub block_registries: Option<&'w crate::command::args::Registries>,
-=======
-    /// This world's frozen damage definitions and current tags.
-    pub health: &'w crate::health::HealthResources,
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 }
 enum TickInput {
     Living([f32; 3]),
@@ -1273,7 +1270,6 @@ impl MotionWorld<'_, '_, '_> {
         // The resident scene accepts the resolved local movement directly.
         // Vanilla dispatches this separately from travel, on packet acceptance.
         self.check_movement_statistics(previous.vector_to(self.player.position))?;
-<<<<<<< HEAD
         let rules = self.scene.health_rules;
         self.player.food_tick(
             self.loop_context,
@@ -1284,12 +1280,9 @@ impl MotionWorld<'_, '_, '_> {
                 self.block_registries,
                 self.damage_hooks,
             ),
-            &self.resources.health,
+            self.health,
             rules,
         )
-=======
-        self.player.food_tick(self.health, self.scene.health_rules)
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     }
     pub fn controlled_simulation_tick(&mut self, keys: crate::sprint::Keys) -> Result<()> {
         self.controlled_simulation_tick_with_sprint_window(keys, 7)
@@ -1511,6 +1504,7 @@ impl MotionWorld<'_, '_, '_> {
     /// `hurtServer(damageSources().freeze(), 1)` for a fully frozen player.
     fn freeze_damage(&mut self) -> Result<()> {
         let id = self
+            .resources
             .health
             .damage
             .id("minecraft:freeze")
@@ -1519,7 +1513,6 @@ impl MotionWorld<'_, '_, '_> {
             crate::health::HealthEvent::FreezeDamage(1.0),
         ));
         let rules = self.scene.health_rules;
-<<<<<<< HEAD
         self.player.hurt(
             &mut crate::health::DamageLevel::of(
                 self.scene,
@@ -1528,14 +1521,11 @@ impl MotionWorld<'_, '_, '_> {
                 self.block_registries,
                 self.damage_hooks,
             ),
-            &self.resources.health,
+            self.health,
             rules,
             id,
             1.0,
         )?;
-=======
-        self.player.hurt(self.health, rules, id, 1.0)?;
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         Ok(())
     }
     /// `Entity.applyEffectsFromBlocks` for the blocks Horizon's player reacts
@@ -2030,6 +2020,7 @@ impl MotionWorld<'_, '_, '_> {
             && (known.x.abs() >= f64::from(0.003_f32) || known.z.abs() >= f64::from(0.003_f32))
         {
             let id = self
+                .resources
                 .health
                 .damage
                 .id("minecraft:sweet_berry_bush")
@@ -2038,7 +2029,6 @@ impl MotionWorld<'_, '_, '_> {
                 crate::health::HealthEvent::SweetBerryBushDamage(1.0),
             ));
             let rules = self.scene.health_rules;
-<<<<<<< HEAD
             self.player.hurt(
                 &mut crate::health::DamageLevel::of(
                     self.scene,
@@ -2047,14 +2037,11 @@ impl MotionWorld<'_, '_, '_> {
                     self.block_registries,
                     self.damage_hooks,
                 ),
-                &self.resources.health,
+                self.health,
                 rules,
                 id,
                 1.0,
             )?;
-=======
-            self.player.hurt(self.health, rules, id, 1.0)?;
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         }
         Ok(())
     }
@@ -2194,12 +2181,12 @@ impl MotionWorld<'_, '_, '_> {
                         pitch: 1.0,
                     }));
                 let id = self
+                    .resources
                     .health
                     .damage
                     .id("minecraft:fly_into_wall")
                     .ok_or("missing fly_into_wall damage type")?;
                 let rules = self.scene.health_rules;
-<<<<<<< HEAD
                 self.player.hurt(
                     &mut crate::health::DamageLevel::of(
                         self.scene,
@@ -2208,14 +2195,11 @@ impl MotionWorld<'_, '_, '_> {
                         self.block_registries,
                         self.damage_hooks,
                     ),
-                    &self.resources.health,
+                    self.health,
                     rules,
                     id,
                     dmg,
                 )?;
-=======
-                self.player.hurt(self.health, rules, id, dmg)?;
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 if self.player.server_copy {
                     self.player.wall_hit_events = Some(first..self.player.events.len());
                 }

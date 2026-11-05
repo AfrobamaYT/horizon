@@ -607,12 +607,13 @@ impl Dragon {
         kind: DamageKind,
         direct: Option<&ProjectileKind>,
     ) -> Hurt {
-        self.hurt_part_from(part, damage, counts, kind, direct, None)
+        self.hurt_part_from(level, part, damage, counts, kind, direct, None)
     }
     /// `hurt_part` with the melee attacker's position (`DamageSource.getSourcePosition`,
     /// the direct entity's feet). `None` for a hit that is not a player's melee.
     fn hurt_part_from(
         &mut self,
+        level: &mut DamageLevel<'_>,
         part: usize,
         damage: f32,
         counts: Option<HurtSource<'_>>,
@@ -629,40 +630,33 @@ impl Dragon {
                 ProjectileKind::Arrow { .. } | ProjectileKind::Trident | ProjectileKind::WindCharge
             )
         );
-<<<<<<< HEAD
-        self.hurt(level, part, damage, counts, arrow)
-=======
-        self.hurt_from(part, damage, counts, arrow, from)
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
+        self.hurt_from(level, part, damage, counts, arrow, from)
     }
     /// `EnderDragon.hurt(part, source, damage)`: whether the hit landed
     /// (an arrow is spent, else it turns back). `counts` is the source
     /// `reallyHurt` takes when `source.getEntity() instanceof Player` or its
     /// type always hurts dragons (explosions), and none otherwise; `arrow` a
     /// direct arrow or wind charge, which a perched dragon shrugs off
-<<<<<<< HEAD
     /// (`AbstractDragonSittingPhase.onHurt`).
+    #[cfg(test)]
     fn hurt(
         &mut self,
         level: &mut DamageLevel<'_>,
-=======
-    /// (`AbstractDragonSittingPhase.onHurt`). Gameplay calls `hurt_from`.
-    #[cfg(test)]
-    fn hurt(&mut self, part: usize, damage: f32, counts: Option<HurtSource>, arrow: bool) -> Hurt {
-        self.hurt_from(part, damage, counts, arrow, None)
-    }
-    /// `hurt` with the position `dealDefaultKnockback` pushes away from.
-    fn hurt_from(
-        &mut self,
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         part: usize,
         damage: f32,
         counts: Option<HurtSource>,
         arrow: bool,
-<<<<<<< HEAD
-=======
+    ) -> Hurt {
+        self.hurt_from(level, part, damage, counts, arrow, None)
+    }
+    fn hurt_from(
+        &mut self,
+        level: &mut DamageLevel<'_>,
+        part: usize,
+        damage: f32,
+        counts: Option<HurtSource>,
+        arrow: bool,
         from: Option<Vec3>,
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     ) -> Hurt {
         if matches!(self.phase, Phase::Dying { .. }) || !self.alive() {
             return Hurt::Refused;
@@ -764,6 +758,7 @@ impl Dragon {
         // `explosion_knockback`.
         if full && let Some(from) = from {
             self.knockback(
+                level,
                 f64::from(0.4_f32),
                 from.x - self.position.x,
                 from.z - self.position.z,
@@ -788,7 +783,14 @@ impl Dragon {
     /// the source position minus this position). Knockback resistance is the
     /// mob default, 0. `noPhysics` never sets `onGround`, so the vertical
     /// component stays.
-    fn knockback(&mut self, power: f64, xd: f64, zd: f64, source: HurtSource<'_>) {
+    fn knockback(
+        &mut self,
+        level: &mut DamageLevel<'_>,
+        power: f64,
+        xd: f64,
+        zd: f64,
+        source: HurtSource<'_>,
+    ) {
         if self.phase.sitting() {
             return;
         }
@@ -797,7 +799,7 @@ impl Dragon {
             x: xd,
             z: zd,
         };
-        if horizon_client::health::knockback_canceled(
+        if level.knockback_canceled(
             horizon_client::health::Hurting::Dragon(self.id as i32, source),
             &mut knock,
         ) {
@@ -1229,6 +1231,11 @@ impl Game<'_> {
             }
         }
         self.assign_dragon_and_crystal_ids();
+        // updateDragon runs when the fight dragon ticks or dies, but not with NoAI.
+        let ticks = self.dragon.as_ref().is_some_and(|d| !d.alive() || !d.no_ai);
+        if ticks && self.is_fight_dragon() {
+            self.fight.dragon_unseen = 0;
+        }
         self.tick_dragon();
     }
 
@@ -1247,16 +1254,6 @@ impl Game<'_> {
             self.next_entity += 1;
             c.id = self.next_entity;
         }
-<<<<<<< HEAD
-=======
-        // updateDragon, from the fight's dragon's aiStep (not with NoAI) and
-        // tickDeath: it has been seen.
-        let ticks = self.dragon.as_ref().is_some_and(|d| !d.alive() || !d.no_ai);
-        if ticks && self.is_fight_dragon() {
-            self.fight.dragon_unseen = 0;
-        }
-        self.tick_dragon();
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     }
     /// EndSpikeFeature's crystals (with fire under them on the bedrock).
     fn place_spike_crystals(&mut self) {
@@ -1482,10 +1479,6 @@ impl Game<'_> {
     ) -> Hurt {
         let by_id = by.map(|who| self.fight_entity(who));
         let source = counts.then(|| hurt_source(kind, by_id, direct));
-        // `dealDefaultKnockback` for a player's melee: away from the attacker's
-        // feet. The scope names that player to the knockback hook.
-        let _attacker = (kind == DamageKind::PlayerAttack)
-            .then(|| self.knockback_scope(self.player.as_ref().map_or(0, |p| p.entity_id)));
         let from = (kind == DamageKind::PlayerAttack)
             .then(|| self.player.as_ref().map(|p| p.position))
             .flatten();
@@ -1494,12 +1487,8 @@ impl Game<'_> {
         };
         let was_down = d.down();
         let (cooldown, last_hurt) = (d.invulnerable, d.last_hurt);
-<<<<<<< HEAD
-        let level = super::entity::damage_level_of!(self);
-        let hurt = d.hurt_part(level, part, damage, source, kind, direct);
-=======
-        let hurt = d.hurt_part_from(part, damage, source, kind, direct, from);
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
+        let level = super::entity::damage_level_of!(self, scoped);
+        let hurt = d.hurt_part_from(level, part, damage, source, kind, direct, from);
         // LivingEntity.hurtServer: damage that is applied sets lastHurtByPlayer
         // (100 ticks); a hit the damage cooldown absorbs returns before that.
         if counts
@@ -4150,18 +4139,12 @@ impl Game<'_> {
     fn create_new_dragon(&mut self) {
         let yaw = self.world.random.next_float() * 360.0;
         let seed = self.world.random.next_long();
-<<<<<<< HEAD
         let mut dragon = Dragon::new(Vec3::new(0.0, 128.0, 0.0), yaw, seed);
         dragon.join = horizon_client::join_seq::JoinSeq::next();
-        self.dragon = Some(dragon);
-=======
-        let mut d = Dragon::new(Vec3::new(0.0, 128.0, 0.0), yaw, seed);
-        // EnderDragon's constructor takes its id and its parts' from the
-        // entity counter.
-        d.id = self.next_entity + 1;
+        dragon.id = self.next_entity + 1;
         self.next_entity += 9;
-        let id = d.id;
-        self.dragon = Some(d);
+        let id = dragon.id;
+        self.dragon = Some(dragon);
         self.fight.dragon_uuid = Some(self.uuid_for(id));
         self.fight.dirty = true;
     }
@@ -4212,7 +4195,6 @@ impl Game<'_> {
             (Some(id), Some(uuid)) if id != 0 => self.uuid_for(id) == uuid,
             _ => false,
         }
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     }
     /// The END stage: the portal crystals blow up (no block damage) and a
     /// new dragon takes over.

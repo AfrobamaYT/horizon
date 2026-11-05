@@ -403,7 +403,7 @@ pub fn tick(
     mobs: &mut [Mob],
     index: usize,
     w: &MobWorld,
-    random: &mut horizon_core::random::LegacyRandom,
+    level: &mut super::DamageLevel<'_>,
     events: &mut Vec<super::MobEvent>,
 ) -> bool {
     let mut owner = index;
@@ -425,7 +425,7 @@ pub fn tick(
         }
     }
     if owner == index {
-        return mobs[index].tick(w, random, events);
+        return mobs[index].tick(w, level, events);
     }
     let (rider, vehicle) = if index < owner {
         let (left, right) = mobs.split_at_mut(owner);
@@ -443,7 +443,7 @@ pub fn tick(
         passenger: vehicle.extra.mount.is_some(),
         in_liquid: vehicle.is_in_liquid(),
     }));
-    let kept = rider.tick(w, random, events);
+    let kept = rider.tick(w, level, events);
     let redirect = rider
         .ai
         .navigation_redirect

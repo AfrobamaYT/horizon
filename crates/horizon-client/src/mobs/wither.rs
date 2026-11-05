@@ -555,12 +555,13 @@ mod tests {
         assert!(!armor_refuses(&mob(Species::Zombie, 150.0), &charge));
 
         // What `wind_charge_damage` lets through still lands on the armor...
+        let mut test_level = crate::health::TestLevel::new(0);
         let mut m = mob(Species::Wither, 150.0);
-        assert!(m.damage(1.0, Damage::of(DamageKind::Thrown)));
+        assert!(m.damage(&mut test_level.level(), 1.0, Damage::of(DamageKind::Thrown)));
         assert!(m.health < 150.0);
         // ...and arrows stay refused by the damage filter.
         let mut m = mob(Species::Wither, 150.0);
-        assert!(!m.damage(1.0, Damage::of(DamageKind::Arrow)));
+        assert!(!m.damage(&mut test_level.level(), 1.0, Damage::of(DamageKind::Arrow)));
         assert_eq!(m.health, 150.0);
     }
     /// A spawning wither rolled the three particles of `aiStep`'s

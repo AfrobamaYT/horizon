@@ -170,27 +170,12 @@ impl Game<'_> {
             m.yaw = yaw;
             m.body_yaw = yaw;
             m.head_yaw = yaw;
-<<<<<<< HEAD
             // DriedGhastBlock.spawnGhastling: level.playSound(null, ghastling,
             // GHASTLING_SPAWN, BLOCKS, 1, 1).
             let (id, at) = (m.id, [m.position.x, m.position.y, m.position.z]);
             let sound = LevelSound::new("minecraft:entity.ghastling.spawn", at, 1.0, 1.0)
                 .in_source(SoundSource::Blocks);
             self.play_bound_sound(sound, id, None);
-=======
-            self.audio.play_bound(
-                "minecraft:entity.ghastling.spawn",
-                4,
-                1.0,
-                1.0,
-                horizon_client::sound_engine::SoundEntity::new(
-                    m.id,
-                    [m.position.x, m.position.y, m.position.z],
-                    m.silent,
-                ),
-                None,
-            );
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         }
     }
 }

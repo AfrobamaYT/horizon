@@ -262,7 +262,7 @@ impl SyncData {
         defaults: &horizon_world::item_defaults::ItemDefaults,
         sources: &crate::crafting::ResolvedSources,
     ) -> Result<Self, String> {
-        Self::load_with_kept(resources, overlay, biomes, None)
+        Self::load_with_kept(resources, overlay, biomes, None, defaults, sources)
     }
 
     /// Reload tags and reloadable data against the registries frozen at open.
@@ -270,8 +270,10 @@ impl SyncData {
         resources: &Path,
         overlay: &horizon_world::loot::PackOverlay,
         kept: &Self,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
+        sources: &crate::crafting::ResolvedSources,
     ) -> Result<Self, String> {
-        Self::load_with_kept(resources, overlay, None, Some(kept))
+        Self::load_with_kept(resources, overlay, None, Some(kept), defaults, sources)
     }
 
     /// Load reloadable data with frozen synchronized registries; an explicit
@@ -281,8 +283,10 @@ impl SyncData {
         overlay: &horizon_world::loot::PackOverlay,
         biomes: Option<&crate::biome::Biomes>,
         kept: Option<&Self>,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
+        sources: &crate::crafting::ResolvedSources,
     ) -> Result<Self, String> {
-        Self::load_with_frozen(resources, overlay, biomes, kept, None)
+        Self::load_with_frozen(resources, overlay, biomes, kept, None, defaults, sources)
     }
 
     /// First lazy load after world entry: damage definitions are the same
@@ -291,8 +295,18 @@ impl SyncData {
         resources: &Path,
         overlay: &horizon_world::loot::PackOverlay,
         damage: &FrozenDamage,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
+        sources: &crate::crafting::ResolvedSources,
     ) -> Result<Self, String> {
-        Self::load_with_frozen(resources, overlay, None, None, Some(damage))
+        Self::load_with_frozen(
+            resources,
+            overlay,
+            None,
+            None,
+            Some(damage),
+            defaults,
+            sources,
+        )
     }
 
     fn load_with_frozen(
@@ -301,6 +315,8 @@ impl SyncData {
         biomes: Option<&crate::biome::Biomes>,
         kept: Option<&Self>,
         damage: Option<&FrozenDamage>,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
+        sources: &crate::crafting::ResolvedSources,
     ) -> Result<Self, String> {
         use crate::spans::startup;
         // The recipe book, the recipe sync and the advancements read the
@@ -833,7 +849,13 @@ mod tests {
             ("damage_type/demo:infinite".into(), vec![br#"{"message_id":"infinite","scaling":"never","exhaustion":1e400}"#.to_vec()]),
             ("tags/minecraft:damage_type/is_fire".into(), vec![br#"{"values":["demo:heat"]}"#.to_vec()]),
         ];
-        let open = SyncData::load(&root, &PackOverlay { files: &files }).unwrap();
+        let open = SyncData::load(
+            &root,
+            &PackOverlay { files: &files },
+            &horizon_world::item_defaults::read(&root).unwrap(),
+            &crate::crafting::ResolvedSources::default(),
+        )
+        .unwrap();
         let heat = open.id("minecraft:damage_type", "demo:heat").unwrap();
         let packet = open.registry_packets(true, &LevelShapes::VANILLA);
         let packet = packet
@@ -868,7 +890,14 @@ mod tests {
                 ],
             ),
         ];
-        let reloaded = SyncData::reload(&root, &PackOverlay { files: &changed }, &open).unwrap();
+        let reloaded = SyncData::reload(
+            &root,
+            &PackOverlay { files: &changed },
+            &open,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+            &crate::crafting::ResolvedSources::default(),
+        )
+        .unwrap();
         assert_eq!(
             reloaded.id("minecraft:damage_type", "demo:heat"),
             Some(heat)
@@ -902,8 +931,22 @@ mod tests {
                 .contains(&heat)
         );
         // Another world performs registry loading again and refuses malformed definitions.
-        assert!(SyncData::load(&root, &PackOverlay { files: &changed }).is_err());
-        let fresh = SyncData::load(&root, &PackOverlay::NONE).unwrap();
+        assert!(
+            SyncData::load(
+                &root,
+                &PackOverlay { files: &changed },
+                &horizon_world::item_defaults::read(&root).unwrap(),
+                &crate::crafting::ResolvedSources::default()
+            )
+            .is_err()
+        );
+        let fresh = SyncData::load(
+            &root,
+            &PackOverlay::NONE,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+            &crate::crafting::ResolvedSources::default(),
+        )
+        .unwrap();
         assert!(fresh.id("minecraft:damage_type", "demo:heat").is_none());
     }
 

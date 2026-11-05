@@ -2,12 +2,9 @@
 //! chunk-generation spawning (`NaturalSpawner`), mob events (attacks,
 //! breeding, conversions, drops), projectiles, player interactions
 //! (feeding, shearing, milking, spawn eggs, throwing) and rendering.
-<<<<<<< HEAD
-use super::level_sounds::LevelSound;
-=======
 mod pufferfish_player;
 
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
+use super::level_sounds::LevelSound;
 use super::{
     Dim, Game, Hand, InteractTarget, dispenser, native_mob_draw::NativePlayerRender,
     native_projectiles::Impact, view_vector,
@@ -1348,18 +1345,14 @@ impl Game<'_> {
                     ..base
                 };
                 w.controlling_player_movement = controlling_player_movement;
-<<<<<<< HEAD
                 let credit_expiring = m.ai.last_hurt_by_player == 1;
-                let kept = m.tick(&w, &mut level, &mut events);
+                let kept =
+                    horizon_client::mobs::riders::tick(&mut mobs, i, &w, &mut level, &mut events);
+                let m = &mut mobs[i];
                 m.despawn = mod_api::NativeDespawn::default();
                 if credit_expiring && m.ai.last_hurt_by_player == 0 {
                     player_credit.remove(&m.id);
                 }
-=======
-                let kept =
-                    horizon_client::mobs::riders::tick(&mut mobs, i, &w, &mut scratch, &mut events);
-                let m = &mut mobs[i];
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 if seen_guest.is_none() {
                     base.player = w.player;
                 }
@@ -2411,29 +2404,6 @@ impl Game<'_> {
                         self.item_particle(&horizon_client::items::ItemStack::new(item, 1));
                     self.particles
                         .send_particles(&options, at, spread, speed, count);
-                }
-                MobEvent::EntitySound {
-                    mob,
-                    name,
-                    at,
-                    volume,
-                    pitch,
-                    source,
-                } => {
-                    let silent = self
-                        .mobs
-                        .iter()
-                        .find(|m| m.id == mob)
-                        .is_some_and(|m| m.silent);
-                    let entity = horizon_client::sound_engine::SoundEntity::new(mob, at, silent);
-                    self.audio.play_bound(
-                        &format!("minecraft:{name}"),
-                        source,
-                        volume,
-                        pitch,
-                        entity,
-                        None,
-                    );
                 }
                 MobEvent::Sound(name, at, volume, pitch)
                 | MobEvent::LocalSound(name, at, volume, pitch) => {
@@ -3752,50 +3722,6 @@ impl Game<'_> {
                 return None;
             }
         }
-<<<<<<< HEAD
-=======
-        // Animal.finalizeSpawnChildFromBreeding: the player who fed the parent,
-        // or else the one who fed the partner.
-        if let Some(cause) = breeding_credit(&mut self.love_cause, parent, partner) {
-            let parent = self.mob_entity(&p);
-            let partner_view = self
-                .mobs
-                .iter()
-                .find(|m| m.id == partner)
-                .map(|m| self.mob_entity(m))
-                .unwrap_or_else(|| parent.clone());
-            let mut child = parent.clone();
-            child.baby = true;
-            // Not born yet: none of the parent's saved data is its own.
-            child.nbt = None;
-            // TurtleBreedGoal.breed triggers it without a child.
-            let turtle = matches!(p.species(), Species::Turtle | Species::Frog);
-            if matches!(
-                (
-                    p.species(),
-                    self.mobs
-                        .iter()
-                        .find(|m| m.id == partner)
-                        .map(|m| m.species())
-                ),
-                (Species::Horse, Some(Species::Donkey)) | (Species::Donkey, Some(Species::Horse))
-            ) {
-                child.kind = "minecraft:mule".into();
-            }
-            let who = cause.map_or(
-                super::commands::Target::Player,
-                super::commands::Target::Guest,
-            );
-            self.for_player(who, |g| {
-                g.award_custom_stat("animals_bred", 1);
-                g.trigger_bred(&parent, &partner_view, (!turtle).then_some(&child));
-            });
-        }
-        if let Some(q) = self.mobs.iter_mut().find(|m| m.id == partner) {
-            q.extra.age = 6000;
-            q.extra.in_love = 0;
-        }
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         let q = self.mobs.iter().find(|m| m.id == partner).cloned();
         // Sniffer.spawnChildFromBreeding: an egg instead of a baby.
         if p.species() == Species::Sniffer {
@@ -4219,14 +4145,9 @@ impl Game<'_> {
         if let Some(player) = self.player.as_mut()
             && let Some(id) = self.health_resources.damage.id(damage_type)
             && let Ok(o) = player.hurt_caused_by(
-<<<<<<< HEAD
                 crate::game::entity::damage_level_of!(self, &attack),
                 &self.motion.health,
                 rules,
-=======
-                &self.health_resources,
-                self.world.health_rules,
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 id,
                 amount,
                 blocking,
@@ -4375,14 +4296,9 @@ impl Game<'_> {
             && let Some(player) = self.player.as_mut()
             && let Some(id) = self.health_resources.damage.id(damage_type)
             && let Ok(o) = player.hurt_blocking(
-<<<<<<< HEAD
                 crate::game::entity::damage_level_of!(self),
                 &self.motion.health,
                 rules,
-=======
-                &self.health_resources,
-                self.world.health_rules,
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 id,
                 amount,
                 None,
@@ -4464,12 +4380,8 @@ impl Game<'_> {
         }
         let mut projectiles = std::mem::take(&mut self.creatures.projectiles);
         let mut hits = Vec::new();
-<<<<<<< HEAD
         // The breezes that deflected a projectile, and where.
         let mut deflections: Vec<(u32, [f64; 3])> = Vec::new();
-=======
-        let mut deflections: Vec<u32> = Vec::new();
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         let mut arrow_events = Vec::new();
         let mut shoot_events = Vec::new();
         let mut trails = Vec::new();
@@ -4640,7 +4552,8 @@ impl Game<'_> {
                 );
                 // Entity.deflection: a breeze turns every projectile but wind charges away.
                 if let Hit::Entity {
-                    who: Who::Mob(id), ..
+                    who: Who::Mob(id),
+                    at,
                 } = hit
                     && !wind
                     && breezes.contains(&id)
@@ -4651,11 +4564,7 @@ impl Game<'_> {
                         let a = p.arrow.as_mut().expect("an arrow");
                         arrow_events.extend(a.events.drain(..).map(|e| (p.position, e)));
                     }
-<<<<<<< HEAD
                     deflections.push((id, [at.x, at.y, at.z]));
-=======
-                    deflections.push(id);
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                     continue;
                 }
                 // AbstractWindCharge.tick: out of the world's top it bursts.
@@ -4736,26 +4645,12 @@ impl Game<'_> {
         for pos in bubble_tops {
             self.bubble_column_particles(pos);
         }
-<<<<<<< HEAD
         // Breeze.onProjectileDeflect: level.playSound(null, breeze,
         // BREEZE_DEFLECT, HOSTILE, 1, 1).
         for (breeze, at) in deflections {
             let sound = LevelSound::new("minecraft:entity.breeze.deflect", at, 1.0, 1.0)
                 .in_source(SoundSource::Hostile);
             self.play_bound_sound(sound, breeze, None);
-=======
-        for id in deflections {
-            if let Some(index) = self.mobs.iter().position(|m| m.id == id) {
-                self.play_mob_bound_sound(
-                    index,
-                    "minecraft:entity.breeze.deflect",
-                    5,
-                    1.0,
-                    1.0,
-                    false,
-                );
-            }
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         }
         for (at, event) in arrow_events {
             self.arrow_event(at, event);
@@ -6434,44 +6329,10 @@ impl Game<'_> {
                 }
             }
             Species::Mooshroom if item == "minecraft:shears" && !m.is_baby() => {
-<<<<<<< HEAD
                 let player = Some(self.native_acting_id());
                 self.shear_mooshroom(index, player, held.as_ref().expect("held shears"));
                 let ctx = self.who_context(Some(horizon_client::mobs::Who::Player), None);
                 self.post_game_event("minecraft:shear", feet, ctx);
-=======
-                // MushroomCow.shear: becomes a cow and drops five mushrooms.
-                let mushroom = if m.extra.variant == 1 {
-                    "minecraft:brown_mushroom"
-                } else {
-                    "minecraft:red_mushroom"
-                };
-                drops.push((mushroom.into(), 5));
-                shear_puff = Some((
-                    [m.position.x, m.position.y, m.position.z],
-                    f64::from(m.height()),
-                ));
-                self.audio.play_bound(
-                    "minecraft:entity.mooshroom.shear",
-                    7,
-                    1.0,
-                    1.0,
-                    horizon_client::sound_engine::SoundEntity::new(m.id, feet, m.silent),
-                    None,
-                );
-                m.removed = true;
-                let setup = SpawnSetup {
-                    yaw: m.yaw,
-                    persistent: true,
-                    ..Default::default()
-                };
-                let pos = [m.position.x, m.position.y, m.position.z];
-                self.handle_mob_events(vec![MobEvent::SpawnKind {
-                    kind: "minecraft:cow".into(),
-                    at: pos,
-                    setup,
-                }])?;
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 self.damage_held_tool();
             }
             // MushroomCow.mobInteract: a brown adult takes the flower's effects
@@ -6981,7 +6842,6 @@ impl Game<'_> {
             None => {}
         }
         if let Some((s, volume, pitch)) = eat {
-<<<<<<< HEAD
             let name = format!("minecraft:{s}");
             if eating_sound_is_bound(species) {
                 let id = self.mobs[index].id;
@@ -6990,16 +6850,6 @@ impl Game<'_> {
                 self.play_bound_sound(sound, id, None);
             } else {
                 self.audio.play(&name, Some(feet), volume, pitch);
-=======
-            let event = format!("minecraft:{s}");
-            if matches!(
-                self.mobs[index].species(),
-                Species::Frog | Species::Goat | Species::Sniffer
-            ) {
-                self.play_mob_bound_sound(index, &event, 6, volume, pitch, false);
-            } else {
-                self.audio.play(&event, Some(feet), volume, pitch);
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
             }
         }
         if consume
@@ -7105,14 +6955,10 @@ impl Game<'_> {
         let at = m.position;
         let mob = (m.id, super::native_hooks::mob_kind(m));
         let tool = self.held().cloned();
-<<<<<<< HEAD
         // shear: level.playSound(null, this, sound, PLAYERS, 1, 1).
         let shear =
             LevelSound::new(sound, [at.x, at.y, at.z], 1.0, 1.0).in_source(SoundSource::Players);
         self.play_bound_sound(shear, mob.0, None);
-=======
-        self.play_mob_bound_sound(index, sound, 7, 1.0, 1.0, false);
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         self.mobs[index].extra.sheared = true;
         let mut stacks = self.sequence_loot(table, table, tool.as_ref());
         let origin = [at.x, at.y, at.z];

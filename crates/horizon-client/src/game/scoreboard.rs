@@ -350,21 +350,7 @@ impl Game<'_> {
             if ok && !s.predicates.is_empty() {
                 // EntityPredicates: the datapack predicate with the entity as
                 // `this` and the entity's position as origin.
-<<<<<<< HEAD
                 let view = self.entity_view_of(t);
-=======
-                self.ensure_datapacks();
-                // The player's records only as far as the predicates may ask.
-                let asked = (s.predicates.iter())
-                    .filter_map(|(id, _)| self.fns.store.predicates.get(id))
-                    .fold(
-                        Default::default(),
-                        |all: horizon_client::advancements::FactsAsked, p| {
-                            all.or(horizon_client::advancements::facts_asked_in(p))
-                        },
-                    );
-                let view = self.entity_view_asking(t, asked);
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 let origin = self.target_position(t).unwrap_or_default();
                 for (id, negated) in &s.predicates {
                     // EntitySelectorOptions rejects a missing registry entry

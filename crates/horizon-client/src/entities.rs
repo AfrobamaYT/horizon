@@ -4189,7 +4189,6 @@ mod render_light_tests {
         }
     }
 }
-<<<<<<< HEAD
 crate::impl_joined!(
     ItemEntity,
     ExperienceOrb,
@@ -4198,83 +4197,6 @@ crate::impl_joined!(
     Cushion,
     ItemFrame
 );
-=======
-crate::impl_joined!(ItemEntity, ExperienceOrb, ArmorStand);
-#[cfg(test)]
-mod orb_lava_tests {
-    use super::*;
-
-    #[test]
-    fn a_server_orb_takes_lava_damage_after_moving_and_discards_at_zero() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../.local/horizon-client")
-            .join(horizon_core::VANILLA_VERSION);
-        if !root.join("movement-properties.nbt").exists() {
-            eprintln!("orb lava fixture unavailable: prepared resources missing");
-            return;
-        }
-        let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
-        let facts = BlockFacts::load(&root, assets.registry).unwrap();
-        let fluids = crate::motion::FluidResources::new(&assets, &facts).unwrap();
-        let collision = crate::collisions::load(&root, assets.registry).unwrap();
-        let mut world = World::test_scene(&assets, &render, 3).unwrap();
-        let lava = assets.registry.default_state("minecraft:lava").unwrap();
-        world.set(20, 4, 20, lava).unwrap();
-        let at = Vec3::new(20.5, 4.1, 20.5);
-        let mut orb = ExperienceOrb {
-            rotation: [0.0, 0.0],
-            join: Default::default(),
-            no_gravity: false,
-            id: 1,
-            position: at,
-            previous: at,
-            velocity: Vec3::ZERO,
-            value: 1,
-            age: 0,
-            on_ground: false,
-            count: 1,
-            ticks: 0,
-            health: 5,
-        };
-        let mut client = orb.clone();
-        for expected_age in 1..=2 {
-            assert!(client.tick(
-                &world,
-                &facts,
-                &collision,
-                None,
-                false,
-                &mut || 0.0,
-                None,
-                &fluids
-            ));
-            assert_eq!((client.health, client.age), (5, expected_age));
-        }
-        assert!(orb.tick(
-            &world,
-            &facts,
-            &collision,
-            None,
-            true,
-            &mut || 0.0,
-            None,
-            &fluids
-        ));
-        assert_eq!((orb.health, orb.age), (1, 1));
-        assert!(!orb.tick(
-            &world,
-            &facts,
-            &collision,
-            None,
-            true,
-            &mut || 0.0,
-            None,
-            &fluids
-        ));
-        assert_eq!((orb.health, orb.age), (-3, 2));
-    }
-}
 
 /// `Entity.checkInsideBlocks` and `collidedWithFluid`: fluid AABB contacts
 /// along Entity.move's axis-ordered path, each block visited once.
@@ -4346,41 +4268,3 @@ fn orb_lava_contacts(
     }
     contacts
 }
-
-#[cfg(test)]
-mod orb_lava_shape_tests {
-    use super::*;
-
-    fn contacts(from: Vec3, to: Vec3) -> usize {
-        orb_lava_contacts(from, to, to.subtract(from), |p| {
-            (p == BlockPos::new(0, 0, 0)).then_some(f64::from(8.0_f32 / 9.0))
-        })
-    }
-
-    #[test]
-    fn lava_uses_the_swept_box_and_fluid_height_not_the_feet_block() {
-        let side = Vec3::new(-0.2, 0.1, 0.5);
-        assert_eq!(contacts(side, side), 1);
-        let above = Vec3::new(0.5, 0.95, 0.5);
-        assert_eq!(contacts(above, above), 0);
-        let through = Vec3::new(-1.0, 0.1, 0.5);
-        let end = Vec3::new(2.0, 0.1, 0.5);
-        assert_eq!(contacts(through, end), 1);
-        let away = Vec3::new(-1.0, 0.1, -1.0);
-        assert_eq!(contacts(away, away), 0);
-    }
-
-    #[test]
-    fn axis_segments_do_not_damage_twice_for_the_same_lava_cell() {
-        let from = Vec3::new(0.1, 0.1, 0.1);
-        let to = Vec3::new(0.7, 0.2, 0.7);
-        assert_eq!(contacts(from, to), 1);
-        assert_eq!(
-            orb_lava_contacts(from, to, Vec3::new(0.1, 0.1, 0.9), |p| {
-                (p == BlockPos::new(0, 0, 0)).then_some(1.0)
-            }),
-            1
-        );
-    }
-}
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392

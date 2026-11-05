@@ -119,14 +119,11 @@ pub fn main() -> Result<()> {
                 assets: &assets,
                 collision_binding: &binding,
                 resources: &resources,
-<<<<<<< HEAD
+                health: &resources.health,
                 tag_items: None,
                 block_registries: None,
                 loop_context: crate::test_resources::server_loop_context(),
                 damage_hooks: &horizon_client::health::DamageHooks::NONE,
-=======
-                health: &resources.health,
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
             }
             .update_auto_jump(fl(&c["xa"]), fl(&c["za"]))?;
         }

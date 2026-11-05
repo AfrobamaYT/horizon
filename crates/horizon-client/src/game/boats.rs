@@ -1350,22 +1350,12 @@ impl Game<'_> {
         {
             return false;
         }
-<<<<<<< HEAD
         let id = self.boats[i].id;
         self.start_riding_target(
             super::commands::Target::Player,
             super::commands::Target::Boat(id),
             false,
         );
-=======
-        if !self.native_may_board(self.boats[i].id) {
-            return true;
-        }
-        let id = self.boats[i].id;
-        self.yaw = self.boats[i].yaw;
-        // Entity.startRiding (ServerPlayer.startRiding fires the trigger).
-        self.start_riding(id);
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         true
     }
     /// `ContainerEntity.interactWithContainerVehicle` (`AbstractChestBoat`):

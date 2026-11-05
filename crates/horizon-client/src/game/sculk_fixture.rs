@@ -616,7 +616,6 @@ impl Game<'_> {
                     lines.push(format!("game {rest}"));
                 }
             }
-<<<<<<< HEAD
             // The sounds bound to an entity are the server's too.
             let bound = std::mem::take(&mut self.bound_sounds)
                 .into_iter()
@@ -627,18 +626,9 @@ impl Game<'_> {
                 .replace(Vec::new())
                 .unwrap_or_default()
                 .into_iter()
+                .map(|s| (s.event, s.position, s.volume, s.pitch))
                 .chain(bound)
             {
-=======
-            for sound in self.audio.capture.replace(Vec::new()).unwrap_or_default() {
-                let horizon_client::audio::CapturedSound {
-                    event: sound,
-                    position: at,
-                    volume,
-                    pitch,
-                    ..
-                } = sound;
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 if CLIENT_SOUNDS.contains(&sound.as_str()) {
                     continue;
                 }

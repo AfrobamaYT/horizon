@@ -1,18 +1,10 @@
 //! Living entities for native server mods, through a `LivingRef`
-<<<<<<< HEAD
 //! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): the equipment
 //! of mobs, players and armor stands, throwing a stack, and whether a mob
 //! is tamed. Reads return `None`, writes false, for a stale handle or on a
 //! client; the exception is the reads marked side `both` (`living`, `equipment`,
 //! `hand_item`, `health`, `max_health`, and `effect`/`effects`), which on a
 //! client answer for the local player from the client's own copy.
-=======
-//! (docs/native-mods.md, "Entity and level handles", #7387): the equipment
-//! of mobs, players and armor stands. Reads return `None`, writes false, for
-//! a stale handle. On a client (API @API:client_entity_refs@) reads give the
-//! equipment the server synced (`ClientboundSetEquipmentPacket`, and this
-//! window's own inventory), and writes are refused.
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 use super::Game;
 use super::commands::{Target, items::Owner};
 use super::living_attributes::AttributeWrite;
@@ -653,7 +645,6 @@ impl Game<'_> {
     ) -> Option<ItemStack> {
         self.native_living_equipment(living, hand_slot(hand))
     }
-<<<<<<< HEAD
     /// Puts `stack` in hand `hand` (`LivingEntity.setItemInHand`): the main
     /// hand's slot or the off hand's, written as `set_equipment`
     /// writes them, with its equip events and sound. None, air or a zero count
@@ -675,14 +666,6 @@ impl Game<'_> {
     /// This is a direct write: it takes effect and is final immediately, even
     /// inside `host.transaction`. A mob's write makes any equip/unequip event
     /// and equip sound immediately; a stand's or the dragon's makes neither. API 382.
-=======
-    /// Puts `stack` (None: empties it) in equipment slot `slot`
-    /// (`LivingEntity.setItemSlot`), as `/item replace entity` does. False
-    /// when the entity has no such slot: a player has no body or saddle
-    /// slot, the dragon none. A mob has every slot, head and body apart
-    /// (`EntityEquipment`), as `/item` does; Horizon keeps no mob saddle here
-    /// yet. False on a client. API 382.
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     pub(super) fn native_living_set_equipment(
         &mut self,
         living: LivingRef,

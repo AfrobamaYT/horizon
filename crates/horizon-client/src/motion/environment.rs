@@ -22,7 +22,6 @@ impl MotionWorld<'_, '_, '_> {
             .damage
             .id(source)
             .ok_or("missing environment damage type")?;
-<<<<<<< HEAD
         let rules = self.scene.health_rules;
         self.player.hurt(
             &mut crate::health::DamageLevel::of(
@@ -32,15 +31,11 @@ impl MotionWorld<'_, '_, '_> {
                 self.block_registries,
                 self.damage_hooks,
             ),
-            &self.resources.health,
+            self.health,
             rules,
             id,
             damage,
         )?;
-=======
-        self.player
-            .hurt(self.health, self.scene.health_rules, id, damage)?;
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         Ok(())
     }
     pub(super) fn tick_remaining_fire(&mut self) -> Result<()> {
@@ -153,7 +148,6 @@ impl MotionWorld<'_, '_, '_> {
                 .damage
                 .id("minecraft:out_of_world")
                 .ok_or("missing environment damage type")?;
-<<<<<<< HEAD
             let rules = self.scene.health_rules;
             self.player.hurt(
                 &mut crate::health::DamageLevel::of(
@@ -163,15 +157,11 @@ impl MotionWorld<'_, '_, '_> {
                     self.block_registries,
                     self.damage_hooks,
                 ),
-                &self.resources.health,
+                self.health,
                 rules,
                 id,
                 4.0,
             )?;
-=======
-            self.player
-                .hurt(self.health, self.scene.health_rules, id, 4.0)?;
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         }
         if in_wall {
             self.environment_hurt("minecraft:in_wall", 1.0)?;

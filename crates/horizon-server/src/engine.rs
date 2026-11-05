@@ -145,62 +145,11 @@ pub fn spawn(
     low_memory: bool,
     transfers: Option<&str>,
 ) -> std::io::Result<Child> {
-<<<<<<< HEAD
-    horizon_server_launch::command(program, resources, dir, low_memory)?.spawn()
-=======
-    command(program, resources, dir, low_memory, transfers)?.spawn()
-}
-
-/// The command `spawn` runs.
-fn command(
-    program: &Path,
-    resources: &Path,
-    dir: &Path,
-    low_memory: bool,
-    transfers: Option<&str>,
-) -> std::io::Result<Command> {
-    // The game runs in the server folder, so a folder given relative to ours (`--dir srv`) would put its
-    // control endpoint in `srv/srv/.horizon`, which doesn't exist.
-    let dir = std::path::absolute(dir)?;
-    let resources = std::path::absolute(resources)?;
-    let mut command = Command::new(program);
-    command
-        .arg("--resources")
-        .arg(resources)
-        .arg("--control-socket")
-        .arg(control_path(&dir));
-    // `[transfer]` on: a proxy's hand-over requests on that endpoint (docs/server.md).
+    let mut command = horizon_server_launch::command(program, resources, dir, low_memory)?;
     if let Some(transfers) = transfers {
         command.arg("--transfers").arg(transfers);
     }
-    command
-        .args(["--dedicated", "--nogui"])
-        .current_dir(&dir)
-        .env("HORIZON_NO_AUDIO", "1")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    // The terminal's Ctrl-C reaches the supervisor alone, which then stops the game cleanly.
-    #[cfg(unix)]
-    std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(
-        &mut command,
-        windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP
-            | windows_sys::Win32::System::Threading::CREATE_NO_WINDOW,
-    );
-    // `[engine] low_memory`: mimalloc then keeps transparent huge pages off. Mostly empty huge pages cost
-    // 60 MB idle and 190 MB at 20 players, and save ~1 % of tick time (docs/hosting.md).
-    if low_memory {
-        command.env("MIMALLOC_ALLOW_THP", "0");
-    }
-    Ok(command)
-}
-
-/// The game's control endpoint in a server folder (`--control-socket`): TCP on 127.0.0.1 with a token, on every OS.
-pub fn control_path(dir: &Path) -> PathBuf {
-    dir.join(".horizon/engine.json")
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
+    command.spawn()
 }
 
 /// A connection to the game's control endpoint: one JSON line asked, one answered.
@@ -250,74 +199,7 @@ impl Control {
 #[cfg(test)]
 mod tests {
     use super::*;
-<<<<<<< HEAD
     use std::path::PathBuf;
-=======
-
-    #[test]
-    fn low_memory_turns_huge_pages_off_for_the_game() {
-        let thp = |low_memory| {
-            let dir = std::env::temp_dir();
-            let command =
-                command(Path::new("horizon-client"), &dir, &dir, low_memory, None).unwrap();
-            command
-                .get_envs()
-                .find(|(k, _)| *k == "MIMALLOC_ALLOW_THP")
-                .and_then(|(_, v)| v.map(|v| v.to_owned()))
-        };
-        assert_eq!(thp(true).as_deref(), Some(std::ffi::OsStr::new("0")));
-        assert_eq!(thp(false), None);
-    }
-
-    #[test]
-    fn transfers_reach_the_game_only_when_they_are_on() {
-        let args = |transfers: Option<&str>| {
-            let dir = std::env::temp_dir();
-            let command =
-                command(Path::new("horizon-client"), &dir, &dir, false, transfers).unwrap();
-            command
-                .get_args()
-                .map(|a| a.to_string_lossy().into_owned())
-                .collect::<Vec<_>>()
-        };
-        assert!(!args(None).iter().any(|a| a == "--transfers"));
-        let on = args(Some("expect_seconds=10"));
-        let at = on.iter().position(|a| a == "--transfers").unwrap();
-        assert_eq!(on[at + 1], "expect_seconds=10");
-        // Before `--dedicated`: what follows it is vanilla's server arguments.
-        assert!(at < on.iter().position(|a| a == "--dedicated").unwrap());
-    }
-
-    #[test]
-    fn resources_are_searched_in_order() {
-        let mut config = Config::default();
-        let dir = Path::new("/srv/mc");
-        let program = Path::new("/opt/horizon/target/release/horizon-client");
-        let found = resource_candidates(&config, dir, Some(program));
-        assert_eq!(found[0], Path::new("/srv/mc/resources"));
-        assert!(found.contains(&PathBuf::from("/opt/horizon/.local/horizon-client/26.3")));
-        config.engine.resources = "/data/res".into();
-        assert_eq!(
-            resource_candidates(&config, dir, Some(program)),
-            [PathBuf::from("/data/res")]
-        );
-    }
-
-    #[test]
-    fn resources_prepared_without_sounds_are_found() {
-        let root = std::env::temp_dir().join(format!("horizon-server-res-{}", std::process::id()));
-        let prepared = root.join(".local/horizon-client/26.3");
-        std::fs::create_dir_all(&prepared).unwrap();
-        let program = root.join("horizon-client");
-        let config = Config::default();
-        let server = root.join("server");
-        assert!(resources(&config, &server, Some(&program)).is_err());
-        // What `horizon-prepare` writes on every run; no asset index without `horizon-prepare sounds`.
-        std::fs::write(prepared.join("horizon-resources.json"), "{}").unwrap();
-        assert_eq!(resources(&config, &server, Some(&program)), Ok(prepared));
-        std::fs::remove_dir_all(&root).unwrap();
-    }
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 
     /// A folder as `horizon-prepare` leaves it, as far as `check_prepared` looks.
     fn prepared_folder(name: &str) -> PathBuf {

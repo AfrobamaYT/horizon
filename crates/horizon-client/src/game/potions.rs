@@ -956,7 +956,6 @@ impl Game<'_> {
             EffectAction::Hurt(source, amount) => {
                 let mut canceled = false;
                 if !creative
-<<<<<<< HEAD
                     && let Some(id) = self.motion.health.damage.id(source)
                     && let Ok(o) = p.hurt_blocking(
                         crate::game::entity::damage_level_of!(self, scoped),
@@ -966,10 +965,6 @@ impl Game<'_> {
                         amount,
                         None,
                     )
-=======
-                    && let Some(id) = self.health_resources.damage.id(source)
-                    && let Ok(o) = p.hurt_blocking(&self.health_resources, rules, id, amount, None)
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 {
                     canceled = o.canceled;
                 }
@@ -980,7 +975,6 @@ impl Game<'_> {
                     && p.health.health() > 1.0
                     && let Some(id) = self.health_resources.damage.id("minecraft:magic")
                 {
-<<<<<<< HEAD
                     let _ = p.hurt(
                         crate::game::entity::damage_level_of!(self, scoped),
                         &self.motion.health,
@@ -988,9 +982,6 @@ impl Game<'_> {
                         id,
                         1.0,
                     );
-=======
-                    let _ = p.hurt(&self.health_resources, rules, id, 1.0);
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                 }
             }
             EffectAction::Exhaust(amount) => {

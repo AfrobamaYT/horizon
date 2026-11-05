@@ -43,7 +43,6 @@ impl Game<'_> {
     /// zero. On a client, another entity's is the motion the server last
     /// sent it (`Entity.lerpMotion`). API 379.
     pub(super) fn native_entity_velocity(&self, entity: EntityRef) -> Option<[f64; 3]> {
-<<<<<<< HEAD
         let t = self.native_entity_read_target(entity)?;
         if !self.is_logical_server() {
             // The client's copy: its own player's motion, and the motion the
@@ -56,11 +55,6 @@ impl Game<'_> {
                 },
             };
             return Some([v.x, v.y, v.z]);
-=======
-        let t = self.native_entity_target(entity)?;
-        if let Some(p) = self.native_client_player(t) {
-            return Some([p.velocity.x, p.velocity.y, p.velocity.z]);
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         }
         if let Some(g) = self.native_target_guest(t) {
             return Some(std::array::from_fn(|i| {

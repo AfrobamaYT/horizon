@@ -1,15 +1,8 @@
 //! An entity's saved data, tags and name for native server mods, through an
 //! `EntityRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): what
 //! `/data` and `/tag` read and change. They return `None` (or `false`) for a
-<<<<<<< HEAD
 //! stale handle or on a client.
-use super::Game;
-=======
-//! stale handle or on a client, which the server sends no saved data or tags;
-//! only the name reads there.
 use super::{Game, commands::Target};
-use horizon_client::mod_api::EntityRef;
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 use horizon_world::nbt::{Compound, Tag};
 use mod_api::EntityRef;
 

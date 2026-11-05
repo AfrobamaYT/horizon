@@ -500,14 +500,9 @@ impl Game<'_> {
                 && !spectator
                 && hurtable
                 && let Ok(o) = p.hurt_caused_by(
-<<<<<<< HEAD
                     crate::game::entity::damage_level_of!(self, scoped),
                     &self.motion.health,
                     rules,
-=======
-                    &self.health_resources,
-                    self.world.health_rules,
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
                     id,
                     amount,
                     blocking,

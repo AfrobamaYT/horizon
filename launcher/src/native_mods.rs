@@ -1654,49 +1654,7 @@ fn pipeline(
         .collect();
     let resolution = dependencies::resolve(&inputs).map_err(|e| e.to_string())?;
     let ordered: Vec<Bundle> = resolution.order.iter().map(|&i| mods[i].clone()).collect();
-<<<<<<< HEAD
     let projects: Vec<_> = mods
-=======
-    // A mod naming a hook points' version doesn't pin: it follows the others, else the game.
-    let pins: Vec<Bundle> = mods.iter().filter(|b| b.hooks.is_none()).cloned().collect();
-    let free = pins.iter().all(|b| b.horizon.is_none());
-    let on_base = on_base || built_on.as_ref().is_some_and(|a| a.on_base);
-    // The commit of the release or Nightly the build starts from. A native build's own is that
-    // of the version it started from when it recorded it; else, outside `on_base`, the commit it
-    // compiled, so a rebuild stays on the Horizon it plays.
-    let base_revision = || match &built_on {
-        Some(about) => match &about.base_horizon {
-            Some(r) => Ok(r.clone()),
-            None if !on_base && !about.off_its_nightly() => Ok(about.horizon.clone()),
-            None => revision_of(origin),
-        },
-        None => revision_of(base),
-    };
-    let date = |r: &str| committed(backend::REPO, r);
-    let (pinned, mut pinned_by) = pinned_revision(&pins, on_base, base_revision, date)?;
-    // Known without asking GitHub again unless a pin chose the commit.
-    let base_horizon = match pinned_by.is_empty() {
-        true => Some(pinned.clone()),
-        false => base_revision().ok(),
-    };
-    let game = || revision_of(origin).ok();
-    let revision = with_hooks(&mods, pinned.clone(), free, game, hooks_at)?;
-    // Nothing to say when the pin is the base's own commit, or the hook points moved the build.
-    if base_horizon.as_ref() == Some(&revision) || revision != pinned {
-        pinned_by.clear();
-    }
-    let other = mismatch(&mods, &revision);
-    if let (Some(list), false) = (&other, anyway || on_base) {
-        return Err(format!("{MISMATCH}{list}."));
-    }
-    if let Some(list) = &other {
-        log_warning(&format!(
-            "Some mods were made for other Horizon versions ({list}). Building anyway on {}.",
-            &revision[..revision.len().min(7)]
-        ));
-    }
-    for b in mods
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         .iter()
         .map(api::Project::read)
         .collect::<Result<_, _>>()
@@ -1727,18 +1685,13 @@ fn pipeline(
         .map_err(|error| error.to_string())?;
     }
     // Said with a failure: a mod made for another revision may not apply or compile on this one.
-    let blame = |e: String| match &other {
-        Some(list) => {
-            let by = match pinned_by.as_slice() {
-                [] => String::new(),
-                [single] => format!(" (pinned by {single})"),
-                many => format!(" (pinned by {})", many.join(", ")),
-            };
-            format!(
-                "{e}\n\nSome mods were made for other Horizon versions ({list}{by}), which may be why. Install versions made for the same Nightly."
-            )
-        }
+    let blame = |e: String| {
+        match &other {
+        Some(list) => format!(
+            "{e}\n\nSome mods were made for other Horizon versions ({list}), which may be why. Install versions made for the same Nightly."
+        ),
         None => e,
+    }
     };
     let mixins = newest(
         &mods,
@@ -1928,7 +1881,7 @@ fn pipeline(
         let (mut crates, mut total, mut name) = (0, None, String::new());
         let identities: Vec<_> = mods
             .iter()
-            .map(|m| (m.id.clone(), m.version.clone()))
+            .map(|m| (m.manifest.id.clone(), m.manifest.version.clone()))
             .collect();
         run_with_compiler(
             compile(

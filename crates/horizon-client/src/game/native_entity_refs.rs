@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 //! Entity and level handles for native server mods (docs/modding/src/how-to/native-mods.md,
 //! "Entity and level handles", #7387): `native_entity(id)` turns an event's
 //! entity id into an `EntityRef`, and each `native_entity_*` helper reads the
@@ -20,22 +19,17 @@ use mod_api::{
     EntityRef, ItemStack, LevelRef, NativeBlockFace, NativeBlockShapeKind, NativeBlockUpdateFlags,
     NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType, NeighbourUpdate,
 };
-=======
-//! Entity and level handles for native mods (docs/native-mods.md, "Entity
-//! and level handles", #7387): `native_entity(id)` turns an event's entity id
-//! into an `EntityRef`, and each `native_entity_*` helper reads the entity a
-//! handle names. On a server the entities are those of the level in place
-//! (the one a hook runs in) and the server's players, whatever their level.
-//! On a client (API @API:client_entity_refs@) they are the entities the
-//! server shows this window, read from what it synced: positions, rotations,
-//! types, UUIDs, custom names and equipment, never saved data or tags. With
-//! no world open, or for a handle of an earlier open (on a client, of an
-//! earlier client level), they return `None`.
-use super::{Dim, Game, commands::Target};
-use horizon_client::mod_api::{EntityRef, LevelRef};
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
 
 impl Game<'_> {
+    /// An entity tracked by the remote client but absent from local entity lists.
+    fn native_client_tracked(&self, entity: EntityRef) -> Option<(&str, [f64; 3])> {
+        let remote = self.remote.as_ref()?;
+        if !remote.logged_in || self.native_lifecycle.epoch() != Some(entity.epoch()) {
+            return None;
+        }
+        remote.tracked_entity(i32::try_from(entity.id()).ok()?)
+    }
+
     /// Keep a held-out entity inaccessible until its copy has been stored back.
     pub(super) fn with_entity_held_out<R>(
         &mut self,
@@ -53,7 +47,6 @@ impl Game<'_> {
 
     /// What a handle names now, or None for a stale or foreign one.
     pub(super) fn native_entity_target(&self, entity: EntityRef) -> Option<Target> {
-<<<<<<< HEAD
         if self.held_out.contains(&entity.id())
             || !self.is_logical_server()
             || self.native_lifecycle.epoch() != Some(entity.epoch())
@@ -71,20 +64,6 @@ impl Game<'_> {
         {
             return Some(Target::Player);
         }
-=======
-        let id = i32::try_from(entity.id()).ok()?;
-        if let Some(r) = &self.remote {
-            if r.native_epoch() != Some(entity.epoch()) {
-                return None;
-            }
-            // This window's own player is the one in place.
-            if id == r.entity_id {
-                return self.player.as_ref().map(|_| Target::Player);
-            }
-        } else if self.native_lifecycle.epoch() != Some(entity.epoch()) {
-            return None;
-        }
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
         let player = self
             .lan
             .iter()
@@ -102,7 +81,6 @@ impl Game<'_> {
             t => Some(t),
         }
     }
-<<<<<<< HEAD
     /// What a handle names on a client: the local player, or an entity the
     /// server told this client of (`ClientLevel.getEntity`, whose entities are
     /// the ones the server tracks to it). None for a stale handle, with no
@@ -128,17 +106,6 @@ impl Game<'_> {
         } else {
             self.native_client_entity_target(entity)
         }
-=======
-    /// An entity a client tracks that no entity list of the game holds (a
-    /// display, an interaction, a marker, a leash knot): its type and its
-    /// position as the server last sent it. None on a server.
-    fn native_client_tracked(&self, entity: EntityRef) -> Option<(&str, [f64; 3])> {
-        let r = self.remote.as_ref()?;
-        if r.native_epoch() != Some(entity.epoch()) {
-            return None;
-        }
-        r.tracked_entity(i32::try_from(entity.id()).ok()?)
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     }
     /// The entity `id` (the id events carry) as a handle for the `entity_*`
     /// methods: None with no world open, or for no such entity in the level
@@ -146,19 +113,10 @@ impl Game<'_> {
     /// @API:client_entity_refs@), any entity the server shows this window,
     /// this window's own player included. API 373.
     pub(super) fn native_entity(&self, id: u32) -> Option<EntityRef> {
-<<<<<<< HEAD
         let entity = EntityRef::new(self.native_lifecycle.epoch()?, id);
-        self.native_entity_read_target(entity).map(|_| entity)
-=======
-        let epoch = match &self.remote {
-            Some(r) => r.native_epoch()?,
-            None => self.native_lifecycle.epoch()?,
-        };
-        let entity = EntityRef::new(epoch, id);
-        (self.native_entity_target(entity).is_some()
+        (self.native_entity_read_target(entity).is_some()
             || self.native_client_tracked(entity).is_some())
         .then_some(entity)
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     }
     /// The level `dimension` (`minecraft:the_nether`) as a handle: None on a
     /// client, with no world open, or for a dimension the server hasn't
@@ -511,21 +469,14 @@ impl Game<'_> {
     }
 
     /// The entity's position (`Entity.position`): its feet, the middle of
-<<<<<<< HEAD
     /// its box for a painting or an item frame.
     pub(super) fn native_entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        self.target_position(self.native_entity_read_target(entity)?)
-=======
-    /// its box for a painting or an item frame. On a client, where the
-    /// window shows it (another entity eases toward the server's moves); an
-    /// entity tracked without a list of its own is where the server last put
-    /// it. API 373.
-    pub(super) fn native_entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        match self.native_entity_target(entity) {
-            Some(t) => self.target_position(t),
-            None => self.native_client_tracked(entity).map(|(_, at)| at),
+        match self.native_entity_read_target(entity) {
+            Some(target) => self.target_position(target),
+            None => self
+                .native_client_tracked(entity)
+                .map(|(_, position)| position),
         }
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     }
     /// The block the entity's position is in (`Entity.blockPosition`). API
     /// 373.
@@ -541,7 +492,7 @@ impl Game<'_> {
     /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
     /// 373.
     pub(super) fn native_entity_kind(&self, entity: EntityRef) -> Option<String> {
-        match self.native_entity_target(entity) {
+        match self.native_entity_read_target(entity) {
             Some(t) => Some(self.target_type(t)),
             None => self
                 .native_client_tracked(entity)
@@ -555,7 +506,7 @@ impl Game<'_> {
     pub(super) fn native_entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
         if let Some(r) = &self.remote {
             let id = i32::try_from(entity.id()).ok()?;
-            if self.native_entity_target(entity).is_none()
+            if self.native_entity_read_target(entity).is_none()
                 && self.native_client_tracked(entity).is_none()
             {
                 return None;
@@ -580,7 +531,7 @@ impl Game<'_> {
     /// The level the entity is in (`Entity.level`): on a client, the
     /// client's level. API 373.
     pub(super) fn native_entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
-        let dim: Dim = match self.native_entity_target(entity) {
+        let dim: Dim = match self.native_entity_read_target(entity) {
             Some(t) => self.target_level(t),
             None => self.native_client_tracked(entity).map(|_| self.dim)?,
         };
@@ -3133,11 +3084,11 @@ pub(super) mod tests {
 #[cfg(test)]
 mod client_tests {
     use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
-    use horizon_client::mod_api::EquipmentSlot;
     use horizon_protocol::entity_data::Value;
     use horizon_protocol::item::{Component, Stack, component};
     use horizon_protocol::packets::play::{self, Clientbound as C};
     use horizon_world::nbt::Tag;
+    use mod_api::EquipmentSlot;
 
     fn spawn(dimension: &str) -> play::SpawnInfo {
         play::SpawnInfo {

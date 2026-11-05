@@ -223,14 +223,10 @@ def main():
         link(bins / (name + suffix), version / (name + suffix))
     lab.link_dir(resources, version / '.local/horizon-client' / lab.VERSION)
     (version / '.installed').write_text('')
-<<<<<<< HEAD
-    env = lab.game_env(HORIZON_LAUNCHER_HOME=work / 'launcher', HORIZON_HOME=work / 'home')
-=======
     (work / 'home').mkdir()
-    # The game's default endpoint, this run's: a player's game with Agent Control on stays out of it.
-    env = lab.game_env(HORIZON_LAUNCHER_HOME=work / 'launcher', HORIZON_HOME=work / 'home', HORIZON_TELEMETRY_URL='off',
+    # Isolate the game control endpoint from any player session.
+    env = lab.game_env(HORIZON_LAUNCHER_HOME=work / 'launcher', HORIZON_HOME=work / 'home',
                        HORIZON_CONTROL=work / 'default.sock')
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
     m = Mcp(Path(args.launcher).resolve(), env)
     try:
         summary = window_game_scenario(m, bins / ('horizon-client' + suffix), resources, work)

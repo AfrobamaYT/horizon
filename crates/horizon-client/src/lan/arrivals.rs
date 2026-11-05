@@ -608,7 +608,15 @@ mod hub_tests {
             integrated: false,
             levels: Default::default(),
         };
-        let mut hub = Hub::new(lan, sync, encoder, config);
+        let mut hub = Hub::new(
+            lan,
+            sync,
+            encoder,
+            config,
+            crate::test_resources::loop_context(
+                horizon_world::native_load_context::LoopSide::Server,
+            ),
+        );
         hub.transfers = Some(super::Transfers::new(super::Settings::default()));
         hub
     }

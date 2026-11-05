@@ -723,12 +723,8 @@ impl LivingFallWorld for FallCall<'_, '_, '_, '_> {
             source: self.source,
             amount,
         });
-<<<<<<< HEAD
-        let resources = &self.world.resources.health;
-        let rules = self.world.scene.health_rules;
-=======
         let resources = self.world.health;
->>>>>>> 5c06efc139a1bdff937e85b3bcaf11c2d9a6e392
+        let rules = self.world.scene.health_rules;
         self.world.player.hurt(
             &mut crate::health::DamageLevel::of(
                 self.world.scene,
@@ -804,6 +800,10 @@ mod tests {
                         collision_binding: &collision,
                         resources: &resources,
                         health,
+                        tag_items: None,
+                        block_registries: None,
+                        loop_context: crate::test_resources::server_loop_context(),
+                        damage_hooks: &crate::health::DamageHooks::NONE,
                     },
                     7.0,
                     1.0,
