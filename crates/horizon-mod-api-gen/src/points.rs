@@ -46,15 +46,15 @@ pub struct GamePoint {
 const ATTRIBUTE: &str = "side = \"both\"";
 
 /// A source file of the game module, with its module path.
-struct GameFile {
-    module: String,
-    path: PathBuf,
+pub(crate) struct GameFile {
+    pub(crate) module: String,
+    pub(crate) path: PathBuf,
 }
 
 /// The files of `horizon_client::game` that every build compiles, following its `mod`
 /// declarations (and `#[path]`s) from `game.rs`: a module behind a `cfg` is left out with
 /// everything under it.
-fn game_files(src: &Path) -> Result<Vec<GameFile>, String> {
+pub(crate) fn game_files(src: &Path) -> Result<Vec<GameFile>, String> {
     let mut files = Vec::new();
     let mut pending = vec![(
         "horizon_client::game".to_owned(),

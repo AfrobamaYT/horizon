@@ -1901,6 +1901,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_json",
+ "sha2",
  "syn 2.0.119",
  "toml",
  "wit-parser 0.261.0",

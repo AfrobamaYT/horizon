@@ -953,6 +953,7 @@ enum FillMode {
 mod build;
 mod dispatch;
 mod host_param;
+pub mod internals;
 pub mod points;
 mod wasm;
 pub use build::generate;
