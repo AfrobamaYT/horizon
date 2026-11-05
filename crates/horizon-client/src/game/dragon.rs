@@ -2695,7 +2695,7 @@ impl Game<'_> {
     fn dragon_died_event(&mut self, id: u32, at: Vec3, targetable: bool) {
         let at = [at.x, at.y, at.z];
         let ctx = horizon_client::sculk::Context {
-            source: Some(Who::Mob(id)),
+            source: Some(Who::Mob(id).into()),
             targetable,
             living: true,
             ..Default::default()
