@@ -116,13 +116,12 @@ A wasm mod keeps running on a newer game while the hooks it imports are unchange
 always builds for `wasm32-unknown-unknown`: a hook that needs an engine type takes a plain-data type of the
 API's own, converted on the game side.
 
-## Injections stay, and become hooks
+## Injections stay, and the API comes first
 
-`[[native.injection]]` stays, for what the API does not yet reach. The documented default is a `trait_method`
-injection with a `Host` binding whose body uses only `mod_api` types, so it becomes a hook by renaming its
-target; a `helper` bound to the game is the last resort and comes with a request for the hook that replaces it.
-The launcher suggests `hook = "<name>"` when a target is a catalog hook point. Injections are native-only. The
-[injections chapter](../injections.md) has the decision ladder.
+`[[native.injection]]` stays as the native-only escape hatch for what the API does not yet reach. The rule is
+API first: a mod needing something the API lacks asks for the hook that replaces the injection, and the
+injection is the stopgap until it exists. The [injections chapter](../injections.md) holds the current forms,
+the decision ladder and the hook-request format.
 
 ## The order of the build route
 
@@ -131,7 +130,8 @@ rests on the one before:
 
 1. **The prebuilt game.** The game as a dylib with its metadata, built daily and published as prerelease
    builds, so a native mod compiles against it in seconds instead of rebuilding the game.
-2. **Slots.** Injection targets compiled into the prebuilt game, so a mixin does not force a rebuild.
+2. **Slots.** Injection targets compiled into the prebuilt game, so a mixin does not force a rebuild. The
+   generated slot points exist; filling them from a mod follows.
 3. **The internals tier.** A per-mod declared list of game internals the prebuilt game exposes. It is native
    only and logged, and each internal a mod needs is a request for an API.
 4. **The blend.** A wasm mod that also carries slot mixins. An API-typed mixin is filled by the `mod.wasm`
