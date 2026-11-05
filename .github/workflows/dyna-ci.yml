@@ -102,8 +102,9 @@ jobs:
   lint:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    # Main seeds the lint cache from cold (two full clippy graphs, about 40 minutes): give it room to finish and save.
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 45 || 100 }}
+    # An incompatible fallback is cold for the changed graph: both Clippy passes took about
+    # 50 minutes after #1190. PRs must still finish all checks when main's matching seed is pending.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 75 || 100 }}
     env:
       # Keep incremental check state too: changed workspace crates can reuse unchanged queries.
       CARGO_INCREMENTAL: 1
