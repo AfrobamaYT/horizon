@@ -56,9 +56,9 @@ mod motion;
 mod multiplayer_page;
 mod native_log_page;
 mod new_instance;
+mod open_card;
 mod owner_page;
 mod packs_page;
-mod open_card;
 mod perf;
 mod plate;
 mod profile_heads;
@@ -2920,7 +2920,12 @@ impl Launcher {
             },
         )));
         foot = foot
-            .child(link("roadmap", tr("Roadmap"), "map", self.links.roadmap.clone()))
+            .child(link(
+                "roadmap",
+                tr("Roadmap"),
+                "map",
+                self.links.roadmap.clone(),
+            ))
             .child(link(
                 "documentation",
                 tr("Documentation"),
@@ -2983,7 +2988,7 @@ impl Launcher {
             |tag| {
                 horizon_launcher::nightly::label(tag)
                     .or_else(|| build_import::label(tag))
-                    .unwrap_or_else(|| tag.clone())
+                    .unwrap_or_else(|| horizon_launcher::nightly::short_commit(tag))
             },
         );
         // As tall as Play: "Version" over the tag, and a chevron.
@@ -4783,15 +4788,11 @@ impl Launcher {
         if t.glass {
             return self.glass_notes(cx);
         }
-        let page = div()
-            .flex()
-            .flex_col()
-            .gap(px(32.))
-            .child(page_header(
-                "Patch notes",
-                "What changed in each release, newest first.",
-                &t,
-            ));
+        let page = div().flex().flex_col().gap(px(32.)).child(page_header(
+            "Patch notes",
+            "What changed in each release, newest first.",
+            &t,
+        ));
         let releases = match &self.releases {
             Load::Loading => return page.child(centered(tr("Loading patch notes…"), &t)),
             Load::Failed(e) => {

@@ -8,13 +8,10 @@ use horizon_theme::glass::{ink, radius};
 impl Launcher {
     pub(super) fn glass_notes(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
-        let page = div()
-            .flex()
-            .flex_col()
-            .child(ui::page_head(
-                tr("Patch notes"),
-                tr("What changed in each release, newest first."),
-            ));
+        let page = div().flex().flex_col().child(ui::page_head(
+            tr("Patch notes"),
+            tr("What changed in each release, newest first."),
+        ));
         let releases = match &self.releases {
             Load::Loading => return page.child(centered(tr("Loading patch notes…"), &t)),
             Load::Failed(e) => {

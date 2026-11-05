@@ -136,7 +136,14 @@ impl Launcher {
                             ),
                         )
                     }
-                    (None, Some(tag), Some(_)) => (Tone::Live, format!("{} · {tag}", tr("Ready"))),
+                    (None, Some(tag), Some(_)) => (
+                        Tone::Live,
+                        format!(
+                            "{} · {}",
+                            tr("Ready"),
+                            horizon_launcher::nightly::short_commit(tag)
+                        ),
+                    ),
                     (None, Some(_), None) => (Tone::Live, tr("Ready").into()),
                 }
             }
@@ -487,7 +494,12 @@ impl Launcher {
             .flex()
             .flex_col()
             .mt(px(8.))
-            .child(link("roadmap", tr("Roadmap"), "map", self.links.roadmap.clone()))
+            .child(link(
+                "roadmap",
+                tr("Roadmap"),
+                "map",
+                self.links.roadmap.clone(),
+            ))
             .child(link(
                 "documentation",
                 tr("Documentation"),

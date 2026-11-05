@@ -141,15 +141,3 @@ fn a_server_without_a_name_gets_the_games_default() {
         "Minecraft Server"
     );
 }
-
-fn entries_of(bytes: &[u8]) -> Vec<Tag> {
-    match nbt::read_named(bytes, Limits::default())
-        .unwrap()
-        .0
-        .tag
-        .get("servers")
-    {
-        Some(Tag::List(list)) => list.clone(),
-        other => panic!("no servers list: {other:?}"),
-    }
-}
