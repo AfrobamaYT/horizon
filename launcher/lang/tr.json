@@ -1094,6 +1094,5 @@
   "{version} is not installed": "{version} yüklü değil",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (veya bir projede .mcp.json)",
   "← All servers": "← Tüm sunucular",
-  "← Newer": "← Newer",
-    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "← Newer": "← Newer"
 }

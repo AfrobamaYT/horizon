@@ -1094,6 +1094,5 @@
   "{version} is not installed": "{version} ບໍ່ໄດ້ຕິດຕັ້ງ",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ຫຼື .mcp.json ໃນໂຄງການ)",
   "← All servers": "← ເຊີບເວີທັງໝົດ",
-  "← Newer": "← ໃໝ່ກວ່າ",
-    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "← Newer": "← ໃໝ່ກວ່າ"
 }

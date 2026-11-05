@@ -1094,6 +1094,5 @@
   "{version} is not installed": "{version} neįdiegtas",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (arba .mcp.json projekte)",
   "← All servers": "← Visi serveriai",
-  "← Newer": "← Naujesnis",
-    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "← Newer": "← Naujesnis"
 }

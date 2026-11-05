@@ -1094,6 +1094,5 @@
   "{version} is not installed": "{version} není nainstalováno",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (nebo .mcp.json v projektu)",
   "← All servers": "← Všechny servery",
-  "← Newer": "← Novější",
-    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "← Newer": "← Novější"
 }

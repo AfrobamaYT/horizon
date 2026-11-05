@@ -8,16 +8,10 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     track(root)?;
     let generated = sources(root, super::FillMode::Require)?;
     let outputs = match target {
-        Target::Client => {
-            let points = super::points::game_points(root)?;
-            let list = serde_json::to_string_pretty(&points).map_err(|e| e.to_string())?;
-            // The list the launcher routes injections by: the prebuilt game carries it.
-            fs::write(out_dir.join("points.json"), list + "\n").map_err(|e| e.to_string())?;
-            vec![
-                ("mod_api_host_generated.rs", generated.implementation),
-                ("mod_api_fire_generated.rs", generated.fire),
-            ]
-        }
+        Target::Client => vec![
+            ("mod_api_host_generated.rs", generated.implementation),
+            ("mod_api_fire_generated.rs", generated.fire),
+        ],
         Target::Api => {
             let hooks = generated.hooks;
             let included = [

@@ -1094,6 +1094,5 @@
   "{version} is not installed": "{version} non è installato",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (o .mcp.json in un progetto)",
   "← All servers": "← Tutti i server",
-  "← Newer": "← Più recente",
-    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "← Newer": "← Più recente"
 }

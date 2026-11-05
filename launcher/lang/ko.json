@@ -1094,6 +1094,5 @@
   "{version} is not installed": "{version}이(가) 설치되지 않았습니다.",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (또는 프로젝트 내 .mcp.json)",
   "← All servers": "← 모든 서버",
-  "← Newer": "← 최신",
-    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "← Newer": "← 최신"
 }

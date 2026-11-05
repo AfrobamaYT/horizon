@@ -1094,6 +1094,5 @@
   "{version} is not installed": "{version} אינו מותקן",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (או .mcp.json בפרויקט)",
   "← All servers": "← כל השרתים",
-  "← Newer": "← חדש יותר",
-    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "← Newer": "← חדש יותר"
 }

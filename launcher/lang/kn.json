@@ -1094,6 +1094,5 @@
   "{version} is not installed": "{version} ಅನ್ನು ಸ್ಥಾಪಿಸಲಾಗಿಲ್ಲ",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ಅಥವಾ ಯೋಜನೆಯಲ್ಲಿ .mcp.json)",
   "← All servers": "← ಎಲ್ಲಾ ಸರ್ವರ್‌ಗಳು",
-  "← Newer": "← ಹೊಸದು",
-    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "← Newer": "← ಹೊಸದು"
 }

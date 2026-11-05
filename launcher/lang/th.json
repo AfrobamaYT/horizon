@@ -1094,6 +1094,5 @@
   "{version} is not installed": "{version} ไม่ได้ติดตั้ง",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (หรือ .mcp.json ในโปรเจ็กต์)",
   "← All servers": "← เซิร์ฟเวอร์ทั้งหมด",
-  "← Newer": "← ใหม่กว่า",
-    "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
+  "← Newer": "← ใหม่กว่า"
 }
