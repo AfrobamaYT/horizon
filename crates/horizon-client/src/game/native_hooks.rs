@@ -1033,8 +1033,8 @@ use mod_api::{
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
-    NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativeNoteInstrument,
-    NativePanelEvent, NativePortalShape, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
+    NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativePanelEvent,
+    NativePortalShape, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
 use mod_api::{
     MobRef, NativeDespawn, NativeDifficulty, NativePermissionLevel, NativeSpawnCheck,
