@@ -838,8 +838,8 @@ impl Game<'_> {
                             self.thrower_hit(t.guest, &victim, direct, damage);
                         }
                         // Projectile.onHit: the landing is heard, at the hit.
-                        self.projectile_event(
-                            "minecraft:projectile_land",
+                        self.projectile_landed_event(
+                            t.id,
                             Some(Who::Player),
                             [t.position.x, t.position.y, t.position.z],
                         );
@@ -888,8 +888,8 @@ impl Game<'_> {
                     } else if let Some((stop, block, _)) = clip {
                         // Projectile.onHit on a block: PROJECTILE_LAND at the
                         // block's centre.
-                        self.projectile_event(
-                            "minecraft:projectile_land",
+                        self.projectile_landed_event(
+                            t.id,
                             Some(Who::Player),
                             [
                                 f64::from(block.x) + 0.5,

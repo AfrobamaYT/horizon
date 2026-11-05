@@ -1935,7 +1935,7 @@ impl Game<'_> {
                 .and_then(|host| host.hub.guest(conn))
                 .is_some_and(|g| g.spectator());
             let ctx = horizon_client::sculk::Context {
-                source: Some(horizon_client::mobs::Who::Player),
+                source: Some(horizon_client::mobs::Who::Player.into()),
                 spectator: spect,
                 targetable: !spect,
                 living: true,
