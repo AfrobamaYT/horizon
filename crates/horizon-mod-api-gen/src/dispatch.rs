@@ -29,10 +29,7 @@ const FLAT_TARGETS_OVER_THE_LIMIT: &[&str] = &[
     "entity_mount",
     "sign_changed",
     "ender_pearl_teleport",
-    "finalize_spawn",
     "item_tooltip",
-    "living_drops",
-    "get_equipment_drop_chance",
     "player_set_spawn",
 ];
 

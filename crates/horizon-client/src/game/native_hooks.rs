@@ -1019,8 +1019,8 @@ use mod_api::__private::game::IngredientTest;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EnchantmentInfo, EntityRef,
-    EquipmentSlot, GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand,
-    NativeDispensed, NativeHandRender, NativeItemDrop, NativeKeyMapping, NativeLifecycleContext,
+    GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
+    NativeHandRender, NativeItemDrop, NativeKeyMapping, NativeLifecycleContext,
     NativeNoteBlockChange, NativeProgressType, NativeServerPlayer, PathComputationType, Placement,
     PlayerRef, RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase,
     TicketController, ToolUse, WorldPhase,
@@ -1037,8 +1037,7 @@ pub(crate) use mod_api::{
     NativePortalShape, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
 use mod_api::{
-    MobRef, NativeDespawn, NativeDifficulty, NativePermissionLevel, NativeSpawnCheck,
-    NativeSpawnReason, NativeSpawner, Recipe,
+    MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason, Recipe,
 };
 use std::{
     collections::HashMap,
@@ -5381,17 +5380,8 @@ impl Game<'_> {
     /// (`native_living_experience_drop`); a spectator, who drops nothing,
     /// doesn't call this. Item entity state such as no-gravity, owner and
     /// lifetime isn't in `NativeItemDrop`. Server-side.
-    pub(super) fn native_living_drops(
-        &mut self,
-        entity: u32,
-        kind: &str,
-        player: Option<u128>,
-        source: &HurtSource<'_>,
-        recently_hit: bool,
-        drops: &mut Vec<NativeItemDrop>,
-        cancel: &mut bool,
-    ) {
-        self.fire_living_drops(entity, kind, player, source, recently_hit, drops, cancel);
+    pub(super) fn native_living_drops(&mut self, call: mod_api::__private::LivingDropsCall<'_>) {
+        self.fire_living_drops(call);
     }
     /// A dying mob `entity` of `kind` is about to roll its drop chance for
     /// the item `stack` in `slot` (`Mob.dropCustomDeathLoot`, NeoForge's
@@ -5409,27 +5399,9 @@ impl Game<'_> {
     /// Server-side.
     pub(super) fn native_get_equipment_drop_chance(
         &mut self,
-        entity: u32,
-        kind: &str,
-        slot: EquipmentSlot,
-        source: &HurtSource<'_>,
-        recently_hit: bool,
-        stack: &ItemStack,
-        original_chance: f32,
-        preserved: bool,
-        chance: &mut f32,
+        call: mod_api::__private::GetEquipmentDropChanceCall<'_>,
     ) {
-        self.fire_get_equipment_drop_chance(
-            entity,
-            kind,
-            slot,
-            source,
-            recently_hit,
-            stack,
-            original_chance,
-            preserved,
-            chance,
-        );
+        self.fire_get_equipment_drop_chance(call);
     }
     /// A server player's experience points are about to change through
     /// `Player.giveExperiencePoints` (NeoForge's `PlayerXpEvent.XpChange`): an
@@ -6677,27 +6649,8 @@ impl Game<'_> {
     /// finalization (the mob still spawns, uninitialised); `spawn_cancelled`
     /// stops the spawn. `difficulty` is what finalization will read.
     /// Server-side.
-    pub(super) fn native_finalize_spawn(
-        &self,
-        dimension: &str,
-        kind: &str,
-        reason: NativeSpawnReason,
-        pos: [f64; 3],
-        spawner: Option<NativeSpawner>,
-        difficulty: &mut NativeDifficulty,
-        spawn_cancelled: &mut bool,
-        cancel: &mut bool,
-    ) {
-        self.fire_finalize_spawn(
-            dimension,
-            kind,
-            reason,
-            pos,
-            spawner,
-            difficulty,
-            spawn_cancelled,
-            cancel,
-        );
+    pub(super) fn native_finalize_spawn(&self, call: mod_api::__private::FinalizeSpawnCall<'_>) {
+        self.fire_finalize_spawn(call);
     }
     /// The world's spawn point changed to `pos` and `angle`.
     pub(super) fn native_spawn_change(&mut self, pos: [i32; 3], angle: [f32; 2]) {
