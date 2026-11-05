@@ -1020,10 +1020,10 @@ pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProbl
 use mod_api::{
     self, Answered, BlockPlacement, ClientReloadListeners, EnchantmentInfo, EntityRef,
     GameRuleActor, InteractionKey, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
-    NativeHandRender, NativeItemDrop, NativeKeyMapping, NativeLifecycleContext,
-    NativeNoteBlockChange, NativeProgressType, NativeServerPlayer, PathComputationType, Placement,
-    PlayerRef, RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase,
-    TicketController, ToolUse, WorldPhase,
+    NativeHandRender, NativeKeyMapping, NativeLifecycleContext, NativeNoteBlockChange,
+    NativeProgressType, NativeServerPlayer, PathComputationType, Placement, PlayerRef,
+    RecipeBookCategory, ScreenOpening, ServerReloadListeners, ServerTickPhase, TicketController,
+    ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BlockHit, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite,
