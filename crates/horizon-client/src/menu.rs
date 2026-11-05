@@ -4949,6 +4949,7 @@ pub(crate) mod tests {
                     count: 4,
                     damage: 0,
                     extra: None,
+                    components: None,
                 },
             },
         ));
@@ -5000,6 +5001,7 @@ pub(crate) mod tests {
                     count: 4,
                     damage: 0,
                     extra: None,
+                    components: None,
                 },
             },
         ));
@@ -5052,6 +5054,7 @@ pub(crate) mod tests {
                     count: 4,
                     damage: 0,
                     extra: None,
+                    components: None,
                 },
             },
         ));
@@ -5108,6 +5111,7 @@ pub(crate) mod tests {
                     count: 1,
                     damage: 0,
                     extra: None,
+                    components: None,
                 },
             }),
         ));
