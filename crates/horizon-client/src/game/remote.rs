@@ -6112,24 +6112,7 @@ impl Game<'_> {
         // Window callbacks only queue clicks, so an interaction cannot leak
         // between CLIENT_TICK_END and a later pong.
         self.remote_handle_input();
-        // The local Player.tick includes its cooldown, sleep and motion work,
-        // even on the death screen. Keep its endpoints paired across load waits.
-        let player = (mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
-            || mod_api::__private::listened(mod_api::HookId::PlayerTickPost))
-        .then(|| {
-            self.player
-                .as_ref()
-                .and_then(|_| self.native_local_player())
-        })
-        .flatten();
-        if let Some(player) = player {
-            self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
-        }
-        let result = self.tick_remote_player(running, hold);
-        if let Some(player) = player {
-            self.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player });
-        }
-        result
+        self.tick_remote_player(running, hold)
     }
 
     fn tick_remote_player(&mut self, running: bool, hold: bool) -> Result<()> {
@@ -6220,6 +6203,38 @@ impl Game<'_> {
             }
             return Ok(());
         }
+        // LocalPlayer.tick reaches Player.tick only once the client has loaded
+        // and the player's chunk is there; its endpoints bracket that work
+        // alone, also on the death screen, not the level pass before it.
+        let player = self
+            .remote
+            .as_ref()
+            .is_some_and(|r| r.loaded_sent)
+            .then(|| {
+                (mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
+                    || mod_api::__private::listened(mod_api::HookId::PlayerTickPost))
+                .then(|| self.native_local_player())
+                .flatten()
+            })
+            .flatten();
+        if let Some(player) = player {
+            self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
+        }
+        let result = self.tick_local_player(entity_collisions, pushed, sprint_window);
+        if let Some(player) = player {
+            self.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player });
+        }
+        result
+    }
+
+    /// `LocalPlayer.tick`'s `Player.tick` work: input, riding, motion, sleep
+    /// and the state the server hears.
+    fn tick_local_player(
+        &mut self,
+        entity_collisions: Vec<horizon_core::geometry::Aabb>,
+        pushed: Vec3,
+        sprint_window: i32,
+    ) -> Result<()> {
         let stick = self.pad_move();
         if self.player.is_none() {
             return Ok(());
@@ -13628,9 +13643,23 @@ mod player_tick_tests {
                 ));
                 game.cooldowns.add("minecraft:ender_pearl".into(), 3);
                 game.sleep_timer = 4;
+                // LocalPlayer.tick waits for the client load and its chunk: only
+                // the other player's pair runs, and the level pass still ticks.
                 game.tick_remote().unwrap();
                 assert_eq!(game.cooldowns.remaining().next().unwrap().1, 2);
                 assert_eq!(game.sleep_timer, 5);
+                let phases = || {
+                    std::mem::take(&mut *heard.lock().unwrap())
+                        .iter()
+                        .map(|s| (s.phase, s.side, s.uuid))
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(phases(), [("pre", "client", 789), ("post", "client", 789)]);
+                game.remote.as_mut().unwrap().loaded_sent = true;
+                game.streaming
+                    .insert_remote(&mut game.world, horizon_client::chunk::Chunk::empty(0, 0));
+                // The other player's tick ends before the local player's starts.
+                game.tick_remote().unwrap();
                 game.screen = super::super::Screen::Dead;
                 game.player
                     .as_mut()
@@ -13638,20 +13667,16 @@ mod player_tick_tests {
                     .set_health(0.0, false)
                     .unwrap();
                 game.tick_remote().unwrap();
-                let observations = heard.lock().unwrap();
                 assert_eq!(
-                    observations
-                        .iter()
-                        .map(|s| (s.phase, s.side, s.uuid))
-                        .collect::<Vec<_>>(),
+                    phases(),
                     [
-                        ("pre", "client", 456),
                         ("pre", "client", 789),
                         ("post", "client", 789),
+                        ("pre", "client", 456),
                         ("post", "client", 456),
-                        ("pre", "client", 456),
                         ("pre", "client", 789),
                         ("post", "client", 789),
+                        ("pre", "client", 456),
                         ("post", "client", 456)
                     ]
                 );
