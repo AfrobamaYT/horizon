@@ -2002,9 +2002,7 @@ mod tests {
                     )
                     .unwrap();
                 }
-                cfg::Clientbound::Ping(p) => {
-                    let _ = c.send(&cfg::Serverbound::Pong(p).encode());
-                }
+                cfg::Clientbound::Ping(_) => panic!("unexpected mod-list round trip"),
                 cfg::Clientbound::Disconnect(d) => {
                     let text = horizon_protocol::text::plain(&d.reason, &Default::default());
                     assert!(text.contains("couldn't be read"));
