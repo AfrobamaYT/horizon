@@ -828,7 +828,6 @@
   "These mods will run with full access to your computer": "Αυτά τα mod θα εκτελούνται με πλήρη πρόσβαση στον υπολογιστή σας",
   "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "Μπορούν να διαβάσουν, να αλλάξουν ή να διαγράψουν τα αρχεία σας και να χρησιμοποιήσουν τους λογαριασμούς και το δίκτυό σας, όπως κάθε πρόγραμμα που εκτελείτε. Δημιουργήστε τα μόνο εάν εμπιστεύεστε τους δημιουργούς τους: η σελίδα Mods τους ονομάζει.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Αυτή η έκδοση του προγράμματος εκκίνησης δεν έχει σύνδεση στη Microsoft (HORIZON_MSA_CLIENT_ID), επομένως δεν μπορεί να ξεκινήσει το παιχνίδι.",
-  "This copy of the launcher can't replace itself. Download it again once; it updates itself after that.": "Αυτό το αντίγραφο του εκκινητή δεν μπορεί να αντικαταστήσει τον εαυτό του. Κατεβάστε το ξανά μία φορά· μετά ενημερώνεται μόνο του.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Αυτός ο πηγαίος κώδικας του παιχνιδιού δεν έχει πρότυπο εγγραφής εγγενούς καταλόγου. Ενημερώστε το Horizon και μεταγλωττίστε ξανά τα mods για αυτό το παιχνίδι.",
   "This launcher is open.": "This launcher is open.",
   "This server's Horizon": "Το Horizon αυτού του διακομιστή",
@@ -1064,6 +1063,8 @@
   "← Newer": "← Νεότερο",
   "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported.",
   "Horizon's Vulkan renderer crashed while starting on this graphics card, so the game now uses {api}. Press Play to start it again. Video Settings > Graphics API switches back.": "Horizon's Vulkan renderer crashed while starting on this graphics card, so the game now uses {api}. Press Play to start it again. Video Settings > Graphics API switches back.",
+  "This Nightly's title ({title}) doesn't name its date and commit as Horizon signs them, so it can't be checked: it was not installed.": "This Nightly's title ({title}) doesn't name its date and commit as Horizon signs them, so it can't be checked: it was not installed.",
+  "{tag} is older than {newest}, which is installed: installing it as a rollback. The selection only moves to it when you pick it.": "{tag} is older than {newest}, which is installed: installing it as a rollback. The selection only moves to it when you pick it.",
   "Balanced": "Balanced",
   "Build mode": "Build mode",
   "Build now": "Build now",
@@ -1094,5 +1095,7 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+  "Update this launcher with your package manager.": "Update this launcher with your package manager.",
+  "Close this launcher, move it to {folder}, and open it there to enable updates.": "Close this launcher, move it to {folder}, and open it there to enable updates."
 }

@@ -828,7 +828,6 @@
   "These mods will run with full access to your computer": "ये मॉड आपके कंप्यूटर तक पूर्ण पहुँच के साथ चलेंगे",
   "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "वे आपके द्वारा चलाए जाने वाले किसी भी प्रोग्राम की तरह आपकी फ़ाइलों को पढ़, बदल या हटा सकते हैं, और आपके खातों और नेटवर्क का उपयोग कर सकते हैं। उन्हें तभी बनाएं जब आप उनके लेखकों पर भरोसा करते हैं: मॉड पेज उनका नाम देता है।",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "ल लॉन्चर के इस बिल्ड में कोई माइक्रोसॉफ्ट साइन-इन (HORIZON_MSA_CLIENT_ID) नहीं है, इसलिए यह गेम शुरू नहीं कर सकता।",
-  "This copy of the launcher can't replace itself. Download it again once; it updates itself after that.": "लॉन्चर की यह कॉपी खुद को बदल नहीं सकती। इसे एक बार फिर से डाउनलोड करें; उसके बाद यह खुद अपडेट होता है।",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "इस गेम स्रोत में नेटिव इन्वेंटरी एंट्री टेम्पलेट नहीं है। Horizon अपडेट करें और मॉड्स को इस गेम के लिए फिर से बिल्ड करें।",
   "This launcher is open.": "This launcher is open.",
   "This server's Horizon": "इस सर्वर का Horizon",
@@ -1064,6 +1063,8 @@
   "← Newer": "← नया",
   "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported.",
   "Horizon's Vulkan renderer crashed while starting on this graphics card, so the game now uses {api}. Press Play to start it again. Video Settings > Graphics API switches back.": "Horizon's Vulkan renderer crashed while starting on this graphics card, so the game now uses {api}. Press Play to start it again. Video Settings > Graphics API switches back.",
+  "This Nightly's title ({title}) doesn't name its date and commit as Horizon signs them, so it can't be checked: it was not installed.": "This Nightly's title ({title}) doesn't name its date and commit as Horizon signs them, so it can't be checked: it was not installed.",
+  "{tag} is older than {newest}, which is installed: installing it as a rollback. The selection only moves to it when you pick it.": "{tag} is older than {newest}, which is installed: installing it as a rollback. The selection only moves to it when you pick it.",
   "Balanced": "Balanced",
   "Build mode": "Build mode",
   "Build now": "Build now",
@@ -1094,5 +1095,7 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+  "Update this launcher with your package manager.": "इस लॉन्चर को अपने पैकेज मैनेजर से अपडेट करें।",
+  "Close this launcher, move it to {folder}, and open it there to enable updates.": "इस लॉन्चर को बंद करें, इसे {folder} में ले जाएँ और अपडेट सक्षम करने के लिए वहीं से खोलें।"
 }

@@ -828,7 +828,6 @@
   "These mods will run with full access to your computer": "Các mod này sẽ chạy với toàn quyền truy cập vào máy tính của bạn",
   "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "Họ có thể đọc, thay đổi hoặc xóa các tệp của bạn cũng như sử dụng tài khoản và mạng của bạn, giống như bất kỳ chương trình nào bạn chạy. Chỉ xây dựng chúng nếu bạn tin tưởng tác giả của chúng: trang Mod đặt tên cho chúng.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "Bản dựng trình khởi chạy này không có thông tin đăng nhập vào Microsoft (HORIZON_MSA_CLIENT_ID) nên không thể bắt đầu trò chơi.",
-  "This copy of the launcher can't replace itself. Download it again once; it updates itself after that.": "Bản trình khởi chạy này không thể tự thay thế chính nó. Hãy tải lại một lần; sau đó nó sẽ tự cập nhật.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "Mã nguồn trò chơi này không có mẫu mục trong danh mục mod mã máy. Hãy cập nhật Horizon và dựng lại các mod cho trò chơi này.",
   "This launcher is open.": "This launcher is open.",
   "This server's Horizon": "Horizon của máy chủ này",
@@ -1064,6 +1063,8 @@
   "← Newer": "← Mới hơn",
   "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported.",
   "Horizon's Vulkan renderer crashed while starting on this graphics card, so the game now uses {api}. Press Play to start it again. Video Settings > Graphics API switches back.": "Horizon's Vulkan renderer crashed while starting on this graphics card, so the game now uses {api}. Press Play to start it again. Video Settings > Graphics API switches back.",
+  "This Nightly's title ({title}) doesn't name its date and commit as Horizon signs them, so it can't be checked: it was not installed.": "This Nightly's title ({title}) doesn't name its date and commit as Horizon signs them, so it can't be checked: it was not installed.",
+  "{tag} is older than {newest}, which is installed: installing it as a rollback. The selection only moves to it when you pick it.": "{tag} is older than {newest}, which is installed: installing it as a rollback. The selection only moves to it when you pick it.",
   "Balanced": "Balanced",
   "Build mode": "Build mode",
   "Build now": "Build now",
@@ -1094,5 +1095,7 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+  "Update this launcher with your package manager.": "Cập nhật trình khởi chạy này bằng trình quản lý gói.",
+  "Close this launcher, move it to {folder}, and open it there to enable updates.": "Đóng trình khởi chạy này, chuyển vào {folder}, rồi mở từ đó để bật cập nhật."
 }

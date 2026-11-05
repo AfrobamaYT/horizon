@@ -828,7 +828,6 @@
   "These mods will run with full access to your computer": "די מאָדס וועט לויפן מיט פול אַקסעס צו דיין קאָמפּיוטער",
   "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "זיי קענען לייענען, טוישן אָדער ויסמעקן דיין טעקעס און נוצן דיין אַקאַונץ און נעץ, ווי קיין פּראָגראַם איר לויפן. בויען זיי בלויז אויב איר צוטרוי זייער מחברים: די מאָדס בלאַט נעמען זיי.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.": "דעם בויען פון די לאָנטשער האט קיין Microsoft צייכן-אין (HORIZON_MSA_CLIENT_ID), אַזוי עס קען נישט אָנהייבן די שפּיל.",
-  "This copy of the launcher can't replace itself. Download it again once; it updates itself after that.": "די קאָפּיע פֿון דעם לאַנטשער קען זיך נישט אליין פֿאַרבייטן. לאָדט עס אַראָפּ נאָכאַמאָל איין מאָל; דערנאָך דערהייַנטיקט עס זיך אליין.",
   "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.": "This game source has no native inventory entry template. Update Horizon and rebuild the mods against this game.",
   "This launcher is open.": "This launcher is open.",
   "This server's Horizon": "דעם סערווער איז Horizon",
@@ -1064,6 +1063,8 @@
   "← Newer": "← נייַער",
   "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported.",
   "Horizon's Vulkan renderer crashed while starting on this graphics card, so the game now uses {api}. Press Play to start it again. Video Settings > Graphics API switches back.": "Horizon's Vulkan renderer crashed while starting on this graphics card, so the game now uses {api}. Press Play to start it again. Video Settings > Graphics API switches back.",
+  "This Nightly's title ({title}) doesn't name its date and commit as Horizon signs them, so it can't be checked: it was not installed.": "This Nightly's title ({title}) doesn't name its date and commit as Horizon signs them, so it can't be checked: it was not installed.",
+  "{tag} is older than {newest}, which is installed: installing it as a rollback. The selection only moves to it when you pick it.": "{tag} is older than {newest}, which is installed: installing it as a rollback. The selection only moves to it when you pick it.",
   "Balanced": "Balanced",
   "Build mode": "Build mode",
   "Build now": "Build now",
@@ -1094,5 +1095,7 @@
   "Built here": "Built here",
   "Needs a full game build": "Needs a full game build",
   " The last build took {time}.": " The last build took {time}.",
-  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes."
+  "Press Build to rebuild with your changes.": "Press Build to rebuild with your changes.",
+  "Update this launcher with your package manager.": "Update this launcher with your package manager.",
+  "Close this launcher, move it to {folder}, and open it there to enable updates.": "Close this launcher, move it to {folder}, and open it there to enable updates."
 }
