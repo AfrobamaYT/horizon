@@ -1090,11 +1090,5 @@
   "Build cancelled": "Build cancelled",
   "Another build is running": "Another build is running",
   "This instance's build waits until it finishes.": "This instance's build waits until it finishes.",
-  "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds.": "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds.",
-  "Horizon is built in the open. Sponsors fund the next release.": "Horizon is built in the open. Sponsors fund the next release.",
-  "Join the Discord": "Join the Discord",
-  "PARTNER": "PARTNER",
-  "Partner": "Partner",
-  "Sponsor": "Sponsor",
-  "Sponsor on GitHub": "Sponsor on GitHub"
+  "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds.": "Compiles against the prebuilt game when one exists for your Horizon, in seconds. Otherwise the whole game builds."
 }
