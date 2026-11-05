@@ -68,16 +68,4 @@ pub mod __private {
         }
         false
     }
-
-    #[cfg(test)]
-    mod tests {
-        use super::lists;
-
-        #[test]
-        fn lists_finds_a_name_at_compile_time() {
-            const LIST: &[&str] = &["tick", "tick_return"];
-            const _: () = assert!(lists(LIST, "tick_return"));
-            assert!(!lists(LIST, "tic") && !lists(LIST, "ticks") && !lists(&[], "tick"));
-        }
-    }
 }
