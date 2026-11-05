@@ -16,6 +16,16 @@ fn main() {
         let text = serde_json::to_string_pretty(&widened.entries).map_err(|e| e.to_string())?;
         std::fs::write(internals, text + "\n")
             .map_err(|e| format!("{}: {e}", internals.display()))?;
+        // The table a wasm mod reaches the internals through, at the game crate's root.
+        let (table, counts) = horizon_mod_api_gen::internals_table::table(&widened.entries);
+        let lib = root.join("crates/horizon-client/src/lib.rs");
+        let text = std::fs::read_to_string(&lib).map_err(|e| format!("{}: {e}", lib.display()))?;
+        std::fs::write(&lib, text + "\n" + &table + "\n")
+            .map_err(|e| format!("{}: {e}", lib.display()))?;
+        println!(
+            "internals table: {} types, {} thunks, {} functions that can't cross",
+            counts.types, counts.thunks, counts.skipped
+        );
         Ok((staged, widened))
     });
     match staged {

@@ -955,6 +955,7 @@ pub mod crossing;
 mod dispatch;
 mod host_param;
 pub mod internals;
+pub mod internals_table;
 pub mod points;
 mod wasm;
 pub use build::{generate, generate_points};
