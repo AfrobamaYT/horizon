@@ -25,9 +25,15 @@ fn main() {
                 "staged {} points ({} with a head only, {} with a raw form) in {} files",
                 staged.points, staged.head_only, staged.raw, staged.files
             );
+            let shapes = widened
+                .entries
+                .iter()
+                .filter(|entry| entry.shape_only)
+                .count();
             println!(
-                "exposed {} internals in {} changed files: {:?}",
-                widened.entries.len(),
+                "exposed {} internals and listed {} type shapes in {} changed files: {:?}",
+                widened.entries.len() - shapes,
+                shapes,
                 widened.files,
                 widened.changed
             );
