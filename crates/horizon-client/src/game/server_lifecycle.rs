@@ -29,6 +29,8 @@ impl Game<'_> {
         if !startup_began {
             return result;
         }
+        // Listeners still see the loaded worlds and players, even on failure.
+        self.native_server_stopping(dedicated);
         if let Err(error) = &result {
             self.native_lifecycle_world_failed(&error.to_string());
             self.native_lifecycle_close_failed(&error.to_string());

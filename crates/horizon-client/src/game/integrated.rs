@@ -624,12 +624,7 @@ impl Game<'_> {
         ready: &Sender<Ready>,
         opening: Opening,
     ) -> Result<()> {
-        // The open segment runs as one unit (`integrated_open`) so its
-        // failures fire `WorldOpenFailed` with the engine's own error text.
-        if let Err(e) = self.integrated_open(&launch, &flags, tasks, ready, opening) {
-            self.native_lifecycle_world_failed(&e.to_string());
-            return Err(e);
-        }
+        self.integrated_open(&launch, &flags, tasks, ready, opening)?;
         // The server thread's `server_started` site, before the tick loop.
         self.native_lifecycle_world_ready();
         if let (Some(script), Some(output)) = (
@@ -829,8 +824,6 @@ impl Game<'_> {
         self.streaming.abort_generation();
         // The close request: lifecycle observation stops.
         self.native_lifecycle.begin_close();
-        // MinecraftServer.stopServer's start: everyone is still here.
-        self.native_server_stopping(false);
         self.native_configs_server_stop();
         self.native_players_leaving();
         // IntegratedServer.stopServer: teardownPublishedState.

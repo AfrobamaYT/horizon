@@ -2237,8 +2237,6 @@ impl Game<'_> {
     pub(super) fn stop_dedicated(&mut self, crashed: bool) -> Result<()> {
         // The close request starts before player and world saves.
         self.native_lifecycle.begin_close();
-        // MinecraftServer.stopServer's start: everyone is still here.
-        self.native_server_stopping(true);
         self.native_configs_server_stop();
         log("INFO", "Stopping server");
         self.native_players_leaving();
