@@ -108,7 +108,7 @@ jobs:
       # Keep incremental check state too: changed workspace crates can reuse unchanged queries.
       CARGO_INCREMENTAL: 1
       # Temporary diagnostics: explain invalidated fingerprints after restoring main's cache.
-      CARGO_LOG: cargo::core::compiler::fingerprint=info
+      CARGO_LOG: cargo::compiler::fingerprint=info
     steps:
       - uses: actions/checkout@v4
         with:
