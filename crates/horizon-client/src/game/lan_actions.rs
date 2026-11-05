@@ -130,7 +130,7 @@ pub(super) struct GuestPlay {
     pub(super) won_game: bool,
     pub(super) respawn_requested: bool,
     /// `Player.takeXpDelay`: ticks until the next orb can be taken.
-    xp_delay: u32,
+    pub(super) xp_delay: u32,
     /// This player entity's age and level-up sound cooldown.
     level_up_sound: horizon_client::entities::LevelUpSound,
     /// What last killed the guest outright (`/kill`): the death message's key.
@@ -215,6 +215,8 @@ pub(super) struct GuestSwap {
     pub(super) shield_cooldown: u32,
     /// The guest's item cooldowns (`Game::cooldowns` for its turn).
     cooldowns: horizon_client::cooldowns::Cooldowns,
+    /// The guest's `takeXpDelay` (`Game::xp_delay` for its turn).
+    xp_delay: u32,
     attack_ticks: u32,
     attack_item: Option<std::sync::Arc<str>>,
     swing: horizon_client::first_person::SwingState,
@@ -406,7 +408,7 @@ impl Game<'_> {
     }
 
     /// Where guest `conn` is in the hub's list.
-    fn guest_index(&self, conn: u32) -> Option<usize> {
+    pub(super) fn guest_index(&self, conn: u32) -> Option<usize> {
         self.lan
             .as_ref()?
             .hub
@@ -651,6 +653,7 @@ impl Game<'_> {
         let use_delay = std::mem::replace(&mut self.use_delay, play.use_delay);
         let shield_cooldown = std::mem::replace(&mut self.shield_cooldown, play.shield_cooldown);
         let cooldowns = std::mem::replace(&mut self.cooldowns, std::mem::take(&mut play.cooldowns));
+        let xp_delay = std::mem::replace(&mut self.xp_delay, play.xp_delay);
         let attack_ticks = std::mem::replace(&mut self.attack_ticks, play.attack_ticks);
         let attack_item = std::mem::replace(&mut self.attack_item, play.attack_item.take());
         let swing = std::mem::replace(&mut self.swing, play.swing);
@@ -794,6 +797,7 @@ impl Game<'_> {
             use_delay,
             shield_cooldown,
             cooldowns,
+            xp_delay,
             attack_ticks,
             attack_item,
             swing,
@@ -910,6 +914,7 @@ impl Game<'_> {
             use_delay,
             shield_cooldown,
             cooldowns,
+            xp_delay,
             attack_ticks,
             attack_item,
             swing,
@@ -1080,6 +1085,7 @@ impl Game<'_> {
         play.use_delay = std::mem::replace(&mut self.use_delay, use_delay);
         play.shield_cooldown = std::mem::replace(&mut self.shield_cooldown, shield_cooldown);
         play.cooldowns = std::mem::replace(&mut self.cooldowns, cooldowns);
+        play.xp_delay = std::mem::replace(&mut self.xp_delay, xp_delay);
         play.attack_ticks = std::mem::replace(&mut self.attack_ticks, attack_ticks);
         play.attack_item = std::mem::replace(&mut self.attack_item, attack_item);
         play.swing = std::mem::replace(&mut self.swing, swing);
@@ -1214,6 +1220,10 @@ impl Game<'_> {
                 g.sprinting = false;
             }
             m.sprinting = false;
+            // The acting body's glide flag is authoritative for this turn.
+            // In a nested turn this is the inner guest, never the suspended
+            // outer actor whose body the swap restores above.
+            g.fall_flying = m.fall_flying;
             // ServerPlayer.indicateDamage: the hit's direction to the player.
             if let Some(yaw) = m.health.indicated_dir.take() {
                 g.send(&C::HurtAnimation(play::HurtAnimation {
@@ -1252,21 +1262,6 @@ impl Game<'_> {
             }
         }
         let g = &mut host.hub.guests[i];
-        if let Some(head) = g.bed.filter(|_| fell_asleep) {
-            // LivingEntity.startSleeping: in the bed, still.
-            let at = [
-                f64::from(head[0]) + 0.5,
-                // setPosToBed: the bed's top (getSleepHeight) and 0.125 above it.
-                f64::from(head[1]) + 0.5625 + 0.125,
-                f64::from(head[2]) + 0.5,
-            ];
-            g.position = at;
-            g.previous_position = at;
-            if let Some(m) = g.motion.as_mut() {
-                m.position = Vec3::new(at[0], at[1], at[2]);
-                m.velocity = Vec3::ZERO;
-            }
-        }
         if new_mode != g.game_mode {
             let conn = g.conn;
             host.hub

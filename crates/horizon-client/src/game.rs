@@ -4017,10 +4017,19 @@ impl Game<'_> {
         pos: [i32; 3],
         player_context: bool,
     ) -> Vec<[f64; 6]> {
+        self.outline_boxes_iter(world, anims, pos, player_context)
+            .collect()
+    }
+    /// The same outline traversal without allocating a box list.
+    fn outline_boxes_iter(
+        &self,
+        world: &World,
+        anims: &horizon_client::block_entity_anim::BlockEntityAnims,
+        pos: [i32; 3],
+        player_context: bool,
+    ) -> impl Iterator<Item = [f64; 6]> + '_ {
         let state = world.block(pos[0], pos[1], pos[2]);
-        if let Some(b) = self.context_outline(pos, state, player_context, anims) {
-            return vec![std::array::from_fn(|i| f64::from(pos[i % 3]) + b[i])];
-        }
+        let context = self.context_outline(pos, state, player_context, anims);
         let f = self.res.facts().get(state);
         let o = perspective::outline_offset(
             &self.pack.context.tables,
@@ -4034,10 +4043,19 @@ impl Game<'_> {
             f64::from(pos[1]) + o[1],
             f64::from(pos[2]) + o[2],
         ];
-        f.outline
-            .iter()
-            .map(|b| std::array::from_fn(|i| base[i % 3] + b[i]))
-            .collect()
+        let boxes = if context.is_some() {
+            &[][..]
+        } else {
+            &f.outline[..]
+        };
+        context
+            .map(|b| std::array::from_fn(|i| f64::from(pos[i % 3]) + b[i]))
+            .into_iter()
+            .chain(
+                boxes
+                    .iter()
+                    .map(move |b| std::array::from_fn(|i| base[i % 3] + b[i])),
+            )
     }
     /// Voxel traversal against non-air, non-fluid blocks, clipped against
     /// each block's outline shape (`BlockGetter.clip` with `ClipContext.Block.OUTLINE`).
@@ -9743,20 +9761,13 @@ impl Game<'_> {
                 }
             });
             let (visual_ticks, visual_millis) = (self.visual_ticks(), self.visual_millis());
-            if !self.creative
-                && !spectator
+            let kind = (!self.creative && !spectator)
+                .then(|| self.player_heart_kind())
+                .flatten();
+            if let Some(kind) = kind
                 && let Some(p) = &mut self.player
             {
                 let effects = &self.potions.effects;
-                let kind = if effects.get("poison").is_some() {
-                    hud_layout::HeartKind::Poisoned
-                } else if effects.get("wither").is_some() {
-                    hud_layout::HeartKind::Withered
-                } else if p.is_fully_frozen() {
-                    hud_layout::HeartKind::Frozen
-                } else {
-                    hud_layout::HeartKind::Normal
-                };
                 // Hud.extractAirBubbles: `isEyeInFluidMatching`, so the eyes are below
                 // the surface, not merely in the water block.
                 let under_water = p.is_eye_in_fluid(horizon_client::motion::WATER);
@@ -16150,6 +16161,7 @@ impl Game<'_> {
         if let Some(p) = self.player.as_mut() {
             p.position = at;
             p.velocity = Vec3::ZERO;
+            let _ = p.set_sleeping(true);
             p.pitch = 0.0;
             p.teleported = true;
             p.teleported_delta = [false; 3];
@@ -16172,6 +16184,18 @@ impl Game<'_> {
             return;
         };
         self.sleep_timer = 100;
+        // The active guest's live body wakes here; the hub owns its wake
+        // animation and sleeping metadata, not the suspended outer actor.
+        if let Some(i) = self.lan_acting.and_then(|conn| self.guest_index(conn))
+            && let Some(host) = self.lan.as_mut()
+        {
+            // The live turn may have changed its bed since entry.
+            host.hub.guests[i].bed = Some(head);
+            host.hub.wake(i);
+            // This live body applies the stand-up pose below, not the later
+            // wake_woken_guests pass over stored guest bodies.
+            host.hub.guests[i].woke_from = None;
+        }
         let stand = self.bed_wake_pose(head, self.yaw);
         if let Some(p) = self.player.as_mut() {
             if let Some((at, yaw)) = stand {
@@ -16179,14 +16203,18 @@ impl Game<'_> {
                 p.velocity = Vec3::ZERO;
                 p.yaw = yaw;
                 p.pitch = 0.0;
+                p.teleported = true;
+                p.teleported_delta = [false; 3];
             }
             let _ = p.set_sleeping(false);
         }
         if let Some((at, yaw)) = stand {
-            self.previous_position = at;
             self.yaw = yaw;
             self.pitch = 0.0;
-            self.snap_player_model_pitch();
+            if self.lan_acting.is_none() {
+                self.previous_position = at;
+                self.snap_player_model_pitch();
+            }
         }
         if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
             self.native_player_bed_leave(player, &name, head);
