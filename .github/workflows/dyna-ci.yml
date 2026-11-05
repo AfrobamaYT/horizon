@@ -1,7 +1,8 @@
 name: dyna-checks
 run-name: ${{ github.event.pull_request.title || github.event.head_commit.message || github.workflow }}
-# Fork-only checks. Keep upstream's workflows byte-identical; disable checks (ci.yml)
-# in the fork's Actions settings after this workflow's verify passes on main.
+# Upstream-style checks on pull requests; fork-only extras on main pushes and dispatches.
+# Keep upstream's workflows byte-identical; disable checks (ci.yml) in the fork's Actions
+# settings after this workflow's verify passes on main.
 # Scheduled events run only the hosted dispatcher; the dispatched run uses Dyna.
 on:
   push:
@@ -41,14 +42,11 @@ jobs:
       actions: read
     outputs:
       self_hosted: ${{ steps.runner.outputs.self_hosted }}
-      # The ignored-tests shard matrix: every shard on main, the affected ones on a pull request (empty: none).
+      # Every ignored-tests shard on main pushes and dispatches; empty on pull requests.
       ignored_matrix: ${{ steps.matrix.outputs.matrix || '{"shard":[]}' }}
-      # Whether the wasm runtime, the mod API or its generator changed: on main, always.
-      wasm: ${{ steps.wasm.outputs.wasm }}
     steps:
       - uses: actions/checkout@v4
         with:
-          # ignored_shards.py diffs the pull request's full range, like the shard jobs do.
           fetch-depth: 0
       # The pool's switch and lease are read live: `vars` is fixed when the run is created, and a main run
       # that waits in the concurrency group would otherwise see a lease that expired while it waited.
@@ -69,30 +67,9 @@ jobs:
           echo "pool lease: live=${LEASE:-unreadable} snapshot=${VARS_LEASE:-none}"
           ENABLED=${ENABLED:-$VARS_ENABLED} LEASE=${LEASE:-$VARS_LEASE} bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
       - name: The ignored-tests shard matrix
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         id: matrix
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          if [ "$EVENT" = push ]; then
-            python3 tools/ci/ignored_shards.py --matrix --all >> "$GITHUB_OUTPUT"
-          else
-            python3 tools/ci/ignored_shards.py --matrix "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Does this change touch wasm mods?
-        id: wasm
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          if [ "$EVENT" = push ] || git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -qE '^(crates/(horizon-mod-api|horizon-mod-api-gen|horizon-mod-api-macros|horizon-mod-point-shape|horizon-mod-points|horizon-mod-wasm|horizon-mods)/|Cargo\.lock$)'; then
-            echo wasm=true >> "$GITHUB_OUTPUT"
-          else
-            echo wasm=false >> "$GITHUB_OUTPUT"
-          fi
+        run: python3 tools/ci/ignored_shards.py --matrix --all >> "$GITHUB_OUTPUT"
 
   pool-watch:
     needs: changes
@@ -118,8 +95,8 @@ jobs:
   # playhorizon's checks runners (label playhorizon-ci); a fork's pull request never does (and the runners refuse it
   # themselves). There the build folder persists (CARGO_TARGET_DIR, outside the checkout), so the apt packages,
   # Python and the Rust cache steps are GitHub's only.
-  # Formatting and clippy on GitHub's own runners, in parallel with verify's tests on Dyna's: the fork's account has
-  # its own hosted pool, so both pools work on every run and a run's wall time is the longer of the two, not the sum.
+  # Formatting, clippy and the mod API's wasm32 check on GitHub's own runners, in parallel with verify's tests on
+  # Dyna's: the fork's account has its own hosted pool, so a run's wall time is the longer of the two, not the sum.
   lint:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
@@ -139,7 +116,7 @@ jobs:
         if: steps.rust.outputs.required != 'false'
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
-          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         if: steps.rust.outputs.required != 'false'
         with:
@@ -152,12 +129,15 @@ jobs:
           cargo +stable clippy --workspace --all-targets -- -D warnings
           # The server build (released as horizon-engine): the game without sound or controllers.
           cargo +stable clippy -p horizon-client --all-targets --no-default-features -- -D warnings
+      - name: The mod API builds for wasm32
+        if: steps.rust.outputs.required != 'false'
+        run: cargo +stable check -p horizon-mod-api --target wasm32-unknown-unknown --locked
 
   wasm-mods:
-    # A mod built to mod.wasm and loaded as the game loads it; the mod API's generated WIT as an
-    # artifact, and what this change does to it in the job summary (a report, never a failure).
+    # Main pushes and dispatches: a mod built to mod.wasm and loaded as the game loads it;
+    # the mod API's generated WIT as an artifact, and its diff in the job summary (never a failure).
     needs: changes
-    if: github.event_name != 'schedule'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'dyna-large' || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
@@ -261,11 +241,10 @@ jobs:
             docs/modding/examples/wasm-hello/target/horizon-mod/hello_wasm.hmod
 
   wasm-bench:
-    # What a wasm mod costs against the same mod built native, in release: a table in the job
-    # summary (a report, never a failure; timings on shared runners are indicative). Only when
-    # the wasm runtime, the mod API or its generator changed.
+    # Main pushes and dispatches: what a wasm mod costs against the same mod built native,
+    # in release, in the job summary (never a failure; timings on shared runners are indicative).
     needs: changes
-    if: github.event_name != 'schedule' && needs.changes.outputs.wasm == 'true'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -380,19 +359,16 @@ jobs:
           # recompiling the workspace with a different dependency graph.
           cargo +stable test $JOBS --workspace --lib --bins --tests mod_content::tests:: -- --ignored
           cargo +stable test $JOBS --workspace --doc
-  # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main's pushes and this
-  # repository's own pull requests only, on Dyna's large runner where that data lives; a fork's pull request never
-  # runs here. One package per shard (the plan lives in tools/ci/ignored_shards.py, measured when it was cut: about
-  # 380s, 279s and 189s of tests), so the wall time stays under verify's; a pull request runs only the shards its
-  # changed crates can affect. tools/ci/ignored_tests.py fails on a new failure and on a known one that passes, and
-  # prints only test names and results: the data is Mojang's.
+  # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
+  # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
+  # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known
+  # one that passes, and prints only test names and results: the data is Mojang's.
   ignored-tests-shards:
     needs: changes
-    # The matrix holds only the shards to run, so an empty one (a pull request that needs
-    # none) skips the job instead of expanding to nothing, which GitHub refuses.
+    # Skip an empty matrix instead of expanding to nothing, which GitHub refuses.
     if: >-
       needs.changes.outputs.self_hosted == 'true' &&
-      (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       fromJSON(needs.changes.outputs.ignored_matrix).shard[0] != null
     strategy:
       fail-fast: false
@@ -414,7 +390,7 @@ jobs:
             curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
           fi
           rustup toolchain install stable --profile minimal
-      # Not every dyna-large runner has the data yet. A pull request's run skips the tests there; a push to main fails.
+      # Not every dyna-large runner has the data yet. Dispatches skip the tests there; main pushes fail.
       - name: Link prepared vanilla data
         id: data
         env:
@@ -440,13 +416,13 @@ jobs:
         run: |
           export HORIZON_TEST_RESOURCES="$PWD/.local/horizon-client/26.3"
           python3 tools/ci/ignored_tests.py "$SHARD"
-  # The one check branch protection requires: green when every shard ran green or was skipped as unaffected.
+  # Aggregate the main-push and dispatch shards: green when each passed or was skipped.
   ignored-tests:
     needs: [changes, ignored-tests-shards]
     if: >-
       always() && !cancelled() &&
       needs.changes.outputs.self_hosted == 'true' &&
-      (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
