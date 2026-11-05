@@ -372,11 +372,6 @@ impl Manifest {
                 m.id
             ));
         }
-        if m.native.is_none() && m.wasm.is_none() && !m.dependencies.is_empty() {
-            return Err(format!(
-                "{MANIFEST}: content mod dependencies are not supported yet"
-            ));
-        }
         if let Some(native) = &m.native {
             let mut paths = std::collections::HashSet::new();
             for internal in &native.internals {
@@ -1239,14 +1234,11 @@ capabilities = ["registries"]
     }
 
     #[test]
-    fn dependencies_are_typed_and_content_dependencies_are_refused() {
+    fn dependencies_are_typed_for_content_and_code_mods() {
         let deps =
             "[dependencies]\ncreate = '^6.0'\naddon = { version = '^1.2', optional = true }\n";
-        assert!(
-            Manifest::parse(&format!("{EXAMPLE}{deps}"))
-                .unwrap_err()
-                .contains("not supported")
-        );
+        let content = Manifest::parse(&format!("{EXAMPLE}{deps}")).unwrap();
+        assert_eq!(content.dependencies.len(), 2);
         let native = format!(
             "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
             "a".repeat(40),
