@@ -3,8 +3,7 @@
 Horizon's registry lists what is made for Horizon and reviewed: content mods (`.hmod`), native mods (`.hmod`,
 [native mods](../how-to/native-mods.md)), modpacks (`.hpack`), resource packs, data packs, shaders-folder packs and Horizon shader packs (`.hshader`,
 [shaders.md](../../../shaders.md)). A project is listed by a reviewed pull request in
-[horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods) that links its GitHub repository; its versions are
-the repository's GitHub releases, read and checked by the registry's CI with no pull request and no review per version. The launcher and the
+[horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods); new versions are submitted as files and pinned by SHA-256. Legacy entries may still follow their repositories. The launcher and the
 website read one file, `index.json`, which that repository's CI builds. The Rust types and every check below are
 `horizon_mods::index` and `horizon_mods::modpack` (feature `index`); the sample is
 `crates/horizon-mods/tests/index/index-v1.json`, read by the tests with the files it lists.
@@ -100,8 +99,7 @@ them into the profile's game folder.
 ## The registry repository
 
 [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods) holds one `mods/<id>.toml` per project and
-`revoked.toml`. An entry is **a link and a page**: the project's GitHub repository and what the listing says about it.
-Its versions are the repository's GitHub releases. What an entry can't vouch for is read from the file by the kind's own
+`revoked.toml`. An entry is **a page and its pinned versions**: new versions are submitted as files and checked. Legacy entries may name a repository whose releases are read as below; new repository-following entries are refused. What an entry can't vouch for is read from the file by the kind's own
 check (`index::inspect`): a mod's API, side and capabilities, a modpack's mods, the size. Types and rules:
 `horizon_mods::index::registry`.
 
@@ -125,7 +123,7 @@ license = "MIT"
 # source defaults to https://github.com/<repo>
 ```
 
-**Versions come from the releases.** For each entry with a `repo`, the registry's CI lists its GitHub releases (drafts
+**Legacy: versions from releases.** For each entry with a `repo`, the registry's CI lists its GitHub releases (drafts
 and pre-releases are skipped) and, for each release it has not read yet, downloads the asset with the kind's extension
 (and its `<name>.minisig` when the project has a key), runs the checks of a submission (below), and if they pass
 adds the version. The version, the game and the pins are the file's own manifest (`horizon-mod.toml`
@@ -142,8 +140,7 @@ does: a release deleted or an asset replaced later does not change the index (th
 `description`, `authors` and `license` (unknown keys, and anything about owners, key, kind or icon, are refused): they fill the
 page fields the entry leaves out. A listing that is incomplete without it is refused until it is.
 
-**`[[versions]]` in an entry are optional** and kept for projects listed before releases were read, and for Horizon's own
-mods built in the registry (`native/<name>/`):
+**`[[versions]]`** hold submitted versions, including Horizon's own mods built in the registry (`native/<name>/`):
 
 ```toml
 [[versions]]                     # newest first
@@ -167,14 +164,9 @@ reason = "Sent chat messages it didn't declare."
 date = "2026-10-24"
 ```
 
-Who reviews what: **a project is reviewed when it is listed** (the pull request that adds its entry: the
-repository, its source, the page, the owners), and again if its `repo`, owners or key change. **Later releases are
-checked automatically, not reviewed by a person**; `revoked.toml` takes a bad one down. A signing `key` makes a stolen
-repository or account useless for publishing an update.
+A project is reviewed when it is listed. New versions are checked and reviewed, except an unchanged page's qualifying owner update as described below. Legacy repository-following entries keep their existing release process. `revoked.toml` takes a bad version down.
 
-The submission form's service (`crates/horizon-mod-registry`) lists a new project: it signs the creator in with GitHub,
-reads the repository's address and the page, and opens the pull request. It no longer takes updates for a project listed
-with a `repo`: "publish a GitHub release in <repo>". Projects without a `repo` can still be updated through the form
+The submission form's service (`crates/horizon-mod-registry`) signs the creator in with GitHub, accepts the page and version file, and opens a pull request. It does not take updates for a legacy project listed with a `repo`: "publish a GitHub release in <repo>". Projects without a `repo` can be updated through the form
 (it uploads the file to the repository's `staging` release as `<sha256>.<extension>` and opens a pull request; an
 owner's update with nothing else changed is merged by `owner-update` once the checks pass; only an owner whose numeric
 GitHub ID is in `owner_ids` gets that, and an entry without `owner_ids` matches its owners by login and always waits for

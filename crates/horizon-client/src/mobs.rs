@@ -1521,6 +1521,9 @@ pub struct Mob {
     pub last_hurt: f32,
     /// `LivingEntity.getAbsorptionAmount`: golden hearts that soak damage before health.
     pub absorption: f32,
+    /// Tenths of absorbed damage a player's hit dealt, which the attack awards as
+    /// `Stats.DAMAGE_DEALT_ABSORBED` to the player whose turn it is (see [`Mob::soak_hit`]).
+    pub dealt_absorbed: i32,
     pub last_damage: Option<(Damage, i64)>,
     /// `DamageSource.getDirectEntity` of `last_damage` when [`Damage`] cannot name it (a
     /// thrown potion, an area effect cloud): its entity type.
@@ -3306,6 +3309,7 @@ impl Mob {
             air: 300,
             last_hurt: 0.0,
             absorption: 0.0,
+            dealt_absorbed: 0,
             last_damage: None,
             last_direct: None,
             combat: combat::Tracker::default(),
@@ -3685,7 +3689,7 @@ impl Mob {
         if absorbed {
             self.hurt_wolf_armor(dealt);
         } else {
-            through = self.soak_absorption(dealt);
+            through = self.soak_hit(dealt, &source);
             container.record_reduction(Reduction::Absorption, dealt - through);
             self.health -= through;
         }
@@ -4133,6 +4137,21 @@ impl Mob {
         }
         self.effects_dirty |= changed;
         changed
+    }
+    /// [`Mob::soak_absorption`] for a hit from `source`: `LivingEntity.actuallyHurt`
+    /// credits a `ServerPlayer` attacker with the absorbed damage in tenths.
+    fn soak_hit(&mut self, damage: f32, source: &Damage) -> f32 {
+        let through = self.soak_absorption(damage);
+        let absorbed = damage - through;
+        if absorbed > 0.0
+            && absorbed < 3.402_823_5e37
+            && matches!(source.attacker, Some(Who::Player))
+        {
+            self.dealt_absorbed = self
+                .dealt_absorbed
+                .saturating_add((absorbed * 10.0).round() as i32);
+        }
+        through
     }
     /// `LivingEntity.actuallyHurt`: the absorption amount takes the damage first;
     /// what is left reaches the health.

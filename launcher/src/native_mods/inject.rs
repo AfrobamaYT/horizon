@@ -250,6 +250,7 @@ mod tests {
             "mixins",
             super::super::Profile::Balanced,
             super::super::Target::Client,
+            None,
             &[first.clone(), second.clone()],
         )
         .unwrap();
@@ -258,6 +259,7 @@ mod tests {
             "mixins",
             super::super::Profile::Balanced,
             super::super::Target::Client,
+            None,
             &[second, first],
         )
         .unwrap();
