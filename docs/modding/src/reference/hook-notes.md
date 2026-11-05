@@ -2418,6 +2418,13 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `entity.nbt(host)` and `merge_nbt(host, compound)` read and change its data as `/data get` and `/data merge entity`
   do (merging works on mobs, dropped items, armor stands and item frames; never on players, as in vanilla);
   `tags`, `add_tag`, `remove_tag` work as `/tag` does, and `name` is its name as plain text.
+  `set_custom_name(host, Some(text))` names it and `None` takes the name away (`Entity.setCustomName`);
+  `custom_name_visible` and `set_custom_name_visible` read and change whether the name shows at any distance. Both
+  writes are saved and reach the players tracking a mob or an armor stand; they return false for a player and for the
+  kinds whose name Horizon keeps nowhere yet (projectiles, primed TNT, falling blocks, experience orbs, ominous item
+  spawners, the dragon and crystals).
+  `classification` is the type's `MobCategory`, and `added_to_level` is true from when `entity_join_level` let the
+  entity in until it leaves or is removed.
 - `entity.play_sound(host, sound, volume, pitch)` (`Entity.playSound`: at the entity, under its `sound_source`, for the
   players in range; a silent mob plays nothing and a player doesn't hear their own), `game_event(host, event)`
   (`Entity.gameEvent`: the entity is the source of a vibration for sculk sensors, wardens and allays),
