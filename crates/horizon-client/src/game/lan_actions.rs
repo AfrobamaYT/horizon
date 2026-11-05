@@ -6158,10 +6158,8 @@ impl Game<'_> {
         let mut orb = self.orbs[index].clone();
         let mut canceled = false;
         // Swapping the guest in costs: only when a mod hears the pickup.
-        let mut listened = false;
-        if self.serving.is_some() || self.options.dedicated.is_some() {
-            self.native_pickup_xp_listened(&mut listened);
-        }
+        let listened = (self.serving.is_some() || self.options.dedicated.is_some())
+            && mod_api::__private::listened(mod_api::HookId::PickupXp);
         if listened {
             let dimension = self.dim.id();
             let called = self.as_guest(conn, |game| {
