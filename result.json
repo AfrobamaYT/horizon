@@ -1,1 +1,0 @@
-{"status":"pr_opened","pr":1054,"branch":"bulk-batch3-zwnj25-19942e70cc8e","head":"b7073acd57","notes":"Wasm and API checks and client library check passed; client all-targets and lifecycle test blocked by nine unrelated existing test compilation errors. In-game proof not performed."}
