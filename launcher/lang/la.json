@@ -1113,5 +1113,6 @@
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
   "Claim for free": "Gratis accipe",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Ministrator solutionum tabernae terram tuam non servit, itaque Conditor set hic gratis accipere potes.",
-  "The Founder Set is yours.": "Conditor set tuum est."
+  "The Founder Set is yours.": "Conditor set tuum est.",
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

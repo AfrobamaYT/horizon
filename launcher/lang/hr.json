@@ -1113,5 +1113,6 @@
   "Could not open the data folder: {error}": "Could not open the data folder: {error}",
   "Claim for free": "Preuzmi besplatno",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Pružatelj plaćanja trgovine ne posluje u vašoj zemlji, pa Osnivački set možete preuzeti ovdje besplatno.",
-  "The Founder Set is yours.": "Osnivački set je vaš."
+  "The Founder Set is yours.": "Osnivački set je vaš.",
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

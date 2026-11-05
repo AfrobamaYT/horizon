@@ -1113,5 +1113,6 @@
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
   "Claim for free": "Prevzemi brezplačno",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Ponudnik plačil trgovine ne deluje v vaši državi, zato lahko Ustanoviteljski set tukaj prevzamete brezplačno.",
-  "The Founder Set is yours.": "Ustanoviteljski set je vaš."
+  "The Founder Set is yours.": "Ustanoviteljski set je vaš.",
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

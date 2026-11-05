@@ -1113,5 +1113,6 @@
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
   "Claim for free": "Gratis kriege",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "De betaalprovider van de winkel bedient dien land neet, dus kins se de Oprichter set hie gratis kriege.",
-  "The Founder Set is yours.": "De Oprichter set is van dich."
+  "The Founder Set is yours.": "De Oprichter set is van dich.",
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

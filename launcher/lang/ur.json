@@ -1113,5 +1113,6 @@
   "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.": "The launcher closes while your data is copied and verified, then reopens. Old folders are kept and still use disk space until you verify the move and remove them yourself.",
   "Claim for free": "مفت حاصل کریں",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "دکان کا ادائیگی فراہم کنندہ آپ کے ملک میں خدمات نہیں دیتا، اس لیے آپ بانی سیٹ یہاں مفت حاصل کر سکتے ہیں۔",
-  "The Founder Set is yours.": "بانی سیٹ اب آپ کا ہے۔"
+  "The Founder Set is yours.": "بانی سیٹ اب آپ کا ہے۔",
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

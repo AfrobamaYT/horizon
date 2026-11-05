@@ -1113,5 +1113,6 @@
   "Could not open the data folder: {error}": "Could not open the data folder: {error}",
   "Claim for free": "Obtenir gratuitement",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Le prestataire de paiement de la boutique n'opère pas dans votre pays : vous pouvez donc obtenir le Set fondateur ici gratuitement.",
-  "The Founder Set is yours.": "Le Set fondateur est à vous."
+  "The Founder Set is yours.": "Le Set fondateur est à vous.",
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

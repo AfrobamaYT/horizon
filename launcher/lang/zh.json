@@ -1113,5 +1113,6 @@
   "Could not open the data folder: {error}": "无法打开数据文件夹：{error}",
   "Claim for free": "免费领取",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "商店的支付服务商不在你所在的国家提供服务，因此你可以在这里免费领取创始者套装。",
-  "The Founder Set is yours.": "创始者套装已归你所有。"
+  "The Founder Set is yours.": "创始者套装已归你所有。",
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }

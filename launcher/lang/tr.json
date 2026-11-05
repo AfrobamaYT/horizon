@@ -1113,5 +1113,6 @@
   "Could not open the data folder: {error}": "Could not open the data folder: {error}",
   "Claim for free": "Ücretsiz al",
   "The shop's payment provider doesn't serve your country, so you can claim the Founder Set here for free.": "Mağazanın ödeme sağlayıcısı ülkende hizmet vermiyor, bu yüzden Kurucu setini burada ücretsiz alabilirsin.",
-  "The Founder Set is yours.": "Kurucu seti artık senin."
+  "The Founder Set is yours.": "Kurucu seti artık senin.",
+  "{why}, so the game builds from source and makes it a point": "{why}, so the game builds from source and makes it a point"
 }
